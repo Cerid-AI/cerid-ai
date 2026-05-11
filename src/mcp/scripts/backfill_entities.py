@@ -4,26 +4,34 @@
 
 """Backfill the (:Entity) layer over the existing artifact corpus.
 
-Workstream E Phase 4a.4. For each ``(:Artifact)`` in Neo4j: fetch all
-its chunks from chromadb, concatenate the text (truncated at
-``max_chars``), run :func:`core.agents.entity_extraction.extract_entities_from_text`,
-and upsert the result via :func:`app.db.neo4j.entity.upsert_entities_for_artifact`.
+Workstream E Phase 4a.4 (origin) + v0.92 Phase P refactor.
+
+Default path enqueues an ``EntityExtractionJob`` per artifact onto the
+Redis-backed processor queue. The script becomes a *driver* — it lists
+candidates, dedupes against the checkpoint, and submits work — while
+the existing background worker drains the queue with CPU-aware
+throttling, retry logic, cost tracking, and progress visible in the
+Processor pane. Use ``--in-process`` to bypass the queue for ad-hoc
+diagnostic runs (no Redis required).
 
 Resumable + idempotent: a checkpoint file at ``.cerid-state/entity_backfill.json``
-records the artifact IDs already processed; rerunning skips them. Safe
+records the artifact IDs already enqueued; rerunning skips them. Safe
 to interrupt with Ctrl-C — the next run continues from the last
 checkpoint.
 
 Usage:
     docker exec ai-companion-mcp python -m scripts.backfill_entities \\
-        --limit 100         # pilot run (default: process all)
+        --limit 100              # pilot run (default: process all)
     docker exec ai-companion-mcp python -m scripts.backfill_entities \\
-        --reset             # drop checkpoint and start fresh
+        --in-process             # bypass the queue (legacy path)
     docker exec ai-companion-mcp python -m scripts.backfill_entities \\
-        --domain general    # restrict to one domain
+        --reset                  # drop checkpoint and start fresh
+    docker exec ai-companion-mcp python -m scripts.backfill_entities \\
+        --domain general         # restrict to one domain
 
 Output: progress every 10 artifacts; a final summary with total
-entities upserted, MENTIONS edges added, and elapsed wall-clock time.
+artifacts enqueued (or, in legacy mode, entities upserted + edges added)
+and elapsed wall-clock time.
 """
 from __future__ import annotations
 
@@ -34,6 +42,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("entity-backfill")
@@ -205,18 +214,36 @@ async def _run(args: argparse.Namespace) -> int:
     if args.limit:
         pending = pending[: args.limit]
 
+    mode = "in-process" if args.in_process else "processor-queue"
     logger.info(
-        "Backfill: %d artifacts pending (showing %d this run; %d already in checkpoint)",
-        total, len(pending), len(processed),
+        "Backfill (%s): %d artifacts pending (showing %d this run; %d already in checkpoint)",
+        mode, total, len(pending), len(processed),
     )
 
     started = time.time()
-    totals = {"entities_upserted": 0, "edges_upserted": 0, "no_entities": 0,
-              "no_chunks": 0, "empty_text": 0, "errors": 0}
+    if args.in_process:
+        return await _run_in_process(
+            driver, chroma_client, pending, args.max_chars, processed, started,
+        )
+    return _run_via_processor(pending, args.tenant_id, processed, started)
 
+
+async def _run_in_process(
+    driver: Any,
+    chroma_client: Any,
+    pending: list[tuple[str, str]],
+    max_chars: int,
+    processed: set[str],
+    started: float,
+) -> int:
+    """Legacy direct-call path. Useful for environments without Redis."""
+    totals: dict[str, int] = {
+        "entities_upserted": 0, "edges_upserted": 0, "no_entities": 0,
+        "no_chunks": 0, "empty_text": 0, "errors": 0,
+    }
     for i, (artifact_id, domain) in enumerate(pending, start=1):
         try:
-            stats = await _process_one(driver, chroma_client, artifact_id, domain, args.max_chars)
+            stats = await _process_one(driver, chroma_client, artifact_id, domain, max_chars)
         except Exception as exc:  # noqa: BLE001 — observability boundary
             logger.exception("Artifact %s failed: %s", artifact_id, exc)
             totals["errors"] += 1
@@ -244,6 +271,49 @@ async def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_via_processor(
+    pending: list[tuple[str, str]],
+    tenant_id: str,
+    processed: set[str],
+    started: float,
+) -> int:
+    """Enqueue an ``EntityExtractionJob`` per artifact onto the processor queue.
+
+    The script returns once all jobs are enqueued — the worker drains
+    them asynchronously. Progress and per-job results land in the
+    Processor pane and the ``processor_*`` ``/health.invariants`` fields.
+    """
+    from app.db.redis.processor_queue import enqueue_job
+    from app.processor.jobs.entity_extraction import EntityExtractionJob
+
+    enqueued = 0
+    errors = 0
+    for i, (artifact_id, _domain) in enumerate(pending, start=1):
+        try:
+            enqueue_job(EntityExtractionJob(artifact_id=artifact_id, tenant_id=tenant_id))
+            enqueued += 1
+            processed.add(artifact_id)
+        except Exception as exc:  # noqa: BLE001 — enqueue-failure boundary
+            logger.exception("Enqueue failed for artifact %s: %s", artifact_id, exc)
+            errors += 1
+            continue
+
+        if i % 50 == 0 or i == len(pending):
+            _save_checkpoint(processed)
+            elapsed = time.time() - started
+            rate = i / elapsed if elapsed > 0 else 0
+            logger.info("[%d/%d] enqueued=%d errors=%d (%.0f art/s)",
+                        i, len(pending), enqueued, errors, rate)
+
+    _save_checkpoint(processed)
+    logger.info(
+        "Done in %.1fs. Enqueued %d job(s); %d enqueue error(s). "
+        "Watch the Processor pane or /processor/status for run progress.",
+        time.time() - started, enqueued, errors,
+    )
+    return 0 if errors == 0 else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backfill entity layer")
     parser.add_argument("--limit", type=int, default=0,
@@ -261,8 +331,23 @@ def main() -> int:
                         help="Cap the candidate list pre-checkpoint-skip (use with --sort)")
     parser.add_argument("--ids-from-file", type=str, default=None,
                         help="One artifact_id per line; bypasses the filter knobs above")
-    parser.add_argument("--max-chars", type=int, default=8000, help="Max chars per artifact extraction")
+    parser.add_argument("--max-chars", type=int, default=8000, help="Max chars per artifact extraction (in-process path only)")
     parser.add_argument("--reset", action="store_true", help="Clear the checkpoint and start fresh")
+    parser.add_argument(
+        "--in-process",
+        action="store_true",
+        help=(
+            "Bypass the processor queue and run extraction inline. "
+            "Useful when Redis is not available or for ad-hoc diagnostics; "
+            "the default path enqueues an EntityExtractionJob per artifact."
+        ),
+    )
+    parser.add_argument(
+        "--tenant-id",
+        type=str,
+        default="default",
+        help="Tenant identifier passed to EntityExtractionJob for log correlation (default: 'default').",
+    )
     args = parser.parse_args()
     if args.domains:
         args.domains = [d.strip() for d in args.domains.split(",") if d.strip()]

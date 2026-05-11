@@ -21,7 +21,7 @@ export function ProGate({ tier, children }: { tier: string; children: React.Reac
   return (
     <div className="relative">
       <div className="opacity-40 pointer-events-none select-none">{children}</div>
-      <Badge variant="outline" className="absolute right-0 top-0 text-[10px] px-1.5 py-0 text-gold border-gold">
+      <Badge variant="outline" className="absolute right-0 top-0 text-label-xs px-1.5 py-0 text-gold border-gold">
         Pro
       </Badge>
     </div>
@@ -97,7 +97,7 @@ export function ReadOnlyEnvHint({ envVar }: { envVar: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex items-center gap-1 rounded-sm bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 rounded-sm bg-muted/40 px-1.5 py-0.5 font-mono text-label-xs text-muted-foreground">
           <Lock className="h-2.5 w-2.5" aria-hidden="true" />
           {envVar}
         </span>
@@ -198,7 +198,7 @@ export function SliderRow({
         />
       </div>
       {recommended && (
-        <p className="text-[9px] text-muted-foreground/80 pl-0.5">{recommended}</p>
+        <p className="text-label-xxs text-muted-foreground/80 pl-0.5">{recommended}</p>
       )}
     </div>
   )
@@ -227,7 +227,7 @@ export function PipelineToggle({
             {label}
             {info && <InfoTip text={info} />}
           </span>
-          <span className="text-[11px] leading-tight text-muted-foreground">{description}</span>
+          <span className="text-label-sm leading-tight text-muted-foreground">{description}</span>
         </div>
         <Switch size="sm" aria-label={label} checked={enabled} onCheckedChange={onToggle} />
       </div>

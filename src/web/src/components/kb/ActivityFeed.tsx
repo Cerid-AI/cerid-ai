@@ -167,16 +167,16 @@ export function ActivityFeed({ className, maxHeight = "400px" }: ActivityFeedPro
                 <span className="min-w-0 flex-1 truncate text-xs" title={item.filename}>
                   {truncateFilename(item.filename)}
                 </span>
-                <Badge variant="outline" className={cn("shrink-0 text-[10px] px-1.5 py-0", source.color)}>
+                <Badge variant="outline" className={cn("shrink-0 text-label-xs px-1.5 py-0", source.color)}>
                   <SourceIcon className="h-2.5 w-2.5 mr-0.5" />
                   {source.label}
                 </Badge>
                 {item.chunks > 0 && (
-                  <span className="shrink-0 text-[10px] font-mono text-muted-foreground">
+                  <span className="shrink-0 text-label-xs font-mono text-muted-foreground">
                     {item.chunks}ch
                   </span>
                 )}
-                <span className="shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+                <span className="shrink-0 text-label-xs text-muted-foreground whitespace-nowrap">
                   {relativeTime(item.timestamp)}
                 </span>
               </div>

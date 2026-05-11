@@ -93,16 +93,16 @@ function PackCard({ pack, onInstall, isInstalling, isInstallingThisPack }: PackC
           <BookOpen className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden="true" />
           <span className="truncate text-xs font-medium">{pack.name}</span>
         </div>
-        <Badge variant="secondary" className="shrink-0 text-[9px]">
+        <Badge variant="secondary" className="shrink-0 text-label-xxs">
           {pack.domain}
         </Badge>
       </div>
 
-      <p className="mb-2 text-[11px] leading-relaxed text-muted-foreground line-clamp-2">
+      <p className="mb-2 text-label-sm leading-relaxed text-muted-foreground line-clamp-2">
         {pack.description}
       </p>
 
-      <div className="mb-2.5 flex items-center gap-3 text-[10px] text-muted-foreground">
+      <div className="mb-2.5 flex items-center gap-3 text-label-xs text-muted-foreground">
         <span className="flex items-center gap-1">
           <Database className="h-3 w-3" aria-hidden="true" />
           <span aria-label={`${pack.artifact_count} articles`}>

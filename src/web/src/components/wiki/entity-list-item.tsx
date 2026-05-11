@@ -65,7 +65,7 @@ export function EntityListItem({ entity, selected, onSelect }: EntityListItemPro
       )}
 
       {/* Meta row */}
-      <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+      <div className="mt-1.5 flex items-center gap-2 text-label-xs text-muted-foreground">
         {entity.related_count > 0 && (
           <span>{entity.related_count} related</span>
         )}

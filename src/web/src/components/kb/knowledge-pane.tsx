@@ -125,11 +125,11 @@ function RecentUploads({ entries }: { entries: Array<{ name: string; time: numbe
     <div className="space-y-0.5">
       <div className="flex items-center gap-1">
         <Clock className="h-2.5 w-2.5 text-muted-foreground" />
-        <span className="text-[10px] text-muted-foreground font-medium">Recent uploads</span>
+        <span className="text-label-xs text-muted-foreground font-medium">Recent uploads</span>
       </div>
       <div className={cn("space-y-0.5 overflow-y-auto", expanded && "max-h-32")}>
         {visible.map((entry) => (
-          <div key={`${entry.name}-${entry.time}`} className="flex items-center gap-1.5 text-[10px]">
+          <div key={`${entry.name}-${entry.time}`} className="flex items-center gap-1.5 text-label-xs">
             {entry.status === "success" ? (
               <CheckCircle className="h-2.5 w-2.5 shrink-0 text-green-500" />
             ) : (
@@ -144,7 +144,7 @@ function RecentUploads({ entries }: { entries: Array<{ name: string; time: numbe
       </div>
       {hiddenCount > 0 && !expanded && (
         <button
-          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          className="text-label-xs text-muted-foreground hover:text-foreground transition-colors"
           onClick={() => setExpanded(true)}
         >
           Show {hiddenCount} more
@@ -152,7 +152,7 @@ function RecentUploads({ entries }: { entries: Array<{ name: string; time: numbe
       )}
       {expanded && entries.length > 4 && (
         <button
-          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          className="text-label-xs text-muted-foreground hover:text-foreground transition-colors"
           onClick={() => setExpanded(false)}
         >
           Show less
@@ -665,14 +665,14 @@ export function KnowledgePane() {
             {/* Active tag highlight */}
             {activeTag && (
               <div className="flex items-center gap-1.5">
-                <Badge variant="default" className="gap-1 text-[10px]">
+                <Badge variant="default" className="gap-1 text-label-xs">
                   <Tag className="h-2.5 w-2.5" />
                   {activeTag}
                   <span className="ml-0.5 opacity-70">
                     ({availableTags.find(([t]) => t === activeTag)?.[1] ?? 0})
                   </span>
                 </Badge>
-                <Button variant="ghost" size="xs" className="h-5 text-[10px]" onClick={() => setActiveTag(null)}>
+                <Button variant="ghost" size="xs" className="h-5 text-label-xs" onClick={() => setActiveTag(null)}>
                   <X className="mr-0.5 h-2.5 w-2.5" />
                   Clear
                 </Button>
@@ -684,7 +684,7 @@ export function KnowledgePane() {
                 <Badge
                   key={tag}
                   variant={activeTag === tag ? "default" : "secondary"}
-                  className="cursor-pointer text-[10px]"
+                  className="cursor-pointer text-label-xs"
                   role="button"
                   tabIndex={0}
                   aria-pressed={activeTag === tag}
@@ -698,7 +698,7 @@ export function KnowledgePane() {
                 <Button
                   variant="ghost"
                   size="xs"
-                  className="h-5 text-[10px] gap-0.5"
+                  className="h-5 text-label-xs gap-0.5"
                   onClick={() => setTagBrowseMode(true)}
                 >
                   <LayoutGrid className="h-2.5 w-2.5" />
@@ -709,7 +709,7 @@ export function KnowledgePane() {
                 <Button
                   variant="ghost"
                   size="xs"
-                  className="h-5 text-[10px]"
+                  className="h-5 text-label-xs"
                   onClick={() => setTagBrowseMode(false)}
                 >
                   Less
@@ -718,7 +718,7 @@ export function KnowledgePane() {
               <Button
                 variant="ghost"
                 size="xs"
-                className="ml-auto h-5 text-[10px]"
+                className="ml-auto h-5 text-label-xs"
                 onClick={() => setTagManagerOpen(true)}
                 title="Manage tags"
               >
@@ -734,12 +734,12 @@ export function KnowledgePane() {
       {dateFiltered.length > 1 && (
         <div className="flex items-center gap-1 border-b px-4 py-1.5">
           <ArrowUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
-          <span className="text-[10px] text-muted-foreground mr-1">Sort:</span>
+          <span className="text-label-xs text-muted-foreground mr-1">Sort:</span>
           {activeSearch && (
             <Button
               variant={sortBy === "relevance" ? "secondary" : "ghost"}
               size="xs"
-              className="h-5 text-[10px] gap-0.5"
+              className="h-5 text-label-xs gap-0.5"
               onClick={() => setSortBy("relevance")}
             >
               <Star className="h-2.5 w-2.5" />
@@ -749,7 +749,7 @@ export function KnowledgePane() {
           <Button
             variant={sortBy === "quality" ? "secondary" : "ghost"}
             size="xs"
-            className="h-5 text-[10px] gap-0.5"
+            className="h-5 text-label-xs gap-0.5"
             onClick={() => setSortBy("quality")}
           >
             <Star className="h-2.5 w-2.5" />
@@ -758,7 +758,7 @@ export function KnowledgePane() {
           <Button
             variant={sortBy === "date" ? "secondary" : "ghost"}
             size="xs"
-            className="h-5 text-[10px] gap-0.5"
+            className="h-5 text-label-xs gap-0.5"
             onClick={() => setSortBy("date")}
           >
             <CalendarArrowDown className="h-2.5 w-2.5" />
@@ -767,7 +767,7 @@ export function KnowledgePane() {
           <Button
             variant={sortBy === "name" ? "secondary" : "ghost"}
             size="xs"
-            className="h-5 text-[10px] gap-0.5"
+            className="h-5 text-label-xs gap-0.5"
             onClick={() => setSortBy("name")}
           >
             <ArrowDownAZ className="h-2.5 w-2.5" />
@@ -939,7 +939,7 @@ export function KnowledgePane() {
                   >
                     Load more
                   </Button>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-label-xs text-muted-foreground">
                     Showing {paginatedResults.length} of {totalCount} artifacts
                   </span>
                 </div>
@@ -1054,7 +1054,7 @@ function KBListItem({ result, isSelected, onSelect, onPreview, onDelete, onRecat
         {onDelete && <button title="Delete" onClick={(e) => { e.stopPropagation(); onDelete() }} className="rounded p-1 hover:bg-muted"><Trash2 className="h-3.5 w-3.5 text-muted-foreground" /></button>}
       </div>
       {result.ingested_at && (
-        <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(result.ingested_at)}</span>
+        <span className="shrink-0 text-label-xs text-muted-foreground">{timeAgo(result.ingested_at)}</span>
       )}
     </div>
   )

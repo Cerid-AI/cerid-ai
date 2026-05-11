@@ -136,7 +136,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
             <Button
               variant="ghost"
               size="sm"
-              className="h-5 text-[10px]"
+              className="h-5 text-label-xs"
               onClick={clearFilter}
             >
               Clear
@@ -155,7 +155,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
       </div>
 
       {error && (
-        <div className="mx-2 rounded bg-destructive/10 px-2 py-1 text-[10px] text-destructive">
+        <div className="mx-2 rounded bg-destructive/10 px-2 py-1 text-label-xs text-destructive">
           {error}
         </div>
       )}
@@ -164,7 +164,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
         <div className="mx-2 flex items-center gap-1">
           <input
             type="text"
-            className="h-6 flex-1 rounded border bg-background px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-6 flex-1 rounded border bg-background px-2 text-label-sm focus:outline-none focus:ring-1 focus:ring-ring"
             placeholder="Domain name..."
             value={newDomainName}
             onChange={(e) => setNewDomainName(e.target.value)}
@@ -246,7 +246,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                     )}
                     <span className="flex-1 truncate capitalize">{domain}</span>
                     {domainCount !== undefined && (
-                      <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                      <Badge variant="secondary" className="h-4 px-1 text-label-xxs">
                         {domainCount}
                       </Badge>
                     )}
@@ -278,7 +278,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                         <button
                           key={label}
                           className={cn(
-                            "flex min-w-0 w-full items-center gap-1.5 rounded px-2 py-0.5 text-left text-[11px] transition-colors",
+                            "flex min-w-0 w-full items-center gap-1.5 rounded px-2 py-0.5 text-left text-label-sm transition-colors",
                             "hover:bg-muted/50",
                             isSubActive && "bg-primary/10 font-medium",
                           )}
@@ -286,7 +286,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                         >
                           <span className="flex-1 truncate capitalize">{label}</span>
                           {count !== undefined && count > 0 && (
-                            <Badge variant="secondary" className="h-3.5 px-1 text-[8px]">
+                            <Badge variant="secondary" className="h-3.5 px-1 text-label-xxs">
                               {count}
                             </Badge>
                           )}
@@ -297,7 +297,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                       <div className="flex items-center gap-1 py-0.5">
                         <input
                           type="text"
-                          className="h-5 flex-1 rounded border bg-background px-1.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+                          className="h-5 flex-1 rounded border bg-background px-1.5 text-label-xs focus:outline-none focus:ring-1 focus:ring-ring"
                           placeholder="Sub-category..."
                           value={newSubName}
                           onChange={(e) => setNewSubName(e.target.value)}

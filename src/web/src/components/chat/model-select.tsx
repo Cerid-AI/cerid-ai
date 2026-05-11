@@ -39,17 +39,17 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
               <span className="truncate">{m.label}</span>
               <span className="ml-2 shrink-0 text-xs text-muted-foreground">{m.provider}</span>
               {top && (
-                <span className="ml-1.5 shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                <span className="ml-1.5 shrink-0 rounded bg-muted px-1 py-0.5 text-label-xs text-muted-foreground">
                   {top}
                 </span>
               )}
-              <span className="ml-1.5 shrink-0 text-[10px] text-muted-foreground">
+              <span className="ml-1.5 shrink-0 text-label-xs text-muted-foreground">
                 ~{formatCost(cost)}
               </span>
             </SelectItem>
           )
         })}
-        <div className="border-t px-2 py-1.5 text-[9px] text-muted-foreground/80">
+        <div className="border-t px-2 py-1.5 text-label-xxs text-muted-foreground/80">
           All models via OpenRouter. Non-US models accessible but not bundled by default.
         </div>
       </SelectContent>

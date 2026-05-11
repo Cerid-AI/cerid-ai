@@ -272,7 +272,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
           </Button>
           {showAddNode && (
             <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-lg min-w-[200px] max-h-[300px] overflow-y-auto">
-              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+              <div className="px-3 py-1.5 text-label-xs uppercase tracking-wider text-zinc-500 font-semibold">
                 Agents
               </div>
               {AGENT_NAMES.map((a) => (
@@ -285,7 +285,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
                 </button>
               ))}
               <div className="border-t border-zinc-700 my-1" />
-              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+              <div className="px-3 py-1.5 text-label-xs uppercase tracking-wider text-zinc-500 font-semibold">
                 Other
               </div>
               {NODE_TYPE_OPTIONS.filter((o) => o.type !== "agent").map((o) => (
@@ -388,7 +388,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
             <div className="mt-2 p-2 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
               Run <span className="text-zinc-200 font-mono">{runResult.id.slice(0, 8)}</span>
               {" — "}
-              <Badge variant={runResult.status === "completed" ? "default" : "destructive"} className="text-[10px]">
+              <Badge variant={runResult.status === "completed" ? "default" : "destructive"} className="text-label-xs">
                 {runResult.status}
               </Badge>
               {runResult.error && <span className="text-red-700 dark:text-red-400 ml-2">{runResult.error}</span>}

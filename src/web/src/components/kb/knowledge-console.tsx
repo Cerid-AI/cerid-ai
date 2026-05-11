@@ -27,6 +27,7 @@ import {
   Settings2,
 } from "lucide-react"
 import { Plus } from "lucide-react"
+import { ProgressBar } from "@/components/ui/progress-bar"
 import { cn } from "@/lib/utils"
 import { fetchDataSources, enableDataSource, disableDataSource, updateSettings } from "@/lib/api"
 import { CustomApiDialog } from "./custom-api-dialog"
@@ -70,7 +71,7 @@ function SourceSection({
         {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         {icon}
         <span className="flex-1 text-xs font-medium">{title}</span>
-        <Badge variant="secondary" className={cn("text-[10px] px-1.5 py-0", color)}>
+        <Badge variant="secondary" className={cn("text-label-xs px-1.5 py-0", color)}>
           {count}
         </Badge>
         <TooltipProvider delayDuration={0}>
@@ -110,12 +111,12 @@ function KBSourceCard({ result }: { result: KBQueryResult }) {
       <FileText className="h-3 w-3 shrink-0 mt-0.5 text-blue-400" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
-          <p className="truncate text-[11px] font-medium">{result.filename}</p>
-          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          <p className="truncate text-label-sm font-medium">{result.filename}</p>
+          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">
             {Math.round(result.relevance * 100)}%
           </span>
         </div>
-        <p className="text-[10px] text-muted-foreground">{result.domain}</p>
+        <p className="text-label-xs text-muted-foreground">{result.domain}</p>
       </div>
     </div>
   )
@@ -136,13 +137,13 @@ function MemorySourceCard({ result }: { result: MemoryRecallResult }) {
       <Brain className={cn("h-3 w-3 shrink-0 mt-0.5", typeColors[result.memory_type] ?? "text-muted-foreground")} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
-          <p className="truncate text-[11px] font-medium">{result.summary || result.content.slice(0, 60)}</p>
-          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          <p className="truncate text-label-sm font-medium">{result.summary || result.content.slice(0, 60)}</p>
+          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">
             {Math.round(result.relevance * 100)}%
           </span>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <Badge variant="outline" className="text-[9px] px-1 py-0">{result.memory_type}</Badge>
+        <div className="flex items-center gap-2 text-label-xs text-muted-foreground">
+          <Badge variant="outline" className="text-label-xxs px-1 py-0">{result.memory_type}</Badge>
           <span>{Math.round(result.age_days)}d ago</span>
         </div>
       </div>
@@ -156,14 +157,14 @@ function ExternalSourceCard({ result }: { result: ExternalSourceResult }) {
       <Globe className="h-3 w-3 shrink-0 mt-0.5 text-green-400" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
-          <p className="truncate text-[11px] font-medium">{result.source_name ?? "External"}</p>
-          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          <p className="truncate text-label-sm font-medium">{result.source_name ?? "External"}</p>
+          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">
             {Math.round(result.relevance * 100)}%
           </span>
         </div>
-        <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{result.content}</p>
+        <p className="mt-0.5 text-label-xs text-muted-foreground line-clamp-2">{result.content}</p>
         {result.source_url && (
-          <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-[10px] text-primary hover:underline">
+          <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-label-xs text-primary hover:underline">
             Source &rarr;
           </a>
         )}
@@ -203,16 +204,16 @@ function DataSourceIndicator() {
 
   return (
     <div className="mt-1.5 space-y-1">
-      <p className="text-[10px] text-muted-foreground font-medium">
+      <p className="text-label-xs text-muted-foreground font-medium">
         APIs ({enabledCount}/{data.sources.length} active)
       </p>
       {data.sources.map((src) => (
         <div key={src.name} className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", src.enabled && src.configured ? "bg-green-500" : "bg-muted-foreground/40")} />
-            <span className="text-[10px] truncate">{src.name}</span>
+            <span className="text-label-xs truncate">{src.name}</span>
             {src.requires_api_key && !src.configured && (
-              <Badge variant="outline" className="text-[8px] px-1 py-0 text-amber-600 dark:text-yellow-400 border-yellow-500/30">key needed</Badge>
+              <Badge variant="outline" className="text-label-xxs px-1 py-0 text-amber-600 dark:text-yellow-400 border-yellow-500/30">key needed</Badge>
             )}
           </div>
           <Switch
@@ -278,7 +279,7 @@ function ConsoleConfigBar({
   return (
     <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b bg-background/95 backdrop-blur px-3 py-1.5">
       {/* RAG Mode display (read-only — primary control is in chat toolbar) */}
-      <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+      <span className="rounded bg-muted px-2 py-0.5 text-label-xs font-medium text-muted-foreground">
         {ragMode === "smart" ? "Smart" : ragMode === "custom_smart" ? "Custom" : "Manual"}
       </span>
 
@@ -299,7 +300,7 @@ function ConsoleConfigBar({
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">Self-RAG</Label>
+                  <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">Self-RAG</Label>
                 </TooltipTrigger>
                 <TooltipContent side="left" className="max-w-[200px] text-xs">
                   Validates response claims against KB. Adds ~1s latency.
@@ -314,7 +315,7 @@ function ConsoleConfigBar({
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">Query Decomposition</Label>
+                  <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">Query Decomposition</Label>
                 </TooltipTrigger>
                 <TooltipContent side="left" className="max-w-[200px] text-xs">
                   Splits complex queries into sub-queries for better coverage.
@@ -329,7 +330,7 @@ function ConsoleConfigBar({
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">Semantic Cache</Label>
+                  <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">Semantic Cache</Label>
                 </TooltipTrigger>
                 <TooltipContent side="left" className="max-w-[200px] text-xs">
                   Caches similar queries to skip repeated retrieval. Saves ~500ms on cache hits.
@@ -344,21 +345,21 @@ function ConsoleConfigBar({
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">NLI Verification</Label>
+                  <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">NLI Verification</Label>
                 </TooltipTrigger>
                 <TooltipContent side="left" className="max-w-[220px] text-xs">
                   NLI entailment model validates KB evidence. Threshold: 0.7 entailment / 0.6 contradiction.
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <Badge variant="secondary" className="text-[9px] px-1.5 py-0">Active</Badge>
+            <Badge variant="secondary" className="text-label-xxs px-1.5 py-0">Active</Badge>
           </div>
 
           {/* Top-K slider */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label className="text-[11px]">Top-K</Label>
-              <span className="text-[10px] tabular-nums text-muted-foreground">{topK}</span>
+              <Label className="text-label-sm">Top-K</Label>
+              <span className="text-label-xs tabular-nums text-muted-foreground">{topK}</span>
             </div>
             <Slider value={[topK]} onValueChange={handleTopK} min={3} max={20} step={1} className="w-full" />
           </div>
@@ -397,7 +398,7 @@ export function KnowledgeConsole({
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <span className="flex-1 text-sm font-medium">Knowledge Console</span>
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-teal-500">
+        <Badge variant="outline" className="text-label-xs px-1.5 py-0 text-teal-500">
           {ragMode === "smart" ? "Smart" : "Custom"}
         </Badge>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close">
@@ -448,7 +449,7 @@ export function KnowledgeConsole({
                 color="bg-blue-500/10 text-blue-500"
               >
                 {kbSources.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground py-1">No KB matches</p>
+                  <p className="text-label-sm text-muted-foreground py-1">No KB matches</p>
                 ) : (
                   kbSources.map((r, i) => <KBSourceCard key={`kb-${r.artifact_id}-${r.chunk_index}-${i}`} result={r} />)
                 )}
@@ -463,7 +464,7 @@ export function KnowledgeConsole({
                 color="bg-purple-500/10 text-purple-500"
               >
                 {memorySources.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground py-1">No memory matches</p>
+                  <p className="text-label-sm text-muted-foreground py-1">No memory matches</p>
                 ) : (
                   memorySources.map((r, i) => <MemorySourceCard key={`mem-${r.memory_id}-${i}`} result={r} />)
                 )}
@@ -479,7 +480,7 @@ export function KnowledgeConsole({
                 defaultExpanded={false}
               >
                 {externalSources.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground py-1">No external results</p>
+                  <p className="text-label-sm text-muted-foreground py-1">No external results</p>
                 ) : (
                   externalSources.map((r, i) => <ExternalSourceCard key={`ext-${i}`} result={r} />)
                 )}
@@ -487,7 +488,7 @@ export function KnowledgeConsole({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="mt-1 h-6 gap-1 text-[10px] w-full"
+                  className="mt-1 h-6 gap-1 text-label-xs w-full"
                   onClick={() => setCustomApiOpen(true)}
                 >
                   <Plus className="h-3 w-3" /> Add Custom API
@@ -508,16 +509,11 @@ export function KnowledgeConsole({
         <div className="border-t bg-muted/30 px-3 py-2">
           {/* Relevance bar */}
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[11px] text-muted-foreground">Relevance</span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${confidencePct}%` }}
-              />
-            </div>
-            <span className="text-[11px] font-medium tabular-nums">{confidencePct}%</span>
+            <span className="text-label-sm text-muted-foreground">Relevance</span>
+            <ProgressBar pct={confidencePct} className="flex-1" />
+            <span className="text-label-sm font-medium tabular-nums">{confidencePct}%</span>
           </div>
-          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+          <div className="flex items-center justify-between text-label-xs text-muted-foreground">
             <span>
               {kbSources.length} KB &middot; {memorySources.length} memory &middot; {externalSources.length} external
             </span>

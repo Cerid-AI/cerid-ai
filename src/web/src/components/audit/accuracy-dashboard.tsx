@@ -4,6 +4,7 @@
 import { useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
+import { ProgressBar } from "@/components/ui/progress-bar"
 import { ShieldCheck } from "lucide-react"
 import { cn, getAccuracyTier } from "@/lib/utils"
 import { ModelAccuracyChart } from "./model-accuracy-chart"
@@ -49,12 +50,11 @@ export function AccuracyDashboard({ verification }: AccuracyDashboardProps) {
         {/* Overall accuracy */}
         <div className="mb-3 flex items-center gap-3">
           <span className="text-xs text-muted-foreground">Overall:</span>
-          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
-            <div
-              className={cn("h-full rounded-full transition-all", overallTier.barColor)}
-              style={{ width: `${Math.round(verification.avg_accuracy * 100)}%` }}
-            />
-          </div>
+          <ProgressBar
+            pct={Math.round(verification.avg_accuracy * 100)}
+            fillClassName={overallTier.barColor}
+            className="w-20"
+          />
           <span className={cn("text-xs font-medium tabular-nums", overallTier.textColor)}>
             {Math.round(verification.avg_accuracy * 100)}%
           </span>
@@ -74,14 +74,14 @@ export function AccuracyDashboard({ verification }: AccuracyDashboardProps) {
                     </span>
                   </div>
                   <div className="mt-1.5 flex items-center gap-2">
-                    <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={cn("h-full rounded-full transition-all", tier.barColor)}
-                        style={{ width: `${Math.round(stats.accuracy * 100)}%` }}
-                      />
-                    </div>
+                    <ProgressBar
+                      pct={Math.round(stats.accuracy * 100)}
+                      size="sm"
+                      fillClassName={tier.barColor}
+                      className="flex-1"
+                    />
                   </div>
-                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-label-xs text-muted-foreground">
                     <span>{stats.checks} checks</span>
                     <span className="text-green-700 dark:text-green-400">{stats.verified} verified</span>
                     {stats.uncertain > 0 && (

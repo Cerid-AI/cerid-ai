@@ -3,6 +3,7 @@
 
 import { Cpu, Coins, Binary, Database } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { ProgressBar } from "@/components/ui/progress-bar"
 import type { ChatMessage } from "@/lib/types"
 import { useLiveMetrics } from "@/hooks/use-live-metrics"
 import { cn, tokenCost } from "@/lib/utils"
@@ -55,24 +56,18 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
               <Binary className="h-3 w-3 text-muted-foreground" />
               <span className="hidden tabular-nums xl:inline">~{totalTokens.toLocaleString()}</span>
               <span className="hidden text-muted-foreground xl:inline">/ {formatContextWindow(contextWindow)}</span>
-              <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all",
-                    metrics.contextPct < 50
-                      ? "bg-green-500"
-                      : metrics.contextPct < 80
-                        ? "bg-yellow-500"
-                        : "bg-red-500",
-                  )}
-                  style={{ width: `${Math.min(metrics.contextPct, 100)}%` }}
-                  role="progressbar"
-                  aria-valuenow={Math.round(metrics.contextPct)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label={`Context window ${metrics.contextPct.toFixed(1)}% used`}
-                />
-              </div>
+              <ProgressBar
+                pct={metrics.contextPct}
+                className="w-16"
+                fillClassName={
+                  metrics.contextPct < 50
+                    ? "bg-green-500"
+                    : metrics.contextPct < 80
+                      ? "bg-yellow-500"
+                      : "bg-red-500"
+                }
+                label={`Context window ${metrics.contextPct.toFixed(1)}% used`}
+              />
               <span
                 className={cn(
                   "tabular-nums",
@@ -93,7 +88,7 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
             <p className="text-muted-foreground">Output: ~{metrics.outputTokens.toLocaleString()} tokens</p>
             <p className="text-muted-foreground">Total: ~{totalTokens.toLocaleString()} tokens</p>
             <p className="text-muted-foreground">Remaining: ~{remaining.toLocaleString()} tokens</p>
-            <p className="text-[10px] text-muted-foreground/80">When this reaches zero, older messages are summarized to free space. Your knowledge base is not affected.</p>
+            <p className="text-label-xs text-muted-foreground/80">When this reaches zero, older messages are summarized to free space. Your knowledge base is not affected.</p>
           </TooltipContent>
         </Tooltip>
 

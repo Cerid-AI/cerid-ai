@@ -1,6 +1,6 @@
 # Cerid AI — Product Story
 
-> **Last reviewed:** 2026-05-10 (v0.92 plan)
+> **Last reviewed:** 2026-05-11 (v0.92.1 release — primitive descriptions reflect shipped behaviour)
 > **Canonical narrative.** Drift gate: `scripts/lint-product-story.py`
 > asserts this file exists, has a `## Last reviewed:` line within 90 days
 > of the most recent release tag, and references the five primitives.

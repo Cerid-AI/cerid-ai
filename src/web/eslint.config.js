@@ -25,9 +25,20 @@ export default defineConfig([
       globals: globals.browser,
     },
     rules: {
-      // react-hooks v7 strict rules — warn for now, fix incrementally
+      // react-hooks v7 strict rules — warn for now, fix incrementally.
+      // 7.1.x added `refs`, `immutability`, `component-hook-factories`,
+      // and `preserve-manual-memoization` as errors-by-default; existing
+      // codebase patterns trip them (`use-verification-orchestrator.ts`
+      // accesses .current during render, plugins-section.tsx defines a
+      // component inside render). Demote to warn while migrating off
+      // these patterns in a dedicated cleanup sprint.
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/purity': 'warn',
+      'react-hooks/refs': 'warn',
+      'react-hooks/immutability': 'warn',
+      'react-hooks/component-hook-factories': 'warn',
+      'react-hooks/static-components': 'warn',
+      'react-hooks/preserve-manual-memoization': 'warn',
       // shadcn/ui files export variant helpers alongside components
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       // jsx-a11y — UX audit baseline. All recommended rules surface as

@@ -167,25 +167,25 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
       {hardware && (
         <div className="border-t">
           <div className="px-3 py-1.5">
-            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">Hardware Detected</p>
+            <p className="text-label-xs font-medium uppercase tracking-wider text-muted-foreground/80">Hardware Detected</p>
           </div>
           <div className="divide-y">
             <div className="flex items-center gap-3 px-3 py-1.5">
               <Monitor className="h-3 w-3 shrink-0 text-muted-foreground/80" />
-              <span className="flex-1 text-[11px] text-muted-foreground">OS</span>
-              <span className="text-[11px] text-muted-foreground">{hardware.os}</span>
+              <span className="flex-1 text-label-sm text-muted-foreground">OS</span>
+              <span className="text-label-sm text-muted-foreground">{hardware.os}</span>
             </div>
             <div className="flex items-center gap-3 px-3 py-1.5">
               <Cpu className="h-3 w-3 shrink-0 text-muted-foreground/80" />
-              <span className="flex-1 text-[11px] text-muted-foreground">CPU</span>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="flex-1 text-label-sm text-muted-foreground">CPU</span>
+              <span className="text-label-sm text-muted-foreground">
                 {hardware.cpu}{hardware.cpuCores != null ? ` (${hardware.cpuCores} cores)` : ""}
               </span>
             </div>
             <div className="flex items-center gap-3 px-3 py-1.5">
               <Zap className="h-3 w-3 shrink-0 text-muted-foreground/80" />
-              <span className="flex-1 text-[11px] text-muted-foreground">GPU</span>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="flex-1 text-label-sm text-muted-foreground">GPU</span>
+              <span className="text-label-sm text-muted-foreground">
                 {hardware.gpu}{hardware.gpuAcceleration && hardware.gpuAcceleration !== "none" ? ` (${hardware.gpuAcceleration})` : ""}
               </span>
             </div>
@@ -199,9 +199,9 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
             <p className="text-xs text-destructive">{error}</p>
           </div>
           {retrying && (
-            <p className="mt-1 text-[10px] text-muted-foreground">
+            <p className="mt-1 text-label-xs text-muted-foreground">
               Retrying automatically... Start services with{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">./scripts/start-cerid.sh</code>
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-label-xs">./scripts/start-cerid.sh</code>
             </p>
           )}
         </div>
@@ -211,7 +211,7 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
           <p className="mb-1.5 text-xs font-medium text-destructive">
             Docker is required to run Cerid AI services.
           </p>
-          <ol className="ml-4 list-decimal space-y-0.5 text-[11px] text-muted-foreground">
+          <ol className="ml-4 list-decimal space-y-0.5 text-label-sm text-muted-foreground">
             <li>
               <a
                 href="https://www.docker.com/products/docker-desktop/"

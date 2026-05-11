@@ -85,7 +85,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
           <Tooltip>
             <TooltipTrigger asChild>
               <span className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                "rounded px-1.5 py-0.5 text-label-xs font-semibold uppercase tracking-wider",
                 health.degradation_tier === "lite" && "bg-yellow-500/20 text-yellow-400",
                 health.degradation_tier === "direct" && "bg-orange-500/20 text-orange-400",
                 health.degradation_tier === "cached" && "bg-red-500/20 text-red-400",
@@ -141,7 +141,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
         {health?.openrouter_auth_ok === false && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="flex items-center gap-1 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-400 animate-pulse">
+              <span className="flex items-center gap-1 rounded bg-red-500/20 px-1.5 py-0.5 text-label-xs font-semibold text-red-400 animate-pulse">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
                 OpenRouter: Auth Error
               </span>
@@ -157,7 +157,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
         {health?.circuit_breakers?.openrouter === "open" && health?.openrouter_auth_ok !== false && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="flex items-center gap-1 rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-orange-400">
+              <span className="flex items-center gap-1 rounded bg-orange-500/20 px-1.5 py-0.5 text-label-xs font-semibold text-orange-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
                 OpenRouter: Circuit Open
               </span>
@@ -177,7 +177,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
             return (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="flex items-center gap-1 text-[10px] text-green-600 dark:text-green-400">
+                  <span className="flex items-center gap-1 text-label-xs text-green-600 dark:text-green-400">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
                     Ollama: {health.internal_llm_model || "active"} ({localCount}/{totalStages} local)
                   </span>
@@ -193,7 +193,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
           return (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-[10px] text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">&#x26A1; 0 local</span>
+                <span className="text-label-xs text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">&#x26A1; 0 local</span>
               </TooltipTrigger>
               <TooltipContent side="top">
                 <p>All pipeline stages use cloud APIs. Enable Ollama for faster local processing.</p>
@@ -212,7 +212,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
               <button
                 onClick={onToggleConsole}
                 className={cn(
-                  "relative flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
+                  "relative flex items-center gap-1 rounded px-1.5 py-0.5 text-label-xs transition-colors",
                   consoleOpen
                     ? "bg-teal-500/20 text-teal-400"
                     : "text-muted-foreground hover:text-foreground",
@@ -221,7 +221,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
                 <Terminal className="h-3 w-3" />
                 <span className="hidden sm:inline">Console</span>
                 {!consoleOpen && consoleUnreadCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] animate-pulse items-center justify-center rounded-full bg-teal-500 px-1 text-[9px] font-bold text-white">
+                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] animate-pulse items-center justify-center rounded-full bg-teal-500 px-1 text-label-xxs font-bold text-white">
                     {consoleUnreadCount > 99 ? "99+" : consoleUnreadCount}
                   </span>
                 )}

@@ -75,7 +75,7 @@ export function ContradictionItem({ finding }: ContradictionItemProps) {
         </blockquote>
 
         {/* vs. separator */}
-        <p className="text-center text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+        <p className="text-center text-label-xs font-semibold uppercase tracking-widest text-muted-foreground">
           contradicts
         </p>
 

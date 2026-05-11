@@ -70,7 +70,7 @@ export function CustomProviderInput({ onValidated }: CustomProviderInputProps) {
       {expanded && (
         <div className="space-y-3 border-t px-3 py-3">
           <div className="space-y-1.5">
-            <Label className="text-[11px]">Provider Name</Label>
+            <Label className="text-label-sm">Provider Name</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -79,7 +79,7 @@ export function CustomProviderInput({ onValidated }: CustomProviderInputProps) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-[11px]">API Base URL</Label>
+            <Label className="text-label-sm">API Base URL</Label>
             <Input
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
@@ -88,7 +88,7 @@ export function CustomProviderInput({ onValidated }: CustomProviderInputProps) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-[11px]">API Key</Label>
+            <Label className="text-label-sm">API Key</Label>
             <Input
               type="password"
               value={apiKey}
@@ -98,7 +98,7 @@ export function CustomProviderInput({ onValidated }: CustomProviderInputProps) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-[11px]">Model ID (optional)</Label>
+            <Label className="text-label-sm">Model ID (optional)</Label>
             <Input
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
@@ -123,10 +123,10 @@ export function CustomProviderInput({ onValidated }: CustomProviderInputProps) {
               Test Connection
             </Button>
             {status === "valid" && (
-              <span className="text-[10px] text-green-600 dark:text-green-400">Connected</span>
+              <span className="text-label-xs text-green-600 dark:text-green-400">Connected</span>
             )}
           </div>
-          {error && <p className="text-[10px] text-destructive">{error}</p>}
+          {error && <p className="text-label-xs text-destructive">{error}</p>}
         </div>
       )}
     </div>

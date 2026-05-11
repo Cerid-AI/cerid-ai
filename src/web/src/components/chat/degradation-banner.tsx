@@ -248,7 +248,7 @@ export function DegradationBanner() {
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
-          className={cn("flex items-center gap-0.5 text-[10px] font-medium", textColor)}
+          className={cn("flex items-center gap-0.5 text-label-xs font-medium", textColor)}
         >
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           How to fix
@@ -266,10 +266,10 @@ export function DegradationBanner() {
 
       {/* Expanded fix instructions */}
       {expanded && (
-        <div className={cn("border-t px-4 py-2 text-[11px]", isError ? "border-destructive/10" : "border-yellow-500/10")}>
+        <div className={cn("border-t px-4 py-2 text-label-sm", isError ? "border-destructive/10" : "border-yellow-500/10")}>
           <p className="text-muted-foreground">{info.hint}</p>
           <div className="mt-1.5 flex items-center gap-2">
-            <code className={cn("flex-1 rounded bg-background/60 px-2 py-1 font-mono text-[10px]", textColor)}>
+            <code className={cn("flex-1 rounded bg-background/60 px-2 py-1 font-mono text-label-xs", textColor)}>
               {info.command}
             </code>
             <Button

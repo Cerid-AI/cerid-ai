@@ -116,9 +116,9 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
               <div className="rounded-lg border bg-card p-3">
                 <div className="flex items-center gap-2 mb-2">
                   <HardDrive className="h-3 w-3 text-muted-foreground" />
-                  <p className="text-[11px] font-medium text-muted-foreground">Your Hardware</p>
+                  <p className="text-label-sm font-medium text-muted-foreground">Your Hardware</p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-[10px]">
+                <div className="grid grid-cols-3 gap-2 text-label-xs">
                   <div>
                     <p className="text-muted-foreground">RAM</p>
                     <p className="font-medium">{hardware.ram_gb} GB</p>
@@ -133,7 +133,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                   </div>
                 </div>
                 {!hardware.gpu?.includes("Metal") && !hardware.gpu?.includes("NVIDIA") && (
-                  <p className="mt-2 text-[9px] text-yellow-600 dark:text-yellow-400">
+                  <p className="mt-2 text-label-xxs text-yellow-600 dark:text-yellow-400">
                     CPU-only detected — inference will be slower. GPU acceleration available with Apple Silicon or NVIDIA.
                   </p>
                 )}
@@ -143,7 +143,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
             {/* Model recommendations (dynamic from backend) */}
             {modelRecs.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] font-medium text-muted-foreground">Recommended Models</p>
+                <p className="text-label-sm font-medium text-muted-foreground">Recommended Models</p>
                 {modelRecs.map((m) => {
                   // Match the full tag (`llama3.2:1b`) — not the base name —
                   // so installing `llama3.2:3b` doesn't make `llama3.2:1b`
@@ -159,18 +159,18 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                           <div className="flex items-center gap-1.5">
                             <p className="text-xs font-medium">{m.name}</p>
                             {m.recommended && (
-                              <Badge variant="outline" className="text-[9px] px-1 py-0 border-brand/30 text-brand">
+                              <Badge variant="outline" className="text-label-xxs px-1 py-0 border-brand/30 text-brand">
                                 <Star className="mr-0.5 h-2 w-2" /> Recommended
                               </Badge>
                             )}
                             {installed && (
-                              <Badge variant="outline" className="text-[9px] px-1 py-0 border-green-500/30 text-green-600">
+                              <Badge variant="outline" className="text-label-xxs px-1 py-0 border-green-500/30 text-green-600">
                                 Installed
                               </Badge>
                             )}
                           </div>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{m.description}</p>
-                          <p className="text-[9px] text-muted-foreground/80 mt-0.5">
+                          <p className="text-label-xs text-muted-foreground mt-0.5">{m.description}</p>
+                          <p className="text-label-xxs text-muted-foreground/80 mt-0.5">
                             {m.origin} · {m.size_gb} GB
                             {(m.expected_tokens_per_sec ?? 0) > 0 && ` · ~${m.expected_tokens_per_sec} tok/s`}
                             {(m.ram_usage_pct ?? 0) > 0 && ` · ${m.ram_usage_pct}% RAM`}
@@ -183,14 +183,14 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                           </Button>
                         )}
                         {!m.compatible && (
-                          <span className="text-[9px] text-muted-foreground shrink-0">Needs {m.size_gb * 2}+ GB RAM</span>
+                          <span className="text-label-xxs text-muted-foreground shrink-0">Needs {m.size_gb * 2}+ GB RAM</span>
                         )}
                       </div>
                     </div>
                   )
                 })}
-                {pullProgress && <p className="text-[10px] text-muted-foreground">{pullProgress}</p>}
-                {pullError && <p className="text-[10px] text-destructive">{pullError}</p>}
+                {pullProgress && <p className="text-label-xs text-muted-foreground">{pullProgress}</p>}
+                {pullError && <p className="text-label-xs text-destructive">{pullError}</p>}
               </div>
             )}
 
@@ -200,7 +200,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium">{RECOMMENDED_MODEL}</p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-label-xs text-muted-foreground">
                       {RECOMMENDED_MODEL_SIZE} — best balance of speed and quality for pipeline tasks
                     </p>
                   </div>
@@ -209,20 +209,20 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                     Pull
                   </Button>
                 </div>
-                {pullProgress && <p className="mt-2 text-[10px] text-muted-foreground">{pullProgress}</p>}
-                {pullError && <p className="mt-2 text-[10px] text-destructive">{pullError}</p>}
+                {pullProgress && <p className="mt-2 text-label-xs text-muted-foreground">{pullProgress}</p>}
+                {pullError && <p className="mt-2 text-label-xs text-destructive">{pullError}</p>}
               </div>
             )}
 
             {/* Installed Models */}
             {ollamaModels.length > 0 && (
               <div className="rounded-lg border bg-card p-3">
-                <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+                <p className="mb-2 text-label-sm font-medium text-muted-foreground">
                   Installed Models
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {ollamaModels.map((model) => (
-                    <Badge key={model} variant="secondary" className="text-[10px]">
+                    <Badge key={model} variant="secondary" className="text-label-xs">
                       {model}
                     </Badge>
                   ))}
@@ -241,7 +241,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
             <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
               <div>
                 <Label className="text-xs font-medium">Enable for pipeline tasks</Label>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-label-xs text-muted-foreground">
                   Query routing, claim extraction, topic detection (not full verification)
                 </p>
               </div>
@@ -261,9 +261,9 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
               </p>
             </div>
             <div className="rounded-lg border bg-card p-3 space-y-2">
-              <p className="text-[11px] font-medium text-muted-foreground">Quick Install</p>
+              <p className="text-label-sm font-medium text-muted-foreground">Quick Install</p>
               {navigator.platform?.includes("Mac") ? (
-                <div className="flex items-center gap-2 rounded bg-muted px-3 py-1.5 font-mono text-[10px]">
+                <div className="flex items-center gap-2 rounded bg-muted px-3 py-1.5 font-mono text-label-xs">
                   <span className="flex-1 select-all">brew install ollama && ollama serve</span>
                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 shrink-0"
                     onClick={() => navigator.clipboard.writeText("brew install ollama && ollama serve")}>
@@ -271,7 +271,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                   </Button>
                 </div>
               ) : navigator.platform?.includes("Linux") ? (
-                <div className="flex items-center gap-2 rounded bg-muted px-3 py-1.5 font-mono text-[10px]">
+                <div className="flex items-center gap-2 rounded bg-muted px-3 py-1.5 font-mono text-label-xs">
                   <span className="flex-1 select-all">curl -fsSL https://ollama.com/install.sh | sh</span>
                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 shrink-0"
                     onClick={() => navigator.clipboard.writeText("curl -fsSL https://ollama.com/install.sh | sh")}>
@@ -283,7 +283,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                   href="https://ollama.com/download"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 rounded bg-muted px-3 py-1.5 text-[10px] font-medium text-brand hover:bg-brand/5"
+                  className="flex items-center justify-center gap-2 rounded bg-muted px-3 py-1.5 text-label-xs font-medium text-brand hover:bg-brand/5"
                 >
                   Download from ollama.com
                   <ExternalLink className="h-2.5 w-2.5" />

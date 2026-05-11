@@ -65,7 +65,7 @@ export function ProvenancePopover({
         {verdict && (
           <span
             className={cn(
-              "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+              "rounded-full px-1.5 py-0.5 text-label-xs font-medium",
               verdict === "entailed" &&
                 "bg-green-500/10 text-green-700 dark:text-green-400",
               verdict === "contradicted" &&
@@ -170,7 +170,7 @@ export function ProvenancePopover({
           No vote count shown — this is a personal signal, not a public tally. */}
       {claim.claim && (
         <div className="flex items-center gap-1 border-t border-border/50 pt-2 mt-2">
-          <span className="mr-auto text-[10px] text-muted-foreground">
+          <span className="mr-auto text-label-xs text-muted-foreground">
             {UX_COPY.feedback.rateThisClaim}
           </span>
           <button

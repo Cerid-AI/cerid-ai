@@ -68,10 +68,10 @@ function InferenceTierRow() {
         info={`How embedding + reranking run on this host. Optimal = GPU-accelerated (Metal/CUDA/ROCm). Good = Ollama or native CPU sidecar. CPU Only = ONNX in-Docker (slowest). Auto-detected from hardware. ${inf.message}. Provider: ${inf.provider}, Platform: ${inf.platform}${inf.gpu_name ? `, GPU: ${inf.gpu_name}` : ""}.`}
       />
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className={cn("text-[10px]", TIER_COLORS[inf.tier] ?? TIER_COLORS.unknown)}>
+        <Badge variant="outline" className={cn("text-label-xs", TIER_COLORS[inf.tier] ?? TIER_COLORS.unknown)}>
           {inf.tier === "optimal" ? "Optimal (GPU)" : inf.tier === "good" ? "Good" : inf.tier === "degraded" ? "CPU Only" : "Unknown"}
         </Badge>
-        <span className="text-[10px] text-muted-foreground">{inf.provider}</span>
+        <span className="text-label-xs text-muted-foreground">{inf.provider}</span>
       </div>
     </div>
   )
@@ -125,7 +125,7 @@ export function SystemSection({
             {/* Tier-gated capabilities grid — hover any row for what the
                 capability does + which tier unlocks it. */}
             <div className="mt-1 rounded border bg-muted/30 p-3">
-              <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+              <p className="mb-2 text-label-sm font-medium text-muted-foreground">
                 Platform Capabilities
                 <span className="ml-1.5 font-normal text-muted-foreground/80">(hover for details)</span>
               </p>
@@ -137,9 +137,9 @@ export function SystemSection({
                       <TooltipTrigger asChild>
                         <div className="flex cursor-help items-center gap-1.5">
                           <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-green-500" : "bg-muted-foreground/30")} />
-                          <span className="text-[11px] text-muted-foreground">{formatFlagName(flag)}</span>
+                          <span className="text-label-sm text-muted-foreground">{formatFlagName(flag)}</span>
                           {desc.tier && (
-                            <Badge variant="outline" className="px-1 py-0 text-[8px] font-mono uppercase tracking-wide">
+                            <Badge variant="outline" className="px-1 py-0 text-label-xxs font-mono uppercase tracking-wide">
                               {desc.tier}
                             </Badge>
                           )}
@@ -148,7 +148,7 @@ export function SystemSection({
                       <TooltipContent side="top" className="max-w-72">
                         <p className="text-xs">{desc.description}</p>
                         {desc.tier && (
-                          <p className="mt-1 text-[10px] text-muted-foreground">Requires <strong>{desc.tier}</strong> tier.</p>
+                          <p className="mt-1 text-label-xs text-muted-foreground">Requires <strong>{desc.tier}</strong> tier.</p>
                         )}
                       </TooltipContent>
                     </Tooltip>
@@ -172,7 +172,7 @@ export function SystemSection({
           <CardContent className="px-4 pb-4 pt-0">
             <div className="rounded border">
               {/* Table header */}
-              <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+              <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-label-xs font-medium text-muted-foreground uppercase tracking-wide">
                 <span className="flex-1">Domain</span>
                 <span className="w-20 text-right">Sub-cats</span>
                 <span className="w-20 text-right">Artifacts</span>
@@ -308,7 +308,7 @@ function KBManagementSection({
                       <Button
                         variant="destructive"
                         size="sm"
-                        className="h-5 px-1 text-[10px]"
+                        className="h-5 px-1 text-label-xs"
                         disabled={kbAction !== null}
                         onClick={() => {
                           setClearConfirmDomain(null)
@@ -320,7 +320,7 @@ function KBManagementSection({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-5 px-1 text-[10px]"
+                        className="h-5 px-1 text-label-xs"
                         onClick={() => setClearConfirmDomain(null)}
                       >
                         Cancel
@@ -603,15 +603,15 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
           {isLoading ? (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
           ) : ollamaStatus?.reachable ? (
-            <Badge variant="default" className="text-[10px] bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30">
+            <Badge variant="default" className="text-label-xs bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30">
               Connected ({ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? "s" : ""})
             </Badge>
           ) : ollamaStatus?.enabled ? (
-            <Badge variant="outline" className="text-[10px] text-amber-600 dark:text-yellow-400 border-yellow-500/30">
+            <Badge variant="outline" className="text-label-xs text-amber-600 dark:text-yellow-400 border-yellow-500/30">
               Enabled but unreachable
             </Badge>
           ) : (
-            <Badge variant="secondary" className="text-[10px]">Not installed</Badge>
+            <Badge variant="secondary" className="text-label-xs">Not installed</Badge>
           )}
         </div>
 
@@ -624,7 +624,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                   <CheckCircle2 className="h-4 w-4" />
                   <span className="font-medium">Ollama is set up and running!</span>
                 </div>
-                <p className="text-[11px] text-muted-foreground">Pipeline tasks (claim extraction, query decomposition, memory resolution) will now run locally for $0. This section will update momentarily.</p>
+                <p className="text-label-sm text-muted-foreground">Pipeline tasks (claim extraction, query decomposition, memory resolution) will now run locally for $0. This section will update momentarily.</p>
               </div>
             ) : wizardPhase === "enabling" ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -637,13 +637,13 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   <span>{pullProgress || "Pulling model..."}</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground/80">This may take a few minutes depending on your connection.</p>
+                <p className="text-label-xs text-muted-foreground/80">This may take a few minutes depending on your connection.</p>
               </div>
             ) : wizardPhase === "model-select" && modelRecs ? (
               <div className="space-y-3">
                 <div>
                   <p className="text-xs font-medium">Choose a Model</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                  <p className="text-label-xs text-muted-foreground mt-0.5">
                     Detected {modelRecs.hardware.ram_gb}GB RAM
                     {modelRecs.hardware.gpu ? ` \u00b7 ${modelRecs.hardware.gpu}` : ""}
                   </p>
@@ -667,18 +667,18 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-medium">{m.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{m.size_gb}GB</span>
+                          <span className="text-label-xs text-muted-foreground">{m.size_gb}GB</span>
                           {m.recommended && (
-                            <Badge variant="default" className="text-[9px] h-4 bg-brand/20 text-brand border-brand/30">
+                            <Badge variant="default" className="text-label-xxs h-4 bg-brand/20 text-brand border-brand/30">
                               Recommended
                             </Badge>
                           )}
                         </div>
-                        <span className="text-[10px] text-muted-foreground">{m.origin}</span>
+                        <span className="text-label-xs text-muted-foreground">{m.origin}</span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{m.description}</p>
+                      <p className="text-label-xs text-muted-foreground mt-1 leading-relaxed">{m.description}</p>
                       {!m.compatible && (
-                        <p className="text-[10px] text-red-500 mt-0.5">Requires {m.min_ram_gb}GB+ RAM</p>
+                        <p className="text-label-xs text-red-500 mt-0.5">Requires {m.min_ram_gb}GB+ RAM</p>
                       )}
                     </button>
                   ))}
@@ -704,17 +704,17 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   <span>Waiting for Ollama to start...</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground/80">
+                <p className="text-label-xs text-muted-foreground/80">
                   Checking every 3 seconds. Once detected, model download and setup will continue automatically.
                 </p>
-                <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { if (pollingRef.current) clearInterval(pollingRef.current); setWizardPhase(null) }}>
+                <Button size="sm" variant="ghost" className="h-6 text-label-xs" onClick={() => { if (pollingRef.current) clearInterval(pollingRef.current); setWizardPhase(null) }}>
                   Cancel
                 </Button>
               </div>
             ) : wizardPhase === "install" ? (
               <div className="space-y-3">
                 <p className="text-xs font-medium">Install Ollama</p>
-                <ol className="text-[11px] text-muted-foreground list-decimal list-inside space-y-0.5">
+                <ol className="text-label-sm text-muted-foreground list-decimal list-inside space-y-0.5">
                   <li>Open <strong>Terminal</strong> (macOS: Spotlight → &quot;Terminal&quot;, Linux: Ctrl+Alt+T, Windows: PowerShell)</li>
                   <li>Copy the command below and paste it into your terminal</li>
                   <li>Click <strong>Continue</strong> — Cerid will detect Ollama and finish setup automatically</li>
@@ -725,8 +725,8 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                     { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
                   ].map(({ os, cmd }) => (
                     <div key={os} className="flex items-center gap-2 rounded border bg-muted/50 px-2.5 py-1.5">
-                      <span className="text-[10px] font-semibold text-muted-foreground w-10 shrink-0">{os}</span>
-                      <code className="flex-1 text-[10px] truncate select-all">{cmd}</code>
+                      <span className="text-label-xs font-semibold text-muted-foreground w-10 shrink-0">{os}</span>
+                      <code className="flex-1 text-label-xs truncate select-all">{cmd}</code>
                       <CopyButton text={cmd} />
                     </div>
                   ))}
@@ -754,7 +754,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             {wizardError && (
               <div className="space-y-1">
                 <p className="text-xs text-red-600 dark:text-red-400">{wizardError}</p>
-                <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={startWizard}>Try again</Button>
+                <Button size="sm" variant="outline" className="h-6 text-label-xs" onClick={startWizard}>Try again</Button>
               </div>
             )}
           </div>
@@ -777,14 +777,14 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             <div className="flex items-center justify-between">
               <LabelWithInfo label="Active model" info="The local LLM used for pipeline tasks. Click Change to see available options." />
               <div className="flex items-center gap-2">
-                <code className="text-[11px] text-muted-foreground font-mono">
+                <code className="text-label-sm text-muted-foreground font-mono">
                   {settings.internal_llm_model || ollamaStatus?.default_model || "—"}
                 </code>
                 {ollamaReachable && (
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-6 text-[10px]"
+                    className="h-6 text-label-xs"
                     disabled={switching || !!wizardPhase}
                     onClick={() => { setModelMgmtOpen((v) => !v); loadRecommendations() }}
                   >
@@ -800,7 +800,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                 <div>
                   <p className="text-xs font-medium">Model Selection</p>
                   {modelRecs && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                    <p className="text-label-xs text-muted-foreground mt-0.5">
                       {modelRecs.hardware.ram_gb}GB RAM
                       {modelRecs.hardware.gpu && modelRecs.hardware.gpu !== "CPU only" ? ` · ${modelRecs.hardware.gpu}` : ""}
                       {modelRecs.hardware.cpu ? ` · ${modelRecs.hardware.cpu}` : ""}
@@ -827,19 +827,19 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-medium">{m.name}</span>
-                              <span className="text-[10px] text-muted-foreground">{m.size_gb}GB · {m.origin}</span>
+                              <span className="text-label-xs text-muted-foreground">{m.size_gb}GB · {m.origin}</span>
                               {m.recommended && (
-                                <Badge variant="default" className="text-[9px] h-4 bg-brand/20 text-brand border-brand/30">
+                                <Badge variant="default" className="text-label-xxs h-4 bg-brand/20 text-brand border-brand/30">
                                   Recommended
                                 </Badge>
                               )}
                               {isCurrent && (
-                                <Badge variant="default" className="text-[9px] h-4 bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30">
+                                <Badge variant="default" className="text-label-xxs h-4 bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30">
                                   Active
                                 </Badge>
                               )}
                               {isInstalled && !isCurrent && (
-                                <Badge variant="secondary" className="text-[9px] h-4">
+                                <Badge variant="secondary" className="text-label-xxs h-4">
                                   Installed
                                 </Badge>
                               )}
@@ -848,7 +848,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-6 text-[10px]"
+                                className="h-6 text-label-xs"
                                 disabled={switching || !!wizardPhase}
                                 onClick={() => switchModel(m.id)}
                               >
@@ -856,9 +856,9 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                               </Button>
                             )}
                           </div>
-                          <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{m.strengths}</p>
+                          <p className="text-label-xs text-muted-foreground mt-1 leading-relaxed">{m.strengths}</p>
                           {!m.compatible && (
-                            <p className="text-[10px] text-red-500 mt-0.5">Requires {m.min_ram_gb}GB+ RAM</p>
+                            <p className="text-label-xs text-red-500 mt-0.5">Requires {m.min_ram_gb}GB+ RAM</p>
                           )}
                         </div>
                       )
@@ -877,21 +877,21 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                   if (extra.length === 0) return null
                   return (
                     <div className="space-y-1">
-                      <p className="text-[10px] text-muted-foreground font-medium">Other installed models</p>
+                      <p className="text-label-xs text-muted-foreground font-medium">Other installed models</p>
                       {extra.map((m) => {
                         const isCurrent = (settings.internal_llm_model || ollamaStatus.default_model) === m
                         return (
                           <div key={m} className={cn("flex items-center justify-between rounded-md border px-2.5 py-1.5", isCurrent ? "border-brand bg-brand/5" : "border-border")}>
                             <div className="flex items-center gap-2">
-                              <code className="text-[11px] font-mono">{m}</code>
+                              <code className="text-label-sm font-mono">{m}</code>
                               {isCurrent && (
-                                <Badge variant="default" className="text-[9px] h-4 bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30">
+                                <Badge variant="default" className="text-label-xxs h-4 bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30">
                                   Active
                                 </Badge>
                               )}
                             </div>
                             {!isCurrent && (
-                              <Button size="sm" variant="outline" className="h-6 text-[10px]" disabled={switching} onClick={() => switchModel(m)}>
+                              <Button size="sm" variant="outline" className="h-6 text-label-xs" disabled={switching} onClick={() => switchModel(m)}>
                                 Use
                               </Button>
                             )}
@@ -910,7 +910,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
           </>
         )}
         {/* Limitations */}
-        <div className="rounded border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
+        <div className="rounded border bg-muted/30 px-3 py-2 text-label-sm text-muted-foreground leading-relaxed">
           <span className="font-medium">{ollamaReachable ? "Limitations:" : "What Ollama does:"}</span>{" "}
           {ollamaReachable
             ? "The local model handles classification, extraction, and routing well. Chat, verification, and synopsis generation always use cloud models via OpenRouter."
@@ -937,7 +937,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             {pipelineOpen && (
               <div className="grid gap-1.5">
                 {!ollamaReachable && (
-                  <p className="mb-2 text-[11px] text-muted-foreground">
+                  <p className="mb-2 text-label-sm text-muted-foreground">
                     Install <a href="https://ollama.com" target="_blank" rel="noopener" className="text-primary underline">Ollama</a> to enable local pipeline routing.
                   </p>
                 )}
@@ -962,7 +962,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                         <Badge
                           variant="outline"
                           className={cn(
-                            "text-[10px]",
+                            "text-label-xs",
                             isOllama
                               ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30"
                               : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30",
@@ -1045,7 +1045,7 @@ function WatchedFoldersSection() {
   return (
     <Card className="mb-4">
       <CardContent className="space-y-2 pt-4">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-label-sm text-muted-foreground">
           Directories monitored for automatic ingestion. Each folder can be scanned independently with domain overrides.
         </p>
 
@@ -1060,7 +1060,7 @@ function WatchedFoldersSection() {
                 <FolderOpen className={cn("h-3.5 w-3.5 shrink-0", folder.enabled ? "text-brand" : "text-muted-foreground")} />
                 <div className="min-w-0">
                   <p className="text-xs font-medium truncate">{folder.label}</p>
-                  <p className="text-[10px] text-muted-foreground truncate font-mono">{folder.path}</p>
+                  <p className="text-label-xs text-muted-foreground truncate font-mono">{folder.path}</p>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
@@ -1082,7 +1082,7 @@ function WatchedFoldersSection() {
                 </Tooltip>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
+            <div className="flex items-center gap-4 text-label-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Switch
                   aria-label={`Active — ${folder.label}`}
@@ -1104,11 +1104,11 @@ function WatchedFoldersSection() {
                 <span>Searchable</span>
               </span>
               {folder.domain_override && (
-                <Badge variant="secondary" className="text-[9px]">{folder.domain_override}</Badge>
+                <Badge variant="secondary" className="text-label-xxs">{folder.domain_override}</Badge>
               )}
             </div>
             {folder.last_scanned_at && (
-              <div className="flex gap-3 text-[10px] text-muted-foreground">
+              <div className="flex gap-3 text-label-xs text-muted-foreground">
                 <span>{folder.stats.ingested} ingested</span>
                 <span>{folder.stats.skipped} skipped</span>
                 {folder.stats.errored > 0 && <span className="text-red-500">{folder.stats.errored} errors</span>}
@@ -1181,9 +1181,9 @@ function DataSourcesSection({
                 <div key={source.name} className="flex items-center justify-between rounded-md border px-3 py-2">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium capitalize">{source.name.replace(/_/g, " ")}</p>
-                    <p className="text-[11px] text-muted-foreground">{source.description}</p>
+                    <p className="text-label-sm text-muted-foreground">{source.description}</p>
                     {source.requires_api_key && !source.configured && (
-                      <p className="mt-0.5 text-[10px] text-yellow-500">Set {source.api_key_env_var} in .env to enable</p>
+                      <p className="mt-0.5 text-label-xs text-yellow-500">Set {source.api_key_env_var} in .env to enable</p>
                     )}
                   </div>
                   <Switch

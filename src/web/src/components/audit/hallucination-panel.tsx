@@ -20,7 +20,7 @@ function VerificationMethodBadge({ method, model }: { method?: string; model?: s
   const label = verificationMethodLabel(method)
   if (!label) return null
   return (
-    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${verificationMethodColor(method)}`} title={model ? `Verified by ${model}` : undefined}>
+    <Badge variant="outline" className={`text-label-xs px-1 py-0 ${verificationMethodColor(method)}`} title={model ? `Verified by ${model}` : undefined}>
       {label}
     </Badge>
   )
@@ -55,13 +55,13 @@ function VerificationActivityLog({ entries, phase }: { entries: ActivityLogEntry
     <div className="mb-3 rounded-md border border-muted bg-muted/30 p-2">
       <div className="mb-1.5 flex items-center gap-2">
         <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="text-label-sm font-medium uppercase tracking-wider text-muted-foreground">
           Verification Pipeline
         </span>
       </div>
       <div
         ref={scrollRef}
-        className="max-h-24 space-y-0.5 overflow-y-auto font-mono text-[10px] text-muted-foreground/80"
+        className="max-h-24 space-y-0.5 overflow-y-auto font-mono text-label-xs text-muted-foreground/80"
       >
         {entries.map((entry, i) => (
           <div key={i} className="flex items-start gap-1.5">
@@ -138,23 +138,23 @@ function ClaimBadge({
     >
       {/* Badge row: number + status + sub-type, left-aligned */}
       <div className="flex items-center gap-1.5 mb-1.5">
-        <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+        <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-label-xs font-medium text-muted-foreground">
           {index + 1}
         </span>
         {expertVerified ? (
-          <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] px-1.5 py-0.5">
+          <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-label-xs px-1.5 py-0.5">
             <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert · {displayStatus}</span>
           </Badge>
         ) : (
           <Badge
             variant="outline"
-            className={`text-[10px] ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
+            className={`text-label-xs ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
           >
             {displayStatus}
           </Badge>
         )}
         {refutedSubType && REFUTED_SUB_LABELS[refutedSubType] && (
-          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${REFUTED_SUB_LABELS[refutedSubType].color}`}>
+          <Badge variant="outline" className={`text-label-xxs px-1 py-0 ${REFUTED_SUB_LABELS[refutedSubType].color}`}>
             {REFUTED_SUB_LABELS[refutedSubType].label}
           </Badge>
         )}
@@ -186,7 +186,7 @@ function ClaimBadge({
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <span>Source: {claim.source_filename}</span>
                 {claim.source_domain && (
-                  <Badge variant="outline" className="text-[10px] px-1 py-0">{claim.source_domain}</Badge>
+                  <Badge variant="outline" className="text-label-xs px-1 py-0">{claim.source_domain}</Badge>
                 )}
               </div>
             )}
@@ -207,7 +207,7 @@ function ClaimBadge({
 
             {/* References section */}
             <div className="border-t border-border/50 pt-2">
-              <p className="text-[10px] font-medium text-muted-foreground mb-1">References</p>
+              <p className="text-label-xs font-medium text-muted-foreground mb-1">References</p>
               {claim.source_urls && claim.source_urls.length > 0 ? (
                 <div className="flex flex-col gap-0.5">
                   {claim.source_urls.slice(0, 5).map((url, i) => (
@@ -216,7 +216,7 @@ function ClaimBadge({
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
+                      className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
                     >
                       <ExternalLink className="h-2.5 w-2.5 shrink-0" />
                       {claimHostname(url)}
@@ -228,7 +228,7 @@ function ClaimBadge({
                   href={`https://www.google.com/search?q=${encodeURIComponent(claim.claim)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400"
+                  className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400"
                 >
                   <Search className="h-2.5 w-2.5" />
                   Search for references
@@ -243,7 +243,7 @@ function ClaimBadge({
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 text-[11px] text-muted-foreground hover:text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 gap-1"
+              className="h-6 px-2 text-label-sm text-muted-foreground hover:text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 gap-1"
               onClick={(e) => { e.stopPropagation(); onRetry() }}
               aria-label="Re-verify this claim with expert analysis"
               title="Re-verify with Grok 4 expert mode"
@@ -326,7 +326,7 @@ export function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
     return (
       <div className="rounded-lg border px-3 py-3 transition-all">
         <div className="flex items-start gap-2">
-          <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+          <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-label-xs font-medium text-muted-foreground">
             {claim.index + 1}
           </span>
           <Badge
@@ -351,12 +351,12 @@ export function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
   return (
     <div className="rounded-lg border px-3 py-3 transition-all">
       <div className="flex items-start gap-2">
-        <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+        <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-label-xs font-medium text-muted-foreground">
           {claim.index + 1}
         </span>
         <VerificationClaimBadge claim={fe} />
         {claim.claim_type && claim.claim_type !== "factual" && (
-          <Badge variant="outline" className="text-[10px] px-1 py-0">
+          <Badge variant="outline" className="text-label-xs px-1 py-0">
             {claim.claim_type}
           </Badge>
         )}
@@ -365,7 +365,7 @@ export function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {claim.source && <span>Source: {claim.source}</span>}
             {claim.source_domain && (
-              <Badge variant="outline" className="text-[10px] px-1 py-0">{claim.source_domain}</Badge>
+              <Badge variant="outline" className="text-label-xs px-1 py-0">{claim.source_domain}</Badge>
             )}
             <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
             {claim.similarity != null && claim.similarity > 0 && (
@@ -604,7 +604,7 @@ export function HallucinationPanel({
           <button
             onClick={() => toggleCategory("verified")}
             className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              "rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors border",
               hiddenCategories.has("verified")
                 ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
                 : "bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/30",
@@ -617,7 +617,7 @@ export function HallucinationPanel({
           <button
             onClick={() => toggleCategory("refuted")}
             className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              "rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors border",
               hiddenCategories.has("refuted")
                 ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
                 : "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/30",
@@ -630,7 +630,7 @@ export function HallucinationPanel({
           <button
             onClick={() => toggleCategory("evasion")}
             className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              "rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors border",
               hiddenCategories.has("evasion")
                 ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
                 : "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/30",
@@ -643,7 +643,7 @@ export function HallucinationPanel({
           <button
             onClick={() => toggleCategory("unverified")}
             className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              "rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors border",
               hiddenCategories.has("unverified")
                 ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
                 : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/30",
@@ -656,7 +656,7 @@ export function HallucinationPanel({
           <button
             onClick={() => toggleCategory("other")}
             className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              "rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors border",
               hiddenCategories.has("other")
                 ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
                 : "bg-muted/50 text-muted-foreground border-border",

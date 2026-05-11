@@ -123,7 +123,7 @@ export function JobRow({ job }: JobRowProps) {
       {/* Priority chip */}
       <Badge
         variant="outline"
-        className="shrink-0 text-[10px] capitalize"
+        className="shrink-0 text-label-xs capitalize"
         aria-label={`Priority: ${job.priority}`}
       >
         {job.priority}

@@ -12,6 +12,7 @@ import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { LastUpdated } from "@/components/ui/last-updated"
 import { DigestCard } from "./digest-card"
 import { HealthCards } from "./health-cards"
+import { InvariantsCard } from "./invariants-card"
 import { CollectionChart } from "./collection-chart"
 import { IngestionTimeline } from "./ingestion-timeline"
 import { SchedulerStatus } from "./scheduler-status"
@@ -97,6 +98,9 @@ export function MonitoringPane() {
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Health Cards">
               <HealthCards health={maintenance?.health} />
+            </PaneErrorBoundary>
+            <PaneErrorBoundary label="Operational Invariants">
+              <InvariantsCard />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Collection Chart">
               <CollectionChart collections={maintenance?.collections} />

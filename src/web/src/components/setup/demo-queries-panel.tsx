@@ -210,7 +210,7 @@ export function DemoQueriesPanel({ pack, onComplete }: DemoQueriesPanelProps) {
           aria-label="Query result"
           aria-live="polite"
         >
-          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+          <p className="mb-1 text-label-xs font-medium uppercase tracking-wide text-muted-foreground/70">
             Answer
           </p>
           <p className="text-xs leading-relaxed text-foreground line-clamp-6">

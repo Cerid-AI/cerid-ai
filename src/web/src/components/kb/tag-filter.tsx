@@ -69,7 +69,7 @@ export function TagFilter({ activeTags, onToggleTag, domain }: TagFilterProps) {
             <Badge
               key={tag}
               variant="default"
-              className="gap-1 py-0 text-[10px]"
+              className="gap-1 py-0 text-label-xs"
             >
               {tag}
               <button
@@ -84,7 +84,7 @@ export function TagFilter({ activeTags, onToggleTag, domain }: TagFilterProps) {
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 text-[10px]"
+            className="h-5 text-label-xs"
             onClick={() => activeTags.forEach(onToggleTag)}
           >
             Clear
@@ -114,7 +114,7 @@ export function TagFilter({ activeTags, onToggleTag, domain }: TagFilterProps) {
                 handleSelect(filteredSuggestions[0].name)
               }
             }}
-            className="h-6 flex-1 text-[11px]"
+            className="h-6 flex-1 text-label-sm"
             aria-label="Filter by tag"
           />
         </div>
@@ -131,7 +131,7 @@ export function TagFilter({ activeTags, onToggleTag, domain }: TagFilterProps) {
                   <button
                     key={suggestion.name}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[11px] transition-colors",
+                      "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-label-sm transition-colors",
                       "hover:bg-muted/50",
                     )}
                     onClick={() => handleSelect(suggestion.name)}
@@ -143,7 +143,7 @@ export function TagFilter({ activeTags, onToggleTag, domain }: TagFilterProps) {
                     )}
                     <span className="flex-1 truncate">{suggestion.name}</span>
                     {suggestion.usage_count > 0 && (
-                      <span className="text-[9px] text-muted-foreground">
+                      <span className="text-label-xxs text-muted-foreground">
                         {suggestion.usage_count}
                       </span>
                     )}

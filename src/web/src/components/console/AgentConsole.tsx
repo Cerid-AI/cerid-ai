@@ -152,7 +152,7 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
           aria-label={collapsed ? "Expand console" : "Collapse console"}
         >
           {collapsed ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          <span className="font-mono tracking-wide uppercase text-[10px]">Agent Console</span>
+          <span className="font-mono tracking-wide uppercase text-label-xs">Agent Console</span>
         </button>
 
         <span className={cn(
@@ -160,7 +160,7 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
           connected ? "bg-green-500" : "bg-red-500",
         )} />
 
-        <span className="text-[10px] text-zinc-600 tabular-nums">
+        <span className="text-label-xs text-zinc-600 tabular-nums">
           {filteredEvents.length} events
         </span>
 
@@ -222,7 +222,7 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
                 key={agent}
                 onClick={() => toggleAgent(agent)}
                 className={cn(
-                  "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
+                  "rounded px-2 py-0.5 text-label-xs font-medium transition-colors",
                   isHidden
                     ? "bg-zinc-800 text-zinc-600 line-through"
                     : `${style.bgColor} ${style.color}`,

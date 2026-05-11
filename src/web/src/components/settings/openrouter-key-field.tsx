@@ -104,7 +104,7 @@ export function OpenRouterKeyField() {
         </Button>
       </div>
 
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-label-xs text-muted-foreground">
         The key is stored on your machine. It is never sent to Cerid or returned
         in any API response after save.
       </p>

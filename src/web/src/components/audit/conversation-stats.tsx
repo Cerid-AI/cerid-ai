@@ -40,7 +40,7 @@ export function ConversationStats({ conversations }: ConversationStatsProps) {
                   <span className="text-xs font-medium">{model}</span>
                   <span className="text-xs text-muted-foreground">{stats.turns} turns</span>
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-label-xs text-muted-foreground">
                   <span>{stats.input_tokens.toLocaleString()} in</span>
                   <span>{stats.output_tokens.toLocaleString()} out</span>
                   {stats.avg_latency_ms > 0 && <span>{Math.round(stats.avg_latency_ms)}ms avg</span>}

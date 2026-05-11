@@ -245,12 +245,12 @@ export default function SettingsPane() {
                       <span>{preset.emoji}</span>
                       <span className="text-sm font-medium">{preset.label}</span>
                       {locked && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-gold border-gold">
+                        <Badge variant="outline" className="text-label-xs px-1.5 py-0 text-gold border-gold">
                           <Crown className="mr-0.5 h-2.5 w-2.5" />Pro
                         </Badge>
                       )}
                     </div>
-                    <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+                    <p className="mt-1 text-label-sm leading-tight text-muted-foreground">
                       {preset.description}
                     </p>
                   </button>

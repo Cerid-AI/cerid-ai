@@ -43,12 +43,12 @@ function HardwareRecommendation() {
       <div className="flex items-center gap-2 mb-1.5">
         <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">System</span>
-        <span className="text-[10px] text-muted-foreground ml-auto">
+        <span className="text-label-xs text-muted-foreground ml-auto">
           {hw.ram_gb}GB RAM · {hw.cpu_cores ?? "?"} cores
           {gpuAvailable && ` · ${hw.gpu_acceleration}`}
         </span>
       </div>
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-label-xs text-muted-foreground">
         {capable
           ? "Your hardware supports all features — Advanced mode recommended for full verification, reranking, and smart routing."
           : "Simple mode recommended for smooth performance on your hardware. Switch to Advanced anytime if needed."}
@@ -56,7 +56,7 @@ function HardwareRecommendation() {
       {gpuAvailable && (
         <div className="mt-1.5 flex items-center gap-1">
           <Zap className="h-2.5 w-2.5 text-green-500" />
-          <span className="text-[9px] text-green-600 dark:text-green-400">
+          <span className="text-label-xxs text-green-600 dark:text-green-400">
             GPU acceleration active — embeddings and reranking use {hw.gpu_acceleration}
           </span>
         </div>
@@ -354,7 +354,7 @@ function AdvancedModeToggle() {
             <Label htmlFor="advanced-mode-toggle" className="text-sm font-medium cursor-pointer">
               Show advanced surfaces
             </Label>
-            <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+            <p className="text-label-sm text-muted-foreground leading-snug mt-0.5">
               Reveals pipeline controls, governance, plugins, and operator-facing settings.
             </p>
           </div>
@@ -376,10 +376,10 @@ function DegradedFeatureNote({ message, command }: { message: string; command?: 
     <div className="mt-1 rounded bg-yellow-500/10 px-2.5 py-1" role="status">
       <div className="flex items-center gap-1.5">
         <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-600 dark:text-yellow-400" />
-        <span className="text-[10px] text-yellow-600 dark:text-yellow-400">{message}</span>
+        <span className="text-label-xs text-yellow-600 dark:text-yellow-400">{message}</span>
       </div>
       {command && (
-        <code className="mt-1 block rounded bg-background/60 px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
+        <code className="mt-1 block rounded bg-background/60 px-2 py-0.5 font-mono text-label-xxs text-muted-foreground">
           {command}
         </code>
       )}
@@ -420,7 +420,7 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
         {/* Provider status pills — hover any pill for what its state means
             and how to change it. These are status badges, not buttons. */}
         <div>
-          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 text-label-xs font-medium uppercase tracking-wide text-muted-foreground">
             Status
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -431,7 +431,7 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
                   <TooltipTrigger asChild>
                     <span
                       className={cn(
-                        "flex cursor-help items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+                        "flex cursor-help items-center gap-1.5 rounded-full border px-2.5 py-1 text-label-sm",
                         configured
                           ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
                           : "border-muted text-muted-foreground",
@@ -455,7 +455,7 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
               <TooltipTrigger asChild>
                 <span
                   className={cn(
-                    "flex cursor-help items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+                    "flex cursor-help items-center gap-1.5 rounded-full border px-2.5 py-1 text-label-sm",
                     ollamaEnabled
                       ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
                       : "border-muted text-muted-foreground",
@@ -478,7 +478,7 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
 
         {/* Capability grid */}
         <div className="rounded border bg-muted/30 p-2.5">
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1.5 text-label-xs font-medium uppercase tracking-wide text-muted-foreground">
             Capabilities
           </p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
@@ -486,20 +486,20 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
               <div key={cap.label}>
                 <div className="flex items-center gap-1.5">
                   <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", CAPABILITY_STATUS_DOT[cap.status])} />
-                  <span className="text-[11px] text-muted-foreground">{cap.label}</span>
+                  <span className="text-label-sm text-muted-foreground">{cap.label}</span>
                 </div>
                 {cap.status !== "available" && cap.reason && (
-                  <p className="ml-3 text-[9px] text-muted-foreground/80">{cap.reason}</p>
+                  <p className="ml-3 text-label-xxs text-muted-foreground/80">{cap.reason}</p>
                 )}
                 {cap.fix && cap.status !== "available" && cap.fix.command && (
-                  <code className="ml-3 mt-0.5 block text-[8px] font-mono text-muted-foreground/80">
+                  <code className="ml-3 mt-0.5 block text-label-xxs font-mono text-muted-foreground/80">
                     {cap.fix.command}
                   </code>
                 )}
               </div>
             ))}
           </div>
-          <p className="mt-1.5 text-[10px] text-muted-foreground/80">
+          <p className="mt-1.5 text-label-xs text-muted-foreground/80">
             {COST_PROFILE_LABELS[assessment.costProfile]}
           </p>
         </div>
@@ -510,7 +510,7 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
             {assessment.warnings.map((w, i) => (
               <div key={i}>
                 <p className={cn(
-                  "text-[11px] leading-relaxed",
+                  "text-label-sm leading-relaxed",
                   w.severity === "error" && "text-destructive",
                   w.severity === "warning" && "text-yellow-600 dark:text-yellow-400",
                   w.severity === "info" && "text-muted-foreground",
@@ -518,7 +518,7 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
                   {w.message}
                 </p>
                 {w.fix?.command && (
-                  <code className="mt-0.5 block rounded bg-background/60 px-2 py-0.5 text-[9px] font-mono text-muted-foreground">
+                  <code className="mt-0.5 block rounded bg-background/60 px-2 py-0.5 text-label-xxs font-mono text-muted-foreground">
                     {w.fix.command}
                   </code>
                 )}

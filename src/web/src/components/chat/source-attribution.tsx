@@ -87,14 +87,14 @@ function SourceCard({ source }: { source: SourceRef }) {
       )}
       <DomainBadge domain={source.domain} />
       {source.sub_category && source.sub_category !== "general" && (
-        <Badge variant="secondary" className="text-[10px]">
+        <Badge variant="secondary" className="text-label-xs">
           {source.sub_category}
         </Badge>
       )}
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
         {source.quality_score != null && (
           <span className={cn(
-            "tabular-nums text-[10px]",
+            "tabular-nums text-label-xs",
             source.quality_score >= 0.8 ? "text-green-600 dark:text-green-400" :
             source.quality_score >= 0.6 ? "text-blue-600 dark:text-blue-400" :
             source.quality_score >= 0.4 ? "text-yellow-600 dark:text-yellow-400" :

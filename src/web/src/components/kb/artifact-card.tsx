@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { ProgressBar } from "@/components/ui/progress-bar"
 import { MessageSquarePlus, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers, Star, Leaf } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { SourceTypeBadge } from "./source-type-badge"
@@ -174,7 +175,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
+                      <Badge variant="outline" className="shrink-0 gap-0.5 text-label-xxs px-1.5 py-0">
                         <Layers className="h-2.5 w-2.5" />
                         {chunkCount}
                       </Badge>
@@ -189,7 +190,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <DomainBadge domain={result.domain} />
               {result.ingested_at && (
-                <span className="text-[10px] text-muted-foreground" title={new Date(result.ingested_at).toLocaleString()}>
+                <span className="text-label-xs text-muted-foreground" title={new Date(result.ingested_at).toLocaleString()}>
                   {timeAgo(result.ingested_at)}
                 </span>
               )}
@@ -206,7 +207,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                 </Badge>
               )}
               {result.sub_category && result.sub_category !== "general" && (
-                <Badge variant="secondary" className="text-[10px]">
+                <Badge variant="secondary" className="text-label-xs">
                   {result.sub_category}
                 </Badge>
               )}
@@ -216,7 +217,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               )}
               {/* Client source badge — shown when showSource is true and source is non-gui */}
               {showSource && clientSource && clientSource !== "gui" && (
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-teal-500/40 text-teal-600 dark:text-teal-400">
+                <Badge variant="outline" className="text-label-xxs px-1.5 py-0 border-teal-500/40 text-teal-600 dark:text-teal-400">
                   {clientSource}
                 </Badge>
               )}
@@ -227,13 +228,13 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   const isAuto = tag.startsWith("~")
                   const label = isAuto ? tag.slice(1) : tag
                   return (
-                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-[10px] ${isAuto ? "bg-muted/50 italic text-muted-foreground/80" : "bg-muted text-muted-foreground"}`}>
+                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-label-xs ${isAuto ? "bg-muted/50 italic text-muted-foreground/80" : "bg-muted text-muted-foreground"}`}>
                       {label}
                     </span>
                   )
                 })}
                 {result.tags.length > 4 && (
-                  <span className="text-[10px] text-muted-foreground">+{result.tags.length - 4}</span>
+                  <span className="text-label-xs text-muted-foreground">+{result.tags.length - 4}</span>
                 )}
               </div>
             )}
@@ -245,12 +246,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   <TooltipTrigger asChild>
                     <div className="flex flex-col items-end gap-0.5">
                       <span className="text-xs font-medium tabular-nums">{relevancePct}%</span>
-                      <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary transition-all"
-                          style={{ width: `${relevancePct}%` }}
-                        />
-                      </div>
+                      <ProgressBar pct={relevancePct} className="w-12" />
                     </div>
                   </TooltipTrigger>
                   <TooltipContent side="left">Relevance: {relevancePct}% match to query</TooltipContent>
@@ -273,7 +269,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
 
         {/* Compact content preview — outside header flex to avoid layout interference */}
         {compact && result.content && (
-          <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
+          <p className="mt-0.5 truncate text-label-sm leading-tight text-muted-foreground">
             {result.content.replace(/[#*_[\]|>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80)}
           </p>
         )}
@@ -303,12 +299,12 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             {result.keywords && result.keywords.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {result.keywords.map((k: string) => (
-                  <Badge key={k} variant="secondary" className="text-[10px]">{k}</Badge>
+                  <Badge key={k} variant="secondary" className="text-label-xs">{k}</Badge>
                 ))}
               </div>
             )}
             {/* Metadata row */}
-            <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+            <div className="flex flex-wrap gap-3 text-label-xs text-muted-foreground">
               {result.source_type && <span>Source: {result.source_type}</span>}
               {result.chunk_count != null && <span>Chunks: {result.chunk_count}</span>}
               {result.ingested_at && <span>Ingested: {new Date(result.ingested_at).toLocaleDateString()}</span>}
@@ -316,14 +312,13 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             </div>
             {/* Quality score */}
             {result.quality_score != null && (
-              <div className="flex items-center gap-2 text-[10px]">
+              <div className="flex items-center gap-2 text-label-xs">
                 <span className="text-muted-foreground">Quality:</span>
-                <div className="h-1.5 w-20 rounded-full bg-muted">
-                  <div
-                    className="h-1.5 rounded-full bg-emerald-500"
-                    style={{ width: `${Math.round(result.quality_score * 100)}%` }}
-                  />
-                </div>
+                <ProgressBar
+                  pct={Math.round(result.quality_score * 100)}
+                  variant="success"
+                  className="w-20"
+                />
                 <span className="text-muted-foreground">{Math.round(result.quality_score * 100)}%</span>
               </div>
             )}
@@ -331,7 +326,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 gap-1 px-2 text-[10px]"
+              className="h-6 gap-1 px-2 text-label-xs"
               disabled={regeneratingSynopsis}
               onClick={async (e) => {
                 e.stopPropagation()
@@ -352,13 +347,13 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         {/* Recategorize inline picker */}
         {!compact && showRecategorize && domains && onRecategorize && (
           <div className="mt-2 flex flex-wrap items-center gap-1 rounded border bg-muted/30 p-2">
-            <span className="text-[10px] text-muted-foreground">Move to:</span>
+            <span className="text-label-xs text-muted-foreground">Move to:</span>
             {domains.filter((d) => d !== result.domain).map((d) => (
               <Button
                 key={d}
                 variant="outline"
                 size="xs"
-                className="h-5 text-[10px] capitalize"
+                className="h-5 text-label-xs capitalize"
                 disabled={recategorizing}
                 onClick={async (e) => {
                   e.stopPropagation()
@@ -386,7 +381,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
           <div className="mt-2 rounded border bg-muted/30 p-2" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-wrap gap-1 mb-1.5">
               {editedTags.map((tag) => (
-                <span key={tag} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                <span key={tag} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-label-xs text-primary">
                   {tag}
                   <button className="hover:text-destructive" onClick={() => setEditedTags((t) => t.filter((x) => x !== tag))}>
                     <X className="h-2.5 w-2.5" />
@@ -396,7 +391,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             </div>
             <div className="flex items-center gap-1">
               <input
-                className="h-6 flex-1 rounded border bg-background px-1.5 text-[11px] outline-none focus:ring-1 focus:ring-primary"
+                className="h-6 flex-1 rounded border bg-background px-1.5 text-label-sm outline-none focus:ring-1 focus:ring-primary"
                 placeholder="Add tag..."
                 value={tagInput}
                 onChange={(e) => setTagInput(e.target.value)}
@@ -412,7 +407,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               <Button
                 variant="ghost"
                 size="xs"
-                className="h-6 text-[10px] text-primary"
+                className="h-6 text-label-xs text-primary"
                 disabled={savingTags}
                 onClick={async () => {
                   setSavingTags(true)
@@ -427,7 +422,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                 {savingTags ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
                 Save
               </Button>
-              <Button variant="ghost" size="xs" className="h-6 text-[10px]" onClick={() => setEditingTags(false)}>
+              <Button variant="ghost" size="xs" className="h-6 text-label-xs" onClick={() => setEditingTags(false)}>
                 <X className="h-3 w-3" />
               </Button>
             </div>
@@ -437,12 +432,12 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         {/* Delete confirmation */}
         {!compact && confirmDelete && onDelete && (
           <div className="mt-2 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 p-2" onClick={(e) => e.stopPropagation()}>
-            <span className="text-[11px] text-destructive">Delete this artifact?</span>
+            <span className="text-label-sm text-destructive">Delete this artifact?</span>
             <div className="flex-1" />
             <Button
               variant="destructive"
               size="xs"
-              className="h-5 text-[10px]"
+              className="h-5 text-label-xs"
               disabled={deleting}
               onClick={async () => {
                 setDeleting(true)
@@ -452,7 +447,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               {deleting ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
               Delete
             </Button>
-            <Button variant="ghost" size="xs" className="h-5 text-[10px]" onClick={() => setConfirmDelete(false)}>
+            <Button variant="ghost" size="xs" className="h-5 text-label-xs" onClick={() => setConfirmDelete(false)}>
               Cancel
             </Button>
           </div>
@@ -594,7 +589,7 @@ function QualityBadge({ score }: { score: number }) {
                    { label: "poor", color: "border-red-500/50 text-red-700 dark:text-red-400" }
 
   return (
-    <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0", tier.color)}>
+    <Badge variant="outline" className={cn("text-label-xxs px-1.5 py-0", tier.color)}>
       Q{pct}
     </Badge>
   )

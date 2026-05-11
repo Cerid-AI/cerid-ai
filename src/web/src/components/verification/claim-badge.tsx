@@ -93,7 +93,7 @@ export function ClaimBadge({ claim, onArtifactClick }: ClaimBadgeProps) {
           <Badge
             variant="outline"
             className={cn(
-              "gap-1 text-[11px] px-2 py-0.5 font-medium transition-colors",
+              "gap-1 text-label-sm px-2 py-0.5 font-medium transition-colors",
               styles.badge,
             )}
           >

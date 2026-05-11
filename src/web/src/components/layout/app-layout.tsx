@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { Sidebar, type Pane } from "./sidebar"
+import { NavigationProvider } from "@/contexts/navigation-context"
 import { StatusBar } from "./status-bar"
 import { AgentConsole } from "@/components/console/AgentConsole"
 import { ModelDownloadBanner } from "@/components/model-download-banner"
@@ -80,7 +81,11 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
           onCycleTier={onCycleTier}
           activePanes={activePanes}
         />
-        <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden">{children(activePane)}</main>
+        <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden">
+          <NavigationProvider activePane={activePane} onPaneChange={setActivePane}>
+            {children(activePane)}
+          </NavigationProvider>
+        </main>
       </div>
       {consoleOpen && (
         <AgentConsole

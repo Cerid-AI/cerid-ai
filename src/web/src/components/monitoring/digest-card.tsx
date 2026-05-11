@@ -93,7 +93,7 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
           </SelectContent>
         </Select>
         {digest?.generated_at && (
-          <span className="text-[10px] tabular-nums text-muted-foreground">
+          <span className="text-label-xs tabular-nums text-muted-foreground">
             {formatRelativeTime(digest.generated_at)}
           </span>
         )}
@@ -185,7 +185,7 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
                     >
                       <span className="flex items-center gap-1.5 truncate">
                         <span className="truncate font-medium">{item.filename}</span>
-                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                        <Badge variant="outline" className="shrink-0 text-label-xs">
                           {item.domain}
                         </Badge>
                       </span>
@@ -196,7 +196,7 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
                   ))}
                 </ul>
                 {digest.artifacts.items.length > 10 && (
-                  <p className="mt-1 text-[10px] text-muted-foreground">
+                  <p className="mt-1 text-label-xs text-muted-foreground">
                     {digest.artifacts.items.length - 10} more…
                   </p>
                 )}

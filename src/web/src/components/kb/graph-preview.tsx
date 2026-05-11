@@ -70,7 +70,7 @@ export function GraphPreview({ artifactId }: GraphPreviewProps) {
         <GitBranch className="h-3 w-3" />
         <span>Connected ({related.length})</span>
         {stack.length > 0 && (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-label-xs">
             depth {stack.length}
           </Badge>
         )}
@@ -87,7 +87,7 @@ export function GraphPreview({ artifactId }: GraphPreviewProps) {
         >
           <DomainBadge domain={item.domain} />
           <span className="min-w-0 flex-1 truncate">{item.filename}</span>
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-label-xs">
             {item.relationship_type}
           </Badge>
         </div>

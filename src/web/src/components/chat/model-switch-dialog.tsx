@@ -60,7 +60,7 @@ export function ModelSwitchDialog({
         <Coins className="h-3 w-3" />
         <span>History: ~{costEstimate.historyTokens.toLocaleString()} tokens</span>
         {costEstimate.exceedsTargetContext && (
-          <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
+          <Badge variant="destructive" className="px-1.5 py-0 text-label-xs">
             Exceeds context
           </Badge>
         )}
@@ -96,7 +96,7 @@ export function ModelSwitchDialog({
                 <div className="font-medium">
                   {config.label}
                   {isRecommended && (
-                    <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-[10px]">
+                    <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-label-xs">
                       Recommended
                     </Badge>
                   )}

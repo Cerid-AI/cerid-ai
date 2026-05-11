@@ -325,13 +325,13 @@ export default function AutomationsPane() {
                         </span>
                         <Badge
                           variant="secondary"
-                          className={cn("gap-1 text-[10px] font-medium", ACTION_COLOR[auto.action])}
+                          className={cn("gap-1 text-label-xs font-medium", ACTION_COLOR[auto.action])}
                         >
                           <ActionIcon className="h-2.5 w-2.5" />
                           {auto.action.charAt(0).toUpperCase() + auto.action.slice(1)}
                         </Badge>
                         {auto.last_run_at && (
-                          <span className="ml-auto text-[10px]">
+                          <span className="ml-auto text-label-xs">
                             Last run {formatRelativeTime(auto.last_run_at)}
                           </span>
                         )}
@@ -343,7 +343,7 @@ export default function AutomationsPane() {
                           {auto.domains.map((d) => (
                             <span
                               key={d}
-                              className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                              className="rounded-full bg-muted px-2 py-0.5 text-label-xs font-medium text-muted-foreground"
                             >
                               {d}
                             </span>
@@ -391,7 +391,7 @@ export default function AutomationsPane() {
                           Delete
                         </Button>
                         {auto.run_count > 0 && (
-                          <span className="ml-auto text-[10px] text-muted-foreground">
+                          <span className="ml-auto text-label-xs text-muted-foreground">
                             {auto.run_count} run{auto.run_count !== 1 ? "s" : ""}
                           </span>
                         )}

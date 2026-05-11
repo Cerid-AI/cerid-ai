@@ -52,7 +52,7 @@ export function WebSearchIndicator({ active, query, sourceUrls }: WebSearchIndic
           {active ? "Searching the web\u2026" : "Web search complete"}
         </span>
         {query && (
-          <span className="ml-1 truncate text-[11px] text-muted-foreground italic max-w-[200px]">
+          <span className="ml-1 truncate text-label-sm text-muted-foreground italic max-w-[200px]">
             {query}
           </span>
         )}
@@ -67,7 +67,7 @@ export function WebSearchIndicator({ active, query, sourceUrls }: WebSearchIndic
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-full bg-teal-500/10 px-2 py-0.5 text-[10px] text-teal-400 transition-colors hover:bg-teal-500/20 hover:text-teal-300"
+              className="inline-flex items-center gap-1 rounded-full bg-teal-500/10 px-2 py-0.5 text-label-xs text-teal-400 transition-colors hover:bg-teal-500/20 hover:text-teal-300"
             >
               <ExternalLink className="h-2.5 w-2.5 shrink-0" />
               {hostname(url)}

@@ -86,24 +86,24 @@ function ServiceRow({
             </Tooltip>
           )}
           {isOptional && (
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className="rounded bg-muted px-1.5 py-0.5 text-label-xs font-medium text-muted-foreground">
               Optional
             </span>
           )}
           {isLightweightNeo4j && (
-            <span className="rounded bg-yellow-500/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-600 dark:text-yellow-400">
+            <span className="rounded bg-yellow-500/10 px-1.5 py-0.5 text-label-xs font-medium text-yellow-600 dark:text-yellow-400">
               Lightweight
             </span>
           )}
         </div>
         {meta.description && (
-          <p className="text-[10px] text-muted-foreground">{meta.description}</p>
+          <p className="text-label-xs text-muted-foreground">{meta.description}</p>
         )}
         {isOffline && !isOptional && meta.fixAction && (
           <Button
             variant="ghost"
             size="sm"
-            className="mt-1 h-6 gap-1 px-1.5 text-[10px] text-muted-foreground"
+            className="mt-1 h-6 gap-1 px-1.5 text-label-xs text-muted-foreground"
             onClick={() => navigator.clipboard.writeText(meta.fixAction!)}
           >
             <Copy className="h-2.5 w-2.5" />
@@ -112,7 +112,7 @@ function ServiceRow({
         )}
         {svc.name === "verification_pipeline" && isOffline && (
           <div className="mt-1 flex items-center gap-2">
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-label-xs text-muted-foreground">
               {configuredProviders.length === 0
                 ? "Requires API key — configure a provider first"
                 : "Self-test failed — click Re-check after configuring keys"}
@@ -121,7 +121,7 @@ function ServiceRow({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-5 gap-1 px-1.5 text-[10px]"
+                className="h-5 gap-1 px-1.5 text-label-xs"
                 onClick={onRetest}
                 disabled={retesting}
               >
@@ -226,11 +226,11 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy,
     <div className="space-y-4">
       {/* Auto-refresh indicator */}
       {lastChecked && (
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <div className="flex items-center justify-between text-label-xs text-muted-foreground">
           <span>
             Last checked: {lastChecked.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </span>
-          <Button variant="ghost" size="sm" className="h-5 gap-1 px-1.5 text-[10px]" onClick={checkHealth}>
+          <Button variant="ghost" size="sm" className="h-5 gap-1 px-1.5 text-label-xs" onClick={checkHealth}>
             <RefreshCw className="h-2.5 w-2.5" />
             Refresh
           </Button>
@@ -271,7 +271,7 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy,
               All required services are healthy
             </p>
             {services.some((s) => (SERVICE_META[s.name]?.optional) && s.status !== "healthy" && s.status !== "connected") && (
-              <p className="mt-1 text-[10px] text-muted-foreground">
+              <p className="mt-1 text-label-xs text-muted-foreground">
                 Optional services can be configured later in Settings.
               </p>
             )}

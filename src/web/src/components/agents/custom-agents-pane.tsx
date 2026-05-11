@@ -221,21 +221,21 @@ function AgentRow({
           )}
           <div className="mt-2 flex flex-wrap gap-1">
             {agent.template_id && (
-              <Badge variant="outline" className="text-[10px]">tmpl: {agent.template_id}</Badge>
+              <Badge variant="outline" className="text-label-xs">tmpl: {agent.template_id}</Badge>
             )}
             {agent.rag_mode && (
-              <Badge variant="outline" className="text-[10px]">rag: {agent.rag_mode}</Badge>
+              <Badge variant="outline" className="text-label-xs">rag: {agent.rag_mode}</Badge>
             )}
             {agent.model_override && (
-              <Badge variant="outline" className="text-[10px] font-mono">{agent.model_override}</Badge>
+              <Badge variant="outline" className="text-label-xs font-mono">{agent.model_override}</Badge>
             )}
             {agent.domains && agent.domains.length > 0 && (
-              <Badge variant="outline" className="text-[10px]">
+              <Badge variant="outline" className="text-label-xs">
                 domains: {agent.domains.join(",")}
               </Badge>
             )}
             {agent.tools && agent.tools.length > 0 && (
-              <Badge variant="outline" className="text-[10px]">tools: {agent.tools.length}</Badge>
+              <Badge variant="outline" className="text-label-xs">tools: {agent.tools.length}</Badge>
             )}
           </div>
         </div>

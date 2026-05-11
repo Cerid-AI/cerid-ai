@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState } from "react"
+import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   fetchModelUpdatesFull,
@@ -13,24 +13,39 @@ import {
 import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-// Inline Alert primitives (shadcn Alert component not installed in this project)
-function Alert({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement> & { variant?: string }) {
-  return <div role="alert" className={`relative w-full rounded-lg border px-4 py-3 text-sm grid has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] grid-cols-[0_1fr] has-[>svg]:gap-x-3 gap-y-0.5 items-start [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current ${className ?? ""}`} {...props}>{children}</div>
-}
-function AlertDescription({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={`text-muted-foreground col-start-2 text-sm [&_p]:leading-relaxed ${className ?? ""}`} {...props}>{children}</div>
-}
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Sparkles,
   RefreshCw,
   AlertTriangle,
   ArrowRight,
+  ArrowUpRight,
+  ArrowDownRight,
   X,
   Loader2,
   Clock,
   DollarSign,
   Layers,
+  CheckCircle2,
 } from "lucide-react"
+
+function formatRelativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime()
+  const secs = Math.max(0, Math.floor(ms / 1000))
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins} min ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function formatCost(value: number): string {
+  if (value === 0) return "free"
+  if (value < 0.01) return `$${value.toFixed(4)}`
+  return `$${value.toFixed(2)}`
+}
 
 export function ModelManagement() {
   const queryClient = useQueryClient()
@@ -82,7 +97,7 @@ export function ModelManagement() {
           <Sparkles className="h-4 w-4 text-teal-500" />
           <h3 className="text-sm font-medium">Model Management</h3>
           {updates.length > 0 && (
-            <Badge variant="secondary" className="bg-teal-500/10 text-teal-600 dark:text-teal-400 text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="bg-teal-500/10 text-teal-600 dark:text-teal-400 text-label-xs px-1.5 py-0">
               {updates.length} update{updates.length !== 1 ? "s" : ""}
             </Badge>
           )}
@@ -105,16 +120,21 @@ export function ModelManagement() {
 
       {/* Check result */}
       {checkResult && (
-        <p className="text-xs text-muted-foreground">{checkResult}</p>
+        <Alert className="border-teal-500/30 bg-teal-500/5 [&>svg]:text-teal-500">
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertDescription className="text-foreground">{checkResult}</AlertDescription>
+        </Alert>
       )}
 
       {/* Last checked */}
       {data?.last_checked && (
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-label-sm text-muted-foreground">
           <Clock className="h-3 w-3" />
-          Last checked: {new Date(data.last_checked).toLocaleString()}
+          <span title={new Date(data.last_checked).toLocaleString()}>
+            Last checked {formatRelativeTime(data.last_checked)}
+          </span>
           {data.catalog_size > 0 && (
-            <span className="ml-1">({data.catalog_size} models in catalog)</span>
+            <span className="ml-1">· {data.catalog_size} models in catalog</span>
           )}
         </div>
       )}
@@ -151,7 +171,7 @@ export function ModelManagement() {
                 <NewModelRow key={item.update_id} item={item} onDismiss={handleDismiss} />
               ))}
               {newModels.length > 8 && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-label-sm text-muted-foreground">
                   +{newModels.length - 8} more new models
                 </p>
               )}
@@ -211,16 +231,16 @@ function DeprecatedCard({
           <p className="text-xs font-medium">
             {item.model_id}
             {inUse && (
-              <Badge variant="outline" className="ml-1.5 text-[9px] px-1 py-0 border-amber-500/50">
+              <Badge variant="outline" className="ml-1.5 text-label-xxs px-1 py-0 border-amber-500/50">
                 In use
               </Badge>
             )}
           </p>
-          <p className="text-[11px] opacity-80">{reason}</p>
+          <p className="text-label-sm opacity-80">{reason}</p>
           {successor && (
-            <p className="flex items-center gap-1 text-[11px]">
+            <p className="flex items-center gap-1 text-label-sm">
               <ArrowRight className="h-3 w-3" />
-              Switch to <span className="font-mono text-[10px]">{successor}</span>
+              Switch to <span className="font-mono text-label-xs">{successor}</span>
             </p>
           )}
         </div>
@@ -254,14 +274,16 @@ function NewModelRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-xs font-medium">{name}</span>
-          <Badge className="bg-teal-500/10 text-teal-600 dark:text-teal-400 text-[9px] px-1 py-0 border-0">
+          <Badge className="bg-teal-500/10 text-teal-600 dark:text-teal-400 text-label-xxs px-1 py-0 border-0">
             New
           </Badge>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-2 text-label-xs text-muted-foreground">
           {contextLength != null && <span>{(contextLength / 1000).toFixed(0)}K ctx</span>}
           {inputCost != null && outputCost != null && (
-            <span>${inputCost.toFixed(2)} / ${outputCost.toFixed(2)} per 1M</span>
+            <span className="tabular-nums">
+              in {formatCost(inputCost)} · out {formatCost(outputCost)} / 1M tok
+            </span>
           )}
         </div>
       </div>
@@ -277,6 +299,29 @@ function NewModelRow({
   )
 }
 
+interface CostDelta {
+  label: string
+  prev: number
+  next: number
+  direction: "up" | "down" | "flat"
+}
+
+function buildCostDeltas(details: Record<string, unknown>): CostDelta[] {
+  const out: CostDelta[] = []
+  const pairs: Array<[string, string, string]> = [
+    ["old_input_cost", "new_input_cost", "in"],
+    ["old_output_cost", "new_output_cost", "out"],
+  ]
+  for (const [oldKey, newKey, label] of pairs) {
+    const prev = details[oldKey] as number | undefined
+    const next = details[newKey] as number | undefined
+    if (prev == null || next == null) continue
+    const direction = next > prev ? "up" : next < prev ? "down" : "flat"
+    out.push({ label, prev, next, direction })
+  }
+  return out
+}
+
 function PriceChangeRow({
   item,
   onDismiss,
@@ -284,13 +329,46 @@ function PriceChangeRow({
   item: ModelUpdateItem
   onDismiss: (id: string) => void
 }) {
+  const deltas = buildCostDeltas(item.details)
   return (
     <div className="flex items-center justify-between gap-2">
-      <div className="min-w-0 flex-1">
-        <span className="truncate text-xs">{item.model_id}</span>
-        <Badge className="ml-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[9px] px-1 py-0 border-0">
-          Price
-        </Badge>
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-xs">{item.model_id}</span>
+          <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 text-label-xxs px-1 py-0 border-0">
+            Price
+          </Badge>
+        </div>
+        {deltas.length === 0 ? (
+          <p className="text-label-xs text-muted-foreground">
+            Pricing was updated upstream.
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-label-xs tabular-nums text-muted-foreground">
+            {deltas.map((d) => {
+              const colorClass =
+                d.direction === "up"
+                  ? "text-red-500"
+                  : d.direction === "down"
+                    ? "text-emerald-500"
+                    : "text-muted-foreground"
+              const Arrow =
+                d.direction === "up"
+                  ? ArrowUpRight
+                  : d.direction === "down"
+                    ? ArrowDownRight
+                    : ArrowRight
+              return (
+                <span key={d.label} className="inline-flex items-center gap-1">
+                  <span className="text-muted-foreground/70">{d.label}</span>
+                  <span>{formatCost(d.prev)}</span>
+                  <Arrow className={`h-3 w-3 ${colorClass}`} aria-hidden="true" />
+                  <span className={colorClass}>{formatCost(d.next)}</span>
+                </span>
+              )
+            })}
+          </div>
+        )}
       </div>
       <Button
         variant="ghost"
