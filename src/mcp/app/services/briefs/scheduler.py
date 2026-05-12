@@ -44,23 +44,44 @@ logger = logging.getLogger("ai-companion.briefs.scheduler")
 
 
 async def _daily_brief_job(queue: object) -> None:
-    """Enqueue a BriefGenerationJob for today's date."""
+    """Enqueue a BriefGenerationJob for today's date.
+
+    RAG C3.4: reads the operator's brief settings (vault-write toggle +
+    target vault) and threads them through both the in-process
+    ``BriefGenerationJob`` instance and the JobRecord payload — the
+    worker re-instantiates jobs from payload so both code paths need
+    the kwargs in sync (see d03622c).
+    """
     from datetime import date
 
+    from app.deps import get_redis
     from app.processor.jobs.brief_generation import BriefGenerationJob
+    from app.services.briefs.settings import load_brief_settings
 
     target_date = date.today().isoformat()
-    job = BriefGenerationJob(target_date=target_date)
-    record = job.new_record(payload={"target_date": target_date})
+    settings = load_brief_settings(get_redis())
+    vault_kwargs = settings.to_payload_fields()
+
+    job = BriefGenerationJob(target_date=target_date, **vault_kwargs)
+    record = job.new_record(payload={"target_date": target_date, **vault_kwargs})
     await queue.enqueue(record)  # type: ignore[attr-defined]
-    logger.info("brief_generation enqueued target_date=%s job_id=%s", target_date, record.id)
+    logger.info(
+        "brief_generation enqueued target_date=%s job_id=%s write_to_vault=%s",
+        target_date, record.id, vault_kwargs["write_to_vault"],
+    )
 
 
 async def _weekly_synthesis_job(queue: object) -> None:
-    """Enqueue a WeeklySynthesisJob for the current week's ending date (Monday)."""
+    """Enqueue a WeeklySynthesisJob for the current week's ending date (Monday).
+
+    Vault-write fields are shared with the daily brief — operators
+    configure them once and the same toggle controls both jobs.
+    """
     from datetime import date, timedelta
 
+    from app.deps import get_redis
     from app.processor.jobs.weekly_synthesis import WeeklySynthesisJob
+    from app.services.briefs.settings import load_brief_settings
 
     today = date.today()
     # Find the most recent Monday (weekday 0)
@@ -68,11 +89,15 @@ async def _weekly_synthesis_job(queue: object) -> None:
     monday = today - timedelta(days=days_since_monday)
     week_ending = monday.isoformat()
 
-    job = WeeklySynthesisJob(week_ending=week_ending)
-    record = job.new_record(payload={"week_ending": week_ending})
+    settings = load_brief_settings(get_redis())
+    vault_kwargs = settings.to_payload_fields()
+
+    job = WeeklySynthesisJob(week_ending=week_ending, **vault_kwargs)
+    record = job.new_record(payload={"week_ending": week_ending, **vault_kwargs})
     await queue.enqueue(record)  # type: ignore[attr-defined]
     logger.info(
-        "weekly_synthesis enqueued week_ending=%s job_id=%s", week_ending, record.id
+        "weekly_synthesis enqueued week_ending=%s job_id=%s write_to_vault=%s",
+        week_ending, record.id, vault_kwargs["write_to_vault"],
     )
 
 

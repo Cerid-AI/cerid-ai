@@ -2,6 +2,82 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.2 — Bidirectional vault (RAG Cycle 3, 2026-05-12)
+
+Closes the Obsidian-integration loop started in v0.93.1. Cerid's
+outputs — chat distillations, synthesis briefs, weekly digests — can
+now write back to the user's vault as markdown notes via
+`POST /wiki/write_note`, and assistant chat messages gain a
+**"Save to vault"** action button. Sparse retrieval was the third
+intended C3 deliverable; the BGE-M3 spike found a real blocker that
+warrants its own focused cycle, and that path was deferred honestly
+rather than shipped half-faked.
+
+**Two-way write API** (`610a04a`) — `POST /wiki/write_note` accepts
+`{vault_id, path, content, frontmatter?, mode?: "create"|"append"|
+"overwrite", allow_synthesis_input?}` and returns
+`{file_path, artifact_id, ingested, frontmatter_written, mode}`. After
+the write, the note is automatically re-ingested as an Artifact with
+`source_type="cerid-synthesis"` so it's queryable. Path safety reuses
+C2.3's `VaultProfile.classify_path` — `..` escapes rejected; templates
+and skip folders rejected. Atomic write via tmp + os.replace.
+
+**Loop-breaker** — every Cerid-written note gets stamped
+`source_type="cerid-synthesis"` on both the ChromaDB chunk metadata
+AND the Neo4j Artifact node properties. Brief and weekly-synthesis
+jobs now filter their input claims to exclude `cerid-synthesis`
+artifacts by default. A note with `cerid:reanalyze: true` in
+frontmatter (OR the service-level `allow_synthesis_input=True` kwarg)
+opts back INTO synthesis inputs — the explicit "re-analyze/update"
+carve-out.
+
+**Synthesis writeback** (`77a2ebf`) — daily brief + weekly synthesis
+processor jobs can opt to write their generated content to a registered
+vault. Off by default; configured via `GET/PUT /briefs/settings` and
+the new BriefSettingsSection in the Settings panel. Default filenames
+`_briefs/brief-YYYY-MM-DD.md` / `_briefs/synthesis-YYYY-MM-DD.md`,
+mode=append (forgiving / idempotent). Vault-write failure inside the
+job is swallowed via `log_swallowed_error` — never fails the brief.
+
+**Chat save-to-vault UI** — assistant messages get a button next to
+the existing copy action. Opens a dialog with vault selector (populated
+from `/watched-folders?is_vault=true`), path input (default
+`chat/{conversation-title}-{message-id}.md`), mode radio, content
+preview, and a Save button.
+
+**C3.1 spike + C3.2 deferral** (`9b55b44`) — `scripts/bge_m3_spike.py`
+validated every public BGE-M3 ONNX export. Result: all four shipped
+exports (`BAAI/bge-m3`, `Xenova/bge-m3`, `aapot/bge-m3-onnx`,
+`hooman650/bge-m3-onnx-o4`) are `XLMRobertaModel` backbone only — the
+sparse-weights, dense-projection, and ColBERT heads are NOT in the
+graph. `session.get_outputs()` returns one tensor:
+`last_hidden_state [B, T, 1024]`. The C3.2 blueprint's `outputs[1]`
+does not exist. Mean encode latency 226.7 ms/doc on M-series CPU
+(extrapolates to 6.3 hrs at 100K-chunk scale). Re-entry options for a
+future cycle: (a) custom-export FlagEmbedding's BGEM3FlagModel with
+the sparse head attached, or (b) switch to SPLADE-v3 which has working
+ONNX exports. The full spike findings are in
+`docs/EVAL_BASELINES.md`'s phase ledger.
+
+**Audit fixes** (pre-tag review caught 2 issues):
+- `vault_written` in JobResult.metadata now reflects the actual write
+  outcome rather than just "branch entered" — `_vault_write_brief` /
+  `_vault_write_synthesis` return a bool and the runner assigns from
+  that return.
+- C3.2 deferral is now durably recorded in
+  [`docs/EVAL_BASELINES.md`](docs/EVAL_BASELINES.md) (committed, syncs
+  to public) so future operators inherit the context — the gitignored
+  spike doc alone wasn't enough.
+
+**Verification** — 3 commits, ~3000 LOC across ~20 files (backend +
+frontend). All gates green:
+- ruff + mypy + import-linter + lint-no-silent-catch on full src/mcp/
+- 18 new vault-write + synthesis-writeback tests + 5 frontend tests
+  + 280 regression tests on adjacent brief/wiki/vault surface
+- tsc + eslint + vitest clean on frontend
+- router-registry regenerated for the new `/wiki/write_note` +
+  `/briefs/settings` routes
+
 ## v0.93.1 — Obsidian-style integration layer (RAG Cycle 2, 2026-05-12)
 
 Six-phase integration on top of the existing RAG pipeline: wikilink

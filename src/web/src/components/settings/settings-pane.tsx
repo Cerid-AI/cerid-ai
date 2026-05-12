@@ -17,6 +17,7 @@ import { TierSelector } from "@/components/ui/tier-selector"
 import { PluginsSection } from "./plugins-section"
 import { ProSection } from "./pro-section"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
+import { BriefSettingsSection } from "./brief-settings-section"
 import { EssentialsSection } from "./essentials-section"
 import { PipelineSection } from "./pipeline-section"
 import { SystemSection } from "./system-section"
@@ -283,6 +284,9 @@ export default function SettingsPane() {
               <TabsContent value="system" className="space-y-3 pt-2">
                 <PaneErrorBoundary label="Inference Models">
                   <InferenceModelsCard />
+                </PaneErrorBoundary>
+                <PaneErrorBoundary label="Brief Settings">
+                  <BriefSettingsSection />
                 </PaneErrorBoundary>
                 <PaneErrorBoundary label="System">
                   <SystemSection

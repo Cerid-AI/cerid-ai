@@ -8,13 +8,22 @@ Runs the end-to-end weekly synthesis pipeline:
   2. Pull contradiction findings from the last 7 days.
   3. Synthesise via BriefService.generate_weekly (Ollama-backed LLM).
   4. Persist the resulting BriefRecord to Neo4j via BriefService.store.
+  5. (RAG C3.4) Optionally write the synthesis markdown back to a
+     registered vault as ``_briefs/synthesis-YYYY-MM-DD.md`` via
+     ``vault_write.write_note``.  Opt-in per job; vault failures are
+     swallowed so they cannot fail an otherwise-successful synthesis.
 
 The BriefService is obtained through ``_get_brief_service()`` so tests
 can patch it without modifying the job class.
 
 Payload schema (used by the worker registry for instantiation)
 --------------------------------------------------------------
-  {"week_ending": "2026-05-11"}   # ISO-8601 date string (Sunday or Monday)
+  {
+    "week_ending": "2026-05-11",          # ISO-8601 date string
+    "write_to_vault": false,              # opt-in vault writeback (C3.4)
+    "vault_id": null,                     # required when write_to_vault=True
+    "vault_folder": "_briefs",            # path prefix under the vault root
+  }
 """
 from __future__ import annotations
 
@@ -75,12 +84,104 @@ def _get_neo4j() -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _render_synthesis_markdown(record: "BriefRecord", week_ending: str) -> str:
+    """Render a weekly ``BriefRecord`` as a markdown body for a vault note.
+
+    Mirrors :func:`brief_generation._render_brief_markdown` so the two
+    flows produce the same shape of note (top-level heading + one ``##``
+    section per parsed section).  Kept inline here rather than shared
+    in a helper module because the heading wording differs ("Daily Brief"
+    vs "Weekly Synthesis") and the function is small.
+    """
+    lines: list[str] = [f"# Weekly Synthesis — week ending {week_ending}", ""]
+    sections = record.sections or {}
+    if not sections:
+        lines.append(f"_status_: **{record.status}**")
+        lines.append("")
+        lines.append("_No sections were parsed from the LLM output._")
+        return "\n".join(lines) + "\n"
+
+    for name, body in sections.items():
+        lines.append(f"## {name}")
+        lines.append("")
+        lines.append(body.strip())
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _vault_write_synthesis(
+    *,
+    week_ending: str,
+    vault_id: str,
+    vault_folder: str,
+    record: "BriefRecord",
+) -> bool:
+    """Write the rendered synthesis markdown to a registered vault.
+
+    Forgiving by design — uses ``mode="append"`` so a re-run for the
+    same week stacks rather than overwriting.  ``allow_synthesis_input``
+    is hard-coded ``False``: the weekly synthesis MUST NOT feed back
+    into the next synthesis run's input set.
+
+    Returns True on success, False on failure. All exceptions are
+    swallowed via ``log_swallowed_error`` so the synthesis job never
+    fails on vault-write errors; the bool return lets the caller
+    surface the real outcome in JobResult.metadata.
+    """
+    from app.deps import get_redis
+    from app.services.vault_write import WriteNoteRequest, write_note
+
+    try:
+        body = _render_synthesis_markdown(record, week_ending)
+        rel_path = f"{vault_folder.rstrip('/')}/synthesis-{week_ending}.md"
+        write_note(
+            WriteNoteRequest(
+                vault_id=vault_id,
+                path=rel_path,
+                content=body,
+                frontmatter={
+                    "cerid:job_type": "weekly_synthesis",
+                    "cerid:week_ending": week_ending,
+                },
+                mode="append",
+                allow_synthesis_input=False,
+            ),
+            get_redis(),
+        )
+        logger.info(
+            "weekly_synthesis.vault_write_ok week_ending=%s vault_id=%s path=%s",
+            week_ending, vault_id, rel_path,
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "processor.weekly_synthesis.vault_write",
+            exc,
+            context={
+                "week_ending": week_ending,
+                "vault_id": vault_id,
+                "vault_folder": vault_folder,
+            },
+        )
+        return False
+
+
 def _build_vault_snapshot(driver: Any, week_ending: str) -> str:
     """Page through Neo4j for recent Brief + Claim summaries.
 
     Returns a serialised text blob suitable for the weekly prompt.
     Pages through (:Brief) and (:Claim) nodes from the last 7 days
     relative to ``week_ending``.
+
+    RAG C3.3 loop-breaker
+    ---------------------
+    Claims whose upstream Artifact carries ``source_type="cerid-synthesis"``
+    are excluded by default — otherwise last week's synthesis would
+    contaminate this week's input set and Cerid would amplify its own
+    outputs.  Claims with ``cerid_reanalyze=true`` on the source
+    Artifact re-enter the input set for the "reconsider this synthesis
+    with new evidence" carve-out.  The filter uses OPTIONAL MATCH so
+    orphan Claims (no linked Artifact) pass through unchanged.
     """
     lines: list[str] = []
 
@@ -105,11 +206,17 @@ def _build_vault_snapshot(driver: Any, week_ending: str) -> str:
                     f"{str(row.get('sections', ''))[:500]}"
                 )
 
-            # Recent claims / vault notes
+            # Recent claims / vault notes — see module docstring for the
+            # cerid-synthesis loop-breaker rationale.
             claim_rows = session.run(
                 """
                 MATCH (c:Claim)
                 WHERE c.created_at >= datetime($week_ending) - duration('P7D')
+                OPTIONAL MATCH (c)-[:EXTRACTED_FROM]->(a:Artifact)
+                WITH c, a
+                WHERE a IS NULL
+                   OR coalesce(a.source_type, '') <> 'cerid-synthesis'
+                   OR coalesce(a.cerid_reanalyze, false) = true
                 RETURN c.text AS text, c.claim_id AS claim_id
                 ORDER BY c.created_at DESC
                 LIMIT 150
@@ -144,12 +251,32 @@ class WeeklySynthesisJob(BaseJob):
         ISO-8601 date string for the Sunday or Monday the week ends
         (e.g. ``"2026-05-11"``). Used to bound vault snapshot and
         contradiction queries to the preceding 7 days.
+    write_to_vault
+        RAG C3.4. When True and ``vault_id`` is set, the generated
+        synthesis markdown is written back to the named vault at
+        ``{vault_folder}/synthesis-{week_ending}.md`` after the brief is
+        persisted to Neo4j.  Defaults to False — opt-in per job.
+    vault_id
+        Target vault (watched-folder ID with ``is_vault=True``).  Required
+        when ``write_to_vault`` is True; ignored otherwise.
+    vault_folder
+        Path prefix under the vault root.  Defaults to ``"_briefs"``.
     """
 
     job_type = "weekly_synthesis"
 
-    def __init__(self, week_ending: str) -> None:
+    def __init__(
+        self,
+        week_ending: str,
+        *,
+        write_to_vault: bool = False,
+        vault_id: str | None = None,
+        vault_folder: str | None = None,
+    ) -> None:
         self._week_ending = week_ending
+        self._write_to_vault = bool(write_to_vault)
+        self._vault_id = vault_id
+        self._vault_folder = vault_folder or "_briefs"
 
     @property
     def priority(self) -> Priority:
@@ -249,14 +376,28 @@ class WeeklySynthesisJob(BaseJob):
 
         # --- 4. Persist to Neo4j ------------------------------------------
         await brief_service.store(record, driver)
+
+        # --- 5. (RAG C3.4) Optional vault writeback -----------------------
+        vault_written = False
+        if self._write_to_vault and self._vault_id:
+            vault_written = await asyncio.to_thread(
+                _vault_write_synthesis,
+                week_ending=self._week_ending,
+                vault_id=self._vault_id,
+                vault_folder=self._vault_folder,
+                record=record,
+            )
+
         await progress_cb(1.0)
 
         logger.info(
-            "weekly_synthesis.done week_ending=%s brief_id=%s status=%s contradictions=%d",
+            "weekly_synthesis.done week_ending=%s brief_id=%s status=%s "
+            "contradictions=%d vault_written=%s",
             self._week_ending,
             record.brief_id,
             record.status,
             len(contradictions),
+            vault_written,
         )
 
         return JobResult(
@@ -268,5 +409,6 @@ class WeeklySynthesisJob(BaseJob):
                 "brief_id": record.brief_id,
                 "status": record.status,
                 "contradictions_included": len(contradictions),
+                "vault_written": vault_written,
             },
         )

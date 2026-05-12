@@ -30,6 +30,7 @@ import { SourceAttribution } from "./source-attribution"
 import { KBContextIndicator } from "./kb-context-indicator"
 import { ClaimOverlay } from "./claim-overlay"
 import { DegradedBanner } from "./degraded-banner"
+import { SaveToVaultButton } from "./save-to-vault-button"
 
 /** Inline styles for <mark> elements — avoids prose class specificity overriding Tailwind utilities.
  *  Verified claims use a subtle underline instead of a background highlight
@@ -642,6 +643,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         {!isUser && !!message.content && (
           <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
             <CopyButton text={message.content} />
+            <SaveToVaultButton content={message.content} messageId={message.id} />
             {onCorrect && (
               <TooltipProvider delayDuration={200}>
                 <Tooltip>

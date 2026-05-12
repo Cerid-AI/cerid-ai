@@ -36,6 +36,7 @@ from app.routers import (
     agents,
     artifacts,
     automations,
+    brief_settings,
     chat,
     contradictions,
     digest,
@@ -836,6 +837,11 @@ app.include_router(processor_router_module)
 # Wiki API — entity pages and contradiction ledger (Phase W)
 app.include_router(contradictions.router)
 app.include_router(wiki.router)
+
+# Brief scheduler settings (RAG C3.4) — vault-write toggle for daily +
+# weekly synthesis jobs.  Lives under /briefs/* so the scheduler is the
+# obvious consumer; routes mounted here, not on the user-state router.
+app.include_router(brief_settings.router)
 
 # External public-API adapter management (Phase API.1 + API.2)
 app.include_router(external_apis.router)

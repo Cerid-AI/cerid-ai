@@ -2,15 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Wiki API functions — Phase W.1.
+ * Wiki API functions — Phase W.1 + RAG C3.3 / C3.4.
  *
  * Wraps the backend routes:
- *   GET /wiki/entities?limit=N
- *   GET /wiki/entities/{slug}
- *   GET /wiki/contradictions
+ *   GET  /wiki/entities?limit=N
+ *   GET  /wiki/entities/{slug}
+ *   GET  /wiki/contradictions
+ *   POST /wiki/write_note            (RAG C3.3 — two-way vault writeback)
+ *   GET  /watched-folders            (filtered to is_vault=true for the
+ *                                     save-to-vault UI)
  */
 
-import { MCP_BASE, mcpHeaders } from "./common"
+import { MCP_BASE, mcpHeaders, extractError } from "./common"
+import type { WatchedFolder } from "./settings"
+import { fetchWatchedFolders } from "./settings"
 import type {
   EntitySummary,
   ExternalReference,
@@ -127,8 +132,7 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
 export async function fetchWikiEntities({
   limit = 30,
 }: { limit?: number } = {}): Promise<EntitySummary[]> {
-  const url = `${MCP_BASE}/wiki/entities?limit=${limit}`
-  const res = await fetch(url, { headers: mcpHeaders() })
+  const res = await fetch(`${MCP_BASE}/wiki/entities?limit=${limit}`, { headers: mcpHeaders() })
   if (!res.ok) {
     throw new Error(`Wiki entities fetch failed (${res.status})`)
   }
@@ -151,6 +155,67 @@ export async function fetchWikiEntity(slug: string): Promise<WikiEntityPage | nu
   }
   const data = (await res.json()) as Record<string, unknown>
   return normalizeEntityPage(data)
+}
+
+// ---------------------------------------------------------------------------
+// RAG C3.3 / C3.4 — vault writeback
+// ---------------------------------------------------------------------------
+
+export type WriteNoteMode = "create" | "append" | "overwrite"
+
+export interface WriteNoteRequest {
+  vault_id: string
+  path: string
+  content: string
+  frontmatter?: Record<string, unknown>
+  mode?: WriteNoteMode
+  allow_synthesis_input?: boolean
+}
+
+export interface WriteNoteResponse {
+  file_path: string
+  artifact_id: string | null
+  ingested: boolean
+  frontmatter_written: Record<string, unknown>
+  mode: string
+  reingest_error: string | null
+}
+
+/**
+ * POST /wiki/write_note
+ *
+ * Writes a markdown note into a registered vault and re-ingests it as
+ * an Artifact tagged `source_type='cerid-synthesis'`.  The backend
+ * rejects:
+ *   - unknown / non-vault `vault_id` (400)
+ *   - path-traversal attempts and templates/attachments folders (400)
+ *   - mode='create' against an existing file (400)
+ *
+ * Frontend callers surface 4xx as the response body's `detail` via
+ * `extractError`; 5xx are user-visible "vault write failed" messages.
+ */
+export async function writeNote(req: WriteNoteRequest): Promise<WriteNoteResponse> {
+  const res = await fetch(`${MCP_BASE}/wiki/write_note`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    throw new Error(await extractError(res, `Vault write failed (${res.status})`))
+  }
+  return (await res.json()) as WriteNoteResponse
+}
+
+/**
+ * GET /watched-folders filtered to vaults.
+ *
+ * Helper used by the save-to-vault dialog to populate its vault
+ * selector.  Surfaces the same `WatchedFolder` shape as
+ * `fetchWatchedFolders` so callers can re-use existing typing.
+ */
+export async function fetchVaultsList(): Promise<WatchedFolder[]> {
+  const { folders } = await fetchWatchedFolders()
+  return folders.filter((f) => Boolean(f.is_vault))
 }
 
 /**

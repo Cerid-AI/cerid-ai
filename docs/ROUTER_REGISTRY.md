@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 270
+**Total routes:** 273
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -65,6 +65,8 @@ not documented here; see the internal repo for the full registry.
 | POST | `/{automation_id}/enable` | `enable_automation` | `src/mcp/app/routers/automations.py` | automations |  |
 | GET | `/{automation_id}/history` | `get_history` | `src/mcp/app/routers/automations.py` | automations |  |
 | POST | `/{automation_id}/run` | `trigger_manual_run` | `src/mcp/app/routers/automations.py` | automations |  |
+| GET | `/settings` | `get_brief_settings` | `src/mcp/app/routers/brief_settings.py` | briefs |  |
+| PUT | `/settings` | `put_brief_settings` | `src/mcp/app/routers/brief_settings.py` | briefs |  |
 | POST | `/chat/compress` | `compress_context` | `src/mcp/app/routers/chat.py` | chat |  |
 | POST | `/chat/stream` | `chat_stream` | `src/mcp/app/routers/chat.py` | chat |  |
 | GET | `/contradictions` | `list_contradictions` | `src/mcp/app/routers/contradictions.py` | wiki |  |
@@ -274,6 +276,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/widget/config` | `widget_config` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/entities` | `list_entity_pages` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/entities/{slug}` | `get_entity_wiki_page` | `src/mcp/app/routers/wiki.py` | wiki |  |
+| POST | `/write_note` | `write_note_endpoint` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `` | `list_workflows` | `src/mcp/app/routers/workflows.py` | workflows |  |
 | POST | `` | `create_workflow` | `src/mcp/app/routers/workflows.py` | workflows |  |
 | GET | `/templates` | `list_templates` | `src/mcp/app/routers/workflows.py` | workflows |  |
