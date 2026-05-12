@@ -169,6 +169,21 @@ export interface HealthResponse {
   circuit_breakers?: Record<string, string>
   /** Operational invariants snapshot (added in v0.92). */
   invariants?: HealthInvariants
+  /** Adaptive recommendation feed (C3.2, v0.93.3). */
+  recommended_features?: RecommendedFeature[]
+}
+
+/**
+ * One row in the /health.recommended_features array. The Settings-pane
+ * banner polls /health and renders one card per entry.
+ */
+export interface RecommendedFeature {
+  id: string
+  label: string
+  reason: string
+  triggered_at: string
+  corpus_size: number
+  enable_payload: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------
@@ -799,6 +814,10 @@ export interface ServerSettings {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
+  // Cycle 3.2 — SPLADE-v3 sparse retrieval + tri_rrf fusion
+  enable_sparse_retrieval?: boolean
+  hybrid_fusion_mode?: "weighted_sum" | "rrf" | "tri_rrf"
+  hybrid_rrf_sparse_weight?: number
   // Context source gates
   context_sources?: ContextSources
   // Ollama add-on (local LLM for pipeline tasks)
@@ -876,6 +895,10 @@ export interface SettingsUpdate {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
+  // Cycle 3.2 — SPLADE-v3 sparse retrieval + tri_rrf fusion
+  enable_sparse_retrieval?: boolean
+  hybrid_fusion_mode?: "weighted_sum" | "rrf" | "tri_rrf"
+  hybrid_rrf_sparse_weight?: number
   rag_mode?: string  // KB injection mode in SettingsUpdate
   // Context source gates
   context_sources?: ContextSources

@@ -2,6 +2,69 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.3 — SPLADE-v3 sparse retrieval + adaptive recommender (RAG Cycle 3.2, 2026-05-12)
+
+Re-entry on C3.2 (the sparse-retrieval phase that was honestly deferred in v0.93.2). Ships
+the third retriever alongside the existing dense bi-encoder + BM25, fused via the
+existing N-way `rrf_fuse`. Adds a **general adaptive-recommendation engine** as net-new
+infrastructure — SPLADE-v3 is the first user; HyPE, parent-child, and RRF piggyback on
+the same surface at no extra UI cost. The recommender surfaces a dismissable banner in
+the Settings pane once the operator's corpus crosses a feature-specific threshold.
+
+Plan doc: [`docs/plans/2026-05-12-c3-2-sparse-retrieval-plan.md`](docs/plans/2026-05-12-c3-2-sparse-retrieval-plan.md).
+
+**SPLADE-v3 encoder + index** — `core/retrieval/sparse.py` ships a lazy-init thread-safe
+ONNX encoder that picks at init between two execution branches: full-model exports
+(head baked into the graph) and backbone-only exports (head bolted in numpy from the
+MLM `decoder.weight` cached as `.npz`). `core/retrieval/sparse_index.py` clones the
+`bm25.py` shape — per-domain JSONL, fsync-on-append crash safety, tenant scoping at
+the index layer, corrupted-line tolerance. Pivoted from BGE-M3 (the original spike
+target) to SPLADE-v3 after literature review: smaller (~140 MB vs 2.16 GB), faster
+(~50–100 ms vs 227 ms per doc), and the head is a trivial
+`log(1 + ReLU(max-pool(MLM_logits)))`.
+
+**3-way RRF wire-in** — `core/agents/query_agent.py` now fires a third
+`asyncio.to_thread(search_sparse)` task in parallel with vector + BM25 when
+`HYBRID_FUSION_MODE=tri_rrf`. Zero-cost when the flag is off — no encoder load, no
+JSONL probe.
+
+**Ingest-time indexing** — `app/services/ingestion.py` patches both BM25 call sites
+with a guarded `sparse_index.index_chunks()` invocation. Sparse exceptions never break
+the two-phase commit.
+
+**Adaptive recommendation engine** — `core/config/recommendations.py` declares a
+4-entry registry (`sparse_retrieval`, `hype_indexing`, `parent_child_retrieval`,
+`rrf_fusion`) each with an env-var-tunable threshold and a `reason_template` that
+substitutes the live corpus size. `app/processor/jobs/config_recommender.py` runs
+every 6 hours via APScheduler — pulls non-eval-corpus Artifact count from Neo4j,
+walks the registry, writes the `cerid:recommendations` Redis hash. `/health` surfaces
+the live entries as `recommended_features`, filtered by the per-tenant
+`cerid:recommendations:dismissed:{tenant}` set. The Settings-pane banner polls every
+60 s and offers three actions: Enable now (PATCH + clear), Maybe later (sessionStorage
+snooze), Dismiss permanently (server-side per-tenant).
+
+**Settings router** — `enable_sparse_retrieval`, `hybrid_fusion_mode`
+(`"weighted_sum" | "rrf" | "tri_rrf"`), and `hybrid_rrf_sparse_weight` exposed via
+PATCH/GET. The sparse toggle mutates `os.environ["RETRIEVAL_SPARSE_ENABLED"]` and
+`core.retrieval.sparse.SPARSE_ENABLED` live so the next ingest/search call sees the
+new state. Toggling sparse on auto-picks `tri_rrf` in the UI; the segmented control
+stays exposed for revert.
+
+**Tests** — 59 new pytest cases (encoder degradation, index roundtrip with tenant
+scoping + corrupted-line tolerance, 3-way RRF, ingest guards, recommender pass +
+idempotency, /health filter + dismiss/clear round-trips, settings router PATCH/GET).
+5 new frontend vitest cases (banner renders, Enable now, Maybe later snooze, Dismiss
+permanently). All gates clean: ruff / mypy / import-linter / silent-catch lint / tsc /
+eslint / vitest 1088 pass / pytest.
+
+**Sidecar follow-on** — `utils.inference_sidecar_client.sidecar_encode_sparse()` client
+shipped; the matching `/encode/sparse` server endpoint is a follow-on PR. The
+local-ONNX fallback works without the sidecar.
+
+**Eval gate** — parked at 20-doc dev corpus (same recall-saturation note as HyPE).
+The wiring is the v0.93.3 deliverable; the gate flips post-corpus-growth per the
+`docs/EVAL_BASELINES.md` procedure.
+
 ## v0.93.2 — Bidirectional vault (RAG Cycle 3, 2026-05-12)
 
 Closes the Obsidian-integration loop started in v0.93.1. Cerid's

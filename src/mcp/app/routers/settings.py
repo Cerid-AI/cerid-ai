@@ -144,6 +144,28 @@ class SettingsUpdateRequest(BaseModel):
         None, description="RAG mode: smart, always, or off"
     )
 
+    # Cycle 3.2 — SPLADE-v3 sparse retrieval + 3-way RRF fusion.
+    enable_sparse_retrieval: bool | None = Field(
+        None,
+        description=(
+            "Toggle SPLADE-v3 learned-sparse retrieval (third retriever "
+            "alongside vector + BM25). Defaults OFF; recommended once "
+            "the corpus crosses CERID_RECOMMEND_SPARSE_AT documents."
+        ),
+    )
+    hybrid_fusion_mode: str | None = Field(
+        None,
+        description=(
+            "Fusion strategy: weighted_sum (legacy), rrf (vector+BM25), "
+            "or tri_rrf (vector+BM25+SPLADE). Auto-picked to tri_rrf "
+            "when the sparse toggle flips on."
+        ),
+    )
+    hybrid_rrf_sparse_weight: float | None = Field(
+        None, ge=0.0, le=5.0,
+        description="Per-retriever weight for SPLADE-v3 in tri_rrf fusion.",
+    )
+
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
@@ -224,6 +246,12 @@ async def get_settings_endpoint():
         "internal_llm_provider": config.INTERNAL_LLM_PROVIDER,
         "internal_llm_model": config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL,
         "rag_mode": getattr(config, "RAG_MODE", "smart"),
+        # Cycle 3.2 — SPLADE-v3 sparse + tri_rrf fusion config.
+        "enable_sparse_retrieval": os.getenv(
+            "RETRIEVAL_SPARSE_ENABLED", "false",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        "hybrid_fusion_mode": getattr(config, "HYBRID_FUSION_MODE", "weighted_sum"),
+        "hybrid_rrf_sparse_weight": getattr(config, "HYBRID_RRF_SPARSE_WEIGHT", 1.0),
     }
 
 
@@ -390,6 +418,40 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
             )
         config.RAG_MODE = req.rag_mode
         updated["rag_mode"] = req.rag_mode
+
+    # Cycle 3.2 — sparse retrieval + tri_rrf fusion.
+    # RETRIEVAL_SPARSE_ENABLED is an env-var flag (mirrors HyPE +
+    # parent-child). Mutating the live os.environ value lets us also
+    # update the module-level SPARSE_ENABLED constant in
+    # core.retrieval.sparse without restarting, so the next ingest /
+    # search call sees the new state.
+    if req.enable_sparse_retrieval is not None:
+        os.environ["RETRIEVAL_SPARSE_ENABLED"] = (
+            "true" if req.enable_sparse_retrieval else "false"
+        )
+        try:
+            from core.retrieval import sparse as _sparse_mod
+            _sparse_mod.SPARSE_ENABLED = bool(req.enable_sparse_retrieval)
+        except Exception as _exc:  # noqa: BLE001 — observability boundary
+            logger.warning("sparse module reload failed: %s", _exc)
+        updated["enable_sparse_retrieval"] = req.enable_sparse_retrieval
+
+    if req.hybrid_fusion_mode is not None:
+        valid_modes = ("weighted_sum", "rrf", "tri_rrf")
+        if req.hybrid_fusion_mode not in valid_modes:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid hybrid_fusion_mode: '{req.hybrid_fusion_mode}'. "
+                    f"Must be one of {valid_modes}"
+                ),
+            )
+        config.HYBRID_FUSION_MODE = req.hybrid_fusion_mode
+        updated["hybrid_fusion_mode"] = req.hybrid_fusion_mode
+
+    if req.hybrid_rrf_sparse_weight is not None:
+        config.HYBRID_RRF_SPARSE_WEIGHT = req.hybrid_rrf_sparse_weight  # type: ignore[assignment]
+        updated["hybrid_rrf_sparse_weight"] = req.hybrid_rrf_sparse_weight
 
     if not updated:
         raise HTTPException(

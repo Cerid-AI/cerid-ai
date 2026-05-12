@@ -114,6 +114,50 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
 
                 <div className="h-px bg-border" />
 
+                {/* SPLADE-v3 Sparse Retrieval (Cycle 3.2) */}
+                <PipelineToggle
+                  label="Sparse Retrieval (SPLADE-v3)"
+                  enabled={settings.enable_sparse_retrieval ?? false}
+                  onToggle={(v) => {
+                    // Auto-pick tri_rrf when sparse flips on, so the
+                    // new ranking list actually feeds the fuser.
+                    if (v) {
+                      void patch({
+                        enable_sparse_retrieval: true,
+                        hybrid_fusion_mode: "tri_rrf",
+                      })
+                    } else {
+                      void patch({ enable_sparse_retrieval: false })
+                    }
+                  }}
+                  description="Adds SPLADE-v3 learned-sparse as a third retriever; RRF-fused with vector + BM25"
+                  info="Catches synonym matches that pure-vector and BM25 miss. Recommended once your corpus exceeds 100 documents."
+                >
+                  <Row label="Fusion mode" info="weighted_sum (legacy), rrf (vector+BM25), tri_rrf (vector+BM25+SPLADE)">
+                    <select
+                      className="rounded border bg-background px-2 py-1 text-xs"
+                      value={settings.hybrid_fusion_mode ?? "weighted_sum"}
+                      onChange={(e) => void patch({
+                        hybrid_fusion_mode: e.target.value as "weighted_sum" | "rrf" | "tri_rrf",
+                      })}
+                    >
+                      <option value="weighted_sum">Weighted sum</option>
+                      <option value="rrf">RRF (2-way)</option>
+                      <option value="tri_rrf">RRF (3-way)</option>
+                    </select>
+                  </Row>
+                  <SliderRow
+                    label="Sparse weight"
+                    value={settings.hybrid_rrf_sparse_weight ?? 1.0}
+                    onChange={(v) => patch({ hybrid_rrf_sparse_weight: v })}
+                    min={0} max={3} step={0.1}
+                    info="Per-retriever weight for SPLADE-v3 in tri_rrf fusion"
+                    recommended="Recommended: 1.0 (uniform across all three)"
+                  />
+                </PipelineToggle>
+
+                <div className="h-px bg-border" />
+
                 {/* Query Decomposition */}
                 <PipelineToggle
                   label="Query Decomposition"

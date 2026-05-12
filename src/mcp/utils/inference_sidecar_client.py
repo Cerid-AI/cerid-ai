@@ -135,6 +135,52 @@ async def sidecar_rerank(
     return data["scores"]
 
 
+async def sidecar_encode_sparse(
+    texts: list[str],
+    is_query: bool = False,
+) -> list[dict[int, float]]:
+    """Encode SPLADE-v3 sparse vectors via the sidecar server (C3.2).
+
+    Mirrors :func:`sidecar_embed` shape; returns one ``dict[int, float]``
+    per input mapping BERT-vocab token-id → SPLADE weight. The sidecar
+    is expected to apply ``log(1 + ReLU(max_pool(MLM_logits)))`` and
+    top-k prune before returning so storage stays bounded.
+
+    Raises on failure — caller is expected to fall back to local
+    ONNX via :func:`core.retrieval.sparse.encode_batch`.
+
+    The sidecar-side ``/encode/sparse`` endpoint is shipped in a
+    follow-on PR; until then this function will exercise the
+    circuit-breaker's open-state path, and callers should rely on
+    the local-ONNX branch.
+    """
+    breaker = get_breaker("sidecar")
+    url = _get_sidecar_url()
+    client = await _get_client()
+
+    t0 = time.perf_counter()
+
+    async def _call():
+        resp = await client.post(
+            f"{url}/encode/sparse",
+            json={"texts": texts, "is_query": is_query},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    data = await breaker.call(_call)
+    latency_ms = (time.perf_counter() - t0) * 1000
+    logger.debug("Sidecar sparse: %d texts in %.1fms", len(texts), latency_ms)
+
+    # The sidecar returns vectors as {"vectors": [{"<token_id>": weight, ...}, ...]}
+    # — JSON has no integer keys, so we cast here.
+    raw = data.get("vectors", [])
+    return [
+        {int(tid): float(weight) for tid, weight in vec.items()}
+        for vec in raw
+    ]
+
+
 async def sidecar_health() -> dict | None:
     """Check sidecar health. Returns health dict or None if unreachable."""
     try:

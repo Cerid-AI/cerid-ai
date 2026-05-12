@@ -133,6 +133,31 @@ Three layers, one rule: **core must not import app.**
 - Fails CI on: `core → app`, `core → routers`, `core → services`, `core → middleware`, `core → parsers`, `core → sync`, `core → models`, `core → db`, `core → deps`, `core → tools`, `core → main`, `core → scheduler`, `core → eval`, `core → stores`, `core → agents` (top-level bridge — now an empty dir but the rule stays).
 - No layering exceptions. The former `utils.data_sources` narrow exception was resolved by the 2026-04-20 sprint: the package moved to `app/data_sources/` and `authoritative_verify` now receives the registry via dependency injection (see `set_data_source_registry()` wired from `app/main.py`).
 
+## Sparse retrieval (Cycle 3.2 / v0.93.3)
+
+Cerid runs three independent retrievers and fuses their rankings via
+N-way Reciprocal Rank Fusion:
+
+1. **Dense bi-encoder** — ChromaDB vector search (existing).
+2. **BM25** — `core/retrieval/bm25.py` per-domain inverted index.
+3. **SPLADE-v3 learned-sparse** — `core/retrieval/sparse.py` encoder +
+   `core/retrieval/sparse_index.py` per-domain inverted index. Default
+   OFF. Enabled via `RETRIEVAL_SPARSE_ENABLED=true` AND
+   `HYBRID_FUSION_MODE=tri_rrf`. The Settings PATCH endpoint sets both
+   atomically when the user flips the sparse toggle on.
+
+The fusion happens in `core/agents/query_agent.py` — when `tri_rrf` is
+active, sparse runs in `asyncio.gather` with BM25, and `rrf_fuse` is
+called with three rankings + three weights
+(`HYBRID_RRF_{VECTOR,BM25,SPARSE}_WEIGHT`). Zero-cost when the flag is
+off: no encoder load, no JSONL probe.
+
+`core ↛ app` is preserved — neither sparse module imports anything
+under `app/`. The recommendation engine that surfaces the sparse
+toggle to the user lives in `core/config/recommendations.py` (pure
+declarative registry) consumed by `app/processor/jobs/config_recommender.py`
+which writes to Redis and is served back via `/health.recommended_features`.
+
 ## Observability contract
 
 The canonical endpoint is `GET /health`. Every observability signal must appear in `/health.invariants`:

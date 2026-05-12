@@ -54,6 +54,7 @@ from app.routers import (
     plugins,
     providers,
     query,
+    recommendations,
     scanner,
     sdk,
     settings,
@@ -842,6 +843,11 @@ app.include_router(wiki.router)
 # weekly synthesis jobs.  Lives under /briefs/* so the scheduler is the
 # obvious consumer; routes mounted here, not on the user-state router.
 app.include_router(brief_settings.router)
+
+# Adaptive recommendations dismiss/clear (C3.2). The read-side surfaces
+# via /health.recommended_features; this router only owns the write
+# side for per-tenant dismissals.
+app.include_router(recommendations.router)
 
 # External public-API adapter management (Phase API.1 + API.2)
 app.include_router(external_apis.router)
