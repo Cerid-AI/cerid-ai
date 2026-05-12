@@ -290,7 +290,8 @@ def _run_via_processor(
     errors = 0
     for i, (artifact_id, _domain) in enumerate(pending, start=1):
         try:
-            enqueue_job(EntityExtractionJob(artifact_id=artifact_id, tenant_id=tenant_id))
+            payload = {"artifact_id": artifact_id, "tenant_id": tenant_id}
+            enqueue_job(EntityExtractionJob(**payload), payload=payload)
             enqueued += 1
             processed.add(artifact_id)
         except Exception as exc:  # noqa: BLE001 — enqueue-failure boundary

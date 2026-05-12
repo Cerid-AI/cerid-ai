@@ -2,6 +2,65 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.0 — HyPE wiring fix (Workstream E R.3 lands, 2026-05-12)
+
+Fixes three integration bugs that had been silently preventing the HyPE
+retrieval augmentation from ever building per-domain indexes despite the
+flag being available since Phase R.3. Discovered while attempting to
+clear the HyPE eval gate documented in [`docs/EVAL_BASELINES.md`](docs/EVAL_BASELINES.md).
+
+**Wiring fixes (`d03622c`)**
+
+- `HyPEIndexingJob` was not imported in
+  [`app/processor/jobs/__init__.py`](src/mcp/app/processor/jobs/__init__.py),
+  so `build_default_registry()` never discovered it. Every enqueue logged
+  "unknown job_type: 'hype_indexing'" and the worker marked the job
+  failed. Added the import + `__all__` entry.
+- [`enqueue_job()`](src/mcp/app/db/redis/processor_queue.py) built the
+  `JobRecord` via `job.new_record()` with no payload arg, so
+  `JobRecord.payload` was always `{}`. The worker re-instantiates jobs
+  as `job_class(**record.payload)` and crashed with "instantiation
+  error: missing 4 required positional arguments". Helper now accepts a
+  `payload=` kwarg; the HyPE enqueue site at
+  [`services/ingestion.py:186`](src/mcp/app/services/ingestion.py)
+  passes the constructor args through.
+- [`services/hype_indexer.py:132`](src/mcp/app/services/hype_indexer.py)
+  passed the collection name positionally to
+  `chroma.get_or_create_collection`, but the `_EmbeddingAwareClient`
+  wrapper in [`app/deps.py:84`](src/mcp/app/deps.py) only accepts
+  kwargs. Switched to `name=...`.
+
+**Sibling fix (`abe8748`)**
+
+- Caught during C1 audit: [`scripts/backfill_entities.py:293`](src/mcp/scripts/backfill_entities.py)
+  was enqueueing `EntityExtractionJob` without a payload via the same
+  helper that bug #2 above fixed for HyPE. Identical failure mode —
+  silent crash on every dequeue. Now passes payload.
+
+**Eval ledger row (`f34eedb`)**
+
+- Captured HyPE-on metrics against the seeded 20-doc eval corpus once
+  the pipeline actually worked. All 127 chunks produced HyPE indexes
+  across 5 per-domain collections in <30 min. IR metrics tied baseline
+  exactly (recall@10/MRR/NDCG@10/NDCG@5/precision_5 all 0.000 delta —
+  recall is saturated at this corpus size). Latency p50 -108ms,
+  p95 +640ms (+17.6%, within the +30% budget), p99 -102ms. The
+  decision rule requires lift on at least one gated metric AND latency
+  within budget; HyPE passes the latency half but fails the lift half.
+- `RETRIEVAL_HYPE_ENABLED=false` remains the default. Opt-in via env
+  var now works end-to-end. Re-evaluate at 100+ documents — same
+  "small-corpus saturation" pattern as Phase 3a (RRF) and 3b
+  (contextual chunks). Full ledger row at
+  [`docs/EVAL_BASELINES.md`](docs/EVAL_BASELINES.md).
+
+**Verification**
+
+- All 28 HyPE-adjacent tests pass (`test_hype_indexing_job.py`,
+  `test_hype_indexer.py`, `tests/integration/test_r3_hype_eval_gate.py`).
+- `ruff check src/mcp/` clean; `mypy` clean on modified files.
+- End-to-end validated against the sandbox stack: HyPE jobs reach
+  `state=completed`, 5 `domain_*_hype` collections appear in ChromaDB.
+
 ## v0.92.2 — UI Audit Phases 1–9 (Comprehensive, 2026-05-11)
 
 > Tag superseded mid-day. The initial v0.92.2 cut (commit `7122ec6`) shipped
