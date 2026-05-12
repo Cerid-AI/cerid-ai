@@ -5,8 +5,10 @@ import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { formatCost } from "@/lib/utils"
 import {
   fetchOpenRouterKeyStatus,
   putOpenRouterKey,
@@ -46,7 +48,7 @@ export function OpenRouterKeyField() {
         const credits = data.credits_remaining
         toast.success(
           credits != null
-            ? `Key valid — $${credits.toFixed(2)} credits remaining`
+            ? `Key valid — ${formatCost(credits)} credits remaining`
             : "Key valid",
         )
       } else {
@@ -95,13 +97,13 @@ export function OpenRouterKeyField() {
         >
           Test
         </Button>
-        <Button
+        <SaveButton
           size="sm"
-          onClick={() => putMutation.mutate(draft)}
+          onSave={async () => { await putMutation.mutateAsync(draft) }}
           disabled={draft.length < 8 || putMutation.isPending}
-        >
-          {putMutation.isPending ? "Saving..." : "Save"}
-        </Button>
+          idleLabel={putMutation.isPending ? "Saving..." : "Save"}
+          savedLabel="Saved"
+        />
       </div>
 
       <p className="text-label-xs text-muted-foreground">

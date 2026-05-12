@@ -102,14 +102,29 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     })
   }
 
+  // M-A.5: feature-detected View Transition wrapper for active-pane indicator
+  // slide. Browsers without the API (Firefox <129, Safari <18) get the direct
+  // call — no spinner, no slide, but no breakage either.
+  type ViewTransitionDoc = Document & {
+    startViewTransition?: (cb: () => void) => unknown
+  }
+  const triggerPaneChange = (pane: Pane) => {
+    const doc = document as ViewTransitionDoc
+    if (typeof doc.startViewTransition === "function") {
+      doc.startViewTransition(() => onPaneChange(pane))
+    } else {
+      onPaneChange(pane)
+    }
+  }
+
   const handleSelectConversation = (id: string) => {
     setActiveId(id)
-    if (activePane !== "chat") onPaneChange("chat")
+    if (activePane !== "chat") triggerPaneChange("chat")
   }
 
   const handleNewChat = () => {
     create(active?.model || MODELS[0].id)
-    if (activePane !== "chat") onPaneChange("chat")
+    if (activePane !== "chat") triggerPaneChange("chat")
   }
 
   return (
@@ -157,7 +172,12 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                       activePane === pane && "border-l-2 border-brand bg-brand/5 glow-teal",
                       pane === "chat" && !collapsed && "flex-1",
                     )}
-                    onClick={() => onPaneChange(pane)}
+                    style={
+                      activePane === pane
+                        ? { viewTransitionName: "active-pane-indicator" }
+                        : undefined
+                    }
+                    onClick={() => triggerPaneChange(pane)}
                   >
                     <span className="relative shrink-0">
                       <Icon className={cn("h-4 w-4", activePane === pane && "text-brand")} />

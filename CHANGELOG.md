@@ -2,7 +2,175 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.92.2 — UI Audit Phase 1 + 2 (2026-05-11)
+## v0.92.2 — UI Audit Phases 1–9 (Comprehensive, 2026-05-11)
+
+> Tag superseded mid-day. The initial v0.92.2 cut (commit `7122ec6`) shipped
+> only audit phases 1 + 2 (visible-bug ledger + reduced-motion accessibility).
+> This expanded cut adds phases 3–9 in three orchestrated waves so the
+> v0.92.2 tag captures the complete audit response.
+
+Comprehensive response to the UI/UX audit at
+[`tasks/2026-05-11-ui-audit.md`](tasks/2026-05-11-ui-audit.md). All 8 P0
+visible bugs cleared, 24 P1 quality issues closed, 7 P2 polish opportunities
+landed. Three new primitives extracted; verification + chat surfaces
+refactored; 8 motion enhancements added; light-mode brand-shine + status-bar
+gold both made theme-aware.
+
+**Wave 1 — Primitive extraction + 10 site migrations** (`feature-dev:code-architect`
+agents A + B; integrated by hand)
+
+- New primitive [`<PaneError>`](src/web/src/components/ui/pane-error.tsx) —
+  sibling to `<EmptyState>` with inline + `fullPage` forms, optional retry,
+  axe-clean. Adopted across 8 panes (Wiki, Communities/GraphExplorer,
+  Processor, Monitoring, Knowledge, Audit, Memories, Wiki entity detail).
+  The Processor pane now returns early when `statusError` is true (the
+  prior "Cerid Idle badge + empty tabs + destructive Alert" three-signal
+  confusion is gone).
+- New primitive [`<SegmentedControl>`](src/web/src/components/ui/segmented-control.tsx)
+  — single-select radiogroup styled as a connected button row, with full
+  keyboard navigation (ArrowLeft / ArrowRight with wrap). Adopted in
+  `audit-pane.tsx` for the 1h / 6h / 24h / 7d / 30d time-range row.
+- New primitive [`<TierSelector>`](src/web/src/components/ui/tier-selector.tsx)
+  — three-card radiogroup with locked-state + Pro badge. Adopted in
+  `settings-pane.tsx` (Quick / Balanced / Maximum) and
+  `pipeline-section.tsx` (Efficient / Balanced / Maximum retrieval preset).
+- Three TanStack hooks (`useWikiEntities`, `useWikiEntity`, `useCommunities`,
+  `useCommunity`, `useProcessorStatus`, `useProcessorRecent`) now expose
+  `refetch` so the adopt-sites can wire retry CTAs.
+- 29 new unit tests across the 3 primitives (axe-clean via jest-axe).
+
+**Wave 2 — Verification + chat surface refactors** (general-purpose agents
+C + D, parallel; disjoint file scopes — no merge conflicts)
+
+*Verification surface (Phase 4):*
+- **V-P0.1 Nested `<button>` HTML violation** in `<VerificationStatusBar>`
+  summary row eliminated — outer container is now a `<div role="button"
+  tabIndex={0}>` with `onKeyDown` for Enter/Space; expand-toggle is a
+  dedicated end-of-row `<button>`. Caught live as a dev-console warning
+  during the audit and reproduced under React 19 strict-mode.
+- **V-P0.2 `<ClaimOverlay>` migrated to Radix `<Popover>`** — drops the
+  `popoverHeight = 220` magic constant + manual `getBoundingClientRect`
+  flip logic. Radix handles positioning, collision detection, focus
+  management, and the animation. `PopoverAnchor` re-exported from
+  `components/ui/popover` to support virtual-anchor placement at the
+  click rect.
+- **V-P0.3 Green-on-green light-mode contrast** in the claim-overlay
+  "Found answer" section fixed (`text-green-300/80` → `text-green-800
+  dark:text-green-300/80`).
+- **V-P1.4 TrustScore dual-trigger** dropped — chip is now click-only with
+  a downward `<ChevronDown>` glyph + `aria-haspopup="dialog"`. HoverCard
+  removed.
+- **V-P1.5 TrustScore modal score-in-DialogTitle** moved to a dedicated
+  sub-row beneath the title; band span gained the missing `borderClass`.
+- **V-P1.7 + V-P1.8 Entity detail** — raw brand tokens (`bg-brand/10
+  text-brand`) on the refresh spinner replaced with semantic
+  (`bg-primary/10 text-primary`); refresh spinner now *replaces* the
+  `<ConfidenceBandBadge>` rather than rendering alongside it.
+- **V-P2.2 TrustScore sparkline placeholder** removed entirely until
+  history is wired backend-side.
+- **V-P2.3 TrustScore TabsList** switched from `flex-wrap` to
+  `overflow-x-auto flex-nowrap` with hidden scrollbar.
+- **V-P2.4 Amber/yellow "More/Less" toggle color collision** fixed across
+  `<ClaimOverlay>` and `<VerificationStatusBar>` —
+  `text-muted-foreground hover:text-foreground` now used everywhere (amber
+  was sending false "warning" semantics where it just meant "expand").
+- **V-P2.5 ExternalLink icon** bumped from `h-2.5 w-2.5` (10 px, illegible)
+  to `h-3 w-3` (12 px minimum).
+- **V-P2.6 External-reference card body** now fully clickable via a
+  wrapping `<a>` (44 × 44 + tap target); inline `ExternalLink` icon stays
+  for visual signal.
+- **V-P2.7 Inline `<mark>` highlights** gained `aria-label="Claim:
+  <status>"` so screen readers can announce the verification band.
+
+*Chat surface (Phase 7):*
+- **C-P0.1 Esc-to-stop streaming** — textarea stays focusable during
+  streaming (was `disabled`, blocking all keyboard access). Streaming
+  state surfaces via `aria-readonly` + a streaming placeholder; Esc binds
+  to `onStop`.
+- **C-P0.2 Scroll anchoring** — `chat-messages.tsx` now tracks
+  `userScrolledUpRef` (true when scrollTop is >100 px above bottom) and
+  only auto-scrolls when the user is at the bottom. Force-scroll fires
+  when the latest message is a user message (i.e., they just hit Send).
+- **C-P1.2 Message timestamps** — relative-time `<time>` element rendered
+  beneath each bubble, ticking every 30 s; absolute time in the `title`
+  attribute.
+- **C-P1.4 Source-attribution + KB-context-indicator merge** —
+  `<SourceAttribution>` now takes a `variant: "card" | "badge"` prop;
+  `<KBContextIndicator>` is a compat shim forwarding to
+  `<SourceAttribution variant="badge">` until consumer sites swap.
+- **C-P1.5 Model select** — provider-grouped via `SelectGroup` /
+  `SelectLabel` / `SelectSeparator`; unconfigured providers' models are
+  disabled with a "Not configured" hint. `configuredProviders` threaded
+  from `chat-panel.tsx` → `chat-toolbar.tsx` → `<ModelSelect>`.
+- **C-P1.6 ArrowUp recall** — when the textarea is empty and the user
+  presses ↑, the last-sent message is restored.
+- **C-P2.1 Drag-over overlay** with explicit text labels ("Drop file to
+  attach" vs "Drop artifact to inject"). Previously just a ring color
+  shift.
+- **C-P2.3 Conversation-list search** — `useMemo`-built search index
+  replaces the per-keystroke O(N × M) `.some(m => m.content.includes(q))`
+  scan.
+- **C-P2.6 Private-mode L3/L4 pulse** — one-shot 3-second pulse on
+  activation only, then static. (Was persistent infinite pulse.)
+- **C-P2.7 ChatDashboard** token-count visibility breakpoint dropped from
+  `xl:` (1280 px+) to `lg:` (1024 px+) so laptop users see actual data.
+
+**Wave 3 — Light-mode polish + mixed-bag fixes + motion additions** (hand
+edits + Phase 9 motion agent)
+
+*Phase 3 (light-mode):*
+- `text-brand-shine` now uses a darker teal-700 → teal-800 gradient in
+  light mode (`#0D9488` → `#115E59`) — readable against the pale
+  background. Dark mode keeps the original bright shimmer.
+
+*Phase 8 (mixed-bag):*
+- **P1.9 Status bar gold border tier-aware** — the gold top divider
+  (`border-[rgba(212,175,55,0.22)]`) now appears only for `pro` /
+  `enterprise` tiers; community tier uses neutral `border-border`.
+  Removes the gold-vs-teal accent collision at the default tier.
+- **P1.10 Knowledge filename truncation** — new `displayFilename()`
+  helper in `artifact-card.tsx` strips the repetitive
+  `memory_(empirical|decision|preference|project|temporal|conversational)_`
+  prefix from the displayed filename. Full filename remains in `title=`.
+- **S-P1.2 Cost formatter audit** — `essentials-section.tsx` (Today /
+  This Month / Balance) and `openrouter-key-field.tsx` now route through
+  the canonical `formatCost()` util. Today's spend no longer shows 4
+  decimal places on values > $0.01.
+
+*Phase 9 (motion additions, all in the 150–300 ms band):*
+- **M-A.1 `<ClaimBadge>` settle fade-in** — `animate-in fade-in
+  zoom-in-95 duration-200` keyed on band so state changes (loading →
+  verified/refuted) animate cleanly.
+- **M-A.2 Streaming caret** — single-blink caret at the tail of the
+  active streaming assistant message.
+- **M-A.3 Copy-to-clipboard checkmark scale-in** — `animate-in zoom-in-50
+  duration-150` on the Check icon when copy succeeds. Applied in
+  `<MessageBubble>` + `<OllamaCopyRow>`.
+- **M-A.4 TrustScore chip number tween** — 200 ms opacity fade keyed on
+  score, so re-verifications animate the new value in.
+- **M-A.5 Sidebar active-pane indicator** uses the View Transition API
+  (feature-detected) for a sliding crossfade between active panes.
+- **M-A.6 Verification step pulse** — exactly one pending step pulses at
+  a time (per ui-ux-pro-max guideline #7).
+- **M-A.7 Setup Wizard step transition** — replaced the 800 ms blocking
+  `setTimeout` with `animate-in fade-in zoom-in-95 duration-300` on
+  key-change. Felt faster, no dead time.
+- **M-A.8 `<SaveButton>` primitive** — new component at
+  `components/ui/save-button.tsx` wraps shadcn `<Button>` with a 1.2 s
+  success-state Check zoom-in. Available for adoption by Settings + KB
+  save flows.
+
+**Cumulative verification.** 1073 frontend tests + 4036 Python tests
+green; tsc + ruff + mypy + lint-imports + drift (0 violations) +
+silent-catch + product-story all clean. Snapshot regenerations: 5 across
+2 files (motion-class additions on TrustScore chip + VerifiedResponse).
+
+**Anti-pattern audit residual.** 0 P0 visible bugs. 0 active anti-pattern
+violations. 13 design-drift allowlist entries remain documented (each
+with section-header rationale: runtime geometry, pinned widths,
+brand-pinned type sizes, workflow editor chrome).
+
+## v0.92.2 — UI Audit Phase 1 + 2 (2026-05-11) — SUPERSEDED
 
 Quick-win patch following the comprehensive UI/UX audit at
 [`tasks/2026-05-11-ui-audit.md`](tasks/2026-05-11-ui-audit.md). Phase 1

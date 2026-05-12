@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useRef, useEffect, type ReactNode } from "react"
+import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -87,12 +87,23 @@ export function ConversationList({
     }
   }, [searchQuery])
 
+  // C-P2.3: build a per-conversation search index once and reuse across
+  // keystrokes. Previously this did a full `.some(m => m.content...)` scan
+  // on every keystroke — O(messages × keystrokes) on the UI thread. Joining
+  // each conversation's messages once collapses lookup to a single `includes`.
+  const searchIndex = useMemo(() => {
+    const idx = new Map<string, string>()
+    for (const c of conversations) {
+      const joined = c.messages.map((m) => m.content).join("\n").toLowerCase()
+      // Title is lowercased here so we don't lowercase twice on every keystroke.
+      idx.set(c.id, `${c.title.toLowerCase()}\n${joined}`)
+    }
+    return idx
+  }, [conversations])
+
   // Filter conversations by search query (title + message content)
   const filtered = debouncedQuery
-    ? conversations.filter((c) => {
-        if (c.title.toLowerCase().includes(debouncedQuery)) return true
-        return c.messages.some((m) => m.content.toLowerCase().includes(debouncedQuery))
-      })
+    ? conversations.filter((c) => (searchIndex.get(c.id) ?? "").includes(debouncedQuery))
     : conversations
 
   // Clear selection when exiting edit mode or switching archive view

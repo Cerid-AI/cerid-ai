@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { PaneError } from "@/components/ui/pane-error"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Brain,
@@ -20,7 +20,6 @@ import {
   Loader2,
   X,
   Archive,
-  AlertCircle,
   Clock,
   MessageSquare,
   FolderKanban,
@@ -87,7 +86,7 @@ export default function MemoriesPane() {
       setMemories(res.memories)
     } catch (err) {
       console.error("Failed to load memories:", err)
-      setError("Failed to load memories. Please try again.")
+      setError("The backend may be unavailable. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -249,16 +248,15 @@ export default function MemoriesPane() {
           ))}
         </div>
       ) : error ? (
-        /* D.2: error state — shadcn Alert + Retry */
-        <div className="flex flex-col items-center gap-3 p-8">
-          <Alert variant="destructive" className="max-w-md">
-            <AlertCircle className="h-4 w-4" aria-hidden="true" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-          <Button variant="outline" size="sm" onClick={loadMemories}>
-            <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-            Retry
-          </Button>
+        /* D.2: error state — shared PaneError primitive */
+        <div className="flex items-center justify-center p-8">
+          <div className="w-full max-w-md">
+            <PaneError
+              title="Failed to load memories"
+              description={error}
+              onRetry={loadMemories}
+            />
+          </div>
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">

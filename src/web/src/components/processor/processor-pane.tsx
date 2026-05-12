@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { PaneError } from "@/components/ui/pane-error"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { JobRow } from "./job-row"
@@ -25,7 +25,6 @@ import {
   Cpu,
   Pause,
   Play,
-  AlertCircle,
   List,
   LayoutGrid,
 } from "lucide-react"
@@ -134,13 +133,37 @@ function QueueBreakdown({ queue_sizes }: QueueBreakdownProps) {
 // ---------------------------------------------------------------------------
 
 export function ProcessorPane() {
-  const { data: status, isLoading: statusLoading, isError: statusError } = useProcessorStatus()
-  const { data: recent, isLoading: recentLoading, isError: recentError } = useProcessorRecent(50)
+  const {
+    data: status,
+    isLoading: statusLoading,
+    isError: statusError,
+    refetch: refetchStatus,
+  } = useProcessorStatus()
+  const {
+    data: recent,
+    isLoading: recentLoading,
+    isError: recentError,
+    refetch: refetchRecent,
+  } = useProcessorRecent(50)
   const { pause, resume, isPending } = useProcessorMutations()
 
   const totalQueued = status
     ? Object.values(status.queue_sizes).reduce((sum, n) => sum + n, 0)
     : 0
+
+  if (statusError) {
+    return (
+      <Card>
+        <CardContent className="p-3">
+          <PaneError
+            title="Failed to load processor status"
+            description="Check that the backend is running, then retry."
+            onRetry={() => void refetchStatus()}
+          />
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card>
@@ -244,14 +267,9 @@ export function ProcessorPane() {
                 <Skeleton className="h-8 w-full rounded-md" />
                 <Skeleton className="h-8 w-full rounded-md" />
               </div>
-            ) : statusError ? (
-              <Alert variant="destructive" className="mt-2">
-                <AlertCircle className="h-4 w-4" aria-hidden="true" />
-                <AlertDescription>
-                  Failed to load queue status. Check that the backend is running.
-                </AlertDescription>
-              </Alert>
             ) : (
+              // Note: statusError is handled by the outer early-return at the
+              // top of ProcessorPane — it never reaches the tabs. Audit P2.6.
               <QueueBreakdown queue_sizes={status?.queue_sizes ?? {}} />
             )}
           </TabsContent>
@@ -265,12 +283,12 @@ export function ProcessorPane() {
                 ))}
               </div>
             ) : recentError ? (
-              <Alert variant="destructive" className="mt-2">
-                <AlertCircle className="h-4 w-4" aria-hidden="true" />
-                <AlertDescription>
-                  Failed to load recent jobs.
-                </AlertDescription>
-              </Alert>
+              <div className="mt-2">
+                <PaneError
+                  title="Failed to load recent jobs"
+                  onRetry={() => void refetchRecent()}
+                />
+              </div>
             ) : !recent || recent.length === 0 ? (
               <EmptyState
                 icon={Cpu}

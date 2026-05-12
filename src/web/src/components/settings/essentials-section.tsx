@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
 import { useSettings } from "@/hooks/use-settings"
-import { cn } from "@/lib/utils"
+import { cn, formatCost } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Select,
@@ -104,15 +104,15 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                     credits.status === "exhausted" && "text-red-600 dark:text-red-400",
                     credits.status === "error" && "text-muted-foreground",
                   )}>
-                    ${credits.balance?.toFixed(2) ?? "\u2014"}
+                    {credits.balance != null ? formatCost(credits.balance) : "\u2014"}
                   </span>
                 </div>
                 {credits.warning && (
                   <p className="text-xs text-yellow-600 dark:text-yellow-400">{credits.warning}</p>
                 )}
                 <div className="my-1 h-px bg-border" />
-                <Row label="Today" value={credits.usage_daily != null ? `$${credits.usage_daily.toFixed(4)}` : "\u2014"} info="Spend today" />
-                <Row label="This Month" value={credits.usage_monthly != null ? `$${credits.usage_monthly.toFixed(2)}` : "\u2014"} info="Spend this month" />
+                <Row label="Today" value={credits.usage_daily != null ? formatCost(credits.usage_daily) : "\u2014"} info="Spend today" />
+                <Row label="This Month" value={credits.usage_monthly != null ? formatCost(credits.usage_monthly) : "\u2014"} info="Spend this month" />
                 <div className="my-1 h-px bg-border" />
                 <div className="flex gap-2">
                   <a

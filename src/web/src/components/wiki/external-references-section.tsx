@@ -45,11 +45,11 @@ interface ReferenceCardProps {
 }
 
 function ReferenceCard({ reference }: ReferenceCardProps) {
-  return (
-    <div
-      className="flex items-start gap-3 rounded-md border border-border bg-muted/10 px-3 py-2"
-      data-testid="external-reference-card"
-    >
+  const cardClasses =
+    "flex items-start gap-3 rounded-md border border-border bg-muted/10 px-3 py-2 transition-colors"
+
+  const body = (
+    <>
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="secondary" className="shrink-0 text-label-xs font-medium">
@@ -71,16 +71,34 @@ function ReferenceCard({ reference }: ReferenceCardProps) {
         </p>
       </div>
       {reference.url && (
-        <a
-          href={reference.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-          aria-label={`Open ${reference.title ?? reference.source_display} on ${reference.source_display} (opens in new tab)`}
-        >
-          <ExternalLink className="h-4 w-4" aria-hidden="true" />
-        </a>
+        <ExternalLink
+          className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-foreground transition-colors"
+          aria-hidden="true"
+        />
       )}
+    </>
+  )
+
+  // V-P2.6: when the reference has a URL, the entire card is the tap target
+  // (44×44+ minimum). Without a URL we fall back to a plain non-interactive div.
+  if (reference.url) {
+    return (
+      <a
+        href={reference.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`group ${cardClasses} hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1`}
+        data-testid="external-reference-card"
+        aria-label={`Open ${reference.title ?? reference.source_display} on ${reference.source_display} (opens in new tab)`}
+      >
+        {body}
+      </a>
+    )
+  }
+
+  return (
+    <div className={cardClasses} data-testid="external-reference-card">
+      {body}
     </div>
   )
 }

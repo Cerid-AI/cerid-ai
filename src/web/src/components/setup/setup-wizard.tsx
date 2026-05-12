@@ -30,7 +30,6 @@ import type { ProviderCredits, SystemCheckResponse } from "@/lib/types"
 // Constants
 // ---------------------------------------------------------------------------
 
-const STEP_TRANSITION_MS = 800
 const TOTAL_STEPS = 8
 const SKIPPABLE_STEPS = new Set([2, 3, 6])
 const STORAGE_KEY = "cerid-setup-progress"
@@ -402,8 +401,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
         ollama_model: state.ollama.model ?? undefined,
       })
       if (result.success) {
+        // M-A.7: drop the 800ms `setTimeout` gate — the new step's wrapper
+        // animates in on key change so the visual transition is the feedback.
         dispatch({ type: "SET_APPLIED" })
-        setTimeout(() => dispatch({ type: "SET_STEP", step: 5 }), STEP_TRANSITION_MS)
+        dispatch({ type: "SET_STEP", step: 5 })
       } else {
         dispatch({ type: "SET_APPLY_ERROR", error: "Configuration failed — check backend logs" })
       }
@@ -486,8 +487,13 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
             </div>
           )}
 
+          {/* M-A.7: step content wrapped with a key={state.step} container so
+              each transition animates in (replaces the previous 800ms setTimeout
+              gate). The wrapper only mounts when the resume prompt isn't showing. */}
+          {!showResumePrompt && (
+            <div key={state.step} className="animate-in fade-in zoom-in-95 duration-300">
           {/* Step 0: Welcome */}
-          {!showResumePrompt && state.step === 0 && (
+          {state.step === 0 && (
             <>
               <div className="mb-2 flex items-center justify-center">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10 glow-teal">
@@ -827,6 +833,8 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 gpu_acceleration: state.systemCheck.gpu_acceleration,
               } : null}
             />
+          )}
+            </div>
           )}
         </div>
 

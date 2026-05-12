@@ -2,10 +2,9 @@
 
 exports[`TrustScoreChip > snapshots > snapshot at rest (high band) 1`] = `
 <button
+  aria-haspopup="dialog"
   aria-label="System trust score: 94 of 100, high"
   class="inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 bg-green-500/15 border-green-500/30 text-green-700 dark:text-green-400"
-  data-slot="hover-card-trigger"
-  data-state="closed"
   data-testid="trust-score-chip"
   type="button"
 >
@@ -30,18 +29,39 @@ exports[`TrustScoreChip > snapshots > snapshot at rest (high band) 1`] = `
     />
   </svg>
   <span>
-    Trust 
-    94
+    Trust
+     
+    <span
+      class="inline-block animate-in fade-in duration-200 tabular-nums"
+    >
+      94
+    </span>
   </span>
+  <svg
+    aria-hidden="true"
+    class="lucide lucide-chevron-down size-3"
+    fill="none"
+    height="24"
+    stroke="currentColor"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="2"
+    viewBox="0 0 24 24"
+    width="24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="m6 9 6 6 6-6"
+    />
+  </svg>
 </button>
 `;
 
 exports[`TrustScoreChip > snapshots > snapshot low band 1`] = `
 <button
+  aria-haspopup="dialog"
   aria-label="System trust score: 60 of 100, low"
   class="inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 bg-red-500/15 border-red-500/30 text-red-700 dark:text-red-400"
-  data-slot="hover-card-trigger"
-  data-state="closed"
   data-testid="trust-score-chip"
   type="button"
 >
@@ -69,18 +89,39 @@ exports[`TrustScoreChip > snapshots > snapshot low band 1`] = `
     />
   </svg>
   <span>
-    Trust 
-    60
+    Trust
+     
+    <span
+      class="inline-block animate-in fade-in duration-200 tabular-nums"
+    >
+      60
+    </span>
   </span>
+  <svg
+    aria-hidden="true"
+    class="lucide lucide-chevron-down size-3"
+    fill="none"
+    height="24"
+    stroke="currentColor"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="2"
+    viewBox="0 0 24 24"
+    width="24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="m6 9 6 6 6-6"
+    />
+  </svg>
 </button>
 `;
 
 exports[`TrustScoreChip > snapshots > snapshot medium band 1`] = `
 <button
+  aria-haspopup="dialog"
   aria-label="System trust score: 75 of 100, medium"
   class="inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 bg-amber-500/15 border-amber-500/30 text-amber-700 dark:text-amber-400"
-  data-slot="hover-card-trigger"
-  data-state="closed"
   data-testid="trust-score-chip"
   type="button"
 >
@@ -108,8 +149,30 @@ exports[`TrustScoreChip > snapshots > snapshot medium band 1`] = `
     />
   </svg>
   <span>
-    Trust 
-    75
+    Trust
+     
+    <span
+      class="inline-block animate-in fade-in duration-200 tabular-nums"
+    >
+      75
+    </span>
   </span>
+  <svg
+    aria-hidden="true"
+    class="lucide lucide-chevron-down size-3"
+    fill="none"
+    height="24"
+    stroke="currentColor"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="2"
+    viewBox="0 0 24 24"
+    width="24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="m6 9 6 6 6-6"
+    />
+  </svg>
 </button>
 `;

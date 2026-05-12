@@ -99,6 +99,7 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
         consoleOpen={consoleOpen}
         onToggleConsole={toggleConsole}
         consoleUnreadCount={unreadCount}
+        featureTier={featureTier}
       />
     </div>
   )

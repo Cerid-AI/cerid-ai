@@ -17,7 +17,12 @@ const LazySyntaxHighlighter = lazy(() =>
 )
 
 let oneDarkStyle: Record<string, React.CSSProperties> | undefined
-import("@/lib/syntax-highlighter").then((m) => { oneDarkStyle = m.oneDark })
+// The .catch() prevents an "Unhandled Rejection" when the test environment
+// tears down before this module-level promise resolves. In production the
+// import always resolves; only the vitest teardown race surfaces this.
+import("@/lib/syntax-highlighter")
+  .then((m) => { oneDarkStyle = m.oneDark })
+  .catch(() => { /* environment torn down before lazy import resolved */ })
 import type { ChatMessage, HallucinationClaim } from "@/lib/types"
 import { findModel, PROVIDER_COLORS } from "@/lib/types"
 import { matchClaimsToText, type ClaimDisplayStatus } from "@/lib/verification-utils"
@@ -297,7 +302,9 @@ function CopyButton({ text }: { text: string }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={copied ? "Copied" : "Copy to clipboard"} onClick={handleCopy}>
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            <span key={copied ? "check" : "copy"} className="inline-flex animate-in zoom-in-50 duration-150">
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            </span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>{copied ? "Copied!" : "Copy to clipboard"}</TooltipContent>
@@ -422,6 +429,8 @@ interface MessageBubbleProps {
   verificationStatus?: MessageVerificationStatus
   verificationClaims?: HallucinationClaim[]
   inlineMarkups?: boolean
+  /** True while this specific assistant message is the active stream target. */
+  isStreaming?: boolean
   onCorrect?: (messageId: string, correction: string) => void
   onEnrich?: (messageId: string, content: string) => void
   onToggleMarkup?: () => void
@@ -433,7 +442,7 @@ interface MessageBubbleProps {
   onReVerify?: () => void
 }
 
-export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick, onReVerify }: MessageBubbleProps) {
+export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, isStreaming, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick, onReVerify }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const [correcting, setCorrecting] = useState(false)
   const [correctionText, setCorrectionText] = useState("")
@@ -521,6 +530,9 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           })
           mark.dataset.ceridClaim = "true"
           mark.dataset.claimIndex = String(i)
+          // V-P2.7: announce the verification status to screen readers so the
+          // <mark> isn't read as a bare "mark" with no context.
+          mark.setAttribute("aria-label", `Claim: ${span.displayStatus}`)
           range.surroundContents(mark)
           createdEls.push(mark)
           lastMark = mark
@@ -535,6 +547,8 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         sup.style.pointerEvents = "auto"
         sup.textContent = `[${i + 1}]`
         sup.dataset.ceridFootnote = String(i)
+        // V-P2.7: announce footnote position + verification status to SRs.
+        sup.setAttribute("aria-label", `Citation ${i + 1}: ${span.displayStatus}`)
         lastMark.parentNode?.insertBefore(sup, lastMark.nextSibling)
         createdEls.push(sup)
       }
@@ -605,6 +619,12 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
               >
                 {message.content}
               </ReactMarkdown>
+              {isStreaming && (
+                <span
+                  className="inline-block h-3.5 w-0.5 ml-0.5 align-text-bottom bg-current animate-pulse"
+                  aria-hidden="true"
+                />
+              )}
             </div>
           )}
         </div>

@@ -31,14 +31,13 @@ import {
   ChevronDown,
   ChevronRight,
   MessageSquare,
-  AlertCircle,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { PaneError } from "@/components/ui/pane-error"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { EmptyState } from "@/components/ui/empty-state"
 
@@ -182,7 +181,7 @@ function CommunityDetailPanel({
   onEntityClick?: (canonical_id: string) => void
   onAskAbout?: (community: CommunityFull) => void
 }) {
-  const { data, isLoading, isError } = useCommunity(communityId)
+  const { data, isLoading, isError, refetch } = useCommunity(communityId)
 
   if (isLoading) {
     return (
@@ -208,10 +207,11 @@ function CommunityDetailPanel({
   if (isError) {
     return (
       <div className="p-6">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription>Failed to load community. Please try again.</AlertDescription>
-        </Alert>
+        <PaneError
+          title="Failed to load community"
+          description="The backend may be unavailable. Try again."
+          onRetry={() => void refetch()}
+        />
       </div>
     )
   }
@@ -298,7 +298,7 @@ export function GraphExplorer({
   onAskAbout,
 }: GraphExplorerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const { data: communities, isLoading, isError } = useCommunities()
+  const { data: communities, isLoading, isError, refetch } = useCommunities()
   const navigation = useNavigation()
   // Default callbacks wire to the cross-pane navigation context so the
   // pane is self-sufficient when mounted bare. Callers (tests, future
@@ -352,10 +352,11 @@ export function GraphExplorer({
   if (isError) {
     return (
       <div className="p-4">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription>Failed to load communities. Please try again.</AlertDescription>
-        </Alert>
+        <PaneError
+          title="Failed to load communities"
+          description="The backend may be unavailable. Try again."
+          onRetry={() => void refetch()}
+        />
       </div>
     )
   }

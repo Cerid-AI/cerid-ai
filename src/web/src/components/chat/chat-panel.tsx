@@ -64,7 +64,9 @@ function OllamaCopyRow({ os, cmd, accent }: { os: string; cmd: string; accent: "
         onClick={() => { navigator.clipboard.writeText(cmd).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }) }}
         aria-label="Copy"
       >
-        {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
+        <span key={copied ? "check" : "copy"} className="inline-flex animate-in zoom-in-50 duration-150">
+          {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
+        </span>
       </button>
     </div>
   )
@@ -559,6 +561,7 @@ export function ChatPanel() {
         cycleRoutingMode={cycleRoutingMode}
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
+        configuredProviders={setupStatusForDefault?.configured_providers ?? []}
         privateModeEnabled={privateModeEnabled}
         privateModeLevel={privateModeLevel}
         togglePrivateMode={togglePrivateMode}

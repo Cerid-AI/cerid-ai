@@ -99,12 +99,16 @@ describe("TrustScoreModal", () => {
     })
   })
 
-  describe("'Insufficient history' placeholder when sparkline data absent", () => {
-    it("shows insufficient history placeholder", () => {
+  describe("sparkline section (V-P2.2)", () => {
+    // V-P2.2: sparkline section is hidden entirely until per-component history
+    // ships from the backend. The dashed "Insufficient history" placeholder
+    // was permanent visual noise. Re-add a test when history wires through.
+    it("does not render the trend section while history is unwired", () => {
       render(
         <TrustScoreModal open={true} onOpenChange={vi.fn()} data={makeScore()} />,
       )
-      expect(screen.getByText("Insufficient history")).toBeInTheDocument()
+      expect(screen.queryByText("Insufficient history")).not.toBeInTheDocument()
+      expect(screen.queryByText(/Trend \(last 7 days\)/i)).not.toBeInTheDocument()
     })
   })
 

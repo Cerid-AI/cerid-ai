@@ -4,11 +4,11 @@
 import { useState } from "react"
 import type { ServerSettings, SettingsUpdate } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
-import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
-import { ChevronDown, ChevronRight, Cpu, SearchIcon, Layers, Crown } from "lucide-react"
+import { TierSelector } from "@/components/ui/tier-selector"
+import { ChevronDown, ChevronRight, Cpu, SearchIcon, Layers } from "lucide-react"
 import { SectionHeading, Row, SliderRow, PipelineToggle, ProGate } from "./settings-primitives"
 import { ModelManagement } from "./model-management"
 
@@ -46,39 +46,22 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
               const activePreset = detectActivePreset(settings as unknown as Record<string, unknown>)
               const tier = settings.feature_tier ?? "community"
               return (
-                <div className="grid grid-cols-3 gap-2">
-                  {Object.entries(PRESETS).map(([key, preset]) => {
-                    const locked = key === "maximum" && tier === "community"
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => !locked && patch(preset.values)}
-                        disabled={locked}
-                        className={cn(
-                          "rounded-lg border p-2.5 text-left transition-colors",
-                          locked
-                            ? "opacity-50 cursor-not-allowed border-muted"
-                            : activePreset === key
-                              ? "border-primary bg-primary/5"
-                              : "border-muted hover:border-muted-foreground/30",
-                        )}
-                      >
-                        <span className="flex items-center gap-1 text-sm font-medium">
-                          {preset.label}
-                          {locked && (
-                            <Badge variant="outline" className="text-label-xs px-1 py-0 text-gold border-gold">
-                              <Crown className="mr-0.5 h-2.5 w-2.5" />Pro
-                            </Badge>
-                          )}
-                        </span>
-                        <p className="mt-0.5 text-label-sm leading-tight text-muted-foreground">
-                          {preset.description}
-                        </p>
-                      </button>
-                    )
-                  })}
-                </div>
+                <TierSelector
+                  value={activePreset ?? ""}
+                  onChange={(id) => {
+                    const preset = PRESETS[id]
+                    if (preset) void patch(preset.values)
+                  }}
+                  options={Object.entries(PRESETS).map(([key, preset]) => ({
+                    id: key,
+                    label: preset.label,
+                    description: preset.description,
+                    locked: key === "maximum" && tier === "community",
+                    lockedReason: "Pro",
+                  }))}
+                  ariaLabel="Retrieval pipeline preset"
+                  activeClassName="border-primary bg-primary/5"
+                />
               )
             })()}
 

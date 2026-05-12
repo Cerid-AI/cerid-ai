@@ -36,6 +36,8 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isArtifactDragOver, setIsArtifactDragOver] = useState(false)
+  // Last-sent user message for ArrowUp recall (C-P1.6)
+  const lastSentRef = useRef<string>("")
   const { activePane, consumeChatSeed } = useNavigation()
   // Cross-pane seeds (e.g. "Ask about this community" from the Communities
   // pane) land here when the user lands on the chat pane. Consume once,
@@ -93,6 +95,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
     if (!trimmed || isStreaming) return
     sendingRef.current = true
     try {
+      lastSentRef.current = trimmed
       onSend(trimmed)
       setInput("")
       if (textareaRef.current) {
@@ -108,14 +111,39 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   }, [input, isStreaming, onSend])
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault()
         if (sendingRef.current) return
         handleSend()
+        return
+      }
+      // C-P0.1: Esc cancels an in-flight streaming response. Keyboard escape
+      // hatch for users who can't reach the stop button by mouse.
+      if (e.key === "Escape" && isStreaming) {
+        e.preventDefault()
+        onStop()
+        return
+      }
+      // C-P1.6: ArrowUp on an empty composer restores the last-sent user
+      // message — common chat ergonomic (Slack, Discord, iMessage).
+      if (e.key === "ArrowUp" && input.length === 0 && lastSentRef.current) {
+        e.preventDefault()
+        const recalled = lastSentRef.current
+        setInput(recalled)
+        onInputChange?.(recalled)
+        // Defer caret-to-end + autoresize until after React paints the new value
+        queueMicrotask(() => {
+          const ta = textareaRef.current
+          if (ta) {
+            ta.setSelectionRange(recalled.length, recalled.length)
+            ta.style.height = "auto"
+            ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`
+          }
+        })
       }
     },
-    [handleSend]
+    [handleSend, isStreaming, onStop, input.length, onInputChange]
   )
 
   const handleInput = useCallback(() => {
@@ -128,7 +156,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   return (
     <div
       className={cn(
-        "flex items-end gap-2 border-t bg-background p-4",
+        "relative flex items-end gap-2 border-t bg-background p-4",
         isDragOver && "ring-2 ring-primary ring-inset",
         isArtifactDragOver && "ring-2 ring-brand ring-inset bg-brand/5",
       )}
@@ -137,19 +165,40 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
       onDrop={(e) => { handleArtifactDrop(e); dragHandlers.onDrop?.(e) }}
       onDragLeave={(e) => { dragHandlers.onDragLeave?.(e); handleArtifactDragLeave() }}
     >
+      {/* C-P2.1: explicit drag-over overlay labels — colour-only signalling is too subtle. */}
+      {(isDragOver || isArtifactDragOver) && (
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md text-sm font-medium",
+            isArtifactDragOver ? "bg-brand/10 text-brand" : "bg-primary/10 text-primary",
+          )}
+        >
+          {isArtifactDragOver ? "Drop artifact to inject" : "Drop file to attach"}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         value={input}
         onChange={(e) => {
+          // Block edits while streaming — read-only behaviour without losing
+          // keyboard focus (so Escape-to-cancel still works). Native `readOnly`
+          // would also disable our paste handling for drag-drop helpers.
+          if (isStreaming) return
           setInput(e.target.value)
           handleInput()
           onInputChange?.(e.target.value)
         }}
         onKeyDown={handleKeyDown}
-        placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+        placeholder={
+          isStreaming
+            ? "Streaming — Esc to cancel"
+            : "Type a message... (Enter to send, Shift+Enter for new line)"
+        }
         aria-label="Chat message input"
+        aria-readonly={isStreaming || undefined}
         rows={1}
-        disabled={disabled || isStreaming}
+        disabled={disabled}
         className="flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
       />
       {injectedCount > 0 && (

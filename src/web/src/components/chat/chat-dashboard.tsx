@@ -31,7 +31,7 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
             <div className="flex shrink-0 cursor-default items-center gap-1.5">
               <Cpu className="h-3 w-3 text-muted-foreground" />
               <span className="font-medium">{modelInfo?.label ?? "Unknown"}</span>
-              <span className="hidden text-muted-foreground xl:inline">({modelInfo?.provider ?? "?"})</span>
+              <span className="hidden text-muted-foreground lg:inline">({modelInfo?.provider ?? "?"})</span>
             </div>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="space-y-1">
@@ -54,8 +54,8 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
           <TooltipTrigger asChild>
             <div className="flex shrink-0 cursor-default items-center gap-1.5">
               <Binary className="h-3 w-3 text-muted-foreground" />
-              <span className="hidden tabular-nums xl:inline">~{totalTokens.toLocaleString()}</span>
-              <span className="hidden text-muted-foreground xl:inline">/ {formatContextWindow(contextWindow)}</span>
+              <span className="hidden tabular-nums lg:inline">~{totalTokens.toLocaleString()}</span>
+              <span className="hidden text-muted-foreground lg:inline">/ {formatContextWindow(contextWindow)}</span>
               <ProgressBar
                 pct={metrics.contextPct}
                 className="w-16"
@@ -99,9 +99,9 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
             <div className="flex shrink-0 cursor-default items-center gap-1.5">
               <Coins className="h-3 w-3 text-muted-foreground" />
               <span className="tabular-nums">~${metrics.sessionCost.toFixed(4)}</span>
-              <span className="hidden text-muted-foreground xl:inline">session</span>
+              <span className="hidden text-muted-foreground lg:inline">session</span>
               {metrics.messageCost > 0 && (
-                <span className="hidden text-muted-foreground xl:inline">(last: ${metrics.messageCost.toFixed(4)})</span>
+                <span className="hidden text-muted-foreground lg:inline">(last: ${metrics.messageCost.toFixed(4)})</span>
               )}
             </div>
           </TooltipTrigger>
