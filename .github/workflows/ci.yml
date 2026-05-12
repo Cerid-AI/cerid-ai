@@ -222,7 +222,7 @@ jobs:
         with:
           dockerfile: src/web/Dockerfile
           ignore: DL3008,DL3018,DL3059
-      - run: docker build -t cerid-mcp-test src/mcp/
+      - run: docker build -t cerid-mcp-test -f src/mcp/Dockerfile .
       - run: docker build -t cerid-web-test src/web/
       - name: Create Trivy ignore file
         run: |
