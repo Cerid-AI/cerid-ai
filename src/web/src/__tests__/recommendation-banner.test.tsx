@@ -38,7 +38,7 @@ beforeEach(() => {
 })
 
 function mockHealthFetch(features: typeof SAMPLE_REC[]) {
-  global.fetch = vi.fn().mockImplementation((url: string) => {
+  globalThis.fetch = vi.fn().mockImplementation((url: string) => {
     if (typeof url === "string" && url.includes("/health")) {
       return Promise.resolve({
         ok: true,
@@ -118,7 +118,7 @@ describe("RecommendationBanner", () => {
     await userEvent.click(screen.getByText("Dismiss permanently"))
 
     await waitFor(() => {
-      const calls = (global.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
       const dismissCall = calls.find(
         (c) => typeof c[0] === "string" && c[0].includes("/settings/recommendations/sparse_retrieval/dismiss"),
       )
