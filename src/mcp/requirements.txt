@@ -1,5 +1,5 @@
 # Core framework
-fastapi>=0.100,<0.136
+fastapi>=0.136.1,<0.137
 sentry-sdk[fastapi]>=2.35.0
 uvicorn[standard]>=0.46.0,<1
 pydantic>=2.0,<3
@@ -42,7 +42,7 @@ pandas>=2.0,<3.1
 extract-msg>=0.50,<1
 
 # Search
-bm25s>=0.3,<1.0
+bm25s>=0.3.6,<1.0
 PyStemmer>=2.2
 
 # Scheduling
@@ -72,7 +72,7 @@ quotequail>=0.4,<1
 
 # Utilities
 cryptography>=42,<47
-python-multipart>=0.0.9,<1
+python-multipart>=0.0.27,<1
 
 # Plugins (Pro tier — system deps: tesseract-ocr, ffmpeg in Dockerfile)
 # optional (Pro OCR plugin): pytesseract>=0.3.10

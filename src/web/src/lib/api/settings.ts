@@ -770,6 +770,35 @@ export async function disablePrivateMode(clearCache: boolean = false): Promise<v
   })
 }
 
+/**
+ * L4 session-wipe (Cycle 3.2 / v0.93.5).  Called from a
+ * ``beforeunload`` handler via ``navigator.sendBeacon()`` when L4 is
+ * active, so the backend's ephemeral-state wipe completes even when
+ * the page is unloading.
+ *
+ * ``sendBeacon`` doesn't accept custom headers, so the api-key header
+ * is omitted on this call.  The endpoint is intentionally
+ * unauthenticated for this reason — the worst case is a stray POST
+ * clearing the private-mode flag, which is the same state any caller
+ * can produce by hitting ``DELETE /settings/private-mode`` anyway.
+ */
+export function wipePrivateSession(conversationId: string): void {
+  if (typeof navigator === "undefined" || typeof navigator.sendBeacon !== "function") {
+    // Fallback for jsdom / SSR — fire-and-forget fetch.
+    void fetch(`${MCP_BASE}/settings/private-mode/session-wipe`, {
+      method: "POST",
+      headers: mcpHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ conversation_id: conversationId }),
+      keepalive: true,
+    }).catch(() => { /* noop — best-effort */ })
+    return
+  }
+  const blob = new Blob([JSON.stringify({ conversation_id: conversationId })], {
+    type: "application/json",
+  })
+  navigator.sendBeacon(`${MCP_BASE}/settings/private-mode/session-wipe`, blob)
+}
+
 // ---------------------------------------------------------------------------
 // Storage Monitoring
 // ---------------------------------------------------------------------------

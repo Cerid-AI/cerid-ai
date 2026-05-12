@@ -55,6 +55,15 @@ class CorpusStats:
     flags_enabled: frozenset[str]
     """Names of retrieval flags currently flipped on (e.g. ``"RETRIEVAL_HYPE_ENABLED"``)."""
 
+    longest_conversation_length: int = 0
+    """Message count of the operator's longest chat thread.
+
+    Sourced from the same Neo4j query the recommender job runs; default
+    0 keeps existing tests working without rewiring fixtures.  Used by
+    the chat-virtualization recommendation to surface only once a
+    conversation is large enough to benefit.
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class RecommendationSpec:
@@ -96,6 +105,11 @@ _THRESHOLD_SPARSE = int(os.getenv("CERID_RECOMMEND_SPARSE_AT", "100"))
 _THRESHOLD_HYPE = int(os.getenv("CERID_RECOMMEND_HYPE_AT", "100"))
 _THRESHOLD_PARENT_CHILD = int(os.getenv("CERID_RECOMMEND_PARENT_CHILD_AT", "100"))
 _THRESHOLD_RRF = int(os.getenv("CERID_RECOMMEND_RRF_AT", "500"))
+# Chat-virtualization threshold uses message count, not artifact count,
+# since the relevant dimension is conversation length.  200 is the
+# breakpoint where plain .map() reconciliation starts costing on every
+# streaming token, per the sprint plan's perf rationale.
+_THRESHOLD_VIRTUALIZATION = int(os.getenv("CERID_RECOMMEND_VIRTUALIZATION_AT", "200"))
 
 
 def _at(n: int, flag: str) -> Callable[[CorpusStats], bool]:
@@ -164,6 +178,28 @@ RECOMMENDATIONS: tuple[RecommendationSpec, ...] = (
         condition_fn=lambda stats: (
             stats.artifact_count >= _THRESHOLD_RRF
             and "HYBRID_FUSION_MODE_ACTIVE" not in stats.flags_enabled
+        ),
+    ),
+    RecommendationSpec(
+        id="chat_virtualization",
+        label="Virtualized chat list (long conversations)",
+        flag_env_var="ENABLE_CHAT_VIRTUALIZATION",
+        # The flag is consumed client-side via localStorage
+        # (``cerid:chat-virtualized``); the enable_payload tells the
+        # frontend recommendation banner which key to write.  No
+        # backend setting is mutated because virtualization is a pure
+        # render-tree choice.
+        enable_payload={"enable_chat_virtualization": True},
+        reason_template=(
+            "One of your conversations has {count} messages.  Virtualization "
+            "keeps the chat pane responsive at that length by rendering only "
+            "the visible window instead of the whole transcript."
+        ),
+        # Uses the new longest_conversation_length field; falls back to 0
+        # for callers that don't yet populate it (existing tests).
+        condition_fn=lambda stats: (
+            stats.longest_conversation_length >= _THRESHOLD_VIRTUALIZATION
+            and "ENABLE_CHAT_VIRTUALIZATION" not in stats.flags_enabled
         ),
     ),
 )

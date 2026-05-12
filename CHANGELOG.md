@@ -2,6 +2,83 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.5 — Chat virtualization + L4 backend enforcement + Dependabot batch (2026-05-12)
+
+Three-in-one release closing the open-action queue from v0.93.4.  Bundle
+chosen for atomicity (one merge, one CI run, no per-PR triage) over a
+trickle of patches.
+
+**Chat message virtualization** (v0.84.0 deferral cleared, Cycle 3.2 follow-on)
+
+* `src/web/src/components/chat/chat-messages.tsx` refactored into a
+  dispatcher with two parallel implementations sharing a single
+  `<MessageRow>` so the plain `.map()` branch and the new
+  `<VirtualizedChatMessages>` branch can't drift in their per-message
+  rendering.  `@tanstack/react-virtual@3.13.24` is pinned at an exact
+  version published **24 days before the May 11 2026 supply-chain
+  attack** on the `@tanstack/router` family (GHSA-g7cv-rxg3-hmpx); neither
+  `@tanstack/react-virtual` nor `@tanstack/virtual-core` was in the
+  affected list, and pinning blocks any future re-resolution from
+  picking up an attacker-injected version.
+* Feature flag `useChatVirtualization()` reads
+  `localStorage['cerid:chat-virtualized']` first, then the
+  `VITE_CHAT_VIRTUALIZATION` env var, default OFF for the v0.93.5
+  release.  The recommender engine surfaces the toggle once a user's
+  longest conversation crosses 200 messages (second user of the
+  C3.2 adaptive recommender — first since SPLADE).
+* Auto-scroll integration replaces the plain branch's
+  `viewport.scrollTop = viewport.scrollHeight` pixel math with
+  `virtualizer.scrollToIndex(messages.length - 1, { align: "end" })`.
+  The user-scrolled-up heuristic switches to comparing the last
+  virtual index against the total count — same semantics, virtualizer-
+  aware implementation.
+* jsdom polyfill in `src/__tests__/setup.ts` shims both
+  `Element.getBoundingClientRect` and `clientHeight`/`clientWidth` for
+  the Radix ScrollArea viewport so the virtualizer can compute its
+  visible window under tests.  Unit tests verify dispatcher logic +
+  empty-state guard + render-tree wrapper presence; visible-window
+  clipping is verified via the manual-browser sign-off in
+  `docs/plans/2026-05-12-chat-virtualization-sprint-plan.md`.
+
+**L4 backend enforcement** (closes the architectural privacy-contract gap)
+
+The UI has rendered Private Mode L4 ("Full ephemeral") since v0.92.1
+but the backend validator was capped at `le=3`, leaving the
+wipe-on-close contract half-shipped.  v0.93.5 closes the gap:
+
+* `PrivateModeRequest.level` now accepts `0–4`.
+* New `POST /settings/private-mode/session-wipe` endpoint, idempotent,
+  scoped to `conversation_id`.  Clears the global flag + the per-session
+  override.
+* Frontend wires `wipePrivateSession()` via `navigator.sendBeacon` on a
+  `beforeunload` handler registered in `useSettings` when
+  `privateModeLevel === 4`.  Falls back to `keepalive: true` fetch when
+  `sendBeacon` is unavailable (jsdom / older browsers).
+* 9 new pytest cases cover L0–L4 acceptance, idempotency, scope, and
+  invalid-input rejection.
+
+**Dependabot batch** (11 PRs absorbed locally — one CI run instead of 11)
+
+Applied directly to main rather than per-PR merges to save GitHub
+Actions minutes and bundle the dep-graph state with the release:
+
+* `fastapi 0.135.4 → 0.136.1`
+* `bm25s 0.3.4 → 0.3.8`
+* `structlog 24.x → 25.5.0`
+* `python-multipart 0.0.18 → 0.0.28`
+* `pytest-benchmark 4.0 → 5.2.3`
+* `sonner 1.7.4 → 2.0.7`
+* `actions/checkout@v4 → @v6` (all three workflow files)
+* `actions/setup-python@v5 → @v6` (all three workflow files)
+* `actions/upload-artifact@v4 → @v7`
+* `actions/download-artifact@v4 → @v8`
+* `aquasecurity/trivy-action@0.35.0 → @0.36.0` (SHA-pinned)
+
+The TanStack supply-chain attack was investigated mid-flight — the
+project's existing `@tanstack/react-query@5.100.10` + new
+`@tanstack/react-virtual@3.13.24` + `@tanstack/virtual-core@3.14.0` are
+all clean (not in the 42-package affected list).
+
 ## v0.93.4 — Sidecar SPLADE endpoint + Private Mode polish + chat-virtualization sprint plan (2026-05-12)
 
 Closes the C3.2 follow-on punch list and a long-deferred UX polish round.

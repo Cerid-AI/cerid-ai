@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 275
+**Total routes:** 276
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -224,6 +224,7 @@ not documented here; see the internal repo for the full registry.
 | DELETE | `/settings/private-mode` | `reset_private_mode` | `src/mcp/app/routers/settings.py` |  |  |
 | GET | `/settings/private-mode` | `get_private_mode` | `src/mcp/app/routers/settings.py` |  |  |
 | POST | `/settings/private-mode` | `set_private_mode` | `src/mcp/app/routers/settings.py` |  |  |
+| POST | `/settings/private-mode/session-wipe` | `wipe_private_session` | `src/mcp/app/routers/settings.py` |  |  |
 | POST | `/settings/tier` | `set_tier` | `src/mcp/app/routers/settings.py` |  |  |
 | GET | `/settings/openrouter-key` | `get_openrouter_key_status` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
 | PUT | `/settings/openrouter-key` | `put_openrouter_key` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |

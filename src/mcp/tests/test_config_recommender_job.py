@@ -87,14 +87,49 @@ class _FakeRedis:
 # Registry tests
 # ---------------------------------------------------------------------------
 
-def test_registry_has_four_recommendations():
+def test_registry_has_expected_recommendations():
     ids = {spec.id for spec in RECOMMENDATIONS}
     assert ids == {
         "sparse_retrieval",
         "hype_indexing",
         "parent_child_retrieval",
         "rrf_fusion",
+        # v0.93.5 — second user of the recommender engine, fires on
+        # conversation length rather than artifact count.
+        "chat_virtualization",
     }
+
+
+def test_chat_virtualization_fires_on_long_conversation():
+    """The new C3.2 follow-on user of the recommender engine."""
+    from core.config.recommendations import CorpusStats, evaluate
+
+    # Short conversation: no fire.
+    stats_short = CorpusStats(
+        artifact_count=10,
+        flags_enabled=frozenset(),
+        longest_conversation_length=50,
+    )
+    ids_short = {spec.id for spec, _ in evaluate(stats_short)}
+    assert "chat_virtualization" not in ids_short
+
+    # Long conversation: fires regardless of artifact count.
+    stats_long = CorpusStats(
+        artifact_count=10,
+        flags_enabled=frozenset(),
+        longest_conversation_length=250,
+    )
+    ids_long = {spec.id for spec, _ in evaluate(stats_long)}
+    assert "chat_virtualization" in ids_long
+
+    # Already enabled: no fire even at long length.
+    stats_on = CorpusStats(
+        artifact_count=10,
+        flags_enabled=frozenset({"ENABLE_CHAT_VIRTUALIZATION"}),
+        longest_conversation_length=500,
+    )
+    ids_on = {spec.id for spec, _ in evaluate(stats_on)}
+    assert "chat_virtualization" not in ids_on
 
 
 def test_corpus_below_threshold_fires_nothing():

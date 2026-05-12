@@ -39,6 +39,80 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof globalThis.ResizeObserver
 }
 
+// Polyfill Element.getBoundingClientRect for jsdom + @tanstack/react-virtual
+// (Cycle 3.2 / v0.93.5).  jsdom returns a zero-size DOMRect by default,
+// which makes the virtualizer think every item has zero height and
+// stops it from rendering anything.
+//
+// Two shims here:
+//   1. Per-row: when the element carries a data-index attribute (the
+//      virtualizer's per-item marker), return a realistic 40px-tall box
+//      so the virtualizer measures + positions the row correctly.
+//   2. Scroll-viewport: when the element is the Radix ScrollArea
+//      viewport (carries data-radix-scroll-area-viewport), report an
+//      800x600 box so the virtualizer's visible-window calculation has
+//      something to clip against.
+// Also overrides ``clientHeight`` for the viewport — the virtualizer
+// uses both APIs to compute the visible window.
+//
+// All other callers get the original zero-rect, preserving existing
+// test behavior.
+{
+  const original = Element.prototype.getBoundingClientRect
+  Element.prototype.getBoundingClientRect = function (): DOMRect {
+    const dataIndex = this.getAttribute && this.getAttribute("data-index")
+    if (dataIndex !== null && dataIndex !== undefined) {
+      const i = parseInt(dataIndex, 10)
+      const height = 40
+      const top = i * height
+      return {
+        x: 0, y: top, top, left: 0,
+        right: 800, bottom: top + height,
+        width: 800, height,
+        toJSON: () => ({}),
+      } as DOMRect
+    }
+    if (
+      typeof this.hasAttribute === "function" &&
+      this.hasAttribute("data-radix-scroll-area-viewport")
+    ) {
+      return {
+        x: 0, y: 0, top: 0, left: 0,
+        right: 800, bottom: 600,
+        width: 800, height: 600,
+        toJSON: () => ({}),
+      } as DOMRect
+    }
+    return original.call(this)
+  }
+  // The virtualizer also reads clientHeight / clientWidth.  jsdom
+  // defaults to 0 for both; shim them to match the viewport box above.
+  Object.defineProperty(Element.prototype, "clientHeight", {
+    configurable: true,
+    get(): number {
+      if (
+        typeof this.hasAttribute === "function" &&
+        this.hasAttribute("data-radix-scroll-area-viewport")
+      ) {
+        return 600
+      }
+      return 0
+    },
+  })
+  Object.defineProperty(Element.prototype, "clientWidth", {
+    configurable: true,
+    get(): number {
+      if (
+        typeof this.hasAttribute === "function" &&
+        this.hasAttribute("data-radix-scroll-area-viewport")
+      ) {
+        return 800
+      }
+      return 0
+    },
+  })
+}
+
 // Polyfill localStorage for test environments where it's a broken proxy
 // (Node 22 ships localStorage but requires --localstorage-file to work)
 {

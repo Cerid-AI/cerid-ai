@@ -47,6 +47,12 @@ ALLOWLIST: set[tuple[str, str]] = {
     # "enable" / "disable"; runAutomation hits /automations/{id}/run. Backend
     # exposes those three endpoints individually.
     ("POST", "/automations/{p}/{p}"),
+    # wipePrivateSession() calls navigator.sendBeacon() which has no
+    # ``method:`` literal for the scanner to read.  The endpoint is POST
+    # on the backend; sendBeacon always POSTs.  The fallback fetch path
+    # in the same function declares method:"POST" explicitly and is
+    # picked up by the scanner normally.
+    ("GET", "/settings/private-mode/session-wipe"),
 }
 
 
