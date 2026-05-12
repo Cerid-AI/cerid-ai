@@ -112,6 +112,19 @@ function MenuSeparator() {
 }
 
 /**
+ * Small italic footnote at the base of a menu — used to clarify
+ * data-route semantics under the privacy radio group without
+ * cluttering each individual option's one-line description.
+ */
+function MenuFootnote({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-t mt-1 px-2 pt-2 text-label-xs italic text-muted-foreground leading-snug">
+      {children}
+    </div>
+  )
+}
+
+/**
  * Toolbar button with a companion chevron that opens a settings popover.
  *
  * - Click the **icon** to toggle the feature on/off
@@ -360,19 +373,44 @@ export function ChatToolbar({
               <MenuRadioItem
                 checked={privateModeLevel === 4}
                 onClick={() => requestPrivateLevel(4)}
-                description="Wipes session state when you close the tab. Cannot recover."
+                description="One-shot per tab. Session is erased automatically on tab close — even the audit log is bypassed."
                 destructive
               >
                 L4 — Full ephemeral
               </MenuRadioItem>
+              <MenuFootnote>
+                Data routes: L0 persists to server + local cache. L1 keeps the
+                local cache only. L2 also bypasses KB injection. L3 also skips
+                Redis audit logs. L4 is in-memory only and disappears with the tab.
+              </MenuFootnote>
             </>
           }
         />
       </TooltipProvider>
       {privateModeEnabled && !isNarrow && (
-        <Badge variant="outline" className={cn("text-label-xs px-1.5 py-0", badgeBorderClass)}>
-          {privateModeLevel === 4 ? "Private · L4" : "Private"}
-        </Badge>
+        privateModeLevel === 4 ? (
+          // L4 needs a persistent reassurance that the wipe-on-close
+          // contract is still in force — without it the badge looks
+          // identical to L1-L3 once the AlertDialog has been dismissed,
+          // and users have flagged uncertainty about whether the
+          // ephemeral lifecycle actually triggers.
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className={cn("text-label-xs px-1.5 py-0 cursor-help", badgeBorderClass)}>
+                Private · L4
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              This tab is in full-ephemeral mode. Closing the tab will erase the
+              conversation, memory state, and any cached query results. No
+              recovery path.
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <Badge variant="outline" className={cn("text-label-xs px-1.5 py-0", badgeBorderClass)}>
+            Private
+          </Badge>
+        )
       )}
       <AlertDialog open={pendingL4} onOpenChange={setPendingL4}>
         <AlertDialogContent>

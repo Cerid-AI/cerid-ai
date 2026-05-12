@@ -1,6 +1,6 @@
 [project]
 name = "cerid-ai"
-version = "0.93.3"
+version = "0.93.4"
 description = "Privacy-first Personal AI Knowledge Companion"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -26,6 +26,7 @@ ignore = ["E501"]  # line length handled by formatter
 "**/tests/**" = ["BLE001"]  # test files can use broad except for test isolation
 "**/core/**" = ["BLE001"]  # core/ extracted from branch without BLE001 annotations; sweep planned
 "**/app/**" = ["BLE001"]  # app/ extracted from branch without BLE001 annotations; sweep planned
+"scripts/cerid-sidecar.py" = ["E402"]  # FastAPI imports follow heavy model-loading helpers by design
 
 [tool.mypy]
 python_version = "3.12"

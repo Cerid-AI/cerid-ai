@@ -73,8 +73,23 @@ interface EssentialsSectionProps {
   credits?: ProviderCredits
 }
 
+/**
+ * Per-level data-route summary surfaced in the read-only Privacy
+ * section. Mirrors the bottom-of-menu footnote in chat-toolbar so the
+ * Settings view and the chat menu say the same thing about what each
+ * level does to your data.
+ */
+const PRIVATE_MODE_DESCRIPTIONS: Record<number, { label: string; reason: string }> = {
+  0: { label: "Off", reason: "Standard behaviour — conversations saved to server, KB injected, audit logged." },
+  1: { label: "L1 — Skip saves & sync", reason: "Local cache only; this conversation never reaches the server." },
+  2: { label: "L2 — Also skip KB injection", reason: "L1 protections, plus the model only sees what you type — no KB context." },
+  3: { label: "L3 — Also no logging", reason: "L2 protections, plus Redis audit logs are bypassed for this session." },
+  4: { label: "L4 — Full ephemeral", reason: "In-memory only. Session is erased when you close the tab — no recovery path." },
+}
+
 export function EssentialsSection({ settings, sections, toggleSection, patch, credits }: EssentialsSectionProps) {
-  const { routingMode, setRoutingMode } = useSettings()
+  const { routingMode, setRoutingMode, privateModeEnabled, privateModeLevel } = useSettings()
+  const privateInfo = PRIVATE_MODE_DESCRIPTIONS[privateModeEnabled ? privateModeLevel : 0]
   const { data: healthStatus } = useQuery({
     queryKey: ["health-status"],
     queryFn: fetchHealthStatus,
@@ -141,6 +156,39 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
       <SectionHeading icon={Shield} label="Provider Status" open={sections.provider_status} onToggle={() => toggleSection("provider_status")} />
       {sections.provider_status && (
         <ProviderStatusPanel settings={settings} />
+      )}
+
+      {/* -- Privacy (read-only — toggle lives in the chat toolbar) -- */}
+      <SectionHeading icon={Shield} label="Privacy" open={sections.privacy} onToggle={() => toggleSection("privacy")} />
+      {sections.privacy && (
+        <Card className="mb-4">
+          <CardContent className="grid gap-2 pt-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Private Mode</span>
+              <span
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-label-xs font-mono uppercase tracking-wide",
+                  privateModeEnabled && privateModeLevel === 1 && "border-green-500/40 text-green-500 bg-green-500/5",
+                  privateModeEnabled && privateModeLevel === 2 && "border-yellow-500/40 text-yellow-500 bg-yellow-500/5",
+                  privateModeEnabled && privateModeLevel === 3 && "border-orange-500/40 text-orange-500 bg-orange-500/5",
+                  privateModeEnabled && privateModeLevel === 4 && "border-red-500/40 text-red-500 bg-red-500/5",
+                  !privateModeEnabled && "border-muted-foreground/30 text-muted-foreground",
+                )}
+              >
+                {privateModeEnabled ? `L${privateModeLevel}` : "OFF"}
+              </span>
+              <span className="text-sm text-muted-foreground">{privateInfo.label}</span>
+            </div>
+            <p className="text-label-sm text-muted-foreground leading-relaxed">
+              {privateInfo.reason}
+            </p>
+            <p className="text-label-xs italic text-muted-foreground">
+              Change the level from the lock icon in the chat toolbar. Read-only here
+              so a single privacy state lives next to your live conversation, not
+              behind a Settings tab.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {/* -- System Recommendation -- */}
