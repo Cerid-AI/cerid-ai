@@ -48,6 +48,7 @@ ElementType = Literal[
     "EmailHeader",
     "EmailBody",
     "EmailThreadEdge",
+    "WikilinkEdge",
     "CodeFunction",
     "CodeClass",
     "CodeImport",
@@ -98,6 +99,13 @@ class ParsedElement(TypedDict):
         reply-stripped; quoted blocks dropped)
     * EmailThreadEdge
         ``{"thread_id": str, "message_id": str, "in_reply_to": str}``
+    * WikilinkEdge
+        ``{"wikilink_target": str, "wikilink_alias": str,
+           "wikilink_heading": str, "wikilink_is_embed": "true"|"false",
+           "wikilink_source_chunk_idx": str}`` — zero-text edge marker
+        synthesised by ``markdown_wikilink_edge_strategy``; the Phase E
+        graph-commit step converts each one into a Neo4j ``WIKILINKS_TO``
+        or ``EMBEDS`` edge.
     * CodeFunction / CodeClass / CodeImport
         ``{"file": str, "language": str, "name": str, "start_line": int,
            "end_line": int, "qualified_name": str}``

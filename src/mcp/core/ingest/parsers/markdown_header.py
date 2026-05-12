@@ -16,12 +16,21 @@ Library choice: `langchain_text_splitters.MarkdownHeaderTextSplitter`
 parser keeps the section text raw — header-prepending happens in the
 chunker strategy so we can A/B test "with prepended headings" vs
 "plain section text" without re-parsing.
+
+RAG Cycle C2.2: a leading YAML frontmatter block is stripped from the
+source before header-splitting and its allowlisted keys are attached to
+the FIRST emitted ``MarkdownSection`` element under
+``metadata["frontmatter"]``.  The service layer picks the dict up from
+the chunker output and threads it into Neo4j Artifact properties +
+alias resolution.
 """
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
+from core.ingest.frontmatter import extract_frontmatter
 from core.ingest.parsers import ParsedElement
 
 logger = logging.getLogger("ai-companion.ingest.parsers.markdown")
@@ -83,8 +92,41 @@ def parse_markdown(path: str | Path, *, encoding: str = "utf-8") -> list[ParsedE
 
 def parse_markdown_string(text: str) -> list[ParsedElement]:
     """Parse a Markdown string. Same contract as :func:`parse_markdown`
-    minus the file-IO step. Useful for stdin / streamed sources."""
+    minus the file-IO step. Useful for stdin / streamed sources.
+
+    RAG Cycle C2.2: if ``text`` starts with a ``---``-fenced YAML
+    frontmatter block, the allowlisted keys are extracted and attached
+    to the first emitted element under
+    ``metadata["frontmatter_json"]`` (JSON-encoded so the value
+    round-trips through ChromaDB's primitive-only metadata schema).
+    The frontmatter fence itself is stripped before header-splitting so
+    the splitter doesn't see ``---`` as a horizontal rule.
+    """
     if not text.strip():
+        return []
+
+    # Strip frontmatter first so the header splitter never sees the
+    # fence (langchain treats ``---`` as a thematic-break which would
+    # split the body in unexpected places).  Empty frontmatter dict +
+    # unchanged body when no fence is present.
+    frontmatter, body = extract_frontmatter(text)
+
+    if not body.strip():
+        # Pure-frontmatter file with no body — emit a single empty
+        # section so the frontmatter still reaches the service layer.
+        if frontmatter:
+            return [
+                {
+                    "text": "",
+                    "element_type": "MarkdownSection",
+                    "metadata": {
+                        "heading_path": [],
+                        "level": 0,
+                        "headers": {},
+                        "frontmatter_json": json.dumps(frontmatter),
+                    },
+                },
+            ]
         return []
 
     # Lazy import so the module loads even when the dep isn't installed —
@@ -97,12 +139,12 @@ def parse_markdown_string(text: str) -> list[ParsedElement]:
         # chunker strategy if header-prepended retrieval is wanted.
         strip_headers=True,
     )
-    docs = splitter.split_text(text)
+    docs = splitter.split_text(body)
 
     elements: list[ParsedElement] = []
     for doc in docs:
-        body = doc.page_content
-        if not body.strip():
+        body_text = doc.page_content
+        if not body_text.strip():
             continue
         # Document.metadata is dict[str, str] keyed by h1..h6
         headers: dict[str, str] = doc.metadata
@@ -116,7 +158,7 @@ def parse_markdown_string(text: str) -> list[ParsedElement]:
 
         elements.append(
             {
-                "text": body,
+                "text": body_text,
                 "element_type": "MarkdownSection",
                 "metadata": {
                     "heading_path": heading_path,
@@ -126,9 +168,16 @@ def parse_markdown_string(text: str) -> list[ParsedElement]:
             },
         )
 
+    # Attach frontmatter to the FIRST emitted element so the service
+    # layer picks it up exactly once.  The chunker strategy propagates
+    # element metadata into chunk metadata verbatim.
+    if frontmatter and elements:
+        elements[0]["metadata"]["frontmatter_json"] = json.dumps(frontmatter)
+
     logger.info(
-        "markdown_parsed sections=%d max_depth=%d",
+        "markdown_parsed sections=%d max_depth=%d frontmatter_keys=%d",
         len(elements),
         max((el["metadata"]["level"] for el in elements), default=0),
+        len(frontmatter),
     )
     return elements

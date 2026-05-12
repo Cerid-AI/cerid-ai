@@ -2,6 +2,104 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.1 — Obsidian-style integration layer (RAG Cycle 2, 2026-05-12)
+
+Six-phase integration on top of the existing RAG pipeline: wikilink
+parsing, frontmatter, vault source profiles, recursive email-attachment
+ingestion, three small parser improvements, and end-to-end parent-child
+retrieval. The cycle treats markdown as graph signal rather than plain
+text — links, aliases, and folder semantics now flow into Neo4j as
+first-class relationships.
+
+**Wikilinks** (`3696967`) — `[[Some Note]]`, `[[Note|alias]]`,
+`[[Note#heading]]`, and `![[embed.png]]` are now parsed during the
+existing layout-aware chunking pass and materialized as
+`(:Artifact)-[:WIKILINKS_TO]->(:Artifact)` /
+`(:Artifact)-[:EMBEDS]->(:Artifact)` edges in Neo4j. Broken links
+create `(:PendingArtifact {name})` placeholders that get promoted
+when the target is later ingested. New files:
+[`core/ingest/wikilinks.py`](src/mcp/core/ingest/wikilinks.py),
+[`app/db/neo4j/wikilinks.py`](src/mcp/app/db/neo4j/wikilinks.py).
+ReDoS-safe regex with 50 KB input cap and code-fence stripping.
+
+**Frontmatter** (`8f66184`) — YAML frontmatter is now extracted and
+allowlisted into artifact metadata. Reserved keys (`tags`, `aliases`,
+`cssclass`, `status`, `created`, `updated`, `source`) flow through
+existing pipelines; any `cerid:*`-prefixed custom key lands as a Neo4j
+node property (with non-alphanumerics sanitized to underscore).
+Aliases now feed the wikilink resolver — `aliases: [Foo]` promotes
+any `PendingArtifact {name: "Foo"}`. New
+[`core/ingest/frontmatter.py`](src/mcp/core/ingest/frontmatter.py).
+
+**Vault source profile** (`5bcd845`) — folders registered as vaults
+now apply folder semantics: `mocs/` → `sub_category="moc"`, `daily/`
+→ `sub_category="daily"`, `templates/` → SKIP, `attachments/` →
+ingest binaries bypassing the general extension allowlist. Dual-source
+config: `.cerid-vault.yaml` in the vault root takes precedence, with
+the Settings UI form as fallback. New
+[`core/ingest/vault_config.py`](src/mcp/core/ingest/vault_config.py) +
+[`components/settings/vault-config-section.tsx`](src/web/src/components/settings/vault-config-section.tsx)
++ `GET /watched-folders/{id}/vault-profile` endpoint.
+
+**Email-attachment recursive ingestion** (`f500dd4`) — `parse_eml`
+and `parse_mbox` now extract attachment bytes and ingest each
+attachment as its own Artifact via the existing parser dispatch
+(PDFs go to the PDF parser, DOCX to office.py, etc). Parent →
+attachment is materialized as `(:Artifact {source_type:"email"})
+-[:HAS_ATTACHMENT]->(:Artifact)`. 50 MB cap per attachment; magic-byte
+mismatch skips; one bad attachment never aborts the batch; nested
+.eml-in-.eml is captured as text only (cycle prevention via
+`_SKIP_NESTED_ATTACHMENTS` ContextVar). Dedup'd attachments
+re-link via HAS_ATTACHMENT instead of creating duplicates.
+
+**Parser improvements** (`f7ab333`) — three small wins bundled:
+- mbox truncation surfaced as `mbox_truncated` /
+  `mbox_total_messages` / `mbox_message_cap` on the parse response;
+  new `MBOX_MESSAGE_CAP` env var (default 100). A 10K-message mbox
+  no longer silently loses 99% of content.
+- PPTX parser added via `python-pptx` (slide-by-slide text + notes).
+  Legacy `.ppt` raises a clear `HTTPException(422)` with conversion
+  guidance instead of a generic crash.
+- MSG parser added via `extract-msg`; mirrors the `parse_eml`
+  contract including AttachmentBlob recursion. `.pst` is deferred
+  honestly — needs system `libpff` or the existing `pst-scanpst`
+  sidecar wired up; that's a focused phase of its own.
+
+**Parent-child retrieval end-to-end** (`4c6d989`) — the long-dormant
+`ENABLE_PARENT_CHILD_RETRIEVAL` flag is now actually wired. Audit
+found the feature was a non-functional skeleton: the chunker helper
+existed but neither the ingest path nor the query path called it.
+C2.6 lights it up: when the flag is true, ingest writes both parent
+(~512 token) and child (~128 token) chunks with `chunk_level`
+metadata + `parent_chunk_id` linkage; vector retrieval ranks against
+children for precision, then substitutes parent text into the top-K
+results before reranker and LLM context. When the flag is off, every
+chunk gets `chunk_level="child"` so the metadata field is uniformly
+present — no runtime branching needed. Eval gate deferred per the
+documented procedure; default stays OFF until corpus growth exposes
+recall headroom.
+
+**Audit fixes** — pre-tag review caught 4 issues:
+- `CERID_RSS_POLL_INTERVAL` was defined twice in `settings.py` with
+  conflicting units (seconds vs minutes); duplicate removed.
+- Wikilink `source_chunk_id` resolved against the flat `chunk_ids`
+  list — pointing at parent rows when parent-child was on. Now
+  resolves against `child_chunk_ids` so the edge always references
+  a retrieval-visible chunk.
+- `cerid:*` frontmatter keys with non-alphanumeric characters
+  (spaces, dots) now sanitize cleanly to a legal Neo4j property
+  identifier instead of failing the inline Cypher.
+- `_substitute_parent_content` no longer mutates result dicts in
+  place — returns a fresh list so future shared/cached result paths
+  can't be corrupted.
+
+**Verification** — 6 phases, ~30 files, ~3500 LOC. All checks green:
+ruff + mypy + import-linter + env-example-drift across full
+src/mcp/ tree. Live-Neo4j tests verified against the sandbox stack
+(127.0.0.1:8898) for every Neo4j-touching phase: 5 wikilink tests +
+4 frontmatter tests + 3 HAS_ATTACHMENT tests + 5 parent-child
+end-to-end tests all pass.
+
 ## v0.93.0 — HyPE wiring fix (Workstream E R.3 lands, 2026-05-12)
 
 Fixes three integration bugs that had been silently preventing the HyPE

@@ -108,6 +108,55 @@ def create_artifact(
         return aid
 
 
+def set_artifact_properties(
+    driver,
+    artifact_id: str,
+    properties: dict[str, Any],
+) -> int:
+    """Set arbitrary Neo4j properties on an existing Artifact node.
+
+    RAG Cycle C2.2 — used by the ingestion service to land frontmatter
+    fields (``status``, ``cssclass``, ``source``, ``cerid_priority``,
+    …) on the just-created Artifact node.  Property names are
+    Neo4j-legal identifiers — the caller is responsible for sanitising
+    user-supplied keys (the frontmatter parser allowlists reserved keys
+    + ``cerid:`` prefix; the service layer rewrites ``cerid:foo`` to
+    ``cerid_foo`` because Neo4j property names can't contain colons).
+
+    Values that aren't Neo4j-native scalars (str/int/float/bool/None and
+    lists thereof) are skipped — frontmatter ``aliases`` lists land as
+    list-of-strings, which Neo4j supports natively as a property type.
+    Returns the number of properties successfully written.
+    """
+    if not properties:
+        return 0
+
+    # Strip empty/None values — the caller's frontmatter pass may emit
+    # None for keys the user intentionally cleared in YAML, and setting
+    # ``a.status = null`` would actively delete an existing value.  We
+    # don't want frontmatter omissions to wipe Artifact properties.
+    clean: dict[str, Any] = {
+        k: v for k, v in properties.items() if v is not None
+    }
+    if not clean:
+        return 0
+
+    with driver.session() as session:
+        # Build the SET clause with parameterised values so the caller
+        # never injects raw Cypher.  Property names go in the clause
+        # text (which is why the helper relies on the allowlist
+        # guarantee from the frontmatter parser); values are bound.
+        set_clauses = ", ".join(f"a.{k} = $prop_{k}" for k in clean)
+        params: dict[str, Any] = {"artifact_id": artifact_id}
+        for k, v in clean.items():
+            params[f"prop_{k}"] = v
+        session.run(
+            f"MATCH (a:Artifact {{id: $artifact_id}}) SET {set_clauses}",
+            **params,
+        )
+    return len(clean)
+
+
 def find_artifact_by_filename(
     driver,
     filename: str,

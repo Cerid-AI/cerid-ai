@@ -38,6 +38,7 @@ import {
 import { SyncSection } from "./sync-section"
 import { StorageBar } from "./StorageBar"
 import { SectionHeading, InfoTip, LabelWithInfo, ReadOnlyEnvHint, Row } from "./settings-primitives"
+import { VaultConfigSection } from "./vault-config-section"
 import { logSwallowedError } from "@/lib/log-swallowed"
 
 function formatFlagName(flag: string): string {
@@ -1115,6 +1116,7 @@ function WatchedFoldersSection() {
                 <span>Last: {new Date(folder.last_scanned_at).toLocaleDateString()}</span>
               </div>
             )}
+            <VaultConfigSection folder={folder} onChanged={async () => { await refetch() }} />
           </div>
         ))}
 

@@ -17,10 +17,12 @@ import os
 import pathlib
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from core.ingest.vault_config import build_profile, profile_to_dict
 from errors import IngestionError
 from models.watched_folders import (
     WatchedFolderDetail,
@@ -50,6 +52,15 @@ class WatchedFolderCreate(BaseModel):
     domain_override: str | None = Field(None, description="Force domain classification for all files")
     exclude_patterns: list[str] = Field(default_factory=lambda: [".git", "node_modules", "__pycache__", ".DS_Store"])
     search_enabled: bool = Field(True, description="Include this folder's chunks in RAG queries")
+    is_vault: bool = Field(False, description="Treat this folder as a markdown vault with per-subfolder semantics")
+    vault_config: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "UI-form fallback for vault folder names (mocs_folders, daily_folders, "
+            "templates_folders, attachments_folders, skip_folders, default_domain). "
+            "A .cerid-vault.yaml at the vault root takes precedence."
+        ),
+    )
 
 
 class WatchedFolderUpdate(BaseModel):
@@ -58,6 +69,8 @@ class WatchedFolderUpdate(BaseModel):
     domain_override: str | None = None
     exclude_patterns: list[str] | None = None
     search_enabled: bool | None = None
+    is_vault: bool | None = None
+    vault_config: dict[str, Any] | None = None
 
 
 class WatchedFolderResponse(BaseModel):
@@ -71,6 +84,14 @@ class WatchedFolderResponse(BaseModel):
     last_scanned_at: str | None
     stats: dict
     created_at: str
+
+
+class VaultProfileResponse(BaseModel):
+    """The effective vault profile for a folder: YAML > UI > defaults."""
+
+    is_vault: bool = Field(description="Whether the folder is registered as a vault")
+    yaml_present: bool = Field(description="Whether .cerid-vault.yaml exists at the vault root")
+    profile: dict[str, Any] = Field(description="Merged vault profile (folder names + default_domain)")
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +163,8 @@ async def create_watched_folder(body: WatchedFolderCreate):
         "domain_override": body.domain_override,
         "exclude_patterns": body.exclude_patterns,
         "search_enabled": body.search_enabled,
+        "is_vault": body.is_vault,
+        "vault_config": body.vault_config or None,
         "last_scanned_at": None,
         "stats": {"ingested": 0, "skipped": 0, "errored": 0},
         "created_at": now,
@@ -199,6 +222,12 @@ async def update_watched_folder(folder_id: str, body: WatchedFolderUpdate):
         data["exclude_patterns"] = body.exclude_patterns
     if body.search_enabled is not None:
         data["search_enabled"] = body.search_enabled
+    if body.is_vault is not None:
+        data["is_vault"] = body.is_vault
+    if body.vault_config is not None:
+        # An empty dict from the client explicitly clears the UI overrides
+        # and falls back to defaults / YAML; preserve that semantics.
+        data["vault_config"] = body.vault_config or None
 
     _save_folder(redis, folder_id, data)
     logger.info("Updated watched folder %s", folder_id)
@@ -232,17 +261,26 @@ async def scan_watched_folder(folder_id: str, background_tasks: BackgroundTasks)
         raise HTTPException(status_code=400, detail=f"Directory not accessible: {data['path']}")
 
     async def _run_scan():
-        from app.services.folder_scanner import scan_folder
+        from app.services.folder_scanner import scan_folder, scan_vault
 
         ingested = 0
         skipped = 0
         errored = 0
 
-        try:
-            async for result in scan_folder(
+        if data.get("is_vault"):
+            scan_iter = scan_vault(
+                data["path"],
+                data.get("vault_config"),
+                exclude_patterns=set(data.get("exclude_patterns", [])),
+            )
+        else:
+            scan_iter = scan_folder(
                 data["path"],
                 exclude_patterns=set(data.get("exclude_patterns", [])),
-            ):
+            )
+
+        try:
+            async for result in scan_iter:
                 if result.status == "ingested":
                     ingested += 1
                 elif result.status in ("duplicate", "low_quality", "skipped", "unsupported"):
@@ -285,3 +323,32 @@ async def get_folder_status(folder_id: str):
         "last_scanned_at": data.get("last_scanned_at"),
         "stats": data.get("stats", {}),
     }
+
+
+@router.get("/{folder_id}/vault-profile", response_model=VaultProfileResponse)
+async def get_folder_vault_profile(folder_id: str) -> VaultProfileResponse:
+    """Return the effective vault profile (YAML > UI config > defaults).
+
+    The endpoint is callable even when ``is_vault`` is False — in that
+    case it returns the profile that *would* apply if the folder were
+    flagged as a vault, so the UI can show a preview before the user
+    flips the toggle.  ``yaml_present`` lets the UI explain to the user
+    which config source is winning.
+    """
+    redis = _get_redis()
+    data = _load_folder(redis, folder_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Watched folder not found: {folder_id}")
+
+    from core.ingest.vault_config import VAULT_CONFIG_FILENAME
+
+    folder_path = data.get("path", "")
+    yaml_present = bool(folder_path) and os.path.isfile(
+        os.path.join(folder_path, VAULT_CONFIG_FILENAME)
+    )
+    profile = build_profile(folder_path, data.get("vault_config"))
+    return VaultProfileResponse(
+        is_vault=bool(data.get("is_vault", False)),
+        yaml_present=yaml_present,
+        profile=profile_to_dict(profile),
+    )

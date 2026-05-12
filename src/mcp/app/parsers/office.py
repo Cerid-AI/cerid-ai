@@ -1,7 +1,13 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Office document parsers — DOCX and XLSX."""
+"""Office document parsers — DOCX, XLSX, and PPTX.
+
+PPTX (C2.5) — minimal text-frame extraction via ``python-pptx``. One
+``--- Slide N ---`` block per slide; shape text and notes are
+concatenated. Legacy ``.ppt`` (CFB binary) is NOT supported by
+python-pptx — uploads are rejected with a clear 422.
+"""
 
 from __future__ import annotations
 
@@ -142,3 +148,83 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
         result["truncated"] = True
 
     return result
+
+
+@register_parser([".pptx"])
+def parse_pptx(file_path: str) -> dict[str, Any]:
+    """Parse PPTX — concatenate shape text + speaker notes per slide.
+
+    Returns ``{text, file_type, page_count, slide_count}``.
+
+    Matches the contract of :func:`parse_docx` — ``page_count`` is the
+    slide count (peer parsers stuff their canonical "unit count" here)
+    and ``slide_count`` is added as an explicit alias for retrieval-side
+    consumers that want unambiguous slide semantics.
+    """
+    assert_safe_zip(file_path)
+
+    from pptx import Presentation
+
+    try:
+        prs = Presentation(file_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise ValueError(
+            f"Failed to read PPTX '{Path(file_path).name}': {e}. "
+            f"File may be corrupted or not a valid .pptx file."
+        ) from e
+
+    sections: list[str] = []
+    for idx, slide in enumerate(prs.slides, start=1):
+        parts: list[str] = [f"--- Slide {idx} ---"]
+
+        for shape in slide.shapes:
+            # ``has_text_frame`` short-circuits non-text shapes (pictures,
+            # placeholders without text, group shapes' container nodes).
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            text_frame = shape.text_frame
+            for paragraph in text_frame.paragraphs:
+                line = "".join(run.text for run in paragraph.runs).strip()
+                if line:
+                    parts.append(line)
+
+        # Speaker notes — pptx exposes them via a separate slide.
+        notes_slide = getattr(slide, "notes_slide", None) if slide.has_notes_slide else None
+        if notes_slide is not None:
+            notes_tf = getattr(notes_slide, "notes_text_frame", None)
+            if notes_tf is not None:
+                notes_text = (notes_tf.text or "").strip()
+                if notes_text:
+                    parts.append(f"[Notes] {notes_text}")
+
+        # Skip slides that had no extractable text at all.
+        if len(parts) > 1:
+            sections.append("\n".join(parts))
+
+    slide_count = len(prs.slides)
+    text = "\n\n".join(sections)
+    return {
+        "text": text[:_MAX_TEXT_CHARS],
+        "file_type": "pptx",
+        "page_count": slide_count,
+        "slide_count": slide_count,
+    }
+
+
+@register_parser([".ppt"])
+def parse_ppt(file_path: str) -> dict[str, Any]:
+    """Legacy ``.ppt`` (CFB binary) — unsupported; raise 422.
+
+    python-pptx only handles the OOXML ``.pptx`` format. Surfacing this
+    as a clear HTTP 422 lets the upload UI nudge the user to re-save as
+    .pptx rather than crashing inside the parser.
+    """
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Legacy .ppt format is not supported (file: '{Path(file_path).name}'). "
+            "Please convert to .pptx in PowerPoint or Keynote and re-upload."
+        ),
+    )

@@ -348,6 +348,15 @@ export async function disableOllama(): Promise<{ status: string; provider: strin
 // ---------------------------------------------------------------------------
 // Watched Folders
 
+export interface VaultConfig {
+  mocs_folders?: string[]
+  daily_folders?: string[]
+  templates_folders?: string[]
+  attachments_folders?: string[]
+  skip_folders?: string[]
+  default_domain?: string
+}
+
 export interface WatchedFolder {
   id: string
   path: string
@@ -356,9 +365,25 @@ export interface WatchedFolder {
   domain_override: string | null
   exclude_patterns: string[]
   search_enabled: boolean
+  is_vault?: boolean
+  vault_config?: VaultConfig | null
   last_scanned_at: string | null
   stats: { ingested: number; skipped: number; errored: number }
   created_at: string
+}
+
+export interface VaultProfileResponse {
+  is_vault: boolean
+  yaml_present: boolean
+  profile: {
+    root_path: string
+    mocs_folders: string[]
+    daily_folders: string[]
+    templates_folders: string[]
+    attachments_folders: string[]
+    skip_folders: string[]
+    default_domain: string
+  }
 }
 
 export async function fetchWatchedFolders(): Promise<{ folders: WatchedFolder[]; total: number }> {
@@ -367,7 +392,7 @@ export async function fetchWatchedFolders(): Promise<{ folders: WatchedFolder[];
   return res.json()
 }
 
-export async function addWatchedFolder(data: { path: string; label?: string; domain_override?: string; search_enabled?: boolean }): Promise<WatchedFolder> {
+export async function addWatchedFolder(data: { path: string; label?: string; domain_override?: string; search_enabled?: boolean; is_vault?: boolean; vault_config?: VaultConfig | null }): Promise<WatchedFolder> {
   const res = await fetch(`${MCP_BASE}/watched-folders`, {
     method: "POST",
     headers: { ...mcpHeaders(), "Content-Type": "application/json" },
@@ -377,7 +402,7 @@ export async function addWatchedFolder(data: { path: string; label?: string; dom
   return res.json()
 }
 
-export async function updateWatchedFolder(id: string, data: { enabled?: boolean; label?: string; search_enabled?: boolean; domain_override?: string }): Promise<WatchedFolder> {
+export async function updateWatchedFolder(id: string, data: { enabled?: boolean; label?: string; search_enabled?: boolean; domain_override?: string; is_vault?: boolean; vault_config?: VaultConfig | null }): Promise<WatchedFolder> {
   const res = await fetch(`${MCP_BASE}/watched-folders/${id}`, {
     method: "PATCH",
     headers: { ...mcpHeaders(), "Content-Type": "application/json" },
@@ -395,6 +420,12 @@ export async function removeWatchedFolder(id: string): Promise<void> {
 export async function scanWatchedFolder(id: string): Promise<{ status: string }> {
   const res = await fetch(`${MCP_BASE}/watched-folders/${id}/scan`, { method: "POST", headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Scan failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchVaultProfile(id: string): Promise<VaultProfileResponse | null> {
+  const res = await fetch(`${MCP_BASE}/watched-folders/${id}/vault-profile`, { headers: mcpHeaders() })
+  if (!res.ok) return null
   return res.json()
 }
 

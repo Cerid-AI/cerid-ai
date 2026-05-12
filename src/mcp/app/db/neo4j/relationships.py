@@ -267,3 +267,67 @@ def discover_relationships(
             f"Discovered {created} relationship(s) for artifact {artifact_id[:8]} ({filename})"
         )
     return created
+
+
+# ---------------------------------------------------------------------------
+# RAG Cycle C2.4 — email attachment edges
+# ---------------------------------------------------------------------------
+
+def write_has_attachment(
+    driver,
+    parent_id: str,
+    child_id: str,
+    filename: str,
+    content_type: str,
+) -> bool:
+    """Write a ``(:Artifact)-[:HAS_ATTACHMENT]->(:Artifact)`` edge.
+
+    Parent is the email artifact; child is the artifact extracted from
+    one of its attachments. Properties on the edge:
+
+    * ``filename`` — the attachment's original filename
+    * ``content_type`` — MIME type from the email part
+    * ``attached_at`` — wall-clock ISO timestamp of the edge write
+
+    Idempotent: MERGE keyed on ``(parent_id, child_id)`` so re-ingesting
+    the parent (e.g. through ``_reingest_artifact``) does not duplicate
+    the edge. ``ON CREATE`` writes the metadata; existing edges are left
+    untouched (the first attachment metadata wins, matching how the
+    discovery-graph creates ``RELATES_TO`` edges).
+
+    Returns ``True`` if a new edge was created, ``False`` if it already
+    existed (or the MATCH failed because one of the nodes is missing).
+    Best-effort logging on errors — the caller wraps this in a
+    ``log_swallowed_error`` boundary because attachment-edge creation
+    must never break ingestion.
+    """
+    if parent_id == child_id:
+        # Defensive: a content_hash dedup collapse from an email onto its
+        # own attachment is a degenerate case. Skip silently.
+        return False
+
+    now = utcnow_iso()
+    cypher = (
+        "MATCH (p:Artifact {id: $parent_id}), (c:Artifact {id: $child_id}) "
+        "MERGE (p)-[r:HAS_ATTACHMENT]->(c) "
+        "ON CREATE SET r.filename = $filename, "
+        "              r.content_type = $content_type, "
+        "              r.attached_at = $now "
+        "RETURN r.attached_at = $now AS is_new"
+    )
+    with driver.session() as session:
+        record = session.run(
+            cypher,
+            parent_id=parent_id,
+            child_id=child_id,
+            filename=filename,
+            content_type=content_type,
+            now=now,
+        ).single()
+        is_new = bool(record and record["is_new"])
+        if is_new:
+            logger.debug(
+                "HAS_ATTACHMENT: %s -[%s]-> %s",
+                parent_id[:8], filename, child_id[:8],
+            )
+        return is_new
