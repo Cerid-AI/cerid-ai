@@ -107,7 +107,12 @@ def _mapping_to_record(mapping: dict[str, Any]) -> JobRecord:
 # ---------------------------------------------------------------------------
 
 
-def enqueue_job(job: Any, *, redis_client: Any | None = None) -> str:
+def enqueue_job(
+    job: Any,
+    *,
+    payload: dict[str, Any] | None = None,
+    redis_client: Any | None = None,
+) -> str:
     """Synchronously enqueue a ``BaseJob`` — for sync call sites.
 
     Bridges the async-only ``RedisJobQueue.enqueue`` for sync paths like
@@ -118,8 +123,14 @@ def enqueue_job(job: Any, *, redis_client: Any | None = None) -> str:
     Parameters
     ----------
     job
-        A concrete ``BaseJob`` instance.  ``job.new_record()`` is called
-        to produce the persisted ``JobRecord``.
+        A concrete ``BaseJob`` instance.  ``job.new_record(payload=...)``
+        is called to produce the persisted ``JobRecord``.
+    payload
+        Optional mapping captured into ``JobRecord.payload``. The worker
+        re-instantiates jobs as ``job_class(**record.payload)`` — call
+        sites with non-trivial ``__init__`` args MUST pass them here or
+        the dispatch will fail with ``instantiation error: missing
+        required positional argument``.
     redis_client
         Optional connected ``redis.Redis`` instance. When omitted, fetched
         via ``app.deps.get_redis``.
@@ -132,7 +143,7 @@ def enqueue_job(job: Any, *, redis_client: Any | None = None) -> str:
     if redis_client is None:
         from app.deps import get_redis  # noqa: PLC0415
         redis_client = get_redis()
-    record = job.new_record()
+    record = job.new_record(payload=payload)
     mapping = _record_to_mapping(record)
     # redis-py's hset typing requires Mapping[str|bytes, bytes|float|int|str];
     # our values are all str so this is correct at runtime.

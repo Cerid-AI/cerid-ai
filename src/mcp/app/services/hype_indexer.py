@@ -130,7 +130,7 @@ async def index_chunk_with_hype(
         # 3. Store in parallel HyPE collection
         hype_coll_name = hype_collection_name(collection_name)
         hype_coll = await asyncio.to_thread(
-            chroma.get_or_create_collection, hype_coll_name
+            chroma.get_or_create_collection, name=hype_coll_name
         )
 
         doc_ids = [

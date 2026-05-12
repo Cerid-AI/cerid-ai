@@ -624,9 +624,9 @@ jinja2==3.1.6 \
     --hash=sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d \
     --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
     # via -r requirements.txt
-json-repair==0.59.7 \
-    --hash=sha256:933fc5c81c5edabb004472e58c495f1ae656a8778e9fd26ca806ae42f3110b07 \
-    --hash=sha256:f23c7890b7d1760185ff316421bc776d31a29290a8d45997cfaf6c3add895aaa
+json-repair==0.59.8 \
+    --hash=sha256:03f13c5169a15642612933dac918413abca8ea682c31a45c7427992a43b3af7e \
+    --hash=sha256:447e946b235ba0689a7f3d7f057988adebae316711cfb4170c44c5ea38ed5dea
     # via neo4j-graphrag
 jsonpatch==1.33 \
     --hash=sha256:0ae28c0cd062bbd8b8ecc26d7d164fbbea9652a1a3693f3b956c1eae5145dade \
@@ -666,19 +666,19 @@ langchain-text-splitters==0.3.11 \
     --hash=sha256:7a50a04ada9a133bbabb80731df7f6ddac51bc9f1b9cab7fa09304d71d38a6cc \
     --hash=sha256:cf079131166a487f1372c8ab5d0bfaa6c0a4291733d9c43a34a16ac9bcd6a393
     # via -r requirements.txt
-langgraph==1.1.10 \
-    --hash=sha256:3115beb58203283c98d8752a90c034f3432177d2979a1fe205f76e5f1b744500 \
-    --hash=sha256:8a4f163f72f4401648d0c11b48ee906947d938ba8cf1f474540fe591534f0d17
+langgraph==1.2.0 \
+    --hash=sha256:03fd5895a8d4b70db1ff63ebc3bacead29dd20cd794a8b1a483e7ec9018f7a65 \
+    --hash=sha256:4a9baaf62afc5d5f63144a50095140a34b9aa9b7cea695d25326d564775348e7
     # via -r requirements.txt
-langgraph-checkpoint==4.0.3 \
-    --hash=sha256:a7b5e2ca18fb79b55edf19396d4ee446f8a53dcb7a4ec62ce6f1c7e00bb5af7f \
-    --hash=sha256:b91b765712a2311a5b198760f714b7ab9b376d01c047ed78d9b9a3e80df802a3
+langgraph-checkpoint==4.1.0 \
+    --hash=sha256:8bc2a0466a20c38b865ce6671b42093fd5c041133f32351cae4222e0eeaf7fb5 \
+    --hash=sha256:e5bb304e30fc1363ac8fcb5f7dee5ca2185d77fe475b0d01de2c5f91324c2c21
     # via
     #   langgraph
     #   langgraph-prebuilt
-langgraph-prebuilt==1.0.13 \
-    --hash=sha256:7055e9fad41fbd3593800aed0aea0a6e974b17f33ed51b80d3d3a031212dd7c0 \
-    --hash=sha256:ad219782a80e1718e7e7794de49e0ae307111d45cbcffab9a52725a66a609456
+langgraph-prebuilt==1.1.0 \
+    --hash=sha256:3c579cf6eed2d17f9c157c2d0fcaddcd8688524e7022d3b22b37a3bf4589d528 \
+    --hash=sha256:51e311747d755b751d5c6b39b0c1446124d3a7643d2515017e6714b323508fc9
     # via langgraph
 langgraph-sdk==0.3.14 \
     --hash=sha256:68935bf6f4924eda92617a9e5dfb4f4281197508c648cb9d62ff083907607f9d \

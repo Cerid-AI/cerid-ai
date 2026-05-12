@@ -186,4 +186,4 @@ class TestFlagOn:
                 n=3,
             )
 
-        chroma_mock.get_or_create_collection.assert_called_once_with("cerid_general_hype")
+        chroma_mock.get_or_create_collection.assert_called_once_with(name="cerid_general_hype")

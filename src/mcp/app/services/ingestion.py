@@ -185,13 +185,14 @@ def _enqueue_hype_jobs_if_enabled(
 
     for chunk_id, content in zip(chunk_ids, chunks):
         try:
-            job = HyPEIndexingJob(
-                chunk_id=chunk_id,
-                content=content,
-                collection_name=coll_name,
-                artifact_id=artifact_id,
-            )
-            enqueue_job(job)
+            payload: dict[str, Any] = {
+                "chunk_id": chunk_id,
+                "content": content,
+                "collection_name": coll_name,
+                "artifact_id": artifact_id,
+            }
+            job = HyPEIndexingJob(**payload)
+            enqueue_job(job, payload=payload)
             logger.debug(
                 "hype_indexer.enqueued chunk_id=%s artifact_id=%s",
                 chunk_id, artifact_id,
