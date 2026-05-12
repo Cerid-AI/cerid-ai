@@ -12,6 +12,11 @@
 - `GET /health/live` — Liveness probe (always 200 unless process crashed)
 - `GET /health/ready` — Readiness probe (503 when critical deps unreachable)
 - `GET /health/status` — Detailed degradation report with circuit breaker states, pipeline providers, feature tier, and per-capability flags (`can_retrieve`, `can_verify`, `can_generate`)
+- `GET /health` (extended, v0.93.3) — Additionally surfaces `recommended_features: [{id, label, reason, triggered_at, corpus_size, enable_payload}, ...]` for the adaptive recommendation engine. Polled by the Settings-pane banner every 60 s.
+- `POST /settings/recommendations/{id}/dismiss` — Permanently dismiss a recommendation for the current tenant. 204 on success. (C3.2 / v0.93.3)
+- `DELETE /settings/recommendations/{id}` — Clear a recommendation from the active hash + drop the per-tenant dismissal. Used by the "Enable now" flow so the banner closes immediately. (C3.2 / v0.93.3)
+- `POST /wiki/write_note` — Two-way vault write (RAG C3.3 / v0.93.2). `{vault_id, path, content, frontmatter?, mode?: "create"|"append"|"overwrite", allow_synthesis_input?}` → `{file_path, artifact_id, ingested, frontmatter_written, mode}`. Atomic write via tmp + `os.replace`; reuses `VaultProfile.classify_path` for path safety; re-ingests as Artifact with `source_type="cerid-synthesis"`.
+- `PATCH /settings` (extended, v0.93.3) — Accepts `enable_sparse_retrieval`, `hybrid_fusion_mode` (`"weighted_sum" | "rrf" | "tri_rrf"`), `hybrid_rrf_sparse_weight`. The sparse toggle mutates `os.environ["RETRIEVAL_SPARSE_ENABLED"]` + `core.retrieval.sparse.SPARSE_ENABLED` live; invalid fusion mode returns 400.
 - `GET /collections` — List ChromaDB collections
 - `GET /scheduler` — Scheduled job status
 - `POST /query` — Query knowledge base (domain, top_k)

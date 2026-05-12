@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from app.processor.jobs.brief_generation import BriefGenerationJob
+from app.processor.jobs.config_recommender import ConfigRecommenderJob
 from app.processor.jobs.entity_extraction import EntityExtractionJob
 from app.processor.jobs.hype_indexing import HyPEIndexingJob
 from app.processor.jobs.ingest_recovery import IngestRecoveryJob
@@ -13,6 +14,7 @@ from app.processor.jobs.wiki_refresh import WikiRefreshJob
 
 __all__ = [
     "BriefGenerationJob",
+    "ConfigRecommenderJob",
     "EntityExtractionJob",
     "HyPEIndexingJob",
     "IngestRecoveryJob",

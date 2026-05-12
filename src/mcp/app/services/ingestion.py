@@ -472,6 +472,18 @@ def _reingest_artifact(
             "app.services.ingestion.bm25_index_reingest", e,
         )
 
+    # SPLADE-v3 sparse index (C3.2) — same children-only granularity.
+    # No-op when RETRIEVAL_SPARSE_ENABLED is off (the default state).
+    # Sparse exceptions must not break the two-phase commit; the same
+    # broad-catch + log_swallowed_error pattern as BM25 is used.
+    try:
+        from core.retrieval.sparse_index import index_chunks as sparse_index_chunks
+        sparse_index_chunks(domain, bm25_ids, bm25_texts)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.sparse_index_reingest", e,
+        )
+
     # Compute quality_score for re-ingested content
     _summary = base_meta.get("summary", "")
     _tags = base_meta.get("tags_json", "[]")
@@ -859,8 +871,17 @@ def ingest_content(
     try:
         from core.retrieval.bm25 import index_chunks
         index_chunks(domain, bm25_ids, bm25_texts)
-    except Exception as e:
-        logger.warning(f"BM25 indexing failed (non-blocking): {e}")
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.services.ingestion.bm25_index", e)
+
+    # SPLADE-v3 sparse index (C3.2) — same children-only granularity.
+    # No-op when RETRIEVAL_SPARSE_ENABLED is off; the encoder is
+    # never instantiated in that case so cold-start cost is zero.
+    try:
+        from core.retrieval.sparse_index import index_chunks as sparse_index_chunks
+        sparse_index_chunks(domain, bm25_ids, bm25_texts)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.services.ingestion.sparse_index", e)
 
     # Compute quality_score using weighted 4-dimension formula (skip in fast
     # paths where summary/keywords haven't been populated — curator re-scores

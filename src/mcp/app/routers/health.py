@@ -262,6 +262,58 @@ def _invariants_snapshot() -> dict:
         return {"healthy_invariants": False, "errors": [str(exc)]}
 
 
+def _load_recommendations(
+    redis_client, dismissed_prefix: str, hash_key: str,
+) -> list[dict]:
+    """Read ``cerid:recommendations`` and filter per-tenant dismissals.
+
+    Cycle 3.2 helper for the /health endpoint. Returns a list of
+    ``{id, label, reason, triggered_at, corpus_size, enable_payload}``
+    dicts in declaration order (registry order). Callers should treat
+    an empty list as "no nudges, all features either off-and-fine or
+    already on".
+
+    For now Cerid is single-tenant by default; we read the "default"
+    tenant's dismissals set. Multi-tenant installations route
+    /health per tenant via middleware (out of scope for v0.93.3).
+    """
+    if redis_client is None:
+        return []
+    try:
+        raw_hash = redis_client.hgetall(hash_key) or {}
+    except Exception as exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.load_recs.hgetall", exc)
+        return []
+    if not raw_hash:
+        return []
+
+    try:
+        dismissed = redis_client.smembers(f"{dismissed_prefix}default") or set()
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.health.load_recs.smembers", exc)
+        dismissed = set()
+
+    # Normalize bytes → str (redis-py returns bytes by default).
+    def _s(v: Any) -> str:
+        return v.decode() if isinstance(v, bytes) else str(v)
+
+    dismissed_str = {_s(d) for d in dismissed}
+
+    out: list[dict] = []
+    import json as _json
+    for key, value in raw_hash.items():
+        rec_id = _s(key)
+        if rec_id in dismissed_str:
+            continue
+        try:
+            entry = _json.loads(_s(value))
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("app.routers.health.load_recs.json", exc)
+            continue
+        out.append(entry)
+    return out
+
+
 @router.get("/health")
 def health_check_endpoint():
     """Return infrastructure health.
@@ -359,6 +411,28 @@ def health_check_endpoint():
         except Exception as _exc:  # noqa: BLE001 — observability augmentation only
             log_swallowed_error("app.routers.health.memory_consolidation_failures", _exc)
             result["invariants"].setdefault("memory_consolidation_failures_last_24h", 0)
+
+        # Cycle 3.2 — adaptive feature recommendations. Pure metadata
+        # surfaced at the top level of the /health response so the
+        # Settings-pane banner can poll a single endpoint and react to
+        # corpus growth.  Filters out per-tenant dismissals.  Failures
+        # here must never affect the /health response code.
+        try:
+            from app.routers.recommendations import _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY
+            _rec_redis = None
+            try:
+                _rec_redis = get_redis()
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed_error(
+                    "app.routers.health.recommendations.get_redis", _exc,
+                )
+            result["recommended_features"] = _load_recommendations(
+                _rec_redis, _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY,
+            )
+        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+            log_swallowed_error("app.routers.health.recommendations", _exc)
+            result.setdefault("recommended_features", [])
+
         _health_cache = result
         _health_cache_ts = now
 

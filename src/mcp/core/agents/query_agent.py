@@ -425,46 +425,92 @@ async def multi_domain_query(
                     seen_ids.add(chunk_id)
 
             from core.retrieval import bm25 as bm25_mod
-            if bm25_mod.is_available():
-                bm25_hits = await asyncio.to_thread(bm25_mod.search_bm25, domain, query, top_k)
-                if bm25_hits:
+            from core.retrieval import sparse_index as sparse_mod
+            bm25_avail = bm25_mod.is_available()
+            # Cycle 3.2 — SPLADE-v3 sparse retrieval. Only consulted when
+            # HYBRID_FUSION_MODE=tri_rrf so the default path stays
+            # zero-cost (no encoder load, no JSONL probe).
+            fusion_mode = getattr(config, "HYBRID_FUSION_MODE", "weighted_sum")
+            tri_rrf = fusion_mode == "tri_rrf" and sparse_mod.is_available()
+
+            if bm25_avail or tri_rrf:
+                fetch_tasks: list = []
+                if bm25_avail:
+                    fetch_tasks.append(asyncio.to_thread(
+                        bm25_mod.search_bm25, domain, query, top_k,
+                    ))
+                if tri_rrf:
+                    fetch_tasks.append(asyncio.to_thread(
+                        sparse_mod.search_sparse, domain, query, top_k,
+                    ))
+                fetch_results = await asyncio.gather(*fetch_tasks)
+
+                # Unpack in registration order so the indices match.
+                ridx = 0
+                bm25_hits: list[tuple[str, float]] = []
+                sparse_hits: list[tuple[str, float]] = []
+                if bm25_avail:
+                    bm25_hits = list(fetch_results[ridx])
+                    ridx += 1
+                if tri_rrf:
+                    sparse_hits = list(fetch_results[ridx])
+                    ridx += 1
+
+                if bm25_hits or sparse_hits:
                     bm25_map = dict(bm25_hits)
+                    sparse_map = dict(sparse_hits)
 
                     # Workstream E Phase 3 wire-in: HYBRID_FUSION_MODE selects
-                    # between the legacy weighted-sum blend and Reciprocal
-                    # Rank Fusion (Cormack/Clarke/Buettcher 2009; the 2026
-                    # default in Elastic, OpenSearch, Azure AI Search,
-                    # neo4j-graphrag). Default stays "weighted_sum" so this
-                    # commit is a pure plumbing change — flip
-                    # HYBRID_FUSION_MODE=rrf to enable.
-                    fusion_mode = getattr(config, "HYBRID_FUSION_MODE", "weighted_sum")
+                    # between the legacy weighted-sum blend, two-way RRF
+                    # (Cormack/Clarke/Buettcher 2009; the 2026 default in
+                    # Elastic, OpenSearch, Azure AI Search, neo4j-graphrag),
+                    # and Cycle-3.2's three-way variant that adds SPLADE-v3
+                    # sparse as a third ranking signal. Default stays
+                    # "weighted_sum" so this is a pure plumbing change —
+                    # flip HYBRID_FUSION_MODE to enable.
                     fused_map: dict[str, float] = {}
 
-                    if fusion_mode == "rrf":
+                    if fusion_mode in {"rrf", "tri_rrf"}:
                         from core.retrieval.rrf import rrf_fuse
                         vector_ranking = [
                             (entry["chunk_id"], entry["relevance"])
                             for entry in formatted
                         ]
-                        # bm25_hits already sorted descending per search_bm25 contract
+                        rankings: list[list[tuple[str, float]]] = [vector_ranking]
+                        weights: list[float] = [config.HYBRID_RRF_VECTOR_WEIGHT]
+                        if bm25_hits:
+                            rankings.append(bm25_hits)
+                            weights.append(config.HYBRID_RRF_BM25_WEIGHT)
+                        if tri_rrf and sparse_hits:
+                            rankings.append(sparse_hits)
+                            weights.append(
+                                getattr(config, "HYBRID_RRF_SPARSE_WEIGHT", 1.0),
+                            )
                         fused = rrf_fuse(
-                            [vector_ranking, bm25_hits],
+                            rankings,
                             k=config.HYBRID_RRF_K,
-                            weights=[
-                                config.HYBRID_RRF_VECTOR_WEIGHT,
-                                config.HYBRID_RRF_BM25_WEIGHT,
-                            ],
+                            weights=weights,
                         )
                         fused_map = dict(fused)
                         for entry in formatted:
                             entry["relevance"] = round(
                                 fused_map.get(entry["chunk_id"], 0.0), 6,
                             )
-                        # Drop entries already represented from bm25_map so
-                        # the bm25-only fetch below only fires on net-new
-                        # chunk_ids — same shape as the legacy path.
+                        # Drop entries already represented from bm25_map /
+                        # sparse_map so the bm25-only fetch below only
+                        # fires on net-new chunk_ids — same shape as the
+                        # legacy path. tri_rrf merges sparse-only chunks
+                        # into the same fallback path via sparse_map.
                         for entry in formatted:
                             bm25_map.pop(entry["chunk_id"], None)
+                            sparse_map.pop(entry["chunk_id"], None)
+                        # Sparse-only chunks travel through the same
+                        # fetch loop as bm25-only; carry their best score
+                        # into bm25_map so the existing code-path handles
+                        # them uniformly.
+                        for cid, score in sparse_map.items():
+                            if cid not in bm25_map:
+                                bm25_map[cid] = score
                     else:
                         # Legacy weighted-sum blend (default).
                         for entry in formatted:
@@ -501,10 +547,11 @@ async def multi_domain_query(
                                     meta.get(k) == v for k, v in metadata_filter.items()
                                 ):
                                     continue
-                                # In RRF mode the bm25-only chunk's fused
-                                # score already accounts for its rank; in
-                                # legacy mode use the keyword-weighted bm25.
-                                if fusion_mode == "rrf":
+                                # In RRF / tri_rrf mode the bm25/sparse-only
+                                # chunk's fused score already accounts for its
+                                # rank; in legacy mode use the keyword-weighted
+                                # bm25.
+                                if fusion_mode in {"rrf", "tri_rrf"}:
                                     rel = round(
                                         fused_map.get(cid, bm25_map[cid]),
                                         6,

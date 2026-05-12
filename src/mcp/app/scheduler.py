@@ -262,6 +262,60 @@ async def _run_ingest_recovery() -> None:
         logger.error("ingest_recovery scheduled job failed: %s", e)
 
 
+async def _run_config_recommender() -> None:
+    """Cycle 3.2 — periodic evaluation of the recommendation registry.
+
+    Mirrors :func:`_run_ingest_recovery` exactly: try enqueueing via
+    the processor queue (preferred path), fall back to running the
+    body directly when the queue isn't on ``app.state`` yet (early
+    startup / lightweight mode).
+    """
+    start = time.time()
+    try:
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:  # noqa: BLE001 — queue probe is best-effort
+            queue = None
+
+        if queue is not None:
+            from app.processor.jobs.config_recommender import ConfigRecommenderJob
+            job = ConfigRecommenderJob()
+            record = job.new_record()
+            await queue.enqueue(record)
+            logger.debug(
+                "config_recommender enqueued via processor job_id=%s", record.id,
+            )
+            duration = time.time() - start
+            _log_execution("config_recommender", "enqueued", duration)
+        else:
+            from app.deps import get_neo4j, get_redis
+            from app.processor.jobs.config_recommender import run_recommender_sync
+
+            try:
+                driver = get_neo4j()
+            except Exception:  # noqa: BLE001 — direct-call fallback only
+                driver = None
+            try:
+                redis_client = get_redis()
+            except Exception:  # noqa: BLE001 — direct-call fallback only
+                redis_client = None
+            meta = run_recommender_sync(driver, redis_client)
+            duration = time.time() - start
+            detail = (
+                f"corpus={meta['corpus_size']} "
+                f"writes={meta['recommendations_written']}"
+            )
+            _log_execution("config_recommender", "success", duration, detail)
+            logger.info(
+                "config_recommender (direct): %s in %.1fs", detail, duration,
+            )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("config_recommender", "error", duration, str(e))
+        logger.error("config_recommender scheduled job failed: %s", e)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -309,6 +363,21 @@ def start_scheduler() -> AsyncIOScheduler:
         id="tombstone_purge",
         name="Weekly tombstone purge",
         replace_existing=True,
+    )
+
+    # Cycle 3.2 — config recommender: scan corpus + flag state every
+    # 6 h and refresh cerid:recommendations in Redis.  LOW priority,
+    # zero LLM cost; mirrors the ingest_recovery enqueue-or-direct
+    # fallback so it always runs even before processor_queue is wired.
+    _scheduler.add_job(
+        _run_config_recommender,
+        CronTrigger.from_crontab(
+            getattr(config, "SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * * *"),
+        ),
+        id="config_recommender",
+        name="Adaptive config recommender",
+        replace_existing=True,
+        max_instances=1,
     )
 
     # Phase O.1 — ingest recovery: scan for stale pending Chroma chunks every

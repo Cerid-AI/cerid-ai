@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 273
+**Total routes:** 275
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -195,6 +195,8 @@ not documented here; see the internal repo for the full registry.
 | GET | `/{name}` | `get_provider` | `src/mcp/app/routers/providers.py` | providers |  |
 | POST | `/{name}/validate` | `validate_key` | `src/mcp/app/routers/providers.py` | providers |  |
 | POST | `/query` | `query_endpoint` | `src/mcp/app/routers/query.py` |  |  |
+| DELETE | `/{rec_id}` | `clear_recommendation` | `src/mcp/app/routers/recommendations.py` | settings |  |
+| POST | `/{rec_id}/dismiss` | `dismiss_recommendation` | `src/mcp/app/routers/recommendations.py` | settings |  |
 | POST | `/admin/scan` | `start_scan` | `src/mcp/app/routers/scanner.py` | scanner |  |
 | GET | `/admin/scan/preview` | `scan_preview` | `src/mcp/app/routers/scanner.py` | scanner |  |
 | POST | `/admin/scan/preview` | `scan_preview_post` | `src/mcp/app/routers/scanner.py` | scanner |  |

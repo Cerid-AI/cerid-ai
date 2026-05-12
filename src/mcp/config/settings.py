@@ -129,10 +129,29 @@ BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 # (HYBRID_VECTOR_WEIGHT * vec + HYBRID_KEYWORD_WEIGHT * bm25).
 # "rrf" uses Reciprocal Rank Fusion (Cormack/Clarke/Buettcher 2009 — the
 # 2026 default in Elastic, OpenSearch, Azure AI Search, neo4j-graphrag).
+# "tri_rrf" (Cycle 3.2 / v0.93.3) extends RRF to three ranking lists —
+# vector + BM25 + SPLADE-v3 sparse. Opt-in via this knob; auto-picked
+# when the sparse retrieval toggle flips on in the Settings pane.
 HYBRID_FUSION_MODE = os.getenv("HYBRID_FUSION_MODE", "weighted_sum")
 HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
 HYBRID_RRF_VECTOR_WEIGHT = float(os.getenv("HYBRID_RRF_VECTOR_WEIGHT", "1.0"))
 HYBRID_RRF_BM25_WEIGHT = float(os.getenv("HYBRID_RRF_BM25_WEIGHT", "1.0"))
+HYBRID_RRF_SPARSE_WEIGHT = float(os.getenv("HYBRID_RRF_SPARSE_WEIGHT", "1.0"))
+
+# SPLADE-v3 sparse retrieval (C3.2). RETRIEVAL_SPARSE_ENABLED is read
+# directly in core/retrieval/sparse.py (mirror of the HyPE /
+# parent-child pattern). The settings below are infrastructure knobs.
+SPLADE_MODEL_PATH = os.getenv("SPLADE_MODEL_PATH", "data/models/splade-v3")
+SPLADE_ONNX_FILENAME = os.getenv("SPLADE_ONNX_FILENAME", "model.onnx")
+SPLADE_TOP_K_TERMS = int(os.getenv("SPLADE_TOP_K_TERMS", "256"))
+SPARSE_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "sparse")
+
+# Adaptive recommendation engine (Cycle 3.2). Cron expression for the
+# ConfigRecommenderJob that scans the corpus + flag state and writes
+# the cerid:recommendations Redis hash consumed by /health. Off-peak
+# every 6h by default — the job is read-only against Neo4j so even
+# at sub-cron interval it can't deadlock with ingest.
+SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * * *")
 
 # Contextual retrieval per-tenant monthly USD budget (Workstream E
 # Phase 3). When breached, the circuit breaker disables further

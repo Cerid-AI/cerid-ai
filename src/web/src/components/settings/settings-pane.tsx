@@ -20,6 +20,7 @@ import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { BriefSettingsSection } from "./brief-settings-section"
 import { EssentialsSection } from "./essentials-section"
 import { PipelineSection } from "./pipeline-section"
+import { RecommendationBanner } from "./recommendation-banner"
 import { SystemSection } from "./system-section"
 import { GovernanceSection } from "./governance-section"
 import { ExternalAPIsSection } from "./external-apis-section"
@@ -268,6 +269,12 @@ export default function SettingsPane() {
               </TabsList>
 
               <TabsContent value="essentials" className="space-y-1 pt-2">
+                {/* Adaptive recommendations (C3.2): banner at the top of
+                    the Settings pane so the user sees the next-step
+                    nudge before scanning the tab list. */}
+                <PaneErrorBoundary label="Recommendations">
+                  <RecommendationBanner patch={patch} />
+                </PaneErrorBoundary>
                 <PaneErrorBoundary label="Essentials">
                   <EssentialsSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} credits={credits} />
                 </PaneErrorBoundary>
