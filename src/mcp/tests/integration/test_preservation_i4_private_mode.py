@@ -4,14 +4,15 @@
 """I4 — Private Mode levels toggle correctly.
 
 Preservation invariant: the Private Mode surface (GET/POST/DELETE
-/settings/private-mode) must round-trip every valid level (0-3) and
+/settings/private-mode) must round-trip every valid level (0-4) and
 reject invalid input with 422. Settings consolidation in later
 sprints must not silently change the level validator range.
 
-Note: the plan doc and early docs say "4 security levels 1-4"; the
-actual Pydantic validator is ``ge=0, le=3`` — 4 values (0, 1, 2, 3)
-where 0 is disabled. This test codifies the real contract so doc
-drift can never produce a 422 on Level 1 in production.
+Range expanded in v0.93.5: L4 ("Full ephemeral") joined the validated
+range. The UI has rendered L4 since v0.92.1 but the backend validator
+was capped at ``le=3``, leaving the wipe-on-close contract half-shipped.
+v0.93.5 closes the gap; this test codifies the new (full) range so
+doc drift can never produce a 422 on Level 1 OR Level 4 in production.
 """
 from __future__ import annotations
 
@@ -36,7 +37,7 @@ def test_private_mode_get_returns_level_field(http_client):
 
 def test_private_mode_round_trips_each_level(http_client):
     try:
-        for lvl in (0, 1, 2, 3):
+        for lvl in (0, 1, 2, 3, 4):
             r = http_client.post("/settings/private-mode", json={"level": lvl})
             assert r.status_code == 200, (
                 f"POST level={lvl} HTTP {r.status_code}: {r.text[:200]}"
@@ -54,7 +55,8 @@ def test_private_mode_round_trips_each_level(http_client):
 
 def test_private_mode_rejects_out_of_range_levels(http_client):
     try:
-        for bad in (-1, 4, 99):
+        # v0.93.5: L4 is valid; out-of-range starts at 5.
+        for bad in (-1, 5, 99):
             r = http_client.post("/settings/private-mode", json={"level": bad})
             assert r.status_code in (400, 422), (
                 f"POST level={bad} should return 422; got HTTP {r.status_code}"
