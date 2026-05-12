@@ -2,6 +2,58 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.4 — Sidecar SPLADE endpoint + Private Mode polish + chat-virtualization sprint plan (2026-05-12)
+
+Closes the C3.2 follow-on punch list and a long-deferred UX polish round.
+
+**Sidecar `/encode/sparse` endpoint** — the server-side companion to the client
+shipped in v0.93.3 (`utils/inference_sidecar_client.py:sidecar_encode_sparse()`).
+`scripts/cerid-sidecar.py` gains a SPLADE-v3 loader that lazy-initializes on the
+first `/encode/sparse` call (so operators who never enable sparse pay no
+cold-start cost), picks between full-model and bolted-MLM-head branches by
+inspecting `session.get_outputs()`, and mirrors the in-process encoder's exact
+numpy formula so the sidecar fast-path and local-ONNX fallback stay
+wire-identical. Health endpoint reports `sparse_loaded` + `sparse_branch` for
+observability. 10 new pytest cases use `importlib` to load the script and
+mock the ONNX session, so CI runs in milliseconds without network.
+
+**Private Mode UX polish** — three load-bearing improvements to the
+v0.84.0 engine surfaced after the v0.92.1 round closed:
+
+* **Bottom-of-menu data-route footnote** — clarifies what "saved" means
+  at each level. L0 → server + local cache. L1 → local cache only. L2 →
+  also bypass KB injection. L3 → also skip Redis audit logs. L4 →
+  in-memory only, gone with the tab. Replaces a documentation gap users
+  had flagged: per-level descriptions told you what was OFF but not where
+  the data actually lived.
+* **L4 persistent "wipe on close" hint** — the badge for Level 4 now
+  carries an always-visible tooltip explaining the lifecycle, so users
+  who dismissed the AlertDialog confirmation don't lose the contract.
+* **Read-only Privacy section in Settings** — a new Essentials-tab card
+  shows the active level (Off / L1–L4) with a color-coded badge matching
+  the chat toolbar, plus a one-line explanation of what the active
+  level does. The level itself is changed from the chat toolbar so a
+  single privacy state lives next to the live conversation, not behind
+  a Settings tab.
+
+Skipped from the polish round: the "color-code overflow menu Private
+toggle" candidate flagged by the scoping pass was actually already
+shipped — `chat-toolbar.tsx:666-671` carries the same color logic as
+the main toolbar. Skipped to avoid duplicate work. The L4-backend
+enforcement gap (API accepts `le=3`; UI renders L4 as a fully ephemeral
+contract enforced client-side only) is an architectural privacy-contract
+change, not polish, and is flagged for a separate cycle.
+
+**Chat virtualization sprint plan** — published at
+`docs/plans/2026-05-12-chat-virtualization-sprint-plan.md`. Scoping
+concluded this is a 3–5 contiguous-day sprint, not an inline pass.
+Half-shipping would break streaming auto-scroll. The plan locks
+`@tanstack/react-virtual` + the `data-index` anchor strategy + a
+feature-flag rollout, and notably the recommender entry that will
+surface the toggle once a user's longest conversation crosses 200
+messages — making this the second user of the C3.2 adaptive-recommender
+engine. Target ship: v0.94.0.
+
 ## v0.93.3 — SPLADE-v3 sparse retrieval + adaptive recommender (RAG Cycle 3.2, 2026-05-12)
 
 Re-entry on C3.2 (the sparse-retrieval phase that was honestly deferred in v0.93.2). Ships

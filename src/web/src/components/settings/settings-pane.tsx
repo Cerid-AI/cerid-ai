@@ -43,7 +43,7 @@ function readSectionState(): Record<SectionKey, boolean> {
     ollama: true, kb_admin: true, credits: true, data_sources: false,
     rag_config: true, watched_folders: false, provider_status: true,
     governance_mcp: true, governance_agents: true, governance_servers: true,
-    external_apis: true,
+    external_apis: true, privacy: true,
   }
   try {
     const ver = localStorage.getItem("cerid-settings-sections-v")
