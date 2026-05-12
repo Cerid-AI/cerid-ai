@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { PaneError } from "@/components/ui/pane-error"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2, FolderOpen, Copy, Library } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2, FolderOpen, Copy, Library } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { cn } from "@/lib/utils"
 import { ArtifactCard } from "./artifact-card"
@@ -844,20 +844,20 @@ export function KnowledgePane() {
                 </div>
               )}
 
-              {/* D.2: error state — shadcn Alert + Retry */}
+              {/* D.2: error state — shared PaneError primitive */}
               {!isLoading && isError && (
-                <div className="flex flex-col items-center gap-3 py-12 px-4">
-                  <Alert variant="destructive" className="max-w-md">
-                    <AlertCircle className="h-4 w-4" aria-hidden="true" />
-                    <AlertDescription>
-                      Failed to load artifacts —{" "}
-                      {errorDetail instanceof Error ? errorDetail.message : "connection error, check backend services"}
-                    </AlertDescription>
-                  </Alert>
-                  <Button variant="outline" size="sm" onClick={() => refetch()}>
-                    <RefreshCcw className="mr-1.5 h-3 w-3" aria-hidden="true" />
-                    Retry
-                  </Button>
+                <div className="flex items-center justify-center py-12 px-4">
+                  <div className="w-full max-w-md">
+                    <PaneError
+                      title="Failed to load artifacts"
+                      description={
+                        errorDetail instanceof Error
+                          ? errorDetail.message
+                          : "Connection error — check backend services."
+                      }
+                      onRetry={() => void refetch()}
+                    />
+                  </div>
                 </div>
               )}
 

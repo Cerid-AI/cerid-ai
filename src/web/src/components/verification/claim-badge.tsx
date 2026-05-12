@@ -90,10 +90,15 @@ export function ClaimBadge({ claim, onArtifactClick }: ClaimBadgeProps) {
           aria-label={styles.ariaLabel(n)}
           data-verification-band={band}
         >
+          {/* Animation lives on the inner Badge (key=band remounts the
+              Badge, not the outer <button>) so keyboard focus on the
+              trigger survives the streaming→settled state transition.
+              Original M-A.1 placed key on the button and lost focus. */}
           <Badge
+            key={band}
             variant="outline"
             className={cn(
-              "gap-1 text-label-sm px-2 py-0.5 font-medium transition-colors",
+              "gap-1 text-label-sm px-2 py-0.5 font-medium transition-colors animate-in fade-in zoom-in-95 duration-200",
               styles.badge,
             )}
           >

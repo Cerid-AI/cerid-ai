@@ -6,8 +6,7 @@ import { BookOpen } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle } from "lucide-react"
+import { PaneError } from "@/components/ui/pane-error"
 import { EmptyState } from "@/components/ui/empty-state"
 import { EntityListItem } from "./entity-list-item"
 import { EntityDetailView } from "./entity-detail-view"
@@ -30,7 +29,7 @@ function formatLastUpdated(iso: string | null): string | null {
 
 export default function WikiPane() {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
-  const { data: entities, isLoading, isError } = useWikiEntities({ limit: 30 })
+  const { data: entities, isLoading, isError, refetch } = useWikiEntities({ limit: 30 })
 
   // Cross-pane deep link: ?entity=<canonical_id> from the Communities
   // pane preselects the matching entity. We strip the param so reloads
@@ -106,10 +105,13 @@ export default function WikiPane() {
             )}
 
             {isError && (
-              <Alert variant="destructive" className="m-2">
-                <AlertCircle className="h-4 w-4" aria-hidden="true" />
-                <AlertDescription>Failed to load entities.</AlertDescription>
-              </Alert>
+              <div className="p-2">
+                <PaneError
+                  title="Failed to load entities"
+                  description="The backend may be unavailable. Try again."
+                  onRetry={() => void refetch()}
+                />
+              </div>
             )}
 
             {!isLoading && !isError && entities?.length === 0 && (

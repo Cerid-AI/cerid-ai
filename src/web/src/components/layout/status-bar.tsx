@@ -18,9 +18,20 @@ interface StatusBarProps {
   consoleOpen?: boolean
   onToggleConsole?: () => void
   consoleUnreadCount?: number
+  /** Feature tier — controls whether the gold divider is shown. Only Pro+
+   * surfaces gold trim; community/default tier uses a neutral border. */
+  featureTier?: string
 }
 
-export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0 }: StatusBarProps) {
+export function StatusBar({
+  consoleOpen,
+  onToggleConsole,
+  consoleUnreadCount = 0,
+  featureTier = "community",
+}: StatusBarProps) {
+  // Audit P1.9: gold top border was always-on, competing with the teal
+  // accent for users on the default tier. Gate to Pro+ tiers only.
+  const tierGold = featureTier === "pro" || featureTier === "enterprise"
   const { data: health, isError, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealthStatus,
@@ -47,7 +58,12 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-8 items-center gap-4 border-t border-[rgba(212,175,55,0.22)] bg-muted/40 px-4 text-xs text-muted-foreground">
+      <div
+        className={cn(
+          "flex h-8 items-center gap-4 border-t bg-muted/40 px-4 text-xs text-muted-foreground",
+          tierGold ? "border-[rgba(212,175,55,0.22)]" : "border-border",
+        )}
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex cursor-default items-center gap-1.5">

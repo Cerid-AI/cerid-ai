@@ -8,7 +8,7 @@
  * 5-min staleTime + 60-second refetchInterval mirrors use-wiki-entities.ts.
  */
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, type QueryObserverResult } from "@tanstack/react-query"
 import { fetchCommunities, fetchCommunity } from "@/lib/api/community"
 import type { CommunitySummary, CommunityFull } from "@/lib/types/community"
 
@@ -28,8 +28,9 @@ export function useCommunities({
   data: CommunitySummary[] | undefined
   isLoading: boolean
   isError: boolean
+  refetch: () => Promise<QueryObserverResult<CommunitySummary[], Error>>
 } {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["communities", min_size, limit, level],
     queryFn: () => fetchCommunities({ min_size, limit, level }),
     staleTime: 5 * 60_000,
@@ -37,7 +38,7 @@ export function useCommunities({
     retry: 1,
   })
 
-  return { data, isLoading, isError }
+  return { data, isLoading, isError, refetch }
 }
 
 // ---------------------------------------------------------------------------
@@ -49,8 +50,9 @@ export function useCommunity(id: string | null): {
   isLoading: boolean
   isError: boolean
   isNotFound: boolean
+  refetch: () => Promise<QueryObserverResult<CommunityFull | null, Error>>
 } {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["community", id],
     queryFn: () => fetchCommunity(id!),
     enabled: !!id,
@@ -64,5 +66,6 @@ export function useCommunity(id: string | null): {
     isLoading,
     isError,
     isNotFound: !isLoading && !isError && data === null,
+    refetch,
   }
 }

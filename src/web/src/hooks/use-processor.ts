@@ -9,7 +9,12 @@
  *  - Recent:  refetch every 10 s (jobs complete on the order of seconds–minutes)
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryObserverResult,
+} from "@tanstack/react-query"
 import {
   fetchProcessorStatus,
   fetchProcessorRecent,
@@ -27,15 +32,16 @@ export function useProcessorStatus(): {
   data: ProcessorStatus | undefined
   isLoading: boolean
   isError: boolean
+  refetch: () => Promise<QueryObserverResult<ProcessorStatus, Error>>
 } {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["processor", "status"],
     queryFn: fetchProcessorStatus,
     refetchInterval: 5_000,
     staleTime: 4_000,
     retry: 1,
   })
-  return { data, isLoading, isError }
+  return { data, isLoading, isError, refetch }
 }
 
 // ---------------------------------------------------------------------------
@@ -46,15 +52,16 @@ export function useProcessorRecent(limit = 20): {
   data: JobRecord[] | undefined
   isLoading: boolean
   isError: boolean
+  refetch: () => Promise<QueryObserverResult<JobRecord[], Error>>
 } {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["processor", "recent", limit],
     queryFn: () => fetchProcessorRecent(limit),
     refetchInterval: 10_000,
     staleTime: 9_000,
     retry: 1,
   })
-  return { data, isLoading, isError }
+  return { data, isLoading, isError, refetch }
 }
 
 // ---------------------------------------------------------------------------

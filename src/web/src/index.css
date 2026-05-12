@@ -288,12 +288,16 @@
   0%   { background-position: -200% center; }
   100% { background-position:  200% center; }
 }
+/* Light mode: solid darker teal so the wordmark and chat-welcome hero
+ * stay legible against the pale background (the previous bright-teal
+ * gradient was teal-on-pale and effectively invisible — UI audit P0.4). */
 .text-brand-shine {
-  background: linear-gradient(135deg, #00E5D8, #7FF9E8);
+  background: linear-gradient(135deg, #0D9488, #115E59);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+/* Dark mode: keep the original bright shimmer */
 .dark .text-brand-shine {
   background: linear-gradient(90deg, #00E5D8 0%, #7FF9E8 25%, rgba(255,255,255,0.5) 50%, #7FF9E8 75%, #00E5D8 100%);
   background-size: 200% 100%;

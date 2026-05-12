@@ -3,9 +3,9 @@
 
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { AlertCircle, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { PaneError } from "@/components/ui/pane-error"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
@@ -80,19 +80,18 @@ function LoadingSkeleton() {
 // ---------------------------------------------------------------------------
 
 export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProps) {
-  const { data, isLoading, isError, isNotFound } = useWikiEntity(slug)
+  const { data, isLoading, isError, isNotFound, refetch } = useWikiEntity(slug)
 
   if (isLoading) return <LoadingSkeleton />
 
   if (isError) {
     return (
       <div className="p-6">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription>
-            Failed to load entity page. Please try again.
-          </AlertDescription>
-        </Alert>
+        <PaneError
+          title="Failed to load entity page"
+          description="Try selecting this entity again."
+          onRetry={() => void refetch()}
+        />
       </div>
     )
   }
@@ -123,15 +122,16 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold text-foreground">{data.name}</h1>
-            <ConfidenceBandBadge band={data.confidence_band} />
-            {refreshOverdue && (
+            {refreshOverdue ? (
               <span
-                className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand"
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
                 aria-label="Updating from new evidence"
               >
                 <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
                 Updating from new evidence
               </span>
+            ) : (
+              <ConfidenceBandBadge band={data.confidence_band} />
             )}
           </div>
           {relativeUpdated && (

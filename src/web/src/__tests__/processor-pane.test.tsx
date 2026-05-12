@@ -336,8 +336,9 @@ describe("ProcessorPane — 4-state matrix", () => {
     mockUseStatus.mockReturnValue({ data: undefined, isLoading: false, isError: true })
     render(<ProcessorPane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(screen.getByText("Status unavailable")).toBeInTheDocument()
+      expect(screen.getByText("Failed to load processor status")).toBeInTheDocument()
     })
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
   })
 })
 

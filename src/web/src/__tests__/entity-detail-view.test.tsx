@@ -26,7 +26,12 @@ const mockUseWikiEntity = useWikiEntity as ReturnType<typeof vi.fn>
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const NOW_ISO = new Date().toISOString()
+// 1 hour in the future — not overdue (default fixture). NOTE: deliberately
+// not `new Date()` because by the time the test asserts, "now" has advanced
+// past the fixture value and refreshOverdue() flips true. V-P1.8 now hides
+// the confidence band when overdue, so the band-badge test needs a clearly
+// future next_refresh_due.
+const FUTURE_ISO = new Date(Date.now() + 60 * 60 * 1000).toISOString()
 const PAST_ISO = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // 2h ago
 const OVERDUE_ISO = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() // 25h ago — overdue
 
@@ -64,7 +69,7 @@ function makeEntityPage(overrides: Partial<WikiEntityPage> = {}): WikiEntityPage
     ],
     external_references: [],
     last_updated_at: PAST_ISO,
-    next_refresh_due: NOW_ISO, // not overdue
+    next_refresh_due: FUTURE_ISO, // not overdue
     confidence_band: "high",
     ...overrides,
   }

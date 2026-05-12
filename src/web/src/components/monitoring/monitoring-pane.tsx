@@ -5,9 +5,7 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
-import { AlertCircle, RefreshCw } from "lucide-react"
+import { PaneError } from "@/components/ui/pane-error"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { LastUpdated } from "@/components/ui/last-updated"
 import { DigestCard } from "./digest-card"
@@ -72,17 +70,14 @@ export function MonitoringPane() {
         </div>
       ) : errorMaintenance ? (
         /* D.2: error state */
-        <div className="flex flex-col items-center justify-center gap-4 p-8">
-          <Alert variant="destructive" className="max-w-md">
-            <AlertCircle className="h-4 w-4" aria-hidden="true" />
-            <AlertDescription>
-              Failed to load system status. Check that the backend is running.
-            </AlertDescription>
-          </Alert>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-            Retry
-          </Button>
+        <div className="flex items-center justify-center p-8">
+          <div className="w-full max-w-md">
+            <PaneError
+              title="Failed to load system status"
+              description="Check that the backend is running, then retry."
+              onRetry={() => void refetch()}
+            />
+          </div>
         </div>
       ) : (
         <ScrollArea className="min-h-0 flex-1">

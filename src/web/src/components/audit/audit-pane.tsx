@@ -7,7 +7,9 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Loader2, RefreshCw } from "lucide-react"
+import { PaneError } from "@/components/ui/pane-error"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
+import { SegmentedControl } from "@/components/ui/segmented-control"
 import { LastUpdated } from "@/components/ui/last-updated"
 import { ActivityChart } from "./activity-chart"
 import { CostBreakdown } from "./cost-breakdown"
@@ -45,7 +47,14 @@ export function AuditPane() {
 
   const activeReports = REPORT_OPTIONS.filter((r) => enabledReports[r.key]).map((r) => r.key)
 
-  const { data: audit, isLoading, isFetching, dataUpdatedAt } = useQuery({
+  const {
+    data: audit,
+    isLoading,
+    isFetching,
+    isError: auditError,
+    refetch: refetchAudit,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ["audit", hours, activeReports],
     queryFn: () => fetchAudit(activeReports, hours),
     refetchInterval: 60_000,
@@ -95,22 +104,16 @@ export function AuditPane() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1">
                 <span className="text-label-xs font-medium uppercase text-muted-foreground">Period</span>
-                <div className="flex rounded-md border">
-                  {TIME_RANGES.map((range) => (
-                    <Button
-                      key={range.hours}
-                      variant="ghost"
-                      size="sm"
-                      className={cn(
-                        "h-6 rounded-none border-r px-2 text-xs last:border-r-0",
-                        hours === range.hours && "bg-primary/10 font-medium text-primary",
-                      )}
-                      onClick={() => setHours(range.hours)}
-                    >
-                      {range.label}
-                    </Button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  value={String(hours)}
+                  onChange={(v) => setHours(Number(v))}
+                  options={TIME_RANGES.map((r) => ({
+                    value: String(r.hours),
+                    label: r.label,
+                  }))}
+                  size="sm"
+                  ariaLabel="Time range"
+                />
               </div>
               <Separator orientation="vertical" className="h-5" />
               <div className="flex items-center gap-1">
@@ -145,6 +148,16 @@ export function AuditPane() {
               <div className="flex items-center justify-center py-8 text-muted-foreground">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Loading audit data...
+              </div>
+            ) : auditError ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="w-full max-w-md">
+                  <PaneError
+                    title="Failed to load analytics"
+                    description="Check that the backend is running, then retry."
+                    onRetry={() => void refetchAudit()}
+                  />
+                </div>
               </div>
             ) : (
               <div className="space-y-4">

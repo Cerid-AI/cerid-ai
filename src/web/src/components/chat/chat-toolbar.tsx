@@ -28,7 +28,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldOff, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen } from "lucide-react"
 import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
@@ -223,6 +223,11 @@ interface ChatToolbarProps {
   // Model
   selectedModel: string
   onModelChange: (model: string) => void
+  /** Provider IDs (lowercase) the user has configured. Passed through to
+   *  <ModelSelect> so models from unconfigured providers render disabled
+   *  with a "Not configured" hint (C-P1.5). Optional — when omitted,
+   *  every model renders enabled (legacy behaviour). */
+  configuredProviders?: string[]
   // Private Mode
   privateModeEnabled: boolean
   privateModeLevel: number
@@ -246,6 +251,7 @@ export function ChatToolbar({
   ragMode, setRagMode,
   routingMode, setRoutingMode, cycleRoutingMode,
   selectedModel, onModelChange,
+  configuredProviders,
   privateModeEnabled, privateModeLevel, togglePrivateMode, changePrivateModeLevel,
   onNewChat,
 }: ChatToolbarProps) {
@@ -266,6 +272,24 @@ export function ChatToolbar({
     },
     [changePrivateModeLevel, privateModeLevel],
   )
+  // C-P2.6: persistent `animate-pulse` on L3/L4 private-mode is visually
+  // exhausting. Fire a one-shot 3s pulse the moment the user activates the
+  // higher tier, then revert to a static icon.
+  const [privatePulse, setPrivatePulse] = useState(false)
+  const prevPrivateLevelRef = useRef(privateModeLevel)
+  useEffect(() => {
+    const prev = prevPrivateLevelRef.current
+    prevPrivateLevelRef.current = privateModeLevel
+    if (privateModeLevel >= 3 && prev < 3) {
+      setPrivatePulse(true)
+      const id = setTimeout(() => setPrivatePulse(false), 3000)
+      return () => clearTimeout(id)
+    }
+    if (privateModeLevel < 3 && privatePulse) {
+      setPrivatePulse(false)
+    }
+  }, [privateModeLevel, privatePulse])
+
   const badgeBorderClass =
     privateModeLevel === 1
       ? "border-green-500/40 text-green-500"
@@ -299,8 +323,8 @@ export function ChatToolbar({
           className={cn(
             privateModeEnabled && privateModeLevel === 1 && "text-green-500 hover:text-green-500 bg-green-500/10",
             privateModeEnabled && privateModeLevel === 2 && "text-yellow-500 hover:text-yellow-500 bg-yellow-500/10",
-            privateModeEnabled && privateModeLevel === 3 && "text-orange-500 hover:text-orange-500 bg-orange-500/10 animate-pulse",
-            privateModeEnabled && privateModeLevel === 4 && "text-red-500 hover:text-red-500 bg-red-500/10 animate-pulse",
+            privateModeEnabled && privateModeLevel === 3 && cn("text-orange-500 hover:text-orange-500 bg-orange-500/10", privatePulse && "animate-pulse"),
+            privateModeEnabled && privateModeLevel === 4 && cn("text-red-500 hover:text-red-500 bg-red-500/10", privatePulse && "animate-pulse"),
           )}
           menuContent={
             <>
@@ -657,7 +681,7 @@ export function ChatToolbar({
         </>
         )}
       </TooltipProvider>
-      <ModelSelect value={selectedModel} onChange={onModelChange} />
+      <ModelSelect value={selectedModel} onChange={onModelChange} configuredProviders={configuredProviders} />
     </div>
   )
 }

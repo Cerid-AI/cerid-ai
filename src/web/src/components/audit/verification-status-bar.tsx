@@ -39,26 +39,39 @@ interface VerificationStatusBarProps {
   onRetry?: () => void
 }
 
-/** Status icon for a single claim using display status */
-function ClaimStatusIcon({ displayStatus }: { displayStatus: ClaimDisplayStatus }) {
+/** Status icon for a single claim using display status.
+ *
+ * M-A.6: `isCurrent` marks the single pending claim that's actively being
+ * verified — its icon gets `data-current="true"` so the `animate-pulse`
+ * class draws the eye without firing on every pending row at once
+ * (ui-ux-pro-max guideline #7: avoid motion-meaning collisions).
+ */
+function ClaimStatusIcon({
+  displayStatus,
+  isCurrent = false,
+}: {
+  displayStatus: ClaimDisplayStatus
+  isCurrent?: boolean
+}) {
+  const pulseCls = "data-[current=true]:animate-pulse"
   switch (displayStatus) {
     case "verified":
-      return <CheckCircle2 className="h-3 w-3 shrink-0 text-green-700 dark:text-green-400" />
+      return <CheckCircle2 data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-green-700 dark:text-green-400", pulseCls)} />
     case "refuted":
-      return <XOctagon className="h-3 w-3 shrink-0 text-red-700 dark:text-red-400" />
+      return <XOctagon data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-red-700 dark:text-red-400", pulseCls)} />
     case "evasion":
-      return <AlertTriangle className="h-3 w-3 shrink-0 text-orange-600 dark:text-orange-400" />
+      return <AlertTriangle data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-orange-600 dark:text-orange-400", pulseCls)} />
     case "citation":
-      return <Circle className="h-3 w-3 shrink-0 text-purple-600 dark:text-purple-400" />
+      return <Circle data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-purple-600 dark:text-purple-400", pulseCls)} />
     case "unverified":
-      return <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 dark:text-yellow-400" />
+      return <AlertTriangle data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-amber-600 dark:text-yellow-400", pulseCls)} />
     case "skipped":
-      return <Circle className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+      return <Circle data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-muted-foreground/50", pulseCls)} />
     case "pending":
-      return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+      return <Loader2 data-current={isCurrent} className={cn("h-3 w-3 shrink-0 animate-spin text-muted-foreground", pulseCls)} />
     case "uncertain":
     default:
-      return <Circle className="h-3 w-3 shrink-0 text-muted-foreground" />
+      return <Circle data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-muted-foreground", pulseCls)} />
   }
 }
 
@@ -113,12 +126,19 @@ export function VerificationStatusBar({
             Verifying {verifiedCount}/{totalClaims} claims
             {extractionMethod && <span className="ml-1 text-muted-foreground">({extractionMethod})</span>}
           </span>
-          <span className="flex items-center gap-1 text-amber-600 dark:text-yellow-400 transition-colors">
+          {/* V-P2.4: expand affordance is neutral, not amber. Amber means
+              "uncertain claim" — reusing it here sends a false warning. */}
+          <span className="flex items-center gap-1 text-muted-foreground transition-colors">
             <span className="text-label-sm font-medium">{expanded ? "Less" : "More"}</span>
             {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </span>
         </button>
-        {expanded && (
+        {expanded && (() => {
+          // M-A.6: identify the *single* claim currently being verified —
+          // the first pending one. Pulsing the icon on exactly one row at a
+          // time avoids the "everything blinks" anti-pattern.
+          const currentIndex = streamingClaims.find((c) => (c.status ?? "pending") === "pending")?.index ?? null
+          return (
           <div className="border-t border-border/50 px-4 py-1.5">
             <ul className="space-y-0.5">
               {streamingClaims.map((c) => {
@@ -126,7 +146,7 @@ export function VerificationStatusBar({
                 return (
                   <li key={c.index} className="flex flex-col gap-0.5 text-xs">
                     <div className="flex items-start gap-1.5">
-                      <ClaimStatusIcon displayStatus={ds} />
+                      <ClaimStatusIcon displayStatus={ds} isCurrent={c.index === currentIndex} />
                       <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
                         {stripMarkdown(c.claim)}
                       </span>
@@ -163,7 +183,7 @@ export function VerificationStatusBar({
                     {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
                       <div className="ml-[18px] rounded bg-green-500/10 px-2 py-1">
                         <span className="text-label-xs font-medium text-green-700 dark:text-green-400">Found answer: </span>
-                        <span className="text-label-xs leading-tight text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
+                        <span className="text-label-xs leading-tight text-green-800 dark:text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                       </div>
                     )}
                   </li>
@@ -171,7 +191,8 @@ export function VerificationStatusBar({
               })}
             </ul>
           </div>
-        )}
+          )
+        })()}
       </div>
     )
   }
@@ -309,14 +330,32 @@ export function VerificationStatusBar({
           )}
         </div>
       )}
-      {/* Summary row — clickable to expand claims */}
+      {/* Summary row — clickable to expand claims.
+          V-P0.1: the outer container is a <div role="button"> rather than a
+          real <button>, because tooltip triggers (which are <button>s) live
+          inside it. Nested <button>s are invalid HTML and trip the React 19
+          dev runtime warning. Enter/Space activate the row; the dedicated
+          expand <button> at the end has its own onClick (stopPropagation
+          would be overkill — both routes toggle the same state). */}
       <TooltipProvider delayDuration={300}>
-      <button
-        className="flex w-full items-center gap-3 px-4 py-1 text-left text-xs"
+      <div
+        className={cn(
+          "flex w-full items-center gap-3 px-4 py-1 text-left text-xs",
+          hasClaims ? "cursor-pointer" : "cursor-default",
+        )}
         onClick={() => hasClaims && setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (!hasClaims) return
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            setExpanded(!expanded)
+          }
+        }}
+        role={hasClaims ? "button" : undefined}
+        tabIndex={hasClaims ? 0 : undefined}
         aria-expanded={hasClaims ? expanded : undefined}
-        aria-label="Toggle verified claims"
-        disabled={!hasClaims}
+        aria-label={hasClaims ? "Verification summary" : undefined}
+        aria-disabled={!hasClaims}
       >
         <ShieldIcon className={cn("h-3 w-3 shrink-0", shieldColor)} />
 
@@ -398,15 +437,27 @@ export function VerificationStatusBar({
           </>
         )}
 
-        {/* Expand toggle */}
+        {/* Expand toggle — dedicated <button> at the end of the row.
+            V-P0.1 + V-P2.4: this is the only true interactive descendant
+            kept neutral (text-muted-foreground) rather than amber so it
+            doesn't impersonate the "uncertain claim" warning color. */}
         <div className="flex-1" />
         {hasClaims && (
-          <span className="flex items-center gap-1 text-amber-600 dark:text-yellow-400 transition-colors">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setExpanded(!expanded)
+            }}
+            aria-expanded={expanded}
+            aria-label="Toggle verified claims"
+            className="flex items-center gap-1 rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <span className="text-label-sm font-medium">{expanded ? "Less" : "More"}</span>
             {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </span>
+          </button>
         )}
-      </button>
+      </div>
       </TooltipProvider>
 
       {/* Expanded claims list with source attribution */}
@@ -475,7 +526,7 @@ export function VerificationStatusBar({
                   {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
                     <div className="ml-[18px] mt-0.5 rounded bg-green-500/10 px-2 py-1">
                       <span className="text-label-xs font-medium text-green-700 dark:text-green-400">Found answer: </span>
-                      <span className="text-label-xs leading-tight text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
+                      <span className="text-label-xs leading-tight text-green-800 dark:text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                     </div>
                   )}
                 </li>

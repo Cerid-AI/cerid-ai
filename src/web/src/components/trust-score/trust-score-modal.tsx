@@ -23,14 +23,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { TrustComponent, TrustScore, ComponentStatus } from "@/lib/types/trust-score"
 import { getBandDisplay, COMPONENT_META } from "@/lib/types/trust-score"
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
 
 interface TrustScoreModalProps {
   open: boolean
@@ -70,48 +62,6 @@ function formatComponentTarget(comp: TrustComponent): string {
   return comp.target.toFixed(2)
 }
 
-/** Mock historical data shape — real history will come from the backend when added. */
-type SparkPoint = { day: string; value: number }
-
-function SparklineOrPlaceholder({
-  history,
-  color,
-}: {
-  history: SparkPoint[] | null | undefined
-  color: string
-}) {
-  if (!history || history.length < 2) {
-    return (
-      <div className="flex h-20 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
-        Insufficient history
-      </div>
-    )
-  }
-  return (
-    <div className="h-20 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={history} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-          <XAxis dataKey="day" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
-          <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
-          <RechartsTooltip
-            contentStyle={{ fontSize: 10, padding: "2px 6px" }}
-            itemStyle={{ color }}
-            labelStyle={{ fontSize: 9 }}
-          />
-          <Line
-            type="monotone"
-            dataKey="value"
-            stroke={color}
-            strokeWidth={1.5}
-            dot={false}
-            activeDot={{ r: 3 }}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
 function ComponentTab({ comp }: { comp: TrustComponent }) {
   const [calcOpen, setCalcOpen] = useState(false)
   const meta = COMPONENT_META[comp.id]
@@ -135,14 +85,12 @@ function ComponentTab({ comp }: { comp: TrustComponent }) {
         </div>
       </div>
 
-      {/* Sparkline */}
-      <div>
-        <p className="mb-1.5 text-label-xs uppercase tracking-wider text-muted-foreground">
-          Trend (last 7 days)
-        </p>
-        {/* history field not yet on TrustComponent — placeholder shown until backend adds it */}
-        <SparklineOrPlaceholder history={null} color="hsl(var(--primary))" />
-      </div>
+      {/* Sparkline — V-P2.2: the entire trend section is hidden until the
+          backend ships per-component history. Re-introduce when the
+          TrustComponent type gains a `history` field; render <Sparkline> with
+          that data. The dashed "Insufficient history" placeholder was just
+          permanent visual noise on every tab. */}
+      {/* history?: SparkPoint[] — wire up when API lands. */}
 
       {/* Source note */}
       {comp.note && (
@@ -211,32 +159,40 @@ export function TrustScoreModal({ open, onOpenChange, data }: TrustScoreModalPro
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
-            <span>Cerid Trust Score</span>
-            <span className="text-3xl font-bold tabular-nums">
-              {data.score !== null ? data.score : "—"}
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2.5 py-0.5 text-sm font-semibold",
-                display.bgClass,
-                display.textClass,
-              )}
-            >
-              {display.label}
-            </span>
-          </DialogTitle>
+          {/* V-P1.5: keep DialogTitle a plain text node so screen readers
+              announce the dialog as "Cerid Trust Score". The numeric score
+              and band live in their own sub-row beneath the title. */}
+          <DialogTitle>Cerid Trust Score</DialogTitle>
           <DialogDescription>
             {data.note ??
               "Score is the straight mean of normalized component values. No learned weights. Components with 'not_available' status are excluded from the mean."}
           </DialogDescription>
         </DialogHeader>
 
+        {/* Score + band sub-row */}
+        <div className="flex items-center gap-3">
+          <span className="text-3xl font-bold tabular-nums" aria-label={`Current score: ${data.score ?? "unavailable"}`}>
+            {data.score !== null ? data.score : "—"}
+          </span>
+          <span
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-sm font-semibold",
+              display.bgClass,
+              display.borderClass,
+              display.textClass,
+            )}
+          >
+            {display.label}
+          </span>
+        </div>
+
         {visibleComponents.length > 0 ? (
           <Tabs defaultValue={defaultTab} className="mt-2">
-            <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/50 p-1">
+            {/* V-P2.3: horizontally scroll the tab strip when 6+ components
+                appear. flex-wrap was producing a second un-separated row. */}
+            <TabsList className="flex h-auto flex-nowrap gap-1 overflow-x-auto bg-muted/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {visibleComponents.map((comp) => (
-                <TabsTrigger key={comp.id} value={comp.id} className="text-xs">
+                <TabsTrigger key={comp.id} value={comp.id} className="shrink-0 text-xs">
                   {comp.label}
                 </TabsTrigger>
               ))}

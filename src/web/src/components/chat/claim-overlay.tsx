@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { ExternalLink, ChevronDown, ChevronUp, Search } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { DomainBadge } from "@/components/ui/domain-badge"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { findModel } from "@/lib/types"
 import type { HallucinationClaim } from "@/lib/types"
@@ -48,7 +49,6 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
   const [active, setActive] = useState<ActiveClaim | null>(null)
   const [hovered, setHovered] = useState<{ index: number; rect: DOMRect } | null>(null)
   const [expanded, setExpanded] = useState(false)
-  const popoverRef = useRef<HTMLDivElement>(null)
 
   const handleMarkClick = useCallback((e: Event) => {
     const el = e.currentTarget as HTMLElement
@@ -115,27 +115,15 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
     }
   }, [container, claimSpans, handleMarkClick, handleMouseEnter, handleMouseLeave])
 
-  // Dismiss on click outside, Escape, or scroll/resize (stale DOMRect)
+  // Dismiss popover on scroll/resize — Radix handles Escape + click-outside
+  // natively via PopoverContent's onEscapeKeyDown / onPointerDownOutside, but
+  // we still kill it on scroll because the anchor rect goes stale.
   useEffect(() => {
     if (!active) return
-    const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current?.contains(e.target as Node)) return
-      // Don't dismiss if clicking another mark
-      const target = e.target as HTMLElement
-      if (target.closest?.("[data-cerid-claim], [data-cerid-footnote]")) return
-      setActive(null)
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setActive(null)
-    }
     const handleDismiss = () => setActive(null)
-    document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleKeyDown)
     window.addEventListener("scroll", handleDismiss, true)
     window.addEventListener("resize", handleDismiss)
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("scroll", handleDismiss, true)
       window.removeEventListener("resize", handleDismiss)
     }
@@ -148,8 +136,10 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
     return claims.find((c) => c.claim === span.claim) ?? null
   }
 
-  // Tooltip on hover
-  if (hovered && !active) {
+  // Tooltip on hover — raw fixed-position div. Cheap, no flip needed because
+  // it's small and fixed at the mark's top edge.
+  const tooltipNode = (() => {
+    if (!hovered || active) return null
     const span = claimSpans[hovered.index]
     if (!span) return null
     const claim = resolveClaimData(hovered.index)
@@ -168,167 +158,210 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
         {label}
       </div>
     )
+  })()
+
+  // Resolve the active claim for the popover.
+  const activeSpan = active ? claimSpans[active.index] : null
+  const activeClaim = active ? resolveClaimData(active.index) : null
+
+  // Derived UI for the popover content (lift out so the JSX stays readable).
+  let popoverBody: React.ReactNode = null
+  if (active && activeSpan && activeClaim) {
+    const displayStatus = getClaimDisplayStatus(
+      activeClaim.status,
+      activeClaim.verification_method,
+      activeClaim.claim_type,
+      activeClaim.reason,
+    )
+    const methodLabel = verificationMethodLabel(activeClaim.verification_method)
+    const methodColor = verificationMethodColor(activeClaim.verification_method)
+
+    popoverBody = (
+      <>
+        {/* Compact view: status + truncated claim + method badge */}
+        <div className="flex items-center gap-1.5">
+          <Badge
+            variant="outline"
+            className={cn("text-label-xs", DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error)}
+          >
+            {displayStatus}
+          </Badge>
+          {activeClaim.claim_type && activeClaim.claim_type !== "factual" && (
+            <Badge variant="outline" className="text-label-xs px-1 py-0">
+              {activeClaim.claim_type}
+            </Badge>
+          )}
+          {methodLabel && (
+            <Badge variant="outline" className={`text-label-xs px-1 py-0 ${methodColor}`}>
+              {methodLabel}
+            </Badge>
+          )}
+          {activeClaim.verification_model?.includes("grok-4") && (
+            <Badge variant="outline" className="text-label-xs px-1 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30">
+              expert
+            </Badge>
+          )}
+        </div>
+
+        <p className="mt-2 text-xs leading-relaxed">
+          {expanded
+            ? activeClaim.claim
+            : activeClaim.claim.length > 100 ? activeClaim.claim.slice(0, 100) + "…" : activeClaim.claim}
+        </p>
+
+        {/* Expand/collapse toggle — V-P2.4: neutral color, not amber.
+            Amber is the "uncertain claim" warning; reusing it for expand
+            affordances sends a false warning signal. */}
+        <button
+          className="mt-1.5 inline-flex items-center gap-0.5 text-label-sm text-muted-foreground hover:text-foreground"
+          onClick={() => setExpanded((prev) => !prev)}
+        >
+          {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          {expanded ? "Less" : "More"}
+        </button>
+
+        {/* Expanded details */}
+        {expanded && (
+          <>
+            {/* KB-verified claims (kb or kb_nli): artifact link + snippet */}
+            {(activeClaim.verification_method === "kb" || activeClaim.verification_method === "kb_nli") && (
+              <>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-label-sm text-muted-foreground">
+                  {activeClaim.source_filename && (
+                    activeClaim.source_artifact_id && onArtifactClick ? (
+                      <button
+                        className="text-primary hover:underline"
+                        onClick={() => { onArtifactClick(activeClaim.source_artifact_id!); setActive(null) }}
+                      >
+                        {activeClaim.source_filename}
+                      </button>
+                    ) : (
+                      <span>{activeClaim.source_filename}</span>
+                    )
+                  )}
+                  {activeClaim.source_domain && <DomainBadge domain={activeClaim.source_domain} />}
+                  {activeClaim.similarity > 0 && (
+                    <span className="tabular-nums">{Math.round(activeClaim.similarity * 100)}% match</span>
+                  )}
+                </div>
+                {activeClaim.source_snippet && (
+                  <p className="mt-1.5 line-clamp-3 text-label-sm text-muted-foreground/80 italic leading-relaxed">
+                    &ldquo;{activeClaim.source_snippet.slice(0, 150)}&rdquo;
+                  </p>
+                )}
+              </>
+            )}
+
+            {/* Externally-verified claims: model + reasoning */}
+            {activeClaim.verification_method !== "kb" && activeClaim.verification_method !== "kb_nli" && (
+              <>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-label-sm text-muted-foreground">
+                  {displayModelName(activeClaim.verification_model) && (
+                    <span className="text-muted-foreground">{displayModelName(activeClaim.verification_model)}</span>
+                  )}
+                  {activeClaim.similarity > 0 && (
+                    <span className="tabular-nums">{Math.round(activeClaim.similarity * 100)}% confidence</span>
+                  )}
+                </div>
+                {activeClaim.reason && (
+                  <p className="mt-1.5 text-label-sm text-muted-foreground/80 leading-relaxed">
+                    {activeClaim.reason.slice(0, 200)}
+                  </p>
+                )}
+              </>
+            )}
+
+            {/* Ignorance claim: show found answer.
+                V-P0.3: text-green-300/80 on bg-green-500/10 fails WCAG in
+                light mode. Use a darker foreground in light, keep the
+                lighter shade in dark. */}
+            {activeClaim.claim_type === "ignorance" && activeClaim.status === "unverified" && activeClaim.verification_answer && (
+              <div className="mt-2 rounded bg-green-500/10 px-2 py-1.5">
+                <span className="text-label-xs font-medium text-green-700 dark:text-green-400">Found answer: </span>
+                <span className="text-label-sm leading-tight text-green-800 dark:text-green-300/80">
+                  {activeClaim.verification_answer.slice(0, 300)}
+                </span>
+              </div>
+            )}
+
+            {/* References section */}
+            <div className="mt-2 border-t border-border/50 pt-2">
+              <p className="text-label-xs font-medium text-muted-foreground mb-1">References</p>
+              {activeClaim.source_urls && activeClaim.source_urls.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  {activeClaim.source_urls.slice(0, 5).map((url, i) => (
+                    <a
+                      key={i}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
+                    >
+                      {/* V-P2.5: bumped from h-2.5 w-2.5 (10px) to h-3 w-3 (12px) for legibility. */}
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                      {hostname(url)}
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <a
+                  href={`https://www.google.com/search?q=${encodeURIComponent(activeClaim.claim)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400"
+                >
+                  <Search className="h-3 w-3" />
+                  Search for references
+                </a>
+              )}
+            </div>
+          </>
+        )}
+      </>
+    )
   }
 
-  // Popover on click
-  if (!active) return null
-
-  const span = claimSpans[active.index]
-  if (!span) return null
-  const claim = resolveClaimData(active.index)
-  if (!claim) return null
-
-  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type, claim.reason)
-  const methodLabel = verificationMethodLabel(claim.verification_method)
-  const methodColor = verificationMethodColor(claim.verification_method)
-
-  // Position: below mark, clamped to viewport edges (left, right, and bottom)
-  const popoverLeft = Math.max(8, Math.min(active.rect.left, window.innerWidth - 320))
-  const popoverHeight = 220 // approximate max popover height
-  const fitsBelow = active.rect.bottom + 6 + popoverHeight < window.innerHeight
-  const popoverTop = fitsBelow ? active.rect.bottom + 6 : active.rect.top - popoverHeight - 6
-
   return (
-    <div
-      ref={popoverRef}
-      role="dialog"
-      aria-label="Claim verification details"
-      className="fixed z-50 w-[300px] rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95"
-      style={{ left: popoverLeft, top: Math.max(8, popoverTop) }}
-    >
-      {/* Compact view: status + truncated claim + method badge */}
-      <div className="flex items-center gap-1.5">
-        <Badge
-          variant="outline"
-          className={cn("text-label-xs", DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error)}
-        >
-          {displayStatus}
-        </Badge>
-        {claim.claim_type && claim.claim_type !== "factual" && (
-          <Badge variant="outline" className="text-label-xs px-1 py-0">
-            {claim.claim_type}
-          </Badge>
-        )}
-        {methodLabel && (
-          <Badge variant="outline" className={`text-label-xs px-1 py-0 ${methodColor}`}>
-            {methodLabel}
-          </Badge>
-        )}
-        {claim.verification_model?.includes("grok-4") && (
-          <Badge variant="outline" className="text-label-xs px-1 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30">
-            expert
-          </Badge>
-        )}
-      </div>
-
-      <p className="mt-2 text-xs leading-relaxed">
-        {expanded
-          ? claim.claim
-          : claim.claim.length > 100 ? claim.claim.slice(0, 100) + "…" : claim.claim}
-      </p>
-
-      {/* Expand/collapse toggle */}
-      <button
-        className="mt-1.5 inline-flex items-center gap-0.5 text-label-sm text-amber-600 dark:text-yellow-400 hover:text-yellow-300"
-        onClick={() => setExpanded((prev) => !prev)}
+    <>
+      {tooltipNode}
+      {/*
+        V-P0.2: Radix Popover replaces the previous hand-rolled fixed-position
+        div + 220px magic-height flip logic. PopoverAnchor is a zero-size
+        virtual element positioned at the click rect; PopoverContent handles
+        collision detection, side flipping, focus management, and the
+        animation — no manual ResizeObserver needed.
+      */}
+      <Popover
+        open={active !== null && activeClaim !== null}
+        onOpenChange={(open) => { if (!open) setActive(null) }}
       >
-        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        {expanded ? "Less" : "More"}
-      </button>
-
-      {/* Expanded details */}
-      {expanded && (
-        <>
-          {/* KB-verified claims (kb or kb_nli): artifact link + snippet */}
-          {(claim.verification_method === "kb" || claim.verification_method === "kb_nli") && (
-            <>
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-label-sm text-muted-foreground">
-                {claim.source_filename && (
-                  claim.source_artifact_id && onArtifactClick ? (
-                    <button
-                      className="text-primary hover:underline"
-                      onClick={() => { onArtifactClick(claim.source_artifact_id!); setActive(null) }}
-                    >
-                      {claim.source_filename}
-                    </button>
-                  ) : (
-                    <span>{claim.source_filename}</span>
-                  )
-                )}
-                {claim.source_domain && <DomainBadge domain={claim.source_domain} />}
-                {claim.similarity > 0 && (
-                  <span className="tabular-nums">{Math.round(claim.similarity * 100)}% match</span>
-                )}
-              </div>
-              {claim.source_snippet && (
-                <p className="mt-1.5 line-clamp-3 text-label-sm text-muted-foreground/80 italic leading-relaxed">
-                  &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
-                </p>
-              )}
-            </>
-          )}
-
-          {/* Externally-verified claims: model + reasoning */}
-          {claim.verification_method !== "kb" && claim.verification_method !== "kb_nli" && (
-            <>
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-label-sm text-muted-foreground">
-                {displayModelName(claim.verification_model) && (
-                  <span className="text-muted-foreground">{displayModelName(claim.verification_model)}</span>
-                )}
-                {claim.similarity > 0 && (
-                  <span className="tabular-nums">{Math.round(claim.similarity * 100)}% confidence</span>
-                )}
-              </div>
-              {claim.reason && (
-                <p className="mt-1.5 text-label-sm text-muted-foreground/80 leading-relaxed">
-                  {claim.reason.slice(0, 200)}
-                </p>
-              )}
-            </>
-          )}
-
-          {/* Ignorance claim: show found answer */}
-          {claim.claim_type === "ignorance" && claim.status === "unverified" && claim.verification_answer && (
-            <div className="mt-2 rounded bg-green-500/10 px-2 py-1.5">
-              <span className="text-label-xs font-medium text-green-700 dark:text-green-400">Found answer: </span>
-              <span className="text-label-sm leading-tight text-green-300/80">
-                {claim.verification_answer.slice(0, 300)}
-              </span>
-            </div>
-          )}
-
-          {/* References section */}
-          <div className="mt-2 border-t border-border/50 pt-2">
-            <p className="text-label-xs font-medium text-muted-foreground mb-1">References</p>
-            {claim.source_urls && claim.source_urls.length > 0 ? (
-              <div className="flex flex-col gap-1">
-                {claim.source_urls.slice(0, 5).map((url, i) => (
-                  <a
-                    key={i}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
-                  >
-                    <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                    {hostname(url)}
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <a
-                href={`https://www.google.com/search?q=${encodeURIComponent(claim.claim)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400"
-              >
-                <Search className="h-2.5 w-2.5" />
-                Search for references
-              </a>
-            )}
-          </div>
-        </>
-      )}
-    </div>
+        {active && (
+          <PopoverAnchor asChild>
+            <span
+              aria-hidden="true"
+              style={{
+                position: "fixed",
+                left: active.rect.left,
+                top: active.rect.top,
+                width: active.rect.width,
+                height: active.rect.height,
+                pointerEvents: "none",
+              }}
+            />
+          </PopoverAnchor>
+        )}
+        <PopoverContent
+          side="bottom"
+          align="start"
+          sideOffset={6}
+          collisionPadding={8}
+          avoidCollisions
+          className="w-[300px] rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg"
+          aria-label="Claim verification details"
+        >
+          {popoverBody}
+        </PopoverContent>
+      </Popover>
+    </>
   )
 }

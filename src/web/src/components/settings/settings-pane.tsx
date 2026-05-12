@@ -7,14 +7,13 @@ import { fetchSettings, updateSettings, fetchKBStats, fetchProviderCredits } fro
 import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate, ProviderCredits } from "@/lib/types"
 import { useUIMode } from "@/contexts/ui-mode-context"
-import { cn } from "@/lib/utils"
 import { USER_PRESETS } from "@/lib/user-presets"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Settings, Loader2, AlertCircle, RefreshCw, Crown } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { TierSelector } from "@/components/ui/tier-selector"
 import { PluginsSection } from "./plugins-section"
 import { ProSection } from "./pro-section"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
@@ -218,45 +217,34 @@ export default function SettingsPane() {
         <TooltipProvider delayDuration={300}>
           <div className="space-y-4 p-4">
             {/* -- User Experience Presets -- */}
-            <div className="grid grid-cols-3 gap-2">
-              {USER_PRESETS.map((preset) => {
-                const isActive = uiMode === preset.uiMode &&
-                  settings.enable_hallucination_check === (preset.settings.enable_hallucination_check ?? false) &&
-                  settings.enable_feedback_loop === (preset.settings.enable_feedback_loop ?? false) &&
-                  settings.enable_memory_extraction === (preset.settings.enable_memory_extraction ?? false)
-                const tier = settings.feature_tier ?? "community"
-                const locked = preset.requiresPro && tier === "community"
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => !locked && applyUserPreset(preset)}
-                    disabled={locked}
-                    className={cn(
-                      "rounded-lg border p-3 text-left transition-colors",
-                      locked
-                        ? "opacity-50 cursor-not-allowed border-muted"
-                        : isActive
-                          ? "border-brand bg-brand/5"
-                          : "border-muted hover:border-muted-foreground/30",
-                    )}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <preset.Icon className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                      <span className="text-sm font-medium">{preset.label}</span>
-                      {locked && (
-                        <Badge variant="outline" className="text-label-xs px-1.5 py-0 text-gold border-gold">
-                          <Crown className="mr-0.5 h-2.5 w-2.5" />Pro
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="mt-1 text-label-sm leading-tight text-muted-foreground">
-                      {preset.description}
-                    </p>
-                  </button>
-                )
-              })}
-            </div>
+            {(() => {
+              const tier = settings.feature_tier ?? "community"
+              const activePresetId = USER_PRESETS.find(
+                (p) =>
+                  uiMode === p.uiMode &&
+                  settings.enable_hallucination_check === (p.settings.enable_hallucination_check ?? false) &&
+                  settings.enable_feedback_loop === (p.settings.enable_feedback_loop ?? false) &&
+                  settings.enable_memory_extraction === (p.settings.enable_memory_extraction ?? false),
+              )?.id ?? ""
+              return (
+                <TierSelector
+                  value={activePresetId}
+                  onChange={(id) => {
+                    const preset = USER_PRESETS.find((p) => p.id === id)
+                    if (preset) void applyUserPreset(preset)
+                  }}
+                  options={USER_PRESETS.map((p) => ({
+                    id: p.id,
+                    label: p.label,
+                    Icon: p.Icon,
+                    description: p.description,
+                    locked: p.requiresPro === true && tier === "community",
+                    lockedReason: "Pro",
+                  }))}
+                  ariaLabel="Response tier"
+                />
+              )
+            })()}
 
             {/* -- Tabbed Settings -- */}
             <Tabs value={activeTab} onValueChange={handleTabChange}>

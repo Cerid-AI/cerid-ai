@@ -138,10 +138,16 @@ describe("ChatInput", () => {
 
   // ---- Streaming state ----
 
-  it("textarea is disabled during streaming", () => {
+  it("textarea is read-only-ish during streaming (keyboard cancel preserved)", () => {
+    // Phase 7 C-P0.1: textarea must NOT become `disabled` during streaming,
+    // because that strips all keyboard access (including Esc-to-cancel).
+    // It stays focusable, has aria-readonly="true", and swaps to a streaming
+    // placeholder. Edits are dropped at the change-handler level.
     render(<ChatInput {...defaultProps} isStreaming={true} />)
-    const textarea = screen.getByPlaceholderText(/type a message/i)
-    expect(textarea).toBeDisabled()
+    const textarea = screen.getByLabelText("Chat message input")
+    expect(textarea).not.toBeDisabled()
+    expect(textarea).toHaveAttribute("aria-readonly", "true")
+    expect(textarea).toHaveAttribute("placeholder", expect.stringMatching(/streaming/i))
   })
 
   it("shows stop button during streaming", () => {

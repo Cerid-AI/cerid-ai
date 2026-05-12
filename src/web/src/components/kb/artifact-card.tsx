@@ -24,6 +24,21 @@ function normalizeFilename(raw: string): string {
   return parts[parts.length - 1] || raw
 }
 
+/** Audit P1.10: strip the repetitive "memory_empirical_…" / "memory_…" prefix
+ * from the displayed filename so the discriminating suffix has room to breathe.
+ * Title attribute on the parent keeps the full filename one hover away. */
+function displayFilename(raw: string): string {
+  const base = normalizeFilename(raw)
+  // Common machine-generated prefix family — strip everything before the
+  // first divergence point. Examples:
+  //   memory_empirical_hard_fad_20260511_… → hard_fad_20260511_…
+  //   memory_decision_audit_tr_…             → audit_tr_…
+  //   memory_temporal_…                      → temporal_…
+  const m = base.match(/^memory_(?:empirical|decision|preference|project|temporal|conversational)_(.*)$/)
+  if (m && m[1]) return m[1]
+  return base
+}
+
 /** Returns a human-readable relative time string like "3d ago", "2h ago", "5m ago". */
 function timeAgo(date: string): string {
   const now = Date.now()
@@ -169,7 +184,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   className="min-w-0 truncate text-sm font-medium cursor-text"
                   title={`${result.filename} (double-click to rename)`}
                   onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
-                >{normalizeFilename(result.filename)}</p>
+                >{displayFilename(result.filename)}</p>
               )}
               {chunkCount != null && (
                 <TooltipProvider delayDuration={200}>

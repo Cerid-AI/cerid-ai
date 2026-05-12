@@ -9,7 +9,7 @@
  * hammering the backend.
  */
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, type QueryObserverResult } from "@tanstack/react-query"
 import { fetchWikiEntities, fetchWikiEntity } from "@/lib/api/wiki"
 import type { EntitySummary, WikiEntityPage } from "@/lib/types/wiki"
 
@@ -21,8 +21,9 @@ export function useWikiEntities({ limit = 30 }: { limit?: number } = {}): {
   data: EntitySummary[] | undefined
   isLoading: boolean
   isError: boolean
+  refetch: () => Promise<QueryObserverResult<EntitySummary[], Error>>
 } {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["wiki-entities", limit],
     queryFn: () => fetchWikiEntities({ limit }),
     staleTime: 5 * 60_000,
@@ -30,7 +31,7 @@ export function useWikiEntities({ limit = 30 }: { limit?: number } = {}): {
     retry: 1,
   })
 
-  return { data, isLoading, isError }
+  return { data, isLoading, isError, refetch }
 }
 
 // ---------------------------------------------------------------------------
@@ -42,8 +43,9 @@ export function useWikiEntity(slug: string | null): {
   isLoading: boolean
   isError: boolean
   isNotFound: boolean
+  refetch: () => Promise<QueryObserverResult<WikiEntityPage | null, Error>>
 } {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["wiki-entity", slug],
     queryFn: () => fetchWikiEntity(slug!),
     enabled: !!slug,
@@ -57,5 +59,6 @@ export function useWikiEntity(slug: string | null): {
     isLoading,
     isError,
     isNotFound: !isLoading && !isError && data === null,
+    refetch,
   }
 }
