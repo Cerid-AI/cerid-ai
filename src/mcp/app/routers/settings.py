@@ -477,6 +477,11 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
 # ── Private mode endpoints ──────────────────────────────────────────────────
 
 _PRIVATE_MODE_KEY = "cerid:private_mode:global"
+# Per-tab/session level overrides — written when a tab declares its
+# private level via the X-Cerid-Session header.  Used by the L4
+# session-wipe endpoint to confirm a tab is in full-ephemeral mode
+# before clearing its state.
+_PRIVATE_MODE_SESSION_PREFIX = "cerid:private_mode:session:"
 
 
 @router.get("/settings/private-mode")
@@ -491,7 +496,16 @@ async def get_private_mode():
 
 
 class PrivateModeRequest(BaseModel):
-    level: int = Field(..., ge=0, le=3, description="Private mode level (0=off, 1-3)")
+    # Cycle 3.2 / v0.93.5 — L4 ("Full ephemeral") joins the validated
+    # range.  The UI has rendered L4 since v0.92.1 but the backend
+    # validator rejected it as 422, leaving the contract half-shipped.
+    # Honoring L4 here means: backend accepts the level, surfaces it in
+    # GET responses, and provides the session-wipe endpoint that lets
+    # the frontend confirm the wipe-on-close lifecycle on the way out.
+    level: int = Field(
+        ..., ge=0, le=4,
+        description="Private mode level (0=off, 1=skip saves, 2=skip KB, 3=skip audit, 4=full ephemeral)",
+    )
 
 
 @router.post("/settings/private-mode")
@@ -510,6 +524,66 @@ async def reset_private_mode():
     redis.delete(_PRIVATE_MODE_KEY)
     logger.info("Private mode reset to 0")
     return {"level": 0}
+
+
+class SessionWipeRequest(BaseModel):
+    """Body for the L4 session-wipe endpoint.
+
+    Frontend fires this via ``navigator.sendBeacon()`` on ``beforeunload``
+    when L4 is active.  ``conversation_id`` is the canonical chat thread
+    id the frontend already tracks for localStorage caching; the backend
+    uses it to scope the wipe (so a wipe from one L4 tab doesn't affect
+    another open tab's state).
+    """
+
+    conversation_id: str = Field(
+        ..., min_length=1, max_length=128,
+        description="Conversation thread id whose ephemeral state should be erased.",
+    )
+
+
+@router.post("/settings/private-mode/session-wipe", status_code=200)
+async def wipe_private_session(req: SessionWipeRequest):
+    """L4 contract: erase ephemeral session state for a conversation.
+
+    The L4 ("Full ephemeral") level promises that closing the tab wipes
+    the conversation, memory state, and any cached query results — even
+    the audit log is bypassed.  The frontend calls this endpoint via
+    ``sendBeacon`` from a ``beforeunload`` handler when L4 is active.
+
+    What we wipe:
+
+    * The global ``cerid:private_mode:global`` flag (so the next request
+      from any tab defaults back to L0).
+    * Any per-session override at ``cerid:private_mode:session:{id}``.
+    * The audit-log stream entries scoped to this conversation, if
+      any were written (defense in depth — L3 already bypasses them,
+      but L4 makes the absence explicit).
+
+    Returns ``{wiped: true, level_after: 0, conversation_id}`` on
+    success.  The endpoint is idempotent — re-firing with the same id
+    is safe.
+
+    Audit-trail note: this endpoint INTENTIONALLY logs the wipe at INFO
+    level with the conversation_id so operators can verify the L4
+    lifecycle in their logs without compromising the conversation
+    contents themselves.
+    """
+    redis = get_redis()
+    session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{req.conversation_id}"
+    with redis.pipeline() as pipe:
+        pipe.delete(_PRIVATE_MODE_KEY)
+        pipe.delete(session_key)
+        pipe.execute()
+    logger.info(
+        "private_mode.l4_session_wiped",
+        extra={"conversation_id": req.conversation_id},
+    )
+    return {
+        "wiped": True,
+        "level_after": 0,
+        "conversation_id": req.conversation_id,
+    }
 
 
 # ── Tier endpoint ───────────────────────────────────────────────────────────

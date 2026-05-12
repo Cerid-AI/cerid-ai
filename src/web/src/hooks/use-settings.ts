@@ -4,6 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { fetchSettings, updateSettings, syncPreferences, fetchUserState, fetchPrivateMode, enablePrivateMode, disablePrivateMode } from "@/lib/api"
+import { wipePrivateSession } from "@/lib/api/settings"
 import type { RagMode, RoutingMode, SettingsUpdate } from "@/lib/types"
 
 function readBool(key: string): boolean {
@@ -170,6 +171,37 @@ export function useSettings() {
     } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-private-mode-level" }) }
     return 0
   })
+
+  // L4 ephemeral lifecycle (Cycle 3.2 / v0.93.5). When Private Mode is at
+  // Level 4, register a beforeunload handler that fires the backend
+  // session-wipe via sendBeacon so the wipe completes even as the page
+  // unloads. The conversation_id is a per-tab synthetic — same scope
+  // L4's "this tab only" contract promises.
+  useEffect(() => {
+    if (privateModeLevel !== 4) return undefined
+    let tabId: string
+    try {
+      tabId = sessionStorage.getItem("cerid-l4-tab-id") ?? ""
+      if (!tabId) {
+        tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+        sessionStorage.setItem("cerid-l4-tab-id", tabId)
+      }
+    } catch (err) {
+      logSwallowedError(err, "use-settings.l4_tab_id")
+      tabId = `tab-${Date.now()}`
+    }
+    const onBeforeUnload = () => {
+      try {
+        wipePrivateSession(tabId)
+      } catch (err) {
+        logSwallowedError(err, "use-settings.l4_wipe")
+      }
+    }
+    window.addEventListener("beforeunload", onBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload)
+    }
+  }, [privateModeLevel])
 
   // Hydrate from server on mount (non-blocking, localStorage is immediate fallback)
   const hydratedRef = useRef(false)
