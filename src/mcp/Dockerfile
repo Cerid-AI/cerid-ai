@@ -1,6 +1,10 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# Build context: repo root (NOT src/mcp/). The build needs pyproject.toml
+# at the repo root to bake the canonical version into /app/VERSION.
+# Build with: docker build -f src/mcp/Dockerfile .
+
 # Stage 1: Builder — install Python deps with build tools
 FROM python:3.12.13-slim-trixie AS builder
 
@@ -11,7 +15,7 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir --upgrade pip setuptools
 
-COPY requirements.lock .
+COPY src/mcp/requirements.lock .
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Stage 2: Models — pre-download ONNX models into HuggingFace cache
@@ -65,10 +69,16 @@ COPY --from=models /root/.cache/huggingface/ /home/cerid/.cache/huggingface/
 RUN chown -R cerid:cerid /home/cerid/.cache
 
 WORKDIR /app
-COPY --chown=cerid:cerid . .
+COPY --chown=cerid:cerid src/mcp/ /app/
 
-ARG CERID_VERSION=""
-RUN if [ -n "$CERID_VERSION" ]; then echo "$CERID_VERSION" > VERSION; fi
+# Bake the canonical version from pyproject.toml at build time.
+# pyproject.toml is the single source of truth (see core/utils/version.py).
+# The .dockerignore excludes any stale host src/mcp/VERSION, so this RUN
+# is the only producer of /app/VERSION inside the image.
+COPY pyproject.toml /tmp/pyproject.toml
+RUN python -c "import tomllib,sys; v=tomllib.load(open('/tmp/pyproject.toml','rb'))['project']['version']; sys.stdout.write(v)" > /app/VERSION \
+    && chown cerid:cerid /app/VERSION \
+    && rm /tmp/pyproject.toml
 
 USER cerid
 EXPOSE 8888
