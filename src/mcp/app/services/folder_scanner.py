@@ -25,7 +25,22 @@ from app.deps import get_redis
 from app.parsers import parse_file as _parse_file
 from app.services.ingestion import ingest_content, ingest_file
 from config.taxonomy import SUPPORTED_EXTENSIONS
+from core.ingest.vault_config import (
+    PathClassification,
+    VaultProfile,
+    build_profile,
+)
 from core.utils.time import utcnow_iso
+
+# Extensions treated as binary attachments inside an attachments folder.
+# Files in attachments_folders with these suffixes still flow through
+# ingest_file (which dispatches to the right parser); files with any
+# other suffix in an attachments folder are skipped — markdown inside
+# an attachments folder is almost always export-artifact noise.
+_VAULT_ATTACHMENT_EXTENSIONS: frozenset[str] = frozenset({
+    ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+    ".docx", ".xlsx", ".epub",
+})
 
 logger = logging.getLogger("ai-companion.scanner")
 
@@ -120,6 +135,44 @@ def _detect_domain_from_path(file_path: str, root_path: str) -> tuple[str, str]:
     return "", ""
 
 
+def _vault_classify(
+    file_path: str,
+    root_path: str,
+    profile: VaultProfile,
+) -> PathClassification:
+    """Classify ``file_path`` (absolute) against ``profile``'s vault root.
+
+    Translates the absolute path to a path relative to ``root_path`` and
+    delegates to ``profile.classify_path``.  ``..`` (paths outside the
+    root) fall through to ``REGULAR`` rather than raising.
+    """
+    try:
+        rel = os.path.relpath(file_path, root_path.rstrip("/"))
+    except ValueError:
+        # On Windows, relpath raises when paths are on different drives.
+        return PathClassification.REGULAR
+    if rel.startswith(".."):
+        return PathClassification.REGULAR
+    return profile.classify_path(rel)
+
+
+def _vault_sub_category(
+    classification: PathClassification,
+    fallback: str,
+) -> str:
+    """Map a ``PathClassification`` to the ``sub_category`` field.
+
+    MOC / DAILY get their canonical tag; ATTACHMENT and REGULAR fall
+    through to whatever taxonomy-based ``sub_category`` the scanner
+    already computed.
+    """
+    if classification is PathClassification.MOC:
+        return "moc"
+    if classification is PathClassification.DAILY:
+        return "daily"
+    return fallback
+
+
 def _record_file_scanned(
     redis: Any,
     content_hash: str,
@@ -149,11 +202,24 @@ async def scan_folder(
     exclude_patterns: set[str] | None = None,
     max_file_size_mb: int = 50,
     dry_run: bool = False,
+    vault_profile: VaultProfile | None = None,
 ) -> AsyncIterator[ScanResult]:
     """Async generator that walks a directory tree and ingests new files.
 
     Yields a ScanResult for each file encountered (ingested, skipped, error, etc.).
     Uses Redis content-hash tracking to avoid re-processing already-ingested files.
+
+    When ``vault_profile`` is supplied, each file is classified against
+    the profile before ingestion:
+
+    * Files under ``templates_folders`` / ``skip_folders`` yield a
+      ``skipped`` ScanResult and are NOT ingested.
+    * Files under ``mocs_folders`` are tagged with ``sub_category="moc"``.
+    * Files under ``daily_folders`` are tagged with ``sub_category="daily"``.
+    * Files under ``attachments_folders`` are routed through ``ingest_file``
+      using the same parser pipeline (PDFs, images) instead of being
+      treated as markdown — non-attachment extensions in attachment
+      folders are skipped.
     """
     root = Path(root_path)
     if not root.is_dir():
@@ -194,8 +260,29 @@ async def scan_folder(
             file_path = entry.path
             suffix = Path(name).suffix.lower()
 
-            # Check extension
-            if suffix not in valid_extensions:
+            # Vault classification — runs BEFORE the extension gate so a
+            # path under ``templates/`` skips even if it's a supported
+            # extension, and an attachment folder allows binary suffixes
+            # that aren't in SUPPORTED_EXTENSIONS (handled below).
+            classification = PathClassification.REGULAR
+            if vault_profile is not None:
+                classification = _vault_classify(file_path, root_path, vault_profile)
+                if classification is PathClassification.SKIP:
+                    yield ScanResult(
+                        path=file_path,
+                        status="skipped",
+                        error_msg="vault:template_or_skip",
+                    )
+                    continue
+
+            # Check extension — attachment folders have their own
+            # allow-list (binary corpus) so we don't reject PDFs that
+            # may not appear in the general SUPPORTED_EXTENSIONS set.
+            if classification is PathClassification.ATTACHMENT:
+                if suffix not in _VAULT_ATTACHMENT_EXTENSIONS:
+                    yield ScanResult(path=file_path, status="unsupported")
+                    continue
+            elif suffix not in valid_extensions:
                 yield ScanResult(path=file_path, status="unsupported")
                 continue
 
@@ -231,6 +318,10 @@ async def scan_folder(
             # Dry run — preview only
             if dry_run:
                 domain, sub_cat = _detect_domain_from_path(file_path, root_path)
+                if vault_profile is not None:
+                    sub_cat = _vault_sub_category(classification, sub_cat)
+                    if not domain:
+                        domain = vault_profile.default_domain
                 yield ScanResult(
                     path=file_path,
                     status="preview",
@@ -241,6 +332,10 @@ async def scan_folder(
 
             # Ingest with concurrency limit
             domain, sub_cat = _detect_domain_from_path(file_path, root_path)
+            if vault_profile is not None:
+                sub_cat = _vault_sub_category(classification, sub_cat)
+                if not domain:
+                    domain = vault_profile.default_domain
 
             async with sem:
                 try:
@@ -403,3 +498,35 @@ def clear_scan_state(redis: Any) -> int:
         if cursor == 0:
             break
     return deleted
+
+
+def scan_vault(
+    vault_root: str,
+    ui_config: dict[str, Any] | None = None,
+    *,
+    min_quality: float = 0.4,
+    extensions: set[str] | None = None,
+    exclude_patterns: set[str] | None = None,
+    max_file_size_mb: int = 50,
+    dry_run: bool = False,
+) -> AsyncIterator[ScanResult]:
+    """Vault-aware folder scan.
+
+    Builds a ``VaultProfile`` from ``.cerid-vault.yaml`` (if present in
+    ``vault_root``) merged with ``ui_config`` (fallback), then delegates
+    to ``scan_folder`` with that profile threaded through.  YAML wins
+    on key conflicts; defaults fill anything still unspecified.
+
+    Returns the same ``AsyncIterator[ScanResult]`` as ``scan_folder`` —
+    callers consume it identically.
+    """
+    profile = build_profile(vault_root, ui_config)
+    return scan_folder(
+        vault_root,
+        min_quality=min_quality,
+        extensions=extensions,
+        exclude_patterns=exclude_patterns,
+        max_file_size_mb=max_file_size_mb,
+        dry_run=dry_run,
+        vault_profile=profile,
+    )

@@ -92,7 +92,111 @@ def _format_chroma_result(
         "tags_json": metadata.get("tags_json", "[]"),
         "keywords": metadata.get("keywords", "[]"),
         "memory_type": metadata.get("memory_type", ""),
+        # RAG C2.6 — preserve the parent linkage so the per-domain
+        # post-ranking pass can substitute the parent text into ``content``
+        # before reranking. Empty string when the row is not a child.
+        "chunk_level": metadata.get("chunk_level", ""),
+        "parent_chunk_id": metadata.get("parent_chunk_id", ""),
     }
+
+
+# ---------------------------------------------------------------------------
+# RAG C2.6 — parent-child retrieval helpers
+# ---------------------------------------------------------------------------
+
+
+def _parent_child_enabled() -> bool:
+    """Return whether the runtime parent-child retrieval flag is set.
+
+    The query path reads the flag through this function so tests can flip
+    it via env without re-importing the module. Mirrors
+    ``utils.chunker.parent_child_enabled``.
+    """
+    import os
+    return os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in (
+        "true",
+        "1",
+    )
+
+
+def _pc_fuse_child_filter(where: dict | None) -> dict | None:
+    """Fuse ``{"chunk_level": "child"}`` into a Chroma ``where`` clause.
+
+    Used by the multi-domain vector query so retrieval ranks only against
+    child chunks when parent-child retrieval is on. Stacks cleanly with
+    ``$and`` if other clauses are already present.
+    """
+    child_clause: dict[str, Any] = {"chunk_level": "child"}
+    if where is None:
+        return child_clause
+    if "chunk_level" in where:
+        return where
+    if "$and" in where:
+        for clause in where["$and"]:
+            if isinstance(clause, dict) and "chunk_level" in clause:
+                return where
+        return {"$and": [*where["$and"], child_clause]}
+    return {"$and": [where, child_clause]}
+
+
+def _substitute_parent_content(
+    results: list[dict[str, Any]],
+    collection: Any,
+) -> list[dict[str, Any]]:
+    """Substitute parent-chunk text into each child result.
+
+    For each result that has a non-empty ``parent_chunk_id``, fetch the
+    parent's document from the same collection (in one batch) and replace
+    the result's ``content`` field with the parent's text. The child's
+    relevance score, chunk_id, and other metadata are preserved — the
+    intent is to let the cross-encoder rerank against richer context.
+
+    Results without a parent_chunk_id (legacy single-tier corpora, or
+    parents that were already ranked directly) fall through unchanged.
+    """
+    if not results:
+        return results
+
+    parent_ids = sorted({
+        r.get("parent_chunk_id", "")
+        for r in results
+        if r.get("parent_chunk_id")
+    })
+    if not parent_ids:
+        return results
+
+    parent_text_by_id: dict[str, str] = {}
+    try:
+        fetched = collection.get(ids=parent_ids, include=["documents"])
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "core.agents.query_agent.parent_fetch", e,
+        )
+        return results
+
+    fetched_ids = fetched.get("ids", []) if isinstance(fetched, dict) else []
+    fetched_docs = fetched.get("documents", []) if isinstance(fetched, dict) else []
+    for pid, doc in zip(fetched_ids, fetched_docs):
+        if isinstance(doc, str) and doc:
+            parent_text_by_id[pid] = doc
+
+    if not parent_text_by_id:
+        return results
+
+    # Copy each dict instead of mutating in place — a future shared/cached
+    # result list won't be corrupted by this substitution pass.
+    substituted: list[dict[str, Any]] = []
+    for r in results:
+        pid = r.get("parent_chunk_id", "")
+        if pid and pid in parent_text_by_id:
+            substituted.append({
+                **r,
+                "content": parent_text_by_id[pid],
+                "parent_substituted": True,
+            })
+        else:
+            substituted.append(r)
+    return substituted
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +374,8 @@ async def multi_domain_query(
     except Exception:
         existing_collections = set()
 
+    pc_enabled = _parent_child_enabled()
+
     async def query_domain(domain: str) -> list[dict[str, Any]]:
         """Query a single domain collection (vector + BM25 hybrid)."""
         col_name = config.collection_name(domain)
@@ -284,6 +390,13 @@ async def multi_domain_query(
             # `tenant_id: <other>` nested inside `$and` would be invisible).
             # Layer the pending-exclude on AFTER tenant scoping.
             _where = _exclude_pending(with_tenant_scope(metadata_filter))
+            # RAG C2.6 — when parent-child retrieval is on, rank only against
+            # child chunks. The post-ranking pass below swaps each child's
+            # ``content`` for the parent's text so downstream rerank +
+            # context assembly operate on the richer parent context while
+            # the relevance score still reflects the precise child match.
+            if pc_enabled:
+                _where = _pc_fuse_child_filter(_where)
             query_kwargs: dict[str, Any] = {
                 "query_texts": [query],
                 "n_results": top_k,
@@ -410,6 +523,17 @@ async def multi_domain_query(
                             log_swallowed_error(
                                 "core.agents.query_agent.bm25_only_fetch", e,
                             )
+
+            # RAG C2.6 — substitute parent text for each ranked child. The
+            # child's relevance score is preserved (vector + BM25 fused
+            # against the targeted small chunk); only ``content`` is swapped
+            # so reranking + the context assembler operate on the richer
+            # parent context. Children without a parent (legacy single-tier
+            # rows in a mixed corpus) fall through unchanged.
+            if pc_enabled and formatted:
+                formatted = await asyncio.to_thread(
+                    _substitute_parent_content, formatted, collection,
+                )
 
             return formatted
 
@@ -1446,11 +1570,12 @@ async def _augment_with_hype(
                             "memory_type": "",
                             "metadata": meta,
                         })
-            except Exception as e:  # silent-catch-allowed: HyPE collection absent is the off-by-default norm
+            except Exception as e:  # noqa: BLE001 — observability boundary
                 # HyPE collection missing (flag was off at index time) — not an error.
-                logger.debug(
-                    "_augment_with_hype: hype collection %s unavailable: %s",
-                    hype_coll_name, e,
+                log_swallowed_error(
+                    "core.agents.query_agent._augment_with_hype.collection_get",
+                    e,
+                    context={"hype_collection": hype_coll_name},
                 )
 
         if not hype_hits:

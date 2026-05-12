@@ -120,6 +120,15 @@ def init_schema(driver) -> None:
             "FOR (c:Community) ON (c.level)"
         )
 
+        # --- Wikilink layer (RAG Cycle C2.1) ---
+        # PendingArtifact placeholders preserve broken [[wikilink]] targets
+        # until the real artifact lands; resolve_pending_artifacts re-points
+        # the inbound WIKILINKS_TO / EMBEDS edges and deletes the placeholder.
+        session.run(
+            "CREATE CONSTRAINT pending_artifact_name IF NOT EXISTS "
+            "FOR (p:PendingArtifact) REQUIRE p.name IS UNIQUE"
+        )
+
         # --- Seed Domain + SubCategory nodes ---
         now = utcnow_iso()
         for domain_name, domain_info in config.TAXONOMY.items():

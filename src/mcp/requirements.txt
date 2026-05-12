@@ -34,8 +34,12 @@ langgraph>=0.3.0,<2.0  # langgraph 1.x OK — audit verified: only StateGraph/EN
 # File parsing
 pdfplumber>=0.11.9,<0.12
 python-docx>=0.8,<2
+python-pptx>=1.0,<2
 openpyxl>=3.1,<4
 pandas>=2.0,<3.1
+# .msg (single Outlook message) parser — small pure-Python dep, no system libs.
+# Used by app/parsers/email.py::parse_msg. .pst is deferred (needs libpff).
+extract-msg>=0.50,<1
 
 # Search
 bm25s>=0.3,<1.0

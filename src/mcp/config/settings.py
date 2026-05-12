@@ -275,6 +275,9 @@ GRAPH_RELATIONSHIP_TYPES = [
     "DEPENDS_ON",       # import / reference detected in content
     "SUPERSEDES",       # re-ingested file replacing an older version
     "REFERENCES",       # explicit filename mention in content
+    "WIKILINKS_TO",     # Obsidian-style [[wikilink]] in markdown body (C2.1)
+    "EMBEDS",           # Obsidian-style ![[embed]] / transclusion (C2.1)
+    "HAS_ATTACHMENT",   # parent email → child artifact extracted from attachment (C2.4)
 ]
 
 # Validate relationship type names are safe for Cypher injection
@@ -602,6 +605,14 @@ INGEST_CONCURRENCY = int(os.getenv("INGEST_CONCURRENCY", "3"))
 PARENT_CHUNK_TOKENS = int(os.getenv("PARENT_CHUNK_TOKENS", "512"))
 CHILD_CHUNK_TOKENS = int(os.getenv("CHILD_CHUNK_TOKENS", "128"))
 CHILD_CHUNK_OVERLAP_PCT = float(os.getenv("CHILD_CHUNK_OVERLAP_PCT", "0.1"))
+# RAG C2.6 — feature-flag re-export. The canonical read is in
+# ``config/features.py`` (with the rest of the ENABLE_* toggles); this
+# duplicate getenv call exists solely so ``scripts/gen_env_example.py``
+# (which only walks settings.py) picks the variable up and surfaces it in
+# ``.env.example``. Default mirrors the feature flag default (off).
+ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv(
+    "ENABLE_PARENT_CHILD_RETRIEVAL", "false"
+).lower() in ("true", "1")
 
 # Layout-aware parser dispatch (Workstream E Phase 2b — default flipped
 # 2026-05-03 after eval validation against seeded eval-corpus v1; see
@@ -743,11 +754,6 @@ CERID_TRADING_ENABLED: bool = False
 TRADING_AGENT_URL: str = ""
 
 # ---------------------------------------------------------------------------
-# RSS/Atom Feed Poller
-# ---------------------------------------------------------------------------
-CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "30"))  # minutes
-
-# ---------------------------------------------------------------------------
 # Webhooks
 # ---------------------------------------------------------------------------
 # List of webhook endpoints. Each entry: {"url": "...", "events": ["ingestion.complete", ...]}
@@ -781,6 +787,15 @@ PRIVATE_MODE_LEVEL: int = int(os.getenv("CERID_PRIVATE_MODE_LEVEL", "1"))
 # ingestion to prevent PII leakage into vector/graph stores and LLM prompts.
 # Domain is preserved for context (e.g. "[redacted]@example.com").
 ANONYMIZE_EMAIL_HEADERS: bool = os.getenv("CERID_ANONYMIZE_EMAIL_HEADERS", "true").lower() == "true"
+
+# ---------------------------------------------------------------------------
+# mbox ingestion — cap on messages parsed per .mbox file
+# ---------------------------------------------------------------------------
+# Large .mbox archives (10k+ messages) blow up the body-text concatenation
+# and overwhelm the chunker. The parser stops extracting after this many
+# messages, surfaces the truncation as a structured field, and the ingest
+# response forwards the flag so callers (UI) can warn the user.
+MBOX_MESSAGE_CAP: int = int(os.getenv("MBOX_MESSAGE_CAP", "100"))
 
 # ---------------------------------------------------------------------------
 # Storage

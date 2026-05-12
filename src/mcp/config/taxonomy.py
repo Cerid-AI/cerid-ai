@@ -82,11 +82,11 @@ def collection_name(domain: str, *, namespace: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 SUPPORTED_EXTENSIONS = {
     # Documents
-    ".pdf", ".docx", ".xlsx", ".csv", ".tsv",
+    ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv",
     # E-books & rich text
     ".epub", ".rtf",
     # Email
-    ".eml", ".mbox",
+    ".eml", ".mbox", ".msg",
     # Text / markup
     ".txt", ".md", ".rst", ".log",
     ".html", ".htm", ".xml",

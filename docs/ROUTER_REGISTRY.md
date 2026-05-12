@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 269
+**Total routes:** 270
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -262,6 +262,7 @@ not documented here; see the internal repo for the full registry.
 | PATCH | `/{folder_id}` | `update_watched_folder` | `src/mcp/app/routers/watched_folders.py` | watched-folders |  |
 | POST | `/{folder_id}/scan` | `scan_watched_folder` | `src/mcp/app/routers/watched_folders.py` | watched-folders |  |
 | GET | `/{folder_id}/status` | `get_folder_status` | `src/mcp/app/routers/watched_folders.py` | watched-folders |  |
+| GET | `/{folder_id}/vault-profile` | `get_folder_vault_profile` | `src/mcp/app/routers/watched_folders.py` | watched-folders |  |
 | GET | `/webhooks` | `list_subscriptions` | `src/mcp/app/routers/webhook_subscriptions.py` | webhooks |  |
 | POST | `/webhooks` | `create_subscription` | `src/mcp/app/routers/webhook_subscriptions.py` | webhooks |  |
 | DELETE | `/webhooks/{sub_id}` | `delete_subscription` | `src/mcp/app/routers/webhook_subscriptions.py` | webhooks |  |

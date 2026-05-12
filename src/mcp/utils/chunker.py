@@ -212,6 +212,20 @@ PARENT_CHILD_ENABLED = os.getenv(
     "ENABLE_PARENT_CHILD_RETRIEVAL", "false"
 ).lower() in ("true", "1")
 
+
+def parent_child_enabled() -> bool:
+    """Return whether parent-child retrieval is enabled.
+
+    Reads the module-level ``PARENT_CHILD_ENABLED`` constant (set at
+    import time from ``ENABLE_PARENT_CHILD_RETRIEVAL``). Tests can
+    monkeypatch the constant on this module to flip the flag without
+    re-importing. Callers in the ingest and query paths must go through
+    this helper so any future refresh mechanism (e.g. live config
+    reload) lands in one place.
+    """
+    return bool(PARENT_CHILD_ENABLED)
+
+
 # Child chunk size: parent max // 4 (~128 tokens for 512-token parents).
 # Workstream E Phase 0.5 — exposed as settings so operators can tune
 # without a code change. Defaults preserve prior behaviour.
@@ -239,7 +253,7 @@ def chunk_with_parents(
         chunk_id, text, chunk_level ("parent" | "child"),
         parent_chunk_id, child_index, parent_token_count
     """
-    if not PARENT_CHILD_ENABLED:
+    if not parent_child_enabled():
         # Feature flag off — fall back to standard flat chunking.
         raw = chunk_text(
             text,

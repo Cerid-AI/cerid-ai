@@ -35,6 +35,8 @@ _SUFFIX_TO_ACCEPTABLE_TYPES: dict[str, frozenset[str]] = {
     ".doc": frozenset({"doc", "cfb"}),  # CFB = Compound File Binary (old Office)
     ".xls": frozenset({"xls", "cfb"}),
     ".ppt": frozenset({"ppt", "cfb"}),
+    # .msg is a CFB envelope — Outlook ships them with a CFB magic.
+    ".msg": frozenset({"msg", "cfb"}),
     ".epub": frozenset({"epub", "zip"}),
     ".mobi": frozenset({"mobi"}),
     ".png": frozenset({"png"}),
@@ -103,3 +105,40 @@ def validate_magic_bytes(suffix: str, content: bytes, *, filename: str) -> None:
                 "malicious binaries through extension-only validation."
             ),
         )
+
+
+def magic_bytes_match(suffix: str, content: bytes) -> tuple[bool, str]:
+    """Non-HTTP variant: return ``(ok, detected)`` instead of raising.
+
+    Used by service-layer paths (e.g. email-attachment recursion in
+    ``app/services/ingestion.py``) where a mismatch should be logged and
+    the attachment skipped — not propagated as an HTTP 422 to a caller
+    that already committed the parent artifact.
+
+    Contract mirrors :func:`validate_magic_bytes` exactly:
+
+    * Text-only suffixes always return ``(True, "")`` — no signature.
+    * Unrecognised content returns ``(False, "")``.
+    * Suffixes not present in the mapping return ``(True, detected)`` —
+      same "fail open with a log upstream" stance the HTTP path takes.
+    * Otherwise: ``(detected in acceptable_set, detected)``.
+
+    The detected extension is returned even on success so callers can
+    log "we accepted X as Y" for forensic traceability.
+    """
+    if suffix in _TEXT_ONLY_SUFFIXES:
+        return True, ""
+
+    import filetype  # lazy: avoid import cost when not needed
+
+    kind = filetype.guess(content)
+    if kind is None:
+        return False, ""
+
+    acceptable = _SUFFIX_TO_ACCEPTABLE_TYPES.get(suffix)
+    if acceptable is None:
+        # Suffix has no magic-mapping — same fail-open stance as the
+        # HTTP variant. Caller logs and proceeds.
+        return True, kind.extension
+
+    return (kind.extension in acceptable), kind.extension
