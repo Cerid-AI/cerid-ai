@@ -145,8 +145,12 @@ services:
   mcp-server:
     container_name: ai-companion-mcp
     build:
-      context: ./src/mcp
-      dockerfile: Dockerfile
+      # Repo root, so the Dockerfile can read pyproject.toml and bake the
+      # canonical version into /app/VERSION at build time. The .dockerignore
+      # at repo root scopes the build context tightly to pyproject.toml +
+      # src/mcp/ so the larger context doesn't slow builds.
+      context: .
+      dockerfile: src/mcp/Dockerfile
       args:
         # Workstream E Phase E.6.5: default flipped to false (~3 GB
         # lighter image). The reranker + embedder ONNX models download
