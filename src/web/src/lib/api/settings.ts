@@ -833,3 +833,29 @@ export async function testOpenRouterKey(api_key?: string): Promise<OpenRouterKey
   if (!res.ok) throw new Error(await extractError(res, "Failed to test OpenRouter key"))
   return res.json()
 }
+
+// ---------------------------------------------------------------------------
+// Brief scheduler settings (RAG C3.4)
+// ---------------------------------------------------------------------------
+
+export interface BriefSettings {
+  write_to_vault: boolean
+  vault_id: string | null
+  vault_folder: string
+}
+
+export async function fetchBriefSettings(): Promise<BriefSettings> {
+  const res = await fetch(`${MCP_BASE}/briefs/settings`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch brief settings"))
+  return res.json()
+}
+
+export async function updateBriefSettings(body: BriefSettings): Promise<BriefSettings> {
+  const res = await fetch(`${MCP_BASE}/briefs/settings`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to update brief settings"))
+  return res.json()
+}
