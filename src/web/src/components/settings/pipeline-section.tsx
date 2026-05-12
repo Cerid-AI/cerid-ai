@@ -133,7 +133,10 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   description="Adds SPLADE-v3 learned-sparse as a third retriever; RRF-fused with vector + BM25"
                   info="Catches synonym matches that pure-vector and BM25 miss. Recommended once your corpus exceeds 100 documents."
                 >
-                  <Row label="Fusion mode" info="weighted_sum (legacy), rrf (vector+BM25), tri_rrf (vector+BM25+SPLADE)">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      Fusion mode
+                    </span>
                     <select
                       className="rounded border bg-background px-2 py-1 text-xs"
                       value={settings.hybrid_fusion_mode ?? "weighted_sum"}
@@ -145,7 +148,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                       <option value="rrf">RRF (2-way)</option>
                       <option value="tri_rrf">RRF (3-way)</option>
                     </select>
-                  </Row>
+                  </div>
                   <SliderRow
                     label="Sparse weight"
                     value={settings.hybrid_rrf_sparse_weight ?? 1.0}
