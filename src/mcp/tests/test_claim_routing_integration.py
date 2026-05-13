@@ -99,7 +99,7 @@ def _llm_verdict(
 # Patch targets (all relative to the verification module's imports)
 _PATCH_KB_QUERY = "core.agents.query_agent.lightweight_kb_query"
 _PATCH_MEMORIES = "core.agents.hallucination.verification._query_memories"
-_PATCH_NLI = "core.utils.nli.nli_score"
+_PATCH_NLI = "core.utils.nli.nli_score_async"
 _PATCH_LLM_RAW = "core.utils.llm_client.call_llm_raw"
 _PATCH_CACHE_GET = "core.utils.claim_cache.get_cached_verdict"
 _PATCH_CACHE_SET = "core.utils.claim_cache.cache_verdict"

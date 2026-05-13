@@ -1144,8 +1144,12 @@ async def _verify_claim_externally(
                 _ext_nli_conf = ""
                 if kb_snippet:
                     try:
-                        from core.utils.nli import nli_score as _ext_nli_fn
-                        _ext_nli = _ext_nli_fn(kb_snippet[:512], claim)
+                        # v0.93.10: async-batched NLI for coalescing with
+                        # the concurrent verify_claim() calls in the same
+                        # asyncio.gather(). See line ~1804 for the full
+                        # rationale.
+                        from core.utils.nli import nli_score_async as _ext_nli_fn
+                        _ext_nli = await _ext_nli_fn(kb_snippet[:512], claim)
                         _ext_nli_label = _ext_nli["label"]
                         _ext_nli_conf = (
                             f"entailment={_ext_nli['entailment']:.2f}, "
@@ -1799,9 +1803,15 @@ async def verify_claim(
                 pass  # Graph query failed — non-blocking
 
         # --- NLI entailment check on top KB result ---
+        # v0.93.10: switched to nli_score_async so N concurrent
+        # verify_claim() tasks dispatched via asyncio.gather rendezvous
+        # in a single batched inference (`_NliBatcher` coalesces calls
+        # within an NLI_COALESCE_MS window).  Pre-v0.93.10 these calls
+        # serialised on the ONNX-session lock — N concurrent claims took
+        # N × per-call time.  Now they take ~1 × per-batch time.
         try:
-            from core.utils.nli import nli_score
-            _nli = nli_score(top_result.get("content", "")[:512], claim)
+            from core.utils.nli import nli_score_async
+            _nli = await nli_score_async(top_result.get("content", "")[:512], claim)
         except Exception:
             logger.debug("NLI scoring failed for claim %r — falling back to similarity", claim[:60])
             _nli = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "label": "neutral"}

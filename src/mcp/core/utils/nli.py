@@ -16,6 +16,7 @@ Label order for cross-encoder/nli-deberta-v3-xsmall:
 Convention: premise = evidence (KB content), hypothesis = claim.
 """
 
+import asyncio
 import logging
 import os
 import threading
@@ -29,6 +30,7 @@ from tokenizers import Tokenizer
 
 import config
 from core.observability.span_helpers import span
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.nli")
 
@@ -209,3 +211,171 @@ def batch_nli_score(pairs: list[tuple[str, str]]) -> list[dict[str, Any]]:
             "label": _LABEL_NAMES[best_idx],
         })
     return results
+
+
+# ---------------------------------------------------------------------------
+# Async batch-coalescing API (v0.93.10)
+#
+# Verification path's `verify_claim` is async and dispatched via
+# `asyncio.gather` for N claims in parallel.  Pre-v0.93.10 each task
+# called sync `nli_score()` which serialised on the ONNX-session lock —
+# N concurrent tasks took N × per-call time instead of one batch's worth.
+#
+# `nli_score_async()` joins a sliding-window batch.  Concurrent callers
+# inside the same window get coalesced into a single `batch_nli_score()`
+# invocation, then each receives their own per-pair result.  Single
+# callers (no concurrency) still pay the worst-case ``coalesce_ms`` wait
+# but the win on the hot path is substantial: the typical
+# /agent/hallucination call has 5-15 claims dispatched concurrently and
+# they all rendezvous in one batch.
+#
+# Time-window default: 10 ms.  Tuned to `~half the per-call latency` so
+# the wait cost is bounded.  Operators tuning for latency-critical
+# workloads can drop it to 0 (no batching) via NLI_COALESCE_MS=0.
+# ---------------------------------------------------------------------------
+
+_COALESCE_MS = int(os.getenv("NLI_COALESCE_MS", "10"))
+_COALESCE_MAX_BATCH = int(os.getenv("NLI_COALESCE_MAX_BATCH", "32"))
+
+
+class _NliBatcher:
+    """Async batch-coalescer for NLI calls.
+
+    Public surface: ``async submit(premise, hypothesis) -> dict``.
+
+    Per-event-loop instance — created lazily on first call via
+    ``_get_batcher()``.  The "one instance per loop" rule matters because
+    `asyncio.Lock()` is bound to the loop it was constructed under, and
+    cerid runs both the uvicorn loop and per-test loops (pytest-asyncio).
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._pending: list[tuple[tuple[str, str], asyncio.Future]] = []
+        self._flush_task: asyncio.Task | None = None
+
+    async def submit(self, premise: str, hypothesis: str) -> dict[str, Any]:
+        """Submit one pair; return the per-pair result.
+
+        Joins the current batch if a flush task is already pending;
+        otherwise starts one with ``coalesce_ms`` delay.
+        """
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        async with self._lock:
+            self._pending.append(((premise, hypothesis), future))
+            # Force-flush if we already hit the max batch.  Otherwise let
+            # the pending flush task fire on its own timer.
+            should_force = len(self._pending) >= _COALESCE_MAX_BATCH
+            if self._flush_task is None or self._flush_task.done():
+                self._flush_task = loop.create_task(self._flush_after_delay())
+        if should_force:
+            # Cancel the timer-driven flush and run immediately.
+            self._flush_task.cancel()
+            await self._flush()
+        return await future
+
+    async def _flush_after_delay(self) -> None:
+        """Wait `coalesce_ms`, then flush whatever's pending."""
+        try:
+            if _COALESCE_MS > 0:
+                await asyncio.sleep(_COALESCE_MS / 1000.0)
+            await self._flush()
+        except asyncio.CancelledError:
+            # Force-flush path cancelled us; the caller is doing the
+            # flush itself, so we just exit cleanly.
+            pass
+
+    async def _flush(self) -> None:
+        """Drain the pending list and resolve all futures in one batch."""
+        async with self._lock:
+            if not self._pending:
+                return
+            batch = self._pending
+            self._pending = []
+
+        pairs = [pair for pair, _ in batch]
+        # The CPU-bound ONNX call would otherwise block the event loop.
+        # Run in a worker thread; ONNX session is internally thread-safe
+        # for inference once initialized, but `_lock` in `_load_model`
+        # guards the one-time init.
+        try:
+            results = await asyncio.to_thread(batch_nli_score, pairs)
+        except Exception as exc:  # noqa: BLE001 — futures must always resolve
+            log_swallowed_error("core.utils.nli.async_batch", exc)
+            # Resolve every future with a neutral verdict so callers
+            # don't hang forever.  Same shape as the per-claim exception
+            # handler in verification.py.
+            neutral = {
+                "contradiction": 0.0,
+                "entailment": 0.0,
+                "neutral": 1.0,
+                "label": "neutral",
+            }
+            for _, fut in batch:
+                if not fut.done():
+                    fut.set_result(neutral)
+            return
+
+        for (_, fut), result in zip(batch, results):
+            if not fut.done():
+                fut.set_result(result)
+
+
+# Per-event-loop cache.  ``id(loop)`` keys avoid the cross-loop
+# `asyncio.Lock` problem flagged by pytest-asyncio's loop-per-test mode.
+_batchers: dict[int, "_NliBatcher"] = {}
+_batchers_lock = threading.Lock()
+
+
+def _get_batcher() -> "_NliBatcher":
+    """Return the batcher bound to the current event loop."""
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    # Fast path — no lock if already present.
+    cached = _batchers.get(key)
+    if cached is not None:
+        return cached
+    with _batchers_lock:
+        cached = _batchers.get(key)
+        if cached is None:
+            cached = _NliBatcher()
+            _batchers[key] = cached
+        return cached
+
+
+async def nli_score_async(premise: str, hypothesis: str) -> dict[str, Any]:
+    """Async NLI scoring with automatic batch coalescing.
+
+    Preferred over sync ``nli_score()`` whenever the caller is inside an
+    asyncio task — concurrent calls in the same event-loop tick get
+    coalesced into a single batch inference.
+
+    Args:
+        premise: The evidence text (e.g. KB content).
+        hypothesis: The claim to check against the evidence.
+
+    Returns:
+        Same shape as ``nli_score()``: ``{"contradiction", "entailment",
+        "neutral", "label"}``.
+
+    Tuning env vars:
+        ``NLI_COALESCE_MS=10`` — batch-window in milliseconds; 0 disables
+        coalescing (each call runs solo).
+        ``NLI_COALESCE_MAX_BATCH=32`` — max pairs per inference call;
+        any submitted past this cap force-flush the current batch.
+    """
+    batcher = _get_batcher()
+    return await batcher.submit(premise, hypothesis)
+
+
+def reset_async_batcher_for_test() -> None:
+    """Clear all per-loop batchers — test hook only.
+
+    pytest-asyncio uses a fresh event loop per test; without this the
+    `_batchers` dict accumulates stale (loop, batcher) pairs that point
+    at closed loops.  Tests that exercise the async path call this in
+    a fixture teardown.
+    """
+    with _batchers_lock:
+        _batchers.clear()
