@@ -2,6 +2,97 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.10 — NLI async-batched coalescer: 2.5-3x speedup on verification hot path (2026-05-13)
+
+The verification path (`/agent/hallucination`, `/agent/verify-stream`)
+dispatches N claim-verifications concurrently via `asyncio.gather`.
+Each one called sync `nli_score()` which serialised on the ONNX-session
+lock — N concurrent claims took N × per-call time instead of one batch
+inference.
+
+v0.93.10 adds `nli_score_async()` backed by a per-event-loop
+`_NliBatcher` that coalesces submissions within a configurable window
+(default 10 ms, env-tunable via `NLI_COALESCE_MS`). When the typical
+verification call dispatches 10-15 claims concurrently, all submissions
+join one batch and run as a single `batch_nli_score()` call.
+
+**Measured speedup on the live cerid container (Mac Pro 2019, Xeon
+W-3245M, AMD Vega II — Quenchforge for embed/rerank, NLI on CPU):**
+
+| Concurrent N | Sync ms | Async-coalesced ms | Speedup | Saved ms |
+|--|--|--|--|--|
+| 1 | 14.8 | 23.8 | 0.62× | -9 |
+| 3 | 43.1 | 81.7 | 0.53× | -39 |
+| 5 | 111.4 | 91.4 | 1.22× | 20 |
+| 10 | 289.5 | 117.3 | **2.47×** | 172 |
+| 15 | 394.0 | 128.1 | **3.07×** | 266 |
+| 20 | 492.3 | 189.5 | 2.60× | 303 |
+| 30 | 774.0 | 230.5 | **3.36×** | 544 |
+
+Solo-call regression (N≤3) is a known trade-off — those callers pay the
+10 ms coalesce window with no concurrent peers to share with. The hot
+path is the concurrent-dispatch case (typical 5-15 claims per
+`/agent/hallucination` invocation) where the gain is real.
+
+### What changed
+
+- **`core/utils/nli.py`** — adds `nli_score_async(premise, hypothesis)`
+  and `_NliBatcher`. Per-event-loop cache keyed on `id(loop)` so
+  pytest-asyncio's per-test loops don't accumulate stale lock-bound
+  state. Inference runs on `asyncio.to_thread` so the event loop
+  doesn't block during the CPU-bound ONNX call. Error path resolves
+  every pending future with a neutral verdict so callers never hang.
+- **`core/agents/hallucination/verification.py`** — two call sites
+  migrated (`verify_claim` L1804 KB-NLI check, `_verify_claim_externally`
+  L1148 external-NLI check). The third site (`_verify_against_cited_url`
+  L300) stays sync — single-claim-per-URL, no concurrent peers to
+  benefit from batching.
+- **`tests/test_nli.py`** — `TestNliScoreAsync` adds 4 tests:
+  single-call shape match, concurrent-coalesce-into-one-batch
+  (the load-bearing test), zero-coalesce-disables-batching, and
+  inference-error-resolves-with-neutral.
+- **`tests/test_claim_routing_integration.py`** — patch target updated
+  from `nli_score` to `nli_score_async` (the new call site).
+
+### Tuning knobs
+
+| Env var | Default | Effect |
+|---|---|---|
+| `NLI_COALESCE_MS` | 10 | Batch window in milliseconds; 0 disables coalescing |
+| `NLI_COALESCE_MAX_BATCH` | 32 | Max pairs per inference; any past this trigger an immediate flush |
+
+### What was investigated and not done
+
+Earlier in this session we evaluated three other paths to faster NLI:
+
+1. **NLI on Quenchforge GPU** — blocked. `cross-encoder/nli-deberta-v3-xsmall`
+   is DeBERTa-v3, and llama.cpp's `convert_hf_to_gguf.py` has no
+   DeBERTa support. Switching to a BERT/RoBERTa-based NLI cross-encoder
+   trades model quality for GPU acceleration and STILL needs llama-server
+   to expose a classifier-head output mode (which it doesn't).
+2. **INT8 quantization on CPU** — tested with `onnx/model_qint8_avx512_vnni.onnx`
+   from the model's HuggingFace page. Per-call latency essentially
+   unchanged (19.3 ms vs 20.9 ms FP32). The Xeon W-3245's INT8 path
+   doesn't capitalise on the smaller model the way one would expect.
+3. **MLX / PyTorch MPS / ONNX CoreML / vLLM / MLC LLM / custom MPS** —
+   all eliminated for Intel Mac + AMD discrete (see
+   `tasks/2026-05-13-llama-alternatives-for-nli.md` for the survey).
+
+The async-batched coalescer is the best available answer today and is
+revisitable when llama.cpp ships DeBERTa support upstream.
+
+### Out of scope (this release)
+
+- **Tier 2 bandwidth fixes** (`StorageModeManaged` on non-UMA,
+  `MTLDispatchTypeConcurrent` disable) — carry crash risk. The patch
+  sites are identified (`ggml-metal-device.m` lines 1483, 1486, 1550,
+  1577, 1676, 1733 for storage mode; line 469 for dispatch type). Will
+  ship in a separate Quenchforge release (v0.3.4) after the sandbox
+  safety protocol gates them (parallel daemon on port 11444, 15-min
+  soak, embed+rerank smoke, chat coherence).
+
+---
+
 ## v0.93.9 — Production hardening: AMD chat works, settings live-mutable (2026-05-13)
 
 v0.93.9 closes the production gaps left in v0.93.8.  The GPU release

@@ -39,6 +39,18 @@ def _make_fake_tokenizer() -> MagicMock:
     return tok
 
 
+def _make_fake_tokenizer_n(n: int) -> MagicMock:
+    """Return a mock Tokenizer whose encode_batch yields N copies."""
+    tok = MagicMock()
+    encoding = MagicMock()
+    encoding.ids = [0, 1, 2, 3]
+    encoding.attention_mask = [1, 1, 1, 1]
+    encoding.type_ids = [0, 0, 1, 1]
+    tok.encode.return_value = encoding
+    tok.encode_batch.return_value = [encoding] * n
+    return tok
+
+
 class TestNliScore:
     """Unit tests for nli_score()."""
 
@@ -158,3 +170,159 @@ class TestNliScore:
 
         mock_capture.assert_called_once()
         assert nli_mod._MODEL_LOADED is False
+
+
+# ---------------------------------------------------------------------------
+# Async-batched NLI (v0.93.10)
+# ---------------------------------------------------------------------------
+
+
+class TestNliScoreAsync:
+    """Unit tests for nli_score_async() — the batch-coalescing async API."""
+
+    def setup_method(self):
+        import core.utils.nli as nli_mod
+        nli_mod._session = None
+        nli_mod._tokenizer = None
+        nli_mod.reset_async_batcher_for_test()
+
+    def teardown_method(self):
+        import core.utils.nli as nli_mod
+        nli_mod.reset_async_batcher_for_test()
+
+    @patch("core.utils.nli._load_model")
+    async def test_single_call_matches_sync_shape(self, mock_load):
+        """nli_score_async returns the same shape as sync nli_score."""
+        import asyncio
+
+        from core.utils.nli import nli_score_async
+
+        logits = np.array([[-2.0, 5.0, -1.0]])
+        mock_load.return_value = (
+            _make_fake_session(logits), _make_fake_tokenizer_n(1),
+        )
+
+        result = await nli_score_async("premise text", "claim text")
+        assert set(result.keys()) == {"contradiction", "entailment", "neutral", "label"}
+        assert result["label"] == "entailment"
+        assert result["entailment"] > 0.9
+        _ = asyncio  # used implicitly by pytest-asyncio
+
+    @patch("core.utils.nli._load_model")
+    async def test_concurrent_calls_coalesce_into_one_batch(self, mock_load):
+        """N concurrent submit() calls -> exactly ONE batch_nli_score invocation.
+
+        This is the load-bearing test for the v0.93.10 perf win: N
+        `verify_claim` tasks dispatched via asyncio.gather should share
+        a single batch inference, not serialize N times.
+        """
+        import asyncio
+
+        import core.utils.nli as nli_mod
+        from core.utils.nli import nli_score_async
+
+        # Per-pair logits (5 pairs, 3-class each)
+        per_call_logits = np.array([
+            [-2.0,  5.0, -1.0],  # entailment
+            [ 5.0, -2.0, -1.0],  # contradiction
+            [-1.0, -1.0,  5.0],  # neutral
+            [-2.0,  5.0, -1.0],
+            [ 5.0, -2.0, -1.0],
+        ])
+        n_pairs = 5
+        mock_load.return_value = (
+            _make_fake_session(per_call_logits), _make_fake_tokenizer_n(n_pairs),
+        )
+
+        # Track how many times batch_nli_score is invoked by counting
+        # session.run() calls — one per ONNX inference.
+        session, _ = mock_load.return_value
+        # Dispatch N concurrent submissions.
+        results = await asyncio.gather(*[
+            nli_score_async(f"premise {i}", f"hypothesis {i}")
+            for i in range(n_pairs)
+        ])
+
+        # All 5 got results.
+        assert len(results) == n_pairs
+        # ONE inference call — coalesced into a single batch.
+        assert session.run.call_count == 1, (
+            f"Expected 1 batched inference, got {session.run.call_count}. "
+            f"The coalescer isn't batching concurrent submissions."
+        )
+        # Per-pair labels match the per-row logits.
+        assert results[0]["label"] == "entailment"
+        assert results[1]["label"] == "contradiction"
+        assert results[2]["label"] == "neutral"
+        _ = nli_mod  # used implicitly
+
+    @patch("core.utils.nli._load_model")
+    async def test_zero_coalesce_works_without_batching(self, mock_load, monkeypatch):
+        """NLI_COALESCE_MS=0 disables batching — each call inferences solo.
+
+        The escape hatch for operators who want lowest possible latency
+        on isolated calls.  Asserts the per-call result is correct, not
+        the inference-count (with COALESCE_MS=0 concurrent calls may or
+        may not coalesce depending on whether they enqueue before
+        sleep(0) yields).
+        """
+        import asyncio
+
+        import core.utils.nli as nli_mod
+        from core.utils.nli import nli_score_async
+
+        monkeypatch.setattr(nli_mod, "_COALESCE_MS", 0)
+        nli_mod.reset_async_batcher_for_test()
+
+        logits = np.array([
+            [-2.0, 5.0, -1.0],
+            [5.0, -2.0, -1.0],
+        ])
+        mock_load.return_value = (
+            _make_fake_session(logits), _make_fake_tokenizer_n(2),
+        )
+
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                nli_score_async("p1", "h1"),
+                nli_score_async("p2", "h2"),
+            ),
+            timeout=1.0,
+        )
+        assert len(results) == 2
+        # Both got valid result shapes.
+        for r in results:
+            assert set(r.keys()) == {"contradiction", "entailment", "neutral", "label"}
+
+    @patch("core.utils.nli._load_model")
+    async def test_inference_error_resolves_with_neutral(self, mock_load):
+        """When batch_nli_score raises, all pending futures resolve neutrally."""
+        import asyncio
+
+        from core.utils.nli import nli_score_async
+
+        session = MagicMock()
+        session.run.side_effect = RuntimeError("simulated ONNX failure")
+        session.get_inputs.return_value = [
+            MagicMock(name="input_ids"),
+            MagicMock(name="attention_mask"),
+            MagicMock(name="token_type_ids"),
+        ]
+        for inp, name in zip(
+            session.get_inputs.return_value,
+            ["input_ids", "attention_mask", "token_type_ids"],
+        ):
+            inp.name = name
+        mock_load.return_value = (session, _make_fake_tokenizer_n(3))
+
+        results = await asyncio.gather(
+            nli_score_async("a", "b"),
+            nli_score_async("c", "d"),
+            nli_score_async("e", "f"),
+        )
+
+        # All three got resolved (no hung futures), with the neutral
+        # fallback shape so callers don't crash.
+        for r in results:
+            assert r["label"] == "neutral"
+            assert r["neutral"] == 1.0
