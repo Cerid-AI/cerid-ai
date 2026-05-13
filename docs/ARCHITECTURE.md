@@ -158,6 +158,59 @@ toggle to the user lives in `core/config/recommendations.py` (pure
 declarative registry) consumed by `app/processor/jobs/config_recommender.py`
 which writes to Redis and is served back via `/health.recommended_features`.
 
+## Inference routing (v0.93.8)
+
+Every inference workload has a tiered dispatch chain.  The active
+provider is observable at `GET /health.inference_routing`.
+
+```
+LLM chat / generation
+  └─ call_internal_llm(stage=...)
+      ├─ INTERNAL_LLM_PROVIDER=quenchforge → /api/chat on QUENCHFORGE_URL
+      ├─ INTERNAL_LLM_PROVIDER=ollama      → /api/chat on OLLAMA_URL
+      └─ else                              → OpenRouter /v1/chat/completions
+
+Dense embeddings
+  └─ OnnxEmbeddingFunction.__call__
+      ├─ EMBEDDINGS_PROVIDER=quenchforge → /v1/embeddings (AMD GPU)
+      ├─ cfg.provider=fastembed-sidecar  → /embed (CoreML / CUDA)
+      └─ else                            → in-process ONNX (CPU)
+
+Cross-encoder reranking
+  └─ _rerank_cross_encoder
+      ├─ RERANK_PROVIDER=quenchforge     → /v1/rerank (AMD GPU)
+      ├─ cfg.provider=fastembed-sidecar  → /rerank (CoreML / CUDA)
+      └─ else                            → in-process ONNX (CPU)
+
+SPLADE-v3 sparse
+  └─ core.retrieval.sparse.encode_batch
+      ├─ cfg.provider=fastembed-sidecar  → /encode/sparse (CoreML / CUDA)
+      └─ else                            → in-process ONNX (CPU)
+  No Quenchforge — upstream gateway has no sparse endpoint.
+
+NLI verification
+  └─ core.utils.nli.nli_score
+      └─ in-process ONNX (CPU — providers=["CPUExecutionProvider"])
+  No sidecar, no Quenchforge — only GPU path on AMD Mac is none.
+```
+
+Provider selection is env-driven so a PATCH /settings flip takes
+effect on the next request without restart.  The four `QUENCHFORGE_*`
+env vars (URL + three model names) are the operator's surface; the
+`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md` matrix picks GGUFs by VRAM
+tier.
+
+Three workloads stay CPU on Intel Mac + AMD even with Quenchforge
+configured:
+
+* **SPLADE-v3 sparse encoding** — Quenchforge has no sparse endpoint
+  (verified against the routing table in upstream `gateway.go`).
+* **NLI verification** — no GPU path exists in cerid's stack today.
+  Adding NLI to cerid's own sidecar would unlock CoreML / CUDA but
+  still leave Intel Mac + AMD on CPU.
+* **`:online` web-search claim verification** — OpenRouter-specific
+  feature.  Quenchforge has no web-search proxy.
+
 ## Observability contract
 
 The canonical endpoint is `GET /health`. Every observability signal must appear in `/health.invariants`:
