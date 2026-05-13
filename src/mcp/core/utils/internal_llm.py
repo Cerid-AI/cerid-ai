@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Internal LLM call utility — routes to direct OpenRouter or Ollama based on INTERNAL_LLM_PROVIDER.
+"""Internal LLM call utility — routes to OpenRouter, Ollama, or Quenchforge based on INTERNAL_LLM_PROVIDER.
 
 Used by pipeline operations that need lightweight LLM intelligence:
 - Query decomposition
@@ -9,6 +9,9 @@ Used by pipeline operations that need lightweight LLM intelligence:
 - Contextual chunk summaries
 - AI categorization (smart tier)
 - Memory conflict resolution
+
+Quenchforge speaks the Ollama HTTP protocol identically — provider="quenchforge"
+reuses the Ollama wire format but reads QUENCHFORGE_URL instead of OLLAMA_URL.
 
 NOT used for user-facing chat (that goes through /chat/stream → OpenRouter).
 NOT used for verification (that uses dedicated VERIFICATION_MODEL).
@@ -19,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from typing import Any
 
 import httpx
 
@@ -63,7 +67,8 @@ async def call_internal_llm(
     """Route internal LLM call to configured provider.
 
     Returns the assistant message content as a string.
-    Providers: "ollama" (local) or "openrouter" (default).
+    Providers: "ollama" (local), "quenchforge" (local Mac+AMD), or
+    "openrouter" (default cloud aggregator).
 
     The *stage* argument is a first-class observability breadcrumb: every
     internal-LLM call is attributed to a named pipeline stage (e.g.
@@ -83,9 +88,12 @@ async def call_internal_llm(
             pass
         log.debug("internal LLM call provider=%s stage=%s", provider, stage)
 
-    if provider == "ollama":
+    if provider in ("ollama", "quenchforge"):
         return await _call_ollama(
-            messages, temperature=temperature, max_tokens=max_tokens,
+            messages,
+            provider=provider,
+            temperature=temperature,
+            max_tokens=max_tokens,
             json_mode=response_format is not None and response_format.get("type") == "json_object",
         )
     else:
@@ -105,31 +113,70 @@ async def _call_ollama(
     temperature: float,
     max_tokens: int,
     json_mode: bool = False,
+    provider: str = "ollama",
 ) -> str:
-    """Call local Ollama instance for internal operations."""
+    """Call a local Ollama-protocol backend (stock Ollama or Quenchforge).
+
+    The wire format is identical across both backends; ``provider`` only
+    selects the URL (``OLLAMA_URL`` vs ``QUENCHFORGE_URL``) and the
+    user-facing label in fallback log lines.
+    """
     import httpx
 
-    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    if provider == "quenchforge":
+        base_url = getattr(config, "QUENCHFORGE_URL", "") or os.getenv(
+            "OLLAMA_URL", "http://localhost:11434"
+        )
+        label = "Quenchforge"
+        start_hint = "is the quenchforge daemon running?"
+    else:
+        base_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        label = "Ollama"
+        start_hint = "is 'ollama serve' running?"
     model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
+    # Both providers share a single breaker key — they target the same wire
+    # protocol and a stuck local backend is a stuck local backend.
     breaker = get_breaker("ollama")
 
+    # Advanced flags (default off). When any is set, additive payload fields
+    # are surfaced; the wire stays valid against stock Ollama and Quenchforge.
+    options: dict[str, Any] = {
+        "temperature": temperature,
+        "num_predict": max_tokens,
+    }
+    if json_mode and getattr(config, "ENABLE_CONSTRAINED_DECODE", False):
+        # Constrained decode pairs with json_mode by forcing deterministic
+        # output — otherwise the model can still emit valid JSON that varies
+        # per sample. Operators wanting freshness override the flag.
+        options["temperature"] = 0.0
+    if getattr(config, "ENABLE_SPECULATIVE_DECODE", False):
+        draft_model = (
+            getattr(config, "INTERNAL_LLM_DRAFT_MODEL", "")
+            or os.getenv("INTERNAL_LLM_DRAFT_MODEL", "")
+        )
+        if draft_model:
+            options["draft_model"] = draft_model
+
     async def _do_call() -> str:
-        payload: dict = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-            },
+            "options": options,
         }
-        # Ollama supports format: "json" to enforce JSON output
+        # Both backends accept format: "json" to enforce JSON output
         if json_mode:
             payload["format"] = "json"
+        # Prefix-cache keep-alive: ask the backend to keep the model loaded
+        # between calls so prompt-prefix reuse (KV cache hits) survives.
+        if getattr(config, "ENABLE_PROMPT_PREFIX_CACHE", False):
+            payload["keep_alive"] = getattr(
+                config, "PROMPT_PREFIX_KEEP_ALIVE", "30m"
+            )
 
         client = await _get_ollama_client()
         resp = await client.post(
-            f"{ollama_url}/api/chat",
+            f"{base_url}/api/chat",
             json=payload,
         )
         resp.raise_for_status()
@@ -139,13 +186,13 @@ async def _call_ollama(
     try:
         return await breaker.call(_do_call)
     except CircuitOpenError:
-        logger.warning("Ollama circuit breaker open — falling back to OpenRouter")
+        logger.warning("%s circuit breaker open — falling back to OpenRouter", label)
     except httpx.ConnectError:
-        logger.warning("Ollama unreachable at %s (is 'ollama serve' running?) — falling back to OpenRouter", ollama_url)
+        logger.warning("%s unreachable at %s (%s) — falling back to OpenRouter", label, base_url, start_hint)
     except httpx.TimeoutException:
-        logger.warning("Ollama request timed out (model may be loading or server overloaded) — falling back to OpenRouter")
+        logger.warning("%s request timed out (model may be loading or server overloaded) — falling back to OpenRouter", label)
     except httpx.HTTPStatusError as e:
-        logger.warning("Ollama HTTP %d — falling back to OpenRouter", e.response.status_code)
+        logger.warning("%s HTTP %d — falling back to OpenRouter", label, e.response.status_code)
 
     # Explicitly use a known-valid OpenRouter model for fallback —
     # INTERNAL_LLM_MODEL may hold an Ollama-native name (e.g. "llama3.2:3b")

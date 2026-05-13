@@ -2,6 +2,96 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.6 — Quenchforge integration merge: hardware-aware backend recommendation (2026-05-12)
+
+Merge of the long-running `feat/quenchforge-integration` branch (5 commits,
+authored by Justin Michaels prior to the v0.93.3–v0.93.5 release train).
+Rebased cleanly onto v0.93.5 with two minor fix-ups (silent-catch allowlist
+extension for two intentional `logger.debug` swallows in the new routing
+modules, and a TypeScript narrowing fix in the new setup-wizard step).
+
+**Hardware-aware local-backend foundation** (a3dcfdf)
+
+* `src/mcp/utils/host_info.py` — host fingerprint (OS, CPU, GPU) detection.
+* New `/setup/system-check` endpoint surfaces the fingerprint + a
+  recommended local-backend choice (Ollama, Quenchforge, or Cloud) to
+  the setup wizard.
+
+**Quenchforge as a routable LLM provider** (19900d7)
+
+* `core/routing/model_providers.py` registers `quenchforge` as a valid
+  value for `INTERNAL_LLM_PROVIDER`.
+* `core/utils/internal_llm.py` + `core/routing/smart_router.py` route
+  internal LLM calls through the Quenchforge endpoint when configured.
+* Quenchforge is the Mac-Intel-plus-AMD-GPU bridge that lets Ollama
+  leverage hardware Ollama doesn't natively support.
+
+**Setup-wizard backend-recommendation surfaces** (e080120)
+
+* `<BackendRecommendationStep>` renders below `<SystemCheckCard>` once
+  `/setup/system-check` returns. Three options (Ollama / Quenchforge /
+  Cloud); the recommended one is derived from `gpu_type` with a
+  string-fallback truth table that mirrors the backend.
+* `<QuenchforgeInstallStep>` shows audit-recommended copy-and-run brew
+  commands when Quenchforge is picked but not yet detected. No
+  auto-shell — manual install only.
+* `<TelemetryConsentStep>` adds opt-in toggles for `sendPerformance` +
+  `sendBenchmark` (both default OFF) to the Mode Selection step.
+* `<BackendStatusPill>` lands in the StatusBar between the service list
+  and `<TrustScoreChip>`, displaying the active backend with an icon
+  and tooltip.
+* `<InferenceBackendSection>` shipped as a Settings card; mount into
+  the Settings pane tab structure deferred to a follow-on PR to keep
+  blast radius small.
+* Wizard schema migrated from v1 to v2 to carry `selectedBackend` +
+  `telemetryConsent`. v1 state is dropped (24h ephemeral anyway) rather
+  than transformed with assumed defaults.
+
+**Cascade rerank + sentence-window chunker** (51c9b54, flagged off)
+
+* `core/retrieval/reranker.py` gains a cascade pre-filter: cross-encoder
+  first against a wider candidate pool, top-N then re-ranked by the
+  small LLM. Default OFF behind a feature flag.
+* `core/ingest/chunkers/sentence_window_strategy.py` ships an
+  alternative chunker (sentence-window with overlap) for use when the
+  primary heading-based strategy returns sub-optimal boundaries.
+  Default OFF.
+
+**Advanced inference flags** (281cdc2)
+
+* Wire-in for prefix-cache, draft-model speculative decoding,
+  constrained decoding (JSON schema enforcement), and model-cascade
+  routing. All gated; production defaults unchanged.
+
+**Tests**
+
+* 9 new pytest cases for advanced inference flags
+  (`test_advanced_inference_flags.py`).
+* 6 new pytest cases for the cascade rerank
+  (`test_cascade_rerank.py`).
+* 4 new pytest cases for the inference-backend recommendation logic
+  (`test_inference_backend.py`).
+* 3 new pytest cases for model-cascade routing
+  (`test_model_cascade_routing.py`).
+* 6 new pytest cases for the sentence-window chunker
+  (`test_sentence_window_strategy.py`).
+* 3 new pytest cases for the system-check recommendation logic
+  (`test_system_check_recommendation.py`).
+* 9 new frontend vitest cases for `<BackendRecommendationStep>`
+  (`backend-recommendation-step.test.tsx`).
+* 14 new frontend vitest cases for the hardware-profile truth table
+  (`hardware-profile.test.ts`).
+
+Aggregate test count: **4369 Python tests pass** (was 4300 on v0.93.5),
+**1116 frontend tests pass** (was 1093). All gates green: ruff / mypy /
+import-linter / silent-catch (allowlist +2) / drift / tsc / eslint.
+
+The merge is the second user-facing arm of the v0.93.3 adaptive
+recommender concept: where the C3.2 recommender suggests retrieval
+features based on corpus size, the Quenchforge work suggests
+inference backends based on hardware. Both surface as opt-in nudges in
+the same Settings vocabulary, complementary rather than competing.
+
 ## v0.93.5 — Chat virtualization + L4 backend enforcement + Dependabot batch (2026-05-12)
 
 Three-in-one release closing the open-action queue from v0.93.4.  Bundle

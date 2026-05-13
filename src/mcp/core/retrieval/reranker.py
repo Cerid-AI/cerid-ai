@@ -152,6 +152,12 @@ def rerank(
     (query, chunk) pair through the cross-encoder, blends with the
     original hybrid-search relevance, and returns the full list
     re-sorted by the blended score.
+
+    Cascade pre-filter (``ENABLE_CASCADE_RERANK``):
+        When enabled, candidates whose original hybrid-search relevance is
+        below ``CASCADE_RERANK_PRE_THRESHOLD`` are appended at the end
+        without running the (expensive) cross-encoder. Saves CE calls when
+        the hybrid-search distribution is long-tailed. Off by default.
     """
     if len(results) <= 1:
         return results
@@ -161,6 +167,18 @@ def rerank(
 
     if len(candidates) <= 1:
         return results
+
+    low_signal: list[dict[str, Any]] = []
+    if getattr(config, "ENABLE_CASCADE_RERANK", False):
+        threshold = float(getattr(config, "CASCADE_RERANK_PRE_THRESHOLD", 0.3))
+        high_signal = [r for r in candidates if r["relevance"] >= threshold]
+        low_signal = [r for r in candidates if r["relevance"] < threshold]
+        # If pre-filter drops the candidate pool to one (or zero) high-signal
+        # hits, skip the cross-encoder — the original ordering is already the
+        # only signal we have.
+        if len(high_signal) <= 1:
+            return candidates + remainder
+        candidates = high_signal
 
     documents = [r["content"] for r in candidates]
     ce_scores = _score_pairs(query, documents)
@@ -174,4 +192,7 @@ def rerank(
         )
 
     candidates.sort(key=lambda x: x["relevance"], reverse=True)
-    return candidates + remainder
+    # Append cascade-dropped candidates after the cross-encoded survivors so
+    # they remain visible to downstream consumers (preserves recall) but
+    # land below anything that earned a cross-encoder score.
+    return candidates + low_signal + remainder

@@ -161,21 +161,37 @@ _ollama_models: list[str] = []
 
 
 async def _check_ollama() -> bool:
-    """Check if Ollama is reachable and has models.  Cached for 60 seconds."""
+    """Check if the local Ollama-protocol backend is reachable with at least one model.
+
+    Supports both stock Ollama and Quenchforge — they share the wire format,
+    so this function selects the URL based on ``INTERNAL_LLM_PROVIDER``:
+
+    - ``quenchforge`` → ``QUENCHFORGE_URL``, opt-in by virtue of being selected.
+    - anything else → ``OLLAMA_URL``, gated on ``OLLAMA_ENABLED=true``.
+
+    Cached for 60 seconds. The legacy name is preserved so external callers in
+    ``app/routers/providers.py`` keep working.
+    """
     global _ollama_available, _ollama_checked_at, _ollama_models
 
     now = time.monotonic()
     if _ollama_available is not None and (now - _ollama_checked_at) < _OLLAMA_CHECK_INTERVAL:
         return _ollama_available
 
-    ollama_enabled = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
-    if not ollama_enabled:
-        _ollama_available = False
-        _ollama_checked_at = now
-        return False
+    provider = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter").lower()
+    if provider == "quenchforge":
+        ollama_url = os.getenv("QUENCHFORGE_URL") or os.getenv(
+            "OLLAMA_URL", "http://localhost:11434"
+        )
+    else:
+        ollama_enabled = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
+        if not ollama_enabled:
+            _ollama_available = False
+            _ollama_checked_at = now
+            return False
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
     try:
-        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         from core.utils.internal_llm import _get_ollama_client
         client = await _get_ollama_client()
         resp = await client.get(f"{ollama_url}/api/tags")
@@ -558,6 +574,34 @@ async def route(
         )
 
     if complexity == Complexity.SIMPLE:
+        # ENABLE_MODEL_CASCADE: when on, prefer the local backend for
+        # SIMPLE chat answers before falling through to the free OpenRouter
+        # tier. Off by default — historic guidance was "Ollama is never
+        # used for chat answers (quality too low for user-facing)", which
+        # we're flipping selectively for operators on capable hardware
+        # (notably the Mac Pro + Vega II Quenchforge target).
+        if getattr(config, "ENABLE_MODEL_CASCADE", False):
+            ollama_ok = await _check_ollama()
+            if ollama_ok and _ollama_models:
+                try:
+                    p95 = _check_budget("ollama", slo_budget_ms)
+                except BudgetUnsatisfiableError:
+                    pass
+                else:
+                    preferred = ["llama3.2", "phi3", "mistral", "gemma2"]
+                    model = _ollama_models[0]
+                    for pref in preferred:
+                        matching = [m for m in _ollama_models if pref in m]
+                        if matching:
+                            model = matching[0]
+                            break
+                    return RouteDecision(
+                        model=model,
+                        provider="ollama",
+                        reason="simple query — local cascade (ENABLE_MODEL_CASCADE)",
+                        estimated_cost_per_1k=0.0,
+                        tier_p95_ms=p95,
+                    )
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=FREE_MODELS["llama-3.3"],

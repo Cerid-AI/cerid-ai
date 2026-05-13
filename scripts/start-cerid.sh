@@ -170,6 +170,22 @@ export HOST_CPU_CORES="${HOST_CPU_CORES:-}"
 export HOST_GPU="${HOST_GPU:-}"
 export HOST_GPU_ACCEL="${HOST_GPU_ACCEL:-}"
 
+# Source GPU detection for richer hardware-aware fields (CERID_GPU_TYPE +
+# CERID_RECOMMENDED_LOCAL_BACKEND). Sourced here, not earlier, so the basic
+# HOST_GPU* fallbacks above stay authoritative if detect-gpu.sh fails.
+# detect-gpu.sh runs `set -euo pipefail` internally; we don't want a single
+# sub-shell failure (e.g. system_profiler timeout) to abort start-up, so we
+# source it inside a guarded subshell-equivalent.
+if [ -f "$CERID_ROOT/scripts/detect-gpu.sh" ]; then
+    # shellcheck disable=SC1091
+    set +e
+    # shellcheck source=scripts/detect-gpu.sh
+    . "$CERID_ROOT/scripts/detect-gpu.sh" 2>/dev/null || true
+    set -e
+fi
+export HOST_GPU_TYPE="${CERID_GPU_TYPE:-${HOST_GPU_TYPE:-}}"
+export HOST_RECOMMENDED_LOCAL_BACKEND="${CERID_RECOMMENDED_LOCAL_BACKEND:-${HOST_RECOMMENDED_LOCAL_BACKEND:-}}"
+
 # Auto-select ONNX model variant based on CPU architecture.
 # AVX2 quantized model (23MB, int8) is 4x faster but only works on x86 with AVX2.
 # Generic float32 model (91MB) works on any CPU including ARM64/Apple Silicon.
@@ -214,6 +230,8 @@ _persist_host_var HOST_CPU "$HOST_CPU"
 _persist_host_var HOST_CPU_CORES "$HOST_CPU_CORES"
 _persist_host_var HOST_GPU "$HOST_GPU"
 _persist_host_var HOST_GPU_ACCEL "$HOST_GPU_ACCEL"
+_persist_host_var HOST_GPU_TYPE "${HOST_GPU_TYPE:-}"
+_persist_host_var HOST_RECOMMENDED_LOCAL_BACKEND "${HOST_RECOMMENDED_LOCAL_BACKEND:-}"
 _persist_host_var RERANK_ONNX_FILENAME "$RERANK_ONNX_FILENAME"
 
 # Platform-aware Ollama URL default (Section 4: Multi-OS)

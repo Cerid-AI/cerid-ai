@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { TrustScoreChip } from "@/components/trust-score"
+import { BackendStatusPill } from "@/components/layout/backend-status-pill"
 
 const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
   chromadb: { purpose: "Vector embeddings & semantic search", tech: "ChromaDB" },
@@ -220,6 +221,11 @@ export function StatusBar({
             </Tooltip>
           )
         })()}
+
+        {/* Backend status pill — shows the active inference backend
+            (ollama / quenchforge / cloud) at a glance. Reads /system-check;
+            no wire-up to the canonical INTERNAL_LLM_PROVIDER value yet. */}
+        <BackendStatusPill />
 
         {/* TrustScore chip — pure presentation, no effect on retrieval/generation */}
         <TrustScoreChip />

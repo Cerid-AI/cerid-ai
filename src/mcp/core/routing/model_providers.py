@@ -62,6 +62,17 @@ PROVIDER_CONFIGS: dict[str, dict] = {
         "signup_url": "https://ollama.com/download",
         "is_local": True,
     },
+    # Quenchforge speaks the Ollama HTTP protocol on the same port shape, so
+    # it appears as a separate local-backend option but flows through the same
+    # wire format as Ollama. Selection is via INTERNAL_LLM_PROVIDER=quenchforge,
+    # not its own enabled flag. Recommended on Intel Mac + AMD discrete GPU.
+    "quenchforge": {
+        "display_name": "Quenchforge (Local, Mac+AMD)",
+        "base_url": "http://host.docker.internal:11434",
+        "env_var": "QUENCHFORGE_URL",
+        "signup_url": "https://github.com/cerid-ai/quenchforge",
+        "is_local": True,
+    },
 }
 
 # Map model prefixes to their native provider
@@ -139,6 +150,17 @@ def load_config(redis_client) -> ModelProviderConfig:  # noqa: ANN001
                 enabled=os.getenv("OLLAMA_ENABLED", "false").lower() == "true",
                 url=key_value or "http://localhost:11434",
             )
+        elif name == "quenchforge":
+            # Quenchforge is opted in via INTERNAL_LLM_PROVIDER, not its own
+            # env flag (it's mutually exclusive with the ollama provider slot —
+            # both speak the same wire format).
+            quenchforge_active = (
+                os.getenv("INTERNAL_LLM_PROVIDER", "").lower() == "quenchforge"
+            )
+            config.providers[name] = ProviderState(
+                enabled=quenchforge_active,
+                url=key_value or "http://host.docker.internal:11434",
+            )
         else:
             config.providers[name] = ProviderState(
                 enabled=bool(key_value),
@@ -211,7 +233,9 @@ def get_degraded_status(config: ModelProviderConfig) -> dict:
     """Check if the system is in degraded mode and return status."""
     any_llm = False
     for name, state in config.providers.items():
-        if name == "ollama":
+        if name in ("ollama", "quenchforge"):
+            # Local backends count as configured LLMs when their enabled flag
+            # is set — they don't carry an api_key.
             if state.enabled:
                 any_llm = True
         elif state.enabled and state.api_key:

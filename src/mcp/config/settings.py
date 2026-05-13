@@ -700,12 +700,66 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 
 # Internal LLM: model to use for pipeline intelligence operations
 # (categorization, decomposition, contextual chunks, claim extraction)
-# Options: "openrouter" (default, direct calls), "ollama" (local, the special case), or specific model ID
+# Options:
+#   "openrouter" (default, direct calls)
+#   "ollama"     (local, host-native on most platforms)
+#   "quenchforge" (local, Mac+AMD inference service that speaks the Ollama
+#                  HTTP protocol identically — github.com/cerid-ai/quenchforge,
+#                  Apache-2.0; recommended on Intel Mac + AMD discrete GPU
+#                  where stock Ollama falls back to CPU per ollama/ollama#1016)
+#   or a specific model ID
 INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
 
 # Default Ollama model for pipeline tasks — lightweight, runs on CPU or GPU
 OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
+
+# Quenchforge URL — local Mac+AMD inference service speaking the Ollama HTTP
+# protocol on the same port. Defaults to OLLAMA_URL so a pure provider/URL swap
+# is sufficient to migrate. Override explicitly when running both side-by-side
+# on different ports.
+QUENCHFORGE_URL = os.getenv(
+    "QUENCHFORGE_URL",
+    os.getenv("OLLAMA_URL", "http://host.docker.internal:11434"),
+)
+
+# Cached hardware-profile token, populated by scripts/detect-gpu.sh and read
+# by the setup wizard / /system-check endpoint. One of:
+#   nvidia | amd | amd-mac | metal | cpu | "" (empty = re-detect on next call)
+# Not authoritative; the source of truth is a fresh detect-gpu.sh invocation.
+CERID_HARDWARE_PROFILE = os.getenv("CERID_HARDWARE_PROFILE", "")
+
+# ---------------------------------------------------------------------------
+# Advanced RAG feature flags (per docs/TIERED_INFERENCE_ARCHITECTURE.md and
+# the Quenchforge integration plan). All default off pending per-flag rollout
+# in PR-4 / PR-5. Per-flag rationale lives in the architecture doc.
+# ---------------------------------------------------------------------------
+ENABLE_CASCADE_RERANK = os.getenv("ENABLE_CASCADE_RERANK", "false").lower() == "true"
+# Original-relevance cut below which a candidate skips the cross-encoder when
+# ENABLE_CASCADE_RERANK=true. Tuned at 0.3 from internal eval — most
+# hybrid-search systems produce a long tail under 0.3 that the cross-encoder
+# is unlikely to promote.
+CASCADE_RERANK_PRE_THRESHOLD = float(os.getenv("CASCADE_RERANK_PRE_THRESHOLD", "0.3"))
+ENABLE_SENTENCE_WINDOW = os.getenv("ENABLE_SENTENCE_WINDOW", "false").lower() == "true"
+# Number of surrounding sentences (±) captured in each chunk's `window`
+# metadata when ENABLE_SENTENCE_WINDOW=true. 3 is the LlamaIndex default and
+# the value used in the Anthropic contextual-retrieval evals.
+SENTENCE_WINDOW_SIZE = int(os.getenv("SENTENCE_WINDOW_SIZE", "3"))
+ENABLE_PROMPT_PREFIX_CACHE = os.getenv("ENABLE_PROMPT_PREFIX_CACHE", "false").lower() == "true"
+# Ollama / Quenchforge keep_alive value when prefix cache is enabled. Accepts
+# any duration string the backend understands: "30s", "5m", "1h", "-1" for
+# never-unload, "0" for immediate unload. Default 30m holds the model warm
+# through typical session bursts without permanently pinning VRAM.
+PROMPT_PREFIX_KEEP_ALIVE = os.getenv("PROMPT_PREFIX_KEEP_ALIVE", "30m")
+
+ENABLE_MODEL_CASCADE = os.getenv("ENABLE_MODEL_CASCADE", "false").lower() == "true"
+
+ENABLE_SPECULATIVE_DECODE = os.getenv("ENABLE_SPECULATIVE_DECODE", "false").lower() == "true"
+# Smaller draft model that proposes tokens for the main model to accept/reject
+# when speculative decoding is enabled. Empty = let the backend default apply.
+INTERNAL_LLM_DRAFT_MODEL = os.getenv("INTERNAL_LLM_DRAFT_MODEL", "")
+
+ENABLE_CONSTRAINED_DECODE = os.getenv("ENABLE_CONSTRAINED_DECODE", "false").lower() == "true"
 
 # User-configurable default model for high-value intelligence tasks
 # (verification, expert analysis, complex reasoning)

@@ -1101,6 +1101,22 @@ export interface SetupConfigRequest {
   ollama_model?: string
 }
 
+export type RecommendedLocalBackend = "ollama" | "quenchforge" | "cloud"
+
+/**
+ * Authoritative GPU classification produced by ``scripts/detect-gpu.sh`` and
+ * cached in the FastAPI container's environment as ``HOST_GPU_TYPE``. The set
+ * mirrors the shell script so the API response remains pin-compatible with
+ * the detection source of truth.
+ */
+export type GpuType =
+  | ""           // detection skipped or container started without HOST_*
+  | "nvidia"     // discrete CUDA-capable
+  | "amd"        // discrete AMD on Linux (ROCm path)
+  | "amd-mac"    // discrete AMD on Intel Mac (the Quenchforge gap case)
+  | "metal"      // Apple Silicon or Intel Mac iGPU
+  | "cpu"        // no GPU acceleration
+
 export interface SystemCheckResponse {
   ram_gb: number
   docker_running: boolean
@@ -1117,6 +1133,15 @@ export interface SystemCheckResponse {
   cpu_cores: number | null
   gpu: string
   gpu_acceleration: string
+  /** Classified GPU bucket from detect-gpu.sh. Empty when detection did not run. */
+  gpu_type?: GpuType
+  /**
+   * Recommended local inference backend for the detected hardware. Drives the
+   * Backend Recommendation step in the setup wizard. ``"quenchforge"`` is
+   * surfaced for Intel Mac + AMD discrete GPU; ``"ollama"`` for everything
+   * else that supports a local model; ``"cloud"`` when no local path is viable.
+   */
+  recommended_local_backend?: RecommendedLocalBackend
 }
 
 export interface SetupServiceHealth {
