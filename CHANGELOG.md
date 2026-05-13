@@ -2,6 +2,142 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.9 — Production hardening: AMD chat works, settings live-mutable (2026-05-13)
+
+v0.93.9 closes the production gaps left in v0.93.8.  The GPU release
+shipped routing infrastructure but two production blockers surfaced
+under load:
+
+- Quenchforge's `/api/chat` returned 404 because the gateway forwarded
+  Ollama-wire paths verbatim to llama-server (which only speaks
+  OpenAI-wire).  Every `INTERNAL_LLM_PROVIDER=quenchforge` call to the
+  chat path failed.
+- The chat slot on Vega II crashed after the second request with a
+  `GGML_ASSERT(buf_dst)` failure in the Metal prompt-cache state-save
+  path.  Stability was zero past the first generation.
+
+Both are now fixed at the right architectural level (Quenchforge gateway
+and supervisor respectively) — no second llama.cpp patch was needed.
+The cerid surface gains live-mutable `internal_llm_provider` so operators
+can flip providers without a container restart.
+
+### Quenchforge improvements (companion v0.3.2 release)
+
+- **Ollama-wire ↔ OpenAI-wire body translation in the gateway.**
+  `/api/chat`, `/api/generate`, `/api/embeddings`, and `/api/embed`
+  now do full body translation (request + response, streaming +
+  non-streaming).  Ollama's `options.{temperature, num_predict, top_p,
+  top_k, seed, stop}` flatten to OpenAI top-level fields; `format:
+  "json"` becomes `response_format: { type: "json_object" }`.
+  Streaming SSE → NDJSON with per-chunk `http.Flusher.Flush()` so
+  callers get token-streaming UX.
+- **Hardware-aware chat-slot args on AMD discrete.**  When Quenchforge
+  detects an AMD profile (Vega Pro, W6800X, RDNA1/2) the chat slot
+  launches with three correctness flags:
+  - `--flash-attn off` — the default `auto` correctly detects FA can't
+    run on AMD MTL0 but schedules the FA tensor on CPU per decode
+    step, ferrying tensors GPU↔CPU each token.  Forcing off keeps
+    attention GPU-resident.
+  - `--cache-ram 0` — disables the server-side LCP-similarity slot
+    cache that triggers the `GGML_ASSERT(buf_dst)` crash.
+  - `--no-cache-prompt` — belt-and-suspenders companion that disables
+    per-slot prompt caching.
+- **`packaging/macos/com.cerid.quenchforge.plist`** — LaunchAgent
+  template for from-source installs (Homebrew users get this
+  auto-generated via the formula's service block).
+
+### Cerid surface improvements
+
+- **`internal_llm_provider` + `internal_llm_model` now in `PATCH
+  /settings`.**  Closes a GET/PATCH asymmetry: both fields were
+  surfaced in the GET response but couldn't be mutated at runtime,
+  forcing a container env restart to change them.  Live-mutation
+  affects ingest enrichment, LLM-rerank, memory extraction, claim
+  extraction — every pipeline path that uses `call_internal_llm`.
+  Single-worker uvicorn deployment assumed (Cerid's docker-compose
+  default).  Validator restricts the provider to `{openrouter, ollama,
+  quenchforge}`.
+- **Settings GUI: chat provider toggle.**  The amber "GPU acceleration"
+  card on the Pipeline settings page gains an "Internal LLM provider"
+  select with a model-name input that appears when ollama or
+  quenchforge is selected.
+
+### Code review fixes (pre-tag)
+
+A pre-release code-review pass surfaced three real bugs that landed
+in v0.93.x and are fixed in v0.93.9:
+
+- **`utils/quenchforge_client._get_client` TOCTOU race.**  Two
+  concurrent first callers could each construct an `httpx.AsyncClient`,
+  leaking the first.  Added an `asyncio.Lock()` with double-checked
+  init, matching the existing `core/utils/internal_llm._get_ollama_client`
+  pattern.
+- **`core/utils/internal_llm._call_ollama` circuit-breaker mismatch.**
+  When `provider == "quenchforge"`, the function shared the `"ollama"`
+  circuit breaker with the actual Ollama provider, so a Quenchforge
+  outage would trip the Ollama breaker and vice versa.  Breakers are
+  now provider-keyed so failures stay isolated.
+- **`core/retrieval/sparse_index.get_index` lazy-init race.**  Two
+  concurrent ingest calls for the same new domain (processor queue +
+  file-watcher event) could each construct a `SparseIndex`, orphaning
+  the first and silently losing its documents.  Added a
+  `threading.Lock()`-guarded double-checked init.
+
+### Test isolation
+
+The settings PATCH handler mutates `os.environ` directly so changes
+take effect in-process without a worker restart.  Pre-v0.93.9 the
+test fixtures didn't restore those mutations at teardown, so a
+settings test that flipped `EMBEDDINGS_PROVIDER=quenchforge` would
+poison every downstream test that branched on that env (notably
+`test_embeddings.py`'s mocked ONNX session and `test_sidecar_routing`'s
+cross-encoder local-fallback expectations).  Both
+`test_settings_router_internal_llm.py` and
+`test_settings_router_sparse.py` now snapshot/restore the affected
+env vars.  Full pytest run goes from 2 failures to 0 (4421 tests
+pass, 17 skipped).
+
+### Doc cascade
+
+- `docs/ARCHITECTURE.md` — refresh date bumped to v0.93.9.
+- `docs/TIERED_INFERENCE_ARCHITECTURE.md` — Quenchforge is now the
+  option-1 provider on Intel Mac + AMD discrete (was missing from
+  the section 1.2 fallback chains).  Documents the three chat-slot
+  correctness flags and the live-mutable env vars.
+
+### Tests
+
+- 7 new tests in `test_settings_router_internal_llm.py` pin the
+  PATCH round-trip, validator coverage, and dual-mutation contract.
+- Quenchforge gateway tests: full Ollama-wire translation suite
+  (`ollama_translate_test.go`, 9 cases covering chat non-streaming,
+  chat streaming SSE→NDJSON, generate, legacy embed, batch embed,
+  error mapping, empty-body 400).
+- `cmd/quenchforge/serve_test.go` pins the AMD-profile slot-arg
+  injection at the supervisor level.
+
+### Live verification on Mac Pro 2019 + Radeon Pro Vega II
+
+- 5 sequential chats through `/api/chat` survive (previously crashed
+  on chat 2 with `GGML_ASSERT(buf_dst)`).
+- Cerid end-to-end RAG query through `/agent/query` lands chunks at
+  0.81 confidence with `embed=+139 lines, rerank=+100 lines, chat=+0
+  lines` deltas on the Quenchforge log files.
+- Streaming chat through the gateway delivers NDJSON tokens one at a
+  time (was 404 before).
+- `/api/embeddings` returns both legacy `embedding` and newer
+  `embeddings` keys; `/api/embed` returns only `embeddings` (batch).
+
+### Filed-as-followup
+
+- **NLI GPU path** — Quenchforge has no classifier endpoint today;
+  NLI stays on CPU.  Future: route through cerid's own sidecar.
+- **Chat virtualization default flip** — planned for v0.95 after one
+  release of soak time.
+- **`quenchforge#1` and `#2`** are now closed by this release.
+
+---
+
 ## v0.93.8 — The GPU release: end-to-end AMD-Mac GPU routing (2026-05-12)
 
 v0.93.8 is the definitive GPU release for cerid-ai on Intel Mac + AMD

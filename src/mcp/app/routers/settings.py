@@ -185,6 +185,29 @@ class SettingsUpdateRequest(BaseModel):
             "BGE Reranker v2 m3 is the default recommendation."
         ),
     )
+    # v0.93.9 — close the GET/PATCH asymmetry. internal_llm_provider was in
+    # the GET response but operators could only change it via container env,
+    # which forced a restart. Now mutable at runtime so provider flips take
+    # effect on the next call_internal_llm invocation.
+    internal_llm_provider: str | None = Field(
+        None,
+        description=(
+            "Where pipeline-internal LLM calls go: 'openrouter' (default cloud), "
+            "'ollama' (local stock Ollama daemon), or 'quenchforge' (local "
+            "Mac+AMD via Quenchforge gateway). Affects ingest enrichment, "
+            "LLM-rerank, memory extraction, claim extraction, etc."
+        ),
+    )
+    internal_llm_model: str | None = Field(
+        None,
+        description=(
+            "Model name passed to the internal-LLM provider. Empty resolves "
+            "to provider-specific default (Ollama: OLLAMA_DEFAULT_MODEL; "
+            "OpenRouter: meta-llama/llama-3.3-70b-instruct:free per call_llm "
+            "fallback). For Quenchforge, must match a GGUF filename under "
+            "the Quenchforge models dir."
+        ),
+    )
     hybrid_fusion_mode: str | None = Field(
         None,
         description=(
@@ -527,6 +550,31 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     if req.quenchforge_rerank_model is not None:
         os.environ["QUENCHFORGE_RERANK_MODEL"] = req.quenchforge_rerank_model
         updated["quenchforge_rerank_model"] = req.quenchforge_rerank_model
+
+    # v0.93.9 — internal_llm_provider + internal_llm_model live-mutation.
+    # core.utils.internal_llm reads config.INTERNAL_LLM_PROVIDER at call
+    # time (via getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")),
+    # so we need to mutate BOTH os.environ (for any child process that
+    # re-reads) AND the module attribute (for the live process).
+    if req.internal_llm_provider is not None:
+        valid_internal = ("openrouter", "ollama", "quenchforge")
+        if req.internal_llm_provider not in valid_internal:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid internal_llm_provider: "
+                    f"'{req.internal_llm_provider}'. "
+                    f"Must be one of {valid_internal}"
+                ),
+            )
+        os.environ["INTERNAL_LLM_PROVIDER"] = req.internal_llm_provider
+        config.INTERNAL_LLM_PROVIDER = req.internal_llm_provider  # type: ignore[attr-defined]
+        updated["internal_llm_provider"] = req.internal_llm_provider
+
+    if req.internal_llm_model is not None:
+        os.environ["INTERNAL_LLM_MODEL"] = req.internal_llm_model
+        config.INTERNAL_LLM_MODEL = req.internal_llm_model  # type: ignore[attr-defined]
+        updated["internal_llm_model"] = req.internal_llm_model
 
     if not updated:
         raise HTTPException(

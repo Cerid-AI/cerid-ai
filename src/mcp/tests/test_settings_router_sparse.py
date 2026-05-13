@@ -13,20 +13,52 @@ from fastapi.testclient import TestClient
 
 from app.routers.settings import router
 
+_LEAKABLE_ENV_VARS = (
+    "RETRIEVAL_SPARSE_ENABLED",
+    "EMBEDDINGS_PROVIDER",
+    "RERANK_PROVIDER",
+    "QUENCHFORGE_EMBED_MODEL",
+    "QUENCHFORGE_RERANK_MODEL",
+)
+
 
 @pytest.fixture
 def client(monkeypatch):
-    # Disable sync-dir persistence so we don't touch real disk in unit tests.
+    """Build a TestClient with isolated env + config state.
+
+    The settings PATCH handler mutates `os.environ` directly so changes
+    take effect in-process without a worker restart. Pytest's
+    monkeypatch only undoes mutations made via `monkeypatch.setenv` /
+    `delenv`, not direct os.environ writes, so a PATCH test that
+    leaves the process with `EMBEDDINGS_PROVIDER=quenchforge` will
+    poison every downstream test that branches on that env (notably
+    test_embeddings.py's mocked ONNX session and test_sidecar_routing's
+    cross-encoder local-fallback expectations).
+
+    Snapshot the affected env vars at fixture setup and restore at
+    teardown so the file is well-behaved when interleaved with the
+    rest of the suite.
+    """
     import config
 
     monkeypatch.setattr(config, "SYNC_DIR", "")
-    monkeypatch.delenv("RETRIEVAL_SPARSE_ENABLED", raising=False)
     monkeypatch.setattr(config, "HYBRID_FUSION_MODE", "weighted_sum", raising=False)
     monkeypatch.setattr(config, "HYBRID_RRF_SPARSE_WEIGHT", 1.0, raising=False)
+    saved = {k: os.environ.get(k) for k in _LEAKABLE_ENV_VARS}
+    for k in _LEAKABLE_ENV_VARS:
+        os.environ.pop(k, None)
 
     app = FastAPI()
     app.include_router(router)
-    return TestClient(app)
+    yield TestClient(app)
+
+    # Restore any pre-existing values the PATCH handler may have
+    # clobbered. None ↔ unset round-trip preserves both states.
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
 
 
 def test_get_settings_includes_sparse_fields(client):

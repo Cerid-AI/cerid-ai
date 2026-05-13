@@ -43,6 +43,7 @@ expose a sparse-encode endpoint as of v0.3.1.  Cerid's own sidecar at
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -54,6 +55,7 @@ from core.utils.circuit_breaker import get_breaker
 logger = logging.getLogger("ai-companion.quenchforge")
 
 _client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
 
 
 def _get_quenchforge_url() -> str:
@@ -72,12 +74,22 @@ def _get_quenchforge_url() -> str:
 
 
 async def _get_client() -> httpx.AsyncClient:
+    """Return the module-level shared httpx client.
+
+    Double-checked under ``_client_lock`` so concurrent first callers can't
+    both observe ``_client is None`` and each construct a fresh client.
+    Mirrors the pattern in ``core.utils.internal_llm._get_ollama_client``
+    that this client was originally a near-twin of.
+    """
     global _client
-    if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, connect=5.0),
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-        )
+    if _client is not None and not _client.is_closed:
+        return _client
+    async with _client_lock:
+        if _client is None or _client.is_closed:
+            _client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=5.0),
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
     return _client
 
 

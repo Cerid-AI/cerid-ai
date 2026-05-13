@@ -46,7 +46,7 @@ const mockSettings = {
   version: "0.8.0",
   ollama_enabled: false,
   ollama_url: "http://localhost:11434",
-  internal_llm_provider: "bifrost",
+  internal_llm_provider: "openrouter",
   internal_llm_model: "llama3.2:3b",
 }
 

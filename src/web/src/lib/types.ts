@@ -829,7 +829,11 @@ export interface ServerSettings {
   pipeline_providers?: PipelineProviders
   ollama_enabled?: boolean
   ollama_url?: string
-  internal_llm_provider?: string
+  // v0.93.9 — internal LLM routing now also mutable via PATCH /settings.
+  // The provider is constrained to the three values the settings router
+  // accepts; using a union here gives the GPU acceleration UI's <select>
+  // proper autocomplete + a compile-time check.
+  internal_llm_provider?: "openrouter" | "ollama" | "quenchforge"
   internal_llm_model?: string
 }
 
@@ -912,8 +916,8 @@ export interface SettingsUpdate {
   rag_mode?: string  // KB injection mode in SettingsUpdate
   // Context source gates
   context_sources?: ContextSources
-  // Ollama add-on
-  internal_llm_provider?: string
+  // v0.93.9 — internal LLM provider/model now mutable via PATCH /settings.
+  internal_llm_provider?: "openrouter" | "ollama" | "quenchforge"
   internal_llm_model?: string
 }
 

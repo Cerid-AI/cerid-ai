@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from collections import defaultdict
 from pathlib import Path
 
@@ -277,12 +278,21 @@ class SparseIndex:
 # ---------------------------------------------------------------------------
 
 _indexes: dict[str, SparseIndex] = {}
+# Guards the lazy-construction TOCTOU on `_indexes`. Two concurrent
+# ingest calls for the same new domain (e.g., processor queue +
+# file-watcher event) could both observe `domain not in _indexes`
+# and each construct a SparseIndex; the second write would orphan the
+# first index along with any documents it had already accepted.
+_indexes_lock = threading.Lock()
 
 
 def get_index(domain: str) -> SparseIndex:
     """Get or create the SparseIndex for the given domain."""
-    if domain not in _indexes:
-        _indexes[domain] = SparseIndex(domain, SPARSE_DATA_DIR)
+    if domain in _indexes:
+        return _indexes[domain]
+    with _indexes_lock:
+        if domain not in _indexes:
+            _indexes[domain] = SparseIndex(domain, SPARSE_DATA_DIR)
     return _indexes[domain]
 
 
