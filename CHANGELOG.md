@@ -21,7 +21,7 @@ and supervisor respectively) — no second llama.cpp patch was needed.
 The cerid surface gains live-mutable `internal_llm_provider` so operators
 can flip providers without a container restart.
 
-### Quenchforge improvements (companion v0.3.2 release)
+### Quenchforge improvements (companion v0.3.3 release)
 
 - **Ollama-wire ↔ OpenAI-wire body translation in the gateway.**
   `/api/chat`, `/api/generate`, `/api/embeddings`, and `/api/embed`
