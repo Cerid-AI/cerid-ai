@@ -238,8 +238,14 @@ async def ai_categorize(
     )
 
     try:
-        # Route via internal LLM when configured (e.g. Ollama for free local inference)
-        if config.INTERNAL_LLM_PROVIDER == "ollama":
+        # Route via internal LLM when the operator picked a local backend
+        # (Ollama or Quenchforge).  Pre-v0.93.8 this branch only fired
+        # for "ollama", silently shunting Quenchforge users back to
+        # OpenRouter for ingest-time categorization — the per-document
+        # LLM call that runs on every ingested file.  Fixed: both local
+        # backends route through call_internal_llm, which dispatches
+        # via _call_ollama with the right URL.
+        if config.INTERNAL_LLM_PROVIDER in ("ollama", "quenchforge"):
             from core.utils.internal_llm import call_internal_llm
             content = await call_internal_llm(
                 [{"role": "user", "content": prompt}],

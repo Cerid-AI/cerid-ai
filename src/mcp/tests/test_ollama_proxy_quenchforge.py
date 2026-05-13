@@ -108,3 +108,34 @@ def test_enabled_returns_false_when_provider_is_other(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "openrouter")
     assert _ollama_enabled() is False
+
+
+# ---------------------------------------------------------------------------
+# /api/pull short-circuit when Quenchforge is selected (v0.93.8)
+# ---------------------------------------------------------------------------
+
+async def test_pull_short_circuits_quenchforge_with_migrate_hint(monkeypatch):
+    """Quenchforge's /api/pull is a documented 501 stub.  When the
+    operator selects Quenchforge, the pull endpoint MUST surface the
+    upstream's ``migrate-from-ollama`` hint rather than let a raw 501
+    propagate to the UI as a generic ``Ollama pull error: HTTP 501``.
+
+    Verified against the upstream handlePull in
+    quenchforge/internal/gateway/gateway.go which returns 501 with a
+    ``hint`` body pointing at ``quenchforge migrate-from-ollama``.
+    """
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "quenchforge")
+
+    from app.routers.ollama_proxy import PullRequest, pull_model
+    resp = await pull_model(PullRequest(model="llama3.2"))
+    # StreamingResponse — collect the body generator output
+    chunks = []
+    async for chunk in resp.body_iterator:
+        chunks.append(chunk if isinstance(chunk, str) else chunk.decode())
+    body = "".join(chunks)
+    assert "quenchforge migrate-from-ollama" in body
+    assert "not_implemented" in body
+    # The handler must NOT have attempted any network round-trip to
+    # /api/pull — the short-circuit is the whole point.

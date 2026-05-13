@@ -25,7 +25,7 @@ src/mcp/app/sync/import_.py:574
 src/mcp/app/sync/user_state.py:357
 src/mcp/core/agents/audit.py:373
 src/mcp/core/agents/audit.py:392
-src/mcp/core/agents/curator.py:207
+src/mcp/core/agents/curator.py:211
 src/mcp/core/agents/hallucination/authoritative_verify.py:243
 src/mcp/core/agents/hallucination/authoritative_verify.py:312
 src/mcp/core/agents/hallucination/extraction.py:483
@@ -64,6 +64,11 @@ src/mcp/utils/inference_sidecar_client.py:131
 src/mcp/utils/inference_sidecar_client.py:192
 src/mcp/core/routing/model_providers.py:141
 src/mcp/core/routing/smart_router.py:405
+# Quenchforge client (v0.93.8) — all three are health-probe / latency-
+# tracking swallows that fall through to the caller's fallback path.
+src/mcp/utils/quenchforge_client.py:162
+src/mcp/utils/quenchforge_client.py:223
+src/mcp/utils/quenchforge_client.py:251
 src/mcp/utils/retrieval_cache.py:79
 src/mcp/utils/retrieval_cache.py:96
 src/mcp/utils/retrieval_cache.py:104

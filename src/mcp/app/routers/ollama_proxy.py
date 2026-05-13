@@ -318,11 +318,38 @@ async def pull_model(req: PullRequest):
     """Pull (download) a model to the local Ollama server.
 
     Returns a streaming response with download progress.
+
+    Quenchforge interop note (v0.93.8): the Quenchforge gateway returns
+    HTTP 501 on /api/pull because it does not implement model pull —
+    operators are expected to either drop GGUF files into the configured
+    models dir or run ``quenchforge migrate-from-ollama`` to symlink
+    existing Ollama models.  We surface this directly to the client as
+    a friendly error rather than letting raise_for_status() propagate
+    as a generic ``Ollama pull error: HTTP 501``.
     """
     _require_enabled()
     base_url = _ollama_base_url()
+    provider = os.getenv("INTERNAL_LLM_PROVIDER", "").strip().lower()
+    is_quenchforge = provider == "quenchforge"
 
     async def _progress_generator():
+        # Quenchforge short-circuit: don't even round-trip to /api/pull —
+        # surface the upstream's documented hint immediately so the UI
+        # can render a useful message.
+        if is_quenchforge:
+            error_payload = json.dumps({
+                "error": "Quenchforge does not support model pull from this UI.",
+                "hint": (
+                    "Run `quenchforge migrate-from-ollama` in a terminal to "
+                    "symlink your existing Ollama models, or drop a GGUF "
+                    "file into Quenchforge's models directory.  See "
+                    "https://github.com/cerid-ai/quenchforge#models"
+                ),
+                "status": "not_implemented",
+            })
+            yield f"data: {error_payload}\n\n"
+            return
+
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(600.0, connect=_CONNECT_TIMEOUT),

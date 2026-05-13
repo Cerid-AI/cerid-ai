@@ -125,16 +125,26 @@ def _generate_contexts(
     )
 
     try:
-        from core.utils.llm_client import call_llm
+        # Route via call_internal_llm so the contextual-chunks call —
+        # which fires ONCE PER CHUNK during ingest — honors
+        # INTERNAL_LLM_PROVIDER=quenchforge for GPU acceleration on
+        # Intel Mac + AMD.  Pre-v0.93.8 this always hit OpenRouter,
+        # which made ingest of a long document spend $$ + minutes on a
+        # cloud round-trip per chunk.  The local-GPU path keeps the
+        # full enrichment loop on-device.
+        #
+        # Cloud-provider callers preserve their model preference via
+        # the LLM_INTERNAL_MODEL config knob (or fall back to the
+        # provider's default).  Local-provider callers get the
+        # configured local model.
+        from core.utils.internal_llm import call_internal_llm
 
         content = _run_coro_isolated(
-            call_llm(
+            call_internal_llm(
                 [{"role": "user", "content": prompt}],
-                model=config.CONTEXTUAL_CHUNKS_MODEL,
                 temperature=0.0,
                 max_tokens=300,
-                timeout=_TIMEOUT,
-                breaker_name="bifrost-synopsis",
+                stage="contextual_chunks",
             )
         )
         content = (content or "").strip()
