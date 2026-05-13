@@ -151,6 +151,82 @@ class TestEmbeddingFunctionContract:
 
 
 # ---------------------------------------------------------------------------
+# Fast-path return-shape contract — chromadb expects List[ndarray], not
+# List[list[float]]. Both Quenchforge and sidecar branches were silently
+# violating that contract pre-v0.93.8, which crashed retrieval with
+# "'list' object has no attribute 'tolist'" inside chromadb's
+# convert_np_embeddings_to_list. These tests pin the contract.
+# ---------------------------------------------------------------------------
+
+
+class TestFastPathReturnShape:
+    def _make_ef(self):
+        """Build an OnnxEmbeddingFunction without triggering tokenizer/ONNX load.
+
+        We only exercise __call__'s fast-path branches; constructor args
+        are placeholders that never get touched because the fast-path
+        short-circuits before _load() runs.
+        """
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        return OnnxEmbeddingFunction(model_id="org/placeholder")
+
+    def test_quenchforge_branch_returns_list_of_ndarrays(self, monkeypatch):
+        """Quenchforge fast-path must return List[ndarray[float32]] rows."""
+        import numpy as np
+
+        ef = self._make_ef()
+        plain_python_lists = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+        monkeypatch.setattr(
+            ef, "_maybe_embed_via_quenchforge", lambda inp: plain_python_lists,
+        )
+        out = ef(["doc1", "doc2"])
+        assert len(out) == 2
+        for row in out:
+            assert isinstance(row, np.ndarray), (
+                f"chromadb expects ndarray rows; got {type(row).__name__}"
+            )
+            assert row.dtype == np.float32
+            # ndarray.tolist() must work (chromadb's
+            # convert_np_embeddings_to_list calls this).
+            assert isinstance(row.tolist(), list)
+
+    def test_sidecar_branch_returns_list_of_ndarrays(self, monkeypatch):
+        """Sidecar fast-path must satisfy the same chromadb contract."""
+        import numpy as np
+
+        ef = self._make_ef()
+        # Force the sidecar branch by stubbing both:
+        # - quenchforge short-circuit returns None (skip)
+        # - sidecar returns plain lists (the contract-violation case)
+        monkeypatch.setattr(ef, "_maybe_embed_via_quenchforge", lambda inp: None)
+        plain_python_lists = [[0.7, 0.8, 0.9]]
+        monkeypatch.setattr(
+            ef, "_maybe_embed_via_sidecar", lambda inp: plain_python_lists,
+        )
+        out = ef(["doc1"])
+        assert len(out) == 1
+        assert isinstance(out[0], np.ndarray)
+        assert out[0].dtype == np.float32
+
+    def test_empty_input_short_circuits(self, monkeypatch):
+        """Empty input returns empty list, fast-paths never consulted."""
+        ef = self._make_ef()
+        called: list[bool] = []
+
+        def _should_not_be_called(inp):
+            called.append(True)
+            return None
+
+        monkeypatch.setattr(
+            ef, "_maybe_embed_via_quenchforge", _should_not_be_called,
+        )
+        monkeypatch.setattr(ef, "_maybe_embed_via_sidecar", _should_not_be_called)
+        assert ef([]) == []
+        assert not called
+
+
+# ---------------------------------------------------------------------------
 # get_embedding_function tests
 # ---------------------------------------------------------------------------
 
