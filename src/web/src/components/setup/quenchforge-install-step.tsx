@@ -126,11 +126,17 @@ export function QuenchforgeInstallStep({
         <div className="rounded-lg border bg-muted/30 p-3 text-label-xs text-muted-foreground">
           <p className="mb-1 font-medium text-foreground">First-launch on macOS Sonoma+</p>
           <p>
-            You may see a system prompt:{" "}
-            <em>&ldquo;Quenchforge would like to find and connect to devices on
-            your local network.&rdquo;</em> Approve it — quenchforge advertises
-            via mDNS so Cerid can autodiscover it. The first launch also takes
-            a few seconds to JIT-compile Metal shaders.
+            The first launch takes a few seconds to JIT-compile Metal shaders —
+            this is normal and only happens once per model.
+          </p>
+          <p className="mt-2">
+            If you turn on{" "}
+            <code className="rounded bg-background px-1 py-0.5">QUENCHFORGE_ADVERTISE_MDNS=true</code>{" "}
+            (off by default), macOS will prompt to allow local-network access.
+            Approve it so Cerid can autodiscover the daemon on the local
+            network. The default setup binds to{" "}
+            <code className="rounded bg-background px-1 py-0.5">127.0.0.1</code>{" "}
+            only and does not need mDNS.
           </p>
         </div>
 

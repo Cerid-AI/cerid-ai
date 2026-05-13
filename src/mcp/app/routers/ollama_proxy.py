@@ -32,13 +32,43 @@ _CONNECT_TIMEOUT = 10.0
 
 
 def _ollama_base_url() -> str:
-    """Return the configured Ollama base URL."""
+    """Return the base URL of the active Ollama-protocol backend.
+
+    When ``INTERNAL_LLM_PROVIDER=quenchforge`` the routing layer
+    (``core.routing.smart_router`` + ``core.utils.internal_llm``) already
+    switches the *chat* path to ``QUENCHFORGE_URL``.  This proxy router
+    is the OTHER consumer of the Ollama wire — model listing
+    (``/api/tags``), model show (``/api/show``), and model pull
+    (``/api/pull``).  Without this switch the Settings → Models page
+    and pull flow always hit ``OLLAMA_URL`` regardless of provider,
+    which silently breaks installations that run both services on
+    different ports.
+
+    Falls back to ``OLLAMA_URL`` when no override applies.  Both env
+    vars resolve to ``http://localhost:11434`` by default, so a single-
+    service install at the default port stays correct either way.
+    """
+    provider = os.getenv("INTERNAL_LLM_PROVIDER", "").strip().lower()
+    if provider == "quenchforge":
+        url = os.getenv("QUENCHFORGE_URL", "")
+        if url:
+            return url
     return os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 
 def _ollama_enabled() -> bool:
-    """Check if Ollama integration is enabled."""
-    return os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1", "yes")
+    """Check if the Ollama-protocol proxy is enabled.
+
+    Returns True when EITHER ``OLLAMA_ENABLED=true`` (the original
+    Ollama-only switch) OR ``INTERNAL_LLM_PROVIDER=quenchforge`` (the
+    operator has explicitly picked Quenchforge — which speaks the same
+    wire format on the same proxy router).  Otherwise the model-listing
+    + pull surfaces would return 503 against a working Quenchforge
+    backend, which is what the v0.93.7 fix corrects.
+    """
+    if os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1", "yes"):
+        return True
+    return os.getenv("INTERNAL_LLM_PROVIDER", "").strip().lower() == "quenchforge"
 
 
 def _require_enabled() -> None:

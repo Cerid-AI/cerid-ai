@@ -2,6 +2,55 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.7 — Quenchforge integration polish: proxy URL routing + install-step copy (2026-05-12)
+
+Same-day follow-up to v0.93.6.  A post-merge audit of the Quenchforge
+integration against the upstream `Cerid-AI/quenchforge` repo + the
+`Cerid-AI/homebrew-tap` formula surfaced two correctness gaps; both
+are fixed here.
+
+**`ollama_proxy.py` honors `INTERNAL_LLM_PROVIDER=quenchforge`**
+
+The router exposes the Ollama-wire endpoints under `/ollama/*` —
+chat, model list (`/api/tags`), model show (`/api/show`), model pull
+(`/api/pull`).  Pre-v0.93.7 every endpoint hard-coded `OLLAMA_URL`.
+Consequences:
+
+* User running ONLY Quenchforge on the default port 11434 → "works"
+  by URL coincidence (`OLLAMA_URL` default `:11434` happens to hit
+  Quenchforge's default listen addr).
+* User running BOTH services on different ports → Settings → Models
+  page silently shows stock Ollama's installed models, not
+  Quenchforge's.
+* User running Quenchforge on a non-default port → broken.
+
+v0.93.7 routes the proxy to `QUENCHFORGE_URL` when
+`INTERNAL_LLM_PROVIDER=quenchforge` is set, falling back to
+`OLLAMA_URL` for the same-port-coincidence case.  `_ollama_enabled()`
+also returns true for either `OLLAMA_ENABLED=true` OR
+`INTERNAL_LLM_PROVIDER=quenchforge` so the Models page surfaces don't
+return 503 against a Quenchforge-only install.  10 new pytest cases
+in `test_ollama_proxy_quenchforge.py` lock the matrix.
+
+**`QuenchforgeInstallStep` mDNS copy reflects the default-off reality**
+
+Pre-v0.93.7 the step said *"Quenchforge would like to find and connect
+to devices on your local network — approve it — quenchforge advertises
+via mDNS so Cerid can autodiscover it."*  But Quenchforge defaults
+`QUENCHFORGE_ADVERTISE_MDNS=false` and binds to `127.0.0.1`, so the
+local-network prompt never appears for the default install.  The
+copy now says the prompt only appears if the operator explicitly
+enables mDNS, and notes that the default 127.0.0.1 bind doesn't need
+it.
+
+**What's intentionally NOT routed through Quenchforge** (documented
+here so the design intent survives audits): embeddings stay on the
+Snowflake arctic-embed-m-v1.5 ONNX (dimension-pinned to 768 to match
+ChromaDB; switching would force a full re-embed), and reranking stays
+on the MS MARCO MiniLM cross-encoder (different score distribution).
+Quenchforge's `/api/embeddings` and `/v1/rerank` surfaces remain
+available but unused — that's a feature opportunity, not a gap.
+
 ## v0.93.6 — Quenchforge integration merge: hardware-aware backend recommendation (2026-05-12)
 
 Merge of the long-running `feat/quenchforge-integration` branch (5 commits,
