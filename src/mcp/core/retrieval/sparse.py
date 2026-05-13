@@ -338,16 +338,81 @@ def is_available() -> bool:
     return _get_encoder() is not None
 
 
+def _try_sidecar_encode_batch(texts: list[str]) -> list[dict[int, float]] | None:
+    """Route sparse encoding through the cerid sidecar when it's selected.
+
+    The sidecar's ``/encode/sparse`` endpoint (shipped in v0.93.4) gives
+    GPU acceleration on Mac ARM64 (CoreML) and Linux (CUDA/ROCm).  On
+    Intel Mac + AMD, the sidecar's ONNX runtime falls to CPU, so the
+    fast-path is no better than the in-process branch — Quenchforge
+    would be the AMD-Mac path, but Quenchforge has no sparse endpoint
+    per the upstream gateway routing table.
+
+    Returns ``None`` on any opt-out or failure so the caller falls
+    through to the in-process encoder.  Never raises into the query
+    or ingest paths.
+    """
+    try:
+        from utils.inference_config import get_inference_config
+        cfg = get_inference_config()
+    except Exception:  # noqa: BLE001 — module load failure → next provider
+        return None
+    if cfg.provider != "fastembed-sidecar" or not cfg.sidecar_available:
+        return None
+
+    # Sync-bridge to the async sidecar client.  Same ThreadPoolExecutor
+    # pattern as core/utils/embeddings.py uses to call async APIs from
+    # the sync sparse code paths.
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _runner() -> list[dict[int, float]]:
+        from utils.inference_sidecar_client import sidecar_encode_sparse
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(sidecar_encode_sparse(texts))
+        finally:
+            loop.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(_runner).result()
+    except Exception as exc:  # noqa: BLE001 — fall through to in-process
+        log_swallowed_error("core.retrieval.sparse.sidecar_fallthrough", exc)
+        return None
+
+
 def encode_text(text: str) -> dict[int, float]:
     """Encode a single text. Returns ``{}`` when encoder unavailable."""
-    enc = _get_encoder()
-    if enc is None:
-        return {}
-    return enc.encode_text(text)
+    results = encode_batch([text])
+    return results[0] if results else {}
 
 
 def encode_batch(texts: list[str]) -> list[dict[int, float]]:
-    """Encode a batch. Returns ``[]`` when encoder unavailable."""
+    """Encode a batch with the three-tier dispatch.
+
+    Dispatch order:
+
+    1. **Sidecar fast-path** (v0.93.8) — when the operator runs the
+       cerid sidecar AND it's reachable.  Gives GPU acceleration on
+       Mac ARM64 (CoreML) and Linux (CUDA/ROCm).
+    2. **In-process ONNX** — always available when SPLADE is enabled
+       and the model is on disk.  CPU on Intel Mac + AMD.
+
+    Returns ``[]`` when SPLADE is disabled or the encoder is
+    unavailable.  Quenchforge intentionally not in this chain — it has
+    no sparse endpoint per the upstream gateway routing table.
+    """
+    if not texts:
+        return []
+
+    # ── Sidecar fast-path (v0.93.8) ──────────────────────────────────
+    sidecar_result = _try_sidecar_encode_batch(texts)
+    if sidecar_result is not None:
+        return sidecar_result
+
+    # ── In-process ONNX fallback ─────────────────────────────────────
     enc = _get_encoder()
     if enc is None:
         return []

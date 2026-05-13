@@ -95,6 +95,81 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
 
             {pipelineCustomize && (
               <div className="space-y-4 border-t pt-4">
+                {/* v0.93.8 — GPU Acceleration (Quenchforge per-workload) */}
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="text-sm font-medium">GPU acceleration</span>
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/40 bg-amber-500/10 text-label-xs font-mono uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                    >
+                      Quenchforge
+                    </Badge>
+                  </div>
+                  <p className="mb-3 text-label-xs text-muted-foreground leading-relaxed">
+                    Route embedding, reranking, and ingest-enrichment workloads
+                    through Quenchforge for GPU acceleration on Intel Mac + AMD.
+                    See <code className="rounded bg-background px-1 py-0.5">docs/AMD_GPU_MODEL_RECOMMENDATIONS.md</code> for
+                    vetted GGUF model picks.
+                  </p>
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Embeddings provider</span>
+                      <select
+                        className="rounded border bg-background px-2 py-1 text-xs"
+                        value={settings.embeddings_provider ?? "sidecar"}
+                        onChange={(e) =>
+                          void patch({
+                            embeddings_provider: e.target.value as
+                              | "sidecar"
+                              | "quenchforge"
+                              | "in-process",
+                          })
+                        }
+                      >
+                        <option value="sidecar">Sidecar (CoreML / CUDA)</option>
+                        <option value="quenchforge">Quenchforge (AMD GPU)</option>
+                        <option value="in-process">In-process (CPU)</option>
+                      </select>
+                    </div>
+                    {settings.embeddings_provider === "quenchforge" && (
+                      <Row
+                        label="Embed model"
+                        value={settings.quenchforge_embed_model ?? ""}
+                        mono
+                        info="GGUF model Quenchforge serves on /v1/embeddings. Must produce 768-dim vectors."
+                      />
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Rerank provider</span>
+                      <select
+                        className="rounded border bg-background px-2 py-1 text-xs"
+                        value={settings.rerank_provider ?? "sidecar"}
+                        onChange={(e) =>
+                          void patch({
+                            rerank_provider: e.target.value as
+                              | "sidecar"
+                              | "quenchforge"
+                              | "in-process",
+                          })
+                        }
+                      >
+                        <option value="sidecar">Sidecar (CoreML / CUDA)</option>
+                        <option value="quenchforge">Quenchforge (AMD GPU)</option>
+                        <option value="in-process">In-process (CPU)</option>
+                      </select>
+                    </div>
+                    {settings.rerank_provider === "quenchforge" && (
+                      <Row
+                        label="Rerank model"
+                        value={settings.quenchforge_rerank_model ?? ""}
+                        mono
+                        info="GGUF reranker Quenchforge serves on /v1/rerank. BGE Reranker v2 m3 is the default recommendation."
+                      />
+                    )}
+                  </div>
+                </div>
+
                 {/* Adaptive Retrieval */}
                 <PipelineToggle
                   label="Adaptive Retrieval"

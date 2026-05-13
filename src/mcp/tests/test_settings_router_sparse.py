@@ -84,3 +84,66 @@ def test_patch_combo_enable_and_mode(client):
         "hybrid_fusion_mode",
         "hybrid_rrf_sparse_weight",
     }
+
+
+# ---------------------------------------------------------------------------
+# v0.93.8 — per-workload GPU routing fields
+# ---------------------------------------------------------------------------
+
+def test_patch_embeddings_provider_quenchforge(client, monkeypatch):
+    import os
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    r = client.patch("/settings", json={"embeddings_provider": "quenchforge"})
+    assert r.status_code == 200
+    assert r.json()["updated"]["embeddings_provider"] == "quenchforge"
+    assert os.environ["EMBEDDINGS_PROVIDER"] == "quenchforge"
+
+
+def test_patch_rerank_provider_quenchforge(client, monkeypatch):
+    import os
+    monkeypatch.delenv("RERANK_PROVIDER", raising=False)
+    r = client.patch("/settings", json={"rerank_provider": "quenchforge"})
+    assert r.status_code == 200
+    assert os.environ["RERANK_PROVIDER"] == "quenchforge"
+
+
+def test_patch_rejects_invalid_provider(client):
+    r = client.patch("/settings", json={"embeddings_provider": "fake_gpu"})
+    assert r.status_code == 400
+
+
+def test_patch_quenchforge_models(client, monkeypatch):
+    import os
+    monkeypatch.delenv("QUENCHFORGE_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("QUENCHFORGE_RERANK_MODEL", raising=False)
+    r = client.patch("/settings", json={
+        "quenchforge_embed_model": "nomic-embed-text-v1.5",
+        "quenchforge_rerank_model": "bge-reranker-v2-m3",
+    })
+    assert r.status_code == 200
+    assert os.environ["QUENCHFORGE_EMBED_MODEL"] == "nomic-embed-text-v1.5"
+    assert os.environ["QUENCHFORGE_RERANK_MODEL"] == "bge-reranker-v2-m3"
+
+
+def test_get_surfaces_gpu_routing_fields(client):
+    r = client.get("/settings")
+    body = r.json()
+    assert "embeddings_provider" in body
+    assert "rerank_provider" in body
+    assert "quenchforge_embed_model" in body
+    assert "quenchforge_rerank_model" in body
+
+
+def test_patch_all_three_gpu_flags_together(client, monkeypatch):
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    monkeypatch.delenv("RERANK_PROVIDER", raising=False)
+    monkeypatch.delenv("QUENCHFORGE_EMBED_MODEL", raising=False)
+    r = client.patch("/settings", json={
+        "embeddings_provider": "quenchforge",
+        "rerank_provider": "quenchforge",
+        "quenchforge_embed_model": "nomic-embed-text-v1.5",
+    })
+    assert r.status_code == 200
+    assert set(r.json()["updated"]) >= {
+        "embeddings_provider", "rerank_provider", "quenchforge_embed_model",
+    }
