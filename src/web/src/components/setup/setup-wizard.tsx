@@ -18,13 +18,16 @@ import { KBConfigStep } from "@/components/setup/kb-config-step"
 import { OllamaStep } from "@/components/setup/ollama-step"
 import { FirstDocumentStep } from "@/components/setup/first-document-step"
 import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
+import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
+import { QuenchforgeInstallStep } from "@/components/setup/quenchforge-install-step"
+import { TelemetryConsentStep, type TelemetryConsent } from "@/components/setup/telemetry-consent-step"
 import { StepIndicator, type StepDef } from "@/components/setup/step-indicator"
 import { applySetupConfig, fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { assessCapabilities, fromWizardState, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import type { CapabilityAssessment, Warning as ProviderWarning } from "@/lib/provider-capabilities"
 import { cn } from "@/lib/utils"
-import type { ProviderCredits, SystemCheckResponse } from "@/lib/types"
+import type { ProviderCredits, RecommendedLocalBackend, SystemCheckResponse } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,6 +36,14 @@ import type { ProviderCredits, SystemCheckResponse } from "@/lib/types"
 const TOTAL_STEPS = 8
 const SKIPPABLE_STEPS = new Set([2, 3, 6])
 const STORAGE_KEY = "cerid-setup-progress"
+/**
+ * Persisted-state schema version. Bumped to 2 when the Backend Recommendation,
+ * Quenchforge Install, and Telemetry Consent surfaces were added; v1 stores
+ * lack `selectedBackend` and `telemetryConsent`, so on load we drop them and
+ * restart the wizard rather than running a transform — saves are
+ * 24-hour-ephemeral anyway (see `loadProgress`).
+ */
+const STORAGE_SCHEMA_VERSION = 2
 
 // Display-only sentinels the masked API-key input renders when an
 // env-loaded key is already configured. Sending them on the wire would
@@ -98,6 +109,10 @@ interface WizardState {
   }
   selectedMode: "simple" | "advanced"
   customProvider: { name: string; baseUrl: string; apiKey: string; modelId: string; valid: boolean } | null
+  /** User's chosen local-inference backend. null = follow recommendation. */
+  selectedBackend: RecommendedLocalBackend | null
+  /** Opt-in telemetry toggles; both default false. */
+  telemetryConsent: TelemetryConsent
 }
 
 type WizardAction =
@@ -116,6 +131,8 @@ type WizardAction =
   | { type: "SET_FIRST_DOC"; state: WizardState["firstDoc"] }
   | { type: "SET_MODE"; mode: "simple" | "advanced" }
   | { type: "SET_CUSTOM_PROVIDER"; provider: WizardState["customProvider"] }
+  | { type: "SET_BACKEND"; backend: RecommendedLocalBackend }
+  | { type: "SET_TELEMETRY"; consent: TelemetryConsent }
 
 function createInitialState(): WizardState {
   return {
@@ -153,6 +170,8 @@ function createInitialState(): WizardState {
     },
     selectedMode: "simple",
     customProvider: null,
+    selectedBackend: null,
+    telemetryConsent: { sendPerformance: false, sendBenchmark: false },
   }
 }
 
@@ -210,6 +229,10 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, selectedMode: action.mode }
     case "SET_CUSTOM_PROVIDER":
       return { ...state, customProvider: action.provider }
+    case "SET_BACKEND":
+      return { ...state, selectedBackend: action.backend }
+    case "SET_TELEMETRY":
+      return { ...state, telemetryConsent: action.consent }
     default:
       return state
   }
@@ -219,14 +242,30 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
 // Persistence
 // ---------------------------------------------------------------------------
 
+interface PersistedProgress {
+  version: number
+  step: number
+  skippedSteps: number[]
+  kbConfig: WizardState["kbConfig"]
+  ollama: WizardState["ollama"]
+  selectedMode: WizardState["selectedMode"]
+  selectedBackend: WizardState["selectedBackend"]
+  telemetryConsent: WizardState["telemetryConsent"]
+  applied: boolean
+  ts: number
+}
+
 function saveProgress(state: WizardState) {
   try {
-    const data = {
+    const data: PersistedProgress = {
+      version: STORAGE_SCHEMA_VERSION,
       step: state.step,
       skippedSteps: [...state.skippedSteps],
       kbConfig: state.kbConfig,
       ollama: state.ollama,
       selectedMode: state.selectedMode,
+      selectedBackend: state.selectedBackend,
+      telemetryConsent: state.telemetryConsent,
       applied: state.applied,
       ts: Date.now(),
     }
@@ -234,17 +273,25 @@ function saveProgress(state: WizardState) {
   } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: STORAGE_KEY }) }
 }
 
-function loadProgress(): { step: number; skippedSteps: number[]; applied?: boolean } | null {
+function loadProgress(): PersistedProgress | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
     const data = JSON.parse(raw)
+    // v1 → v2 migration: persisted state pre-Backend-Recommendation has no
+    // `version` field or version=1. Drop it rather than transform; saves are
+    // 24h-ephemeral and a clean restart is less risky than backfilling new
+    // fields with assumed defaults.
+    if (data.version !== STORAGE_SCHEMA_VERSION) {
+      localStorage.removeItem(STORAGE_KEY)
+      return null
+    }
     // Expire after 24 hours
     if (Date.now() - data.ts > 86_400_000) {
       localStorage.removeItem(STORAGE_KEY)
       return null
     }
-    return data
+    return data as PersistedProgress
   } catch {
     return null
   }
@@ -533,6 +580,33 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 </p>
               </div>
               <SystemCheckCard onCheckComplete={handleSystemCheckComplete} />
+              {/*
+                Backend Recommendation surfaces as soon as the system check
+                returns — the recommendation is hardware-driven. Quenchforge
+                Install appears only when the user picks quenchforge and the
+                local backend isn't already responding. Both inline in step 0
+                rather than as separate wizard pages so the Welcome page tells
+                a single coherent story without renumbering all later steps.
+              */}
+              {state.systemCheck && (
+                <div className="mt-4 space-y-4">
+                  <BackendRecommendationStep
+                    systemCheck={state.systemCheck}
+                    selected={state.selectedBackend}
+                    onSelect={(backend) => dispatch({ type: "SET_BACKEND", backend })}
+                  />
+                  {state.selectedBackend === "quenchforge" && !state.systemCheck.ollama_detected && (
+                    <div className="border-t pt-4">
+                      <QuenchforgeInstallStep
+                        systemCheck={state.systemCheck}
+                        onSystemCheckRefresh={(result) =>
+                          dispatch({ type: "SET_SYSTEM_CHECK", result })
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -813,26 +887,34 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
             />
           )}
 
-          {/* Step 7: Mode Selection */}
+          {/* Step 7: Mode Selection (preceded by Telemetry Consent) */}
           {!showResumePrompt && state.step === 7 && (
-            <ModeSelectionStep
-              selectedMode={state.selectedMode}
-              onSelectMode={(mode) => dispatch({ type: "SET_MODE", mode })}
-              configSummary={{
-                providerCount,
-                providerNames,
-                domainCount,
-                ollamaEnabled: state.ollama.enabled,
-                ollamaModel: state.ollama.model,
-                documentCount: state.firstDoc.ingested ? 1 : 0,
-              }}
-              hardware={state.systemCheck ? {
-                ram_gb: state.systemCheck.ram_gb,
-                cpu: state.systemCheck.cpu,
-                gpu: state.systemCheck.gpu,
-                gpu_acceleration: state.systemCheck.gpu_acceleration,
-              } : null}
-            />
+            <div className="space-y-6">
+              <TelemetryConsentStep
+                consent={state.telemetryConsent}
+                onChange={(consent) => dispatch({ type: "SET_TELEMETRY", consent })}
+              />
+              <div className="border-t pt-4">
+                <ModeSelectionStep
+                  selectedMode={state.selectedMode}
+                  onSelectMode={(mode) => dispatch({ type: "SET_MODE", mode })}
+                  configSummary={{
+                    providerCount,
+                    providerNames,
+                    domainCount,
+                    ollamaEnabled: state.ollama.enabled,
+                    ollamaModel: state.ollama.model,
+                    documentCount: state.firstDoc.ingested ? 1 : 0,
+                  }}
+                  hardware={state.systemCheck ? {
+                    ram_gb: state.systemCheck.ram_gb,
+                    cpu: state.systemCheck.cpu,
+                    gpu: state.systemCheck.gpu,
+                    gpu_acceleration: state.systemCheck.gpu_acceleration,
+                  } : null}
+                />
+              </div>
+            </div>
           )}
             </div>
           )}

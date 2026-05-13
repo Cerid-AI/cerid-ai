@@ -97,6 +97,20 @@ def _register_phase_2b_strategies() -> None:
     except Exception:  # noqa: BLE001
         logger.exception("xlsx_strategy registration failed — falling back to default")
 
+    # Optional: sentence-window chunker for NarrativeText. Off by default;
+    # when ENABLE_SENTENCE_WINDOW=true this swaps the fallback token chunker
+    # on NarrativeText elements for one that emits per-sentence chunks with
+    # a ±SENTENCE_WINDOW_SIZE context stashed in metadata.
+    try:
+        import config as _cfg
+        if getattr(_cfg, "ENABLE_SENTENCE_WINDOW", False):
+            from core.ingest.chunkers.sentence_window_strategy import (
+                register_default_strategies as _sw,
+            )
+            _sw()
+    except Exception:  # noqa: BLE001
+        logger.exception("sentence_window_strategy registration failed — falling back to default")
+
 
 _register_phase_2b_strategies()
 

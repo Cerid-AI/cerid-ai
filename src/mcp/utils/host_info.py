@@ -24,6 +24,16 @@ class HostHardware:
     cpu_cores: int | None
     gpu: str
     gpu_acceleration: str
+    # Canonical GPU profile token from scripts/detect-gpu.sh.
+    # One of: nvidia | amd | amd-mac | metal | cpu | "" (unknown).
+    # Distinct from gpu_acceleration: "amd-mac" reports the hardware truth
+    # (Intel Mac + AMD discrete), where gpu_acceleration is "none" because
+    # stock Ollama does not accelerate on that config.
+    gpu_type: str = ""
+    # Hardware-aware recommendation for the local inference backend.
+    # One of: ollama | quenchforge | cloud | "" (re-detect needed).
+    # See scripts/detect-gpu.sh for the truth table.
+    recommended_local_backend: str = ""
 
 
 def get_host_ram_gb() -> int:
@@ -58,4 +68,6 @@ def get_host_hardware() -> HostHardware:
         cpu_cores=int(cpu_cores_raw) if cpu_cores_raw.isdigit() else None,
         gpu=os.getenv("HOST_GPU", "") or "Unknown",
         gpu_acceleration=os.getenv("HOST_GPU_ACCEL", "") or "none",
+        gpu_type=os.getenv("HOST_GPU_TYPE", ""),
+        recommended_local_backend=os.getenv("HOST_RECOMMENDED_LOCAL_BACKEND", ""),
     )

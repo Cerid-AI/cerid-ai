@@ -586,6 +586,37 @@ async def retest_services() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _recommend_backend_from_hw(hw: "object") -> str:
+    """Pick a sensible local-inference backend when start-cerid.sh did not
+    propagate ``HOST_RECOMMENDED_LOCAL_BACKEND`` (e.g. dev-mode container
+    started via ``docker compose up`` directly).
+
+    Truth table (mirrors scripts/detect-gpu.sh):
+      - macOS + AMD/Radeon/Vega in GPU name (Intel Mac + AMD)  → quenchforge
+      - macOS + Apple-Silicon GPU                              → ollama
+      - macOS + any other discrete GPU                         → ollama
+      - Linux/Windows + CUDA/ROCm/Metal acceleration           → ollama
+      - Anything else                                          → cloud
+    """
+    os_lower = (getattr(hw, "os", "") or "").lower()
+    gpu_lower = (getattr(hw, "gpu", "") or "").lower()
+    gpu_type_lower = (getattr(hw, "gpu_type", "") or "").lower()
+    accel_lower = (getattr(hw, "gpu_acceleration", "") or "").lower()
+
+    if gpu_type_lower == "amd-mac":
+        return "quenchforge"
+
+    is_mac = "darwin" in os_lower or "macos" in os_lower or "mac os" in os_lower
+    has_amd_marker = any(token in gpu_lower for token in ("amd", "radeon", "vega"))
+    has_apple_marker = "apple" in gpu_lower
+    if is_mac and has_amd_marker and not has_apple_marker:
+        return "quenchforge"
+
+    if accel_lower in ("cuda", "rocm", "metal"):
+        return "ollama"
+    return "cloud"
+
+
 @router.get("/system-check")
 async def system_check(response: Response) -> dict:
     """Detect system environment for the setup wizard."""
@@ -640,6 +671,14 @@ async def system_check(response: Response) -> dict:
     # Lightweight recommendation
     lightweight_recommended = hw.ram_gb < 8
 
+    # Hardware-aware backend recommendation. Populated by start-cerid.sh
+    # sourcing scripts/detect-gpu.sh and persisting HOST_* env vars.
+    # Falls back to a string heuristic when not populated (developer mode
+    # running the container without start-cerid.sh).
+    recommended_local_backend = hw.recommended_local_backend
+    if not recommended_local_backend:
+        recommended_local_backend = _recommend_backend_from_hw(hw)
+
     return {
         "ram_gb": hw.ram_gb,
         "os": hw.os,
@@ -647,6 +686,8 @@ async def system_check(response: Response) -> dict:
         "cpu_cores": hw.cpu_cores,
         "gpu": hw.gpu,
         "gpu_acceleration": hw.gpu_acceleration,
+        "gpu_type": hw.gpu_type,
+        "recommended_local_backend": recommended_local_backend,
         "docker_running": docker_running,
         "env_exists": env_exists,
         "env_keys_present": env_keys,
