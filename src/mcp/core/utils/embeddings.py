@@ -154,7 +154,16 @@ class OnnxEmbeddingFunction:
         # chain on any failure.
         quenchforge_result = self._maybe_embed_via_quenchforge(input)
         if quenchforge_result is not None:
-            return quenchforge_result
+            # ChromaDB's convert_np_embeddings_to_list calls .tolist() on
+            # each row, so the row MUST be a numpy ndarray, not a plain
+            # Python list. The local-ONNX path below already returns
+            # ndarray rows (line ~207); match that shape here so the
+            # fast-paths are drop-in replacements.  The declared return
+            # type predates this fix; chromadb's EmbeddingFunction.__call__
+            # actually expects List[ndarray], which is what the local-ONNX
+            # path silently delivers (mypy couldn't catch it because
+            # ndarray indexing returns Any).
+            return [np.asarray(row, dtype=np.float32) for row in quenchforge_result]  # type: ignore[misc]
 
         # Sidecar fast-path — only when explicitly preferred by inference
         # detection AND reachable. Sync-bridge to async via the proven
@@ -162,7 +171,8 @@ class OnnxEmbeddingFunction:
         # app.queue.tasks; chromadb's EmbeddingFunction.__call__ is sync).
         sidecar_result = self._maybe_embed_via_sidecar(input)
         if sidecar_result is not None:
-            return sidecar_result
+            # Same ndarray-row requirement as the Quenchforge branch above.
+            return [np.asarray(row, dtype=np.float32) for row in sidecar_result]  # type: ignore[misc]
 
         session, tokenizer = self._load()
         encodings = tokenizer.encode_batch(input)
