@@ -167,6 +167,38 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                         info="GGUF reranker Quenchforge serves on /v1/rerank. BGE Reranker v2 m3 is the default recommendation."
                       />
                     )}
+                    {/* v0.93.9 — internal-LLM provider for pipeline tasks
+                        (ingest enrichment, LLM rerank, memory extraction,
+                        claim extraction). Chat-stream user UX still goes
+                        directly to OpenRouter. */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Internal LLM provider</span>
+                      <select
+                        className="rounded border bg-background px-2 py-1 text-xs"
+                        value={settings.internal_llm_provider ?? "openrouter"}
+                        onChange={(e) =>
+                          void patch({
+                            internal_llm_provider: e.target.value as
+                              | "openrouter"
+                              | "ollama"
+                              | "quenchforge",
+                          })
+                        }
+                      >
+                        <option value="openrouter">OpenRouter (cloud)</option>
+                        <option value="ollama">Ollama (local)</option>
+                        <option value="quenchforge">Quenchforge (AMD GPU)</option>
+                      </select>
+                    </div>
+                    {(settings.internal_llm_provider === "ollama" ||
+                      settings.internal_llm_provider === "quenchforge") && (
+                      <Row
+                        label="Internal LLM model"
+                        value={settings.internal_llm_model ?? ""}
+                        mono
+                        info="Model name passed to the internal-LLM provider for pipeline tasks. For Ollama / Quenchforge, must match a model registered with the daemon."
+                      />
+                    )}
                   </div>
                 </div>
 

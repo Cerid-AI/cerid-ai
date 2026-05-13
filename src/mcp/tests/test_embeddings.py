@@ -14,6 +14,30 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _isolate_provider_env(monkeypatch):
+    """Ensure the fast-path env vars don't leak from prior tests.
+
+    The settings router PATCH handler mutates `os.environ` directly to make
+    provider flips take effect in-process without a restart (see
+    `app.routers.settings.update_settings_endpoint`). Pytest's monkeypatch
+    doesn't track those mutations, so a settings test that flips
+    `EMBEDDINGS_PROVIDER=quenchforge` permanently taints the process env.
+    When a later embeddings test runs with that env still set, the
+    OnnxEmbeddingFunction fast-path fires and bypasses the mocked ONNX
+    session → mock breakage. Clearing these per-test guarantees the test
+    body sees the default (sidecar/none) provider state.
+    """
+    for var in (
+        "EMBEDDINGS_PROVIDER",
+        "RERANK_PROVIDER",
+        "INTERNAL_LLM_PROVIDER",
+        "QUENCHFORGE_EMBED_MODEL",
+        "QUENCHFORGE_RERANK_MODEL",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
 class TestOnnxEmbeddingFunction:
     def test_empty_input_returns_empty(self):
         from core.utils.embeddings import OnnxEmbeddingFunction

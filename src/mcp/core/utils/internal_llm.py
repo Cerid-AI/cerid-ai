@@ -134,9 +134,13 @@ async def _call_ollama(
         label = "Ollama"
         start_hint = "is 'ollama serve' running?"
     model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
-    # Both providers share a single breaker key — they target the same wire
-    # protocol and a stuck local backend is a stuck local backend.
-    breaker = get_breaker("ollama")
+    # Breaker key is provider-specific so a Quenchforge outage doesn't trip
+    # the Ollama breaker (and vice versa). Pre-v0.93.9 both providers shared
+    # the "ollama" breaker; mismatched failures cascaded across an operator
+    # who happened to have both daemons running on different ports.
+    # quenchforge_client uses the "quenchforge" breaker for /v1/embeddings
+    # and /v1/rerank — this internal-LLM /api/chat path matches that key.
+    breaker = get_breaker(provider) if provider == "quenchforge" else get_breaker("ollama")
 
     # Advanced flags (default off). When any is set, additive payload fields
     # are surfaced; the wire stays valid against stock Ollama and Quenchforge.

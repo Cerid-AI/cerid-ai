@@ -59,10 +59,17 @@ Each platform follows a strict priority order. The system tries Option 1 first; 
 
 | Priority | Provider | Backend | Expected Perf | Detection |
 |----------|----------|---------|---------------|-----------|
-| **Option 1** | Ollama | CPU (no GPU accel on Intel Mac) | ~20ms/batch-10 | Health check |
-| **Option 2** | FastEmbed sidecar | `onnxruntime` (CPU, AVX2) | ~12ms/batch-10 | Sidecar health |
-| **Option 3** | ONNX in-process | `CPUExecutionProvider` | ~15ms/batch-10 | Always available |
-| **Option 4** | ONNX Docker CPU | `CPUExecutionProvider` | ~20-30ms/batch-10 | Always available |
+| **Option 1** | Quenchforge | Metal GPU on AMD discrete (patched llama.cpp) | ~38ms/batch-10 embed, ~118ms/8-doc rerank | `curl -s http://127.0.0.1:11434/health` returns 200; Cerid's `EMBEDDINGS_PROVIDER=quenchforge` + `RERANK_PROVIDER=quenchforge` |
+| **Option 2** | Ollama | CPU (stock Ollama doesn't reach AMD discrete on Intel Mac per [ollama/ollama#1016](https://github.com/ollama/ollama/issues/1016)) | ~20ms/batch-10 | Health check |
+| **Option 3** | FastEmbed sidecar | `onnxruntime` (CPU, AVX2) | ~12ms/batch-10 | Sidecar health |
+| **Option 4** | ONNX in-process | `CPUExecutionProvider` | ~15ms/batch-10 | Always available |
+| **Option 5** | ONNX Docker CPU | `CPUExecutionProvider` | ~20-30ms/batch-10 | Always available |
+
+**Quenchforge** ([github.com/cerid-ai/quenchforge](https://github.com/cerid-ai/quenchforge), Apache-2.0) is the option-1 provider on Intel Mac + AMD discrete (Vega Pro, W6800X, RDNA1, RDNA2). It supervises a patched `llama-server` per workload (chat / embed / rerank) and gates the Metal `simdgroup_reduction` + `bfloat` kernels that miscompile on AMD discrete. As of Quenchforge v0.3.2 the gateway also translates Ollama-wire `/api/chat` and `/api/embeddings` to llama-server's OpenAI wire, so existing Ollama clients work unchanged.
+
+Three additional hardware-aware flags are applied to the chat slot on AMD profiles to dodge a flash-attention CPU-fallback throttle and the prompt-cache state-save `GGML_ASSERT(buf_dst)` crash (`--flash-attn off --cache-ram 0 --no-cache-prompt`). Embed and rerank slots keep upstream defaults — they don't trip either bug.
+
+For vetted GGUF model picks by VRAM tier see [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](AMD_GPU_MODEL_RECOMMENDATIONS.md). Cerid honours the routing via three env vars: `INTERNAL_LLM_PROVIDER=quenchforge`, `EMBEDDINGS_PROVIDER=quenchforge`, `RERANK_PROVIDER=quenchforge` — all live-mutable via `PATCH /settings` as of v0.93.9.
 
 #### Linux — NVIDIA GPU
 
