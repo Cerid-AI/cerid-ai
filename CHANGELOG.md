@@ -2,6 +2,93 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.93.8 — Quenchforge GPU routing for embeddings, reranking, and ingest-time enrichment (2026-05-12)
+
+A direct read of the upstream `Cerid-AI/quenchforge` repo (gateway.go,
+README, Formula scaffold) surfaced a bigger integration gap than v0.93.7
+closed.  Quenchforge's mission is GPU acceleration for Intel Mac + AMD —
+hardware where ONNX runtime has no GPU execution provider and cerid's
+ingest enrichment falls to CPU.  Until v0.93.8 only the LLM-chat path
+routed through Quenchforge; every other workload (embeddings, reranking,
+per-chunk contextual summaries, AI categorization, curator synopsis)
+silently hit CPU or cloud.  v0.93.8 wires the rest.
+
+**Embeddings (`EMBEDDINGS_PROVIDER=quenchforge`)**
+
+`utils/quenchforge_client.py` is the new HTTP client for Quenchforge's
+OpenAI-wire endpoints (`/v1/embeddings`, `/v1/rerank`, `/health`).
+`core/utils/embeddings.py` gains a `_maybe_embed_via_quenchforge` branch
+ahead of the existing sidecar branch — when the operator opts in,
+embeddings (BOTH query-time and ingest-time, since ChromaDB calls the
+same `EmbeddingFunction.__call__` for both) route through Quenchforge's
+AMD GPU.  Dimension is validated on the first response (must match
+`EMBEDDING_DIMENSIONS`, default 768) so a misconfigured
+`QUENCHFORGE_EMBED_MODEL` can't silently corrupt the ChromaDB index.
+
+**Reranking (`RERANK_PROVIDER=quenchforge`)**
+
+`core/agents/query_agent.py` gains `_maybe_rerank_via_quenchforge`
+ahead of the sidecar branch.  Per-query reranking moves to the GPU.
+Output scores are aligned to the input document order (Quenchforge's
+OpenAI-wire `/v1/rerank` is allowed to return results sorted by score).
+
+**Ingest-time LLM enrichment**
+
+Three call sites that bypassed provider-aware routing got migrated:
+
+* `core/utils/contextual.py`: per-chunk situational summaries
+  (THE highest-volume ingest LLM call — fires once per chunk of every
+  ingested document).  Pre-v0.93.8 always hit OpenRouter.
+* `core/agents/curator.py`: post-ingest synopsis generation.  Runs over
+  every newly-ingested artifact during curation.
+* `utils/metadata.py:ai_categorize`: per-document categorization.  The
+  conditional was `if INTERNAL_LLM_PROVIDER == "ollama"` —
+  Quenchforge users silently fell through to OpenRouter.  Fixed to
+  `in ("ollama", "quenchforge")`.
+
+All three now go through `call_internal_llm()`, the canonical
+provider-aware entrypoint, which dispatches to Quenchforge when the
+operator has selected it.
+
+**Health probe + pull-stub handling**
+
+`quenchforge_health()` probes `/health` (the canonical lightweight
+liveness endpoint per `internal/gateway/gateway.go:handleHealth`) instead
+of `/api/tags` (which does an FS walk).  `app/routers/ollama_proxy.py`
+short-circuits `/api/pull` when Quenchforge is the active provider —
+upstream returns HTTP 501 with a hint pointing at
+`quenchforge migrate-from-ollama`; we surface that directly to the UI
+instead of letting it propagate as a generic `Ollama pull error: HTTP 501`.
+
+**What's still intentionally CPU**
+
+* SPLADE-v3 sparse encoding — Quenchforge's gateway has no sparse
+  endpoint (verified against the routing table in `gateway.go`).
+  Cerid's own sidecar (`scripts/cerid-sidecar.py`) continues to serve
+  SPLADE; on Intel Mac + AMD that's CPU.
+* The MS MARCO MiniLM cross-encoder remains in-process when
+  `RERANK_PROVIDER=sidecar` (default).  Operators with a Quenchforge-
+  loaded rerank model can flip the flag.
+* The Snowflake arctic-embed-m embedder is still the default; operators
+  must explicitly set `QUENCHFORGE_EMBED_MODEL` to a 768-dim-compatible
+  GGUF and flip `EMBEDDINGS_PROVIDER=quenchforge`.
+
+**Future opportunity** (NOT shipped in v0.93.8): Quenchforge also
+exposes `/v1/audio/transcriptions` (whisper), `/v1/audio/speech`
+(bark TTS), and `/v1/images/generations` (stable diffusion).  Cerid
+has no features in those domains yet but the wire surface is
+documented for whenever they ship.
+
+**Tests** — 27 new pytest cases:
+
+* 16 in `test_quenchforge_client.py`: provider flags, dimension
+  validation, index-alignment, health probe path, URL resolution.
+* 11 in `test_ollama_proxy_quenchforge.py`: URL switching matrix,
+  enabled-flag matrix, `/api/pull` short-circuit with migrate hint.
+
+All gates green: ruff / mypy / silent-catch / drift / tsc / eslint /
+4396 Python tests / 1116 frontend tests.
+
 ## v0.93.7 — Quenchforge integration polish: proxy URL routing + install-step copy (2026-05-12)
 
 Same-day follow-up to v0.93.6.  A post-merge audit of the Quenchforge

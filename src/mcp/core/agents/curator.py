@@ -25,7 +25,11 @@ import httpx
 import config
 from core.contracts.stores import ArtifactNode, GraphStore
 from core.utils.circuit_breaker import CircuitOpenError
-from core.utils.llm_client import call_llm
+
+# call_llm import removed v0.93.8 — synopsis generation now routes
+# via call_internal_llm (in-function import) so the provider toggle
+# (Ollama / Quenchforge / OpenRouter) controls where the inference
+# runs.  See ``generate_synopsis`` for the rationale.
 from core.utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.curator")
@@ -262,13 +266,18 @@ async def _generate_synopsis(
 
     for attempt in range(2):
         try:
-            content = await call_llm(
+            # v0.93.8: route via call_internal_llm so synopsis generation
+            # — which runs during post-ingest curation — honors
+            # INTERNAL_LLM_PROVIDER=quenchforge.  Curator runs over every
+            # newly-ingested artifact; on Intel Mac + AMD this is the
+            # difference between minutes-per-doc (cloud round trip) and
+            # seconds-per-doc (local GPU).
+            from core.utils.internal_llm import call_internal_llm
+            content = await call_internal_llm(
                 [{"role": "user", "content": prompt}],
-                breaker_name="bifrost-synopsis",
-                model=model,
                 temperature=0.3,
                 max_tokens=max_tokens,
-                timeout=60.0,
+                stage="curator_synopsis",
             )
             # Strip markdown code fences if present
             if content.startswith("```"):

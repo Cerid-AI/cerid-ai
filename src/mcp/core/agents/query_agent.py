@@ -1043,6 +1043,13 @@ async def _rerank_cross_encoder(
     (audit C-4/C-9) a single load failure would otherwise crash every
     query, so we prefer an honest no-op over a broken alternative path.
     """
+    # ── Quenchforge GPU fast-path (v0.93.8) ───────────────────────────────
+    # Opt-in via RERANK_PROVIDER=quenchforge.  Targets Intel Mac + AMD
+    # where ONNX runtime + the sidecar both fall back to CPU.
+    quenchforge_result = await _maybe_rerank_via_quenchforge(results, query)
+    if quenchforge_result is not None:
+        return quenchforge_result
+
     # ── Sidecar fast-path (Phase E.6.4) ───────────────────────────────────
     sidecar_result = await _maybe_rerank_via_sidecar(results, query)
     if sidecar_result is not None:
@@ -1064,6 +1071,38 @@ async def _rerank_cross_encoder(
         for r in results:
             r["reranker_status"] = "onnx_failed_no_fallback"
         return results
+
+
+async def _maybe_rerank_via_quenchforge(
+    results: list[dict[str, Any]],
+    query: str,
+) -> list[dict[str, Any]] | None:
+    """Route the reranker through Quenchforge when ``RERANK_PROVIDER=quenchforge``.
+
+    Same fall-through contract as :func:`_maybe_rerank_via_sidecar` —
+    returns ``None`` on any failure (provider not selected, daemon
+    unreachable, model not loaded, schema mismatch) so the chain
+    continues down to the sidecar and then the local ONNX path.
+    """
+    try:
+        from utils.quenchforge_client import is_rerank_provider_quenchforge
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.quenchforge_detect", exc)
+        return None
+    if not is_rerank_provider_quenchforge():
+        return None
+    try:
+        from utils.quenchforge_client import quenchforge_rerank
+        documents = [r.get("content", "") for r in results]
+        with span("retrieval.rerank", "quenchforge", k=len(results)):
+            scores = await quenchforge_rerank(query, documents)
+        for r, s in zip(results, scores, strict=False):
+            r["relevance"] = float(s)
+            r["reranker_status"] = "quenchforge"
+        return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
+    except Exception as exc:  # noqa: BLE001 — fall through to sidecar / local ONNX
+        log_swallowed_error("core.agents.query_agent.quenchforge_rerank", exc)
+        return None
 
 
 async def _maybe_rerank_via_sidecar(

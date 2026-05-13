@@ -147,6 +147,15 @@ class OnnxEmbeddingFunction:
         if not input:
             return []
 
+        # Quenchforge GPU fast-path (v0.93.8) — opt-in via
+        # EMBEDDINGS_PROVIDER=quenchforge.  Targets Intel Mac + AMD
+        # where ONNX runtime has no GPU provider and the sidecar path
+        # is CPU-only.  Falls through to the sidecar / local-ONNX
+        # chain on any failure.
+        quenchforge_result = self._maybe_embed_via_quenchforge(input)
+        if quenchforge_result is not None:
+            return quenchforge_result
+
         # Sidecar fast-path — only when explicitly preferred by inference
         # detection AND reachable. Sync-bridge to async via the proven
         # ThreadPoolExecutor pattern (mirrors core.utils.contextual and
@@ -272,6 +281,60 @@ class OnnxEmbeddingFunction:
             cache_dir=config.get("cache_dir"),
             dimensions=config.get("dimensions"),
         )
+
+    # -- Quenchforge GPU fast-path (v0.93.8) -------------------------------
+
+    def _maybe_embed_via_quenchforge(
+        self, texts: list[str],
+    ) -> list[list[float]] | None:
+        """Route the embedder through Quenchforge when EMBEDDINGS_PROVIDER
+        is set and the daemon is configured.
+
+        Targets Intel Mac + AMD discrete GPU — the only hardware where
+        ONNX runtime can't reach the GPU (no AMD-Mac execution provider;
+        ROCm is Linux-only).  Returns ``None`` to signal "fall through
+        to the next provider in the chain" on any failure; never raises
+        because chromadb's EmbeddingFunction contract is sync + must
+        always make progress.
+
+        The operator opts in by setting EMBEDDINGS_PROVIDER=quenchforge
+        AND QUENCHFORGE_EMBED_MODEL (the loaded model name).  Dimension
+        is validated on the response so a misconfigured model can't
+        silently corrupt ChromaDB.
+        """
+        try:
+            from utils.quenchforge_client import (
+                is_embeddings_provider_quenchforge,
+            )
+        except Exception:  # noqa: BLE001 — module load failure → next provider
+            return None
+        if not is_embeddings_provider_quenchforge():
+            return None
+
+        # Sync-bridge identical to the sidecar path below.  Keeps the
+        # call site sync-compatible with chromadb 1.x's
+        # EmbeddingFunction.__call__ contract.
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _runner() -> list[list[float]]:
+            from utils.quenchforge_client import quenchforge_embed
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(quenchforge_embed(texts))
+            finally:
+                loop.close()
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(_runner).result()
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error(
+                "core.utils.embeddings.quenchforge_fallthrough", exc,
+            )
+            return None
 
     # -- sidecar fast-path (Workstream E Phase E.6.4) ----------------------
 
