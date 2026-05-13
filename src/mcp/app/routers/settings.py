@@ -153,6 +153,38 @@ class SettingsUpdateRequest(BaseModel):
             "the corpus crosses CERID_RECOMMEND_SPARSE_AT documents."
         ),
     )
+    # v0.93.8 — per-workload GPU routing for Quenchforge (AMD Mac).
+    embeddings_provider: str | None = Field(
+        None,
+        description=(
+            "Where to run dense embeddings: 'sidecar' (default — auto-"
+            "detects CoreML/CUDA on Mac ARM64/Linux), 'quenchforge' "
+            "(opt-in GPU on Intel Mac + AMD), or 'in-process' (CPU)."
+        ),
+    )
+    rerank_provider: str | None = Field(
+        None,
+        description=(
+            "Where to run the cross-encoder reranker: 'sidecar' "
+            "(default), 'quenchforge' (opt-in GPU on Intel Mac + AMD), "
+            "or 'in-process' (CPU)."
+        ),
+    )
+    quenchforge_embed_model: str | None = Field(
+        None,
+        description=(
+            "GGUF model name Quenchforge serves on /v1/embeddings. "
+            "Must produce 768-dim vectors to match ChromaDB. See "
+            "docs/AMD_GPU_MODEL_RECOMMENDATIONS.md for vetted picks."
+        ),
+    )
+    quenchforge_rerank_model: str | None = Field(
+        None,
+        description=(
+            "GGUF reranker model name Quenchforge serves on /v1/rerank. "
+            "BGE Reranker v2 m3 is the default recommendation."
+        ),
+    )
     hybrid_fusion_mode: str | None = Field(
         None,
         description=(
@@ -252,6 +284,11 @@ async def get_settings_endpoint():
         ).strip().lower() in {"1", "true", "yes", "on"},
         "hybrid_fusion_mode": getattr(config, "HYBRID_FUSION_MODE", "weighted_sum"),
         "hybrid_rrf_sparse_weight": getattr(config, "HYBRID_RRF_SPARSE_WEIGHT", 1.0),
+        # v0.93.8 — per-workload GPU routing for Quenchforge.
+        "embeddings_provider": os.getenv("EMBEDDINGS_PROVIDER", "sidecar"),
+        "rerank_provider": os.getenv("RERANK_PROVIDER", "sidecar"),
+        "quenchforge_embed_model": os.getenv("QUENCHFORGE_EMBED_MODEL", ""),
+        "quenchforge_rerank_model": os.getenv("QUENCHFORGE_RERANK_MODEL", ""),
     }
 
 
@@ -452,6 +489,44 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     if req.hybrid_rrf_sparse_weight is not None:
         config.HYBRID_RRF_SPARSE_WEIGHT = req.hybrid_rrf_sparse_weight  # type: ignore[assignment]
         updated["hybrid_rrf_sparse_weight"] = req.hybrid_rrf_sparse_weight
+
+    # v0.93.8 — per-workload GPU routing flags.  These are env-var
+    # backed (consumed by core.utils.embeddings._maybe_embed_via_quenchforge
+    # and core.agents.query_agent._maybe_rerank_via_quenchforge) so a
+    # PATCH takes effect on the next request without restart.
+    if req.embeddings_provider is not None:
+        valid_providers = ("sidecar", "quenchforge", "in-process")
+        if req.embeddings_provider not in valid_providers:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid embeddings_provider: '{req.embeddings_provider}'. "
+                    f"Must be one of {valid_providers}"
+                ),
+            )
+        os.environ["EMBEDDINGS_PROVIDER"] = req.embeddings_provider
+        updated["embeddings_provider"] = req.embeddings_provider
+
+    if req.rerank_provider is not None:
+        valid_providers = ("sidecar", "quenchforge", "in-process")
+        if req.rerank_provider not in valid_providers:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid rerank_provider: '{req.rerank_provider}'. "
+                    f"Must be one of {valid_providers}"
+                ),
+            )
+        os.environ["RERANK_PROVIDER"] = req.rerank_provider
+        updated["rerank_provider"] = req.rerank_provider
+
+    if req.quenchforge_embed_model is not None:
+        os.environ["QUENCHFORGE_EMBED_MODEL"] = req.quenchforge_embed_model
+        updated["quenchforge_embed_model"] = req.quenchforge_embed_model
+
+    if req.quenchforge_rerank_model is not None:
+        os.environ["QUENCHFORGE_RERANK_MODEL"] = req.quenchforge_rerank_model
+        updated["quenchforge_rerank_model"] = req.quenchforge_rerank_model
 
     if not updated:
         raise HTTPException(

@@ -818,6 +818,11 @@ export interface ServerSettings {
   enable_sparse_retrieval?: boolean
   hybrid_fusion_mode?: "weighted_sum" | "rrf" | "tri_rrf"
   hybrid_rrf_sparse_weight?: number
+  // v0.93.8 — per-workload GPU routing for Quenchforge
+  embeddings_provider?: "sidecar" | "quenchforge" | "in-process"
+  rerank_provider?: "sidecar" | "quenchforge" | "in-process"
+  quenchforge_embed_model?: string
+  quenchforge_rerank_model?: string
   // Context source gates
   context_sources?: ContextSources
   // Ollama add-on (local LLM for pipeline tasks)
@@ -899,6 +904,11 @@ export interface SettingsUpdate {
   enable_sparse_retrieval?: boolean
   hybrid_fusion_mode?: "weighted_sum" | "rrf" | "tri_rrf"
   hybrid_rrf_sparse_weight?: number
+  // v0.93.8 — per-workload GPU routing for Quenchforge
+  embeddings_provider?: "sidecar" | "quenchforge" | "in-process"
+  rerank_provider?: "sidecar" | "quenchforge" | "in-process"
+  quenchforge_embed_model?: string
+  quenchforge_rerank_model?: string
   rag_mode?: string  // KB injection mode in SettingsUpdate
   // Context source gates
   context_sources?: ContextSources

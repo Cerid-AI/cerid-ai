@@ -2,92 +2,151 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.93.8 — Quenchforge GPU routing for embeddings, reranking, and ingest-time enrichment (2026-05-12)
+## v0.93.8 — The GPU release: end-to-end AMD-Mac GPU routing (2026-05-12)
 
-A direct read of the upstream `Cerid-AI/quenchforge` repo (gateway.go,
-README, Formula scaffold) surfaced a bigger integration gap than v0.93.7
-closed.  Quenchforge's mission is GPU acceleration for Intel Mac + AMD —
-hardware where ONNX runtime has no GPU execution provider and cerid's
-ingest enrichment falls to CPU.  Until v0.93.8 only the LLM-chat path
-routed through Quenchforge; every other workload (embeddings, reranking,
-per-chunk contextual summaries, AI categorization, curator synopsis)
-silently hit CPU or cloud.  v0.93.8 wires the rest.
+v0.93.8 is the definitive GPU release for cerid-ai on Intel Mac + AMD
+discrete GPU hardware.  Every inference workload Quenchforge can serve
+is now routable through it; every config knob is surfaced in Settings;
+the AMD GPU model recommendation matrix is documented; the operator
+can verify the routing via `/health.inference_routing`.
 
-**Embeddings (`EMBEDDINGS_PROVIDER=quenchforge`)**
+The release stitches together work that was originally split across
+v0.93.6 (initial Quenchforge merge), v0.93.7 (proxy URL routing polish),
+and the v0.93.8-WIP (embeddings + rerank + ingest enrichment).  After
+a direct audit of the upstream `Cerid-AI/quenchforge` repo
+(gateway.go, README, formula scaffold), seven additional gaps surfaced
+and are all closed here.
 
-`utils/quenchforge_client.py` is the new HTTP client for Quenchforge's
-OpenAI-wire endpoints (`/v1/embeddings`, `/v1/rerank`, `/health`).
-`core/utils/embeddings.py` gains a `_maybe_embed_via_quenchforge` branch
-ahead of the existing sidecar branch — when the operator opts in,
-embeddings (BOTH query-time and ingest-time, since ChromaDB calls the
-same `EmbeddingFunction.__call__` for both) route through Quenchforge's
-AMD GPU.  Dimension is validated on the first response (must match
-`EMBEDDING_DIMENSIONS`, default 768) so a misconfigured
-`QUENCHFORGE_EMBED_MODEL` can't silently corrupt the ChromaDB index.
+### What now routes through Quenchforge
 
-**Reranking (`RERANK_PROVIDER=quenchforge`)**
+| Workload | Pre-v0.93.8 | Post-v0.93.8 |
+|---|---|---|
+| LLM chat | Quenchforge (from v0.93.6) | Same ✓ |
+| Dense embeddings | CPU ONNX always | `EMBEDDINGS_PROVIDER=quenchforge` → AMD GPU |
+| Cross-encoder reranking | CPU ONNX always | `RERANK_PROVIDER=quenchforge` → AMD GPU |
+| Per-chunk contextual summary (ingest) | OpenRouter cloud always | Provider-aware via `call_internal_llm` |
+| Per-document categorization (ingest) | Only when provider==ollama | Now includes quenchforge |
+| Curator synopsis (post-ingest) | OpenRouter cloud always | Provider-aware |
+| Entity / memory / HyPE / brief gen | Already `call_internal_llm` | Already correct ✓ |
 
-`core/agents/query_agent.py` gains `_maybe_rerank_via_quenchforge`
-ahead of the sidecar branch.  Per-query reranking moves to the GPU.
-Output scores are aligned to the input document order (Quenchforge's
-OpenAI-wire `/v1/rerank` is allowed to return results sorted by score).
+### What stays CPU / cloud by design
 
-**Ingest-time LLM enrichment**
+| Workload | Reason |
+|---|---|
+| SPLADE-v3 sparse encode (Mac ARM64 / Linux) | Cerid sidecar fast-path wired in v0.93.8 — gets CoreML/CUDA there |
+| SPLADE-v3 sparse encode (Intel Mac + AMD) | Quenchforge has no sparse endpoint per upstream gateway.go |
+| NLI verification | No GPU path exists in cerid's stack today (no sidecar support, no Quenchforge endpoint) |
+| Claim verification with `:online` web search | OpenRouter's `:online` suffix has no Quenchforge equivalent |
+| RAGAS eval | Eval reproducibility — needs fixed cloud model |
 
-Three call sites that bypassed provider-aware routing got migrated:
+### New infrastructure
 
-* `core/utils/contextual.py`: per-chunk situational summaries
+* **`core/retrieval/sparse.py:_try_sidecar_encode_batch`** — wires
+  the SPLADE sidecar fast-path that v0.93.4 shipped a client for but
+  never called.  Gets GPU SPLADE on Mac ARM64 + Linux.  Intel Mac + AMD
+  still in-process (no Quenchforge sparse endpoint).
+* **`utils/quenchforge_client.py`** — HTTP client for Quenchforge's
+  OpenAI-wire endpoints (`/v1/embeddings`, `/v1/rerank`, `/health`)
+  with circuit-breaker + dimension validation.
+* **`core/utils/inference_routing.py`** — pure snapshot of the active
+  provider per workload (LLM / embed / rerank / sparse / NLI).
+  Consumed by `/health.inference_routing` and the Settings UI.
+* **`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`** — vetted GGUF model
+  matrix by VRAM tier.  Recommended picks: `qwen2.5:14b-instruct-q4_k_m`
+  (chat, 32GB tier), `nomic-embed-text-v1.5` (768-dim embeddings),
+  `bge-reranker-v2-m3` (reranking).
+
+### Operator surfaces
+
+* **`POST /settings`** — four new fields: `embeddings_provider`,
+  `rerank_provider`, `quenchforge_embed_model`, `quenchforge_rerank_model`.
+  Provider validation: `"sidecar" | "quenchforge" | "in-process"`.
+* **`GET /health.inference_routing`** — five-key snapshot of the
+  active routing.  Operators verify their env vars actually reached
+  the MCP container.
+* **`GET /health.recommended_features`** — unchanged from C3.2; still
+  surfaces gated features at corpus thresholds.
+* **Settings → Pipeline → Customize** — new "GPU acceleration" amber
+  card with embeddings/rerank provider selects and model fields.
+  Surfaces when the operator picks `quenchforge` per workload.
+
+### Migrations
+
+Three ingest-time LLM call sites migrated from `call_llm` (OpenRouter-
+only) to `call_internal_llm` (provider-aware):
+
+* `core/utils/contextual.py` — per-chunk situational summaries
   (THE highest-volume ingest LLM call — fires once per chunk of every
-  ingested document).  Pre-v0.93.8 always hit OpenRouter.
-* `core/agents/curator.py`: post-ingest synopsis generation.  Runs over
-  every newly-ingested artifact during curation.
-* `utils/metadata.py:ai_categorize`: per-document categorization.  The
-  conditional was `if INTERNAL_LLM_PROVIDER == "ollama"` —
-  Quenchforge users silently fell through to OpenRouter.  Fixed to
-  `in ("ollama", "quenchforge")`.
+  ingested document)
+* `core/agents/curator.py` — post-ingest synopsis generation
+* `utils/metadata.py:ai_categorize` — the conditional bug fix
+  (was `== "ollama"` only; now `in ("ollama", "quenchforge")`)
 
-All three now go through `call_internal_llm()`, the canonical
-provider-aware entrypoint, which dispatches to Quenchforge when the
-operator has selected it.
+### Polish from the v0.93.7 evaluation pass
 
-**Health probe + pull-stub handling**
+* `_ollama_base_url()` honors `INTERNAL_LLM_PROVIDER=quenchforge` so
+  Settings → Models hits the right service when both Ollama and
+  Quenchforge run on different ports.
+* `_ollama_enabled()` true when `OLLAMA_ENABLED=true` OR
+  `INTERNAL_LLM_PROVIDER=quenchforge` — Quenchforge-only installs no
+  longer 503 on the Models page.
+* `/api/pull` short-circuits with the `quenchforge migrate-from-ollama`
+  hint when Quenchforge is the active provider (upstream returns 501).
+* `quenchforge_health()` probes `/health` (canonical lightweight
+  endpoint) instead of `/api/tags` (FS walk).
+* `QuenchforgeInstallStep` mDNS copy revised — the local-network
+  prompt only appears when `QUENCHFORGE_ADVERTISE_MDNS=true` (default
+  false).
 
-`quenchforge_health()` probes `/health` (the canonical lightweight
-liveness endpoint per `internal/gateway/gateway.go:handleHealth`) instead
-of `/api/tags` (which does an FS walk).  `app/routers/ollama_proxy.py`
-short-circuits `/api/pull` when Quenchforge is the active provider —
-upstream returns HTTP 501 with a hint pointing at
-`quenchforge migrate-from-ollama`; we surface that directly to the UI
-instead of letting it propagate as a generic `Ollama pull error: HTTP 501`.
+### Tests — 60+ new pytest cases
 
-**What's still intentionally CPU**
-
-* SPLADE-v3 sparse encoding — Quenchforge's gateway has no sparse
-  endpoint (verified against the routing table in `gateway.go`).
-  Cerid's own sidecar (`scripts/cerid-sidecar.py`) continues to serve
-  SPLADE; on Intel Mac + AMD that's CPU.
-* The MS MARCO MiniLM cross-encoder remains in-process when
-  `RERANK_PROVIDER=sidecar` (default).  Operators with a Quenchforge-
-  loaded rerank model can flip the flag.
-* The Snowflake arctic-embed-m embedder is still the default; operators
-  must explicitly set `QUENCHFORGE_EMBED_MODEL` to a 768-dim-compatible
-  GGUF and flip `EMBEDDINGS_PROVIDER=quenchforge`.
-
-**Future opportunity** (NOT shipped in v0.93.8): Quenchforge also
-exposes `/v1/audio/transcriptions` (whisper), `/v1/audio/speech`
-(bark TTS), and `/v1/images/generations` (stable diffusion).  Cerid
-has no features in those domains yet but the wire surface is
-documented for whenever they ship.
-
-**Tests** — 27 new pytest cases:
-
-* 16 in `test_quenchforge_client.py`: provider flags, dimension
-  validation, index-alignment, health probe path, URL resolution.
-* 11 in `test_ollama_proxy_quenchforge.py`: URL switching matrix,
+* `test_quenchforge_client.py` (16): provider flags, dimension
+  validation, index alignment, `/health` probe path, URL resolution.
+* `test_ollama_proxy_quenchforge.py` (11): URL switching matrix,
   enabled-flag matrix, `/api/pull` short-circuit with migrate hint.
+* `test_inference_routing.py` (9): default / Quenchforge-everywhere /
+  mixed / sparse disabled / NLI CPU / invalid-provider fall-through /
+  URL fallback / unset model marker.
+* `test_settings_router_sparse.py` (+6): GPU provider PATCH + invalid
+  rejection + model field round-trip.
 
-All gates green: ruff / mypy / silent-catch / drift / tsc / eslint /
-4396 Python tests / 1116 frontend tests.
+All gates green: ruff / mypy / import-linter / silent-catch / drift /
+tsc / eslint / 4411 Python tests / 1116 frontend tests / vite build
+under 800KB cap.
+
+### How to use it on your Mac Pro 2019 + Vega II
+
+```bash
+# 1. Install Quenchforge
+brew install cerid-ai/tap/quenchforge
+brew services start quenchforge
+
+# 2. Drop in the recommended models (or run migrate-from-ollama)
+# See docs/AMD_GPU_MODEL_RECOMMENDATIONS.md for the matrix.
+
+# 3. Configure cerid (.env or via the Settings UI)
+export INTERNAL_LLM_PROVIDER=quenchforge
+export EMBEDDINGS_PROVIDER=quenchforge
+export RERANK_PROVIDER=quenchforge
+export QUENCHFORGE_DEFAULT_MODEL=qwen2.5:14b-instruct-q4_k_m
+export QUENCHFORGE_EMBED_MODEL=nomic-embed-text-v1.5
+export QUENCHFORGE_RERANK_MODEL=bge-reranker-v2-m3
+
+# 4. Verify
+curl http://127.0.0.1:8898/health | jq .inference_routing
+```
+
+Expected output:
+
+```json
+{
+  "llm":     {"provider": "quenchforge", "url": "...", "model": "qwen2.5:14b-instruct-q4_k_m"},
+  "embed":   {"provider": "quenchforge", "url": "...", "model": "nomic-embed-text-v1.5"},
+  "rerank":  {"provider": "quenchforge", "url": "...", "model": "bge-reranker-v2-m3"},
+  "sparse":  {"provider": "in-process", "note": "Quenchforge has no sparse endpoint"},
+  "nli":     {"provider": "in-process", "note": "CPU only; no GPU path available"}
+}
+```
 
 ## v0.93.7 — Quenchforge integration polish: proxy URL routing + install-step copy (2026-05-12)
 

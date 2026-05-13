@@ -412,6 +412,20 @@ def health_check_endpoint():
             log_swallowed_error("app.routers.health.memory_consolidation_failures", _exc)
             result["invariants"].setdefault("memory_consolidation_failures_last_24h", 0)
 
+        # v0.93.8 — inference routing snapshot.  Surfaces which
+        # provider is active for each inference workload (LLM, embed,
+        # rerank, sparse, NLI).  Operators reading the
+        # AMD_GPU_MODEL_RECOMMENDATIONS doc use this to verify their
+        # Quenchforge env vars are actually in scope inside the MCP
+        # container.  Pure metadata; never affects the /health
+        # response code.
+        try:
+            from core.utils.inference_routing import get_routing_snapshot
+            result["inference_routing"] = get_routing_snapshot()
+        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+            log_swallowed_error("app.routers.health.inference_routing", _exc)
+            result.setdefault("inference_routing", {})
+
         # Cycle 3.2 — adaptive feature recommendations. Pure metadata
         # surfaced at the top level of the /health response so the
         # Settings-pane banner can poll a single endpoint and react to
