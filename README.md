@@ -55,6 +55,10 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 - **Hallucination Detection** — Extracts claims from responses and verifies them against your KB using NLI + source attribution
 - **Memory System** — Automatically extracts facts, decisions, and preferences from conversations
 - **Tiered Inference** — Auto-detects Ollama (GPU/CPU), FastEmbed sidecar, or Docker CPU fallback
+- **Quenchforge AMD-GPU Routing** (v0.93.8) — Intel Mac + AMD discrete GPU operators get GPU acceleration for LLM chat, dense embeddings, cross-encoder reranking, AND ingest-time enrichment via per-workload env-driven routing (`INTERNAL_LLM_PROVIDER` / `EMBEDDINGS_PROVIDER` / `RERANK_PROVIDER`). See [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](docs/AMD_GPU_MODEL_RECOMMENDATIONS.md) for vetted GGUF picks by VRAM tier.
+- **`/health.inference_routing`** — Five-key introspection of the active inference provider per workload (LLM / embed / rerank / sparse / NLI). Operators verify their env vars actually reached the container.
+- **Hybrid Retrieval** — dense bi-encoder + BM25 + SPLADE-v3 learned-sparse, RRF-fused across all three retrievers
+- **Adaptive Configuration Recommender** — Settings pane surfaces gated retrieval features (sparse, HyPE, parent-child, RRF) once your corpus crosses a feature-specific threshold; three-action dismissal matches GitHub's notification model
 - **Hybrid Search** — BM25 + vector + knowledge graph traversal
 - **File Ingestion** — 30+ formats (PDF with tables, DOCX, code, Obsidian vaults, etc.)
 - **Multi-Machine Sync** — Optional Dropbox JSONL sync (encrypted)
@@ -106,9 +110,14 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 
 ---
 
-## Recent Highlights (v0.91 — May 2026)
+## Recent Highlights (v0.93.x — May 2026)
 
-- **`benchmark-slo` is a PR-blocking merge gate.** Real-OpenRouter latency drift now fails CI alongside the deterministic budget-plumbing tests. Closes Workstream A's SLO close-out gate after 4 consecutive green main runs.
+- **v0.93.8 — The GPU release.** End-to-end Quenchforge routing on Intel Mac + AMD discrete GPU. Per-workload env-driven dispatch (`EMBEDDINGS_PROVIDER`, `RERANK_PROVIDER`) + ingest enrichment migration (per-chunk contextual summaries, categorization, curator synopsis) + Settings UI surface + `/health.inference_routing` introspection. AMD GPU model recommendation matrix at [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](docs/AMD_GPU_MODEL_RECOMMENDATIONS.md). 4411 Python + 1116 frontend tests.
+- **v0.93.6 — Quenchforge integration merge.** Hardware-aware backend recommendation (Mac IOKit GPU detection) + Quenchforge as a routable LLM provider + setup-wizard surfaces (BackendRecommendationStep, QuenchforgeInstallStep, TelemetryConsentStep) + cascade rerank + sentence-window chunker + four advanced inference flags.
+- **v0.93.5 — Chat virtualization + L4 backend + Dependabot batch.** `@tanstack/react-virtual` exact-pinned to a pre-supply-chain-attack version, three-tier rendering with shared MessageRow component, recommender surfaces toggle at 200-message conversations. L4 ("Full ephemeral") Private Mode contract closed end-to-end. 11 Dependabot bumps absorbed.
+- **v0.93.3 — SPLADE-v3 sparse retrieval + adaptive recommender.** Third retriever alongside dense + BM25, RRF-fused via `tri_rrf`. General adaptive-recommendation engine surfaces gated features at corpus-size thresholds (sparse / HyPE / parent-child @ 100 docs, RRF @ 500). Pivoted from BGE-M3 per literature evidence (smaller, faster, better quality on BEIR).
+- **v0.93.0–v0.93.2 — RAG Cycle 1-3.** HyPE wiring fixes, Obsidian-style wikilink + frontmatter + vault profile ingestion, bidirectional vault writeback with `cerid-synthesis` loop-breaker.
+- **`benchmark-slo` is a PR-blocking merge gate.** Real-OpenRouter latency drift now fails CI alongside the deterministic budget-plumbing tests.
 - **`/sdk/v1/memory/extract` SLO bounded.** Per-stage `asyncio.wait_for` budgets on the three internal LLM calls + a server-side `MEMORY_QUEUE_MODE=async` path that returns 202 + `Location` header; callers poll `GET /sdk/v1/memory/extract/jobs/{job_id}`. The sync `?wait=true` escape hatch preserves binary compatibility.
 - **Pro-tier Stripe checkout end-to-end.** Hosted Checkout flow shipped; webhook coverage extends to `customer.subscription.updated` (deactivates on `past_due` / `unpaid` / `canceled` / `incomplete_expired`).
 - **`mode=fast | thorough` on `/agent/hallucination`.** Fast mode skips cross-model NLI entirely, returns claims marked `status='uncertain'` with `nli_skipped=true` — useful for post-fact annotations that don't want to wait 60-100s.
@@ -116,6 +125,14 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 - **Schema contracts hardened.** Object envelope on `/agent/memory/recall`; `min_length=1` on required `conversation_id` fields. Drift gate keeps every constraint stable across releases.
 - **Python 3.12 runtime.** Dockerfile `python:3.12.13-slim-trixie`, pyproject `requires-python = ">=3.12"`, full CI matrix on 3.12.
 - **Layout-aware retrieval default ON.** `+0.05 MRR / +0.024 NDCG@10 / faster latency` against the live eval-corpus; nightly `eval-exploratory.yml` workflow + BEIR seed plumbing for ongoing drift detection.
+
+### Previously (v0.91 — May 2026)
+
+- **`benchmark-slo` is a PR-blocking merge gate.** Real-OpenRouter latency drift fails CI alongside the deterministic budget-plumbing tests.
+- **`/sdk/v1/memory/extract` SLO bounded** via per-stage `asyncio.wait_for` budgets + async queue mode.
+- **Pro-tier Stripe checkout end-to-end.** Hosted Checkout flow shipped; webhook coverage extends to `customer.subscription.updated`.
+- **Layout-aware retrieval default ON.** `+0.05 MRR / +0.024 NDCG@10` against the live eval-corpus.
+- **Python 3.12 runtime.** Dockerfile `python:3.12.13-slim-trixie`.
 
 ### Previously (v0.90 — April 2026)
 
