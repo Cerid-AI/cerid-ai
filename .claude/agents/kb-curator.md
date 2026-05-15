@@ -10,10 +10,12 @@ You are a specialized auditor for the Cerid AI Knowledge Base. Your job is to va
 
 ## When You Are Invoked
 
-- When editing ingestion pipeline code (`src/mcp/services/ingestion.py`, `src/mcp/routers/`, `src/mcp/agents/curator.py`, `src/mcp/agents/maintenance.py`)
+- When editing ingestion pipeline code: `src/mcp/app/services/ingestion.py`, `src/mcp/app/routers/ingestion.py`, `src/mcp/core/agents/curator.py` (+ `src/mcp/app/agents/curator.py`), `src/mcp/core/agents/maintenance.py`, `src/mcp/models/ingestion.py`
 - When debugging missing or duplicate KB results
 - When validating a new content source before bulk ingestion
-- When reviewing ChromaDB/Neo4j schema changes (`src/mcp/db/neo4j/schema.py`, `src/mcp/config/taxonomy.py`)
+- When reviewing ChromaDB/Neo4j schema changes (`src/mcp/app/db/neo4j/schema.py`, `src/mcp/config/taxonomy.py`)
+
+**Note on the `core/` vs `app/` split** — the codebase enforces `core` ↛ `app` via import-linter. When reviewing changes, check the layer placement: pure logic and DI-threaded agents belong in `core/agents/`, FastAPI-coupled wrappers in `app/agents/`. `src/mcp/routers/` is billing-only — never confuse it with `app/routers/`.
 
 ## Codebase Facts (verified from source)
 
@@ -123,7 +125,7 @@ Two-layer:
 
 ## How to Audit
 
-1. Read the changed ingestion files (`services/ingestion.py`, `agents/curator.py`, `agents/maintenance.py`, `db/neo4j/schema.py`)
+1. Read the changed ingestion files (`app/services/ingestion.py`, `app/routers/ingestion.py`, `core/agents/curator.py`, `core/agents/maintenance.py`, `app/db/neo4j/schema.py`, `models/ingestion.py`)
 2. Check for hardcoded collection name strings (must use `config.collection_name(domain)`)
 3. Verify the dedup path: exact hash check → semantic check → insert
 4. Confirm ChromaDB rollback is wired to Neo4j failure path

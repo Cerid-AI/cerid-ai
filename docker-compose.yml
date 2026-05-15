@@ -216,6 +216,13 @@ services:
       - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
       - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-openrouter}
       - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
+      # MCP SSE advertises this host:port in its `endpoint` event. The
+      # default in app/routers/mcp_sse.py is the Docker-internal hostname
+      # `ai-companion-mcp:8888`, which works container-to-container but
+      # is unreachable for host-side MCP clients like Claude Code (whose
+      # POST /mcp/messages then DNS-fails). Override to the published
+      # host:port — the container itself routes via `127.0.0.1:8888->8888`.
+      - MCP_EXTERNAL_HOST=${MCP_EXTERNAL_HOST:-localhost:8888}
       - HOST_MEMORY_GB=${HOST_MEMORY_GB:-}
       - HOST_OS=${HOST_OS:-}
       - HOST_CPU=${HOST_CPU:-}
