@@ -189,8 +189,14 @@ MCP_TOOLS = [
             },
         },
         "outputSchema": {
-            "type": "array",
-            "items": {"type": "object"},
+            "type": "object",
+            "properties": {
+                "artifacts": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of artifact records",
+                },
+            },
         },
     },
     {
