@@ -694,7 +694,21 @@ async def lifespan(app: FastAPI):
     _start_watchdog()
     logger.info("Event loop watchdog armed (%.0fs timeout)", _WATCHDOG_TIMEOUT_S)
 
+    # MCP SSE session reaper — evicts sessions idle longer than
+    # _IDLE_TIMEOUT_S (5 minutes by default). Started here so it
+    # shares the lifespan; cancelled on shutdown via the stored task
+    # ref so the cleanup is deterministic.
+    _mcp_reaper_task = asyncio.create_task(mcp_sse._session_reaper())
+    app.state.mcp_reaper_task = _mcp_reaper_task
+
     yield
+
+    # Cancel SSE reaper before tearing down sessions.
+    try:
+        app.state.mcp_reaper_task.cancel()
+        await app.state.mcp_reaper_task
+    except (asyncio.CancelledError, AttributeError):
+        pass
 
     # Disarm watchdog before shutdown tasks run (avoid spurious SIGTERM during
     # intentional slow-shutdown operations like cache flush).

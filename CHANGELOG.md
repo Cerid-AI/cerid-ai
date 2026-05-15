@@ -2,6 +2,172 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.0 — cerid-kb overhaul: 56 tools, observability, GDS, active learning (2026-05-15)
+
+Largest single release since v0.90.0. The cerid-kb MCP surface goes
+from 29 tools → 56 tools across 8 categories, gains decorator-based
+registration, schema-fidelity CI gate, per-tool observability,
+typed error classification, GDS-powered graph tools, an active-learning
+feedback loop that wires `:RATED` schema for trust-score, and a
+batch orchestrator. Lands the program in
+`tasks/2026-05-15-cerid-kb-overhaul-plan.md` as one shipping point.
+
+### Phase 0 — Live-bug stabilization
+
+- `app/services/ingest_recovery.py:221,276` — `chroma.get_collection`
+  was being called positionally, but the `_EmbeddingAwareClient` proxy
+  at `app/deps.py:90` only accepts `**kwargs`. Every recovery scan
+  raised `TypeError` (swallowed), so orphan chunks were never
+  recovered. Both call sites now pass `name=` kwarg. Source-string
+  regression test pins the call shape.
+- `app/services/trust_score.py:208` — `size((pattern))` is rejected
+  by Cypher 5+ as a deprecated existence test. Rewritten to
+  `EXISTS { ... }`. Test extracts the literal Cypher block and
+  asserts the modern form so regression is caught at unit-test time.
+
+### Phase 1 — Tool surface correctness
+
+- `app/tool_registry.py` (new) — decorator-based registration with
+  colocated schema + handler + metadata (cost_class,
+  deprecated_since, deprecated_replaced_by, feature_flag). Typed
+  error classes (InvalidToolError, ResourceNotFoundError,
+  UpstreamUnavailableError, PermissionDeniedError, InvalidParamsError,
+  QuotaExceededError) each carry a JSON-RPC error code.
+- `tests/test_mcp_tool_schema_fidelity.py` (new) — parametrised
+  per-tool CI gate: `inputSchema.type == 'object'`,
+  `outputSchema.type == 'object'`, valid JSON Schema, required
+  fields in properties, no duplicate names, inventory floor. 338
+  test assertions over 56 tools.
+- Schema lies fixed: `pkb_collections`, `pkb_scheduler_status`,
+  `pkb_recategorize`, `pkb_memory_archive` — schemas now match
+  actual handler returns.
+- All 24 non-trading tool descriptions rewritten to the canonical
+  `{action}. **Use when** {trigger}. **Returns** {shape}. {caveats}`
+  format. Resolves `pkb_query`/`pkb_agent_query`,
+  `pkb_rectify`/`pkb_maintain`/`pkb_audit`, and
+  `pkb_ingest_*`/`pkb_triage` overlap.
+- `pkb_query` deprecated with `_deprecated_since: 0.95.0` +
+  `_deprecated_replaced_by: pkb_agent_query`. Removal target: v0.96.
+- New fundamentals in `app/mcp_tools/fundamentals.py`:
+  `pkb_artifact_get`, `pkb_artifact_delete` (soft/hard, default soft),
+  `pkb_search_filtered`, `pkb_recategorize_bulk` (refuses empty
+  filter as a safety guard).
+
+### Phase 2 — Observability + transport hardening
+
+- `app/tools.py::execute_tool` wraps every tool call regardless of
+  dispatcher (registered / legacy / trading / external) with:
+  - Audit log on `ai-companion.mcp_tool_audit` with structured extras
+    (`tool_name, args_summary, duration_ms, outcome, error_class`).
+  - Metrics: `mcp_tool_call_duration_ms{tool, outcome}` +
+    `mcp_tool_call{tool, outcome, error_class}` via
+    `utils.metrics`. Fire-and-forget; never blocks the caller.
+  - Sentry tag `mcp_tool=<name>` on every span.
+- `_summarize_args` redacts credential-like keys (password, token,
+  secret, api_key, authorization) and truncates strings >256 chars.
+- `app/routers/mcp_sse.py::_error_envelope_for` maps `ToolError`
+  subclasses to specific JSON-RPC codes (-32602 / -32004 / -32005 /
+  -32601 / -32007). Generic exceptions fall through to -32000.
+- SSE session eviction sorts by `_session_last_seen` (oldest-idle)
+  instead of `next(iter())` (oldest-opened). New `_session_reaper`
+  task started from the lifespan: wakes every 60 s, evicts sessions
+  idle > 5 minutes. Cancelled cleanly on shutdown.
+
+### Phase 3 — Advanced retrieval (8 tools in `app/mcp_tools/retrieval.py`)
+
+- `pkb_answer_with_citations` — RAG → answer → claim extraction →
+  source-binding by word-overlap. Optional `verify=true` runs the
+  hallucination check on the assembled answer.
+- `pkb_question_decompose` — break multi-hop question into atomic
+  sub-questions via one LLM call.
+- `pkb_hypothetical_doc` — HyDE primitive. Generates plausible
+  answer paragraph(s) and retrieves against them. Runs retrieval
+  automatically so callers don't have to chain.
+- `pkb_summarize_artifact` — length ∈ {tldr, short, medium, long}.
+- `pkb_summarize_domain` — period-windowed synthesis with
+  themes + standout artifacts.
+- `pkb_extract_claims` — exposes the internal claim extractor;
+  falls back to regex when LLM is unreachable.
+- `pkb_extract_entities` — exposes
+  `core.agents.entity_extraction.extract_entities_from_text`.
+- `pkb_compare_artifacts` — diff/contrast 2–5 artifacts across
+  configurable aspects (summary, claims, entities).
+
+### Phase 4 — Graph-native (4 tools in `app/mcp_tools/graph_tools.py`)
+
+GDS 2026.04.0 verified pre-installed (471 procedures).
+
+- `pkb_graph_neighbors` — k-hop neighbourhood via plain Cypher
+  variable-length path; relationship-type filterable.
+- `pkb_graph_path` — native Cypher shortestPath; validates both
+  endpoints exist (-32004 on missing).
+- `pkb_graph_communities` — GDS Louvain over anonymous Cypher
+  projection; auto-cleans the projection after each call.
+- `pkb_concept_evolution` — time-bucketed concept mentions with
+  co-mentioned-concept top-N per bucket.
+
+### Phase 5 — Active learning (4 tools in `app/mcp_tools/feedback.py`)
+
+- `pkb_rate` — MERGE-based :RATED edge from anonymous :Rater node.
+  Wires the schema `trust_score.user_agreement` has been waiting for.
+- `pkb_correct` — :Correction node + :ATTACHED_TO edge.
+- `pkb_endorse` — `endorsement_weight` property on :Artifact
+  (range [0.1, 10.0], default 2.0).
+- `pkb_flag` — `flag_reason` property; valid values
+  inaccurate/outdated/off_topic/duplicate/spam, empty clears.
+
+Schema migration in `app/db/neo4j/schema.py::init_schema` adds the
+:Correction constraint + indexes and backfills 9663 :Artifact nodes
+with default `endorsement_weight=1.0`. Idempotent.
+
+### Phase 6 — Temporal + privacy/safety (5 tools in `app/mcp_tools/temporal.py`)
+
+- `pkb_timeline` — date-bucketed matches grouped by day/week/month.
+- `pkb_trending` — concepts whose count this period exceeded prior
+  period; growth-factor ranking.
+- `pkb_revisit_due` — spaced-repetition prompt list using
+  endorsement-weighted log-time-since-access.
+- `pkb_privacy_audit` — 8 PII regex patterns (email, US SSN, US phone,
+  credit card, API keys, AWS access keys, PEM private keys, JWTs).
+- `pkb_quarantine` — soft-delete with retention-window auto-purge
+  (1–365 days).
+
+### Phase 7 — Batch + URL ingest (2 tools in `app/mcp_tools/batch.py`)
+
+- `pkb_batch` — atomic multi-step orchestration. Up to 10 ops,
+  no nesting, depends_on for DAG ordering, `${op_id.result.path}`
+  reference resolution (whole-string returns the object as-is,
+  substring interpolates as string). Default fail-fast,
+  `continue_on_error=true` for fault-tolerant batches.
+- `pkb_ingest_url` — HTTP fetch (no JS rendering) + ingest. Refuses
+  non-HTTP(S) and bodies >5 MB. For JS-rendered pages: wire a
+  browser MCP (Playwright / Chrome DevTools — both installed as
+  Claude Code global plugins) and route via `ext_*` tools.
+
+### Phase 8 — Polish
+
+- Version bump 0.93.10 → 0.95.0. `src/mcp/VERSION` (host file)
+  refreshed in lockstep so the docker bind-mount picks up the new
+  value (per `feedback_mcp_image_version_bindmount` memory).
+- Tool inventory: **56 tools** (29 → +27 net; `pkb_query` retained
+  as deprecated, removal in v0.96).
+- Test coverage: 338 schema-fidelity assertions + 19 batch-tool
+  tests + 11 fundamentals-tool tests + 13 Phase-2 transport tests +
+  10 registry tests + Phase-0 regression tests. All green.
+
+### Migration notes
+
+- Existing clients that catch `ValueError` on unknown tool names
+  still work — `InvalidToolError` derives from `ToolError`, the SSE
+  layer maps it to -32601, the JSON-RPC client never sees a
+  ValueError in the error envelope.
+- Operators can gate destructive or experimental tools via
+  `MCP_DISABLED_TOOLS=pkb_artifact_delete,pkb_quarantine` (CSV) or
+  per-tool feature flags declared in the registration.
+- The `:RATED` schema becomes populated the first time `pkb_rate`
+  is called — `trust_score_24h` will start producing real numbers
+  without further code changes.
+
 ## v0.93.10 — NLI async-batched coalescer: 2.5-3x speedup on verification hot path (2026-05-13)
 
 The verification path (`/agent/hallucination`, `/agent/verify-stream`)

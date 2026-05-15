@@ -218,7 +218,9 @@ async def scan_orphans(*, max_age_seconds: float = 60.0) -> list[OrphanRecord]:
     for raw_coll in raw_collections:
         coll_name: str = getattr(raw_coll, "name", str(raw_coll))
         try:
-            collection = await asyncio.to_thread(chroma.get_collection, coll_name)
+            collection = await asyncio.to_thread(
+                chroma.get_collection, name=coll_name
+            )
         except Exception as e:  # noqa: BLE001 — observability boundary
             log_swallowed_error(
                 "app.services.ingest_recovery.get_collection",
@@ -273,7 +275,7 @@ async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
     new_attempt_count = orphan.retry_count + 1
     try:
         collection = await asyncio.to_thread(
-            chroma.get_collection, orphan.collection_name
+            chroma.get_collection, name=orphan.collection_name
         )
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
