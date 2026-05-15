@@ -3,6 +3,16 @@
     "cerid-kb": {
       "type": "sse",
       "url": "http://localhost:8888/mcp/sse"
+    },
+    "contextplus": {
+      "command": "npx",
+      "args": ["-y", "contextplus"],
+      "env": {
+        "OLLAMA_EMBED_MODEL": "jina-embeddings-v2-base-code",
+        "OLLAMA_CHAT_MODEL": "llama3.1-8b",
+        "CONTEXTPLUS_EMBED_BATCH_SIZE": "8",
+        "CONTEXTPLUS_EMBED_TRACKER": "lazy"
+      }
     }
   }
 }
