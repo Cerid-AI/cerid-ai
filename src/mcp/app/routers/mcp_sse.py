@@ -12,25 +12,90 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
+from app.tool_registry import ToolError
 from app.tools import execute_tool, get_all_tools
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
-# Session message queues (shared between GET /mcp/sse and POST /mcp/messages)
+# Session bookkeeping. Each entry is the asyncio.Queue used to push
+# JSON-RPC responses back over the SSE stream. ``_session_last_seen``
+# tracks the wall-clock time of the most recent activity on that
+# session (initial open or last received POST) so the reaper can
+# evict idle ones in preference to live ones.
 _sessions: dict[str, asyncio.Queue] = {}
+_session_last_seen: dict[str, float] = {}
 _MAX_SESSIONS = 100
+_IDLE_TIMEOUT_S = 5 * 60  # 5 minutes — Claude Code reconnects faster than this
+
+
+def _touch_session(session_id: str) -> None:
+    """Mark a session as just-active so the reaper preserves it."""
+    if session_id:
+        _session_last_seen[session_id] = time.monotonic()
 
 
 def clear_sessions():
     """Called from main.py lifespan on shutdown."""
     _sessions.clear()
+    _session_last_seen.clear()
     logger.info("MCP sessions cleared on shutdown")
+
+
+async def _session_reaper() -> None:
+    """Periodically evict sessions idle longer than ``_IDLE_TIMEOUT_S``.
+
+    Wakes every 60 seconds. A session is idle if no POST has touched
+    it in the last 5 minutes. The SSE pings (every 24s) don't count
+    because they don't traverse ``_touch_session`` — they're server-
+    initiated and don't reset the activity clock. That's correct: a
+    dead client that's holding a TCP connection open but not making
+    any RPC requests should still be reaped.
+
+    Started from the FastAPI lifespan; cancelled on shutdown. Never
+    raises out so a stray exception can't kill the background task.
+    """
+    while True:
+        try:
+            await asyncio.sleep(60)
+            now = time.monotonic()
+            stale = [
+                sid for sid, last in _session_last_seen.items()
+                if now - last > _IDLE_TIMEOUT_S
+            ]
+            for sid in stale:
+                q = _sessions.pop(sid, None)
+                _session_last_seen.pop(sid, None)
+                if q is not None:
+                    try:
+                        q.put_nowait(None)  # sentinel — closes the SSE generator
+                    except asyncio.QueueFull:
+                        pass
+                logger.info(
+                    "MCP session reaper: evicted idle session %s (idle=%ds)",
+                    sid, int(now - _session_last_seen.get(sid, now)),
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.warning("MCP session reaper error (continuing): %s", exc)
+
+
+# Map ToolError subclasses → JSON-RPC error envelopes. Used by the
+# tools/call handler so callers can distinguish "you sent bad args"
+# (-32602) from "the artifact doesn't exist" (-32004) from "ChromaDB
+# is unreachable" (-32005). The default -32000 stays as a fallback
+# for unexpected exceptions.
+def _error_envelope_for(exc: Exception) -> dict:
+    if isinstance(exc, ToolError):
+        return {"code": exc.json_rpc_code, "message": str(exc)}
+    return {"code": -32000, "message": str(exc)}
 
 
 # ── JSON-RPC dispatcher ──────────────────────────────────────────────────────
@@ -59,9 +124,19 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
                 "id": msg_id,
                 "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
             }
+        except ToolError as e:
+            # Typed errors map to specific JSON-RPC codes so clients
+            # can distinguish validation (-32602) from upstream-down
+            # (-32005) from not-found (-32004) etc. See
+            # app.tool_registry for the catalog.
+            logger.warning(
+                "Tool call typed error: name=%s class=%s code=%d msg=%s",
+                tool_name, type(e).__name__, e.json_rpc_code, e,
+            )
+            return {"jsonrpc": "2.0", "id": msg_id, "error": _error_envelope_for(e)}
         except Exception as e:
             logger.error(f"Tool call error {tool_name}: {e}")
-            return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32000, "message": str(e)}}
+            return {"jsonrpc": "2.0", "id": msg_id, "error": _error_envelope_for(e)}
     elif method == "ping":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
     else:
@@ -84,17 +159,28 @@ async def mcp_sse_endpoint(request: Request):
     """SSE endpoint — responses to POSTs come through here."""
     session_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-    # Evict oldest session if at capacity
+    # Evict oldest-IDLE session if at capacity. Prior versions used
+    # ``next(iter(_sessions))`` which evicts oldest-opened — a long-
+    # lived but active client got booted in favor of dead sessions
+    # accumulating from crashed/restarted Claude Code instances.
+    # Sorting by ``_session_last_seen`` picks the dead ones first.
     if len(_sessions) >= _MAX_SESSIONS:
-        oldest_key = next(iter(_sessions))
-        evicted_queue = _sessions.pop(oldest_key, None)
-        if evicted_queue is not None:
-            try:
-                evicted_queue.put_nowait(None)  # Sentinel signals event_stream to stop
-            except asyncio.QueueFull:
-                pass
-        logger.warning(f"[MCP] Evicted oldest session {oldest_key} (cap={_MAX_SESSIONS})")
+        candidates = sorted(
+            _sessions.keys(),
+            key=lambda sid: _session_last_seen.get(sid, 0.0),
+        )
+        if candidates:
+            oldest_key = candidates[0]
+            evicted_queue = _sessions.pop(oldest_key, None)
+            _session_last_seen.pop(oldest_key, None)
+            if evicted_queue is not None:
+                try:
+                    evicted_queue.put_nowait(None)  # Sentinel — closes event_stream
+                except asyncio.QueueFull:
+                    pass
+            logger.warning(f"[MCP] Evicted oldest-idle session {oldest_key} (cap={_MAX_SESSIONS})")
     _sessions[session_id] = queue
+    _touch_session(session_id)
     logger.info(f"[MCP] SSE opened: {session_id}")
 
     async def event_stream():
@@ -129,6 +215,7 @@ async def mcp_sse_endpoint(request: Request):
                 count += 1
         finally:
             _sessions.pop(session_id, None)
+            _session_last_seen.pop(session_id, None)
             logger.info(f"[MCP] SSE closed: {session_id}")
 
     return StreamingResponse(
@@ -171,6 +258,7 @@ async def mcp_messages(request: Request):
     method = msg.get("method", "")
     params = msg.get("params", {})
     msg_id = msg.get("id")
+    _touch_session(session_id)  # reset idle clock on any inbound POST
     logger.info(f"[MCP] Received: {method} (id={msg_id}, session={session_id})")
 
     if method in ("initialized", "notifications/initialized"):

@@ -192,6 +192,56 @@ def test_trust_score_serializes_cleanly() -> None:
     dumped = ts.model_dump()
     assert "score" in dumped
     assert "band" in dumped
+
+
+# ---------------------------------------------------------------------- Cypher syntax
+
+
+def test_verification_coverage_cypher_uses_exists_not_size() -> None:
+    """The rolling-coverage query must use Cypher 5+ ``EXISTS { ... }`` syntax.
+
+    Cypher 5 deprecated ``size((pattern))`` and ``size(list)`` inside scalar
+    expressions; the new pattern is ``EXISTS { (pattern) }`` for existence
+    tests and ``COUNT { ... }`` for counts. Pre-2026-05-15 the
+    ``verification_coverage`` reader used the old form and every call
+    against Neo4j 5+ swallowed a ``CypherSyntaxError`` — the component
+    permanently reported ``not_available`` and the system trust score
+    couldn't compute even when all other components had data.
+
+    String-match test on the literal Cypher; if the reader is refactored
+    later to compose the query, this test asserts the refactor still
+    keeps the modern syntax.
+    """
+    import inspect
+    import re
+
+    from app.services.trust_score import _read_verification_coverage
+
+    src = inspect.getsource(_read_verification_coverage)
+
+    # Extract the Cypher string literal (triple-quoted block passed to
+    # session.run) so explanatory comments mentioning the deprecated
+    # form don't trip the syntax check.
+    m = re.search(r'session\.run\(\s*"""(.*?)"""', src, flags=re.S)
+    assert m is not None, "could not locate Cypher block in _read_verification_coverage"
+    cypher = m.group(1)
+
+    # The new form must be present
+    assert "EXISTS {" in cypher, (
+        "verification_coverage Cypher missing EXISTS { ... } — Cypher 5+ "
+        "regression"
+    )
+    # The deprecated form must be absent in the Cypher itself
+    assert re.search(r"size\(\(", cypher) is None, (
+        "verification_coverage Cypher still uses deprecated size((pattern)) "
+        "— Cypher 5 will reject it"
+    )
+
+
+def test_trust_score_serialize_full_shape() -> None:
+    """TrustScore dumped shape includes timestamps + components list."""
+    ts = compute_trust_score(neo4j_driver=None)
+    dumped = ts.model_dump()
     assert "updated_at" in dumped
     assert "components" in dumped
     assert isinstance(dumped["components"], list)

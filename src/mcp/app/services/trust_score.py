@@ -200,14 +200,16 @@ def _read_verification_coverage(
     try:
         with neo4j_driver.session() as session:
             since_iso = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            # Cypher 5+ rejects ``size((pattern))`` and ``size(list)`` inside
+            # expressions; ``EXISTS { ... }`` is the modern existence test.
             result = session.run(
                 """
                 MATCH (c:Claim)
                 WHERE c.detected_at >= $since
                 WITH count(c) AS total,
-                     sum(CASE WHEN size((c)-[:VERIFIED|:EXTRACTED_FROM]->()) > 0
-                              OR (c.source_urls IS NOT NULL AND size(c.source_urls) > 0)
-                              OR (c.verification_methods IS NOT NULL AND size(c.verification_methods) > 0)
+                     sum(CASE WHEN EXISTS { (c)-[:VERIFIED|EXTRACTED_FROM]->() }
+                              OR (c.source_urls IS NOT NULL AND c.source_urls <> [])
+                              OR (c.verification_methods IS NOT NULL AND c.verification_methods <> [])
                               THEN 1 ELSE 0 END) AS covered
                 RETURN total, covered
                 """,

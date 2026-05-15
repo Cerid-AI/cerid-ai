@@ -129,6 +129,41 @@ def init_schema(driver) -> None:
             "FOR (p:PendingArtifact) REQUIRE p.name IS UNIQUE"
         )
 
+        # --- Active learning layer (v0.95 Phase 5) ---
+        # The :RATED edge type powers trust_score.user_agreement and the
+        # pkb_rate tool. The :Correction node carries user-submitted
+        # corrections linked to specific artifacts (and optionally
+        # specific chunks). endorsement_weight / flag_reason properties
+        # ride on :Artifact so the reranker can read them without an
+        # extra hop.
+        #
+        # Existence guarantee: even with zero ratings/corrections this
+        # block runs cleanly (constraints don't require rows). That
+        # turns trust_score.user_agreement from "permanently
+        # not_available" (no :RATED type) into "available with zero
+        # ratings" — a meaningful semantic shift handled at the
+        # trust_score reader level.
+        session.run(
+            "CREATE CONSTRAINT correction_id IF NOT EXISTS "
+            "FOR (c:Correction) REQUIRE c.id IS UNIQUE"
+        )
+        session.run(
+            "CREATE INDEX correction_artifact_id_idx IF NOT EXISTS "
+            "FOR (c:Correction) ON (c.artifact_id)"
+        )
+        session.run(
+            "CREATE INDEX correction_ts_idx IF NOT EXISTS "
+            "FOR (c:Correction) ON (c.ts)"
+        )
+        # Backfill default endorsement_weight on any :Artifact that
+        # doesn't have one yet. Idempotent — no-op once everything is
+        # 1.0. Future ingests inherit the default at the node level
+        # via the ingest path setting it explicitly.
+        session.run(
+            "MATCH (a:Artifact) WHERE a.endorsement_weight IS NULL "
+            "SET a.endorsement_weight = 1.0"
+        )
+
         # --- Seed Domain + SubCategory nodes ---
         now = utcnow_iso()
         for domain_name, domain_info in config.TAXONOMY.items():
