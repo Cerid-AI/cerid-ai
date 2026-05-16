@@ -30,9 +30,26 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = [REPO_ROOT / "src" / "mcp"]
 
 
+def _is_documented_bridge(src: str) -> bool:
+    """A documented "Re-export bridge" pattern opts out of the __all__ check.
+
+    These shims exist purely for backward-compat with pre-Phase-C import
+    paths (``from mcp.routers import ...``); the canonical source
+    package documents its own ``__all__``. The marker requires the
+    string ``Re-export bridge`` in the first 10 lines so the opt-out
+    is a deliberate choice, not accidental.
+
+    Convention documented in ``docs/CONVENTIONS.md::Re-export bridges``.
+    """
+    head = "\n".join(src.splitlines()[:10])
+    return "Re-export bridge" in head
+
+
 def _check_init(init: Path) -> list[str]:
     """Return findings for one __init__.py."""
     src = init.read_text()
+    if _is_documented_bridge(src):
+        return []
     tree = ast.parse(src, filename=str(init))
 
     has_all = any(
@@ -51,7 +68,9 @@ def _check_init(init: Path) -> list[str]:
     return [
         f"{init.relative_to(REPO_ROOT)}:{node.lineno}: "
         f"`from {node.module} import *` without `__all__` in this __init__.py "
-        "— underscore-prefixed names silently skipped"
+        "— underscore-prefixed names silently skipped. If this is intentional "
+        "back-compat re-export, prepend `Re-export bridge` to the file header "
+        "(see docs/CONVENTIONS.md::Re-export bridges)."
         for node in import_stars
     ]
 
