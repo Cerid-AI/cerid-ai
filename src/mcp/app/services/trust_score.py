@@ -42,7 +42,19 @@ logger = logging.getLogger("ai-companion.trust_score")
 
 
 # Repo-relative baseline locations.
-_BASELINES_DIR = Path(__file__).resolve().parents[3] / "tests" / "eval" / "baselines"
+#
+# __file__ is ``src/mcp/app/services/trust_score.py``. Walking up:
+#   parents[0] = src/mcp/app/services/
+#   parents[1] = src/mcp/app/
+#   parents[2] = src/mcp/          ← the package root
+#   parents[3] = src/              ← TOO FAR (the path bug pre-2026-05-15)
+#
+# Inside the docker image ``__file__`` is ``/app/app/services/...`` so the
+# package root is ``/app``. ``parents[2]`` yields ``/app`` correctly;
+# ``parents[3]`` yielded ``/`` and made every baseline lookup miss. That
+# bug shipped silently for months: ``ragas.json missing`` + ``retrieval.json
+# missing`` notes in /health were the symptom but the files actually existed.
+_BASELINES_DIR = Path(__file__).resolve().parents[2] / "tests" / "eval" / "baselines"
 _RAGAS_PATH = _BASELINES_DIR / "ragas.json"
 _RETRIEVAL_PATH = _BASELINES_DIR / "retrieval.json"
 _LONGMEMEVAL_PATH = _BASELINES_DIR / "longmemeval.json"
@@ -123,10 +135,15 @@ def _read_faithfulness() -> tuple[float | None, str | None, str | None]:
     data = _read_json_safely(_RAGAS_PATH, module="trust_score.faithfulness")
     if data is None:
         return None, None, "ragas.json missing"
-    value = data.get("faithfulness")
+    # ragas.json shape: ``{metrics: {faithfulness, context_precision, ...}}``.
+    # Earlier code looked at top-level ``data.get("faithfulness")`` — wrong
+    # shape, so even when the file existed and was populated, the reader
+    # returned None.
+    metrics = data.get("metrics") or {}
+    value = metrics.get("faithfulness")
     last = data.get("last_updated") or data.get("last_run_at")
     if value is None:
-        return None, last, "faithfulness key missing"
+        return None, last, "faithfulness baseline not yet established (run RAGAS)"
     return float(value), last, None
 
 
@@ -191,36 +208,43 @@ def _read_user_agreement(
 def _read_verification_coverage(
     neo4j_driver: Any | None,
 ) -> tuple[float | None, str | None, str | None]:
-    """Rolling 24 h fraction of claims with at least one provenance source.
+    """Rolling 24 h fraction of verified claims across recent reports.
 
-    Cheap aggregate over the existing ClaimVerification graph.
+    Source of truth: ``(:VerificationReport)`` nodes written by
+    ``app.db.neo4j.artifacts.save_verification_report`` after each
+    hallucination check / verify-stream run. Each report carries
+    aggregate ``verified``, ``unverified``, ``uncertain``, and ``total``
+    counters; coverage = sum(verified) / sum(total) over the window.
+
+    Earlier versions of this reader targeted ``(:Claim)`` nodes with a
+    ``detected_at`` property. Neither artifact exists in the live
+    schema — the verification pipeline persists reports, not standalone
+    Claim nodes, and Claim instances created downstream (briefs, ratings)
+    carry ``created_at`` not ``detected_at``. The component reported
+    "no claims in last 24h" forever as a result.
     """
     if neo4j_driver is None:
         return None, None, "neo4j driver not provided"
     try:
         with neo4j_driver.session() as session:
             since_iso = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-            # Cypher 5+ rejects ``size((pattern))`` and ``size(list)`` inside
-            # expressions; ``EXISTS { ... }`` is the modern existence test.
             result = session.run(
                 """
-                MATCH (c:Claim)
-                WHERE c.detected_at >= $since
-                WITH count(c) AS total,
-                     sum(CASE WHEN EXISTS { (c)-[:VERIFIED|EXTRACTED_FROM]->() }
-                              OR (c.source_urls IS NOT NULL AND c.source_urls <> [])
-                              OR (c.verification_methods IS NOT NULL AND c.verification_methods <> [])
-                              THEN 1 ELSE 0 END) AS covered
-                RETURN total, covered
+                MATCH (r:VerificationReport)
+                WHERE r.created_at >= $since
+                WITH
+                    sum(coalesce(r.total, 0))    AS total,
+                    sum(coalesce(r.verified, 0)) AS verified
+                RETURN total, verified AS covered
                 """,
                 since=since_iso,
             )
             row = result.single()
             if row is None or row["total"] == 0:
-                return None, utcnow_iso(), "no claims in last 24h"
+                return None, utcnow_iso(), "no verification reports in last 24h"
             total = int(row["total"])
             covered = int(row["covered"])
-            return covered / total, utcnow_iso(), f"{covered}/{total}"
+            return covered / total, utcnow_iso(), f"{covered}/{total} verified"
     except Exception as exc:  # noqa: BLE001 — neo4j connection failure is observable
         log_swallowed_error("trust_score.verification_coverage", exc)
         return None, None, "neo4j query failed"

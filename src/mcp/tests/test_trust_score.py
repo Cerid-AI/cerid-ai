@@ -110,7 +110,9 @@ def test_compute_trust_score_no_baselines(tmp_path: Path) -> None:
 def test_compute_trust_score_with_full_baselines(tmp_path: Path) -> None:
     """All baselines present → score computes from normalized mean."""
     (tmp_path / "ragas.json").write_text(json.dumps({
-        "faithfulness": 0.93,
+        # ragas.json canonical shape is `{metrics: {faithfulness, ...}}`
+        # — v0.95.2 fixed the reader to match the actual file format.
+        "metrics": {"faithfulness": 0.93},
         "last_updated": "2026-05-10",
     }))
     (tmp_path / "retrieval.json").write_text(json.dumps({
@@ -141,7 +143,7 @@ def test_compute_trust_score_with_full_baselines(tmp_path: Path) -> None:
 
 def test_compute_trust_score_partial_baselines(tmp_path: Path) -> None:
     """Subset of baselines present → score still computes from available."""
-    (tmp_path / "ragas.json").write_text(json.dumps({"faithfulness": 0.95}))
+    (tmp_path / "ragas.json").write_text(json.dumps({"metrics": {"faithfulness": 0.95}}))
 
     with patch("app.services.trust_score._RAGAS_PATH", tmp_path / "ragas.json"), \
          patch("app.services.trust_score._RETRIEVAL_PATH", tmp_path / "missing.json"), \
@@ -226,12 +228,16 @@ def test_verification_coverage_cypher_uses_exists_not_size() -> None:
     assert m is not None, "could not locate Cypher block in _read_verification_coverage"
     cypher = m.group(1)
 
-    # The new form must be present
-    assert "EXISTS {" in cypher, (
-        "verification_coverage Cypher missing EXISTS { ... } — Cypher 5+ "
-        "regression"
+    # v0.95.2 retargeted the Cypher away from :Claim (which no live path
+    # creates) onto :VerificationReport (which save_verification_report
+    # populates after every check_hallucinations / verify-stream call).
+    # The relevant invariants now:
+    assert ":VerificationReport" in cypher, (
+        "verification_coverage Cypher must target :VerificationReport "
+        "(the actual schema the verification pipeline writes); pre-v0.95.2 "
+        "it targeted :Claim which the system never produces."
     )
-    # The deprecated form must be absent in the Cypher itself
+    # The deprecated Cypher-5 forms must remain absent.
     assert re.search(r"size\(\(", cypher) is None, (
         "verification_coverage Cypher still uses deprecated size((pattern)) "
         "— Cypher 5 will reject it"
