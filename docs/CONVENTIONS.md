@@ -1,6 +1,6 @@
 # Cerid AI — Conventions
 
-> **Last refresh:** 2026-05-08 (v0.91 release: Python 3.12; defensive imports for internal-only modules in mixed-files; min_length on required identifiers; object-envelope SDK contracts)
+> **Last refresh:** 2026-05-15 (v0.95.3: 5 lessons graduated into CONVENTIONS entries below — "Never raise a timeout to fix slow code", "Default to most restrictive security setting", "Event-loop-bound singletons need owner-thread guards", "Middleware reads from immutable request data", "Patch the bridge module, not the source". Plus 5 lint scripts in `scripts/` enforcing the syntactic lessons.)
 > **Scope:** Project-specific style/approach conventions not enforced by lint rules
 > **Owner:** New contributors read this first; senior maintainers amend as patterns solidify
 
@@ -56,6 +56,26 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 - All LLM call sites use breaker names registered in `circuit_breaker.py`.
 - Register a new breaker when you add a new call site category.
 - **Resetting openrouter-dependent breakers happens together:** `_openrouter_auth_probe_loop()` in `main.py` resets all seven at once on a successful auth probe. Adding a new breaker? Add it to the reset list.
+
+## Performance (graduated from `tasks/lessons.md` 2026-05-15)
+
+- **Never raise a timeout to fix slow code.** If something is slow, profile and find the bottleneck — increasing timeouts is a band-aid that masks the real problem. The 2026-04-06 verification-pipeline slowness was "fixed" by raising the timeout three times (10→20→60 s) before the actual cause was found (heuristic-first claim extraction reversed to LLM-first). Reversing the order produced <1.2 s first-event latency — the timeout never needed to grow.
+
+## Security (graduated from `tasks/lessons.md` 2026-05-15)
+
+- **Default to the most restrictive setting; let users opt in to openness.** CORS origins default to `localhost`, ports bind to `127.0.0.1`, sync directories default off, etc. Provide env vars for users who need broader access — never the reverse. Restrictive defaults + opt-in openness is safer than permissive defaults + opt-out hardening; users who need LAN access will set the env var, users who don't will never know they were protected.
+
+## Async & event loops (graduated from `tasks/lessons.md` 2026-05-15)
+
+- **Singletons of event-loop-bound objects need an owner-thread guard.** `httpx.AsyncClient`, `asyncio.Lock`, `asyncio.Queue`, etc. tie themselves to whichever event loop creates them. If a worker thread spins up a transient loop (e.g. `_run_coro_isolated` for sync-adapted async code in ingestion), it must NOT consume the module-level singleton. The fix pattern: gate caching on `threading.current_thread() is threading.main_thread()`; worker threads get a one-shot client (`_acquire_client()` helper); the singleton is reserved for the main loop (uvicorn-owned). Also track owner-loop identity and recycle on mismatch — pytest changes loops between tests. Regression test: `tests/test_llm_client_loop_safety.py::test_worker_thread_call_does_not_poison_singleton`.
+
+## Middleware (graduated from `tasks/lessons.md` 2026-05-15)
+
+- **Middleware reads from immutable request data, not from `request.state` set by other middleware.** Middleware executes LIFO; the rate-limiter expecting an upstream-set `request.state.client_id` ran *before* the request-ID middleware that supposedly set it. Result: every client got default limits. Read identifying values from immutable sources (headers, URL, source IP) instead — order-independent and correct regardless of registration order.
+
+## Testing (graduated from `tasks/lessons.md` 2026-05-15)
+
+- **`@patch` targets the bridge module, not the source.** After the Phase C `agents/` / `utils/` retire-and-bridge migration, `from agents.foo import bar` in `tools.py` looks up `bar` in the `agents.foo` bridge module at runtime — even though the implementation lives at `core.agents.foo.bar`. `@patch("core.agents.foo.bar")` patches the source; runtime call still sees the original. Patch the **call-site lookup module** (`agents.foo.bar`) instead. The migration touched 547 patch targets across 34 test files.
 
 ## Rate limiting
 
