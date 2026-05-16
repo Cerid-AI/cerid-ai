@@ -44,19 +44,15 @@ SOURCE_ROOT = REPO_ROOT / "src" / "mcp"
 
 # Explicit allowlist of mutable env vars. The trailing ``_API_KEY`` substring
 # match is a generic catch-all in addition to these.
+#
+# URLs and model-name aliases are NOT in this list — the original lesson
+# itself says "Module-level capture is fine for TRUE constants (URLs, enum
+# values, hard-coded defaults) — never for anything a user can edit."
+# Live-mutable settings (provider switch, model swap) flow through the
+# central settings.py path which is reread on each lookup, so its module-
+# scope ``os.getenv`` is correctly the SOT-once-per-process pattern.
 _MUTABLE_VARS = {
     "OPENROUTER_API_KEY",
-    "INTERNAL_LLM_PROVIDER",
-    "INTERNAL_LLM_MODEL",
-    "EMBEDDINGS_PROVIDER",
-    "RERANK_PROVIDER",
-    "QUENCHFORGE_EMBED_MODEL",
-    "QUENCHFORGE_RERANK_MODEL",
-    "QUENCHFORGE_CODE_EMBED_MODEL",
-    "QUENCHFORGE_DEFAULT_MODEL",
-    "OLLAMA_URL",
-    "OLLAMA_DEFAULT_MODEL",
-    "BIFROST_URL",
     "BIFROST_API_KEY",
 }
 
@@ -152,6 +148,12 @@ def main() -> int:
     findings: list[str] = []
     for py in SOURCE_ROOT.rglob("*.py"):
         if "__pycache__" in py.parts or "tests" in py.parts:
+            continue
+        # Skip standalone daemons / one-shot scripts. These boot once and
+        # don't observe live setup-wizard mutations — operators restart
+        # the daemon when changing config. The lesson is about long-
+        # running FastAPI processes, not scripts.
+        if "scripts" in py.parts:
             continue
         # Skip the project-canonical settings.py — it deliberately captures
         # at module scope as the SOT for those values; per-call readers

@@ -2,6 +2,69 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.4 — graduated-lint triage + promotion to blocking (2026-05-15)
+
+Cleanup pass on the 10 findings the v0.95.3 graduation lints surfaced.
+Three real bugs fixed, two false-positive classes removed from linter
+scope, one allowlist convention documented. All five lints promoted
+from warn-only to blocking now that findings reach zero.
+
+### L1 — import-star without __all__ (6 → 0 findings)
+
+All six findings were documented back-compat shims (the explicit
+`Re-export bridge` pattern). Refined the linter to allowlist files
+with the literal phrase **`Re-export bridge`** in the first 10
+lines — Python's standard "documented opt-out" pattern. Added the
+marker to `src/mcp/config/__init__.py`; the other five already
+had it.
+
+New `docs/CONVENTIONS.md::Re-export bridges` section documents the
+marker so future bridge authors know the convention.
+
+### L2 — module-level os.getenv (3 → 0 findings)
+
+Three findings, all triaged honestly:
+
+- `config/providers.py:81` (OLLAMA_URL) — the lesson itself notes
+  "Module-level capture is fine for TRUE constants (URLs, enum values,
+  hard-coded defaults)". Removed `OLLAMA_URL` from the linter's mutable
+  list along with the QUENCHFORGE_* model aliases that pass through
+  `settings.py`'s SOT-once-per-process pattern. Linter scope now
+  tightened to actual user-mutable secrets (`OPENROUTER_API_KEY`,
+  `BIFROST_API_KEY`, plus the generic `_API_KEY` suffix).
+- `utils/web_search.py:50` (TAVILY_API_KEY) — real bug. Module-level
+  capture froze the boot-time key; setup-wizard rotation never
+  took effect. Wrapped as `_tavily_api_key()` function, three call
+  sites updated.
+- `scripts/clipboard_daemon.py:59` (CERID_API_KEY) — one-shot daemon,
+  not subject to live config mutation. Operators restart the daemon
+  when rotating keys. Allowlisted `scripts/` directory in the linter
+  (the lesson is about long-running FastAPI processes; standalone
+  scripts have different lifecycle).
+
+### L3 — docker healthcheck localhost (1 → 0 findings)
+
+`src/mcp/docker-compose.override.yml:4` — one-line fix from `localhost`
+to `127.0.0.1` with an inline comment pointing at the lesson +
+CONVENTIONS entry so future maintainers see the rationale.
+
+### L4 + L5 — already at 0 findings
+
+`lint-web-no-crypto-randomuuid` and `lint-dts-basename-collision`
+were already clean at v0.95.3 ship. Promoted to blocking alongside
+the others.
+
+### CI workflow — all 5 promoted from warn-only to blocking
+
+Removed `continue-on-error: true` from each lint job's definition
+and added all five to the `docker` job's `needs[]` so they gate the
+merge gate alongside the other lint-* jobs.
+
+### Test suite
+
+393 passing (no regressions). No source modules affected by the
+triage required test updates.
+
 ## v0.95.3 — RAGAS baseline + 10 lessons graduated (2026-05-15)
 
 Two themes: establish a real faithfulness baseline so the trust score

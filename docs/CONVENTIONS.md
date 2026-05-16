@@ -77,6 +77,35 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 
 - **`@patch` targets the bridge module, not the source.** After the Phase C `agents/` / `utils/` retire-and-bridge migration, `from agents.foo import bar` in `tools.py` looks up `bar` in the `agents.foo` bridge module at runtime — even though the implementation lives at `core.agents.foo.bar`. `@patch("core.agents.foo.bar")` patches the source; runtime call still sees the original. Patch the **call-site lookup module** (`agents.foo.bar`) instead. The migration touched 547 patch targets across 34 test files.
 
+## Re-export bridges (added 2026-05-15)
+
+Some `__init__.py` files exist solely as back-compat shims — they
+re-export everything from a canonical source package so pre-Phase-C
+imports keep working. The lint job
+`lint / import-star-without-all` flags `from X import *` without
+`__all__` because Python silently drops `_underscore_names` in that
+pattern. Documented bridges are exempt: prepend the literal phrase
+**`Re-export bridge`** to the file's docstring or top-of-file comment
+(must appear in the first 10 lines).
+
+Examples in repo: `src/mcp/{config,parsers,middleware,routers}/__init__.py`.
+
+When adding a new bridge:
+
+```python
+# Copyright …
+"""Re-export bridge — back-compat shim for the new package.
+…
+"""
+from new.package import *  # noqa: F401, F403
+```
+
+Bridges are NOT the preferred pattern — they exist for transitional
+back-compat. New consumer code should import from the canonical
+`from new.package import X` path instead. Track bridge removal in
+the same PR that retires the last `from old.package import X` call
+site.
+
 ## Rate limiting
 
 - In-memory sliding window, keyed on `X-Client-ID` header (read directly from headers, not `request.state` — middleware ordering independence).

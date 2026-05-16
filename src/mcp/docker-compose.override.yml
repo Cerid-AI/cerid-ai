@@ -1,7 +1,11 @@
 services:
   mcp-server:
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      # 127.0.0.1 explicit — Alpine resolves `localhost` to ::1 (IPv6) but
+      # mcp-server binds 0.0.0.0 (IPv4). See
+      # docs/CONVENTIONS.md::Re-export bridges family + lessons.md
+      # "Use 127.0.0.1 not localhost in Alpine healthchecks".
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8888/health"]
       interval: 30s
       timeout: 10s
       retries: 5

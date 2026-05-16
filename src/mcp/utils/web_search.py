@@ -47,7 +47,17 @@ def _get_search_client() -> httpx.AsyncClient:
 # Configuration (read from env, no settings.py modifications needed)
 # ---------------------------------------------------------------------------
 
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+def _tavily_api_key() -> str:
+    """Read the Tavily API key at use-site, not at module import.
+
+    The setup wizard mutates ``.env`` + patches ``os.environ`` at runtime
+    so live calls see the new value. Module-level capture would freeze
+    the boot-time value and force a container restart for every key
+    rotation — see ``docs/CONVENTIONS.md::LLM call sites`` and the
+    2026-04-22 OpenRouter incident.
+    """
+    return os.getenv("TAVILY_API_KEY", "")
+
 SEARXNG_URL = os.getenv("SEARXNG_URL", "")
 ENABLE_AUTO_LEARN = os.getenv("ENABLE_AUTO_LEARN", "false").lower() == "true"
 WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
@@ -122,7 +132,7 @@ class TavilyProvider(WebSearchProvider):
     name = "tavily"
 
     def __init__(self) -> None:
-        self._api_key = TAVILY_API_KEY
+        self._api_key = _tavily_api_key()
         if not self._api_key:
             raise ValueError("TAVILY_API_KEY not set")
 
@@ -287,7 +297,7 @@ def get_search_provider() -> WebSearchProvider:
     2. SearXNG (if ``SEARXNG_URL`` is set)
     3. OpenRouter online model (always available as fallback)
     """
-    if TAVILY_API_KEY:
+    if _tavily_api_key():
         _logger.info("Using Tavily web search provider")
         return TavilyProvider()
     if SEARXNG_URL:
