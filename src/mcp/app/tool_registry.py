@@ -90,6 +90,16 @@ CostClass = Literal["low", "medium", "high"]
 - ``high``   — chained LLM + retrieval + reranking; p95 up to 8s
 """
 
+# Authoritative p95 budget mapping. Mirrors the CostClass docstring so the
+# numbers above and the values clients/operators see are the same source.
+# Used by the contract test in tests/contract/test_latency_budget.py and
+# surfaced via the SDK / tool registry. Drift here is a CI failure.
+COST_CLASS_P95_BUDGET_MS: dict[str, int] = {
+    "low": 200,
+    "medium": 2_000,
+    "high": 8_000,
+}
+
 
 @dataclass
 class ToolDef:

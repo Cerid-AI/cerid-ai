@@ -106,6 +106,20 @@ def test_nli_always_reports_cpu(monkeypatch):
     assert "CPU" in snap["nli"]["note"]
 
 
+def test_nli_reports_coalescer_state(monkeypatch):
+    """Operators need to see whether the v0.93.10 batch-coalescer (the
+    actual production NLI speedup) is engaged.  Without this field, a
+    misconfigured NLI_COALESCE_MS=0 silently loses the 2.5-3x p95 win."""
+    _clear(monkeypatch)
+    from core.utils.inference_routing import get_routing_snapshot
+    snap = get_routing_snapshot()
+    assert "coalescer" in snap["nli"]
+    assert "coalesce_ms" in snap["nli"]
+    assert snap["nli"]["execution"] == "onnx-cpu"
+    # Default NLI_COALESCE_MS=10 should report the coalescer active
+    assert snap["nli"]["coalescer"] is (snap["nli"]["coalesce_ms"] > 0)
+
+
 def test_invalid_provider_falls_through_safely(monkeypatch):
     """A typo'd EMBEDDINGS_PROVIDER must not crash the snapshot.
     Anything not "quenchforge" or "sidecar" should report as
