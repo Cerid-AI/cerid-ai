@@ -39,6 +39,10 @@ METRIC_NAMES = frozenset({
     "ragas_answer_relevancy",
     "ragas_context_precision",
     "ragas_context_recall",
+    # v0.95.0+ MCP tool dispatch instrumentation (written by
+    # app.tools.execute_tool's instrumentation wrapper)
+    "mcp_tool_call_duration_ms",
+    "mcp_tool_call",
 })
 
 # Model pricing table (USD per 1M tokens) --input/output

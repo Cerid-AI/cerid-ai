@@ -157,6 +157,89 @@ async def _run_sync_export() -> None:
         logger.error("Scheduled sync export failed: %s", e)
 
 
+async def _run_quarantine_purge() -> None:
+    """Daily hard-purge of artifacts whose quarantine window has expired.
+
+    Phase 6's ``pkb_quarantine`` sets ``a.purge_after`` (ISO-8601) on
+    the :Artifact node when the user soft-deletes with a retention
+    window. This job finds rows whose ``purge_after`` is in the past
+    and DETACH DELETEs them — same final state as
+    ``pkb_artifact_delete(hard=true)`` but auto-triggered by the
+    retention window expiring.
+
+    Drops ChromaDB chunks too (collection by collection) so the vector
+    side stays consistent with the Neo4j source-of-truth. Best-effort
+    on each artifact — a single failure doesn't abort the batch.
+    """
+    start = time.time()
+    purged = 0
+    chunk_dropped = 0
+    failed = 0
+    try:
+        from app.deps import get_chroma, get_neo4j
+        from app.db import neo4j as graph
+        from core.utils.time import utcnow_iso
+
+        now_iso = utcnow_iso()
+        driver = get_neo4j()
+        chroma = get_chroma()
+
+        # 1. Find candidates whose purge window has elapsed.
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a:Artifact)
+                WHERE coalesce(a.archived, false) = true
+                  AND a.purge_after IS NOT NULL
+                  AND a.purge_after < $now
+                RETURN a.id AS id, a.domain AS domain, a.filename AS filename
+                LIMIT 200
+                """,
+                now=now_iso,
+            )
+            candidates = [dict(r) for r in result]
+
+        # 2. For each, drop chunks + delete the node. graph.delete_artifact
+        # already does the DETACH DELETE; we add the ChromaDB sweep.
+        for c in candidates:
+            artifact_id = c["id"]
+            try:
+                record = graph.delete_artifact(driver, artifact_id)
+                if not record.get("deleted"):
+                    continue
+                purged += 1
+                chunk_ids = record.get("chunk_ids") or []
+                if chunk_ids and c.get("domain"):
+                    try:
+                        coll = chroma.get_collection(
+                            name=config.collection_name(c["domain"])
+                        )
+                        coll.delete(ids=chunk_ids)
+                        chunk_dropped += len(chunk_ids)
+                    except Exception:
+                        # Collection missing or chunks already gone —
+                        # the Neo4j node is already deleted, so soldier on.
+                        pass
+            except Exception as e:
+                failed += 1
+                logger.warning("Quarantine purge failed for %s: %s", artifact_id, e)
+
+        duration = time.time() - start
+        _log_execution(
+            "quarantine_purge", "success", duration,
+            f"{purged} purged, {chunk_dropped} chunks dropped, {failed} failed",
+        )
+        logger.info(
+            "Scheduled quarantine purge: %d artifacts removed in %.1fs "
+            "(%d chunks, %d failures)",
+            purged, duration, chunk_dropped, failed,
+        )
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("quarantine_purge", "error", duration, str(e))
+        logger.error("Scheduled quarantine purge failed: %s", e)
+
+
 async def _run_tombstone_purge() -> None:
     """Weekly purge of expired tombstone records."""
     start = time.time()
@@ -376,6 +459,21 @@ def start_scheduler() -> AsyncIOScheduler:
         ),
         id="config_recommender",
         name="Adaptive config recommender",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    # v0.95.1 Phase 6 follow-up — quarantine auto-purge: daily sweep of
+    # :Artifact nodes whose purge_after has elapsed. Drops the Neo4j
+    # node + ChromaDB chunks. Soft path is pkb_quarantine; this job is
+    # what eventually hard-deletes.
+    _scheduler.add_job(
+        _run_quarantine_purge,
+        CronTrigger.from_crontab(
+            getattr(config, "SCHEDULE_QUARANTINE_PURGE", "0 3 * * *"),
+        ),
+        id="quarantine_purge",
+        name="Quarantine auto-purge (retention-window expiry)",
         replace_existing=True,
         max_instances=1,
     )

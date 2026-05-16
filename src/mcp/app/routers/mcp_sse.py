@@ -98,6 +98,37 @@ def _error_envelope_for(exc: Exception) -> dict:
     return {"code": -32000, "message": str(exc)}
 
 
+def _build_tool_call_content(result):
+    """Serialise a handler return value into MCP `content[]` blocks.
+
+    Convention: when a handler returns ``dict`` containing a non-empty
+    ``_warnings: [str, ...]`` key, the warnings get a SEPARATE
+    ``content`` block prefixed with ``WARNINGS:`` so LLM clients can
+    distinguish degraded-but-successful output from clean output. The
+    ``_warnings`` key itself is stripped from the main JSON block so
+    consumers parsing the structuredContent don't see a leaky internal
+    marker.
+
+    Handlers that don't emit warnings get the legacy single-block
+    response unchanged.
+    """
+    warnings: list[str] = []
+    body = result
+    if isinstance(result, dict) and "_warnings" in result:
+        # Always strip the key from the body so an empty/None/wrong-type
+        # _warnings doesn't leak as a no-op marker into structuredContent.
+        candidate = result["_warnings"]
+        if isinstance(candidate, list):
+            warnings = [str(w) for w in candidate if w]
+        body = {k: v for k, v in result.items() if k != "_warnings"}
+
+    content = [{"type": "text", "text": json.dumps(body, indent=2)}]
+    if warnings:
+        warning_text = "WARNINGS:\n" + "\n".join(f"- {w}" for w in warnings)
+        content.append({"type": "text", "text": warning_text})
+    return content
+
+
 # ── JSON-RPC dispatcher ──────────────────────────────────────────────────────
 
 async def build_response(msg_id, method: str, params: dict) -> dict:
@@ -119,10 +150,11 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
         tool_args = params.get("arguments", {})
         try:
             result = await execute_tool(tool_name, tool_args)
+            content = _build_tool_call_content(result)
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {"content": content},
             }
         except ToolError as e:
             # Typed errors map to specific JSON-RPC codes so clients
@@ -239,6 +271,48 @@ async def mcp_sse_endpoint(request: Request):
 async def mcp_sse_post(request: Request):
     """Handle probes to /mcp/sse."""
     return Response(status_code=200, content="", media_type="text/plain")
+
+
+@router.post("/mcp/call-sync")
+async def mcp_call_sync(request: Request):
+    """Direct-HTTP tool dispatch, bypasses the SSE session queue.
+
+    The SSE message path adds 5-15 ms of latency per call due to the
+    POST → queue → SSE-stream → client round-trip. For high-frequency
+    low-latency uses (status polling, scheduler integrations, simple
+    one-shot tool calls from clients that don't already maintain an
+    SSE connection) this endpoint accepts the same JSON-RPC envelope
+    a `tools/call` would and returns the response in the HTTP body.
+
+    Accepts every method ``mcp/messages`` accepts (initialize,
+    tools/list, tools/call, ping) — most useful for ``tools/call``,
+    but the other methods work too for one-shot probing.
+
+    Auth: none (matches the rest of the MCP surface, which binds to
+    127.0.0.1 by default). Operators that expose this off-localhost
+    should put it behind a reverse-proxy auth layer until the Phase 8.2
+    bearer-token model lands.
+    """
+    try:
+        body = await request.body()
+        body_text = body.decode("utf-8").strip()
+        if not body_text or body_text == "{}":
+            return Response(status_code=400, content="empty request body")
+        msg = json.loads(body_text)
+    except Exception as e:
+        return Response(status_code=400, content=f"parse error: {e}")
+
+    method = msg.get("method", "")
+    params = msg.get("params", {})
+    msg_id = msg.get("id")
+
+    # Reuse the SSE-path dispatcher so the two surfaces stay in sync.
+    response = await build_response(msg_id, method, params)
+    return Response(
+        status_code=200,
+        content=json.dumps(response),
+        media_type="application/json",
+    )
 
 
 @router.post("/mcp/messages")
