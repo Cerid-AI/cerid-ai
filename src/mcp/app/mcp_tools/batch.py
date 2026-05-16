@@ -313,6 +313,58 @@ async def pkb_batch(
 
 
 @register_tool(
+    name="pkb_external_servers",
+    description=(
+        "List external MCP servers cerid-kb has discovered + the tools "
+        "each is exposing. **Use when** debugging which third-party "
+        "MCPs are connected (e.g. Playwright, GitHub, Linear) and how "
+        "many of their tools are reachable through the `ext_*` "
+        "namespace. **Returns** `{servers: [{name, transport, status, "
+        "enabled, tool_count, tools, error?}], total, connected_count}`."
+    ),
+    input_schema={"type": "object", "properties": {}},
+    output_schema={
+        "type": "object",
+        "properties": {
+            "servers": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "transport": {"type": "string"},
+                        "status": {"type": "string"},
+                        "enabled": {"type": "boolean"},
+                        "tool_count": {"type": "integer"},
+                        "tools": {"type": "array", "items": {"type": "string"}},
+                        "error": {"type": ["string", "null"]},
+                    },
+                },
+            },
+            "total": {"type": "integer"},
+            "connected_count": {"type": "integer"},
+        },
+    },
+    cost_class="low",
+)
+async def pkb_external_servers() -> dict[str, Any]:
+    """Inspect the MCPClientManager registry. Pure read; never mutates."""
+    try:
+        from utils.mcp_client import mcp_client_manager
+        servers = mcp_client_manager.list_servers()
+    except Exception:
+        # No external manager configured — return empty list, not 503,
+        # because the lack of any external server is a valid steady state.
+        servers = []
+    connected = sum(1 for s in servers if s.get("status") == "connected")
+    return {
+        "servers": servers,
+        "total": len(servers),
+        "connected_count": connected,
+    }
+
+
+@register_tool(
     name="pkb_ingest_url",
     description=(
         "Fetch a URL via HTTP and ingest the response body as a new "

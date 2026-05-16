@@ -244,3 +244,58 @@ def test_summarize_args_redacts_credential_like_keys():
     assert out["token"] == "<redacted>"
     assert out["AUTHORIZATION"] == "<redacted>"
     assert out["regular"] == "ok"
+
+
+# ----------------------------------------------------- v0.95.1 warnings envelope
+
+
+def test_build_tool_call_content_no_warnings_single_block():
+    """Tools returning a plain dict produce one content block."""
+    from app.routers.mcp_sse import _build_tool_call_content
+    content = _build_tool_call_content({"status": "ok", "value": 42})
+    assert len(content) == 1
+    assert content[0]["type"] == "text"
+    assert "value" in content[0]["text"]
+    assert "WARNINGS" not in content[0]["text"]
+
+
+def test_build_tool_call_content_strips_warnings_into_second_block():
+    """Tools returning {_warnings: [...]} get a second WARNINGS block."""
+    import json as _json
+
+    from app.routers.mcp_sse import _build_tool_call_content
+    content = _build_tool_call_content({
+        "status": "partial",
+        "_warnings": ["chromadb fast-path missed", "rerank fallback used"],
+    })
+    assert len(content) == 2
+    parsed = _json.loads(content[0]["text"])
+    assert "_warnings" not in parsed
+    assert parsed == {"status": "partial"}
+    assert content[1]["text"].startswith("WARNINGS:")
+    assert "chromadb fast-path missed" in content[1]["text"]
+
+
+def test_build_tool_call_content_empty_warnings_no_second_block():
+    """An empty _warnings list is treated as no warnings."""
+    from app.routers.mcp_sse import _build_tool_call_content
+    content = _build_tool_call_content({"status": "ok", "_warnings": []})
+    assert len(content) == 1
+    # _warnings should still be stripped even when empty so it doesn't
+    # leak as a no-op key in the main JSON block.
+    assert "_warnings" not in content[0]["text"]
+
+
+def test_build_tool_call_content_non_list_warnings_ignored():
+    """Defensive: a handler that misuses the field shouldn't crash."""
+    from app.routers.mcp_sse import _build_tool_call_content
+    content = _build_tool_call_content({"value": 1, "_warnings": "single string"})
+    assert len(content) == 1  # ignored — not a list
+
+
+def test_build_tool_call_content_non_dict_passthrough():
+    """A tool that returns a list/string still serializes cleanly."""
+    from app.routers.mcp_sse import _build_tool_call_content
+    content = _build_tool_call_content([1, 2, 3])
+    assert len(content) == 1
+    assert "1" in content[0]["text"]

@@ -255,11 +255,88 @@ def _invariants_snapshot() -> dict:
                     errs.append(f"chroma: {exc}")
             snap.update(_probe_nli())
             snap["healthy_invariants"] = bool(snap.get("nli_model_loaded"))
+            snap["mcp"] = _mcp_tool_summary()
             return snap
-        return run_invariants(chroma, redis_client, neo4j_driver)
+        snap = run_invariants(chroma, redis_client, neo4j_driver)
+        snap["mcp"] = _mcp_tool_summary()
+        return snap
     except Exception as exc:
         logger.warning("invariants snapshot failed: %s", exc)
         return {"healthy_invariants": False, "errors": [str(exc)]}
+
+
+def _mcp_tool_summary(window_minutes: int = 60) -> dict[str, Any]:
+    """Roll up MCP tool-call metrics for the /health.invariants.mcp surface.
+
+    Reads the ``mcp_tool_call`` counter and ``mcp_tool_call_duration_ms``
+    histogram written by ``app.tools.execute_tool``'s instrumentation
+    wrapper (Phase 2.1). Aggregates over a rolling window so callers
+    can see "are tools healthy right now?" without running queries
+    against the full /observability/metrics surface.
+
+    Returns:
+        {
+            window_minutes: 60,
+            calls: {ok: int, error: int, total: int, error_rate: float},
+            latency_ms: {p50, p95, p99, avg, max, count},
+            top_tools_by_error: [{tool, error_class, count}],
+        }
+
+    Errors are swallowed via ``log_swallowed_error`` so a metrics-
+    backend hiccup never sinks /health.
+    """
+    summary: dict[str, Any] = {
+        "window_minutes": window_minutes,
+        "calls": {"ok": 0, "error": 0, "total": 0, "error_rate": 0.0},
+        "latency_ms": {"p50": None, "p95": None, "p99": None, "avg": None, "max": None, "count": 0},
+        "top_tools_by_error": [],
+    }
+    try:
+        from utils.metrics import get_metrics_collector
+        collector = get_metrics_collector()
+
+        counter_points = collector.get_metrics("mcp_tool_call", window_minutes)
+        ok = sum(1 for p in counter_points if (p.tags or {}).get("outcome") == "ok")
+        err = sum(1 for p in counter_points if (p.tags or {}).get("outcome") == "error")
+        total = ok + err
+        summary["calls"] = {
+            "ok": ok,
+            "error": err,
+            "total": total,
+            "error_rate": round(err / total, 3) if total else 0.0,
+        }
+
+        # Latency histogram aggregates via the collector's stat helper.
+        agg = collector.get_aggregated_metrics(window_minutes=window_minutes)
+        lat = agg.get("mcp_tool_call_duration_ms")
+        if lat:
+            summary["latency_ms"] = {
+                "p50": lat.get("p50"),
+                "p95": lat.get("p95"),
+                "p99": lat.get("p99"),
+                "avg": lat.get("avg"),
+                "max": lat.get("max"),
+                "count": lat.get("count", 0),
+            }
+
+        # Top error-by-class. Counter points carry an `error_class` tag
+        # when outcome=error.
+        if err:
+            by_pair: dict[tuple[str, str], int] = {}
+            for p in counter_points:
+                t = p.tags or {}
+                if t.get("outcome") != "error":
+                    continue
+                k = (t.get("tool", "?"), t.get("error_class", "?"))
+                by_pair[k] = by_pair.get(k, 0) + 1
+            top = sorted(by_pair.items(), key=lambda x: -x[1])[:5]
+            summary["top_tools_by_error"] = [
+                {"tool": tool, "error_class": cls, "count": n}
+                for (tool, cls), n in top
+            ]
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.health.mcp_tool_summary", exc)
+    return summary
 
 
 def _load_recommendations(

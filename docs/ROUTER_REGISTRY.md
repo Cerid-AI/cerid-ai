@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 276
+**Total routes:** 277
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -139,6 +139,7 @@ not documented here; see the internal repo for the full registry.
 | DELETE | `/{name}` | `remove_mcp_server` | `src/mcp/app/routers/mcp_client.py` | MCP Client |  |
 | POST | `/{name}/reconnect` | `reconnect_mcp_server` | `src/mcp/app/routers/mcp_client.py` | MCP Client |  |
 | GET | `/{name}/tools` | `list_server_tools` | `src/mcp/app/routers/mcp_client.py` | MCP Client |  |
+| POST | `/mcp/call-sync` | `mcp_call_sync` | `src/mcp/app/routers/mcp_sse.py` |  |  |
 | POST | `/mcp/messages` | `mcp_messages` | `src/mcp/app/routers/mcp_sse.py` |  |  |
 | GET | `/mcp/sse` | `mcp_sse_endpoint` | `src/mcp/app/routers/mcp_sse.py` |  |  |
 | HEAD | `/mcp/sse` | `mcp_sse_head` | `src/mcp/app/routers/mcp_sse.py` |  |  |

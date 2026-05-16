@@ -115,11 +115,19 @@ def test_no_duplicate_tool_names() -> None:
 
 
 def test_tool_inventory_meets_minimum() -> None:
-    """Sanity check: cerid-kb ships at least the 29 tools that were
-    registered at v0.93.10. If this drops, something silently dropped
-    a registration."""
+    """Sanity check: cerid-kb ships at least the 56 tools that were
+    registered at v0.95.0.
+
+    Floor history:
+    * v0.93.10 — 29 tools (pre-overhaul)
+    * v0.95.0 — 56 tools (overhaul)
+    * v0.96.0 — will drop pkb_query → 55 floor (deprecation maturity)
+
+    Bump this each release so a silent regression in TOOL_REGISTRY
+    population or MCP_TOOLS truncation lands hard in CI.
+    """
     names = [t["name"] for t in get_all_tools()]
-    assert len(names) >= 29, (
+    assert len(names) >= 56, (
         f"tool inventory regressed: only {len(names)} tools registered "
-        f"(want >= 29)"
+        f"(want >= 56)"
     )

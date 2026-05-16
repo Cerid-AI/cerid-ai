@@ -1270,6 +1270,77 @@ def apply_metadata_boost(
 # Context alignment boost
 # ---------------------------------------------------------------------------
 
+def _apply_active_learning_signals(
+    results: list[dict[str, Any]],
+    neo4j_driver: Any,
+) -> list[dict[str, Any]]:
+    """Enrich retrieval results with endorsement_weight + flag_reason.
+
+    Reads each result's source artifact (by ``artifact_id``) and:
+
+    * **Drops** the result when ``flag_reason`` is non-empty (inaccurate /
+      outdated / off_topic / duplicate / spam — see ``pkb_flag`` for the
+      taxonomy). The flag clears via ``pkb_flag(reason='')`` and the
+      result reappears next query.
+    * **Multiplies** the relevance score by
+      ``endorsement_weight`` (default 1.0; range [0.1, 10.0]). User
+      endorsements rise; user-demoted artifacts sink. This runs BEFORE
+      the reranker so the cross-encoder sees boosted-in / demoted-out
+      candidates.
+
+    Single batched Cypher round-trip — collects all unique
+    ``artifact_id`` values then UNWINDs to read both properties at once.
+    Missing artifacts (e.g. chunk metadata points at a deleted node)
+    are treated as unflagged + weight=1.0; the result survives.
+
+    Synchronous on purpose — called via ``asyncio.to_thread`` from the
+    async pipeline so it doesn't bind the event loop.
+    """
+    artifact_ids = sorted({
+        r.get("artifact_id") for r in results if r.get("artifact_id")
+    })
+    if not artifact_ids:
+        return results
+
+    metadata: dict[str, dict[str, Any]] = {}
+    with neo4j_driver.session() as session:
+        row = session.run(
+            """
+            UNWIND $ids AS aid
+            MATCH (a:Artifact {id: aid})
+            RETURN
+                a.id AS id,
+                coalesce(a.endorsement_weight, 1.0) AS weight,
+                coalesce(a.flag_reason, '') AS flag
+            """,
+            ids=artifact_ids,
+        )
+        for r in row:
+            metadata[r["id"]] = {
+                "weight": float(r["weight"] or 1.0),
+                "flag": str(r["flag"] or ""),
+            }
+
+    filtered: list[dict[str, Any]] = []
+    for chunk in results:
+        aid = chunk.get("artifact_id")
+        meta = metadata.get(aid) if aid else None
+        if meta and meta["flag"]:
+            # Flagged-out — don't surface this chunk at all. We tag the
+            # filter event on the chunk dict before dropping it so a
+            # caller capturing diagnostic results can still see why
+            # it disappeared if they're poking at the upstream pre-
+            # filter list.
+            chunk["_filtered_reason"] = f"flag:{meta['flag']}"
+            continue
+        if meta and meta["weight"] != 1.0:
+            old = float(chunk.get("relevance") or 0.0)
+            chunk["relevance"] = round(old * meta["weight"], 4)
+            chunk["_endorsement_weight"] = meta["weight"]
+        filtered.append(chunk)
+    return filtered
+
+
 def apply_context_alignment_boost(
     results: list[dict[str, Any]],
     conversation_messages: list[dict[str, str]] | None = None,
@@ -1959,6 +2030,20 @@ async def _agent_query_impl(
 
     # Step 4.6: Context alignment boost — reward results matching conversation context
     results = apply_context_alignment_boost(results, conversation_messages)
+
+    # Step 4.7: Active-learning signals — apply endorsement_weight + drop flagged.
+    # Single-query Neo4j round-trip enriches each chunk with the source
+    # artifact's endorsement_weight (default 1.0) and flag_reason. Flagged
+    # artifacts are filtered out of the result set; endorsement_weight
+    # multiplies relevance so endorsed sources rise + de-emphasised
+    # sources sink before the reranker runs.
+    if results and neo4j_driver is not None:
+        try:
+            results = await asyncio.to_thread(
+                _apply_active_learning_signals, results, neo4j_driver,
+            )
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error("query_agent.active_learning_signals", exc)
 
     # Step 5: Reranking (includes both direct and graph-sourced results)
     with timer.step("reranking"):

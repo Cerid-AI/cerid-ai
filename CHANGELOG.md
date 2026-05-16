@@ -2,6 +2,112 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.1 — overhaul follow-through: reranker, scheduler, warnings, observability (2026-05-15)
+
+13 follow-through deliverables from the v0.95.0 cerid-kb overhaul.
+Closes every "shipped a property/hook that nothing reads" gap and
+formalises the documentation + CI gate surface that v0.95.0 left
+implicit.
+
+### Reranker integration (items 2 + 3 of the gap audit)
+
+`core/agents/query_agent.py::_apply_active_learning_signals` runs
+between metadata-boost and reranking (new Step 4.7). Single batched
+Neo4j round-trip enriches each result with the source artifact's
+`endorsement_weight` (default 1.0) and `flag_reason`. Flagged
+artifacts are filtered out of the result set; `endorsement_weight`
+multiplies relevance so user-boosted sources rise + user-demoted
+sinks before the cross-encoder reranks. Missing artifacts (deleted
+during retrieval) pass through unchanged — chunk survives. Four
+unit tests cover endorsement multiply, flag filter, missing-id
+passthrough, and missing-from-graph passthrough.
+
+### `_warnings` envelope on tool results (item 7)
+
+`app/routers/mcp_sse.py::_build_tool_call_content` extracts an
+optional `_warnings: [str, ...]` field from handler return dicts
+into a second `content[]` block prefixed with `WARNINGS:`. Lets
+tools surface degraded-but-successful output without inventing an
+out-of-band channel. Five tests cover happy path, warning
+strip-and-render, empty-list edge case, defensive non-list handling,
+and non-dict passthrough.
+
+### Direct-HTTP `/mcp/call-sync` (item 1)
+
+New endpoint at `POST /mcp/call-sync` that bypasses the SSE session
+queue. Accepts the same JSON-RPC envelope `tools/call` does and
+returns the response in the HTTP body — saves 5-15 ms per call for
+high-frequency low-latency uses (status polling, scheduler
+integrations, clients that don't already maintain an SSE
+connection). Delegates to the same `build_response` dispatcher so
+the two surfaces stay in sync.
+
+### Quarantine auto-purge scheduler (item 4)
+
+`app/scheduler.py::_run_quarantine_purge` — daily 03:00 cron
+(`SCHEDULE_QUARANTINE_PURGE` env override) that finds `:Artifact`
+nodes with `purge_after < now`, hard-deletes the Neo4j node, drops
+the ChromaDB chunks. Same final state as
+`pkb_artifact_delete(hard=true)` but auto-triggered by retention
+window expiry. Best-effort per artifact — single failures don't
+abort the batch; metric logged via `_log_execution`.
+
+### Tool inventory floor 29 → 56 (item 5)
+
+`test_tool_inventory_meets_minimum` floor bumped so any future
+silent drop in `TOOL_REGISTRY` population lands hard in CI.
+
+### Schema-fidelity CI workflow job (item 6)
+
+`lint / mcp-tool-schema-fidelity` job added to
+`.github/workflows/ci.yml` and wired into `docker` needs[]. Was
+local-only in v0.95.0; now blocks the merge gate.
+
+### MCP metrics under `/health.invariants.mcp` + `pkb_external_servers` (items 8 + 9)
+
+`/health.invariants.mcp` exposes rolling 60-min aggregates:
+`{calls: {ok, error, total, error_rate}, latency_ms: {p50, p95, p99,
+avg, max, count}, top_tools_by_error: [...]}`. Reads from the
+existing `utils.metrics` collector — `METRIC_NAMES` extended with
+`mcp_tool_call` + `mcp_tool_call_duration_ms` so the aggregator
+picks them up automatically.
+
+`pkb_external_servers()` admin tool lists discovered external MCP
+servers via `mcp_client_manager.list_servers()` — name, transport,
+status, enabled, tool_count, tools, error. Total + connected_count
+rolled up for at-a-glance "what's connected?" inspection.
+
+### Description-quality linter + warn-only CI (item 10)
+
+`scripts/lint-mcp-descriptions.py` enforces the canonical
+`Use when` / `Returns` anchors from `docs/MCP_TOOL_STYLE.md`. Caught
+five tools whose v0.95.0 descriptions still followed the legacy
+one-liner format; rewrote each to the canonical schema. CI gate
+`lint / mcp-tool-descriptions` runs `continue-on-error: true` for
+v0.95.x; promotes to blocking in v0.96.
+
+### Documentation (items 11 + 12 + 13)
+
+* `docs/MCP_TOOL_STYLE.md` — description style guide with before/
+  after examples, anti-patterns, cost-class hint, deprecation
+  metadata convention.
+* `docs/MCP_OBSERVABILITY.md` — audit log + metrics + Sentry tag
+  contract, p95 latency budgets per `cost_class`, the
+  `/health.invariants.mcp` rollup shape.
+* `docs/MCP_TOOL_TESTS.md` — the minimum per-tool test bundle:
+  schema fidelity (auto), handler unit test, description lint
+  (auto), optional integration test.
+
+### Live final state
+
+- Tools: **57** (56 → +1 with `pkb_external_servers`)
+- Tests: schema fidelity green over all 57; 18 mcp_sse Phase-2
+  tests; 4 active-learning retrieval tests; 19 batch tool tests;
+  11 fundamentals tool tests; 10 registry tests.
+- Description linter: all 57 tools pass.
+- New scheduled jobs: 1 (`quarantine_purge`, daily 03:00)
+- New `/mcp/call-sync` endpoint live.
+
 ## v0.95.0 — cerid-kb overhaul: 56 tools, observability, GDS, active learning (2026-05-15)
 
 Largest single release since v0.90.0. The cerid-kb MCP surface goes
