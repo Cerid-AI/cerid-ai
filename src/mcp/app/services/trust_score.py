@@ -15,14 +15,14 @@ Component sources (read-only):
 
 - Faithfulness ............ tests/eval/baselines/ragas.json
 - Retrieval (NDCG@10) ..... tests/eval/baselines/retrieval.json
-- Memory recall .......... tests/eval/baselines/longmemeval.json (Phase 8)
-- Verification coverage .. Neo4j rolling 24h count
-- Preservation health .... tests/eval/baselines/preservation.json (stub)
+- Memory recall .......... tests/eval/baselines/longmemeval.json
+- Verification coverage .. Neo4j rolling 7d count
+- Preservation health .... tests/eval/baselines/preservation.json
 - User agreement ......... Neo4j rolling 7d (R.1, future)
 
-Missing component files (e.g., LongMemEval before Phase 8 lands) yield
-``value=None`` + ``status='not_available'`` and are excluded from the
-mean. The score self-documents which components contributed.
+Missing component files yield ``value=None`` + ``status='not_available'``
+and are excluded from the mean. The score self-documents which components
+contributed.
 """
 from __future__ import annotations
 
@@ -162,7 +162,7 @@ def _read_retrieval_ndcg() -> tuple[float | None, str | None, str | None]:
 def _read_longmemeval() -> tuple[float | None, str | None, str | None]:
     data = _read_json_safely(_LONGMEMEVAL_PATH, module="trust_score.longmemeval")
     if data is None:
-        return None, None, "longmemeval.json not yet generated (Phase 8)"
+        return None, None, "longmemeval.json not yet generated"
     result = data.get("result") or {}
     value = result.get("recall_score")
     last = data.get("last_run_at")
@@ -174,14 +174,19 @@ def _read_longmemeval() -> tuple[float | None, str | None, str | None]:
 def _read_preservation() -> tuple[float | None, str | None, str | None]:
     data = _read_json_safely(_PRESERVATION_PATH, module="trust_score.preservation")
     if data is None:
-        # Stub: until a CI-side writer exists, report as not_available.
         return None, None, "preservation.json not yet written by CI"
     passed = data.get("passed")
-    total = data.get("total")
+    failed = data.get("failed", 0)
     last = data.get("last_run_at")
-    if passed is None or total is None or total == 0:
-        return None, last, "passed/total missing or zero"
-    return float(passed) / float(total), last, f"{passed}/{total}"
+    if passed is None:
+        return None, last, "passed missing"
+    # Denominator: passed + failed (exclude skipped). A skipped invariant is
+    # not a regression — counting it against the rate would penalise the
+    # honest case where the harness chose to skip (e.g. env-gated tests).
+    attempted = int(passed) + int(failed)
+    if attempted == 0:
+        return None, last, "no invariants attempted"
+    return float(passed) / float(attempted), last, f"{passed}/{attempted}"
 
 
 def _read_user_agreement(
@@ -205,16 +210,24 @@ def _read_user_agreement(
         return None, None, "neo4j query failed"
 
 
+_VERIFICATION_COVERAGE_WINDOW_HOURS = 168  # rolling 7d
+
+
 def _read_verification_coverage(
     neo4j_driver: Any | None,
 ) -> tuple[float | None, str | None, str | None]:
-    """Rolling 24 h fraction of verified claims across recent reports.
+    """Rolling 7-day fraction of verified claims across recent reports.
 
     Source of truth: ``(:VerificationReport)`` nodes written by
     ``app.db.neo4j.artifacts.save_verification_report`` after each
     hallucination check / verify-stream run. Each report carries
     aggregate ``verified``, ``unverified``, ``uncertain``, and ``total``
     counters; coverage = sum(verified) / sum(total) over the window.
+
+    Window widened from 24 h → 7 d (v0.95.7) so the component lights up
+    on developer machines and quiet-tenant deployments where 24 h of
+    verification traffic is often empty. Aligns with user_agreement,
+    which already uses a 7-day window.
 
     Earlier versions of this reader targeted ``(:Claim)`` nodes with a
     ``detected_at`` property. Neither artifact exists in the live
@@ -227,7 +240,10 @@ def _read_verification_coverage(
         return None, None, "neo4j driver not provided"
     try:
         with neo4j_driver.session() as session:
-            since_iso = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            since_iso = (
+                datetime.now(timezone.utc)
+                - timedelta(hours=_VERIFICATION_COVERAGE_WINDOW_HOURS)
+            ).isoformat()
             result = session.run(
                 """
                 MATCH (r:VerificationReport)
@@ -241,7 +257,7 @@ def _read_verification_coverage(
             )
             row = result.single()
             if row is None or row["total"] == 0:
-                return None, utcnow_iso(), "no verification reports in last 24h"
+                return None, utcnow_iso(), "no verification reports in last 7d"
             total = int(row["total"])
             covered = int(row["covered"])
             return covered / total, utcnow_iso(), f"{covered}/{total} verified"
@@ -324,7 +340,7 @@ def compute_trust_score(neo4j_driver: Any | None = None) -> TrustScore:
             id="verification_coverage",
             label="Verification coverage",
             target=0.95,
-            source="Neo4j rolling 24h",
+            source="Neo4j rolling 7d",
             reader=lambda: _read_verification_coverage(neo4j_driver),
         ),
         _ComponentSpec(

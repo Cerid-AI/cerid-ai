@@ -2,6 +2,118 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.7 — sprint beta: LongMemEval baseline + trust-score reader fixes (2026-05-16)
+
+Three-release sprint, second ship. Lights up the sixth and last trust
+component (`memory_recall`) and fixes two reader-correctness issues so
+the composite reports an honest number on real-world data.
+
+### LongMemEval baseline shipped — `memory_recall` is no longer dark
+
+The v0.95.6 trust-readers diagnostic identified `memory_recall` as the
+sole dark component: 5 of 6 readers already had data; the sixth had
+no baseline file. This release closes that gap.
+
+**Pipeline** — `src/mcp/tests/eval/longmemeval/memory_pipeline.py`:
+new `EphemeralChromaPipeline` adapter implementing the `LongMemEvalRunner`
+protocol on top of an in-process `chromadb.EphemeralClient` with the
+default ONNX embedding model. Each evaluation item gets a fresh
+collection — the runner protocol has no `reset_item` hook, so the
+adapter detects item boundaries from the `query → ingest` call ordering
+and resets implicitly. A 10-item heartbeat keeps multi-hour runs
+observable in production.
+
+**Two pipeline modes**:
+
+| Mode | `synthesize` | Scorer | Meaning |
+|---|---|---|---|
+| **retrieval-only** (default — v0.1 baseline) | `False` | `_SubstringScorer` | recall@k against the gold answer text |
+| **synthesis** | `True` | `LongMemEvalScorer` (LLM-as-judge) | end-to-end memory recall + answer extraction |
+
+The v0.1 baseline ships in retrieval-only mode. Both code paths exist;
+synthesis is parked until Phase 8 (chat goes local) lands a stable
+local chat slot. Quenchforge's chat-slot llama-server crashed mid-eval
+with `GGML_ASSERT(buf_dst) failed` on AMD-Mac Metal during smoke runs,
+exactly the bug class CLAUDE.md already documents — the v0.1 path
+side-steps that dependency.
+
+**Driver** — `src/mcp/tests/eval/longmemeval/runner_cli.py`: CLI that
+loads the dataset, runs the pipeline+scorer through `LongMemEvalRunner`,
+writes the baseline. Env-driven knobs (`LONGMEMEVAL_SAMPLE_SIZE`,
+`_SYNTHESIZE`, `_SCORER`, `_TOP_K`, `_DRY_RUN`).
+
+**Baseline numbers**:
+- `tests/eval/baselines/longmemeval.json`
+- **recall@k = 0.560** on a 100-item sample of `longmemeval_s_cleaned`
+  (the `_s` variant deprecated upstream — the cleaned variant is the
+  authoritative replacement)
+- Per-type: `single-session-user = 0.714` (5/7), `multi-session = 0.200`
+- 4 other question types underrepresented in the first 100 items by
+  dataset order. Stratified sampling + full-500 run deferred to a
+  follow-up iteration; this is the v0.1 number, not the canonical
+  headline.
+
+**Trust composite impact**:
+- `memory_recall`: `not_available` → `value=0.56 status=fail` (target ≥ 0.80)
+- Composite: **83 (medium) → 90 (high)** on 4-of-6 available components
+
+### Two reader-correctness fixes — composite reports honest numbers
+
+**(1) `preservation_health` denominator** — skips no longer charge the rate.
+
+The reader previously computed `passed / total` (where `total = passed
++ failed + skipped`). A skipped invariant is not a regression — the
+harness chose to skip (env-gated tests, missing fixtures, etc.).
+Charging skips against the rate punished the honest case.
+
+After: `passed / (passed + failed)`. With 57 passed, 0 failed, 5
+skipped on the current baseline, the score moves from `0.92 → 1.0`.
+
+**(2) `verification_coverage` rolling window** — 24 h → 7 days.
+
+The reader queried `MATCH (r:VerificationReport) WHERE r.created_at
+>= now - 24h`. On developer machines and quiet-tenant deployments
+where 24 h of verification traffic is often empty, the component
+reported `not_available` instead of contributing signal.
+
+After: 7-day window, aligned with `user_agreement` which already
+used 168 h.
+
+`trust_score_24h_summary()` function name is kept as-is — it is the
+public router-facing API and renaming would be a breaking change for
+callers. The "24h" in the name was always a vestigial label; what
+the function returns is the *current composite snapshot*, not a 24-h
+aggregation.
+
+### Verification
+
+- 42/42 trust_score tests pass (added: 2 preservation SKIP cases,
+  1 verification 7-d window query test).
+- 6/6 new memory_pipeline tests pass (protocol contract, per-item
+  reset, empty sessions, synthesize-mode LLM call w/ stage breadcrumb,
+  LLM-failure retrieval fallback, diagnostics counter).
+- 33/33 existing longmemeval adapter tests still pass.
+- ruff + mypy + import-linter clean across `src/mcp/`.
+
+### Follow-ups (not in this release)
+
+- **Stratified sampling** so the next longmemeval baseline covers all
+  6 question types — `knowledge-update`, `temporal-reasoning`, and
+  `single-session-{assistant,preference}` are absent in the first 100
+  items by dataset order.
+- **Full 500-item run** for the canonical headline number.
+- **LLM-judge re-baseline** after Phase 8 lands the stable local
+  chat slot: re-run with `LONGMEMEVAL_SYNTHESIZE=1 LONGMEMEVAL_SCORER=llm`
+  to measure end-to-end memory pipeline quality, not just retrieval.
+
+### Commits
+
+- `a1b8398` feat(longmemeval): retrieval-only baseline lights up memory_recall trust component
+- `1eb54b6` docs(eval-baselines): fill commit hash in v0.95.7 alpha longmemeval row
+- `01027eb` fix(trust-score): exclude skips from preservation rate + widen verification window 24h→7d
+
+---
+
 ## v0.95.6 — sprint alpha: CI green + cross-repo cleanup + trust-readers diagnostic (2026-05-16)
 
 Three-release sprint, first ship. Restores main from a long-running
