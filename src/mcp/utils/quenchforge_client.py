@@ -51,6 +51,7 @@ import time
 import httpx
 
 from core.utils.circuit_breaker import get_breaker
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.quenchforge")
 
@@ -172,7 +173,7 @@ async def quenchforge_embed(
         else:
             cfg.embed_latency_ms = latency_ms
     except Exception as exc:  # noqa: BLE001 — latency tracking is best-effort
-        logger.debug("Latency tracking failed: %s", exc)
+        log_swallowed_error(__name__, exc)
 
     logger.debug(
         "Quenchforge embed: %d texts in %.1fms (model=%s)",
@@ -233,7 +234,7 @@ async def quenchforge_rerank(
         else:
             cfg.rerank_latency_ms = latency_ms
     except Exception as exc:  # noqa: BLE001 — latency tracking is best-effort
-        logger.debug("Latency tracking failed: %s", exc)
+        log_swallowed_error(__name__, exc)
 
     logger.debug(
         "Quenchforge rerank: %d docs in %.1fms (model=%s)",
@@ -261,7 +262,7 @@ async def quenchforge_health() -> dict | None:
         if resp.status_code == 200:
             return resp.json()
     except Exception as exc:  # noqa: BLE001 — health probe is best-effort
-        logger.debug("Quenchforge health probe failed: %s", exc)
+        log_swallowed_error(__name__, exc)
     return None
 
 

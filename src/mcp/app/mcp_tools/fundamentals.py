@@ -24,14 +24,12 @@ import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.routers.artifacts import recategorize
-from app.routers.query import query_knowledge
 from app.tool_registry import (
     InvalidParamsError,
     ResourceNotFoundError,
     UpstreamUnavailableError,
     register_tool,
 )
-
 
 # ---------------------------------------------------------------------- pkb_artifact_get
 

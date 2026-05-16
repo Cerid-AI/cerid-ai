@@ -403,15 +403,30 @@ async def check_hallucinations(
                 redis_client=redis_client,
                 create_memory_fn=create_memory_fn,
             ))
-            _task.add_done_callback(
-                lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())
-                if not t.cancelled() and t.exception() else None
-            )
-        except Exception as exc:
-            # Dispatch-time failures (import error, bad kwargs) would prevent the
-            # coroutine from ever running. Surfacing via log_swallowed_error;
-            # proper narrowing + behavior decision tracked as a Phase 2A.3
-            # follow-up (shared with the streaming-path twin below).
+
+            def _on_promotion_done(t: asyncio.Task) -> None:
+                # Runtime failure inside promote_verified_facts (LLM timeouts,
+                # graph errors, etc.). Resolved as issue #50: surface to
+                # /health.swallowed_errors_last_hour for capacity-planning
+                # instead of WARNING-only. The swallow is intentional —
+                # crashing the verification path on a memory-promotion failure
+                # would lose the user-visible verification result.
+                if t.cancelled() or not t.exception():
+                    return
+                log_swallowed_error(
+                    "core.agents.hallucination.streaming.promote_verified_facts_runtime",
+                    t.exception(),  # type: ignore[arg-type]
+                    redis_client=redis_client,
+                )
+
+            _task.add_done_callback(_on_promotion_done)
+        except Exception as exc:  # noqa: BLE001 — dispatch failure is non-blocking
+            # Dispatch-time failures (ImportError on lazy import, TypeError on
+            # kwarg signature drift, RuntimeError if the loop is closed).
+            # Issue #50 resolution: keep broad-catch with observability —
+            # propagating to the parent would lose the entire response, which
+            # is worse than a silent retry on the next request. The accumulation
+            # signal lives on /health.swallowed_errors_last_hour.
             log_swallowed_error(
                 "core.agents.hallucination.streaming.promote_verified_facts_dispatch",
                 exc,
@@ -1188,13 +1203,22 @@ async def verify_response_streaming(
                 redis_client=redis_client,
                 create_memory_fn=_create_mem_fn,
             ))
-            _task.add_done_callback(
-                lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())
-                if not t.cancelled() and t.exception() else None
-            )
-        except Exception as exc:
-            # Streaming-path twin of the dispatch swallow above; see that site
-            # for the 2A.3 follow-up rationale.
+
+            def _on_promotion_done_streaming(t: asyncio.Task) -> None:
+                # Streaming-path twin of _on_promotion_done above; resolved
+                # as issue #50.
+                if t.cancelled() or not t.exception():
+                    return
+                log_swallowed_error(
+                    "core.agents.hallucination.streaming.promote_verified_facts_runtime_streaming",
+                    t.exception(),  # type: ignore[arg-type]
+                    redis_client=redis_client,
+                )
+
+            _task.add_done_callback(_on_promotion_done_streaming)
+        except Exception as exc:  # noqa: BLE001 — dispatch failure is non-blocking
+            # Streaming-path twin of the dispatch swallow above; resolved as
+            # issue #50.
             log_swallowed_error(
                 "core.agents.hallucination.streaming.promote_verified_facts_dispatch_streaming",
                 exc,

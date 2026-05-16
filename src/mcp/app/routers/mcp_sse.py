@@ -332,7 +332,8 @@ async def mcp_messages(request: Request):
     method = msg.get("method", "")
     params = msg.get("params", {})
     msg_id = msg.get("id")
-    _touch_session(session_id)  # reset idle clock on any inbound POST
+    if session_id:
+        _touch_session(session_id)  # reset idle clock on any inbound POST
     logger.info(f"[MCP] Received: {method} (id={msg_id}, session={session_id})")
 
     if method in ("initialized", "notifications/initialized"):

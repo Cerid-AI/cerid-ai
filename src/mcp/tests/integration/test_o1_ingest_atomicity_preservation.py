@@ -113,7 +113,12 @@ def test_i19b_neo4j_failure_leaves_chunks_pending():
 
     collection = _make_tracked_collection()
 
+    # Bypass the dedup pre-check: a bare MagicMock for get_neo4j() would make
+    # session.run().single() return a truthy mock, causing _check_duplicate to
+    # synthesize a fake "duplicate" record and short-circuit before the
+    # atomicity branch this test targets.
     with (
+        patch("app.services.ingestion._check_duplicate", return_value=None),
         patch("app.services.ingestion.get_redis", return_value=MagicMock()),
         patch("app.services.ingestion.get_neo4j", return_value=MagicMock()),
         patch("app.services.ingestion.get_chroma") as mock_chroma,

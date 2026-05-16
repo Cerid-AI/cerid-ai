@@ -260,12 +260,19 @@ async def extract_and_store_memories(
                             action_label = "UPDATE"
                         elif resolution["action"] == "merge" and resolution.get("merged_text"):
                             effective_content = resolution["merged_text"]
-                except Exception as exc:
-                    # Phase 44 conflict detection/resolution spans several LLM + graph
-                    # calls, so many exception types are reachable. Surfacing via
-                    # log_swallowed_error for now; proper narrowing tracked as a
-                    # Phase 2A.3 follow-up because silent failures here cause
-                    # duplicate memories to accumulate indefinitely.
+                except Exception as exc:  # noqa: BLE001 — conflict-detection failure must not lose the memory
+                    # Phase 44 conflict detection/resolution spans several LLM
+                    # + graph calls (detect_memory_conflict + resolve_memory_conflict),
+                    # so many exception types are reachable: httpx HTTPError,
+                    # neo4j driver errors, asyncio timeouts, JSON parse errors.
+                    # Issue #51 resolution: keep broad-catch with observability.
+                    # Propagating would cancel the parent loop iteration and
+                    # lose the memory we were about to store — strictly worse
+                    # than the duplicate-accumulation problem we're swallowing.
+                    # The accumulation rate is visible on
+                    # /health.swallowed_errors_last_hour; if it spikes, a
+                    # background deduplication sweep is the answer (tracked
+                    # under future-task), not narrowing here.
                     log_swallowed_error(
                         "core.agents.memory.phase44_conflict_detection",
                         exc,

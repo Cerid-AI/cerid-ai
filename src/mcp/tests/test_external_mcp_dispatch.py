@@ -28,6 +28,7 @@ from app.services.external_mcp_dispatch import (
     dispatch_external_mcp_tool,
     get_external_tool_schemas,
 )
+from app.tool_registry import InvalidToolError
 from app.tools import MCP_TOOLS, _tool_dispatchers, execute_tool, get_all_tools
 from utils.mcp_client import ExternalTool, mcp_client_manager
 
@@ -136,19 +137,28 @@ async def test_get_external_tool_schemas_returns_discovered_tools(
 
 
 async def test_get_all_tools_includes_built_ins(fake_external_tool: ExternalTool) -> None:
-    """Static ``MCP_TOOLS`` come first; relative order of built-ins is stable."""
-    all_tools = get_all_tools()
-    builtin_names = [t["name"] for t in MCP_TOOLS]
-    all_names = [t["name"] for t in all_tools]
-    # Built-ins prefix the result; external follows
-    assert all_names[: len(builtin_names)] == builtin_names
-    assert fake_external_tool.namespaced_name in all_names[len(builtin_names) :]
+    """Built-in tools (registered + legacy MCP_TOOLS) must all appear; an
+    external tool must also be present once registered."""
+    from app.tool_registry import get_registered_schemas
+
+    all_names = {t["name"] for t in get_all_tools()}
+    builtin_names = (
+        {t["name"] for t in get_registered_schemas()}
+        | {t["name"] for t in MCP_TOOLS}
+    )
+    assert builtin_names.issubset(all_names)
+    assert fake_external_tool.namespaced_name in all_names
 
 
 async def test_get_all_tools_returns_only_built_ins_when_no_external() -> None:
+    from app.tool_registry import get_registered_schemas
+
     mcp_client_manager._tools.clear()
-    all_tools = get_all_tools()
-    assert [t["name"] for t in all_tools] == [t["name"] for t in MCP_TOOLS]
+    builtin_names = (
+        {t["name"] for t in get_registered_schemas()}
+        | {t["name"] for t in MCP_TOOLS}
+    )
+    assert {t["name"] for t in get_all_tools()} == builtin_names
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +203,7 @@ async def test_execute_tool_routes_ext_name_through_dispatcher(
 
 async def test_execute_tool_unknown_name_still_raises() -> None:
     """Names neither built-in nor matching any dispatcher must still raise
-    ``ValueError`` — the new dispatcher must NOT swallow unknown names."""
+    ``InvalidToolError`` — the new dispatcher must NOT swallow unknown names."""
     mcp_client_manager._tools.clear()
-    with pytest.raises(ValueError, match="Unknown tool"):
+    with pytest.raises(InvalidToolError, match="Unknown tool"):
         await execute_tool("definitely_not_a_real_tool", {})

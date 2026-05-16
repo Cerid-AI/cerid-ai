@@ -407,6 +407,8 @@ class TestMetricNames:
             "ragas_answer_relevancy",
             "ragas_context_precision",
             "ragas_context_recall",
+            "mcp_tool_call",
+            "mcp_tool_call_duration_ms",
         }
         assert METRIC_NAMES == expected
 

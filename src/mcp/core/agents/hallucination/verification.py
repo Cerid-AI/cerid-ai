@@ -37,6 +37,7 @@ from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
 from core.utils.claim_cache import cache_verdict, get_cached_verdict
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
+from core.utils.swallowed import log_swallowed_error
 
 
 class CreditExhaustedError(NonTransientError):
@@ -1053,8 +1054,8 @@ async def _verify_claim_externally(
                         + "\n".join(evidence_lines)
                         + f"\n\nEvidence summary: {auth_result.get('evidence_summary', '')}"
                     )
-            except Exception:
-                logger.debug("Authoritative evidence gathering failed (non-blocking)")
+            except Exception as exc:  # noqa: BLE001 — evidence gathering is best-effort
+                log_swallowed_error(__name__, exc)
 
     # Fast mode: use cheapest/fastest model, 1 retry, skip staleness escalation
     if fast_mode and not expert_mode:
@@ -1799,8 +1800,8 @@ async def verify_claim(
                     if _graph_count and _graph_count["verified_neighbors"] >= 2:
                         similarity = min(1.0, similarity + _graph_boost)
                         details["graph_verified_neighbors"] = _graph_count["verified_neighbors"]
-            except Exception:
-                pass  # Graph query failed — non-blocking
+            except Exception as exc:  # noqa: BLE001 — graph boost is non-blocking
+                log_swallowed_error(__name__, exc)
 
         # --- NLI entailment check on top KB result ---
         # v0.93.10: switched to nli_score_async so N concurrent
@@ -2077,8 +2078,8 @@ async def verify_claim(
                             **_auth_payload,
                             **_kb_source_fields(top_result),
                         })
-                except Exception:
-                    logger.debug("Authoritative escalation failed (non-blocking)")
+                except Exception as exc:  # noqa: BLE001 — authoritative escalation is best-effort
+                    log_swallowed_error(__name__, exc)
 
             # All methods exhausted — return uncertain with all available context
             return await _cache_result({

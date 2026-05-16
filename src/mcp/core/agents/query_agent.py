@@ -1297,7 +1297,8 @@ def _apply_active_learning_signals(
     async pipeline so it doesn't bind the event loop.
     """
     artifact_ids = sorted({
-        r.get("artifact_id") for r in results if r.get("artifact_id")
+        aid for r in results
+        if (aid := r.get("artifact_id")) is not None
     })
     if not artifact_ids:
         return results

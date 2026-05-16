@@ -78,7 +78,6 @@ async def test_tavily_provider_success():
     mock_client.post = AsyncMock(return_value=mock_resp)
 
     with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
-         patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
          patch("utils.web_search._get_search_client", return_value=mock_client):
         from utils.web_search import TavilyProvider
         provider = TavilyProvider()
@@ -106,7 +105,6 @@ async def test_tavily_provider_timeout():
     mock_client.post = AsyncMock(side_effect=httpx.ReadTimeout("timeout"))
 
     with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
-         patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
          patch("utils.web_search._get_search_client", return_value=mock_client):
         from core.utils.circuit_breaker import get_breaker
         from utils.web_search import TavilyProvider
@@ -192,7 +190,7 @@ async def test_openrouter_search_fallback_failure():
 async def test_cascading_failover():
     """Tavily fails -> SearXNG fails -> OpenRouter succeeds."""
     # Set up: Tavily configured but will error, SearXNG configured but will error
-    with patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
+    with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
          patch("utils.web_search.SEARXNG_URL", "http://localhost:8080"):
         from utils.web_search import get_search_provider
 
@@ -201,7 +199,7 @@ async def test_cascading_failover():
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_resp_fail)
 
-    with patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
+    with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
          patch("utils.web_search.SEARXNG_URL", ""), \
          patch("utils.web_search._get_search_client", return_value=mock_client), \
          patch("utils.web_search._rate_window", []):
@@ -214,7 +212,7 @@ async def test_cascading_failover():
 
     # Verify that when Tavily key is missing and SearXNG is missing,
     # we fall back to OpenRouter
-    with patch("utils.web_search.TAVILY_API_KEY", ""), \
+    with patch.dict("os.environ", {"TAVILY_API_KEY": ""}), \
          patch("utils.web_search.SEARXNG_URL", ""):
         from utils.web_search import get_search_provider
         provider = get_search_provider()
@@ -282,7 +280,7 @@ async def test_web_search_returns_structured_results():
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_resp)
 
-    with patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
+    with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
          patch("utils.web_search._get_search_client", return_value=mock_client), \
          patch("utils.web_search._rate_window", []):
         from core.utils.circuit_breaker import get_breaker

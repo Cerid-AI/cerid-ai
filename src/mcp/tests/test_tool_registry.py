@@ -7,10 +7,10 @@ from __future__ import annotations
 import pytest
 
 from app.tool_registry import (
+    TOOL_REGISTRY,
     InvalidParamsError,
     InvalidToolError,
     PermissionDeniedError,
-    TOOL_REGISTRY,
     _swap_registry,
     execute_registered_tool,
     get_registered_schemas,
