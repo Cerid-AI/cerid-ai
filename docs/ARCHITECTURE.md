@@ -1,6 +1,6 @@
 # Cerid AI — Architecture
 
-> **Last refresh:** 2026-05-13 (v0.93.9 release: live-mutable `internal_llm_provider`; Quenchforge gateway now translates Ollama-wire `/api/chat` + `/api/embeddings` and ships AMD-discrete chat-slot correctness flags)
+> **Last refresh:** 2026-05-15 (v0.95.1: cerid-kb MCP overhaul — 29→57 tools across 8 categories via `app/tool_registry.py` decorator pattern; schema-fidelity CI gate; per-tool audit log + metrics + Sentry tag; SSE staleness eviction; `POST /mcp/call-sync` direct-HTTP fallback; active-learning schema migration wiring `:RATED` + `endorsement_weight` + `flag_reason`; quarantine auto-purge scheduler; GDS-Louvain graph tools; `_warnings` envelope; `/health.invariants.mcp` rollups.)
 > **Scope:** System layout, service topology, Phase C layer contract, data flow
 > **Owner:** Anyone modifying the stack topology, adding a service, or splitting core/app boundaries
 

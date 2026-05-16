@@ -1,6 +1,6 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-05-11 (post-v0.92.1 — UX polish + D.1 drift closeout: 0 design-drift violations, Private/Agent-Console/Model-Mgmt polish, cross-pane navigation, `<InvariantsCard>`, `lint-product-story` gate, processor-queue backfill, npm-audit clean)
+> **Last updated:** 2026-05-15 (post-v0.95.1 — cerid-kb MCP overhaul: 57 tools, decorator-based tool registry, schema-fidelity + description-quality CI gates, per-tool audit + metrics, SSE staleness reaper, `POST /mcp/call-sync`, active-learning schema, GDS-Louvain graph tools, `_warnings` envelope.)
 > **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 > **Internal sprint backlog:** `tasks/todo.md` (internal-only).
 
