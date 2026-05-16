@@ -62,3 +62,17 @@ CVE-2026-42010
 # cert names anywhere in the codebase. No upstream fix yet.
 # Re-evaluate: 2026-06-30.
 CVE-2026-42011
+
+# curl/libcurl: wrong file transfer due to incorrect SMB connection
+# reuse. We never speak SMB from inside the container (no curl
+# invocations from application code use smb:// URLs; httpx is HTTP/HTTPS
+# only). Debian 13 base image; no fixed version published as of
+# 2026-05-16. Re-evaluate: 2026-06-30.
+CVE-2026-5773
+
+# curl/libcurl: information disclosure via cookie leak when reusing
+# connections. Httpx (our HTTP client) does not share connection pools
+# across hosts and never reuses cookies from a different origin. Debian
+# 13 base image; no fixed version published as of 2026-05-16.
+# Re-evaluate: 2026-06-30.
+CVE-2026-6276
