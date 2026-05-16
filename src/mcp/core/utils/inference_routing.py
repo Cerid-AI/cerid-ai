@@ -136,10 +136,27 @@ def get_routing_snapshot() -> dict[str, dict[str, Any]]:
 
     # NLI -----------------------------------------------------------------
     # Hard-coded CPU.  No sidecar support today.  No Quenchforge endpoint.
-    # Surface the constraint so operators can spot the bottleneck.
+    # GPU acceleration deferred per tasks/2026-05-16-nli-gpu-decision.md
+    # (DeBERTa-v3 has no production GPU runtime on Intel-Mac + AMD).  The
+    # v0.93.10 async coalescer (core.utils.nli._NliBatcher) is the actual
+    # production speedup — 2.5-3× p95 win on concurrent dispatch.  Surface
+    # both facts so operators can spot the bottleneck and confirm the
+    # mitigation is engaged.
+    try:
+        from core.utils.nli import _COALESCE_MS  # type: ignore[attr-defined]
+
+        coalescer_ms = int(_COALESCE_MS)
+    except Exception:  # noqa: BLE001 — observability fallback
+        coalescer_ms = 0
     nli_block = {
         "provider": "in-process",
-        "note": "CPU only; no GPU path available",
+        "execution": "onnx-cpu",
+        "coalescer": coalescer_ms > 0,
+        "coalesce_ms": coalescer_ms,
+        "note": (
+            "CPU only; GPU path deferred (see "
+            "tasks/2026-05-16-nli-gpu-decision.md)"
+        ),
     }
 
     return {

@@ -256,6 +256,17 @@ NLI_MODEL_CACHE_DIR = os.getenv("NLI_MODEL_CACHE_DIR", "")
 NLI_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ENTAILMENT_THRESHOLD", "0.7"))
 NLI_CONTRADICTION_THRESHOLD = float(os.getenv("NLI_CONTRADICTION_THRESHOLD", "0.6"))
 
+# Phase 6: decompose multi-fact heuristic claims into atomic sub-claims via
+# an LLM call before scoring each independently against the premise. The
+# v0.95.5 sliding-window scorer scored at sentence granularity; multi-fact
+# sentences hide partial-support failures behind a single entailment label.
+FAITHFULNESS_DECOMPOSE_CLAIMS = os.getenv("FAITHFULNESS_DECOMPOSE_CLAIMS", "true").lower() == "true"
+FAITHFULNESS_DECOMPOSE_MAX_SUBCLAIMS = int(os.getenv("FAITHFULNESS_DECOMPOSE_MAX_SUBCLAIMS", "6"))
+# Atomic sub-claims are shorter and lose surrounding context; deberta-v3-mnli
+# under-confidences them at the sentence-tuned 0.7 threshold. A lower bar
+# is empirically required to make decomposition a positive lift.
+NLI_ATOMIC_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ATOMIC_ENTAILMENT_THRESHOLD", "0.5"))
+
 # ---------------------------------------------------------------------------
 # Verified Memory Promotion
 # ---------------------------------------------------------------------------
