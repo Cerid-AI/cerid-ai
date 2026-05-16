@@ -21,12 +21,13 @@ from app.routers.health import health_check, list_collections
 from app.routers.query import query_knowledge
 from app.services.ingestion import ingest_content, ingest_file
 from app.tool_registry import (
-    InvalidToolError,
     TOOL_REGISTRY,
+    InvalidToolError,
     ToolError,
     execute_registered_tool,
     get_registered_schemas,
 )
+from core.utils.swallowed import log_swallowed_error
 
 # Extension hooks — populated by bootstrap (internal tools, plugins, etc.)
 _tool_dispatchers: list = []
@@ -970,8 +971,8 @@ async def execute_tool(name: str, arguments: dict) -> Any:
     try:
         import sentry_sdk  # type: ignore[import-not-found]
         sentry_sdk.set_tag("mcp_tool", name)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — sentry SDK is an optional dep
+        log_swallowed_error(__name__, exc)
 
     try:
         result = await _dispatch_raw(name, arguments)
@@ -1007,10 +1008,8 @@ async def execute_tool(name: str, arguments: dict) -> Any:
                 tags["error_class"] = error_class
             collector.record_metric("mcp_tool_call_duration_ms", duration_ms, tags)
             collector.record_metric("mcp_tool_call", 1.0, tags)
-        except Exception:
-            # Metrics infrastructure failure must not propagate; the
-            # tool result already completed (success or failure).
-            pass
+        except Exception as exc:  # noqa: BLE001 — metrics infra failure must not propagate
+            log_swallowed_error(__name__, exc)
 
 
 # -- External MCP tools (Sprint 1A.1) ----------------------------------------

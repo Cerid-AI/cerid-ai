@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.tool_registry import InvalidToolError
 from app.tools import MCP_TOOLS, execute_tool
 
 # ---------------------------------------------------------------------------
@@ -69,7 +70,7 @@ class TestToolRegistry:
 
 class TestExecuteToolUnknown:
     def test_unknown_tool_raises(self):
-        with pytest.raises(ValueError, match="Unknown tool"):
+        with pytest.raises(InvalidToolError, match="Unknown tool"):
             asyncio.run(
                 execute_tool("nonexistent_tool", {})
             )

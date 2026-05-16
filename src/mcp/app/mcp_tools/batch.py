@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from typing import Any
@@ -32,7 +31,9 @@ logger = logging.getLogger("ai-companion.mcp_tools.batch")
 # ops descriptively (``step1``, ``ingest``, ``fetch_url``) — the
 # decorator-set default is ``op_<index>`` but custom names are allowed.
 # Supports nested fields via dotted paths and array indexing via [N].
-_REF_RE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z_0-9]*)\.result((?:\.[a-zA-Z_][a-zA-Z_0-9]*|\[\d+\])*)\}")
+_REF_RE = re.compile(  # noqa: DUO138 — bounded internal template refs, no untrusted input
+    r"\$\{([a-zA-Z_][a-zA-Z_0-9]*)\.result((?:\.[a-zA-Z_][a-zA-Z_0-9]*|\[\d+\])*)\}"
+)
 
 
 def _resolve_path(value: Any, path: str) -> Any:
@@ -423,6 +424,7 @@ async def pkb_ingest_url(
     max_bytes = max(1, min(int(max_bytes), 5_000_000))
 
     import httpx
+
     from app.services.ingestion import ingest_content
 
     try:

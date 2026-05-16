@@ -25,7 +25,6 @@ from app.tool_registry import (
     ResourceNotFoundError,
 )
 
-
 # -------------------------------------------------------------- pkb_artifact_get
 
 

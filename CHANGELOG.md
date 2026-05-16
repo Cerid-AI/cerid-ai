@@ -2,6 +2,183 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.6 — sprint alpha: CI green + cross-repo cleanup + trust-readers diagnostic (2026-05-16)
+
+Three-release sprint, first ship. Restores main from a long-running
+red-CI state, closes the last v0.95.x cross-repo follow-ons, and
+publishes the trust-reader diagnostic that scopes the rest of the
+sprint.
+
+### Main-branch CI restored to green
+
+CI on `main` had been red for **at least 10 commits**, including
+the v0.95.5 release ship itself. The sprint-readiness probe surfaced
+six independently-red gates that had been hidden under the assumption
+that local green = CI green:
+
+- **`lint` (ruff)** — 16 I001 / F401 errors in `app/mcp_tools/*`,
+  `app/scheduler.py`, `app/tools.py`, and 5 test files. All auto-fixed.
+- **`typecheck` (mypy)** — 2 errors: `core/agents/query_agent.py:1299`
+  (walrus-narrow `sorted()` on `Any | None`) and
+  `app/routers/mcp_sse.py:335` (Optional guard before `_touch_session`).
+- **`lint / silent-catch`** — 9 strict violations (`[exception-pass]`
+  + `[debug-only]` patterns). Each `pass` / `logger.debug(exc)` body
+  replaced with `log_swallowed_error(__name__, exc)` so the rate
+  surfaces on `/health.swallowed_errors_last_hour`. Sites:
+  `app/tools.py:973,1010`, `app/scheduler.py:219`,
+  `app/mcp_tools/graph_tools.py:395`, `utils/quenchforge_client.py:174,
+  235,263`, `core/agents/hallucination/verification.py:1057,1802,2080`.
+- **`security`** — both halves fixed:
+  - 3 detect-secrets false positives (placeholder doc + redaction-test
+    fixtures) annotated with `# pragma: allowlist secret`.
+  - 2 dlint DUO138 ReDoS findings allowlisted: `_REF_RE` parses
+    bounded internal template refs; `credit_card` regex has a `{13,16}`
+    cap that forecloses catastrophic backtracking.
+- **`lock-sync`** — uvicorn 0.46.0 → 0.47.0 drift; `requirements.lock`
+  regenerated via `scripts/regen-lock.sh`.
+- **`test`** — 9 failures across 4 files, all from drifted fixtures:
+  - `test_observability.py::TestMetricNames` — missing `mcp_tool_call`
+    + `mcp_tool_call_duration_ms` in the expected set
+  - `test_external_mcp_dispatch.py` + `test_tools.py` — `pytest.raises(ValueError)`
+    didn't match `InvalidToolError` (type evolution)
+  - `test_web_search.py` — patched module-level `TAVILY_API_KEY`
+    that no longer exists (refactored to at-use-site `os.getenv`)
+  - `test_external_mcp_dispatch.py::test_get_all_tools_*` — composition
+    order changed in Phase 1.6 (registered tools now prefix MCP_TOOLS)
+- **`lint / mcp-tool-schema-fidelity`** — workflow regression: the
+  job installed only `requirements.lock` (no pytest), so the test step
+  exited with 127 (command not found). Fixed by installing pytest in
+  a separate `pip install` invocation (avoids `--require-hashes`
+  conflict with the lock file).
+
+Net effect: 13 commits, every CI gate now green on `main`.
+
+### Preservation flake fixed (Task 1.1)
+
+`test_i19b_neo4j_failure_leaves_chunks_pending` was failing with
+`status=duplicate` instead of `error`. Root cause: the test's bare
+`MagicMock` for `get_neo4j()` caused `_check_duplicate()` to synthesize
+a truthy duplicate record from the MagicMock chain (any attribute
+access on a MagicMock is truthy), short-circuiting `ingest_content`
+before the atomicity branch the test targets. Fix: add
+`patch("app.services.ingestion._check_duplicate", return_value=None)`
+to the test's patch block. Inline comment records the gotcha.
+
+Preservation baseline refreshed: 57 passed, 5 skipped, 0 failed
+(was 56/1/5). All 4 i19 tests now green locally.
+
+### Issues #50 + #51 closed (Tasks 1.2 + 1.3)
+
+Both Phase 2A.3 follow-ups resolved as "design constraints documented,
+broad-catch is the right tradeoff":
+
+- **#50 (verified-memory promotion dispatch silent drop)** — the
+  done_callback at `streaming.py:406-409` / `:1191-1194` previously
+  logged WARNING-only on runtime failure; now routes through
+  `log_swallowed_error` so `/health.swallowed_errors_last_hour`
+  reflects the actual rate. Inline comment explicitly documents
+  why broad-catch is the right tradeoff (propagating dispatch errors
+  loses the entire response). Both twin sites updated.
+- **#51 (Phase 44 conflict-detection silence)** — code unchanged
+  (already routes through `log_swallowed_error`); inline comment
+  rewritten to capture the design decision (propagation would cancel
+  the parent loop iteration and lose the memory entirely).
+  Mitigation path (background dedup sweeper) noted for future work.
+
+### Quenchforge v0.5.1 — `install` subcommand (Task 1.4)
+
+Cross-repo work landed in `cerid-ai/quenchforge` and tagged `v0.5.1`:
+- `quenchforge install` drops the LaunchAgent plist into
+  `~/Library/LaunchAgents/com.cerid.quenchforge.plist` with
+  `$USER` substituted into `REPLACE_ME` placeholders.
+- Flags: `--force` (overwrite), `--skip-user-substitution`,
+  `--print-path`.
+- Single canonical plist source now at
+  `cmd/quenchforge/plist_template.plist` (embedded via `//go:embed`).
+- The former `packaging/macos/com.cerid.quenchforge.plist` is removed;
+  `packaging/macos/README.md` leads with the install command.
+
+Closes the last v0.95.x cerid-ai operator-experience gap from
+`tasks/todo.md` Open follow-ons.
+
+### Lessons graduation batch 1a
+
+`tasks/lessons.md`: 971 → 934 LOC. 10 entries previously marked
+`✅ GRADUATED` had their full **When/Problem/Fix** bodies condensed
+to single-line pointers — the content already lives at the
+graduation destination (lint script / CONVENTIONS.md / regression
+test), so duplicating it in `lessons.md` added maintenance burden
+without educational value. Bigger graduation work (further
+non-graduated entries → lint rules / contract tests) lands in
+batch 2 (Phase 9 of this sprint).
+
+### Trust-readers diagnostic (Task 2.2)
+
+`tasks/2026-05-16-trust-readers-diagnostic.md` probes the live
+`/observability/trust-score` endpoint and traces each component to
+its data source. **5/6 components are already live** — only
+`memory_recall` is dark, gated on Phase 4 (LongMemEval baseline).
+The original handoff doc framed Phase 5 as "wire 4/6 broken
+readers"; reality is just 2 narrow tweaks (preservation-baseline
+SKIP-counting + verification-coverage window length).
+This collapses Phase 5 (Trust score goes live) from 2-3 days to ~1 day.
+
+### Files touched (cerid-ai-internal)
+
+```
+src/mcp/app/mcp_tools/__init__.py                            ±14 (ruff)
+src/mcp/app/mcp_tools/batch.py                               ±2  (ruff + dlint allowlist)
+src/mcp/app/mcp_tools/fundamentals.py                        ±2  (ruff)
+src/mcp/app/mcp_tools/retrieval.py                           ±2  (ruff)
+src/mcp/app/mcp_tools/graph_tools.py                         ±5  (silent-catch)
+src/mcp/app/mcp_tools/temporal.py                            ±1  (dlint allowlist)
+src/mcp/app/routers/mcp_sse.py                               ±1  (typecheck)
+src/mcp/app/scheduler.py                                     ±5  (silent-catch)
+src/mcp/app/services/trust_score.py                          (unchanged, diagnostic only)
+src/mcp/app/tools.py                                         ±9  (silent-catch ×2)
+src/mcp/core/agents/hallucination/streaming.py               ±53 (#50)
+src/mcp/core/agents/hallucination/verification.py            ±5  (silent-catch ×3)
+src/mcp/core/agents/memory.py                                ±10 (#51 doc)
+src/mcp/core/agents/query_agent.py                           ±3  (typecheck)
+src/mcp/utils/quenchforge_client.py                          ±5  (silent-catch ×3)
+src/mcp/requirements.lock                                    ±158 (uvicorn bump)
+src/mcp/tests/integration/test_o1_ingest_atomicity_preservation.py  +5  (i19b)
+src/mcp/tests/test_external_mcp_dispatch.py                  ±18 (set assertion + InvalidToolError)
+src/mcp/tests/test_mcp_sse_phase_2.py                        ±2  (allowlist secret)
+src/mcp/tests/test_observability.py                          +2  (new metric names)
+src/mcp/tests/test_tools.py                                  ±2  (InvalidToolError)
+src/mcp/tests/test_web_search.py                             ±5  (os.environ patch)
+src/mcp/tests/eval/baselines/preservation.json               ±5  (62/62 refresh)
+.github/workflows/ci.yml                                     ±5  (schema-fidelity install)
+CLAUDE.md                                                    ±1  (security false-pos)
+CHANGELOG.md                                                 +XX (this entry)
+docs/CONVENTIONS.md                                          (unchanged, just pointer-target)
+tasks/lessons.md                                             ±47 (10 entries condensed)
+tasks/todo.md                                                ±1  (quenchforge install closed)
+tasks/2026-05-16-v0.95.6-sprint.md                           new (sprint plan)
+tasks/2026-05-16-trust-readers-diagnostic.md                 new (Phase 2 deliverable)
+```
+
+### Cross-repo commits
+
+- `cerid-ai/quenchforge@6157c76` — `feat(install): add 'quenchforge install' subcommand`
+- `cerid-ai/quenchforge@v0.5.1` — tagged release
+
+### Doc updates
+
+- `CHANGELOG.md` — this entry
+- `tasks/todo.md` — quenchforge follow-on closed; release ledger updated
+- `tasks/lessons.md` — 10 entries condensed
+- New: `tasks/2026-05-16-v0.95.6-sprint.md` (sprint plan, 3-release roadmap)
+- New: `tasks/2026-05-16-trust-readers-diagnostic.md`
+
+### Next: v0.95.7 (Phases 4-5)
+
+LongMemEval baseline (Phase 4) + trust-score goes live (Phase 5).
+Phase 4 generates the `tests/eval/baselines/longmemeval.json` that
+lights the 6th trust component; Phase 5 lands the two small reader
+tweaks identified in the diagnostic.
+
 ## v0.95.5 — trust-score uplift: faithfulness + preservation_health (2026-05-16)
 
 Two-axis trust-score improvement. Faithfulness lifted 0.138 → 0.89

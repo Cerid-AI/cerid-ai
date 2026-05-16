@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import patch
 
 import pytest
 
@@ -24,7 +23,6 @@ from app.tool_registry import (
     ResourceNotFoundError,
     UpstreamUnavailableError,
 )
-
 
 # ----------------------------------------------------------- error envelope
 
@@ -149,8 +147,8 @@ async def test_session_reaper_evicts_idle_sessions(monkeypatch):
 async def test_execute_tool_emits_audit_log(caplog):
     """Every dispatch emits an INFO line on ai-companion.mcp_tool_audit
     with structured ``extra`` fields."""
+    from app.tool_registry import _swap_registry, register_tool
     from app.tools import execute_tool
-    from app.tool_registry import register_tool, _swap_registry
 
     _, restore = _swap_registry({})
     try:
@@ -187,8 +185,8 @@ async def test_execute_tool_emits_audit_log(caplog):
 @pytest.mark.asyncio
 async def test_execute_tool_audit_records_error_class(caplog):
     """When the handler raises, audit records outcome=error + class."""
+    from app.tool_registry import _swap_registry, register_tool
     from app.tools import execute_tool
-    from app.tool_registry import register_tool, _swap_registry
 
     _, restore = _swap_registry({})
     try:
@@ -233,8 +231,8 @@ def test_summarize_args_redacts_credential_like_keys():
     from app.tools import _summarize_args
 
     out = _summarize_args({
-        "password": "secret123",
-        "api_key": "sk-abc",
+        "password": "secret123",  # pragma: allowlist secret
+        "api_key": "sk-abc",  # pragma: allowlist secret
         "token": "xyz",
         "AUTHORIZATION": "Bearer ...",
         "regular": "ok",

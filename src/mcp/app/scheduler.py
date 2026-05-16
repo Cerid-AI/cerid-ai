@@ -21,6 +21,7 @@ from apscheduler.triggers.cron import CronTrigger
 import config
 from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils.cache import log_event
+from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.scheduler")
@@ -176,8 +177,8 @@ async def _run_quarantine_purge() -> None:
     chunk_dropped = 0
     failed = 0
     try:
-        from app.deps import get_chroma, get_neo4j
         from app.db import neo4j as graph
+        from app.deps import get_chroma, get_neo4j
         from core.utils.time import utcnow_iso
 
         now_iso = utcnow_iso()
@@ -216,10 +217,8 @@ async def _run_quarantine_purge() -> None:
                         )
                         coll.delete(ids=chunk_ids)
                         chunk_dropped += len(chunk_ids)
-                    except Exception:
-                        # Collection missing or chunks already gone —
-                        # the Neo4j node is already deleted, so soldier on.
-                        pass
+                    except Exception as exc:  # noqa: BLE001 — collection-gone is a valid post-state during quarantine cleanup
+                        log_swallowed_error(__name__, exc)
             except Exception as e:
                 failed += 1
                 logger.warning("Quarantine purge failed for %s: %s", artifact_id, e)

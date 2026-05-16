@@ -824,8 +824,8 @@ async def pkb_answer_with_citations(
     if not question.strip():
         raise InvalidParamsError("question must be non-empty")
 
-    from core.agents.query_agent import agent_query
     from core.agents.hallucination.extraction import extract_claims
+    from core.agents.query_agent import agent_query
     from core.utils.internal_llm import call_internal_llm
 
     # 1. Retrieve

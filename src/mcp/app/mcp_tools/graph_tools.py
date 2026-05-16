@@ -30,6 +30,7 @@ from app.tool_registry import (
     UpstreamUnavailableError,
     register_tool,
 )
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.mcp_tools.graph")
 
@@ -392,8 +393,8 @@ async def pkb_graph_communities(
                     "CALL gds.graph.drop($name, false) YIELD graphName RETURN graphName",
                     name=graph_name,
                 ).consume()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 — drop-on-missing is best-effort cleanup
+                log_swallowed_error(__name__, exc)
 
             # Project + run Louvain. Native projection on (:Artifact)
             # with the connection relationships. We treat all edges

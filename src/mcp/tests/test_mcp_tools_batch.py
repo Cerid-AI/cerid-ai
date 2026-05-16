@@ -24,7 +24,6 @@ from app.mcp_tools.batch import (
 )
 from app.tool_registry import InvalidParamsError
 
-
 # ----------------------------------------------------------- _resolve_path
 
 

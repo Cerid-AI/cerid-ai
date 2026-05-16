@@ -24,9 +24,11 @@ from __future__ import annotations
 
 # Import each module so its @register_tool decorators fire.
 # Order doesn't matter for correctness; alphabetical for readability.
-from app.mcp_tools import batch  # noqa: F401
-from app.mcp_tools import feedback  # noqa: F401
-from app.mcp_tools import fundamentals  # noqa: F401
-from app.mcp_tools import graph_tools  # noqa: F401
-from app.mcp_tools import retrieval  # noqa: F401
-from app.mcp_tools import temporal  # noqa: F401
+from app.mcp_tools import (
+    batch,  # noqa: F401
+    feedback,  # noqa: F401
+    fundamentals,  # noqa: F401
+    graph_tools,  # noqa: F401
+    retrieval,  # noqa: F401
+    temporal,  # noqa: F401
+)
