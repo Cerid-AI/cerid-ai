@@ -2,6 +2,123 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.3 — RAGAS baseline + 10 lessons graduated (2026-05-15)
+
+Two themes: establish a real faithfulness baseline so the trust score
+gets a fourth live component, and start the long-running
+`tasks/lessons.md` graduation — 892 LOC of recovered debugging lessons
+becoming lint rules + CONVENTIONS.md entries instead of prose.
+
+### RAGAS baseline established
+
+Seed run of `tests/eval/ragas_eval.py::evaluate_rag_quality` against
+the 50-entry golden dataset, judged by `openai/gpt-4o-mini`. Result
+saved to `src/mcp/tests/eval/baselines/ragas.json`:
+
+- **faithfulness: 0.138** (below the 0.90 ship gate — honest
+  baseline; the golden dataset's ground-truth claims often include
+  facts that aren't entailed by their contexts. A judge-relaxation
+  pass or a context-tightening pass on the dataset is the v0.96
+  candidate.)
+- **context_precision: 1.0** (every retrieved context is relevant
+  to its query)
+- context_recall / answer_relevancy: not computed (require a
+  separately-generated answer; Phase 3 wiring)
+
+The trust score now reports **4/6 components live** (was 3/6):
+```
+  score: 74  band: medium
+    retrieval_ndcg10       ok    0.8776
+    user_agreement         ok    1.0
+    verification_coverage  fail  0.75 (9/12 verified)
+    faithfulness           fail  0.138 (50-entry RAGAS)
+    memory_recall          not_available  (Phase 8)
+    preservation_health    not_available  (next CI run)
+```
+
+`score` dropped 93→74 (band: high→medium) — that's correct, the
+new data point is below target and pulls the mean down honestly.
+
+The CI workflow's nightly `ragas-eval` job was already wired; this
+run just seeded the file so the trust-score reader has a value to
+report before the next nightly fires.
+
+### Cypher-judge model bug fixed in pre-flight
+
+`app.eval.ragas_metrics` calls go through `call_llm` (OpenRouter
+direct) but inherit `INTERNAL_LLM_MODEL` from settings when no
+explicit model is passed. With v0.95.2 setting that to a local
+quenchforge alias (`llama3.2:3b`), OpenRouter 400'd every judge
+call. Documented + pinned the manual-seed invocation to
+`openai/gpt-4o-mini` explicitly.
+
+### 10 lessons graduated from `tasks/lessons.md`
+
+Five new lint scripts (each enforces a syntactic pattern) +
+five `docs/CONVENTIONS.md` entries (each encodes a judgment-call
+rule). All five lints land **warn-only** in CI initially so existing
+patterns aren't blocking PRs while they get triaged. Promote
+individually to blocking as each linter's findings reach zero.
+
+**Lint scripts (`scripts/lint-*.py`):**
+
+1. `lint-import-star-without-all.py` — forbids `from x import *`
+   in `__init__.py` without `__all__`; underscore-prefixed names
+   silently skipped otherwise. 6 existing findings flagged for
+   triage.
+2. `lint-no-module-getenv-mutable.py` — forbids module-level
+   `os.getenv()` of user-mutable env vars (OPENROUTER_API_KEY,
+   INTERNAL_LLM_*, EMBEDDINGS_PROVIDER, etc.). Setup wizard +
+   live-mutable settings cannot work when module-scope captures
+   freeze the value at import time. 3 existing findings flagged
+   for triage.
+3. `lint-docker-healthcheck-localhost.py` — forbids `localhost`
+   in `docker-compose*.yml` healthcheck commands; Alpine resolves
+   `localhost` to `::1` IPv6 but services bind 0.0.0.0 IPv4.
+   1 existing finding flagged.
+4. `lint-web-no-crypto-randomuuid.py` — forbids `crypto.randomUUID()`
+   outside `lib/utils.ts`; undefined under non-secure contexts
+   (HTTP-over-LAN-IP). `uuid()` helper falls back to
+   `crypto.getRandomValues()`. Web tree currently compliant.
+5. `lint-dts-basename-collision.py` — forbids `.d.ts` sharing a
+   basename with sibling `.ts`/`.tsx`; TypeScript treats it as the
+   type decl for that specific module and silently ignores
+   ambient `declare module` statements. Web tree currently compliant.
+
+**`docs/CONVENTIONS.md` additions:**
+
+6. **Performance**: "Never raise a timeout to fix slow code" —
+   profile + find the bottleneck. The 2026-04-06 verification
+   slowness was wrongly "fixed" by raising timeouts three times
+   before the real cause (extract_claims LLM-first vs heuristic-
+   first) was found.
+7. **Security**: "Default to the most restrictive setting; let
+   users opt in to openness." CORS → localhost, ports → 127.0.0.1,
+   sync directories → off, etc.
+8. **Async & event loops**: "Singletons of event-loop-bound objects
+   need an owner-thread guard." Main-thread guard + owner-loop
+   tracking; regression test `test_llm_client_loop_safety.py`.
+9. **Middleware**: "Middleware reads from immutable request data,
+   not from `request.state` set by other middleware." LIFO
+   ordering makes upstream-set state unreliable; read from headers.
+10. **Testing**: "@patch the bridge module, not the source." After
+    the Phase C bridge migration (`agents/`, `utils/`), patches
+    targeting `core.X` silently miss because callers look up via
+    the bridge module at runtime.
+
+### `tasks/lessons.md` annotations
+
+Each graduated lesson gets a `✅ GRADUATED — <enforcement location>`
+suffix on its heading so future readers can see at a glance which
+lessons are still prose vs. code-enforced. 10/892 LOC done; ~882
+LOC remains, ~17 of which look graduatable on the next pass.
+
+### Test coverage
+
+3 trust_score tests updated to reflect the v0.95.2 reader rewrite
+(ragas.json shape + :VerificationReport-based Cypher). Full suite:
+459 passing.
+
 ## v0.95.2 — trust score goes live + chat goes local (2026-05-15)
 
 Theme A (trust score live) + Theme B partial (chat path local) from
