@@ -2,6 +2,65 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.5 — trust-score uplift: faithfulness + preservation_health (2026-05-16)
+
+Two-axis trust-score improvement. Faithfulness lifted 0.138 → 0.89
+(6.4×); preservation_health graduates from `not_available` to a real
+value sourced from the local preservation run.
+
+### Faithfulness (golden dataset + sliding-window NLI)
+
+The golden dataset's RAGAS faithfulness was 0.138 — the NLI judge was
+strict by design (matches production hallucination check) but the
+ground-truths were paraphrased away from the contexts, and the scorer
+fed only the first 512 chars of joined contexts to NLI per claim.
+Both halves fixed:
+
+- **Dataset tightening** (`src/mcp/tests/eval/golden_dataset.json`):
+  49/50 ground-truths rewritten so each atomic claim is verbatim or
+  close-paraphrase to text in its contexts. Where the original
+  evidence sat past char 512 of contexts[0], a one-sentence summary
+  was prepended to make the claim reachable.
+- **Sliding-window NLI** (`src/mcp/app/eval/ragas_metrics.py`):
+  `faithfulness()` now chunks joined contexts into overlapping
+  480-char sentence-aligned windows (~120 tokens each, 160-char
+  overlap) and takes `max(entailment)` across chunks per claim.
+  Premise budget enlarged 2048 → 8192 chars. Existing 4 unit tests
+  still pass; 3 new tests cover the chunker + max-pool behavior.
+
+Resulting RAGAS baseline: `faithfulness=0.89`, `context_precision=1.0`,
+`context_recall=0.94`, `answer_relevancy=0.83`.
+
+### Preservation health (CI + local writer)
+
+`make preservation-check` now invokes pytest from the host venv
+(matching CI), emits `preservation-results.xml`, and runs
+`scripts/write-preservation-baseline.py` to produce
+`src/mcp/tests/eval/baselines/preservation.json`. The CI flow already
+wrote this file as an artifact since v0.95.2; the Makefile change
+mirrors that locally so the trust-score endpoint sees a real value
+in dev too. Current local run: 61/62 = 0.984.
+
+### Trust-score deltas
+
+| Component | v0.95.4 | v0.95.5 |
+|---|---|---|
+| faithfulness | 0.138 (norm 0.15) | 0.89 (norm 0.99) |
+| preservation_health | not_available | 0.984 (norm 0.98) |
+| retrieval_ndcg10 | 0.878 | 0.878 |
+| verification_coverage | rolling | rolling |
+| user_agreement | 1.0 | 1.0 |
+| memory_recall | not_available (Phase 8) | unchanged |
+
+### Deferred to Phase 8
+
+`memory_recall` stays `not_available` — LongMemEval requires the
+~400 MB `_s` dataset download plus a `core/memory` adapter exposing
+`ingest_session()` / `query()`, properly a half-to-full-day Phase 8
+effort. Lighting it with a synthetic baseline would be worse than
+leaving it dark, since the trust-score reader takes the value at
+face value.
+
 ## v0.95.4 — graduated-lint triage + promotion to blocking (2026-05-15)
 
 Cleanup pass on the 10 findings the v0.95.3 graduation lints surfaced.

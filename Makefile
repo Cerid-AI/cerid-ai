@@ -63,8 +63,13 @@ smoke:
 # CERID_PRESERVATION_MCP). NEO4J_PASSWORD must be in the env or in .env.
 preservation-check: ## Run capability-preservation invariants (I1-I8) against a live stack
 	@echo "[preservation] requires stack running (scripts/start-cerid.sh)"
-	@test -n "$$NEO4J_PASSWORD" || set -a && . .env && set +a; \
-	docker exec ai-companion-mcp python -m pytest tests/integration/ -m preservation -v --tb=short
+	@cd src/mcp && ../../.venv/bin/python -m pytest tests/integration/ -m preservation -v --tb=short \
+	  --junit-xml=/tmp/preservation-results.xml ; \
+	rc=$$? ; \
+	cd ../.. ; \
+	python3 scripts/write-preservation-baseline.py \
+	  --junit-xml /tmp/preservation-results.xml --source local >/dev/null 2>&1 || true ; \
+	exit $$rc
 
 # -- Latency SLO benchmarks --
 slo: ## Run latency SLO benchmarks against localhost:8888 (requires running stack)
