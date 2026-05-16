@@ -158,8 +158,44 @@ def test_compute_trust_score_partial_baselines(tmp_path: Path) -> None:
     assert ts.score == 100
 
 
+def test_preservation_excludes_skipped_from_denominator(tmp_path: Path) -> None:
+    """Skipped invariants don't count against the pass rate.
+
+    Real-world case: 57 passed, 0 failed, 5 skipped → preservation health
+    should be 1.0 (57/57 attempted), not 0.92 (57/62 with skips charged).
+    """
+    (tmp_path / "preservation.json").write_text(json.dumps({
+        "passed": 57, "failed": 0, "skipped": 5, "total": 62,
+        "last_run_at": "2026-05-16T11:34:50+00:00",
+    }))
+    with patch(
+        "app.services.trust_score._PRESERVATION_PATH",
+        tmp_path / "preservation.json",
+    ):
+        ts = compute_trust_score(neo4j_driver=None)
+    pres = next(c for c in ts.components if c.id == "preservation_health")
+    assert pres.value == 1.0
+    assert pres.note == "57/57"
+
+
+def test_preservation_charges_failures(tmp_path: Path) -> None:
+    """Failures still bring the rate down; skips are still neutral."""
+    (tmp_path / "preservation.json").write_text(json.dumps({
+        "passed": 50, "failed": 7, "skipped": 5, "total": 62,
+    }))
+    with patch(
+        "app.services.trust_score._PRESERVATION_PATH",
+        tmp_path / "preservation.json",
+    ):
+        ts = compute_trust_score(neo4j_driver=None)
+    pres = next(c for c in ts.components if c.id == "preservation_health")
+    # 50 / (50+7) = 0.877…
+    assert pres.value is not None
+    assert abs(pres.value - 50.0 / 57.0) < 1e-6
+
+
 def test_compute_trust_score_with_neo4j_coverage() -> None:
-    """Neo4j coverage component computes from rolling 24h fraction."""
+    """Neo4j coverage component computes from rolling 7d fraction."""
     fake_driver = MagicMock()
     fake_session = MagicMock()
     fake_result = MagicMock()
@@ -172,6 +208,32 @@ def test_compute_trust_score_with_neo4j_coverage() -> None:
     coverage = next(c for c in ts.components if c.id == "verification_coverage")
     assert coverage.value == pytest.approx(0.97)
     assert coverage.status == "ok"
+
+
+def test_verification_coverage_queries_seven_day_window() -> None:
+    """The `since` parameter passed to Neo4j must reflect a 7-day window.
+
+    Locks in the v0.95.7 widening from 24h → 7d so the component lights
+    up on tenants with low verification traffic.
+    """
+    from datetime import datetime, timezone
+    fake_driver = MagicMock()
+    fake_session = MagicMock()
+    fake_result = MagicMock()
+    fake_result.single.return_value = {"total": 10, "covered": 9}
+    fake_session.run.return_value = fake_result
+    fake_driver.session.return_value.__enter__ = MagicMock(return_value=fake_session)
+    fake_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+
+    compute_trust_score(neo4j_driver=fake_driver)
+
+    # Inspect the `since` kwarg passed to session.run
+    _, kwargs = fake_session.run.call_args
+    since = kwargs.get("since")
+    assert since is not None
+    delta = datetime.now(timezone.utc) - datetime.fromisoformat(since)
+    # 7 days ± a few seconds for test execution drift
+    assert 6.99 < delta.days + delta.seconds / 86400.0 < 7.01
 
 
 def test_compute_trust_score_handles_neo4j_failure() -> None:
