@@ -2,6 +2,100 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.95.2 — trust score goes live + chat goes local (2026-05-15)
+
+Theme A (trust score live) + Theme B partial (chat path local) from
+the post-v0.95.1 evaluation. The trust score subsystem ships from
+"0/6 components, score=null" to a real composite with three live
+readers; chat traffic stops paying OpenRouter when a GPU host is
+available.
+
+### Trust score — three real bugs found + fixed
+
+The `0/6 components available` state turned out to be three layered
+bugs, not missing data:
+
+- **Path resolution off-by-one.** `_BASELINES_DIR` used
+  `Path(__file__).resolve().parents[3]` — but the actual package root
+  is `parents[2]` (`src/mcp/` host-side, `/app/` in container). The
+  baseline directory lookup pointed at `/` and missed every file.
+  Symptom: `"ragas.json missing"` / `"retrieval.json missing"`
+  notes in /health even though those files existed.
+
+- **Faithfulness reader expected wrong schema.** ragas.json is
+  shaped `{metrics: {faithfulness, context_precision, ...}}` but
+  the reader called `data.get("faithfulness")` at the top level.
+  Fixed to walk into `data["metrics"]["faithfulness"]`.
+
+- **Verification-coverage Cypher targeted `:Claim`** with a
+  `detected_at` property — neither artifact exists in the live
+  schema. The verification pipeline persists `:VerificationReport`
+  nodes (156 of them in the live graph) with aggregate
+  `verified` / `unverified` / `uncertain` / `total` counters, never
+  standalone Claim nodes; downstream paths that do create Claims
+  (briefs, ratings) use `created_at`, not `detected_at`. Reader
+  rewritten to target `:VerificationReport.created_at` and compute
+  `sum(verified)/sum(total)` over the rolling 24h window.
+
+### pkb_rate self-creates Claims
+
+`mcp_tools/feedback.py::pkb_rate` was `MATCH (c:Claim {claim_id: ...})`
+— requiring a pre-existing Claim. Since no live code path produces
+standalone Claim nodes, pkb_rate was silently impossible to use
+from v0.95.0 ship through v0.95.1. Switched to MERGE on Claim
+with `created_at` + `first_rated_at` set on creation so the rating
+graph actually populates. `claim_accuracy_rolling` now produces
+real user_agreement values.
+
+### Preservation health writer
+
+`scripts/write-preservation-baseline.py` parses
+`preservation-results.xml` (JUnit) into
+`src/mcp/tests/eval/baselines/preservation.json` with
+`{passed, failed, skipped, total, last_run_at, git_sha, source}`.
+Wired into the `preservation` CI job after the pytest invocation
++ uploaded as a CI artifact. The `preservation_health` component
+lights up after the next CI run. Local dev path documented in
+the script's docstring.
+
+### INTERNAL_LLM_PROVIDER → quenchforge
+
+Quenchforge v0.3.3's wire-translation + AMD-discrete hardware-aware
+args make `INTERNAL_LLM_PROVIDER=quenchforge` viable on chat paths.
+Verified: 3 sequential `pkb_check_hallucinations` calls land 7
+clean dispatches (`ok=7, error=0, error_rate=0.0`), no breakers
+tripped, no swallowed errors, claim extraction completes through
+the quenchforge gateway. Operators on GPU-equipped hosts stop
+paying OpenRouter for chat workloads.
+
+### Live trust score state post-restart
+
+```
+score: 93  band: high
+  retrieval_ndcg10          ok              0.8776  (real eval baseline)
+  verification_coverage     fail            0.75    (9/12 verified — real data)
+  user_agreement            ok              1.0     (1/1 positive — seeded)
+  faithfulness              not_available   ─       (awaits RAGAS run)
+  memory_recall             not_available   ─       (awaits LongMemEval — Phase 8)
+  preservation_health       not_available   ─       (awaits CI write — lands on next main run)
+```
+
+3/6 components reporting real data. The "fail" status on
+verification_coverage is informational — last 24h of verifications
+landed at 75% verified, below the 95% target. That's real
+operational feedback, not a bug.
+
+### Theme B remainder deferred to v0.96
+
+- **NLI GPU path** — genuinely multi-day work (classifier endpoint
+  in quenchforge or sidecar; ONNX/llama.cpp conversion of an NLI
+  model). Plan doc:
+  [`tasks/2026-05-13-llama-alternatives-for-nli.md`](tasks/2026-05-13-llama-alternatives-for-nli.md).
+- **quenchforge.plist auto-install via `quenchforge install`** —
+  template file ships canonically at
+  `quenchforge/packaging/macos/com.cerid.quenchforge.plist`; the
+  CLI auto-drop step is the remaining gap.
+
 ## v0.95.1 — overhaul follow-through: reranker, scheduler, warnings, observability (2026-05-15)
 
 13 follow-through deliverables from the v0.95.0 cerid-kb overhaul.

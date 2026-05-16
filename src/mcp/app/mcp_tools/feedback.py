@@ -103,13 +103,23 @@ async def pkb_rate(
 
     def _run() -> bool:
         with driver.session() as session:
-            # MERGE the edge so re-rating updates instead of creating
-            # duplicates. The Anonymous source node simply represents
-            # "an anonymous rater" — multi-user mode can specialise it
-            # later to (:User {id}) without touching this tool.
+            # MERGE the Claim so the rating works even when no upstream
+            # path has materialised it as a :Claim node yet — Cerid's
+            # verification pipeline currently persists :VerificationReport
+            # nodes with claims-as-JSON-blob rather than first-class
+            # :Claim records. pkb_rate creates the standalone Claim on
+            # first reference (with created_at + first_rated_at) and
+            # MERGEs the :RATED edge from an anonymous Rater so
+            # re-ratings update rather than duplicate.
+            #
+            # The created_at property is what trust_score's user_agreement
+            # reader filters on via claim_accuracy_rolling — without it
+            # the rating exists but is invisible to the 7-day rolling
+            # aggregate.
             result = session.run(
                 """
-                MATCH (c:Claim {claim_id: $claim_id})
+                MERGE (c:Claim {claim_id: $claim_id})
+                  ON CREATE SET c.created_at = $ts, c.first_rated_at = $ts
                 MERGE (rater:Rater {scope: 'anonymous'})
                 MERGE (rater)-[r:RATED]->(c)
                 SET r.sentiment = $sentiment,
@@ -130,6 +140,8 @@ async def pkb_rate(
         raise UpstreamUnavailableError(f"Neo4j unreachable: {exc}") from exc
 
     if not rated:
+        # Defensive — MERGE always returns a row, so this is unreachable
+        # in practice. Kept for symmetry with the other error envelopes.
         raise ResourceNotFoundError(f"Claim {claim_id!r} not found")
 
     return {"rated": True, "claim_id": claim_id, "sentiment": sentiment, "ts": now}
