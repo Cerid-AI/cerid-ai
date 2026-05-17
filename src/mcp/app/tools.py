@@ -18,7 +18,6 @@ from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.routers.artifacts import recategorize
 from app.routers.health import health_check, list_collections
-from app.routers.query import query_knowledge
 from app.services.ingestion import ingest_content, ingest_file
 from app.tool_registry import (
     TOOL_REGISTRY,
@@ -37,35 +36,12 @@ _audit_logger = logging.getLogger("ai-companion.mcp_tool_audit")
 # ── MCP Tool Definitions ─────────────────────────────────────────────────────
 
 MCP_TOOLS = [
-    {
-        "name": "pkb_query",
-        "description": "**DEPRECATED — prefer `pkb_agent_query`.** Single-domain top-3 search, no reranking. Kept through v0.95 for compatibility; scheduled for removal in v0.96. **Use when** you need the fastest possible retrieval and one domain is sufficient. **Returns** `{results, context, confidence, domains_searched, total_results}`.",
-        "_deprecated_since": "0.95.0",
-        "_deprecated_replaced_by": "pkb_agent_query",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-                "domain": {
-                    "type": "string",
-                    "description": f"Knowledge domain ({', '.join(config.DOMAINS)})",
-                    "default": "general",
-                },
-                "top_k": {"type": "integer", "description": "Number of results", "default": 3},
-            },
-            "required": ["query"],
-        },
-        "outputSchema": {
-            "type": "object",
-            "properties": {
-                "results": {"type": "array", "items": {"type": "object"}, "description": "Matching chunks with relevance scores"},
-                "context": {"type": "string", "description": "Assembled context string"},
-                "confidence": {"type": "number", "description": "Average relevance 0.0-1.0"},
-                "domains_searched": {"type": "array", "items": {"type": "string"}},
-                "total_results": {"type": "integer"},
-            },
-        },
-    },
+    # v0.96.0: pkb_query alias removed. Deprecation maturity ended per
+    # `tests/test_mcp_tool_schema_fidelity.py::test_tool_inventory_meets_minimum`
+    # — the floor drops from 56 → 55 tools. Use `pkb_agent_query` for the
+    # multi-domain reranked path (the v0.95 replacement) or
+    # `pkb_search_filtered` when you specifically need a single-domain
+    # top-k cheaper than the agent path.
     {
         "name": "pkb_ingest",
         "description": "Ingest a raw text blob into the KB (no file, no parsing pipeline). **Use when** the LLM is handing in text it already has — chat turn, web-scrape snippet, computed summary. For files on disk use `pkb_ingest_file`; for full triage routing use `pkb_triage`. **Returns** `{status, artifact_id, chunks, domain}`.",
@@ -732,9 +708,11 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
         return await execute_registered_tool(name, arguments)
 
     # 2. Legacy if/elif (pre-Phase-1.6)
-    if name == "pkb_query":
-        return await asyncio.to_thread(query_knowledge, **arguments)
-    elif name == "pkb_ingest":
+    # v0.96.0: pkb_query handler removed — the deprecation alias from
+    # v0.95 reached maturity and is no longer dispatched. Callers
+    # receive the "Unknown tool: pkb_query" branch below, which is the
+    # correct end-state per the deprecation contract.
+    if name == "pkb_ingest":
         return await asyncio.to_thread(ingest_content, arguments.get("content", ""), arguments.get("domain", "general"))
     elif name == "pkb_ingest_file":
         return await ingest_file(**arguments)

@@ -64,7 +64,7 @@ def test_from_template_with_empty_body_succeeds(_mock_neo4j, _mock_create):
     assert body["template_id"] == "research-assistant"
     # System prompt and tools should be the template's
     assert body["system_prompt"]
-    assert "pkb_query" in body["tools"]
+    assert "pkb_agent_query" in body["tools"]
 
 
 @patch("app.db.neo4j.agents.create_agent", side_effect=_stub_create_agent)

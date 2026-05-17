@@ -279,6 +279,16 @@ jobs:
           # libssh2 vuln — pulled in transitively by base image; no SSH client ever invoked
           # from application code. No upstream fix; re-eval 2026-06-30.
           CVE-2026-7598
+          # libcurl wrong file transfer via incorrect SMB handling — application code
+          # uses httpx for all HTTP I/O; the SMB protocol is never invoked. libcurl is
+          # pulled in transitively by the Debian 13 base. No upstream Debian fix yet;
+          # re-eval 2026-06-30.
+          CVE-2026-5773
+          # libcurl cookie-leak information disclosure — same surface as CVE-2026-5773;
+          # we never invoke libcurl directly. Cookies in our HTTP path are managed by
+          # httpx's Cookies API, not by libcurl's. No upstream Debian fix yet;
+          # re-eval 2026-06-30.
+          CVE-2026-6276
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1

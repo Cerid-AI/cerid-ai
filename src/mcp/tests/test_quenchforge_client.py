@@ -268,3 +268,162 @@ def test_url_final_fallback_to_localhost(monkeypatch):
     monkeypatch.delenv("QUENCHFORGE_URL", raising=False)
     monkeypatch.delenv("OLLAMA_URL", raising=False)
     assert _get_quenchforge_url() == "http://localhost:11434"
+
+
+# ---------------------------------------------------------------------------
+# 503 / Retry-After handling — back-pressure must NOT trip the breaker
+# ---------------------------------------------------------------------------
+
+
+def _resp_with_status(status: int, *, retry_after: str | None = None, json_data: dict | None = None):
+    """Build a fake httpx Response with the given status + optional headers."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    if json_data is not None:
+        resp.json = MagicMock(return_value=json_data)
+    else:
+        resp.json = MagicMock(return_value={})
+    if 400 <= status < 600:
+        import httpx
+        # Build a real HTTPStatusError so raise_for_status() round-trips
+        # through the breaker the way httpx does in production.
+        err = httpx.HTTPStatusError(
+            f"HTTP {status}",
+            request=MagicMock(),
+            response=MagicMock(status_code=status),
+        )
+        resp.raise_for_status = MagicMock(side_effect=err)
+    else:
+        resp.raise_for_status = MagicMock()
+    return resp
+
+
+async def test_503_retries_then_succeeds(monkeypatch):
+    """A 503 should trigger a Retry-After sleep + retry, not bubble up.
+
+    The breaker must NOT see the 503 — it's back-pressure, not a slot
+    failure. After the slot recovers (returns 200), the call succeeds
+    normally.
+    """
+    monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "test-embed")
+    import config.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "EMBEDDING_DIMENSIONS", 3)
+    from utils import quenchforge_client
+
+    # First call: 503 with Retry-After: 0; second call: 200 OK.
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(side_effect=[
+        _resp_with_status(503, retry_after="0"),
+        _resp_with_status(200, json_data={
+            "data": [{"index": 0, "embedding": [1.0, 1.0, 1.0]}],
+        }),
+    ])
+    fake_breaker = MagicMock()
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            result = await quenchforge_client.quenchforge_embed(["hello"])
+    assert result == [[1.0, 1.0, 1.0]]
+    # Two POSTs total — initial + 1 retry.
+    assert fake_client.post.await_count == 2
+
+
+async def test_503_exhausts_retries_raises(monkeypatch):
+    """If the slot keeps returning 503, the helper raises after
+    _MAX_503_RETRIES so the breaker eventually sees the failure."""
+    monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "test-embed")
+    import config.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "EMBEDDING_DIMENSIONS", 3)
+    from utils import quenchforge_client
+
+    fake_client = MagicMock()
+    # Always 503.
+    fake_client.post = AsyncMock(
+        return_value=_resp_with_status(503, retry_after="0"),
+    )
+    fake_breaker = MagicMock()
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            with pytest.raises(Exception):
+                await quenchforge_client.quenchforge_embed(["hello"])
+    # _MAX_503_RETRIES = 3 → 4 total attempts (initial + 3 retries).
+    assert fake_client.post.await_count == 4
+
+
+async def test_502_propagates_to_breaker(monkeypatch):
+    """502 Bad Gateway = slot dead. Must propagate to the breaker so
+    the breaker can open + the embedding chain falls through. The
+    Retry-After path must NOT swallow 502s."""
+    monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "test-embed")
+    import config.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "EMBEDDING_DIMENSIONS", 3)
+    from utils import quenchforge_client
+
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(
+        return_value=_resp_with_status(502),
+    )
+    fake_breaker = MagicMock()
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            with pytest.raises(Exception):
+                await quenchforge_client.quenchforge_embed(["hello"])
+    # 502 should NOT trigger the retry loop — exactly one POST.
+    assert fake_client.post.await_count == 1
+
+
+async def test_retry_after_clamped_to_max(monkeypatch):
+    """A misconfigured server claiming Retry-After: 600 must not pin
+    the calling thread for 10 minutes. We clamp to 5s."""
+    monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "test-embed")
+    import config.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "EMBEDDING_DIMENSIONS", 3)
+    from utils import quenchforge_client
+
+    sleep_calls: list[float] = []
+    async def _spy_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(side_effect=[
+        _resp_with_status(503, retry_after="600"),
+        _resp_with_status(200, json_data={
+            "data": [{"index": 0, "embedding": [1.0, 1.0, 1.0]}],
+        }),
+    ])
+    fake_breaker = MagicMock()
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            with patch.object(quenchforge_client.asyncio, "sleep", new=_spy_sleep):
+                await quenchforge_client.quenchforge_embed(["hello"])
+
+    # Should have slept exactly once before the retry, clamped to 5s.
+    assert sleep_calls == [5.0]
+
+
+def test_parse_retry_after_handles_invalid_values():
+    from utils.quenchforge_client import _parse_retry_after
+    assert _parse_retry_after(None) is None
+    assert _parse_retry_after("") is None
+    assert _parse_retry_after("not-a-number") is None
+    # HTTP-date form is intentionally unsupported (would parse as None).
+    assert _parse_retry_after("Fri, 31 Dec 1999 23:59:59 GMT") is None
+    # Valid integer seconds.
+    assert _parse_retry_after("2") == 2.0
+    assert _parse_retry_after("  3  ") == 3.0
