@@ -267,6 +267,16 @@ FAITHFULNESS_DECOMPOSE_MAX_SUBCLAIMS = int(os.getenv("FAITHFULNESS_DECOMPOSE_MAX
 # is empirically required to make decomposition a positive lift.
 NLI_ATOMIC_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ATOMIC_ENTAILMENT_THRESHOLD", "0.5"))
 
+# v0.96.0 Phase 5 — opt-in upgrade for faithfulness scoring.
+# When enabled, ragas_metrics.faithfulness() calls _extract_claims_llm()
+# instead of the regex heuristic. Catches sub-claims in multi-clause
+# sentences the regex misses, at the cost of one LLM call per scored
+# answer. Disabled by default to keep the RAGAS gate cost-bounded.
+FAITHFULNESS_LLM_CLAIM_EXTRACTION = os.getenv(
+    "FAITHFULNESS_LLM_CLAIM_EXTRACTION", "false",
+).lower() == "true"
+FAITHFULNESS_LLM_MAX_CLAIMS = int(os.getenv("FAITHFULNESS_LLM_MAX_CLAIMS", "12"))
+
 # ---------------------------------------------------------------------------
 # Verified Memory Promotion
 # ---------------------------------------------------------------------------

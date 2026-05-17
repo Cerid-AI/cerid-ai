@@ -321,24 +321,16 @@ class OnnxEmbeddingFunction:
         if not is_embeddings_provider_quenchforge():
             return None
 
-        # Sync-bridge identical to the sidecar path below.  Keeps the
-        # call site sync-compatible with chromadb 1.x's
-        # EmbeddingFunction.__call__ contract.
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
-
-        def _runner() -> list[list[float]]:
-            from utils.quenchforge_client import quenchforge_embed
-            loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(loop)
-                return loop.run_until_complete(quenchforge_embed(texts))
-            finally:
-                loop.close()
-
+        # Sync-bridge via the persistent event-loop thread so the
+        # cached httpx.AsyncClient inside quenchforge_client survives
+        # across calls. Previously each call spawned a fresh loop, which
+        # voided the client cache and added ~1s of TCP-rebuild overhead
+        # per call — verified by the 14h vs 75min projected runtime
+        # delta on the v0.96.0 LongMemEval canonical baseline.
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                return executor.submit(_runner).result()
+            from core.utils.async_bridge import run_async
+            from utils.quenchforge_client import quenchforge_embed
+            return run_async(quenchforge_embed(texts), timeout=60.0)
         except Exception as exc:  # noqa: BLE001 — observability boundary
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error(
@@ -364,26 +356,13 @@ class OnnxEmbeddingFunction:
         if cfg.provider != "fastembed-sidecar" or not cfg.sidecar_available:
             return None
 
-        # Sync-bridge to the async sidecar client. ThreadPoolExecutor +
-        # fresh event loop in a worker thread is the same pattern
-        # core.utils.contextual + app.queue.tasks use to call async APIs
-        # from sync ChromaDB code paths without polluting the caller's
-        # asyncio state.
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
-
-        def _runner() -> list[list[float]]:
-            from utils.inference_sidecar_client import sidecar_embed
-            loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(loop)
-                return loop.run_until_complete(sidecar_embed(texts))
-            finally:
-                loop.close()
-
+        # Sync-bridge via the persistent event-loop thread so the
+        # cached sidecar HTTP client survives across calls. Same
+        # perf-critical fix as the quenchforge branch above.
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                return executor.submit(_runner).result()
+            from core.utils.async_bridge import run_async
+            from utils.inference_sidecar_client import sidecar_embed
+            return run_async(sidecar_embed(texts), timeout=60.0)
         except Exception as exc:  # noqa: BLE001 — observability boundary
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error(

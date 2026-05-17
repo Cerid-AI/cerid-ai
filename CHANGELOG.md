@@ -2,6 +2,102 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.96.0 — quality uplift: production retrieval stack, memory extraction, question-aware routing, RAGAS lift (2026-05-16)
+
+Five-phase quality uplift release per
+`tasks/2026-05-16-quality-uplift-plan.md`. Builds the LongMemEval
+pipeline up from the v0.95.9 minimum-viable baseline (recall@k=0.432)
+toward the SOTA-anchored target by integrating cerid's production
+retrieval primitives, structured memory extraction, question-aware
+strategy routing, an LLM-as-judge scorer, and RAGAS metric upgrades.
+Closes the `pkb_query` deprecation alias per the v0.95 contract.
+
+Mechanically complete and tested across 4,937 unit tests. Numerical
+validation on the 500-item canonical baseline is deferred until
+quenchforge PR-3 ([Cerid-AI/quenchforge#3](https://github.com/Cerid-AI/quenchforge/pull/3))
+lands (sustained-load Metal hardening — the eval harness was the
+workload that surfaced the bug); operators can run CPU-only via the
+new env-knob defaults today.
+
+### Phase 1 — production embedding + reranker + chunking
+
+- **EphemeralChromaPipeline** gains `embedding_fn`, `use_reranker`,
+  `rerank_candidates`, `chunk_max_chars` constructor params. Default
+  preserves the v0.95.9 minimum-viable behaviour for backward compat.
+- **`--production-stack` CLI flag.** Wires the production retrieval
+  primitives: Snowflake Arctic-Embed-M-v1.5 + ms-marco-MiniLM
+  cross-encoder + metadata at ingest.
+- **Quenchforge GPU routing** is opt-in via `LONGMEMEVAL_ENABLE_QUENCHFORGE=1`.
+  Default is local CPU/ONNX with CoreML disabled — survives sustained
+  load on AMD-Mac Vega II. When enabled and the daemon is reachable,
+  the CLI auto-configures `EMBEDDINGS_PROVIDER=quenchforge`,
+  `RERANK_PROVIDER=quenchforge`, conservative `EMBED_UBATCH_SIZE=1024`
+  and `EMBED_METAL_N_CB=1` per the quenchforge v0.6.0 hardening contract.
+- **Per-session metadata at ingest** — `chunk_id`, `chunk_idx`,
+  `session_id`, `session_date` land on every document so Phase 3's
+  question-aware filtering has data to reason about.
+
+### Phase 2 — memory extraction layer
+
+- **`--extract-memories` flag.** Each session also runs through
+  `core.agents.memory.extract_memories`; the structured memories
+  (facts, decisions, preferences, action_items) are indexed in
+  ChromaDB alongside raw session chunks with `doc_kind=memory` and
+  `memory_type=<type>` metadata.
+- **`extraction_cache.py`** — append-only JSONL cache keyed by
+  `(model_version, session_text)` SHA-256. First run pays one LLM
+  call per session; subsequent runs reuse the cache.
+
+### Phase 3 — question-aware retrieval routing
+
+- **`retrieval_strategies.py`** with four strategies: `default`,
+  `preference` (memory_type filter + dual retrieval + RRF), `multi_session`
+  (LLM query decomposition + RRF), `temporal` (4× widened top_k).
+- **`--question-aware` flag** dispatches on dataset `question_type`.
+  Runner threads `question_type` through `query()` with graceful
+  `TypeError` fallback for older pipelines.
+- **RRF merge** (`_rrf_merge`) — reciprocal rank fusion with k=60.
+
+### Phase 4 — LLM-as-judge LongMemEval scorer
+
+- **Default scorer flipped** from substring → `LongMemEvalScorer`
+  (LLM-as-judge with `stage=longmemeval/score`). The substring
+  scorer's false-negative classes systematically underestimate
+  pipeline quality.
+- **`--substring-scorer` flag** retains the cheap mode for smoke
+  tests / CI fast-path.
+
+### Phase 5 — RAGAS quality lift
+
+- **LLM claim extraction in faithfulness** — opt-in via
+  `FAITHFULNESS_LLM_CLAIM_EXTRACTION=true`. Falls through to the
+  regex heuristic on any LLM failure.
+- **Context-grounded `answer_relevancy`** — new optional `contexts`
+  arg swaps in a stricter rubric ("1.0 = covers every essential fact").
+  Legacy context-blind prompt remains for callers that don't pass
+  contexts.
+- **`FAITHFULNESS_LLM_MAX_CLAIMS`** config knob (default 12) bounds
+  the LLM extraction output.
+
+### Operational
+
+- **`pkb_query` deprecation alias removed** (maturity per
+  `tests/test_mcp_tool_schema_fidelity.py:124`). Use `pkb_agent_query`
+  or `pkb_search_filtered`.
+- **Tool inventory floor: 55** (down from 56 — exactly the pkb_query
+  removal).
+- **Agent templates** (research-assistant, code-reviewer,
+  fact-checker, knowledge-curator) now reference `pkb_agent_query`
+  instead of the removed alias.
+
+### Known follow-ups
+
+- Numerical validation on the 500-item canonical baseline awaits
+  quenchforge PR-3 landing — eval harness on this hardware can't
+  sustain GPU embed/rerank load without the hardening.
+- Vega-II tuned defaults for quenchforge embed/rerank slots — separate
+  PR-2 on Cerid-AI/quenchforge.
+
 ## v0.95.9 — open-actions sweep: canonical LongMemEval + stratified sampler + ops hygiene (2026-05-16)
 
 Closes out the v0.95.6→v0.95.8 sprint's open-actions audit
