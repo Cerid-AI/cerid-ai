@@ -121,6 +121,76 @@ async def _get_client() -> httpx.AsyncClient:
     return _client
 
 
+# Cap the per-call retry budget on 503s so a permanently-busy slot
+# doesn't hang the caller indefinitely. After this many retries we
+# raise the HTTPStatusError to the breaker as usual.
+_MAX_503_RETRIES = 3
+
+# Hard cap on the Retry-After header value we honour. A misconfigured
+# server claiming Retry-After: 600 would pin a sync-bridge thread for
+# 10 minutes. Clamp to 5s so the breaker still meaningfully observes
+# patterns longer than that.
+_MAX_RETRY_AFTER_SECONDS = 5.0
+
+
+async def _post_with_retry_after(
+    client: httpx.AsyncClient,
+    url: str,
+    json_body: dict,
+) -> dict:
+    """POST with 503/Retry-After awareness.
+
+    Differentiates two upstream failure modes:
+
+    - **503 Service Unavailable** — the gateway is asking us to back off
+      (quenchforge's auto-backoff fires here when slot latency p99 goes
+      critical). The slot is alive; we sleep ``Retry-After`` seconds and
+      retry up to ``_MAX_503_RETRIES`` times. The breaker never sees the
+      503 — back-pressure is not a failure signal.
+
+    - **Everything else** (502, 500, non-2xx) — the slot is genuinely
+      broken. Propagate to the breaker.
+
+    This eliminates the interaction documented in
+    [[project_quenchforge_pr3_pending]]:
+    quenchforge auto-backoff returns 503 → cerid breaker opens after 3
+    failures → cerid embedding chain falls through to local ONNX
+    (different model than quenchforge serves) → ChromaDB ends up with a
+    mixed vector space → retrieval quality collapses.
+
+    The fix narrows the failure-trip surface so 503 (transient overload)
+    triggers retries instead of fallthrough. 502 still trips the breaker
+    so genuinely-dead slots get bypassed.
+    """
+    for attempt in range(_MAX_503_RETRIES + 1):
+        resp = await client.post(url, json=json_body)
+        if resp.status_code != 503 or attempt == _MAX_503_RETRIES:
+            resp.raise_for_status()
+            return resp.json()
+        # Server asked us to back off. Sleep for Retry-After (clamped).
+        retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+        if retry_after is None:
+            retry_after = 1.0
+        await asyncio.sleep(min(retry_after, _MAX_RETRY_AFTER_SECONDS))
+    # unreachable — the loop body returns or raises on every path
+    raise RuntimeError("_post_with_retry_after: exhausted retries without return")
+
+
+def _parse_retry_after(header: str | None) -> float | None:
+    """Parse the ``Retry-After`` header value. Returns seconds, or None.
+
+    HTTP allows either an integer seconds value or an HTTP-date. We
+    only support the integer form because quenchforge's gateway emits
+    that shape; an HTTP-date would be a behaviour we don't ship.
+    """
+    if not header:
+        return None
+    try:
+        return float(header.strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def is_embeddings_provider_quenchforge() -> bool:
     """True when the operator picked Quenchforge for the embedder."""
     return os.getenv("EMBEDDINGS_PROVIDER", "sidecar").strip().lower() == "quenchforge"
@@ -162,12 +232,10 @@ async def quenchforge_embed(
     t0 = time.perf_counter()
 
     async def _call():
-        resp = await client.post(
-            f"{url}/v1/embeddings",
-            json={"model": model, "input": texts},
+        return await _post_with_retry_after(
+            client, f"{url}/v1/embeddings",
+            {"model": model, "input": texts},
         )
-        resp.raise_for_status()
-        return resp.json()
 
     data = await breaker.call(_call)
     latency_ms = (time.perf_counter() - t0) * 1000
@@ -237,12 +305,10 @@ async def quenchforge_rerank(
     t0 = time.perf_counter()
 
     async def _call():
-        resp = await client.post(
-            f"{url}/v1/rerank",
-            json={"model": model, "query": query, "documents": documents},
+        return await _post_with_retry_after(
+            client, f"{url}/v1/rerank",
+            {"model": model, "query": query, "documents": documents},
         )
-        resp.raise_for_status()
-        return resp.json()
 
     data = await breaker.call(_call)
     latency_ms = (time.perf_counter() - t0) * 1000
