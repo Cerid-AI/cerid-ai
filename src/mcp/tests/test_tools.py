@@ -41,14 +41,17 @@ class TestToolRegistry:
         assert len(names) == len(set(names))
 
     def test_expected_tools_present(self):
+        # v0.96.0 — pkb_query removed (deprecation maturity).
         names = {t["name"] for t in MCP_TOOLS}
         expected = {
-            "pkb_query", "pkb_ingest", "pkb_ingest_file", "pkb_health",
+            "pkb_ingest", "pkb_ingest_file", "pkb_health",
             "pkb_collections", "pkb_agent_query", "pkb_artifacts",
             "pkb_recategorize", "pkb_triage", "pkb_rectify", "pkb_audit",
             "pkb_maintain",
         }
         assert expected.issubset(names)
+        # pkb_query alias must NOT come back.
+        assert "pkb_query" not in names
 
     def test_schemas_have_properties(self):
         for tool in MCP_TOOLS:
@@ -81,13 +84,12 @@ class TestExecuteToolUnknown:
 # ---------------------------------------------------------------------------
 
 class TestExecuteToolSync:
-    @patch("app.tools.query_knowledge")
-    def test_pkb_query(self, mock_qk):
-        mock_qk.return_value = {"results": []}
-        asyncio.run(
-            execute_tool("pkb_query", {"query": "test"})
-        )
-        mock_qk.assert_called_once_with(query="test")
+    def test_pkb_query_removed_in_v0_96(self):
+        # v0.96.0: pkb_query alias removed (deprecation maturity).
+        # Calling it now raises InvalidToolError; pkb_agent_query is
+        # the supported replacement.
+        with pytest.raises(InvalidToolError):
+            asyncio.run(execute_tool("pkb_query", {"query": "test"}))
 
     @patch("app.tools.ingest_content")
     def test_pkb_ingest(self, mock_ic):

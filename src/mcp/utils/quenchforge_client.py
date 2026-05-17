@@ -74,6 +74,9 @@ def _get_quenchforge_url() -> str:
     )
 
 
+_client_loop: asyncio.AbstractEventLoop | None = None
+
+
 async def _get_client() -> httpx.AsyncClient:
     """Return the module-level shared httpx client.
 
@@ -81,16 +84,40 @@ async def _get_client() -> httpx.AsyncClient:
     both observe ``_client is None`` and each construct a fresh client.
     Mirrors the pattern in ``core.utils.internal_llm._get_ollama_client``
     that this client was originally a near-twin of.
+
+    The cached client is tagged with the event loop that created it.
+    When called from a sync-bridge with a per-call fresh loop (the
+    ChromaDB embedding-function path uses this pattern via
+    ``ThreadPoolExecutor``), the previous loop closes between calls and
+    the client's underlying transport breaks ("Event loop is closed").
+    We detect that and rebuild the client on the current loop.
     """
-    global _client
-    if _client is not None and not _client.is_closed:
+    global _client, _client_loop
+    current_loop = asyncio.get_event_loop()
+    if (
+        _client is not None
+        and not _client.is_closed
+        and _client_loop is current_loop
+    ):
         return _client
     async with _client_lock:
-        if _client is None or _client.is_closed:
+        if (
+            _client is None
+            or _client.is_closed
+            or _client_loop is not current_loop
+        ):
+            # Best-effort cleanup of the loop-orphaned client. Closing on
+            # a closed loop is a no-op; we swallow whatever happens.
+            if _client is not None and not _client.is_closed:
+                try:
+                    await _client.aclose()
+                except Exception:  # noqa: BLE001 — best-effort cleanup
+                    pass
             _client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=5.0),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
+            _client_loop = current_loop
     return _client
 
 
@@ -268,7 +295,8 @@ async def quenchforge_health() -> dict | None:
 
 async def close() -> None:
     """Shutdown the shared httpx client.  Called from the app lifespan."""
-    global _client
+    global _client, _client_loop
     if _client and not _client.is_closed:
         await _client.aclose()
     _client = None
+    _client_loop = None
