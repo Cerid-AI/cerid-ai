@@ -111,8 +111,8 @@ async def _get_client() -> httpx.AsyncClient:
             if _client is not None and not _client.is_closed:
                 try:
                     await _client.aclose()
-                except Exception:  # noqa: BLE001 — best-effort cleanup
-                    pass
+                except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                    log_swallowed_error(__name__, exc)
             _client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=5.0),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
