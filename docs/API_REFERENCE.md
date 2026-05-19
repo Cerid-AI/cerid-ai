@@ -414,9 +414,41 @@ curl -X POST http://localhost:8888/recategorize \
 - `CATEGORIZE_MODE=smart` — Default tier (manual/smart/pro)
 - `OPENROUTER_API_KEY` — API key for OpenRouter (required)
 - `ARCHIVE_PATH=/archive` — Container-side mount point
-- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama` or `openrouter`, default: `openrouter`)
+- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama`, `quenchforge`, or `openrouter`, default: `openrouter`)
 - `INTERNAL_LLM_MODEL` — Internal LLM model ID (empty = auto-selected; set during Ollama setup wizard or via `OLLAMA_DEFAULT_MODEL`)
 - `OLLAMA_DEFAULT_MODEL` — Default Ollama model (auto-recommended based on hardware if not set; fallback: `llama3.2:3b`)
+
+**Internal LLM routing + retry (v0.96.1 candidate, post-2026-05-17 ablations):**
+- `PROVIDER_STAGE_<NORMALIZED_STAGE>` — Per-stage provider override
+  (e.g. `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`). Routes that
+  specific `call_internal_llm` call site to a different provider than
+  the global default. Stage names normalize via uppercase + `/` → `_`
+  + `-` → `_`. See `core.utils.internal_llm._resolve_stage_provider`.
+- `INTERNAL_LLM_MAX_RETRIES=3` — Cap on transient-failure retry
+  attempts inside `_call_ollama` (5xx / 429 / timeout / ConnectError).
+- `INTERNAL_LLM_RETRY_BACKOFF=0.5` — Exponential backoff base
+  (seconds) for the retry loop. Doubles per attempt.
+
+**Embedding cache (v0.96.1 candidate):**
+- `CERID_EMBED_CACHE_SIZE=50000` — In-memory LRU capacity. `0` disables.
+- `CERID_EMBED_CACHE_PATH` — If set, enables a disk tier
+  (`PersistentEmbeddingCache`) at the given SQLite path. Default
+  empty = memory-only. Cross-run / cross-process cache; namespace-
+  isolated per provider+model so different backends coexist in one DB.
+
+**LongMemEval runtime knobs (v0.96.1 candidate):**
+- `LONGMEMEVAL_INGEST_PARALLEL=4` — Parallel-ingest chunk size in
+  `runner.run`. Matches quenchforge's `--parallel 4` slot. Set to
+  `1` for sequential ingest (debugging).
+- `LONGMEMEVAL_SCORER=llm` — Scorer mode. Values: `llm` (default,
+  LongMemEvalScorer with stage=longmemeval/score), `substring`
+  (smoke mode), `two-pass` (substring shortcut → LLM fallback).
+- `LONGMEMEVAL_ENABLE_QUENCHFORGE=1` — Opt in to quenchforge GPU
+  routing for embed + rerank during ablation runs. Auto-configures
+  `EMBEDDINGS_PROVIDER`, `RERANK_PROVIDER`, and the internal LLM
+  provider for the LLM-judge scorer.
+- `LONGMEMEVAL_CHUNK_MAX_CHARS` — Override chunking size. Default is
+  unset (no chunking on minimum-viable, 1500 on production-stack).
 
 ---
 

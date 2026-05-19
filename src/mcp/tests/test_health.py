@@ -64,6 +64,40 @@ class TestHealthCheckFunction:
         result = health_check()
         assert "disabled" in result["services"]["neo4j"] or "lightweight" in result["services"]["neo4j"]
 
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_neo4j")
+    @patch("app.routers.health.get_chroma")
+    def test_embedding_cache_stats_included(self, mock_chroma, mock_neo4j, mock_redis):
+        """/health surfaces the embedding cache stats so operators can
+        verify the LRU is doing work (and catch 0% hit-rate regressions
+        if a config change ever defeats it)."""
+        mock_chroma.return_value = MagicMock()
+        mock_neo4j.return_value = None
+        mock_redis.return_value = MagicMock()
+
+        # Reset the cache singleton so this test sees a clean baseline,
+        # then poke it once to register a miss.
+        from core.utils.embedding_cache import (
+            _reset_singleton_for_testing,
+            get_embedding_cache,
+        )
+
+        _reset_singleton_for_testing()
+        try:
+            get_embedding_cache().get("ns", "test-text")
+            result = health_check()
+        finally:
+            _reset_singleton_for_testing()
+
+        assert "embedding_cache" in result
+        stats = result["embedding_cache"]
+        # Shape contract — operators script against these field names.
+        for field in ("hits", "misses", "size", "max_size", "hit_rate"):
+            assert field in stats, f"missing field {field!r} in {stats!r}"
+        # The poke registered exactly one miss.
+        assert stats["misses"] == 1
+        assert stats["hits"] == 0
+
 
 class TestHealthEndpoints:
     """Test HTTP endpoints via TestClient."""

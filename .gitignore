@@ -111,6 +111,8 @@ tests/beta/eval/reports/
 # Internal task tracking & plans (not for public repo)
 tasks/
 .claude/plans/
+# Claude Code session lock files — runtime artifacts, expire on session end
+.claude/*.lock
 
 # Runtime log artifacts
 src/mcp/rag-api-logs.txt

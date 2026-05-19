@@ -732,6 +732,41 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
 
+# Retry budget + backoff for the `_call_ollama` transient-back-pressure
+# loop (5xx / 429 / timeout / ConnectError). Mirrors the embed-side
+# retry pattern that shipped in 51d7cc9 — eliminates the 10-15%
+# Quenchforge fall-through rate observed during sustained-load ablations.
+INTERNAL_LLM_MAX_RETRIES = int(os.getenv("INTERNAL_LLM_MAX_RETRIES", "3"))
+INTERNAL_LLM_RETRY_BACKOFF = float(os.getenv("INTERNAL_LLM_RETRY_BACKOFF", "0.5"))
+
+# Per-stage provider override pattern: setting
+# PROVIDER_STAGE_<NORMALIZED_STAGE> (e.g.
+# `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`) routes that specific
+# call site to a different provider, leaving privacy-sensitive stages
+# (`memory_resolution`, `claim_extraction`) on the global default.
+# Wildcard env pattern — declared here for .env.example surfacing only;
+# the actual lookup happens in `core.utils.internal_llm._resolve_stage_provider`.
+# Example below uses the LongMemEval scorer stage:
+_PROVIDER_STAGE_EXAMPLE = os.getenv("PROVIDER_STAGE_LONGMEMEVAL_SCORE", "")
+
+# ---------------------------------------------------------------------------
+# Embedding cache
+#   Bounded in-process LRU keyed on (namespace, sha256(text)). Optional
+#   SQLite disk tier when CERID_EMBED_CACHE_PATH is set. Both layers are
+#   namespace-isolated so a config flip cannot mix vector spaces.
+# ---------------------------------------------------------------------------
+CERID_EMBED_CACHE_SIZE = int(os.getenv("CERID_EMBED_CACHE_SIZE", "50000"))
+CERID_EMBED_CACHE_PATH = os.getenv("CERID_EMBED_CACHE_PATH", "")
+
+# ---------------------------------------------------------------------------
+# LongMemEval runtime knobs
+#   Declared here for .env.example surfacing; the eval CLI re-reads
+#   them via os.environ.get so an operator can toggle without restarting
+#   the MCP server.
+# ---------------------------------------------------------------------------
+LONGMEMEVAL_INGEST_PARALLEL = int(os.getenv("LONGMEMEVAL_INGEST_PARALLEL", "4"))
+LONGMEMEVAL_SCORER = os.getenv("LONGMEMEVAL_SCORER", "llm")
+
 # Default Ollama model for pipeline tasks — lightweight, runs on CPU or GPU
 OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
 

@@ -125,7 +125,21 @@ def _make_worker(
     *,
     redis_client: MagicMock | None = None,
     max_retries: int = 3,
+    load_ceiling: float = 99999.0,
 ) -> ProcessorWorker:
+    """Construct a worker for tests.
+
+    ``load_ceiling=99999.0`` by default so the throttle check (which
+    short-circuits the dequeue path when ``os.getloadavg()[0]`` exceeds
+    the ceiling) never fires under CI load. Default is `cpu * 0.7` in
+    production, which is easily exceeded on a 2-cpu GitHub Actions
+    runner under sustained pytest load — that produced silent test
+    failures in CI even though local runs (8+ cpu) passed.
+
+    Tests that exercise the throttle path itself
+    (``test_throttled_skips_dequeue`` etc.) construct the worker
+    directly and pass a low ceiling — they don't use this helper.
+    """
     if registry is None:
         registry = {"stub_job": _StubJob, "failing_job": _FailingJob}
     return ProcessorWorker(
@@ -135,6 +149,7 @@ def _make_worker(
         poll_interval=0.01,
         redis_client=redis_client,
         max_retries=max_retries,
+        load_ceiling=load_ceiling,
     )
 
 
@@ -249,7 +264,11 @@ async def test_throttled_skips_dequeue():
     """When throttled, the worker does not call dequeue."""
     queue = _mock_queue(None)
     redis_mock = MagicMock()
-    worker = _make_worker(queue, redis_client=redis_mock)
+    # Use the production-realistic default load_ceiling so the
+    # mocked load of 999.0 actually trips the throttle. The helper's
+    # default of 99999 covers the every-other-test case (CI runner
+    # load > cpu*0.7 was causing silent dequeue skips).
+    worker = _make_worker(queue, redis_client=redis_mock, load_ceiling=0.5)
 
     with patch("os.getloadavg", return_value=(999.0, 999.0, 999.0)):
         with patch("app.processor.metrics.record_throttled", new_callable=AsyncMock) as mock_rt:

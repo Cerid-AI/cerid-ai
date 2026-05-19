@@ -20,8 +20,20 @@ def _enable_ollama():
 
 
 def _disable_ollama():
-    """Return a patch that sets OLLAMA_ENABLED=false."""
-    return patch.dict("os.environ", {"OLLAMA_ENABLED": "false"})
+    """Return a patch that disables BOTH ollama-direct and quenchforge co-routing.
+
+    The proxy's ``_ollama_enabled()`` returns True when EITHER
+    ``OLLAMA_ENABLED=true`` OR ``INTERNAL_LLM_PROVIDER=quenchforge``
+    (since quenchforge speaks the same wire format and shares the
+    proxy router for model-listing / pull surfaces). A test asserting
+    "disabled → 503" must therefore unset both inputs — otherwise CI
+    runners that export ``INTERNAL_LLM_PROVIDER=quenchforge`` from the
+    runner environment leave the second branch live.
+    """
+    return patch.dict(
+        "os.environ",
+        {"OLLAMA_ENABLED": "false", "INTERNAL_LLM_PROVIDER": ""},
+    )
 
 
 @pytest.fixture(autouse=True)
