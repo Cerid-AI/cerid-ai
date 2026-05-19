@@ -2,6 +2,134 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — v0.96.1 candidate: ablation hardening + LongMemEval throughput
+
+The 2026-05-18 expert audit follow-on (post the [2026-05-17 ablation results](tasks/2026-05-17-ablation-results.md))
+that hardens the eval surface against the silent-zero / canonical-
+clobber / daemon-instability failure classes uncovered during the
+v0.96.0 ablation work, and lands the throughput improvements
+(parallel ingest, stage-aware routing, disk-backed cache, two-pass
+scorer) that take ablation wall-clock from ~80 min to ~10 min.
+
+### Eval safety guards
+
+- **Variant-aware preserve-floor** (`fa98eb3`, hardened in `1fe60e9`)
+  — `write_result` keeps the canonical baseline in place when an
+  experimental run undershoots it. The 2026-05-18 audit added a
+  sample-size arm: a smaller-sample run can never replace a larger-
+  sample canonical, regardless of variant. Restored the v0.95.9
+  canonical (n=468, recall=0.432) that an in-session smoke run had
+  silently clobbered to n=60, 0.333.
+- **`latest_per_variant` actually populated** — the pydantic schema
+  field existed since v0.96.0 Phase 1 but no write path populated
+  it. Now writes the per-variant snapshot (`recall_score`, `n_items`,
+  `per_type_breakdown`, `cerid_version`, `run_id`, `completed_at`)
+  on every write. Carried forward on read. Updated on the
+  preserve-canonical path too — the map is the per-variant ledger,
+  independent of which run wins the canonical slot. Fixes silently-
+  broken trust-score dashboard / per-variant ablation surfaces.
+
+### Internal-LLM hardening (`29f8b4b`)
+
+- **Stage-aware provider routing** via the `stage=` kwarg →
+  `_resolve_stage_provider`: env override
+  `PROVIDER_STAGE_<NORMALIZED_STAGE>` (e.g.
+  `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`) beats
+  `config.PIPELINE_PROVIDERS[stage]` beats the global
+  `INTERNAL_LLM_PROVIDER`. Lets operators route the LLM-judge scorer
+  to OpenRouter to escape local-chat-slot queueing while keeping
+  privacy-sensitive stages on the local daemon.
+- **Retry loop in `_call_ollama`** for transient back-pressure
+  (5xx, 429, timeouts, ConnectError). Exponential backoff (default
+  base 0.5s, capped at 3 attempts via `INTERNAL_LLM_MAX_RETRIES`).
+  Eliminates the 10–15% Quenchforge-5xx fall-through rate that
+  contaminated the 2026-05-17 ablations.
+
+### LongMemEval scorer
+
+- **Two-pass scorer** (`9b65be3`) — substring shortcut, LLM judge
+  only for misses. Wired into the CLI as `--two-pass-scorer`
+  (or `LONGMEMEVAL_SCORER=two-pass`). ~33% wall-time reduction on
+  the stratified-60 subset without changing measured recall.
+- **Tighter judge token budget** (`9b65be3`) — `LongMemEvalScorer`
+  `max_tokens` 5 → 2. Empirical probe on llama3.1-8b confirms "YES."
+  / "NO." emit cleanly within 2 tokens.
+
+### LongMemEval throughput
+
+- **Parallel ingest** (`f6b4042`) — `runner.run` uses
+  `asyncio.gather` in chunks of `LONGMEMEVAL_INGEST_PARALLEL`
+  (default 4). `EphemeralChromaPipeline` gains an eager
+  `asyncio.Lock` (audit fixed a lazy-init race) protecting the
+  reset-on-item-boundary check and the chunk-counter increment, with
+  the heavy `collection.add()` running outside the lock via
+  `loop.run_in_executor`. The async-bridge in `OnnxEmbeddingFunction`
+  lets concurrent executor threads multiplex httpx embed calls
+  across the daemon's parallel slot.
+
+### Embedding cache (`6f2b97b`, `e89be4e`)
+
+- **In-memory LRU** keyed on `(namespace, sha256(text))`. Namespace
+  encodes the active provider + model (`qf:<model>` for Quenchforge,
+  `onnx:<model>` for local). Bounded by `CERID_EMBED_CACHE_SIZE`
+  (default 50 000).
+- **Disk tier** — `PersistentEmbeddingCache` adds an SQLite tier
+  enabled by `CERID_EMBED_CACHE_PATH`; default empty = memory-only.
+  Namespace-keyed identically to memory so different backends coexist
+  in one DB. WAL mode for cross-process safety. Disk failures
+  degrade to memory-only with a warning. **2026-05-18 audit fix**:
+  `_disk_enabled` writes moved under the instance lock.
+
+### Observability + ergonomics
+
+- **`/health.embedding_cache`** + LongMemEval runner summary now
+  expose hits/misses/size/hit_rate (`a382bc6`); persistent-cache
+  stats add `disk_hits`, `disk_misses`, `disk_enabled`, `disk_path`.
+- **Routing-aware query prefix** in `OnnxEmbeddingFunction`
+  (`eb189c0`) — derives the query prefix from the active backend
+  instead of hardcoding Snowflake's.
+- **Auto-wire `INTERNAL_LLM_PROVIDER` for quenchforge ablations**
+  (`8c82952`) — closes the silent-zero bug class when the host
+  shell lacks `OPENROUTER_API_KEY`.
+- **Log clarity** (`12364ed`) — gpu-embed-only mode logs actual
+  `chunk_max_chars` instead of hardcoded "no chunking".
+
+### New env vars
+
+| Name | Default | Purpose |
+|---|---|---|
+| `PROVIDER_STAGE_<STAGE>` | unset | Per-stage internal-LLM provider override (e.g. `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`) |
+| `INTERNAL_LLM_MAX_RETRIES` | `3` | Cap on transient-failure retry attempts in `_call_ollama` |
+| `INTERNAL_LLM_RETRY_BACKOFF` | `0.5` | Exponential backoff base (seconds) for the retry loop |
+| `CERID_EMBED_CACHE_PATH` | unset | If set, enables disk-backed cache at the given path (SQLite) |
+| `LONGMEMEVAL_INGEST_PARALLEL` | `4` | Parallel-ingest chunk size in the LongMemEval runner |
+| `LONGMEMEVAL_SCORER` | `llm` | New value `two-pass` engages the substring + LLM composite |
+
+---
+
+## Earlier post-v0.96.0 work — client-side embedding cache (superseded by entry above)
+
+Tier-1 follow-up from the [2026-05-17 session handoff](tasks/2026-05-17-session-handoff.md).
+Targets the ~30% embed redundancy on LongMemEval haystacks (sessions
+reuse across items in the canonical 60-item / 500-item run) and the
+same pattern in cerid ingest's rectify / dedupe paths.
+
+- **`core/utils/embedding_cache.py`** — process-wide LRU keyed on
+  `(namespace, sha256(text))` where `namespace` encodes the active
+  provider + model (`qf:<model>` for Quenchforge, `onnx:<model>` for
+  local). Thread-safe; bounded by `CERID_EMBED_CACHE_SIZE`
+  (default 50 000, set 0 to disable).
+- **`OnnxEmbeddingFunction.__call__`** now splits each batch into
+  cache hits and misses, embeds only the misses through the existing
+  Quenchforge → sidecar → ONNX chain, and stitches results back in
+  input order. Saves one network round-trip per re-embed; namespace
+  isolation prevents a config flip from silently mixing vector spaces
+  (mitigates the same family of bugs the 503/Retry-After fix in
+  v0.96.0 closed for the live path).
+- 44 unit tests cover LRU semantics, namespace isolation, thread
+  safety, env-var configuration, and the mixed-hit-miss ordering
+  invariant.
+
 ## v0.96.0 — quality uplift: production retrieval stack, memory extraction, question-aware routing, RAGAS lift (2026-05-16)
 
 Five-phase quality uplift release per

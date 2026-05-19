@@ -251,6 +251,123 @@ class TestFastPathReturnShape:
 
 
 # ---------------------------------------------------------------------------
+# Embedding cache integration
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddingCacheIntegration:
+    """The LRU cache wraps the routing chain so identical texts don't
+    re-embed across the network. Targeted by LongMemEval haystacks where
+    ~30% of embed calls within a run are exact repeats of earlier sessions.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_cache(self):
+        from core.utils.embedding_cache import _reset_singleton_for_testing
+
+        _reset_singleton_for_testing()
+        yield
+        _reset_singleton_for_testing()
+
+    def _make_ef(self):
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        return OnnxEmbeddingFunction(model_id="org/placeholder")
+
+    def test_second_call_with_same_texts_skips_backend(self, monkeypatch):
+        ef = self._make_ef()
+        backend_calls: list[list[str]] = []
+
+        def _stub_backend(texts):
+            backend_calls.append(list(texts))
+            return [[float(len(t)), 0.0, 0.0] for t in texts]
+
+        monkeypatch.setattr(ef, "_embed_uncached", lambda inp: [
+            np.asarray(row, dtype=np.float32) for row in _stub_backend(inp)
+        ])
+        first = ef(["alpha", "beta"])
+        second = ef(["alpha", "beta"])
+        assert len(backend_calls) == 1, "second call should be served from cache"
+        np.testing.assert_array_equal(first[0], second[0])
+        np.testing.assert_array_equal(first[1], second[1])
+
+    def test_mixed_hit_miss_preserves_order(self, monkeypatch):
+        ef = self._make_ef()
+
+        def _stub(texts):
+            return [np.asarray([float(len(t))], dtype=np.float32) for t in texts]
+
+        backend_calls: list[list[str]] = []
+
+        def _tracked(inp):
+            backend_calls.append(list(inp))
+            return _stub(inp)
+
+        monkeypatch.setattr(ef, "_embed_uncached", _tracked)
+
+        # Warm cache for two texts.
+        ef(["a", "bb"])
+        backend_calls.clear()
+
+        # Mixed batch: cached, new, cached, new.
+        out = ef(["a", "ccc", "bb", "dddd"])
+        assert len(out) == 4
+        # Only the misses hit the backend, in input order.
+        assert backend_calls == [["ccc", "dddd"]]
+        # Output order matches input order, by-length vectors prove it.
+        assert out[0][0] == 1.0  # "a"
+        assert out[1][0] == 3.0  # "ccc"
+        assert out[2][0] == 2.0  # "bb"
+        assert out[3][0] == 4.0  # "dddd"
+
+    def test_namespace_isolates_quenchforge_from_onnx(self, monkeypatch):
+        ef = self._make_ef()
+        backend_calls: list[str] = []
+
+        def _stub(inp):
+            backend_calls.append(_current_namespace_for_test(ef))
+            return [np.asarray([1.0], dtype=np.float32) for _ in inp]
+
+        monkeypatch.setattr(ef, "_embed_uncached", _stub)
+
+        # First call under ONNX namespace.
+        monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+        ef(["hello"])
+        # Flip to Quenchforge — same text, different vector space, must
+        # re-embed instead of returning the ONNX-cached entry.
+        monkeypatch.setenv("EMBEDDINGS_PROVIDER", "quenchforge")
+        monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "nomic-embed-text-v1.5")
+        ef(["hello"])
+
+        assert backend_calls == [
+            "onnx:org/placeholder",
+            "qf:nomic-embed-text-v1.5",
+        ]
+
+    def test_cache_disabled_via_env(self, monkeypatch):
+        from core.utils.embedding_cache import _reset_singleton_for_testing
+
+        monkeypatch.setenv("CERID_EMBED_CACHE_SIZE", "0")
+        _reset_singleton_for_testing()
+        ef = self._make_ef()
+        calls = [0]
+
+        def _stub(inp):
+            calls[0] += 1
+            return [np.asarray([1.0], dtype=np.float32) for _ in inp]
+
+        monkeypatch.setattr(ef, "_embed_uncached", _stub)
+        ef(["x"])
+        ef(["x"])
+        assert calls[0] == 2, "disabled cache must not memoize"
+
+
+def _current_namespace_for_test(ef):
+    """Helper used by the namespace-isolation test."""
+    return ef._active_namespace()
+
+
+# ---------------------------------------------------------------------------
 # get_embedding_function tests
 # ---------------------------------------------------------------------------
 

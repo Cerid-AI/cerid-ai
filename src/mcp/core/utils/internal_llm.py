@@ -56,6 +56,34 @@ async def close_ollama_client() -> None:
         _ollama_client = None
 
 
+def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
+    """Resolve the LLM provider for a specific call site.
+
+    Lookup order (first match wins):
+    1. ``PROVIDER_STAGE_<NORMALIZED_STAGE>`` env var. Stage names like
+       ``"longmemeval/score"`` normalize to ``LONGMEMEVAL_SCORE``.
+    2. ``config.PIPELINE_PROVIDERS[stage]`` for well-known stages
+       (``claim_extraction``, ``query_decomposition``, …).
+    3. ``default_provider`` (the global ``INTERNAL_LLM_PROVIDER``).
+
+    Lets operators send heavy or latency-sensitive call sites to a
+    different provider than the global default — e.g. route
+    ``stage=longmemeval/score`` to OpenRouter to escape local-chat-slot
+    queueing while keeping privacy-sensitive stages (``memory_resolution``,
+    ``claim_extraction``) on the local daemon.
+    """
+    if not stage:
+        return default_provider
+    normalized = stage.upper().replace("/", "_").replace("-", "_")
+    env_override = os.environ.get(f"PROVIDER_STAGE_{normalized}")
+    if env_override:
+        return env_override
+    pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
+    if stage in pipeline_providers:
+        return pipeline_providers[stage]
+    return default_provider
+
+
 async def call_internal_llm(
     messages: list[dict[str, str]],
     *,
@@ -73,11 +101,11 @@ async def call_internal_llm(
     The *stage* argument is a first-class observability breadcrumb: every
     internal-LLM call is attributed to a named pipeline stage (e.g.
     ``"topic_extraction"``, ``"claim_extraction"``, ``"contextual_summary"``).
-    It flows into log records and, when the Sentry SDK is active, into
-    the current scope as a tag. Callers are encouraged — but not required —
-    to supply it.
+    It also drives per-stage provider routing — see
+    :func:`_resolve_stage_provider`.
     """
-    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    provider = _resolve_stage_provider(stage, default_provider)
     log: logging.Logger | logging.LoggerAdapter = logger
     if stage:
         log = logging.LoggerAdapter(logger, {"llm_stage": stage})
@@ -187,16 +215,73 @@ async def _call_ollama(
         data = resp.json()
         return data.get("message", {}).get("content", "")
 
-    try:
-        return await breaker.call(_do_call)
-    except CircuitOpenError:
-        logger.warning("%s circuit breaker open — falling back to OpenRouter", label)
-    except httpx.ConnectError:
-        logger.warning("%s unreachable at %s (%s) — falling back to OpenRouter", label, base_url, start_hint)
-    except httpx.TimeoutException:
-        logger.warning("%s request timed out (model may be loading or server overloaded) — falling back to OpenRouter", label)
-    except httpx.HTTPStatusError as e:
-        logger.warning("%s HTTP %d — falling back to OpenRouter", label, e.response.status_code)
+    # Retry transient back-pressure failures before falling back to OpenRouter.
+    # Mirrors quenchforge_client's embed-side retry (commit 51d7cc9): on AMD-
+    # Mac the chat slot can return 502/timeout under sustained embed load,
+    # but a short backoff lets the daemon catch up. Capped at 3 attempts so a
+    # truly dead daemon still fails over within ~5 s.
+    # 5xx, timeouts, and ConnectError are retryable; circuit-open and 4xx are not.
+    max_retries = int(os.environ.get("INTERNAL_LLM_MAX_RETRIES", "3"))
+    backoff_base = float(os.environ.get("INTERNAL_LLM_RETRY_BACKOFF", "0.5"))
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            return await breaker.call(_do_call)
+        except CircuitOpenError as exc:
+            logger.warning(
+                "%s circuit breaker open — falling back to OpenRouter", label,
+            )
+            last_exc = exc
+            break  # retrying past an open breaker is the breaker's job
+        except httpx.ConnectError as exc:
+            last_exc = exc
+            if attempt + 1 < max_retries:
+                delay = backoff_base * (2 ** attempt)
+                logger.info(
+                    "%s connect error (attempt %d/%d) — retry in %.2fs",
+                    label, attempt + 1, max_retries, delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.warning(
+                "%s unreachable at %s (%s) — falling back to OpenRouter",
+                label, base_url, start_hint,
+            )
+        except httpx.TimeoutException as exc:
+            last_exc = exc
+            if attempt + 1 < max_retries:
+                delay = backoff_base * (2 ** attempt)
+                logger.info(
+                    "%s timeout (attempt %d/%d) — retry in %.2fs",
+                    label, attempt + 1, max_retries, delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.warning(
+                "%s request timed out after %d attempts — falling back to OpenRouter",
+                label, max_retries,
+            )
+        except httpx.HTTPStatusError as exc:
+            last_exc = exc
+            status = exc.response.status_code
+            # Retry server-side (5xx) and rate-limit (429) but not 4xx classes
+            # that signal a bad request — those won't get better with backoff.
+            if 500 <= status < 600 or status == 429:
+                if attempt + 1 < max_retries:
+                    delay = backoff_base * (2 ** attempt)
+                    logger.info(
+                        "%s HTTP %d (attempt %d/%d) — retry in %.2fs",
+                        label, status, attempt + 1, max_retries, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+            logger.warning(
+                "%s HTTP %d (after %d attempts) — falling back to OpenRouter",
+                label, status, attempt + 1,
+            )
+        # Reached only when a non-retryable branch executed — exit the loop.
+        break
+    del last_exc  # informational only; the fall-through path doesn't need it
 
     # Explicitly use a known-valid OpenRouter model for fallback —
     # INTERNAL_LLM_MODEL may hold an Ollama-native name (e.g. "llama3.2:3b")

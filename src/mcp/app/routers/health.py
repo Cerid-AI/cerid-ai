@@ -93,6 +93,17 @@ def health_check() -> dict:
         except Exception:
             ollama_status = {"reachable": False, "url": ollama_url}
 
+    # Embedding-cache stats — read-only, no side effects. Cheap (single
+    # locked dict copy). Lets operators verify the cache is doing work
+    # rather than degenerating to 0% hit-rate after a config flip.
+    embedding_cache_stats: dict[str, Any]
+    try:
+        from core.utils.embedding_cache import get_embedding_cache
+        embedding_cache_stats = dict(get_embedding_cache().stats())
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.embedding_cache_stats", exc)
+        embedding_cache_stats = {"error": "stats_unavailable"}
+
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": get_version(),
@@ -102,6 +113,7 @@ def health_check() -> dict:
             "openrouter": openrouter_cb_state,
         },
         "openrouter_credits_exhausted": credits_exhausted,
+        "embedding_cache": embedding_cache_stats,
     }
     if ollama_status is not None:
         result["ollama"] = ollama_status
