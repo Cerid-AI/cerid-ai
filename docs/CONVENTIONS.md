@@ -64,6 +64,9 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 ## Security (graduated from `tasks/lessons.md` 2026-05-15)
 
 - **Default to the most restrictive setting; let users opt in to openness.** CORS origins default to `localhost`, ports bind to `127.0.0.1`, sync directories default off, etc. Provide env vars for users who need broader access — never the reverse. Restrictive defaults + opt-in openness is safer than permissive defaults + opt-out hardening; users who need LAN access will set the env var, users who don't will never know they were protected.
+- **Reuse `utils/encryption.py` (Fernet) — don't add new crypto.** New features needing encryption (sync dir at-rest, etc.) reuse the same Fernet/key-management plumbing that already protects API keys. Same battle-tested patterns, no new dependencies. Reaching for a new crypto library per feature is a smell.
+- **Path traversal guards: always `resolve()` + `is_relative_to()` on user-supplied paths.** Bare `os.path.join(base, user_input)` is a CVE waiting to happen. Resolve to absolute, then `is_relative_to(base)`.
+- **Privacy claims drift with feature adds.** When a feature changes WHERE data flows (cloud sync, analytics, telemetry, external APIs), update marketing site + CLAUDE.md privacy claims in the *same* PR. Treat privacy claims as code that needs updating, not background prose.
 
 ## Async & event loops (graduated from `tasks/lessons.md` 2026-05-15)
 
@@ -76,6 +79,48 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 ## Testing (graduated from `tasks/lessons.md` 2026-05-15)
 
 - **`@patch` targets the bridge module, not the source.** After the Phase C `agents/` / `utils/` retire-and-bridge migration, `from agents.foo import bar` in `tools.py` looks up `bar` in the `agents.foo` bridge module at runtime — even though the implementation lives at `core.agents.foo.bar`. `@patch("core.agents.foo.bar")` patches the source; runtime call still sees the original. Patch the **call-site lookup module** (`agents.foo.bar`) instead. The migration touched 547 patch targets across 34 test files.
+
+### Mock hygiene (graduated from `tasks/lessons.md` 2026-05-19)
+
+- **Same-module function calls skip `patch.object` when looked up by name.** Python resolves bare-name calls via the defining module's globals; an external `patch("pkg.submodule.fn")` doesn't reach a call site that lives in the same module as the function it calls. If the test needs to patch such a function, route the calling site through the package facade explicitly (`import pkg as _pkg; return _pkg.fn(...)`) so the patch can hook the lookup.
+- **`@patch` on stub modules needs `create=True`.** When `conftest.py` stubs heavy optional deps as empty `ModuleType` objects (`sys.modules["pandas"] = ModuleType("pandas")`), `@patch("pandas.read_csv")` errors because the stub has no attribute. `@patch("pandas.read_csv", create=True)` lets the patcher add the attribute on the stub.
+- **`side_effect` for mocks that return mutable containers.** `mock.return_value = [item]` returns the SAME list reference on every call — if the code under test does `results.extend(cross_results)` with both pointing at that one list, the list grows unexpectedly. Use `mock.side_effect = [[item], []]` to return fresh lists per call.
+- **`sys.modules` stub pollution leaks across test files.** pytest collects all test modules before running them; if `test_a.py` injects `sys.modules["agents.foo"] = stub`, then `test_b.py`'s real import of `agents.foo` sees the cached stub instead. Prefer `unittest.mock.patch` over manual `sys.modules` manipulation. If a stub must be set, guard the import in the consumer test (`if not hasattr(cached, "expected_attr"): del sys.modules[...]`) so the real module loads.
+- **MagicMock for async-iterator I/O calls needs a terminator.** `fake_redis.xread.return_value = None` makes every call return None synchronously and instantly — a streaming endpoint's `while True: xread(block=5000)` loop becomes a tight CPU spin that doesn't yield to `TestClient.stream()`'s close, and the test hangs to CI timeout. Use `fake_redis.xread.side_effect = [None, asyncio.CancelledError()]` so the second call raises and the `except asyncio.CancelledError: return` branch exits cleanly.
+- **MagicMock substitutes for entire modules break numeric attribute use.** `core.agents.query_agent.config = MagicMock()` makes `config.AGENT_QUERY_BUDGET_SECONDS` another MagicMock, which `asyncio.wait_for(..., timeout=config.AGENT_QUERY_BUDGET_SECONDS)` chokes on (`max(0, MagicMock())` → TypeError). Patch the specific attributes with real numeric values when the code does arithmetic / comparisons on them.
+- **Audit test assertions after standardizing error message helpers.** `extractError()` and similar normalizers parse server response bodies and surface the actual error string. Tests that asserted on a hard-coded fallback message break. After standardizing an error-handling helper, grep `tests/` for the prior fallback message and update assertions.
+- **`python -u` for backgrounded test runs.** Python defaults to block buffering when stdout is redirected to a pipe; a pytest run that produces thousands of lines appears to hang because the log file holds only the first few lines until the buffer flushes. Always pass `-u` (unbuffered) for `python -m pytest ... > /tmp/log.txt &` invocations. Or pipe through `tee`. The "is it stuck or just buffering" debugging cost is one full cycle per run otherwise.
+
+## Streaming vs non-streaming paths (graduated from `tasks/lessons.md` 2026-05-19)
+
+When two code paths produce the same output shape (e.g. streaming + non-streaming verification, agent query response in two endpoints), wire **every** feature addition into both — or refactor to one shared implementation. Silent drift between streaming and non-streaming is the rule, not the exception. Concrete incidents this rule covers:
+
+- 2026-04-13: `verify_response_streaming()` had verified-memory promotion, `check_hallucinations()` (non-streaming) did not.
+- 2026-04-15: `verify_response_streaming()` threaded `response_context`/`claim_context` via `_extract_claim_context()`, `check_hallucinations()` called `verify_claim()` with neither — claims via `/agent/hallucination` validated in isolation, producing false-unverified verdicts.
+- 2026-04-13: `HallucinationCheckRequest` (4 fields) vs `StreamingVerificationRequest` (8 fields, including `expert_mode`) — non-streaming handler couldn't pass `expert_mode` because the request model didn't declare it.
+
+When adding a post-processing step, grep for all functions that produce the input data — not just the one you're looking at. Prefer a contract test that runs the same input through both paths and asserts the output shapes match.
+
+## Caching multi-backend routers (graduated from `tasks/lessons.md` 2026-05-19)
+
+A cache that fronts a multi-backend router (Quenchforge → sidecar → ONNX, OpenRouter → ollama → quenchforge, …) **must derive its namespace from the active backend that will actually serve the request**, not from the wrapper's static configuration. The wrapper's `model_id` says one thing; the routing logic may have flipped on a breaker, a config knob, or a fallback chain and now be serving a *different* vector space.
+
+If the router checks `is_embeddings_provider_quenchforge()` and `is_sidecar_reachable()` to decide, the cache's namespace function must check the same predicates and pick the same branch. The 2026-05-17 v0.96.0 incident showed how a breaker fall-through silently mixed nomic vectors with Snowflake vectors in the same ChromaDB collection — retrieval collapsed because queries embedded by one model were k-NN-searched against documents embedded by a different one.
+
+**Pattern to detect**: retrieval quality drops sharply after a configuration change (provider flip, model swap, breaker recovery) without any code change. Nearest-neighbour distances cluster bimodally — half the corpus at normal distances, half at ~sqrt(2) (orthogonal between unrelated vector spaces).
+
+**Reference**: `core/utils/embedding_cache.py::EmbeddingCache._active_namespace` encodes the predicate at the key level so model swaps are forced into distinct keyspaces by construction.
+
+## Persistence guards (graduated from `tasks/lessons.md` 2026-05-19)
+
+When building a `write_result` / `save_baseline` / `persist_run` function for an evaluation harness, the naive "replace current with latest, push old to history" shape silently overwrites the canonical when an experimental run undershoots. The 2026-05-17 incident clobbered the v0.95.9 minimum-viable canonical (recall=0.432, n=468) with a `production-stack+qa` 60-item smoke run (recall=0.133) — different variant, much lower score, but the persistence layer didn't know.
+
+**Two-arm guard** (in `tests/eval/longmemeval/persistence.py::write_result` since 2026-05-17, sample-size arm added 2026-05-18):
+
+1. **Sample-size guard**: a new run with fewer items than the canonical can never replace it, regardless of variant. Stratified-subset runs and smoke tests are diagnostic, not baselines.
+2. **Variant-aware guard**: when the new run has equal-or-larger sample size but a *different* variant and equal-or-lower recall, the canonical stays in place. Mixed-variant comparisons are noisy; the safe default is preserve.
+
+Same-variant equal-or-larger-sample runs always replace — that's the operator's expected behaviour when re-running the same pipeline at the same or expanded scale. Promoting a smaller-sample or different-variant result requires manual JSON surgery (or a future `--promote-variant` flag).
 
 ## Re-export bridges (added 2026-05-15)
 
@@ -129,6 +174,8 @@ site.
 
 - Use `127.0.0.1` not `localhost` in Alpine healthchecks — Alpine resolves `localhost` to `::1` (IPv6), many services bind `0.0.0.0` (IPv4) only.
 - Always verify Docker build success — `docker compose build` can return 0 with a cached fallback when the real build exits code 2. Grep the `--progress=plain` output for `error`.
+- **Healthcheck side effects must be idempotent across restarts.** A sentinel file (`/tmp/.health_ok`) lives in the writable layer and survives `docker restart` plus the auto-restart Docker performs after a healthcheck-driven SIGTERM. Naively-gated `kill -s TERM 1` patterns produce infinite restart loops. Gate the kill so it only fires when the sentinel was created during the *current* PID 1's lifetime: `[ -n "$(find /tmp/.health_ok -newer /proc/1 2>/dev/null)" ] && kill -s TERM 1`. `find ... -newer /proc/1` returns the path only when the sentinel's mtime is strictly newer than PID 1's start.
+- **`external: true` networks cross compose-project boundaries.** When a second project opts into the same `external: true` network, both projects join the SAME Docker bridge — full DNS leakage between projects. To run a sandbox alongside production, override the network in the overlay (`networks: llm-network: name: cerid-sandbox-llm-network; external: false`) plus per-service aliases for the canonical hostnames. Distinct container names + ports are NOT enough; the network is the load-bearing piece. Verify with `docker network ls` showing two distinct bridges.
 
 ## CI drift gates
 
@@ -136,6 +183,16 @@ site.
   - **Deterministic checks** (path-existence, pure-Python AST walks, file-hash comparisons) — ship blocking from day one and add to `docker` `needs[]` immediately. No flakiness exposure that soft-gating would absorb. Example: `lint / no-legacy-neo4j-tree` (2026-04-21).
   - **Environmentally-variable checks** (anything that runs `pip-compile`, docker-compose, or a live-stack boot) — ship with `continue-on-error: true`, watch two consecutive green runs on `main`, then flip to blocking. Example: `lint / sdk-openapi-drift` (2026-04-21; four-run wait for extra confidence).
 - Either shape must end up blocking in `docker` `needs[]`. Soft-warning CI gates do not exist in this repo by policy (re-check: `grep 'continue-on-error' .github/workflows/ci.yml` should match zero drift jobs).
+- **`.trivyignore` must be referenced in EVERY Trivy scan step.** A multi-image CI workflow (one Trivy step per image) only applies the ignore-file to the steps that explicitly set `trivyignores: .trivyignore`. Add the field to every `aquasecurity/trivy-action` invocation.
+- **Preservation tests run from the host, not in the container.** `src/mcp/.dockerignore` excludes `tests/` — the runtime image doesn't ship them. Boot the stack via `docker-compose`, then run `pytest -m preservation` on the GitHub Actions runner against the container's public HTTP port. Preservation tests are pure `pytest + httpx + neo4j` with no `app.*` / `core.*` imports, so they have no container-side dependency. The Makefile target mirrors CI: `cd src/mcp && ../../.venv/bin/python -m pytest tests/integration/ -m preservation ...`.
+
+## Cross-repo sync
+
+See [`docs/SYNC_PROTOCOL.md`](SYNC_PROTOCOL.md) for the full bidirectional sync workflow between `cerid-ai-internal` and the public `cerid-ai` mirror. Top three rules to never violate:
+
+1. **Always use `scripts/sync-repos.py`**, never `cp` / `rsync` / direct edits.
+2. **Add gitignored data directories to `_SYNC_SKIP_PREFIXES`** — `Path.rglob('*')` doesn't honour `.gitignore`. The skip list is the sync walker's parallel to git's ignore.
+3. **File deletions in internal need explicit `--track-deletions`** on `to-public`. Without it, orphans pile up in public and break CI typecheck on imports of removed symbols.
 
 ## Frontend
 
@@ -143,6 +200,16 @@ site.
 - **shadcn/ui New York style, Zinc base color**, path alias `@/*` → `./src/*`.
 - `crypto.randomUUID()` requires a secure context — on LAN-over-HTTP it's undefined. Use the shared `uuid()` helper in `src/web/src/lib/utils.ts` everywhere instead.
 - **`.d.ts` basename must not collide with a `.ts` basename** in the same dir — TypeScript treats the `.d.ts` as a specific module declaration and ignores ambient declarations.
+
+### Frontend patterns (graduated from `tasks/lessons.md` 2026-05-19)
+
+- **Don't derive multi-state UI from a boolean server field.** When server state is less expressive than UI state (3+ display states, boolean server field), treat localStorage / a `useSettings`-style hook as source of truth for the richer state and sync the simplified version to the server. Duplicating state derivation in the consuming component is how `Select` snaps back to the wrong value on every render.
+- **React infinite render loops** come from three recurring patterns: (a) object reference comparisons in `useEffect` deps when the value is from `useMemo` — compare by identity strings instead (e.g. `conversation_id + count`); (b) context callbacks (`useConversationsContext`) creating new references on every state update — store the callback in `useRef` and access via `.current`; (c) state updates fired during render — defer with `setTimeout(0)`.
+- **`useRef + tick threshold` for high-frequency value churn.** A value that updates every SSE chunk during streaming doesn't need every render. Store the raw value in `useRef`, maintain a separate `useState` "tick" counter, and only `setTick()` when the ref crosses a meaningful threshold (e.g. every ~100 estimated tokens). Reduces re-renders from ~500/response to ~5. Reference: `use-live-metrics.ts` (`CHARS_PER_TICK = 400`).
+- **"Confidence" in retrieval UI means relevance, not correctness.** When surfacing KB retrieval scores, label as "Relevance" or "Match score" — not "Confidence". "Confidence" reads to users as "we are sure this is true", but the field is actually a similarity score between query and stored content. Rename at the UI layer; the backend field name (`confidence` or `similarity`) is incidental.
+- **Vite `manualChunks` defeats lazy-loading of large libraries.** Putting `react-syntax-highlighter` (or any 1MB+ library) into `manualChunks` forces a single eager chunk for the entire library — even with `React.lazy()` on the consumer side. Wrap in a thin module (`syntax-highlighter.ts`) that imports only the sub-modules / languages you need (`PrismLight` + 25 languages), then lazy-load the wrapper. Reduces the chunk from 1.6 MB to 104 KB.
+- **`@internal` JSDoc beats un-exporting for test-accessed internals.** Un-exporting a function that has 10+ direct test cases forces rewriting every test to go through the public API — losing granular coverage and risking subtle behavioural drift. Keep the function exported, annotate with `@internal`, and let TypeScript surface the constraint at consumer sites. Reference: `model-router.ts` (4 functions, 45 test cases).
+- **Chrome aggressively caches localhost.** `no-store` headers don't prevent disk cache on localhost; old JS bundles served even after a rebuild. Two defences: nginx `/assets/` returns 404 on miss instead of `index.html` fallback so cache-broken requests fail loudly; and dynamic API calls append `?_t=${Date.now()}` cache busters.
 
 ## Design tokens (D.1)
 
@@ -240,10 +307,6 @@ protocol: add to `docker needs[]` and remove `--report-only` after two consecuti
 - Plugins carry a `manifest.json` (name, version, tier, description, entry). BSL-1.1, converts to Apache-2.0 after 3 years.
 - Tier gating enforced at load time via `CERID_TIER`.
 - Workflow engine uses Kahn's algorithm for DAG validation — cycles rejected.
-
-## Cross-repo sync
-
-- See [`docs/SYNC_PROTOCOL.md`](SYNC_PROTOCOL.md). In short: never `cp`/`rsync` between repos; use `scripts/sync-repos.py`; `validate` before and after every sync.
 
 ## When to retire a convention from this file
 

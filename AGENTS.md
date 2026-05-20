@@ -24,6 +24,16 @@
 - No AI attribution in commits (human-authored only)
 - Respect `.mcp.json` governance (allowlist + audit)
 
+## Multi-Agent Workflow Rules (graduated from `cerid-ai-internal/tasks/lessons.md` 2026-05-19)
+
+These rules govern how each agent role behaves regardless of which CLI surface (Grok Heavy, Claude Code, Grok Build) is driving:
+
+1. **Subagent reports describe local state, not the merged tree.** After a multi-agent swarm, re-run the full verification sweep against the combined working tree. Each agent's "tests pass" was true inside their container/worktree; the merge can break across them. Integration testing is mandatory; trust but verify.
+2. **Verify subagent line-number citations before acting on them.** Citations are often hallucinated by 10-50 lines, or reference fabricated symbols. Budget ~30s per claim to `Read` the cited file at the cited line. Treat citations as hypotheses, not facts.
+3. **Validate "open" items in docs against grep before triaging.** `tasks/todo.md`, `docs/ROADMAP.md` drift faster than code. Grep for the missing symbol / endpoint / count before acting on a backlog claim. Stale items waste full sprints rebuilding shipped features.
+4. **Background-task output buffering is not "still running".** A Python process redirected to a file with default block buffering can appear hung when it's actually done — the buffer never flushed. Check both (a) the log file AND (b) whether the PID is alive AND (c) whether a task-notification has fired. Use `python -u` for all backgrounded test/eval runs.
+5. **`git add -u` for gitignored-but-tracked files.** When `git status` shows `tasks/todo.md` as modified but `git add tasks/todo.md` errors with "paths are ignored", use `git add -u <path>` (update-tracked mode) — NOT `git add -f` (force-add, risks staging a genuinely-gitignored neighbour).
+
 ## Tooling & MCP Usage
 - Primary MCP: `cerid-kb` at `http://localhost:8888/mcp/sse`
 - Local MCPs: filesystem, github, browser (via `start-mcps.sh`)
