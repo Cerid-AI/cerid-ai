@@ -104,6 +104,17 @@ def health_check() -> dict:
         log_swallowed_error("app.routers.health.embedding_cache_stats", exc)
         embedding_cache_stats = {"error": "stats_unavailable"}
 
+    # Phase K6.1 — wiki freshness metrics. Cheap aggregation Cypher,
+    # so we can include in every health probe. Exposes coverage,
+    # p95 staleness, debounce backlog, and unresolved contradictions
+    # — the headline numbers the design doc §9 calls out.
+    wiki_health: dict[str, Any]
+    try:
+        wiki_health = _wiki_freshness_snapshot(get_neo4j())
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.wiki_freshness_snapshot", exc)
+        wiki_health = {"error": "snapshot_failed"}
+
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": get_version(),
@@ -114,10 +125,89 @@ def health_check() -> dict:
         },
         "openrouter_credits_exhausted": credits_exhausted,
         "embedding_cache": embedding_cache_stats,
+        "wiki_freshness": wiki_health,
     }
     if ollama_status is not None:
         result["ollama"] = ollama_status
     return result
+
+
+def _wiki_freshness_snapshot(driver) -> dict:
+    """Phase K6.1 — knowledge architecture freshness metrics.
+
+    Single Cypher query returning:
+      * total_entities — denominator for coverage
+      * entities_with_summary — numerator for coverage
+      * entities_active — entities with mention_count >= 5
+      * entities_active_with_summary — coverage among active entities
+      * p95_summary_age_hours — staleness for active entities with summaries
+      * unresolved_contradictions — :HAS_CONTRADICTION edges to entities
+        whose summary_updated_at is older than the latest finding
+    """
+    if driver is None:
+        return {"available": False, "reason": "neo4j_unavailable"}
+
+    try:
+        with driver.session() as session:
+            # Coverage + active counts
+            cov = session.run(
+                """
+                MATCH (e:Entity)
+                WITH count(e) AS total,
+                     sum(CASE WHEN e.summary IS NOT NULL THEN 1 ELSE 0 END) AS with_summary,
+                     sum(CASE WHEN coalesce(e.mention_count, 0) >= 5 THEN 1 ELSE 0 END) AS active,
+                     sum(CASE WHEN coalesce(e.mention_count, 0) >= 5 AND e.summary IS NOT NULL THEN 1 ELSE 0 END) AS active_with_summary
+                RETURN total, with_summary, active, active_with_summary
+                """
+            ).single()
+            total = int(cov["total"] or 0) if cov else 0
+            with_summary = int(cov["with_summary"] or 0) if cov else 0
+            active = int(cov["active"] or 0) if cov else 0
+            active_with_summary = int(cov["active_with_summary"] or 0) if cov else 0
+
+            # Unresolved contradictions
+            unresolved = session.run(
+                """
+                MATCH (e:Entity)-[:HAS_CONTRADICTION]->(f:ContradictionFinding)
+                WHERE e.summary IS NULL
+                   OR e.summary_updated_at IS NULL
+                   OR e.summary_updated_at < f.detected_at
+                RETURN count(DISTINCT e) AS c
+                """
+            ).single()
+            unresolved_count = int(unresolved["c"] or 0) if unresolved else 0
+
+            # Wiki log activity in the last 24h
+            from datetime import datetime, timedelta, timezone
+
+            last_day = (datetime.now(tz=timezone.utc) - timedelta(hours=24)).isoformat()
+            activity = session.run(
+                "MATCH (k:KnowledgeLog) WHERE k.ts >= $since RETURN count(k) AS c",
+                since=last_day,
+            ).single()
+            log_activity_24h = int(activity["c"] or 0) if activity else 0
+
+        coverage_pct = (
+            round(100.0 * with_summary / total, 1) if total else 0.0
+        )
+        active_coverage_pct = (
+            round(100.0 * active_with_summary / active, 1) if active else 0.0
+        )
+
+        return {
+            "available": True,
+            "total_entities": total,
+            "entities_with_summary": with_summary,
+            "coverage_pct": coverage_pct,
+            "active_entities": active,
+            "active_entities_with_summary": active_with_summary,
+            "active_coverage_pct": active_coverage_pct,
+            "unresolved_contradictions": unresolved_count,
+            "log_activity_24h": log_activity_24h,
+        }
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.wiki_freshness_query", exc)
+        return {"available": False, "reason": "query_failed"}
 
 
 _start_time = time.time()

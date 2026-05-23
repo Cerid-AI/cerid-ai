@@ -14,6 +14,11 @@ import { DomainBadge } from "@/components/ui/domain-badge"
 import { ConfidenceBandBadge } from "./confidence-band-badge"
 import { ContradictionItem } from "./contradiction-item"
 import { ExternalReferencesSection } from "./external-references-section"
+import { ProvenanceMarker, type ProvenanceKind } from "./provenance-marker"
+import { MiniGraph } from "./mini-graph"
+import { MentionSparkline } from "./mention-sparkline"
+import { ProvenanceSankey } from "./provenance-sankey"
+import { ContradictionLink } from "./contradiction-link"
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
 import { BookOpen } from "lucide-react"
 
@@ -113,6 +118,15 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
   const relativeUpdated = formatLastUpdated(data.last_updated_at)
   const refreshOverdue = isRefreshOverdue(data.next_refresh_due)
 
+  // Derive section provenance markers from the API signals we have today.
+  // The plan's 4-marker palette (🤖 / ✍️ / ⚠ / ❓) maps onto:
+  //   - Summary: "auto" when present (curator-synthesized; user-edit
+  //     tracking lands when section-edit modal ships)
+  //   - Contradictions: "contradicted" when count > 0
+  //   - Confidence band low: "uncertain" sentinel beside the header
+  const summaryProvenance: ProvenanceKind = "auto"
+  const showLowConfidenceMarker = data.confidence_band === "low"
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="space-y-6 p-6">
@@ -133,6 +147,8 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
             ) : (
               <ConfidenceBandBadge band={data.confidence_band} />
             )}
+            {showLowConfidenceMarker && <ProvenanceMarker kind="uncertain" />}
+            {data.contradictions.length > 0 && <ProvenanceMarker kind="contradicted" />}
           </div>
           {relativeUpdated && (
             <p className="text-xs text-muted-foreground">Updated {relativeUpdated}</p>
@@ -146,15 +162,83 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
         {/* ----------------------------------------------------------------- */}
         {data.summary && (
           <section aria-labelledby="wiki-summary-heading">
-            <h2 id="wiki-summary-heading" className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Summary
-            </h2>
+            <div className="mb-2 flex items-center gap-2">
+              <h2 id="wiki-summary-heading" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Summary
+              </h2>
+              <ProvenanceMarker kind={summaryProvenance} />
+            </div>
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {data.summary}
               </ReactMarkdown>
             </div>
           </section>
+        )}
+
+        {/* --------------------------------------------------------------- */}
+        {/* Graph context — inline mini-graph (1-hop neighborhood)         */}
+        {/* --------------------------------------------------------------- */}
+        <MiniGraph entitySlug={data.slug} entityName={data.name} />
+
+        {/* --------------------------------------------------------------- */}
+        {/* Phase M Day 5 — mention sparkline                                */}
+        {/* --------------------------------------------------------------- */}
+        <MentionSparkline
+          entitySlug={data.slug}
+          entityName={data.name}
+          onOpenTimeline={(slug) => {
+            // Deep-link to Subjects → Timeline with this entity focal.
+            // Reuses the navigation pattern from Phase A.
+            if (typeof window !== "undefined") {
+              const url = new URL(window.location.href)
+              url.searchParams.set("pane", "subjects")
+              url.searchParams.set("mode", "timeline")
+              url.searchParams.set("entity", slug)
+              window.history.pushState({}, "", url.toString())
+              window.dispatchEvent(new PopStateEvent("popstate"))
+            }
+          }}
+        />
+
+        {/* --------------------------------------------------------------- */}
+        {/* Phase M Day 5 — provenance Sankey                                */}
+        {/* --------------------------------------------------------------- */}
+        <ProvenanceSankey
+          entitySlug={data.slug}
+          entityName={data.name}
+          onOpenAtlas={(slug) => {
+            if (typeof window !== "undefined") {
+              const url = new URL(window.location.href)
+              url.searchParams.set("pane", "subjects")
+              url.searchParams.set("mode", "atlas")
+              url.searchParams.set("entity", slug)
+              // Activate provenance lens via the URL param Atlas
+              // already reads (see atlas-lens-panel).
+              url.searchParams.set("lens", "provenance")
+              window.history.pushState({}, "", url.toString())
+              window.dispatchEvent(new PopStateEvent("popstate"))
+            }
+          }}
+        />
+
+        {/* Phase M Day 5 — contradiction lens jump-off, only when relevant */}
+        {data.contradictions.length > 0 && (
+          <ContradictionLink
+            entitySlug={data.slug}
+            contradictionCount={data.contradictions.length}
+            onOpenAtlas={(slug) => {
+              if (typeof window !== "undefined") {
+                const url = new URL(window.location.href)
+                url.searchParams.set("pane", "subjects")
+                url.searchParams.set("mode", "atlas")
+                url.searchParams.set("entity", slug)
+                url.searchParams.set("lens", "contradiction")
+                window.history.pushState({}, "", url.toString())
+                window.dispatchEvent(new PopStateEvent("popstate"))
+              }
+            }}
+          />
         )}
 
         {/* ----------------------------------------------------------------- */}

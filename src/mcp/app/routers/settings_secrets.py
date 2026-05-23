@@ -10,6 +10,10 @@ without ever returning the raw value in any response body:
   PUT  /settings/openrouter-key        -> same shape; stores key server-side
   POST /settings/openrouter-key/test   -> {valid, credits_remaining, error}
 
+  GET  /settings/hf-token              -> {configured, last4, updated_at, model_access}
+  PUT  /settings/hf-token              -> same shape; stores token server-side
+  POST /settings/hf-token/test         -> {valid, gated_model_access, error}
+
 The existing POST /setup/configure wizard endpoint remains unchanged.
 """
 from __future__ import annotations
@@ -250,3 +254,126 @@ async def test_openrouter_key(req: OpenRouterKeyTestRequest) -> OpenRouterKeyTes
         )
     except (httpx.HTTPError, OSError) as exc:
         return OpenRouterKeyTestResponse(valid=False, error=f"Network error: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# HuggingFace token (Phase E — gates pyannote diarization models)
+# ---------------------------------------------------------------------------
+
+_HF_MIN_TOKEN_LENGTH = 16  # HF tokens are typically 37+ chars; 16 is a safe floor
+
+# Models the meeting capture pipeline depends on. Both require accepting
+# pyannote's terms-of-use at https://hf.co/<id> before the token can read.
+_HF_GATED_MODELS = (
+    "pyannote/speaker-diarization-3.1",
+    "pyannote/segmentation-3.0",
+)
+
+
+class HFTokenStatusResponse(BaseModel):
+    """Status-only response — the raw token value is NEVER included."""
+
+    configured: bool
+    last4: str | None = None
+    updated_at: str | None = None
+    # Per-model access (populated by the /test endpoint; None on plain GET status)
+    model_access: dict[str, bool] | None = None
+
+
+class HFTokenPutRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    token: str = Field(..., description="HuggingFace access token (write-only)")
+
+    @field_validator("token")
+    @classmethod
+    def _validate_length(cls, v: str) -> str:
+        if len(v) < _HF_MIN_TOKEN_LENGTH:
+            raise ValueError("Token too short")
+        return v
+
+
+class HFTokenTestRequest(BaseModel):
+    token: str | None = None  # when None, test the stored token
+
+
+class HFTokenTestResponse(BaseModel):
+    """Test-result response — the raw token value is NEVER included."""
+
+    valid: bool
+    gated_model_access: dict[str, bool] | None = None
+    error: str | None = None
+
+
+@router.get("/settings/hf-token", response_model=HFTokenStatusResponse)
+async def get_hf_token_status() -> HFTokenStatusResponse:
+    """Status of the stored HuggingFace token — never returns the value itself."""
+    token = os.getenv("HF_TOKEN", "")
+    if not token:
+        return HFTokenStatusResponse(configured=False)
+    return HFTokenStatusResponse(
+        configured=True,
+        last4=token[-4:] if len(token) >= 4 else "****",
+        updated_at=_get_key_updated_at("HF_TOKEN"),
+    )
+
+
+@router.put("/settings/hf-token", response_model=HFTokenStatusResponse)
+async def put_hf_token(req: HFTokenPutRequest) -> HFTokenStatusResponse:
+    """Write-only: accepts the token, stores it, returns status-only."""
+    _update_env_file({"HF_TOKEN": req.token})
+    os.environ["HF_TOKEN"] = req.token
+    _set_key_updated_at("HF_TOKEN")
+    return HFTokenStatusResponse(
+        configured=True,
+        last4=req.token[-4:] if len(req.token) >= 4 else "****",
+        updated_at=_get_key_updated_at("HF_TOKEN"),
+    )
+
+
+async def _probe_hf_gated_model(client: httpx.AsyncClient, token: str, model_id: str) -> bool:
+    """Return True if *token* can read *model_id*'s repo metadata.
+
+    HuggingFace returns 401 (bad token), 403 (token valid but model not gated for
+    this user — terms not accepted), or 200 (full access). 404 means the model
+    id is wrong (transient outage of our hardcoded reference).
+    """
+    try:
+        resp = await client.get(
+            f"https://huggingface.co/api/models/{model_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        return resp.status_code == 200
+    except (httpx.HTTPError, OSError):
+        return False
+
+
+@router.post("/settings/hf-token/test", response_model=HFTokenTestResponse)
+async def test_hf_token(req: HFTokenTestRequest) -> HFTokenTestResponse:
+    """Validate a token (provided OR stored) without storing.
+
+    Issues a /whoami-v2 to verify the token + parallel HEAD requests to each
+    gated model to verify terms-acceptance. Returns per-model access map.
+    """
+    token = req.token or os.getenv("HF_TOKEN", "")
+    if not token:
+        return HFTokenTestResponse(valid=False, error="No token provided or stored")
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            who = await client.get(
+                "https://huggingface.co/api/whoami-v2",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if who.status_code == 401:
+                return HFTokenTestResponse(valid=False, error="Invalid token (401)")
+            if who.status_code != 200:
+                return HFTokenTestResponse(
+                    valid=False, error=f"Unexpected status {who.status_code}"
+                )
+            access = {
+                model_id: await _probe_hf_gated_model(client, token, model_id)
+                for model_id in _HF_GATED_MODELS
+            }
+        return HFTokenTestResponse(valid=True, gated_model_access=access)
+    except (httpx.HTTPError, OSError) as exc:
+        return HFTokenTestResponse(valid=False, error=f"Network error: {exc}")

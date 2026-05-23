@@ -49,62 +49,187 @@ CERID_WEBHOOK_SECRET = os.getenv("CERID_WEBHOOK_SECRET", "")
 
 # Feature flags: controls what's available per tier
 # Community features are always enabled; pro features require CERID_TIER=pro or enterprise
+#
+# 2026-05-20 rebalance (Pro Tier Implementation Plan, Phase 1):
+#   - Demoted to community: image_understanding (multimodal table-stakes 2026),
+#     parent_child_retrieval (RAG quality is plumbing, not a Pro axis),
+#     docling_parser (parsing quality is plumbing)
+#   - audio_transcription split: plain Whisper transcription is community
+#     (audio_transcription_plain + voice_memos_watch); meeting-aware diarized
+#     transcription is Pro (meeting_diarization + calendar_stitching +
+#     meeting_summary)
+#   - Removed: advanced_workflows (no workflow extension story yet)
+#   - Added Pro flags: meeting_diarization, calendar_stitching, meeting_summary,
+#     daily_digest, inbox_triage, apple_mail_reader, imessage_reader,
+#     apple_calendar_eventkit, reminders_eventkit, apple_photos_reader,
+#     google_calendar_sync, outlook_calendar_sync
+#   - Added community flags: voice_memos_watch, spotlight_integration,
+#     share_sheet, shortcuts_actions, quicklook_preview, safari_reading_list,
+#     menu_bar_mode, keychain_secrets, tcc_wizard, sparkle_updates,
+#     universal_binary, apple_silicon_ml
+#
+# The granular flags below are the source of truth for runtime gating; the
+# FEATURE_BUCKETS map further down groups them for UI presentation and
+# marketing copy.
+
+def _pro_level() -> bool:
+    return _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"]
+
+
+def _enterprise_level() -> bool:
+    return _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"]
+
+
 FEATURE_FLAGS = {
-    # Pro-only features (requires pro or enterprise tier)
-    "ocr_parsing":         True,  # Community feature — scanned PDF/image text extraction for all users
-    "audio_transcription": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    "image_understanding": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    "semantic_dedup":      True,  # Community feature — KB quality for all users
-    "advanced_analytics":  _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    "metamorphic_verification": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Enterprise-only features
-    "multi_user":          CERID_MULTI_USER or _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
-    "sso_saml":            _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],  # Scaffolded — no implementation yet. Enterprise roadmap item.
-    "audit_logging":       _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
-    "priority_support":    _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
-    # Pro-only: custom smart RAG mode with per-source weights
-    "custom_smart_rag": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Pro-only: advanced RAG retrieval strategies
-    "parent_child_retrieval": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Pro-only: email connectors
-    "gmail_connector":   _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    "outlook_connector": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Pro-only: Apple Notes, Calendar, Docling parser
-    "apple_notes_reader": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    "calendar_sync":      _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    "docling_parser":     _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Community features (always enabled)
-    "hierarchical_taxonomy": True,
-    "file_upload_gui":       True,
-    "encryption_at_rest":    True,
-    "truth_audit":           True,
-    "live_metrics":          True,
-    # Private mode: Level 1 available on all tiers; higher levels require pro
-    "private_mode":          True,
-    # Workflow engine (Phase 4 — extensibility sprint)
-    "basic_workflows":       True,  # Always enabled (community)
-    "advanced_workflows":    _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    # ---- Community features (always enabled) ----
+    "ocr_parsing":               True,  # scanned PDF/image text extraction
+    "semantic_dedup":            True,  # KB quality
+    "image_understanding":       True,  # multimodal BYOK (demoted from Pro 2026-05-20)
+    "parent_child_retrieval":    True,  # RAG quality plumbing (demoted 2026-05-20)
+    "docling_parser":            True,  # high-fidelity parsing (demoted 2026-05-20)
+    "audio_transcription_plain": True,  # Whisper transcription without diarization (community)
+    "hierarchical_taxonomy":     True,
+    "file_upload_gui":           True,
+    "encryption_at_rest":        True,
+    "truth_audit":               True,
+    "live_metrics":              True,
+    "private_mode":              True,  # Level 1 community; deeper levels gated by other checks
+    "basic_workflows":           True,
+
+    # ---- Mac-native community features (`mac_native` bucket) ----
+    # All True if platform supports them; runtime macOS check at use-site
+    "voice_memos_watch":         True,
+    "spotlight_integration":     True,
+    "share_sheet":               True,
+    "shortcuts_actions":         True,
+    "quicklook_preview":         True,
+    "safari_reading_list":       True,
+    "menu_bar_mode":             True,
+    "keychain_secrets":          True,
+    "tcc_wizard":                True,
+    "sparkle_updates":           True,
+    "universal_binary":          True,
+    "apple_silicon_ml":          True,
+
+    # ---- Pro features (require pro or enterprise tier) ----
+    # Pro meeting capture bucket
+    "meeting_diarization":       _pro_level(),
+    "calendar_stitching":        _pro_level(),
+    "meeting_summary":           _pro_level(),
+    # Pro intelligence bucket
+    "metamorphic_verification":  _pro_level(),
+    "custom_smart_rag":          _pro_level(),
+    "advanced_analytics":        _pro_level(),
+    "daily_digest":              _pro_level(),
+    "inbox_triage":              _pro_level(),
+    # Pro cloud connectors bucket
+    "gmail_connector":           _pro_level(),
+    "outlook_connector":         _pro_level(),
+    "google_calendar_sync":      _pro_level(),
+    "outlook_calendar_sync":     _pro_level(),
+    # Pro Apple connectors bucket (require macOS + FDA at use-site)
+    "apple_notes_reader":        _pro_level(),
+    "apple_mail_reader":         _pro_level(),
+    "imessage_reader":           _pro_level(),
+    "apple_calendar_eventkit":   _pro_level(),
+    "reminders_eventkit":        _pro_level(),
+    "apple_photos_reader":       _pro_level(),
+    "spotlight_donation":        _pro_level(),  # Phase G.4 — donate KB artifacts to CoreSpotlight
+
+    # ---- Enterprise features ----
+    "multi_user":                CERID_MULTI_USER or _enterprise_level(),
+    "sso_saml":                  _enterprise_level(),  # Scaffolded — no impl yet
+    "audit_logging":             _enterprise_level(),
+    "priority_support":          _enterprise_level(),
+
+    # ---- Back-compat aliases ----
+    # `audio_transcription` was a single Pro flag pre-2026-05-20. Existing
+    # call sites and tests still reference it; new code should use
+    # `audio_transcription_plain` (community) or `meeting_diarization` (Pro).
+    # We keep the alias mirroring the *community* plain transcription path so
+    # community Whisper still works when this flag is consulted; the Pro
+    # uplift consumes the new flags directly.
+    "audio_transcription":       True,
+    # `calendar_sync` collapsed into google_calendar_sync + outlook_calendar_sync
+    "calendar_sync":             _pro_level(),
 }
+
+
+# ---------------------------------------------------------------------------
+# FEATURE_BUCKETS — capability groupings for UI + marketing surfaces.
+# ---------------------------------------------------------------------------
+# Each bucket maps to a list of granular FEATURE_FLAGS keys. A bucket is
+# "enabled" when ALL its member flags are enabled (intersection semantics —
+# selling Pro means *all* the Pro features in a bucket light up together).
+# Phase 1 day 3 of the Pro Tier plan exposes this via /billing/capabilities.
+
+FEATURE_BUCKETS: dict[str, list[str]] = {
+    "pro_meeting_capture": [
+        "meeting_diarization",
+        "calendar_stitching",
+        "meeting_summary",
+    ],
+    "pro_intelligence": [
+        "metamorphic_verification",
+        "custom_smart_rag",
+        "advanced_analytics",
+        "daily_digest",
+        "inbox_triage",
+    ],
+    "pro_cloud_connectors": [
+        "gmail_connector",
+        "outlook_connector",
+        "google_calendar_sync",
+        "outlook_calendar_sync",
+    ],
+    "pro_apple_connectors": [
+        "apple_notes_reader",
+        "apple_mail_reader",
+        "imessage_reader",
+        "apple_calendar_eventkit",
+        "reminders_eventkit",
+        "apple_photos_reader",
+    ],
+    "mac_native": [
+        "voice_memos_watch",
+        "spotlight_integration",
+        "share_sheet",
+        "shortcuts_actions",
+        "quicklook_preview",
+        "safari_reading_list",
+        "menu_bar_mode",
+        "keychain_secrets",
+        "tcc_wizard",
+        "sparkle_updates",
+        "universal_binary",
+        "apple_silicon_ml",
+    ],
+}
+
+# Flags that belong to each tier (used by _get_feature_tier + test_pro_gating_contract)
+_PRO_TIER_FLAGS: frozenset[str] = frozenset(
+    flag
+    for bucket_name, flags in FEATURE_BUCKETS.items()
+    if bucket_name.startswith("pro_")
+    for flag in flags
+) | frozenset({"calendar_sync"})  # back-compat alias
+
+_ENTERPRISE_TIER_FLAGS: frozenset[str] = frozenset(
+    {"multi_user", "sso_saml", "audit_logging", "priority_support"}
+)
 
 
 def _refresh_flags() -> None:
     """Recalculate feature flags after a runtime tier change (e.g., license activation)."""
     global FEATURE_FLAGS
-    tier_level = _TIER_LEVELS.get(FEATURE_TIER, 0)
-    for key in ("audio_transcription", "image_understanding",
-                "advanced_analytics", "metamorphic_verification",
-                "custom_smart_rag",
-                "gmail_connector", "outlook_connector",
-                "parent_child_retrieval",
-                "apple_notes_reader", "calendar_sync", "docling_parser"):
-        FEATURE_FLAGS[key] = tier_level >= _TIER_LEVELS["pro"]
-    # ocr_parsing and semantic_dedup are always True (community features) — not tier-gated
-    for key in ("sso_saml", "audit_logging", "priority_support"):
-        FEATURE_FLAGS[key] = tier_level >= _TIER_LEVELS["enterprise"]
-    FEATURE_FLAGS["multi_user"] = CERID_MULTI_USER or tier_level >= _TIER_LEVELS["enterprise"]
-    # Workflow engine: basic always enabled, advanced requires pro
-    FEATURE_FLAGS["basic_workflows"] = True
-    FEATURE_FLAGS["advanced_workflows"] = tier_level >= _TIER_LEVELS["pro"]
+    pro = _pro_level()
+    ent = _enterprise_level()
+    for flag in _PRO_TIER_FLAGS:
+        FEATURE_FLAGS[flag] = pro
+    for flag in _ENTERPRISE_TIER_FLAGS:
+        FEATURE_FLAGS[flag] = ent
+    FEATURE_FLAGS["multi_user"] = CERID_MULTI_USER or ent
+    # Community flags stay True — they're not tier-gated
 
 
 # ---------------------------------------------------------------------------
@@ -334,54 +459,82 @@ def set_tier(new_tier: str) -> str:
     if new_tier not in _TIER_LEVELS:
         raise ValueError(f"Invalid tier: {new_tier!r} (valid: {list(_TIER_LEVELS)})")
     FEATURE_TIER = new_tier
-    level = _TIER_LEVELS[new_tier]
-    pro_level = _TIER_LEVELS["pro"]
-    ent_level = _TIER_LEVELS["enterprise"]
-    FEATURE_FLAGS.update({
-        # ocr_parsing is always True (community feature) — not tier-gated
-        "audio_transcription": level >= pro_level,
-        "image_understanding": level >= pro_level,
-        # semantic_dedup is always True (community feature) — not tier-gated
-        "advanced_analytics": level >= pro_level,
-        "metamorphic_verification": level >= pro_level,
-        "custom_smart_rag": level >= pro_level,
-        "gmail_connector": level >= pro_level,
-        "outlook_connector": level >= pro_level,
-        "parent_child_retrieval": level >= pro_level,
-        "apple_notes_reader": level >= pro_level,
-        "calendar_sync": level >= pro_level,
-        "docling_parser": level >= pro_level,
-        "multi_user": CERID_MULTI_USER or level >= ent_level,
-        "sso_saml": level >= ent_level,
-        "audit_logging": level >= ent_level,
-        "priority_support": level >= ent_level,
-        # Workflow engine
-        "basic_workflows": True,  # Always enabled (community)
-        "advanced_workflows": level >= pro_level,
-    })
+    _refresh_flags()
     _config_logger.info("Runtime tier override: %s (flags recomputed)", new_tier)
     return new_tier
 
 
+_COMMUNITY_FLAGS: frozenset[str] = frozenset({
+    "ocr_parsing", "semantic_dedup", "image_understanding",
+    "parent_child_retrieval", "docling_parser", "audio_transcription_plain",
+    "audio_transcription",  # back-compat alias
+    "hierarchical_taxonomy", "file_upload_gui", "encryption_at_rest",
+    "truth_audit", "live_metrics", "private_mode", "basic_workflows",
+    "voice_memos_watch", "spotlight_integration", "share_sheet",
+    "shortcuts_actions", "quicklook_preview", "safari_reading_list",
+    "menu_bar_mode", "keychain_secrets", "tcc_wizard", "sparkle_updates",
+    "universal_binary", "apple_silicon_ml",
+})
+
+
 def _get_feature_tier(feature_name: str) -> str:
-    """Determine the minimum tier required for a feature flag."""
-    # Enterprise-only features
-    if feature_name in ("sso_saml", "audit_logging", "priority_support"):
-        return "enterprise"
-    if feature_name == "multi_user":
-        return "enterprise"  # multi_user is enterprise (env override available)
-    # Community features (always enabled)
-    if feature_name in ("hierarchical_taxonomy", "file_upload_gui",
-                        "encryption_at_rest", "truth_audit", "live_metrics",
-                        "ocr_parsing", "semantic_dedup", "basic_workflows",
-                        "private_mode"):
+    """Determine the minimum tier required for a feature flag.
+
+    Lookup order: explicit community set → enterprise set → pro set → unknown.
+    Unknown returns ``"pro"`` (fail-conservative); these surface in
+    ``test_pro_gating_contract`` as flags that need a tier assignment.
+    """
+    if feature_name in _COMMUNITY_FLAGS:
         return "community"
-    # Everything else is pro
-    return "pro"
+    if feature_name in _ENTERPRISE_TIER_FLAGS:
+        return "enterprise"
+    if feature_name in _PRO_TIER_FLAGS:
+        return "pro"
+    return "pro"  # unknown flag — default conservative
+
+
+def is_bucket_enabled(bucket_name: str) -> bool:
+    """Whether ALL features in a capability bucket are enabled.
+
+    Intersection semantics: a bucket is "available" to the customer only when
+    every member flag is on. Pro buckets light up together when tier is pro;
+    the community ``mac_native`` bucket is always on (platform availability
+    is checked at use-site, not here).
+    """
+    members = FEATURE_BUCKETS.get(bucket_name)
+    if not members:
+        return False
+    return all(FEATURE_FLAGS.get(flag, False) for flag in members)
+
+
+def get_bucket_status() -> dict[str, dict]:
+    """Bucket → {enabled, tier_required, features: {flag: {enabled, tier_required}}}.
+
+    Used by ``/billing/capabilities`` to drive the settings UI rendering and by
+    ``scripts/gen_pro_capabilities.py`` to keep ROADMAP.md in sync with
+    declared capabilities.
+    """
+    out: dict[str, dict] = {}
+    for bucket, flags in FEATURE_BUCKETS.items():
+        is_pro_bucket = bucket.startswith("pro_")
+        tier_required = "pro" if is_pro_bucket else "community"
+        feature_detail = {
+            flag: {
+                "enabled": FEATURE_FLAGS.get(flag, False),
+                "tier_required": _get_feature_tier(flag),
+            }
+            for flag in flags
+        }
+        out[bucket] = {
+            "enabled": is_bucket_enabled(bucket),
+            "tier_required": tier_required,
+            "features": feature_detail,
+        }
+    return out
 
 
 def get_feature_status() -> dict:
-    """Return the status of all feature flags."""
+    """Return the status of all feature flags + bucket rollup."""
     return {
         "tier": FEATURE_TIER,
         "features": {
@@ -391,4 +544,5 @@ def get_feature_status() -> dict:
             }
             for name, enabled in FEATURE_FLAGS.items()
         },
+        "buckets": get_bucket_status(),
     }

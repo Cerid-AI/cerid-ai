@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  type LucideIcon,
 } from "lucide-react"
 import {
   Dialog,
@@ -31,7 +32,7 @@ interface TrustScoreModalProps {
 }
 
 function StatusPill({ status }: { status: ComponentStatus }) {
-  const configs: Record<ComponentStatus, { label: string; className: string; Icon: React.ElementType }> = {
+  const configs: Record<ComponentStatus, { label: string; className: string; Icon: LucideIcon }> = {
     ok: { label: "OK", className: "bg-green-500/15 text-green-700 dark:text-green-400", Icon: CheckCircle },
     warn: { label: "Warning", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400", Icon: AlertCircle },
     fail: { label: "Failing", className: "bg-red-500/15 text-red-700 dark:text-red-400", Icon: XCircle },

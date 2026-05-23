@@ -57,7 +57,7 @@ def _make_app(plugin_dir: str, tier: str = "community") -> FastAPI:
     mock_redis = _mock_redis()
 
     with patch("config.PLUGIN_DIR", plugin_dir), \
-         patch("config.FEATURE_TIER", tier), \
+         patch("config.features.FEATURE_TIER", tier), \
          patch("app.routers.plugins.get_redis", return_value=mock_redis):
         from app.routers.plugins import router
 
@@ -74,7 +74,7 @@ class TestListPlugins:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -96,7 +96,7 @@ class TestListPlugins:
         empty_dir.mkdir()
 
         with patch("config.PLUGIN_DIR", str(empty_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -112,7 +112,7 @@ class TestListPlugins:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", "/nonexistent/path"), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -131,7 +131,7 @@ class TestGetPlugin:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -151,7 +151,7 @@ class TestGetPlugin:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -169,7 +169,7 @@ class TestEnableDisable:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
@@ -188,7 +188,7 @@ class TestEnableDisable:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -205,7 +205,7 @@ class TestEnableDisable:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "pro"), \
+             patch("config.features.FEATURE_TIER", "pro"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
@@ -224,7 +224,7 @@ class TestEnableDisable:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
@@ -244,7 +244,7 @@ class TestEnableDisable:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -262,7 +262,7 @@ class TestPluginConfig:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -279,7 +279,7 @@ class TestPluginConfig:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -306,7 +306,7 @@ class TestPluginConfig:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -324,7 +324,7 @@ class TestScanPlugins:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -342,7 +342,7 @@ class TestScanPlugins:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -376,7 +376,7 @@ class TestPluginStatus:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -393,7 +393,7 @@ class TestPluginStatus:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
@@ -410,7 +410,7 @@ class TestPluginStatus:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
@@ -429,7 +429,7 @@ class TestPluginStatus:
         mock_redis = _mock_redis()
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={"cerid-plugin-analytics": {}}):
             from app.routers.plugins import router

@@ -106,13 +106,31 @@ def _format_chroma_result(
 
 
 def _parent_child_enabled() -> bool:
-    """Return whether the runtime parent-child retrieval flag is set.
+    """Return whether parent-child retrieval is active at runtime.
 
-    The query path reads the flag through this function so tests can flip
-    it via env without re-importing the module. Mirrors
-    ``utils.chunker.parent_child_enabled``.
+    Two gates, both must be True:
+      1. Tier availability via ``is_feature_enabled("parent_child_retrieval")``
+         (community-tier+ since the 2026-05-20 rebalance — RAG quality is
+         plumbing, not a Pro axis, so this is True for all tiers today).
+      2. Deployment opt-in via ``ENABLE_PARENT_CHILD_RETRIEVAL`` env var
+         (default ``false``). Off-by-default because parent-child retrieval
+         can have non-trivial perf implications at large KB sizes; operators
+         turn it on per deployment after validating their corpus.
+
+    Tests can flip either gate independently:
+      - Patch ``config.features.FEATURE_FLAGS["parent_child_retrieval"]``
+        to test tier-gating behaviour.
+      - Patch ``ENABLE_PARENT_CHILD_RETRIEVAL`` env var to test deployment
+        activation.
+
+    Mirrors ``utils.chunker.parent_child_enabled`` for the chunker side of
+    the pipeline.
     """
     import os
+
+    from config.features import is_feature_enabled
+    if not is_feature_enabled("parent_child_retrieval"):
+        return False
     return os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in (
         "true",
         "1",
@@ -590,6 +608,30 @@ async def multi_domain_query(
 
     tasks = [query_domain(domain) for domain in domains]
     domain_results = await asyncio.gather(*tasks)
+
+    # Phase I — Custom Smart RAG: apply per-domain multipliers BEFORE
+    # the cross-domain merge so the existing relevance ordering carries
+    # the user's preferences. Pre-fetch the weight map once (zero-cost
+    # when feature off or no weights set).
+    weights: dict[str, float] = {}
+    try:
+        from utils.rag_weights import is_active as _smart_rag_active
+        if _smart_rag_active():
+            from utils.rag_weights import get_weights as _get_weights
+            weights = _get_weights()
+    except ImportError:
+        pass
+
+    if weights:
+        for domain, results in zip(domains, domain_results, strict=True):
+            kb_key = f"kb:{domain}"
+            multiplier = weights.get(kb_key, 1.0)
+            if abs(multiplier - 1.0) > 1e-9:
+                for r in results:
+                    if "relevance" in r:
+                        r["relevance"] = round(
+                            max(0.0, min(1.0, r["relevance"] * multiplier)), 4,
+                        )
 
     all_results = [r for results in domain_results for r in results]
 

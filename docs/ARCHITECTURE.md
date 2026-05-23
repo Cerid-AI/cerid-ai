@@ -241,3 +241,209 @@ Served by `/`, `/health`, and `/openapi.json`. Single source of truth: `pyprojec
 | What are the project conventions? | [`docs/CONVENTIONS.md`](CONVENTIONS.md) |
 | What's resolved / shipped? | [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) |
 | Current sprint work? | `tasks/todo.md` |
+| Sidebar pane shape + redirect map? | [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) |
+| Atlas + Constellation perf budgets? | [`docs/PERF_BUDGETS.md`](PERF_BUDGETS.md) |
+| Visualization endpoints? | `/graph/neighborhood`, `/graph/embeddings/3d`, `/graph/tour/generate`, `/atlas/views/*` |
+
+## Visualization tier (Cerid v1.0)
+
+Sidebar consolidates to 4 panes (Chat / Subjects / Sources / Settings).
+Subjects pane hosts the 2D and 3D graph experiences:
+
+- **Atlas (2D, sigma.js v3 + custom halo NodeProgram)** — everyday analytic
+  view. `core/graphology-adapter` + `lib/graph/programs/` + Web Worker for
+  force-atlas2 layout. Backed by `GET /graph/neighborhood` (APOC byhop +
+  Redis 60s LRU).
+- **Constellation (3D, R3F + drei + InstancedMesh)** — cinematic view with
+  ambient particles + tour mode (LLM-narrated camera waypoints, Pro-gated).
+  Backed by `GET /graph/embeddings/3d` (UMAP-or-fallback coords) and
+  `POST /graph/tour/generate`.
+- **Lenses + saved views** — 4 toggleable lens transforms (contradiction,
+  open-question, provenance, quality) compose via sigma's
+  nodeReducer/edgeReducer. Per-user named view CRUD via `/atlas/views/*`.
+
+See [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) for the full pane shape,
+NavigationProvider redirect map, and component layout reference.
+
+## Pro tier (Cerid v1.0 Phases D-H)
+
+The Pro feature surface sits atop the visualization tier as three
+architectural additions:
+
+### Desktop-host connectors (Phase D)
+
+The Electron main process (`packages/desktop/src/main/`) reads
+on-disk Apple data directly via Node.js, then POSTs structured
+payloads to `/ingest/structured`. Three connectors in this shape:
+Apple Notes (gzipped protobuf via `better-sqlite3` + `protobufjs`),
+Apple Mail (`.emlx` parser walking V10/MailData), iMessage (chat.db
++ minimal NSKeyedArchiver typedstream decoder). FDA + per-category
+TCC grants surfaced via `permissions-step.tsx` (`node-mac-permissions`
+≥ 2.5 + Electron's `systemPreferences`).
+
+### Sibling MCP servers (Phase F)
+
+`stacks/connectors/docker-compose.yml` brings up two opt-in
+profile=pro services — `google-workspace-mcp` (taylorwilsdon v1.21.0)
+and `ms365-mcp` (Softeria v0.111.0, pinned by commit SHA because of
+its high release velocity). Both speak streamable-HTTP MCP on
+loopback with a static bearer (`CERID_CONNECTORS_BEARER`). Cerid
+backend uses `MCPClientPool` with per-connector headers; the sibling
+servers own OAuth + refresh-token rotation. Four plugin
+ConnectorPlugins (`gmail`, `google_calendar`, `outlook`,
+`outlook_calendar`) wrap their MCP tool surface behind
+`DataSource` subclasses, joining the standard `query_all` fan-out.
+
+### Native Swift helpers (Phase G)
+
+`packages/desktop/swift/` ships three SPM CLI executables built via
+`swift build` (no Xcode `.xcodeproj` needed): `ceridek` (EventKit),
+`ceridphotos` (PhotoKit metadata), `ceridspotlight` (CoreSpotlight
+donor). Python plugins (`plugins/apple_calendar`,
+`plugins/apple_photos`, `plugins/spotlight_donor`) invoke them via
+`asyncio.subprocess` and parse JSON-over-stdio. TCC grants inherit
+from the parent Electron app's signed bundle — load-bearing contract
+documented in `packages/desktop/swift/README.md`.
+
+The three Xcode-required native targets (App Intents, Share
+Extension, Quick Look) are deferred — see
+`docs/PHASE_G_DEFERRED.md`.
+
+### Calendar stitching fallback chain
+
+`meeting_capture.calendar_stitch.match_to_event` (async since Phase F)
+resolves calendar events from the first available source in this
+order: `google_calendar` → `outlook_calendar` → `apple_calendar`
+(Swift helper) → `apple_calendar_eventkit` (legacy). Documented in
+`docs/PRO_GOOGLE_CALENDAR.md`.
+
+### Privacy filter
+
+`utils/domain_privacy.py` enforces per-domain visibility floors
+against the active `private_mode` level. Currently:
+`messages`/`imessage` require Level 2+. Wired into
+`pkb_search_filtered` so iMessage content disappears from retrieval
+when the floor isn't met. Privacy-defaults to closed on Redis
+unavailability.
+
+### Metamorphic verification (Phase H)
+
+`plugins/metamorphic/plugin.py` extends the hallucination pipeline
+with per-claim metamorphic scoring: each factoid gets synonym +
+antonym mutations via the internal LLM, then heuristic entailment
+checks classify it as `ok` / `suspicious` / `likely_hallucinated`.
+Registered via the existing `set_metamorphic_handler` stub
+interface in `app/agents/hallucination/metamorphic.py`.
+
+See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
+Phase D-H cumulative metrics and per-phase shipping log.
+
+## Knowledge architecture (Cerid v1.0 Phases K1-K6)
+
+The K-program turns the four primitives (vectors / graph / wiki /
+episodic memory) into an integrated architecture inspired by
+Karpathy's LLM Wiki pattern, Palantir Ontology-Augmented Generation,
+and A-Mem agentic memory.
+
+### Four knowledge surfaces
+
+| Surface | Primary key | Cost profile |
+|---|---|---|
+| **W**iki | `entity_slug` | Read-cheap (1 Neo4j round-trip), write-batched |
+| **V**ector | `chunk_id` | Read-medium (50-200ms Chroma + rerank), write-incremental |
+| **G**raph | `(entity, edge)` | Read-cheap (20-100ms Cypher), write-incremental |
+| **M**emory | `memory_id` | Read-medium, write-explicit + decay-scored |
+
+The surfaces are orthogonal; a query can hit two or three. The
+top-level surface router decides.
+
+### Surface router (Phase K3)
+
+`core/retrieval/surface_router.py` classifies user queries into
+five intent buckets via regex-only fast path (~0.5ms/query):
+
+| Intent | Detection signal | Primary surface |
+|---|---|---|
+| `compiled_summary` | "what is X / who is X / tell me about Y" | wiki |
+| `specific_fact` | quoted spans, "find the X where Y" | vector |
+| `relational` | "how does X relate to Y / what connects" | graph |
+| `personal_context` | "what did we decide / I prefer" | memory |
+| `mixed` (fallback) | no regex match | vector + graph + wiki |
+
+Precedence: `personal_context` > `specific_fact` > `relational`
+> `compiled_summary`. Personal-context first because "what did we
+decide about X" must NOT route to wiki even though X looks like a
+summary target.
+
+Exposed as `pkb_surface_route` (MCP tool) and consumed inside
+`pkb_agent_query` (optional `surfaces=[...]` arg) and
+`pkb_answer_with_citations` (wiki page prepended to context budget
+when W surface fires).
+
+### Event hooks + compounding loop (Phase K1)
+
+`app/processor/event_hooks.py` is a lightweight in-process pub/sub
+that wires the ingest path to the wiki refresh path without
+coupling the two jobs:
+
+```
+ingest_content() -> Neo4j commit + Chroma flip
+    -> EntityExtractionJob (enqueued post-commit)
+        -> upsert entities + MENTIONS edges
+        -> emit "entities_added" event
+            -> wiki_refresh subscriber (with per-entity Redis debounce)
+                -> WikiRefreshJob (enqueued)
+                    -> generate prose summary via local LLM
+                    -> write_entity_summary + external enrichment
+                    -> emit "wiki_refreshed" knowledge log entry
+```
+
+Failure isolation: each subscriber's exceptions are caught by the
+dispatcher so a broken handler can't break the emitter.
+
+Three freshness loops feed back into the queue:
+
+1. **On-write debounced refresh** (Phase K1.3) — per-entity Redis
+   debounce (5min TTL) prevents bulk-ingest write amplification.
+2. **Nightly stale-sweep** (Phase K1.4) — 3 AM cron picks the top
+   `WIKI_STALE_SWEEP_LIMIT` (default 100) entities with
+   `summary_updated_at < now()-24h` ordered by mention_count.
+3. **Weekly drift lint** (Phase K2.4) — Sunday 4 AM scans for
+   unresolved contradictions on stale summaries (force refresh)
+   + high-mention coverage gaps (debounced refresh).
+
+### Karpathy log + index (Phase K4)
+
+`(:KnowledgeLog)` Neo4j label is an append-only ledger written by
+`WikiRefreshJob.on_success` — Karpathy's `log.md` equivalent.
+`GET /wiki/log` paginates by entity/since. `GET /wiki/index` is a
+Karpathy-shaped catalog (slug + one-liner + activity_score +
+has_summary) that the surface router consults when fuzzy name
+matching misses.
+
+### Cross-surface linking (Phase K2)
+
+Per Palantir's OAG influence — the graph is the typed cross-
+reference layer; every other surface references entities by
+`canonical_id`:
+
+| From | To | Edge |
+|---|---|---|
+| Memory artifact | Entity | `(:Artifact {memory_type})-[:MENTIONS]->(:Entity)` |
+| Wiki page | Memory | `WikiEntityPage.episodic_memories` (decay-scored) |
+| Wiki page | Contradiction | `(:Entity)-[:HAS_CONTRADICTION]->(:ContradictionFinding)` |
+| Conversation | Wiki touch | `EXTRACTED_FROM` edge + `entities_added` event |
+
+### Observability (Phase K6)
+
+`/health.wiki_freshness` returns six metrics in one Cypher round-
+trip: total/active entity counts, coverage %, unresolved
+contradictions, 24h log activity. Surfaces in Settings →
+Diagnostics → Analytics via `KnowledgePanel`. Six preservation
+invariants (`tests/test_knowledge_architecture_invariants.py`)
+gate the wiring against regression.
+
+See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
+Phase K1-K6 cumulative metrics and the
+`tasks/2026-05-22-knowledge-architecture-redesign.md` design doc
+for the strategic rationale.

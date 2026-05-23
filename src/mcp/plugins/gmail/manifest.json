@@ -1,0 +1,16 @@
+{
+  "name": "gmail",
+  "version": "0.1.0",
+  "type": "connector",
+  "tier": "pro",
+  "description": "Gmail connector via sibling google-workspace-mcp container",
+  "feature_flags": ["gmail_connector"],
+  "requires": {
+    "env": [
+      "CERID_CONNECTORS_BEARER",
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET"
+    ],
+    "sibling_services": ["google-workspace-mcp"]
+  }
+}

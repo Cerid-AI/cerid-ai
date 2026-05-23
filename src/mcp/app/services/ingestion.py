@@ -268,6 +268,46 @@ def _flip_chunks_committed(collection: Any, chunk_ids: list[str]) -> None:
         log_swallowed_error("app.services.ingestion.flip_committed", e)
 
 
+def _enqueue_entity_extraction_if_enabled(artifact_id: str) -> None:
+    """Enqueue an EntityExtractionJob post-commit when the flag is on.
+
+    Phase K1.1.  Called from ``ingest_content`` after Neo4j commit and
+    Chroma flip succeed.  Non-blocking — the job runs at LOW priority
+    in the processor queue.  When the job completes it emits an
+    ``entities_added`` event which the wiki-refresh subscriber consumes
+    (Phase K1.2/K1.3).
+
+    Defaults to ON for new ingests; operators can disable via
+    ``CERID_ENTITY_EXTRACTION_ENABLED=false`` to revert to backfill-only
+    behaviour.  Lazy imports keep the cost at zero when disabled.
+    """
+    import os
+    val = os.environ.get("CERID_ENTITY_EXTRACTION_ENABLED", "true").strip().lower()
+    if val not in ("true", "1", "yes", "on"):
+        return
+
+    try:
+        from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+        from app.processor.jobs.entity_extraction import EntityExtractionJob  # noqa: PLC0415
+    except ImportError as e:
+        logger.debug("entity_extraction.enqueue: import failed (non-fatal): %s", e)
+        return
+
+    try:
+        payload: dict[str, Any] = {
+            "artifact_id": artifact_id,
+            "tenant_id": "default",
+        }
+        job = EntityExtractionJob(**payload)
+        enqueue_job(job, payload=payload)
+        logger.debug("entity_extraction.enqueued artifact_id=%s", artifact_id)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.entity_extraction_enqueue", e,
+            context={"artifact_id": artifact_id},
+        )
+
+
 def _enqueue_hype_jobs_if_enabled(
     chunk_ids: list[str],
     chunks: list[str],
@@ -962,6 +1002,12 @@ def ingest_content(
             coll_name=coll_name,
             artifact_id=artifact_id,
         )
+
+        # Phase K1.1 — Entity extraction on ingest. Closes the wiki orphan
+        # loop by feeding the entity graph (which the wiki refresh
+        # subscriber reads in K1.3). Non-blocking, LOW priority. Default ON;
+        # operators revert to backfill-only via CERID_ENTITY_EXTRACTION_ENABLED=false.
+        _enqueue_entity_extraction_if_enabled(artifact_id=artifact_id)
     except Exception as e:
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:

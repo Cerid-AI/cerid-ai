@@ -864,6 +864,242 @@ export async function testOpenRouterKey(api_key?: string): Promise<OpenRouterKey
 }
 
 // ---------------------------------------------------------------------------
+// HuggingFace token API (Phase E — gates pyannote diarization models)
+// ---------------------------------------------------------------------------
+
+export interface HFTokenStatus {
+  configured: boolean
+  last4: string | null
+  updated_at: string | null
+  model_access: Record<string, boolean> | null
+}
+
+export interface HFTokenTestResult {
+  valid: boolean
+  gated_model_access: Record<string, boolean> | null
+  error: string | null
+}
+
+export async function fetchHFTokenStatus(): Promise<HFTokenStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/hf-token`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch HF token status"))
+  return res.json()
+}
+
+export async function putHFToken(token: string): Promise<HFTokenStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/hf-token`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to save HF token"))
+  return res.json()
+}
+
+export async function testHFToken(token?: string): Promise<HFTokenTestResult> {
+  const res = await fetch(`${MCP_BASE}/settings/hf-token/test`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(token ? { token } : {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to test HF token"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Whisper model download manager API (Phase E Day 3)
+// ---------------------------------------------------------------------------
+
+export interface WhisperModelInfo {
+  id: string
+  filename: string
+  size_mb: number
+  rtf_estimate: number
+  quality: string
+  description: string
+  cached: boolean
+  cached_size_bytes: number | null
+}
+
+export interface WhisperModelList {
+  models: WhisperModelInfo[]
+  cache_dir: string
+  current_default: string
+}
+
+export interface WhisperDownloadStatus {
+  download_id: string
+  model_id: string
+  state: "pending" | "downloading" | "completed" | "failed" | "cancelled"
+  bytes_downloaded: number
+  bytes_total: number | null
+  error: string | null
+}
+
+export async function fetchWhisperModels(): Promise<WhisperModelList> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/models`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch Whisper models"))
+  return res.json()
+}
+
+export async function startWhisperDownload(model_id: string): Promise<{ download_id: string; model_id: string }> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/download`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ model_id }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to start download"))
+  return res.json()
+}
+
+export async function getWhisperDownloadStatus(download_id: string): Promise<WhisperDownloadStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/download/${download_id}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch download status"))
+  return res.json()
+}
+
+export async function cancelWhisperDownload(download_id: string): Promise<WhisperDownloadStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/download/${download_id}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to cancel download"))
+  return res.json()
+}
+
+export async function deleteWhisperModel(model_id: string): Promise<{ deleted: boolean }> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/models/${model_id}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to delete model"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Custom Smart RAG weights (Phase I)
+// ---------------------------------------------------------------------------
+
+export interface RagWeightMap {
+  weights: Record<string, number>
+  user_scope: string
+  feature_enabled: boolean
+}
+
+export interface RagSource {
+  name: string
+  kind: "data_source" | "kb_domain"
+  description: string
+  default_enabled: boolean
+  current_weight: number
+}
+
+export interface RagSourcesList {
+  sources: RagSource[]
+  min_weight: number
+  max_weight: number
+  default_weight: number
+  feature_enabled: boolean
+}
+
+export async function fetchRagWeights(): Promise<RagWeightMap> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch RAG weights"))
+  return res.json()
+}
+
+export async function fetchRagSources(): Promise<RagSourcesList> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights/sources`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch RAG sources"))
+  return res.json()
+}
+
+export async function putRagWeights(weights: Record<string, number>): Promise<RagWeightMap> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ weights }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to save RAG weights"))
+  return res.json()
+}
+
+export async function resetRagWeights(): Promise<RagWeightMap> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to reset RAG weights"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Pro-tier feature automations (UX consolidation)
+// ---------------------------------------------------------------------------
+
+export interface CadencePreset {
+  label: string
+  cron: string
+}
+
+export interface AutomationState {
+  feature: string
+  display_name: string
+  description: string
+  feature_flag: string
+  feature_flag_enabled: boolean
+  enabled: boolean
+  schedule: string
+  default_schedule: string
+  cadence_presets: CadencePreset[]
+}
+
+export interface RunNowResponse {
+  feature: string
+  triggered: boolean
+  detail: string
+  result: Record<string, unknown> | null
+}
+
+export async function listProAutomations(): Promise<AutomationState[]> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch automations"))
+  const body = await res.json()
+  return body.automations
+}
+
+export async function updateProAutomation(
+  name: string,
+  update: { enabled?: boolean; schedule?: string },
+): Promise<AutomationState> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations/${name}`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to update automation"))
+  return res.json()
+}
+
+export async function resetProAutomation(name: string): Promise<AutomationState> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations/${name}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to reset automation"))
+  return res.json()
+}
+
+export async function runProAutomationNow(name: string): Promise<RunNowResponse> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations/${name}/run-now`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to trigger automation"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
 // Brief scheduler settings (RAG C3.4)
 // ---------------------------------------------------------------------------
 

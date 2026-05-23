@@ -10,8 +10,10 @@ Execution results are logged to Redis for monitoring.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +55,116 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
         )
     except Exception as e:
         logger.warning(f"Failed to log scheduled job {job_name}: {e}")
+
+
+async def _run_daily_digest() -> None:
+    """Phase K Day 1 — daily LLM-synthesized activity digest.
+
+    Gates (in order):
+      1. ``daily_digest`` feature flag (Pro tier — agent enforces this too)
+      2. ``CERID_DAILY_DIGEST_ENABLED`` env toggle (operator opt-in)
+
+    Persists the digest as a KB artifact in domain="digests" and
+    fires a ``digest.ready`` webhook event for the in-app surface
+    to consume. Per-user local-7am is server-UTC-7am for v1; per-user
+    timezone resolution is tracked for Phase K.2.
+    """
+    import os
+
+    from config.features import is_feature_enabled
+
+    start = time.time()
+    if not is_feature_enabled("daily_digest"):
+        return
+    # Redis override wins; env fallback. Surfaced via the
+    # Settings → System → Pro Automations card.
+    from utils.pro_automations import is_enabled as _automation_enabled
+    if not _automation_enabled("daily_digest"):
+        return
+
+    try:
+        from core.agents.daily_digest import generate_daily_digest
+        result = await generate_daily_digest(
+            window_hours=int(os.getenv("DAILY_DIGEST_WINDOW_HOURS", "24")),
+            persist=True,
+        )
+        duration = time.time() - start
+        msg = (
+            f"{result.artifact_count} artifacts, "
+            f"flagged={result.flagged_count}, "
+            f"inbox_urgent={result.inbox_urgent_count}, "
+            f"skipped={result.skipped}"
+        )
+        _log_execution("daily_digest", "success", duration, msg)
+        logger.info("Scheduled daily digest completed: %s", msg)
+
+        # Fire the digest.ready webhook so in-app surfaces (toast,
+        # SSE bridge, future email worker) can deliver it.
+        if not result.skipped:
+            try:
+                from utils.webhooks import fire_event
+                await fire_event("digest.ready", {
+                    "digest_id": result.digest_id,
+                    "generated_at": result.generated_at,
+                    "artifact_count": result.artifact_count,
+                    "flagged_count": result.flagged_count,
+                    "inbox_urgent_count": result.inbox_urgent_count,
+                    "persisted_artifact_id": result.persisted_artifact_id,
+                    "summary": "Your daily digest is ready.",
+                })
+            except Exception as exc:  # noqa: BLE001
+                log_swallowed_error("daily_digest.fire_event", exc)
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("daily_digest", "error", duration, str(e))
+        logger.error(f"Scheduled daily digest failed: {e}")
+
+
+async def _run_inbox_triage() -> None:
+    """Phase J Day 2 — periodic inbox triage.
+
+    Fetches recent unread Gmail + Outlook threads, runs LLM
+    categorization per thread, and persists each as a KB artifact in
+    domain="inbox". Idempotent: re-runs over the same thread update
+    the same artifact via the source_id hash.
+
+    Three guards before doing any work:
+      1. inbox_triage feature flag (Pro tier — agent enforces this too)
+      2. CERID_INBOX_TRIAGE_ENABLED env toggle (operator opt-in)
+      3. At least one of gmail/outlook registered + configured
+    """
+    import os
+
+    from config.features import is_feature_enabled
+
+    start = time.time()
+    if not is_feature_enabled("inbox_triage"):
+        return  # feature off — silent skip
+    # Redis override wins; env fallback when Redis is unavailable.
+    # Surfaced via the Settings → System → Pro Automations card.
+    from utils.pro_automations import is_enabled as _automation_enabled
+    if not _automation_enabled("inbox_triage"):
+        return  # operator hasn't flipped the toggle
+
+    try:
+        from core.agents.inbox_triage import triage_inboxes
+        result = await triage_inboxes(
+            max_results_per_source=int(os.getenv("INBOX_TRIAGE_MAX_PER_SOURCE", "30")),
+            persist=True,
+        )
+        duration = time.time() - start
+        msg = (
+            f"{len(result.threads)} threads, "
+            f"by_category={result.by_category}, "
+            f"sources={result.sources_queried}, "
+            f"skipped={len(result.skipped)}"
+        )
+        _log_execution("inbox_triage", "success", duration, msg)
+        logger.info("Scheduled inbox triage completed: %s", msg)
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("inbox_triage", "error", duration, str(e))
+        logger.error(f"Scheduled inbox triage failed: {e}")
 
 
 async def _run_rectify() -> None:
@@ -344,6 +456,157 @@ async def _run_ingest_recovery() -> None:
         logger.error("ingest_recovery scheduled job failed: %s", e)
 
 
+async def _run_wiki_drift_lint() -> None:
+    """Phase K2.4 — weekly lint sweep for wiki drift + open contradictions.
+
+    Two checks, both surfaced as enqueued refreshes:
+
+    1. **Unresolved contradictions** — entities with at least one
+       :ContradictionFinding edge but a stale or missing summary. Force
+       a refresh so the page reflects the disagreement.
+    2. **Coverage gaps** — entities with mention_count above the lint
+       threshold (default 10) but no summary at all. Their on-ingest
+       refresh may have been debounced out or never fired.
+
+    Cheap: bounded by WIKI_DRIFT_LINT_LIMIT (default 50) per run; the
+    most-active entities win the slot.
+    """
+    import os
+    start = time.time()
+    try:
+        from app.deps import get_neo4j  # noqa: PLC0415
+        from app.processor.subscribers.wiki_refresh import enqueue_refresh  # noqa: PLC0415
+
+        limit = int(os.environ.get("WIKI_DRIFT_LINT_LIMIT", "50"))
+        threshold = int(os.environ.get("WIKI_DRIFT_LINT_MIN_MENTIONS", "10"))
+        driver = get_neo4j()
+        if driver is None:
+            logger.warning("wiki_drift_lint: Neo4j unavailable, skipping")
+            return
+
+        def _scan() -> dict[str, list[str]]:
+            with driver.session() as session:
+                # Unresolved contradictions on entities with stale summaries
+                contra_rows = session.run(
+                    """
+                    MATCH (e:Entity)-[:HAS_CONTRADICTION]->(:ContradictionFinding)
+                    WHERE e.summary IS NULL
+                       OR e.summary_updated_at IS NULL
+                       OR e.summary_updated_at < $cutoff
+                    RETURN DISTINCT e.canonical_id AS slug
+                    LIMIT $lim
+                    """,
+                    cutoff=(datetime.now(tz=timezone.utc) - timedelta(hours=24)).isoformat(),
+                    lim=limit,
+                )
+                contradiction_slugs = [r["slug"] for r in contra_rows if r["slug"]]
+
+                # Coverage gaps: high mention, no summary
+                gap_rows = session.run(
+                    """
+                    MATCH (e:Entity)
+                    WHERE e.summary IS NULL
+                      AND coalesce(e.mention_count, 0) >= $threshold
+                    RETURN e.canonical_id AS slug
+                    ORDER BY e.mention_count DESC
+                    LIMIT $lim
+                    """,
+                    threshold=threshold,
+                    lim=limit,
+                )
+                gap_slugs = [r["slug"] for r in gap_rows if r["slug"]]
+
+            return {"contradiction": contradiction_slugs, "gap": gap_slugs}
+
+        buckets = await asyncio.to_thread(_scan)
+        forced = 0
+        debounced = 0
+        for slug in buckets["contradiction"]:
+            # Contradictions bypass debounce — fresh summary now
+            if enqueue_refresh(slug, force=True):
+                forced += 1
+        for slug in buckets["gap"]:
+            if enqueue_refresh(slug, force=False):
+                debounced += 1
+
+        duration = time.time() - start
+        detail = (
+            f"contradictions={len(buckets['contradiction'])} forced={forced} "
+            f"gaps={len(buckets['gap'])} enqueued={debounced}"
+        )
+        _log_execution("wiki_drift_lint", "success", duration, detail)
+        logger.info("wiki_drift_lint: %s in %.1fs", detail, duration)
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("wiki_drift_lint", "error", duration, str(e))
+        logger.error("wiki_drift_lint failed: %s", e)
+
+
+async def _run_wiki_stale_sweep() -> None:
+    """Phase K1.4 — nightly wiki refresh sweep.
+
+    Finds entities whose summary is overdue (``next_refresh_due < now()``)
+    and enqueues ``WikiRefreshJob`` for the top-``WIKI_STALE_SWEEP_LIMIT``
+    ranked by ``mention_count DESC``. Bounded to prevent a fresh corpus
+    from melting the LOW priority queue.
+
+    The wiki refresh job itself is the same code path used by the
+    ingest-triggered enqueue (Phase K1.3); this sweep is the catch-all
+    for entities whose ingest happened before K1.1 shipped, or whose
+    debounce window expired without a new event.
+    """
+    import os
+    start = time.time()
+    try:
+        from app.deps import get_neo4j  # noqa: PLC0415
+        from app.processor.subscribers.wiki_refresh import enqueue_refresh  # noqa: PLC0415
+
+        limit = int(os.environ.get("WIKI_STALE_SWEEP_LIMIT", "100"))
+        driver = get_neo4j()
+        if driver is None:
+            logger.warning("wiki_stale_sweep: Neo4j unavailable, skipping")
+            return
+
+        # 24h since-last-refresh matches what next_refresh_due represents
+        # on the read path (wiki_pages._compute_next_refresh).
+        cutoff_iso = (datetime.now(tz=timezone.utc) - timedelta(hours=24)).isoformat()
+
+        def _scan_with_cutoff() -> list[str]:
+            with driver.session() as session:
+                result = session.run(
+                    """
+                    MATCH (e:Entity)
+                    WHERE e.summary IS NULL
+                       OR e.summary_updated_at IS NULL
+                       OR e.summary_updated_at < $cutoff
+                    RETURN e.canonical_id AS slug
+                    ORDER BY coalesce(e.mention_count, 0) DESC
+                    LIMIT $lim
+                    """,
+                    cutoff=cutoff_iso,
+                    lim=limit,
+                )
+                return [row["slug"] for row in result if row["slug"]]
+
+        slugs = await asyncio.to_thread(_scan_with_cutoff)
+        enqueued = 0
+        for slug in slugs:
+            # Force=False so per-entity debounce still applies; if the
+            # subscriber already enqueued for this slug in the last
+            # WIKI_REFRESH_DEBOUNCE_TTL seconds, the sweep skips it.
+            if enqueue_refresh(slug, force=False):
+                enqueued += 1
+
+        duration = time.time() - start
+        detail = f"candidates={len(slugs)} enqueued={enqueued} limit={limit}"
+        _log_execution("wiki_stale_sweep", "success", duration, detail)
+        logger.info("wiki_stale_sweep: %s in %.1fs", detail, duration)
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("wiki_stale_sweep", "error", duration, str(e))
+        logger.error("wiki_stale_sweep failed: %s", e)
+
+
 async def _run_config_recommender() -> None:
     """Cycle 3.2 — periodic evaluation of the recommendation registry.
 
@@ -428,6 +691,31 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Phase K Day 1 — daily digest (default 7 AM UTC when
+    # CERID_DAILY_DIGEST_ENABLED is set + daily_digest feature on).
+    if getattr(config, "SCHEDULE_DAILY_DIGEST", ""):
+        _scheduler.add_job(
+            _run_daily_digest,
+            CronTrigger.from_crontab(config.SCHEDULE_DAILY_DIGEST),
+            id="daily_digest",
+            name="Daily digest (Pro)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Phase J Day 2 — inbox triage (every 15 min by default when
+    # CERID_INBOX_TRIAGE_ENABLED is set + inbox_triage feature on).
+    # Empty SCHEDULE_INBOX_TRIAGE disables the cron entirely.
+    if getattr(config, "SCHEDULE_INBOX_TRIAGE", ""):
+        _scheduler.add_job(
+            _run_inbox_triage,
+            CronTrigger.from_crontab(config.SCHEDULE_INBOX_TRIAGE),
+            id="inbox_triage",
+            name="Inbox triage (Pro)",
+            replace_existing=True,
+            max_instances=1,  # block overlapping runs (LLM cost)
+        )
+
     # Sync export (optional — empty SCHEDULE_SYNC_EXPORT disables)
     if getattr(config, "SCHEDULE_SYNC_EXPORT", ""):
         _scheduler.add_job(
@@ -445,6 +733,36 @@ def start_scheduler() -> AsyncIOScheduler:
         id="tombstone_purge",
         name="Weekly tombstone purge",
         replace_existing=True,
+    )
+
+    # Phase K1.4 — nightly wiki refresh sweep (3 AM local). Catches
+    # entities whose summaries are overdue (next_refresh_due elapsed)
+    # and weren't picked up by the on-ingest subscriber (Phase K1.3).
+    # Bounded to WIKI_STALE_SWEEP_LIMIT (default 100) per night.
+    _scheduler.add_job(
+        _run_wiki_stale_sweep,
+        CronTrigger.from_crontab(
+            getattr(config, "SCHEDULE_WIKI_STALE_SWEEP", "0 3 * * *"),
+        ),
+        id="wiki_stale_sweep",
+        name="Wiki refresh sweep (stale entities)",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    # Phase K2.4 — weekly wiki drift lint (Sunday 4 AM, after the
+    # tombstone purge). Two-pass scan: (a) entities with open
+    # contradictions on stale summaries (force refresh), (b) high-
+    # mention entities with no summary (debounced refresh).
+    _scheduler.add_job(
+        _run_wiki_drift_lint,
+        CronTrigger.from_crontab(
+            getattr(config, "SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * 0"),
+        ),
+        id="wiki_drift_lint",
+        name="Wiki drift lint (contradictions + coverage gaps)",
+        replace_existing=True,
+        max_instances=1,
     )
 
     # Cycle 3.2 — config recommender: scan corpus + flag state every

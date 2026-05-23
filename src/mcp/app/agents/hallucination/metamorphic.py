@@ -29,7 +29,21 @@ def set_metamorphic_handler(fn):
 
 
 async def metamorphic_score(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    """Delegate to plugin implementation if loaded, otherwise skip."""
+    """Delegate to plugin implementation if loaded, otherwise skip.
+
+    Two skip paths:
+      - Feature flag disabled (community/enterprise w/o entitlement): skip with
+        ``reason="feature_gated"`` so callers can render a clean upgrade CTA
+        without sounding broken.
+      - Flag enabled but plugin not yet loaded: skip with ``reason=
+        "plugin_not_loaded"`` so operators know the install is incomplete.
+    """
+    from config.features import is_feature_enabled
+
+    if not is_feature_enabled("metamorphic_verification"):
+        return {"skipped": True, "reason": "feature_gated",
+                "feature": "metamorphic_verification"}
     if _metamorphic_fn is None:
-        return {"skipped": True, "reason": "metamorphic_verification plugin not loaded (Pro tier)"}
+        return {"skipped": True, "reason": "plugin_not_loaded",
+                "feature": "metamorphic_verification"}
     return await _metamorphic_fn(*args, **kwargs)

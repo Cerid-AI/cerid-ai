@@ -139,10 +139,14 @@ async def test_scan_vault_uses_default_domain(vault_dir, patched_scanner):
     async for _ in folder_scanner.scan_vault(str(vault_dir), None):
         pass
 
-    # default_domain from YAML is "general"; the regular note has no
-    # taxonomy-detected domain, so it should fall back to "general".
+    # Phase D added "notes" as a first-class Pro-tier domain in
+    # config.TAXONOMY, so a `notes/` folder inside the vault now
+    # resolves to the "notes" domain — folder-based detection wins
+    # over the default_domain. The default still applies for folders
+    # that don't match any domain in TAXONOMY (covered by
+    # test_scan_vault_ui_config_when_yaml_missing).
     notes_call = next(c for c in ingest_calls if "notes/idea.md" in c["file_path"])
-    assert notes_call["domain"] == "general"
+    assert notes_call["domain"] == "notes"
 
 
 @pytest.mark.asyncio

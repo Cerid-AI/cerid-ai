@@ -50,6 +50,67 @@ logger = logging.getLogger("ai-companion.graph.wiki")
 _THIRTY_DAYS_ISO = None  # computed lazily
 
 
+# ---------------------------------------------------------------------------
+# Phase K2.2 — episodic memory for an entity
+# ---------------------------------------------------------------------------
+
+
+def get_memories_for_entity(
+    driver: Any,
+    entity_slug: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Fetch episodic memories that mention ``entity_slug``.
+
+    Returns up to ``limit`` rows ordered by recency (the conversation
+    memories with the latest ``valid_from``). Each row carries the
+    fields the wiki page renders directly — no further joins needed.
+
+    Filters out archived memories so the wiki page reflects the live
+    state. The decay-adjusted score is computed by the service layer
+    on top of the raw rows; this query stays cheap so the page render
+    keeps its ~10 ms budget.
+    """
+    if not driver or not entity_slug:
+        return []
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (m:Artifact)-[:MENTIONS]->(e:Entity {canonical_id: $slug})
+                WHERE coalesce(m.archived, false) = false
+                  AND m.memory_type IS NOT NULL
+                RETURN m.id AS memory_id,
+                       m.memory_type AS memory_type,
+                       m.summary AS summary,
+                       m.valid_from AS valid_from,
+                       coalesce(m.access_count, 0) AS access_count
+                ORDER BY coalesce(m.valid_from, m.created_at) DESC
+                LIMIT $lim
+                """,
+                slug=entity_slug,
+                lim=limit,
+            )
+            return [
+                {
+                    "memory_id": row["memory_id"],
+                    "memory_type": row["memory_type"],
+                    "summary": row["summary"] or "",
+                    "valid_from": row["valid_from"],
+                    "access_count": int(row["access_count"]),
+                }
+                for row in result
+            ]
+    except Exception as exc:
+        log_swallowed_error(
+            "wiki.get_memories_for_entity", exc, context={"slug": entity_slug}
+        )
+        return []
+
+
+
 def _thirty_days_ago_iso() -> str:
     """ISO string for now-minus-30-days. Computed once per process call."""
     from datetime import timedelta

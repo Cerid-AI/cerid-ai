@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 277
+**Total routes:** 323
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -41,11 +41,19 @@ not documented here; see the internal repo for the full registry.
 | POST | `/chat/compress` | `compress_history_endpoint` | `src/mcp/app/routers/agents.py` |  |  |
 | POST | `/verification/save` | `save_verification_report` | `src/mcp/app/routers/agents.py` |  |  |
 | GET | `/verification/{conversation_id}` | `get_verification_report` | `src/mcp/app/routers/agents.py` |  |  |
+| GET | `/cost-by-stage` | `cost_by_stage` | `src/mcp/app/routers/analytics.py` | analytics |  |
+| GET | `/ingestion-by-day` | `ingestion_by_day` | `src/mcp/app/routers/analytics.py` | analytics |  |
+| GET | `/quality-timeline` | `quality_timeline` | `src/mcp/app/routers/analytics.py` | analytics |  |
 | GET | `/artifacts` | `list_artifacts_endpoint` | `src/mcp/app/routers/artifacts.py` |  |  |
 | GET | `/artifacts/{artifact_id}` | `artifact_detail_endpoint` | `src/mcp/app/routers/artifacts.py` |  |  |
 | POST | `/artifacts/{artifact_id}/feedback` | `artifact_feedback_endpoint` | `src/mcp/app/routers/artifacts.py` |  |  |
 | GET | `/artifacts/{artifact_id}/related` | `related_artifacts_endpoint` | `src/mcp/app/routers/artifacts.py` |  |  |
 | POST | `/recategorize` | `recategorize_endpoint` | `src/mcp/app/routers/artifacts.py` |  |  |
+| GET | `` | `list_views` | `src/mcp/app/routers/atlas_views.py` | atlas,views |  |
+| POST | `` | `create_view` | `src/mcp/app/routers/atlas_views.py` | atlas,views |  |
+| GET | `/health` | `health` | `src/mcp/app/routers/atlas_views.py` | atlas,views |  |
+| DELETE | `/{view_id}` | `delete_view` | `src/mcp/app/routers/atlas_views.py` | atlas,views |  |
+| PATCH | `/{view_id}` | `update_view` | `src/mcp/app/routers/atlas_views.py` | atlas,views |  |
 | POST | `/login` | `login` | `src/mcp/app/routers/auth.py` | auth |  |
 | POST | `/logout` | `logout` | `src/mcp/app/routers/auth.py` | auth |  |
 | GET | `/me` | `me` | `src/mcp/app/routers/auth.py` | auth |  |
@@ -69,6 +77,11 @@ not documented here; see the internal repo for the full registry.
 | PUT | `/settings` | `put_brief_settings` | `src/mcp/app/routers/brief_settings.py` | briefs |  |
 | POST | `/chat/compress` | `compress_context` | `src/mcp/app/routers/chat.py` | chat |  |
 | POST | `/chat/stream` | `chat_stream` | `src/mcp/app/routers/chat.py` | chat |  |
+| GET | `` | `list_connectors` | `src/mcp/app/routers/connectors.py` | connectors |  |
+| GET | `/{slug}` | `get_connector` | `src/mcp/app/routers/connectors.py` | connectors |  |
+| POST | `/{slug}/auth/start` | `start_auth` | `src/mcp/app/routers/connectors.py` | connectors |  |
+| GET | `/{slug}/auth/status` | `get_auth_status` | `src/mcp/app/routers/connectors.py` | connectors |  |
+| POST | `/{slug}/disconnect` | `disconnect` | `src/mcp/app/routers/connectors.py` | connectors |  |
 | GET | `/contradictions` | `list_contradictions` | `src/mcp/app/routers/contradictions.py` | wiki |  |
 | GET | `/contradictions/{finding_id}` | `get_contradiction` | `src/mcp/app/routers/contradictions.py` | wiki |  |
 | GET | `/custom-agents` | `list_agents` | `src/mcp/app/routers/custom_agents.py` | custom-agents |  |
@@ -98,6 +111,10 @@ not documented here; see the internal repo for the full registry.
 | POST | `/data-sources/{name}/disable` | `disable_source` | `src/mcp/app/routers/data_sources.py` | data-sources |  |
 | POST | `/data-sources/{name}/enable` | `enable_source` | `src/mcp/app/routers/data_sources.py` | data-sources |  |
 | GET | `/digest` | `digest_endpoint` | `src/mcp/app/routers/digest.py` |  |  |
+| GET | `/latest` | `get_latest_digest` | `src/mcp/app/routers/digests.py` | digests |  |
+| GET | `/recent` | `list_recent_digests` | `src/mcp/app/routers/digests.py` | digests |  |
+| POST | `/run-now` | `run_digest_now` | `src/mcp/app/routers/digests.py` | digests |  |
+| GET | `/{date}` | `get_digest_by_date` | `src/mcp/app/routers/digests.py` | digests |  |
 | GET | `` | `get_dlq_entries` | `src/mcp/app/routers/dlq.py` | admin-dlq |  |
 | POST | `/retry/{entry_id}` | `retry_dlq_entry` | `src/mcp/app/routers/dlq.py` | admin-dlq |  |
 | DELETE | `/{entry_id}` | `discard_dlq_entry` | `src/mcp/app/routers/dlq.py` | admin-dlq |  |
@@ -105,6 +122,12 @@ not documented here; see the internal repo for the full registry.
 | POST | `/{slug}/enabled` | `set_adapter_enabled` | `src/mcp/app/routers/external_apis.py` | external-apis |  |
 | GET | `/{slug}/health` | `adapter_health` | `src/mcp/app/routers/external_apis.py` | external-apis |  |
 | POST | `/feedback` | `submit_claim_feedback` | `src/mcp/app/routers/feedback.py` | feedback |  |
+| GET | `/embeddings/3d` | `get_embeddings_3d` | `src/mcp/app/routers/graph.py` | graph |  |
+| GET | `/health` | `graph_health` | `src/mcp/app/routers/graph.py` | graph |  |
+| GET | `/neighborhood` | `get_neighborhood` | `src/mcp/app/routers/graph.py` | graph |  |
+| GET | `/timeline` | `get_timeline` | `src/mcp/app/routers/graph.py` | graph |  |
+| POST | `/generate` | `generate_tour` | `src/mcp/app/routers/graph_tour.py` | graph,tour |  |
+| GET | `/health` | `tour_health` | `src/mcp/app/routers/graph_tour.py` | graph,tour |  |
 | GET | `/collections` | `list_collections_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | GET | `/health` | `health_check_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | GET | `/health/live` | `liveness_probe` | `src/mcp/app/routers/health.py` |  |  |
@@ -114,6 +137,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/scheduler` | `scheduler_status_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | POST | `/ingest` | `ingest_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
 | POST | `/ingest/feedback` | `ingest_feedback_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
+| POST | `/ingest/structured` | `ingest_structured_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
 | POST | `/ingest_batch` | `ingest_batch_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
 | POST | `/ingest_file` | `ingest_file_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
 | GET | `/ingest_log` | `ingest_log_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
@@ -144,6 +168,9 @@ not documented here; see the internal repo for the full registry.
 | GET | `/mcp/sse` | `mcp_sse_endpoint` | `src/mcp/app/routers/mcp_sse.py` |  |  |
 | HEAD | `/mcp/sse` | `mcp_sse_head` | `src/mcp/app/routers/mcp_sse.py` |  |  |
 | POST | `/mcp/sse` | `mcp_sse_post` | `src/mcp/app/routers/mcp_sse.py` |  |  |
+| GET | `/job/{job_id}` | `get_meeting_job` | `src/mcp/app/routers/meetings.py` | meetings |  |
+| GET | `/jobs` | `list_meeting_jobs` | `src/mcp/app/routers/meetings.py` | meetings |  |
+| POST | `/upload` | `upload_meeting` | `src/mcp/app/routers/meetings.py` | meetings |  |
 | GET | `/memories` | `list_memories` | `src/mcp/app/routers/memories.py` |  |  |
 | POST | `/memories/extract` | `extract_memories_endpoint` | `src/mcp/app/routers/memories.py` |  |  |
 | DELETE | `/memories/{memory_id}` | `delete_memory` | `src/mcp/app/routers/memories.py` |  |  |
@@ -181,6 +208,11 @@ not documented here; see the internal repo for the full registry.
 | PUT | `/plugins/{name}/config` | `update_plugin_config` | `src/mcp/app/routers/plugins.py` | plugins |  |
 | POST | `/plugins/{name}/disable` | `disable_plugin` | `src/mcp/app/routers/plugins.py` | plugins |  |
 | POST | `/plugins/{name}/enable` | `enable_plugin` | `src/mcp/app/routers/plugins.py` | plugins |  |
+| GET | `` | `list_automations` | `src/mcp/app/routers/pro_automations.py` | pro-automations |  |
+| DELETE | `/{name}` | `reset_automation` | `src/mcp/app/routers/pro_automations.py` | pro-automations |  |
+| GET | `/{name}` | `get_automation` | `src/mcp/app/routers/pro_automations.py` | pro-automations |  |
+| PUT | `/{name}` | `put_automation` | `src/mcp/app/routers/pro_automations.py` | pro-automations |  |
+| POST | `/{name}/run-now` | `run_automation_now` | `src/mcp/app/routers/pro_automations.py` | pro-automations |  |
 | GET | `` | `list_providers` | `src/mcp/app/routers/providers.py` | providers |  |
 | GET | `/config` | `get_model_provider_config` | `src/mcp/app/routers/providers.py` | providers |  |
 | PUT | `/config` | `update_model_provider_config` | `src/mcp/app/routers/providers.py` | providers |  |
@@ -196,6 +228,10 @@ not documented here; see the internal repo for the full registry.
 | GET | `/{name}` | `get_provider` | `src/mcp/app/routers/providers.py` | providers |  |
 | POST | `/{name}/validate` | `validate_key` | `src/mcp/app/routers/providers.py` | providers |  |
 | POST | `/query` | `query_endpoint` | `src/mcp/app/routers/query.py` |  |  |
+| DELETE | `` | `delete_weights_endpoint` | `src/mcp/app/routers/rag_weights.py` | rag-weights |  |
+| GET | `` | `get_weights_endpoint` | `src/mcp/app/routers/rag_weights.py` | rag-weights |  |
+| PUT | `` | `put_weights_endpoint` | `src/mcp/app/routers/rag_weights.py` | rag-weights |  |
+| GET | `/sources` | `list_sources_endpoint` | `src/mcp/app/routers/rag_weights.py` | rag-weights |  |
 | DELETE | `/{rec_id}` | `clear_recommendation` | `src/mcp/app/routers/recommendations.py` | settings |  |
 | POST | `/{rec_id}/dismiss` | `dismiss_recommendation` | `src/mcp/app/routers/recommendations.py` | settings |  |
 | POST | `/admin/scan` | `start_scan` | `src/mcp/app/routers/scanner.py` | scanner |  |
@@ -227,6 +263,9 @@ not documented here; see the internal repo for the full registry.
 | POST | `/settings/private-mode` | `set_private_mode` | `src/mcp/app/routers/settings.py` |  |  |
 | POST | `/settings/private-mode/session-wipe` | `wipe_private_session` | `src/mcp/app/routers/settings.py` |  |  |
 | POST | `/settings/tier` | `set_tier` | `src/mcp/app/routers/settings.py` |  |  |
+| GET | `/settings/hf-token` | `get_hf_token_status` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
+| PUT | `/settings/hf-token` | `put_hf_token` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
+| POST | `/settings/hf-token/test` | `test_hf_token` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
 | GET | `/settings/openrouter-key` | `get_openrouter_key_status` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
 | PUT | `/settings/openrouter-key` | `put_openrouter_key` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
 | POST | `/settings/openrouter-key/test` | `test_openrouter_key` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
@@ -275,11 +314,18 @@ not documented here; see the internal repo for the full registry.
 | GET | `/webhooks/{sub_id}` | `get_subscription` | `src/mcp/app/routers/webhook_subscriptions.py` | webhooks |  |
 | PATCH | `/webhooks/{sub_id}` | `update_subscription` | `src/mcp/app/routers/webhook_subscriptions.py` | webhooks |  |
 | GET | `/webhooks/{sub_id}/deliveries` | `list_deliveries` | `src/mcp/app/routers/webhook_subscriptions.py` | webhooks |  |
+| POST | `/download` | `start_download` | `src/mcp/app/routers/whisper_models.py` | whisper-models |  |
+| DELETE | `/download/{download_id}` | `cancel_download` | `src/mcp/app/routers/whisper_models.py` | whisper-models |  |
+| GET | `/download/{download_id}` | `get_download_status` | `src/mcp/app/routers/whisper_models.py` | whisper-models |  |
+| GET | `/models` | `list_models` | `src/mcp/app/routers/whisper_models.py` | whisper-models |  |
+| DELETE | `/models/{model_id}` | `delete_cached_model` | `src/mcp/app/routers/whisper_models.py` | whisper-models |  |
 | GET | `/widget.html` | `widget_page` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/widget.js` | `widget_script` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/widget/config` | `widget_config` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/entities` | `list_entity_pages` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/entities/{slug}` | `get_entity_wiki_page` | `src/mcp/app/routers/wiki.py` | wiki |  |
+| GET | `/index` | `list_knowledge_index` | `src/mcp/app/routers/wiki.py` | wiki |  |
+| GET | `/log` | `list_knowledge_log` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | POST | `/write_note` | `write_note_endpoint` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `` | `list_workflows` | `src/mcp/app/routers/workflows.py` | workflows |  |
 | POST | `` | `create_workflow` | `src/mcp/app/routers/workflows.py` | workflows |  |

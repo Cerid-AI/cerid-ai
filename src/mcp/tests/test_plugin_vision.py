@@ -225,25 +225,34 @@ class TestIngestMultimodal:
     """Test the multimodal ingestion service."""
 
     @pytest.mark.asyncio
-    async def test_ingest_blocked_in_community(self):
-        """ingest_multimodal returns error in community tier."""
+    async def test_ingest_blocked_when_per_plugin_feature_disabled(self, tmp_path):
+        """When a per-plugin feature flag is explicitly disabled, the
+        dispatcher returns a feature-gate error after plugin detection.
+
+        Note: post 2026-05-20 rebalance, ocr/audio_transcription_plain/
+        image_understanding are all community by default — there is no
+        longer a blanket Pro check at this layer. To exercise the gate
+        we patch the flag off explicitly.
+        """
         from app.services.multimodal import ingest_multimodal
 
-        with patch("app.services.multimodal.config") as mock_config:
-            mock_config.FEATURE_TIER = "community"
-            result = await ingest_multimodal("/some/file.mp3")
+        # Create a real file so we get past the file-existence check
+        audio_path = tmp_path / "test.mp3"
+        audio_path.write_bytes(b"fake audio")
+
+        with patch("app.services.multimodal.is_feature_enabled",
+                   return_value=False):
+            result = await ingest_multimodal(str(audio_path))
 
         assert result["status"] == "error"
-        assert "CERID_TIER=pro" in result["error"]
+        assert "audio_transcription_plain" in result["error"]
 
     @pytest.mark.asyncio
     async def test_ingest_file_not_found(self):
         """ingest_multimodal returns error for missing files."""
         from app.services.multimodal import ingest_multimodal
 
-        with patch("app.services.multimodal.config") as mock_config:
-            mock_config.FEATURE_TIER = "pro"
-            result = await ingest_multimodal("/nonexistent/file.mp3")
+        result = await ingest_multimodal("/nonexistent/file.mp3")
 
         assert result["status"] == "error"
         assert "File not found" in result["error"]

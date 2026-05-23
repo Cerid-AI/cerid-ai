@@ -343,6 +343,32 @@ async def call_llm(
             )
             if _consecutive_401s >= _POOL_RECYCLE_401_THRESHOLD:
                 await _recycle_client()
+        elif 400 <= exc.response.status_code < 500:
+            # 4xx (other than auth) — diagnose with model name + response body
+            # so Sentry / log captures the actual rejection cause. Without this
+            # the 2026-05-20 audit saw 80 events of bare "HTTPStatusError 400"
+            # in the breadcrumb with no actionable detail. The body usually
+            # names the offending field (deprecated model, bad payload shape).
+            body_preview = ""
+            try:
+                body_preview = exc.response.text[:500]
+            except Exception:  # silent-catch-allowed: diagnostic body capture is best-effort; the outer raise re-fires regardless, so a missed body preview can only reduce diagnostic detail, never mask an error
+                body_preview = "<body capture failed>"
+            _logger.warning(
+                "OpenRouter 4xx %d on model=%s (breaker=%s): %s",
+                exc.response.status_code, model, breaker_name, body_preview,
+            )
+            try:
+                import sentry_sdk  # type: ignore[import-not-found]
+                sentry_sdk.set_tag("openrouter_model", model)
+                sentry_sdk.set_tag("openrouter_status", str(exc.response.status_code))
+                sentry_sdk.set_context(
+                    "openrouter_4xx",
+                    {"model": model, "status": exc.response.status_code,
+                     "response_preview": body_preview},
+                )
+            except ImportError:
+                pass
         raise
 
 

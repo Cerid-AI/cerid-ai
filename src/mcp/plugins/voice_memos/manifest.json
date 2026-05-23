@@ -1,0 +1,30 @@
+{
+    "name": "voice_memos",
+    "version": "0.1.0",
+    "type": "parser",
+    "tier": "community",
+    "description": "Mac-native Voice Memos auto-watch + plain Whisper transcription. Community tier. For speaker diarization, calendar stitching, and meeting summaries, see the Pro-tier plugins/meeting_capture plugin.",
+    "requires": ["pywhispercpp"],
+    "feature_flags": [
+        "voice_memos_watch",
+        "audio_transcription_plain"
+    ],
+    "platform": "darwin",
+    "file_types": [
+        ".m4a"
+    ],
+    "config": {
+        "VOICE_MEMOS_DIR": {
+            "description": "Path to the Voice Memos recordings directory. Default is the macOS Voice Memos.app location.",
+            "default": "~/Library/Application Support/com.apple.voicememos/Recordings"
+        },
+        "VOICE_MEMOS_OPT_IN": {
+            "description": "Auto-watch is opt-in (off by default) because surprise audio ingestion is creepy. Set via Cerid setup wizard.",
+            "default": false
+        },
+        "WHISPER_MODEL": {
+            "description": "Same model as the Pro plugin; setting this independently lets users pick faster/smaller for plain transcription if desired.",
+            "default": "medium-q5_0"
+        }
+    }
+}

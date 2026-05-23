@@ -1,0 +1,35 @@
+# Pro-tier feature flags that don't yet have runtime gates because their
+# implementation lands in a later phase of the 2026-05-20 Pro Tier
+# Implementation Plan (tasks/2026-05-20-pro-tier-implementation-plan.md).
+#
+# Each entry pairs a flag with the phase that lands its gate. When that phase
+# ships, the flag is removed from this allowlist and the lint asserts the
+# gate exists. This file should shrink to empty by Phase 8.
+#
+# Format: one flag per line; comments start with #.
+
+# Phase 2 — meeting capture anchor (plugins/meeting_capture/)
+meeting_diarization
+calendar_stitching
+meeting_summary
+
+# Phase 4 — Gmail + Google Calendar via MCP-over-HTTP
+gmail_connector
+google_calendar_sync
+calendar_sync           # back-compat alias for google_calendar_sync + outlook_calendar_sync
+inbox_triage
+
+# Phase 6 — Outlook via MCP, Apple connectors via native helpers
+outlook_connector
+outlook_calendar_sync
+apple_notes_reader
+apple_mail_reader
+imessage_reader
+apple_calendar_eventkit
+reminders_eventkit
+apple_photos_reader
+
+# Phase 7 — Pro intelligence bucket
+custom_smart_rag
+advanced_analytics
+daily_digest

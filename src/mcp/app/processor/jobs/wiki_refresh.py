@@ -269,6 +269,31 @@ class WikiRefreshJob(BaseJob):
                 # Non-fatal: enrichment failure does not abort the job
 
         await progress_cb(0.95)
+
+        # Phase K4.1 — append to the knowledge log so the user (and
+        # the LLM via /wiki/log) can see what changed and when.
+        # Karpathy's log.md equivalent — chronological breadcrumb of
+        # everything the system learned.
+        try:
+            from app.db.neo4j.knowledge_log import append_log_entry  # noqa: PLC0415
+
+            action_kind = "enrich" if external_refs_count > 0 else "refresh"
+            log_summary = summary_text[:200].replace("\n", " ")
+            await asyncio.to_thread(
+                append_log_entry,
+                driver,
+                action=action_kind,
+                entity_slug=self._entity_slug,
+                summary=log_summary,
+                source_artifact_id=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error(
+                "processor.wiki_refresh.knowledge_log",
+                exc,
+                context={"entity_slug": self._entity_slug},
+            )
+
         await progress_cb(1.0)
 
         logger.info(

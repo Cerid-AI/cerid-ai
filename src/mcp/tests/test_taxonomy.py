@@ -372,12 +372,14 @@ class TestWatcherDomainDetection:
             assert sub == ""
 
     def test_detect_domain_inbox(self):
-        """Inbox folder returns empty domain (triggers AI)."""
+        """Inbox folder returns the 'inbox' domain (Phase J added inbox as a
+        first-class Pro-tier domain). AI categorization fires inside the
+        inbox-triage pipeline rather than via empty-domain fallback."""
         from scripts.watch_ingest import _detect_domain
 
         with patch("config.WATCH_FOLDER", "/watch"):
             domain, sub = _detect_domain("/watch/inbox/file.pdf")
-            assert domain == ""
+            assert domain == "inbox"
             assert sub == ""
 
     def test_detect_domain_unknown(self):

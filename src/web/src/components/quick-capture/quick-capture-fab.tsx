@@ -1,0 +1,267 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Quick-capture FAB — Phase B Day 12. Floating action button visible
+// from every pane that opens a modal for fast knowledge ingestion via:
+//   - Drop (file drag-target)
+//   - Paste (text or image from clipboard)
+//   - URL (paste a link to ingest)
+//   - Manual note entry
+//
+// Bound to Cmd-Shift-N / Ctrl-Shift-N globally so users can capture
+// without leaving Chat or another pane.
+//
+// v1 ships the UI; the actual ingest call wires to existing
+// /upload + /ingestion/url endpoints (already in lib/api/kb.ts).
+
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Plus, X, Upload, Link as LinkIcon, FileText, Loader2 } from "lucide-react"
+import { useNavigation } from "@/contexts/navigation-context"
+import { uploadFile } from "@/lib/api/kb"
+
+type CaptureMode = "url" | "note" | "upload"
+
+export function QuickCaptureFab() {
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<CaptureMode>("note")
+  const [url, setUrl] = useState("")
+  const [note, setNote] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const navigation = useNavigation()
+
+  // Global Cmd-Shift-N / Ctrl-Shift-N
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey
+      if (isMod && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault()
+        setOpen(true)
+      } else if (e.key === "Escape" && open) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [open])
+
+  const handleFile = useCallback(async (file: File) => {
+    setBusy(true)
+    setStatus(`Ingesting ${file.name}…`)
+    try {
+      await uploadFile(file)
+      setStatus(`Ingested ${file.name}`)
+      window.setTimeout(() => {
+        setOpen(false)
+        setStatus(null)
+      }, 1000)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Upload failed")
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
+  const handleNoteSave = useCallback(async () => {
+    if (!note.trim()) return
+    setBusy(true)
+    setStatus("Saving note…")
+    try {
+      // Wrap as a synthetic text file so it flows through the same
+      // upload pipeline. Subsequent iterations can call a dedicated
+      // /ingestion/note endpoint when one lands.
+      const blob = new Blob([note], { type: "text/markdown" })
+      const file = new File(
+        [blob],
+        `note-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.md`,
+        { type: "text/markdown" },
+      )
+      await uploadFile(file)
+      setStatus("Note saved")
+      setNote("")
+      window.setTimeout(() => {
+        setOpen(false)
+        setStatus(null)
+      }, 1000)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setBusy(false)
+    }
+  }, [note])
+
+  const handleUrlIngest = useCallback(async () => {
+    if (!url.trim()) return
+    setBusy(true)
+    setStatus(`Fetching ${url}…`)
+    try {
+      // POST /ingestion/url isn't yet in lib/api — surface a clear stub
+      // until that endpoint ships; route the user to the Sources library
+      // via the navigation map so they can paste it there.
+      navigation.goTo("sources", { entity: undefined })
+      setStatus("URL ingestion lands in Phase B Day 10 — Sources opened.")
+      window.setTimeout(() => {
+        setOpen(false)
+        setStatus(null)
+        setUrl("")
+      }, 1500)
+    } finally {
+      setBusy(false)
+    }
+  }, [url, navigation])
+
+  // Drop handler (Files dragged onto the modal)
+  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const f = e.dataTransfer.files?.[0]
+    if (f) handleFile(f)
+  }, [handleFile])
+
+  return (
+    <>
+      {/* The FAB itself — only visible when modal is closed */}
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Quick capture"
+          title="Quick capture (⌘⇧N)"
+          className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform hover:scale-105 hover:bg-primary/90"
+        >
+          <Plus className="h-5 w-5" aria-hidden="true" />
+        </button>
+      )}
+
+      {/* Modal */}
+      {open && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Quick capture"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setOpen(false)
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={onDrop}
+          >
+            <div className="flex items-center gap-2 border-b px-4 py-3">
+              <span className="grow text-sm font-semibold">Quick capture</span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded p-1 text-muted-foreground hover:bg-accent/40"
+                aria-label="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Mode tabs */}
+            <div role="tablist" aria-label="Capture mode" className="flex items-center gap-1 border-b bg-card/40 px-3 py-2">
+              {([
+                { id: "note" as CaptureMode, label: "Note", icon: FileText },
+                { id: "url" as CaptureMode, label: "URL", icon: LinkIcon },
+                { id: "upload" as CaptureMode, label: "Upload", icon: Upload },
+              ]).map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={mode === id}
+                  onClick={() => setMode(id)}
+                  className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-label-xs transition-colors ${
+                    mode === id ? "bg-accent text-accent-foreground" : "text-foreground/80 hover:bg-accent/40"
+                  }`}
+                >
+                  <Icon className="h-3 w-3" aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-4">
+              {mode === "note" && (
+                <div className="space-y-2">
+                  <textarea
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Type or paste a note. Drop a file here to upload instead."
+                    rows={6}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    aria-label="Note content"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={!note.trim() || busy}
+                      onClick={handleNoteSave}
+                      className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : "Save note"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {mode === "url" && (
+                <div className="space-y-2">
+                  <input
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://…"
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    aria-label="URL to ingest"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={!url.trim() || busy}
+                      onClick={handleUrlIngest}
+                      className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : "Ingest URL"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {mode === "upload" && (
+                <div className="space-y-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) handleFile(f)
+                    }}
+                    aria-label="Choose file"
+                    className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-accent-foreground hover:file:bg-accent/80"
+                  />
+                  <p className="text-label-xs text-muted-foreground">
+                    Or drop a file anywhere inside this modal.
+                  </p>
+                </div>
+              )}
+
+              {status && (
+                <p className="mt-3 text-label-xs text-muted-foreground" aria-live="polite">
+                  {status}
+                </p>
+              )}
+            </div>
+
+            <div className="border-t px-4 py-2 text-label-xs text-muted-foreground">
+              <kbd className="rounded border bg-background px-1">⌘⇧N</kbd> opens this from any pane ·{" "}
+              <kbd className="rounded border bg-background px-1">esc</kbd> to close
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

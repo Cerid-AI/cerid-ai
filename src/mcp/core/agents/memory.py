@@ -32,6 +32,26 @@ from core.utils.time import utcnow, utcnow_iso
 logger = logging.getLogger("ai-companion.memory")
 
 # ---------------------------------------------------------------------------
+# Phase K2.1 — entity-extraction enqueue dependency injection slot.
+#
+# Set by the app layer at startup (app.startup or equivalent) so the
+# core memory pipeline can fire entity extraction for new memories
+# without crossing the core/ → app/ boundary.
+# ---------------------------------------------------------------------------
+_entity_extraction_enqueue: Callable[[str], None] | None = None
+
+
+def set_entity_extraction_enqueue(fn: Callable[[str], None] | None) -> None:
+    """Install (or clear) the callback invoked when a new memory is stored.
+
+    The callback receives the artifact_id of the freshly-stored memory.
+    Idempotent: callers re-register safely. Passing ``None`` clears the
+    slot (used by tests to isolate side effects).
+    """
+    global _entity_extraction_enqueue
+    _entity_extraction_enqueue = fn
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 MIN_RESPONSE_LENGTH = 100
@@ -342,6 +362,30 @@ async def extract_and_store_memories(
                             )
                     except Exception as e:  # Neo4j driver exceptions vary by version
                         logger.warning("Failed to create EXTRACTED_FROM relationship: %s", e)
+
+                # Phase K2.1 — entity extraction enqueue for the memory.
+                # Reuses the K1.1 machinery: EntityExtractionJob upserts
+                # entities + MENTIONS edges → emits entities_added → wiki
+                # refresh subscriber fires. Result: memories become first-
+                # class graph citizens with the same compounding loop as
+                # ingested artifacts.
+                #
+                # Layering: core/ must not import app/ (import-linter
+                # contract). We use the DI-threaded registry pattern
+                # established by hallucination.authoritative_verify —
+                # callers (the MCP tool / router layer) install an
+                # enqueue callback at startup; this module dispatches
+                # through it. When the callback isn't installed (e.g.
+                # in unit tests), the enqueue is a no-op.
+                if new_artifact_id and _entity_extraction_enqueue is not None:
+                    try:
+                        _entity_extraction_enqueue(new_artifact_id)
+                    except Exception as exc:  # noqa: BLE001 — observability boundary
+                        log_swallowed_error(
+                            "core.agents.memory.entity_extraction_enqueue",
+                            exc,
+                            redis_client=redis_client,
+                        )
 
             entry = {
                 "memory_type": mem["memory_type"],

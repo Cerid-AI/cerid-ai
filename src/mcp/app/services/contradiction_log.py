@@ -149,10 +149,32 @@ async def log_contradiction(finding: ContradictionFinding) -> str:
 
     driver = get_neo4j()
     try:
-        return _neo4j_adapter.record_contradiction(driver, finding)
+        result = _neo4j_adapter.record_contradiction(driver, finding)
     except Exception as exc:
         log_swallowed_error("contradiction_log", exc, context={"finding_id": finding.finding_id})
         raise
+
+    # Phase K2.3 — emit contradiction_detected event so the wiki refresh
+    # subscriber can fire immediately (force=True bypasses debounce —
+    # when the corpus disagrees with itself, the user deserves a fresh
+    # summary now). No-op when no entity slug is attached.
+    if finding.entity_slug:
+        try:
+            from app.processor.event_hooks import emit  # noqa: PLC0415
+
+            emit("contradiction_detected", {
+                "finding_id": finding.finding_id,
+                "entity_slug": finding.entity_slug,
+                "severity": finding.severity,
+            })
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "contradiction_log.emit_event",
+                exc,
+                context={"finding_id": finding.finding_id},
+            )
+
+    return result
 
 
 async def list_recent(
