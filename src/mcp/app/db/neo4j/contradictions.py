@@ -84,6 +84,19 @@ def record_contradiction(driver: Any, finding: "ContradictionFinding") -> str:
                 MERGE (ca)-[c:CONTRADICTS]->(cb)
                   ON CREATE SET c.detected_at = $detected_at, c.severity = $severity
                   ON MATCH  SET c.detected_at = $detected_at, c.severity = $severity
+
+                // 5. Phase K2.3 — typed edge from the focal entity to
+                // the finding, so graph traversals + wiki rendering
+                // don't have to property-filter on every Contradiction.
+                // Only runs when an entity_slug was attached; the
+                // OPTIONAL MATCH keeps the txn alive when the slug is
+                // unknown (the entity may not exist yet).
+                WITH f
+                OPTIONAL MATCH (e:Entity {canonical_id: $entity_slug})
+                FOREACH (_ IN CASE WHEN e IS NULL OR $entity_slug = "" THEN [] ELSE [1] END |
+                    MERGE (e)-[r:HAS_CONTRADICTION]->(f)
+                      ON CREATE SET r.linked_at = $detected_at
+                )
                 """,
                 finding_id=finding.finding_id,
                 detected_at=finding.detected_at,

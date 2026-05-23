@@ -9,8 +9,9 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { TierSelector } from "@/components/ui/tier-selector"
 import { ChevronDown, ChevronRight, Cpu, SearchIcon, Layers } from "lucide-react"
-import { SectionHeading, Row, SliderRow, PipelineToggle, ProGate } from "./settings-primitives"
+import { SectionHeading, Row, SliderRow, PipelineToggle } from "./settings-primitives"
 import { ModelManagement } from "./model-management"
+import { SmartRagWeights } from "./smart-rag-weights"
 
 interface PipelineSectionProps {
   settings: ServerSettings
@@ -443,61 +444,12 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
         </Card>
       )}
 
-      {/* -- Custom Smart RAG Config (Pro tier) -- */}
+      {/* -- Custom Smart RAG Config (Pro tier) — Phase I Day 3 -- */}
       <SectionHeading icon={Layers} label="Smart RAG Config" open={sections.rag_config} onToggle={() => toggleSection("rag_config")} />
       {sections.rag_config && (
-        <Card className="mb-4">
-          <CardHeader className="px-4 pb-2 pt-4">
-            <CardDescription className="flex items-center gap-2 text-xs">
-              Per-source weights and toggles for Custom Smart RAG mode.
-              {(settings.feature_tier ?? "community") === "community" && (
-                <Badge variant="outline" className="text-label-xs px-1.5 py-0 text-gold">Pro</Badge>
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 px-4 pb-4">
-            <ProGate tier={settings.feature_tier ?? "community"}>
-              <div className="grid gap-4">
-                <SliderRow
-                  label="KB Source Weight"
-                  value={1.0}
-                  onChange={() => {}}
-                  min={0} max={2} step={0.1}
-                  info="Weight multiplier for KB relevance scores"
-                />
-                <SliderRow
-                  label="Memory Weight"
-                  value={1.0}
-                  onChange={() => {}}
-                  min={0} max={2} step={0.1}
-                  info="Weight multiplier for memory recall scores"
-                />
-                <SliderRow
-                  label="External Weight"
-                  value={1.0}
-                  onChange={() => {}}
-                  min={0} max={2} step={0.1}
-                  info="Weight multiplier for external source scores"
-                />
-
-                <div className="h-px bg-border" />
-
-                <div className="space-y-2">
-                  <p className="text-xs font-medium">Memory Type Filters</p>
-                  <p className="text-label-sm text-muted-foreground">
-                    Select which memory types are included in Smart/Custom Smart recall.
-                  </p>
-                  {["empirical", "decision", "preference", "project_context", "temporal", "conversational"].map((type) => (
-                    <label key={type} className="flex items-center gap-2 text-xs">
-                      <input type="checkbox" defaultChecked className="rounded border-muted-foreground/30" />
-                      {type.replace("_", " ")}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </ProGate>
-          </CardContent>
-        </Card>
+        <div className="mb-4">
+          <SmartRagWeights tier={settings.feature_tier ?? "community"} />
+        </div>
       )}
     </>
   )

@@ -109,6 +109,22 @@ class EntitySummary(BaseModel):
     summary_updated_at: str | None = None
 
 
+class EpisodicMemoryItem(BaseModel):
+    """A memory the user has recorded that mentions this entity (Phase K2.2).
+
+    Surfaced on entity wiki pages so the user sees "what *we* said about X"
+    alongside the corpus-derived prose summary. Memories are kept distinct
+    from ``source_artifacts`` (which represent ingested documents) because
+    their provenance and decay characteristics differ.
+    """
+
+    memory_id: str
+    memory_type: str
+    summary: str
+    valid_from: str | None = None
+    access_count: int = 0
+
+
 class WikiEntityPage(BaseModel):
     """Full wiki page for a single entity.
 
@@ -119,6 +135,9 @@ class WikiEntityPage(BaseModel):
     ``contradictions`` is a raw list of dicts (one per ContradictionFinding)
     so the router can serialise them without a hard import of
     ContradictionFinding here. The contradiction service is imported lazily.
+
+    Phase K2.2 adds ``episodic_memories`` — user-recorded memories that
+    mention this entity (decay-aware, capped at 5).
     """
 
     slug: str
@@ -129,6 +148,7 @@ class WikiEntityPage(BaseModel):
     source_artifacts: list[SourceCitation] = []
     contradictions: list[dict[str, Any]] = []
     external_references: list[ExternalReference] = []
+    episodic_memories: list[EpisodicMemoryItem] = []
     last_updated_at: str | None = None
     next_refresh_due: str | None = None
     confidence_band: ConfidenceBand = "unknown"
@@ -221,6 +241,27 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
     summary_updated_at: str | None = raw.get("summary_updated_at")
     next_refresh_due = _compute_next_refresh(summary_updated_at)
 
+    # --- 4a. Episodic memories (Phase K2.2) -----------------------------------
+    episodic_memories: list[EpisodicMemoryItem] = []
+    try:
+        mem_raw = await asyncio.to_thread(
+            _neo4j_adapter.get_memories_for_entity, neo4j_driver, slug, limit=5,
+        )
+        episodic_memories = [
+            EpisodicMemoryItem(
+                memory_id=r.get("memory_id", ""),
+                memory_type=r.get("memory_type", "general"),
+                summary=r.get("summary", ""),
+                valid_from=r.get("valid_from"),
+                access_count=int(r.get("access_count", 0)),
+            )
+            for r in mem_raw
+            if r.get("memory_id")
+        ]
+    except Exception as exc:
+        log_swallowed_error("wiki.get_entity_page.episodic_memories", exc, context={"slug": slug})
+        # Non-fatal: episodic memories section stays empty
+
     # --- 4b. External references (written by WikiRefreshJob) -----------------
     external_references: list[ExternalReference] = []
     try:
@@ -274,6 +315,7 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         source_artifacts=source_artifacts,
         contradictions=contradictions,
         external_references=external_references,
+        episodic_memories=episodic_memories,
         last_updated_at=raw.get("updated_at"),
         next_refresh_due=next_refresh_due,
         confidence_band=confidence_band,

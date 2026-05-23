@@ -16,6 +16,7 @@ Organisation by category (each maps to one ``v0.95`` overhaul phase):
 * ``feedback``      — Phase 5   (rate, correct, endorse, flag)
 * ``temporal``      — Phase 6   (timeline, trending, revisit_due, ...)
 * ``batch``         — Phase 7   (pkb_batch)
+* ``wiki``          — Phase K1.5 (wiki_lookup — compiled entity pages)
 
 A future split into per-category MCP servers (``cerid-kb-graph``,
 ``cerid-kb-feedback``) lifts a module over without rewrite.
@@ -29,6 +30,9 @@ from app.mcp_tools import (
     feedback,  # noqa: F401
     fundamentals,  # noqa: F401
     graph_tools,  # noqa: F401
+    inbox,  # noqa: F401
     retrieval,  # noqa: F401
+    router,  # noqa: F401
     temporal,  # noqa: F401
+    wiki,  # noqa: F401
 )

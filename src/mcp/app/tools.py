@@ -130,7 +130,7 @@ MCP_TOOLS = [
     },
     {
         "name": "pkb_agent_query",
-        "description": "Primary KB search — multi-domain hybrid retrieval with reranking and context assembly. **Use when** answering any factual / project question grounded in the KB. Default-on reranking improves precision; pass `use_reranking=false` for raw retrieval. **Returns** `{results, context, confidence, domains_searched, total_results}`. Cost class: medium (one embed + one rerank call).",
+        "description": "Primary KB search — multi-domain hybrid retrieval with reranking and context assembly. **Use when** answering any factual / project question grounded in the KB. Default-on reranking improves precision; pass `use_reranking=false` for raw retrieval. **Phase K3.3** — optional `surfaces=['wiki','vector','graph','memory']` arg restricts retrieval to a subset of knowledge surfaces; default uses the surface router to pick. **Returns** `{results, context, confidence, domains_searched, total_results, surface_route?}`. Cost class: medium (one embed + one rerank call).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -150,6 +150,11 @@ MCP_TOOLS = [
                     "description": "Enable intelligent reranking",
                     "default": True,
                 },
+                "surfaces": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["wiki", "vector", "graph", "memory"]},
+                    "description": "Phase K3.3 — restrict retrieval to the named surfaces. Empty/omitted = router-chosen.",
+                },
             },
             "required": ["query"],
         },
@@ -161,6 +166,10 @@ MCP_TOOLS = [
                 "confidence": {"type": "number", "description": "Average relevance 0.0-1.0"},
                 "domains_searched": {"type": "array", "items": {"type": "string"}},
                 "total_results": {"type": "integer"},
+                "surface_route": {
+                    "type": "object",
+                    "description": "Phase K3.3 — which surfaces were consulted, and why",
+                },
             },
         },
     },
@@ -722,8 +731,37 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
         return await asyncio.to_thread(list_collections)
     elif name == "pkb_agent_query":
         from core.agents.query_agent import agent_query
-        return await agent_query(
-            query=arguments.get("query", ""),
+        from core.retrieval.surface_router import route as _surface_route
+
+        # Phase K3.3 — surface-aware query.
+        # When `surfaces` is omitted, the router classifies the intent and
+        # picks the surface set; when provided, we honour it verbatim.
+        query_text = arguments.get("query", "")
+        requested_surfaces = arguments.get("surfaces") or []
+        surface_decision = _surface_route(query_text)
+        active_surfaces = (
+            requested_surfaces if requested_surfaces else surface_decision.surfaces
+        )
+
+        # When the W surface fires AND we matched an entity hint, fetch
+        # the wiki page eagerly and pass it as a side-channel context
+        # boost. The agent_query path stays untouched for the vector/
+        # graph/memory surfaces; wiki context is composed on top.
+        wiki_page = None
+        if "wiki" in active_surfaces and surface_decision.matched_entity_hint:
+            try:
+                from app.services.wiki_pages import get_entity_page  # noqa: PLC0415
+
+                neo4j_driver = get_neo4j()
+                # Try canonical slug first, then fuzzy by hint.
+                wiki_page = await get_entity_page(
+                    neo4j_driver, surface_decision.matched_entity_hint,
+                )
+            except Exception:  # noqa: BLE001
+                wiki_page = None
+
+        result = await agent_query(
+            query=query_text,
             domains=arguments.get("domains"),
             top_k=arguments.get("top_k", 10),
             use_reranking=arguments.get("use_reranking", True),
@@ -731,6 +769,28 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
         )
+
+        # Attach surface route metadata + wiki page when fetched.
+        result["surface_route"] = {
+            "primary": surface_decision.primary,
+            "surfaces": active_surfaces,
+            "intent": surface_decision.intent,
+            "confidence": surface_decision.confidence,
+            "rationale": surface_decision.rationale,
+        }
+        if wiki_page is not None:
+            wp = wiki_page.model_dump() if hasattr(wiki_page, "model_dump") else dict(wiki_page)
+            # Light projection — keep the agent context cheap; full page
+            # is available via pkb_wiki_lookup if the caller wants it.
+            result["wiki_page"] = {
+                "slug": wp.get("slug"),
+                "name": wp.get("name"),
+                "summary": wp.get("summary"),
+                "confidence_band": wp.get("confidence_band"),
+                "last_updated_at": wp.get("last_updated_at"),
+            }
+
+        return result
     elif name == "pkb_artifacts":
         domain = arguments.get("domain", "") or None
         limit = arguments.get("limit", 50)

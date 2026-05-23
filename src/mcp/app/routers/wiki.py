@@ -113,6 +113,139 @@ async def get_entity_wiki_page(slug: str) -> WikiEntityPage:
 
 
 # ---------------------------------------------------------------------------
+# Phase K4.2 + K4.3 — knowledge log + index
+# ---------------------------------------------------------------------------
+
+
+class KnowledgeLogEntry(BaseModel):
+    """One row from the ``(:KnowledgeLog)`` table."""
+
+    log_id: str
+    ts: str
+    action: str
+    entity_slug: str | None = None
+    summary: str | None = None
+    source_artifact_id: str | None = None
+
+
+class KnowledgeLogResponse(BaseModel):
+    entries: list[KnowledgeLogEntry]
+    total: int
+
+
+class KnowledgeIndexEntry(BaseModel):
+    """Catalog row for the Karpathy-shaped wiki index."""
+
+    slug: str
+    name: str
+    entity_type: str
+    one_liner: str | None = None
+    last_updated_at: str | None = None
+    activity_score: int = 0
+    has_summary: bool = False
+
+
+class KnowledgeIndexResponse(BaseModel):
+    entries: list[KnowledgeIndexEntry]
+    total: int
+
+
+@router.get(
+    "/log",
+    response_model=KnowledgeLogResponse,
+    summary="List knowledge-log entries (Phase K4.2)",
+    description=(
+        "Karpathy-style chronological ledger of wiki refreshes, "
+        "enrichments, and contradiction-triggered updates. "
+        "Filterable by entity slug; paginated newest-first."
+    ),
+)
+async def list_knowledge_log(
+    entity_slug: str | None = None,
+    since: str | None = None,
+    limit: int = 50,
+) -> KnowledgeLogResponse:
+    from app.db.neo4j.knowledge_log import list_log_entries
+    from app.deps import get_neo4j
+
+    driver = get_neo4j()
+    if driver is None:
+        raise HTTPException(status_code=503, detail="Neo4j unavailable")
+    try:
+        rows = list_log_entries(
+            driver, entity_slug=entity_slug, since=since, limit=limit,
+        )
+    except Exception as exc:
+        log_swallowed_error("wiki.knowledge_log.list", exc)
+        raise HTTPException(status_code=500, detail="Failed to list log") from exc
+
+    entries = [
+        KnowledgeLogEntry(
+            log_id=r.get("log_id", ""),
+            ts=r.get("ts", ""),
+            action=r.get("action", "refresh"),
+            entity_slug=r.get("entity_slug") or None,
+            summary=r.get("summary") or None,
+            source_artifact_id=r.get("source_artifact_id") or None,
+        )
+        for r in rows
+    ]
+    return KnowledgeLogResponse(entries=entries, total=len(entries))
+
+
+@router.get(
+    "/index",
+    response_model=KnowledgeIndexResponse,
+    summary="Karpathy-shaped wiki index (Phase K4.3)",
+    description=(
+        "LLM-readable catalog of entity pages — one row per "
+        "entity with slug, name, one-line summary, last updated, "
+        "and activity score. The surface router uses this to "
+        "discover slugs when a fuzzy name doesn't match directly."
+    ),
+)
+async def list_knowledge_index(
+    limit: int = 100,
+    q: str | None = None,
+) -> KnowledgeIndexResponse:
+    from app.deps import get_neo4j
+
+    driver = get_neo4j()
+    if driver is None:
+        raise HTTPException(status_code=503, detail="Neo4j unavailable")
+
+    # Reuse list_entities then project to the K4.3 shape.
+    from app.services.wiki_pages import list_entities  # noqa: PLC0415
+
+    try:
+        summaries = await list_entities(driver, limit=limit)
+    except Exception as exc:
+        log_swallowed_error("wiki.knowledge_index.list", exc)
+        raise HTTPException(status_code=500, detail="Failed to load index") from exc
+
+    if q:
+        q_lc = q.strip().lower()
+        summaries = [
+            s for s in summaries
+            if q_lc in s.name.lower() or q_lc in s.canonical_id.lower()
+        ]
+
+    entries = [
+        KnowledgeIndexEntry(
+            slug=s.canonical_id,
+            name=s.name,
+            entity_type=s.entity_type,
+            one_liner=(s.summary[:160] if s.summary else None),
+            last_updated_at=s.summary_updated_at,
+            activity_score=int(s.recent_activity_score),
+            has_summary=bool(s.summary),
+        )
+        for s in summaries
+    ]
+    return KnowledgeIndexResponse(entries=entries, total=len(entries))
+
+
+# ---------------------------------------------------------------------------
 # RAG C3.3 — two-way vault writeback
 # ---------------------------------------------------------------------------
 

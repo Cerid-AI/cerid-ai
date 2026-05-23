@@ -34,26 +34,34 @@ from app.processor import router as processor_router_module
 from app.routers import (
     a2a,
     agents,
+    analytics,
     artifacts,
+    atlas_views,
     automations,
     brief_settings,
     chat,
+    connectors,
     contradictions,
     digest,
+    digests,
     external_apis,
     feedback,
+    graph_tour,
     health,
     ingestion,
     kb_admin,
     knowledge_packs,
     mcp_sse,
+    meetings,
     memories,
     models,
     observability,
     ollama_proxy,
     plugins,
+    pro_automations,
     providers,
     query,
+    rag_weights,
     recommendations,
     scanner,
     sdk,
@@ -64,8 +72,12 @@ from app.routers import (
     taxonomy,
     upload,
     user_state,
+    whisper_models,
     wiki,
     workflows,
+)
+from app.routers import (
+    graph as graph_router,
 )
 from app.scheduler import start_scheduler, stop_scheduler
 from config.features import CERID_MULTI_USER
@@ -494,6 +506,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"DataSourceRegistry wiring failed (authoritative verify disabled): {e}")
 
+    # Phase K2.1 — wire the entity-extraction enqueue callback into
+    # core.agents.memory so freshly-stored memories trigger graph
+    # entity upserts (and the K1.3 wiki refresh chain). Keeps core/
+    # free of app.* imports via DI, same pattern as authoritative_verify.
+    try:
+        from app.db.redis.processor_queue import enqueue_job
+        from app.processor.jobs.entity_extraction import EntityExtractionJob
+        from core.agents.memory import set_entity_extraction_enqueue
+
+        def _enqueue_memory_entity_extraction(artifact_id: str) -> None:
+            val = os.environ.get(
+                "CERID_MEMORY_ENTITY_EXTRACTION_ENABLED", "true",
+            ).strip().lower()
+            if val not in ("true", "1", "yes", "on"):
+                return
+            payload = {"artifact_id": artifact_id, "tenant_id": "default"}
+            enqueue_job(EntityExtractionJob(**payload), payload=payload)
+
+        set_entity_extraction_enqueue(_enqueue_memory_entity_extraction)
+    except Exception as e:
+        logger.warning(f"Memory→entity extraction wiring failed: {e}")
+
     # Load plugins
     try:
         from plugins import load_plugins
@@ -701,6 +735,36 @@ async def lifespan(app: FastAPI):
     _mcp_reaper_task = asyncio.create_task(mcp_sse._session_reaper())
     app.state.mcp_reaper_task = _mcp_reaper_task
 
+    # Register sibling MCP connectors (Phase F). The pool's circuit
+    # breaker handles "server not running yet" gracefully; we register
+    # the URL + bearer here so the first plugin call_tool succeeds
+    # if the connector stack is up.
+    try:
+        from config import settings as _conn_settings
+        from core.mcp_clients.client_pool import get_pool
+
+        if _conn_settings.CERID_CONNECTORS_BEARER:
+            headers = {"Authorization": f"Bearer {_conn_settings.CERID_CONNECTORS_BEARER}"}
+            get_pool().register(
+                "google_workspace",
+                _conn_settings.GOOGLE_WORKSPACE_MCP_URL,
+                headers=headers,
+            )
+            get_pool().register(
+                "ms365",
+                _conn_settings.MS365_MCP_URL,
+                headers=headers,
+            )
+            logger.info(
+                "Registered sibling MCP connectors: google_workspace, ms365",
+            )
+        else:
+            logger.debug(
+                "CERID_CONNECTORS_BEARER unset — Pro cloud connectors not registered",
+            )
+    except Exception as exc:
+        log_swallowed_error("app.main.lifespan.register_sibling_mcp", exc)
+
     yield
 
     # Cancel SSE reaper before tearing down sessions.
@@ -713,6 +777,14 @@ async def lifespan(app: FastAPI):
     # Disarm watchdog before shutdown tasks run (avoid spurious SIGTERM during
     # intentional slow-shutdown operations like cache flush).
     _watchdog_stop.set()
+
+    # Shutdown: disconnect sibling MCP clients (Phase F).
+    try:
+        from core.mcp_clients.client_pool import get_pool
+
+        await get_pool().disconnect_all()
+    except Exception as exc:
+        logger.warning("MCPClientPool disconnect failed: %s", exc)
 
     # Shutdown: stop background processor worker
     try:
@@ -852,6 +924,39 @@ app.include_router(processor_router_module)
 # Wiki API — entity pages and contradiction ledger (Phase W)
 app.include_router(contradictions.router)
 app.include_router(wiki.router)
+
+# Graph visualization API — Atlas / Constellation / Timeline data
+# (Cerid v1.0 Phase A — 2026-05-21 systemic plan).
+# Aliased to graph_router because `graph` is already the alias for
+# app.db.neo4j on line 26.
+app.include_router(graph_router.router)
+
+# Atlas saved views — per-user named graph configurations (Phase A Day 12).
+app.include_router(atlas_views.router)
+
+# Constellation tour mode — LLM-narrated camera arc (Phase B Day 7).
+app.include_router(graph_tour.router)
+
+# Whisper model download manager — Phase E Day 3.
+app.include_router(whisper_models.router)
+
+# Meeting capture orchestration — Phase E Day 4.
+app.include_router(meetings.router)
+
+# Cloud connector OAuth + status surface (Phase F.2 cleanup).
+app.include_router(connectors.router)
+
+# Custom Smart RAG weights surface (Phase I).
+app.include_router(rag_weights.router)
+
+# Daily digest surface (Phase K).
+app.include_router(digests.router)
+
+# Pro-tier feature automation runtime overrides (UX consolidation).
+app.include_router(pro_automations.router)
+
+# Advanced analytics — Phase L (heatmap + sankey + quality timeline).
+app.include_router(analytics.router)
 
 # Brief scheduler settings (RAG C3.4) — vault-write toggle for daily +
 # weekly synthesis jobs.  Lives under /briefs/* so the scheduler is the

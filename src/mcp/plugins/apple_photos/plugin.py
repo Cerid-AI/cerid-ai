@@ -1,0 +1,39 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""Apple Photos connector plugin — Phase G.4."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from plugins.base import ConnectorPlugin
+
+from .data_source import ApplePhotosDataSource
+
+logger = logging.getLogger("ai-companion.plugins.apple_photos")
+
+
+class ApplePhotosConnectorPlugin(ConnectorPlugin):
+    @property
+    def name(self) -> str:
+        return "apple_photos"
+
+    @property
+    def version(self) -> str:
+        return "0.1.0"
+
+    @property
+    def description(self) -> str:
+        return "Apple Photos metadata via Swift PhotoKit helper"
+
+    def get_data_source(self) -> Any:
+        return ApplePhotosDataSource()
+
+    def register(self) -> None:
+        from config.features import is_feature_enabled
+
+        if not is_feature_enabled("apple_photos_reader"):
+            logger.info("apple_photos connector skipped — feature flag off")
+            return
+        super().register()
+        logger.info("apple_photos connector registered")

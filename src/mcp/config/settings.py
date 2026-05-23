@@ -391,10 +391,15 @@ VERIFICATION_COMPLEX_MODEL = os.getenv(
 
 # Expert-tier verification model — high-capability reasoning model for
 # users who want maximum verification quality at higher cost.
-# Grok 4: $3/$15 per 1M tokens (vs $0.15/$0.60 for GPT-4o-mini pool).
+# Catalog-refreshed 2026-05-20: grok-4 was removed from OpenRouter;
+# grok-4.20 is the current expert-tier xAI model ($1.25/$2.50 per 1M
+# tokens, 2M context window) vs the prior grok-4 at $3/$15 per 1M.
+# Note: this default is for non-online (no web search) expert
+# verification; smart_router.VERIFICATION_EXPERT branch uses
+# grok-4.20:online when web search is desired.
 VERIFICATION_EXPERT_MODEL = os.getenv(
     "VERIFICATION_EXPERT_MODEL",
-    "openrouter/x-ai/grok-4",
+    "openrouter/x-ai/grok-4.20",
 )
 
 # ---------------------------------------------------------------------------
@@ -491,7 +496,13 @@ SYNOPSIS_MODEL = CATEGORIZE_MODELS["smart"]   # free Llama model via Bifrost
 SYNOPSIS_MAX_INPUT_CHARS = 2000
 SYNOPSIS_MAX_TOKENS = 100
 
-# Synopsis model options — user-selectable, with cost and throttle info
+# Synopsis model options — user-selectable, with cost and throttle info.
+# Catalog-refreshed 2026-05-20 against OpenRouter live pricing.
+# Cheap-tier options refreshed: gpt-4o-mini → gpt-5-nano (3× cheaper input,
+# 67% cheaper output), gemini-2.5-flash → gemini-3.1-flash-lite (newer +
+# cheaper). Old IDs kept as legacy entries because operators may have them
+# pinned in their persisted Settings doc and a sudden removal would break
+# their synopsis route on next regenerate.
 SYNOPSIS_MODEL_OPTIONS = {
     "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
         "label": "Llama 3.3 (Free)",
@@ -500,15 +511,29 @@ SYNOPSIS_MODEL_OPTIONS = {
         "rpm": 8,
         "throttle": 8.0,
     },
+    "openrouter/openai/gpt-5-nano": {
+        "label": "GPT-5 Nano",
+        "input_per_1m": 0.05,
+        "output_per_1m": 0.40,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
     "openrouter/openai/gpt-4o-mini": {
-        "label": "GPT-4o Mini",
+        "label": "GPT-4o Mini (legacy)",
         "input_per_1m": 0.15,
         "output_per_1m": 0.60,
         "rpm": 1000,
         "throttle": 0.5,
     },
+    "openrouter/google/gemini-3.1-flash-lite": {
+        "label": "Gemini 3.1 Flash Lite",
+        "input_per_1m": 0.25,
+        "output_per_1m": 1.50,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
     "openrouter/google/gemini-2.5-flash": {
-        "label": "Gemini 2.5 Flash",
+        "label": "Gemini 2.5 Flash (legacy)",
         "input_per_1m": 0.30,
         "output_per_1m": 2.50,
         "rpm": 1000,
@@ -604,6 +629,15 @@ SCAN_MIN_QUALITY = float(os.getenv("SCAN_MIN_QUALITY", "0.4"))  # min quality sc
 SCAN_MAX_FILE_SIZE_MB = int(os.getenv("SCAN_MAX_FILE_SIZE_MB", "50"))
 SCAN_EXCLUDE_PATTERNS = [p for p in os.getenv("SCAN_EXCLUDE_PATTERNS", "").split(",") if p]
 SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty=disabled
+# Phase J — inbox triage cadence. Default every 15 minutes; empty disables.
+# Also gated by CERID_INBOX_TRIAGE_ENABLED so the operator opts in
+# explicitly. Set INBOX_TRIAGE_MAX_PER_SOURCE to cap LLM cost.
+SCHEDULE_INBOX_TRIAGE = os.getenv("SCHEDULE_INBOX_TRIAGE", "*/15 * * * *")
+# Phase K — daily digest cadence. Default 7 AM UTC; empty disables.
+# Also gated by CERID_DAILY_DIGEST_ENABLED so operator opts in.
+# Per-user timezone resolution tracked for Phase K.2 (currently
+# everyone gets server-UTC-7am).
+SCHEDULE_DAILY_DIGEST = os.getenv("SCHEDULE_DAILY_DIGEST", "0 7 * * *")
 SCHEDULE_WATCHED_RESCAN = os.getenv("SCHEDULE_WATCHED_RESCAN", "")  # cron expr, e.g. "0 */6 * * *"=every 6h, empty=disabled
 SCHEDULE_MODEL_CATALOG = os.getenv("SCHEDULE_MODEL_CATALOG", "")  # cron expr, e.g. "0 6 * * *"=daily 6 AM, empty=disabled
 ENABLE_AI_TRIAGE = os.getenv("ENABLE_AI_TRIAGE", "").lower() in ("true", "1", "yes")  # Ollama content triage scoring
@@ -1097,6 +1131,26 @@ WS_HEARTBEAT_INTERVAL_S = 30
 WS_PRESENCE_TIMEOUT_S = 90
 WS_MAX_CONNECTIONS = 50
 SYNC_CRDT_ENABLED = True
+
+# ---------------------------------------------------------------------------
+# Pro-tier MCP cloud connectors (Phase F)
+# ---------------------------------------------------------------------------
+# Static bearer token shared between the Cerid backend and the sibling MCP
+# servers (google-workspace-mcp, ms365-mcp). Both servers expect this in
+# the inbound Authorization header.
+CERID_CONNECTORS_BEARER = os.getenv("CERID_CONNECTORS_BEARER", "")
+# Streamable-HTTP URLs for the sibling MCP servers. Defaults point at the
+# Docker network DNS names that stacks/connectors/docker-compose.yml creates.
+GOOGLE_WORKSPACE_MCP_URL = os.getenv(
+    "GOOGLE_WORKSPACE_MCP_URL", "http://cerid-google-workspace-mcp:8000/mcp",
+)
+MS365_MCP_URL = os.getenv("MS365_MCP_URL", "http://cerid-ms365-mcp:3000/mcp")
+# OAuth client credentials for Google Workspace MCP single-user mode.
+# Operator obtains these from Google Cloud Console → APIs & Services →
+# Credentials → "Desktop app" OAuth client. The MCP server owns the OAuth
+# flow + refresh-token rotation; Cerid backend never touches them.
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
 
 if not NEO4J_PASSWORD:
     _config_logger.warning(

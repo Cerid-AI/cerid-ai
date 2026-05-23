@@ -25,6 +25,9 @@ import { SystemSection } from "./system-section"
 import { GovernanceSection } from "./governance-section"
 import { ExternalAPIsSection } from "./external-apis-section"
 import { InferenceModelsCard } from "./inference-models-card"
+import { ProAutomationsCard } from "./pro-automations-card"
+import { WhisperModelManager } from "./whisper-model-manager"
+import { DiagnosticsSection, type DiagnosticsSubTab } from "./diagnostics-section"
 import type { SectionKey } from "./settings-primitives"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { AdvancedMode } from "@/components/common/advanced-mode"
@@ -109,6 +112,23 @@ export default function SettingsPane() {
       try { localStorage.setItem(key, value) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key }) }
     }
     await patch(preset.settings)
+    // UX consolidation: presets may also configure Pro automations
+    // (inbox triage cadence, daily digest schedule). Apply each in
+    // sequence; failures are non-fatal (the rest of the preset still
+    // takes effect).
+    if (preset.automations && preset.automations.length > 0) {
+      const { updateProAutomation } = await import("@/lib/api/settings")
+      for (const auto of preset.automations) {
+        try {
+          await updateProAutomation(auto.feature, {
+            enabled: auto.enabled,
+            schedule: auto.schedule,
+          })
+        } catch (err) {
+          logSwallowedError(err, "applyUserPreset.automation", { feature: auto.feature })
+        }
+      }
+    }
   }
 
   const loadKBStats = useCallback(async () => {
@@ -263,6 +283,7 @@ export default function SettingsPane() {
                 {uiMode === "advanced" && (
                   <TabsTrigger value="plugins" className="flex-1">Plugins</TabsTrigger>
                 )}
+                <TabsTrigger value="diagnostics" className="flex-1">Diagnostics</TabsTrigger>
                 <TabsTrigger value="pro" className="flex-1">
                   <Crown className="mr-1 h-3 w-3" />Pro
                 </TabsTrigger>
@@ -291,6 +312,12 @@ export default function SettingsPane() {
               <TabsContent value="system" className="space-y-3 pt-2">
                 <PaneErrorBoundary label="Inference Models">
                   <InferenceModelsCard />
+                </PaneErrorBoundary>
+                <PaneErrorBoundary label="Whisper Models">
+                  <WhisperModelManager />
+                </PaneErrorBoundary>
+                <PaneErrorBoundary label="Pro Automations">
+                  <ProAutomationsCard tier={settings.feature_tier ?? "community"} />
                 </PaneErrorBoundary>
                 <PaneErrorBoundary label="Brief Settings">
                   <BriefSettingsSection />
@@ -338,6 +365,26 @@ export default function SettingsPane() {
                   </PaneErrorBoundary>
                 </TabsContent>
               </AdvancedMode>
+
+              <TabsContent value="diagnostics" className="h-[calc(100vh-12rem)] pt-2">
+                <PaneErrorBoundary label="Diagnostics">
+                  <DiagnosticsSection
+                    tier={settings.feature_tier ?? "community"}
+                    initialTab={(typeof window !== "undefined"
+                      ? (new URLSearchParams(window.location.search).get("diagnostics_tab") as DiagnosticsSubTab | null)
+                      : null) ?? "status"}
+                    onTabChange={(sub) => {
+                      if (typeof window === "undefined") return
+                      const params = new URLSearchParams(window.location.search)
+                      if (sub === "status") params.delete("diagnostics_tab")
+                      else params.set("diagnostics_tab", sub)
+                      const next = params.toString()
+                      const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
+                      window.history.replaceState({}, "", url)
+                    }}
+                  />
+                </PaneErrorBoundary>
+              </TabsContent>
 
               <TabsContent value="pro" className="space-y-1 pt-2">
                 <PaneErrorBoundary label="Pro">

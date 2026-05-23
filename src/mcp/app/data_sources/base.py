@@ -84,6 +84,15 @@ class DataSourceRegistry:
     def register(self, source: DataSource) -> None:
         self._sources[source.name] = source
 
+    def get(self, name: str) -> DataSource | None:
+        """Look up a registered source by name. Returns None if absent.
+
+        Used by plugins that need to consult a specific source (e.g., the
+        meeting-capture calendar_stitch helper looking for a registered
+        calendar connector).
+        """
+        return self._sources.get(name)
+
     def get_enabled_sources(self, domain: str | None = None) -> list[DataSource]:
         """Get all enabled and configured sources, optionally filtered by domain."""
         return [
@@ -169,15 +178,36 @@ class DataSourceRegistry:
 
         tasks = [_guarded_query(s) for s in sources]
         results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Phase I — Custom Smart RAG. Fetch the active weight map ONCE
+        # (saves one Redis hgetall per result). is_active() short-circuits
+        # when the Pro flag is off or no weights configured — common path
+        # for free-tier users stays zero-cost.
+        weights: dict[str, float] = {}
+        try:
+            from utils.rag_weights import is_active as _smart_rag_active
+            if _smart_rag_active():
+                from utils.rag_weights import get_weights as _get_weights
+                weights = _get_weights()
+        except ImportError:
+            pass
+
         merged = []
         for i, result_or_exc in enumerate(results_lists):
             if isinstance(result_or_exc, list):
                 source = sources[i]
+                # Pre-compute the per-source multiplier so we apply it
+                # once per result rather than re-resolving the map per row.
+                source_weight = weights.get(source.name, 1.0) if weights else 1.0
                 for r in result_or_exc:
                     r.confidence = source.score_confidence(_rq, r)
+                    if abs(source_weight - 1.0) > 1e-9:
+                        r.confidence = max(0.0, min(1.0, r.confidence * source_weight))
                     merged.append(r.to_dict())
             else:
                 logger.warning("Data source %s query failed: %s", sources[i].name, result_or_exc)
+        if weights:
+            logger.debug("query_all: applied Custom Smart RAG weights to %d sources", len(weights))
         logger.info("query_all: merged %d results from %d sources", len(merged), len(sources))
         return merged
 

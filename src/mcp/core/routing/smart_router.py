@@ -132,9 +132,17 @@ FREE_MODELS = {
     "llama-3.3": "openrouter/meta-llama/llama-3.3-70b-instruct",
 }
 
+# Cheap tier: catalog-refreshed 2026-05-20 against OpenRouter live models.
+# Dict keys are stable identifiers used at call sites — only the underlying
+# model ID + cost change with each catalog refresh.
+# - "gpt-4o-mini" slot: gpt-5-nano is 3× cheaper input than gpt-4o-mini for
+#   the same context window class. Quality regression risk is low — gpt-5-nano
+#   is the explicit "cheap workhorse" successor in the gpt-5 family.
+# - "gemini-flash" slot: gemini-3.1-flash-lite is cheaper + newer + larger
+#   context than gemini-2.5-flash.
 CHEAP_MODELS: dict[str, dict[str, str | float]] = {
-    "gpt-4o-mini": {"id": "openrouter/openai/gpt-4o-mini", "cost": 0.00015},
-    "gemini-flash": {"id": "openrouter/google/gemini-2.5-flash", "cost": 0.0003},
+    "gpt-4o-mini": {"id": "openrouter/openai/gpt-5-nano", "cost": 0.00005},
+    "gemini-flash": {"id": "openrouter/google/gemini-3.1-flash-lite", "cost": 0.00025},
 }
 
 CAPABLE_MODELS: dict[str, dict[str, str | float]] = {
@@ -142,12 +150,18 @@ CAPABLE_MODELS: dict[str, dict[str, str | float]] = {
     "gpt-4o": {"id": "openrouter/openai/gpt-4o", "cost": 0.0025},
 }
 
+# Research / online-search tier: catalog-refreshed 2026-05-20.
+# Previous IDs (grok-4.1-fast:online, grok-4:online) were REMOVED from
+# OpenRouter's catalog — source of the 2026-05-20 Sentry 4xx burst.
+# Current xAI lineup is grok-4.20 / grok-4.20-multi-agent / grok-4.3.
+# `:online` is OpenRouter's generic web-search overlay; works on any
+# model ID.
 RESEARCH_MODELS: dict[str, dict[str, str | float]] = {
-    "grok-online": {"id": "openrouter/x-ai/grok-4.1-fast:online", "cost": 0.0002},
+    "grok-online": {"id": "openrouter/x-ai/grok-4.3:online", "cost": 0.00125},
 }
 
 EXPERT_MODELS: dict[str, dict[str, str | float]] = {
-    "grok-4": {"id": "openrouter/x-ai/grok-4:online", "cost": 0.003},
+    "grok-4": {"id": "openrouter/x-ai/grok-4.20:online", "cost": 0.00125},
 }
 
 # ---------------------------------------------------------------------------
@@ -459,10 +473,12 @@ async def route(
 
     if task_type == TaskType.VERIFICATION_WEB:
         p95 = _check_budget("verification_web", slo_budget_ms)
+        # Catalog-refreshed 2026-05-20: grok-4.1-fast removed from
+        # OpenRouter; grok-4.3 is the current cheap-search-tier xAI model.
         model = getattr(
             config,
             "VERIFICATION_CURRENT_EVENT_MODEL",
-            "openrouter/x-ai/grok-4.1-fast:online",
+            "openrouter/x-ai/grok-4.3:online",
         )
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
@@ -470,20 +486,22 @@ async def route(
             model=model,
             provider="openrouter_paid",
             reason="web-search verification",
-            estimated_cost_per_1k=0.0002,
+            estimated_cost_per_1k=0.00125,
             tier_p95_ms=p95,
         )
 
     if task_type == TaskType.VERIFICATION_EXPERT:
         p95 = _check_budget("verification_expert", slo_budget_ms)
-        model = getattr(config, "VERIFICATION_EXPERT_MODEL", "openrouter/x-ai/grok-4:online")
+        # Catalog-refreshed 2026-05-20: grok-4 / grok-4:online removed
+        # from OpenRouter; grok-4.20 is the current expert-tier xAI model.
+        model = getattr(config, "VERIFICATION_EXPERT_MODEL", "openrouter/x-ai/grok-4.20:online")
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
         return RouteDecision(
             model=model,
             provider="openrouter_paid",
             reason="expert verification",
-            estimated_cost_per_1k=0.003,
+            estimated_cost_per_1k=0.00125,
             tier_p95_ms=p95,
         )
 

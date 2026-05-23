@@ -1,0 +1,14 @@
+{
+  "name": "apple_calendar",
+  "version": "0.1.0",
+  "type": "connector",
+  "tier": "pro",
+  "description": "Apple Calendar (EventKit) via signed Swift helper",
+  "feature_flags": ["apple_calendar_eventkit"],
+  "requires": {
+    "platform": "darwin",
+    "macos_min": "14.0",
+    "swift_helpers": ["ceridek"],
+    "tcc_grants": ["NSCalendarsFullAccessUsageDescription"]
+  }
+}

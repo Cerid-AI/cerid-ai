@@ -357,8 +357,37 @@ async def pkb_search_filtered(
     """Filter-then-retrieve. We pre-narrow via Neo4j list_artifacts
     so the embedding-search hot path doesn't have to evaluate the
     full collection on every call.
+
+    Privacy filter: when private_mode is below the floor declared in
+    utils/domain_privacy.py, domain="messages" (iMessage content) is
+    stripped from the requested domains. See docs/PRO_MESSAGES.md.
     """
     from core.agents.query_agent import agent_query
+    from utils.domain_privacy import (
+        DOMAIN_PRIVACY_FLOOR,
+        get_global_private_mode_level,
+        visible_domains,
+    )
+
+    # Apply the privacy filter before any other narrowing. Expand
+    # `domains=None` (all domains) to the explicit DOMAINS list so the
+    # filter has something to subtract from.
+    pm_level = get_global_private_mode_level()
+    explicit_domains = domains if domains is not None else list(config.DOMAINS)
+    explicit_domains = visible_domains(explicit_domains, pm_level) or []
+    if not explicit_domains:
+        return {
+            "results": [],
+            "context": "",
+            "confidence": 0.0,
+            "domains_searched": [],
+            "total_results": 0,
+            "filter_applied": {
+                "private_mode_floor": pm_level,
+                "privacy_gated_domains": sorted(DOMAIN_PRIVACY_FLOOR.keys()),
+            },
+        }
+    domains = explicit_domains
 
     driver = get_neo4j()
 

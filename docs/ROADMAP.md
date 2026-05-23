@@ -1,6 +1,6 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-05-15 (post-v0.95.1 — cerid-kb MCP overhaul: 57 tools, decorator-based tool registry, schema-fidelity + description-quality CI gates, per-tool audit + metrics, SSE staleness reaper, `POST /mcp/call-sync`, active-learning schema, GDS-Louvain graph tools, `_warnings` envelope.)
+> **Last updated:** 2026-05-21 (Phases A + B + C of the Cerid v1.0 plan landed. Phase A: Atlas 2D WebGL via sigma.js v3 + custom halo NodeProgram + 4 lenses + keyboard nav + a11y + saved views + Wiki provenance + perf infrastructure (8.3ms/frame median at 1K nodes on M2 Pro). Phase B: Constellation 3D mode (R3F + InstancedMesh), UMAP backend + `/graph/embeddings/3d` endpoint, Sources pane consolidation, quick-capture FAB with ⌘⇧N. Phase C: Settings → Diagnostics tab merges Monitoring/Audit/Agents, Simple/Advanced mode toggle removed (UIModeProvider hard-pinned to advanced), knowledge-source selector in chat composer, `docs/UI_ARCHITECTURE.md` documents the final shape. **9 → 4 sidebar panes (Chat / Subjects / Sources / Settings)** — legacy panes still resolvable via NavigationProvider redirect map. ~1,220 frontend tests + 36 new backend tests passing. Phase I (Custom Smart RAG — per-source weight tuning) is next. Phases D (Apple ecosystem), E (meeting capture), F (cloud connectors via sibling MCP), G (Swift CLI helpers), and H (metamorphic verification) all shipped — see docs/COMPLETED_PHASES.md.)
 > **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 > **Internal sprint backlog:** `tasks/todo.md` (internal-only).
 
@@ -43,15 +43,19 @@ Real-time activity panel with humanized agent messages. Files: `src/web/src/comp
 
 **Follow-up (P2):** Cost-comparison view (current model vs alternatives) — catalog data is already fetched; needs a UI surface in settings.
 
-### ✅ Pro Tier Purchase Path -- SHIPPED (Stripe checkout end-to-end)
+### ✅ Pro Tier Billing Infrastructure -- SHIPPED (Stripe checkout end-to-end)
 
 Billing backend (Stripe Checkout session creation, webhook event handling across the subscription lifecycle, license-key generation/validation, waitlist, status) lives in the internal-only distribution. The Pro Settings pane (`src/web/src/components/settings/pro-section.tsx`) wires the upgrade button to the billing endpoint and opens the Stripe-hosted Checkout URL; manual license-key entry remains as a fallback for offline activation.
 
-**Follow-up (P2):** Pro-anchor feature (audio transcription) still pending.
+This shipped the **purchase path**, not the feature suite. See the in-progress section below for the actual Pro features being built out.
 
-### ✅ Pro Mode Configuration & Feature Access -- SHIPPED v0.84.0
+### 🚧 Pro Feature Suite -- IN PROGRESS (2026-Q3 target)
 
-Settings → Pro tab renders feature status indicators per tier, license-key entry with backend validation, current-plan display, waitlist join, and a feature-discovery matrix listing all Pro-gated capabilities.
+The current Pro flags in `config/features.py` are declared but the feature implementations are layered in across the 2026-Q3 Pro Tier Implementation Plan. Anchor: meeting capture + speaker diarization with calendar-aware stitching. Connectors: Gmail/Calendar/Outlook via MCP, Apple Notes/Mail/Messages/EventKit/Photos via native helpers. Intelligence: metamorphic verification, custom smart RAG weights, daily KB digest. Mac-native baseline (signed/notarized universal binary, Sparkle, Keychain, TCC wizard, Voice Memos watch, Spotlight donation, Share Sheet, Shortcuts, Quick Look) ships as **community tier** — Mac integration is baseline, not paid.
+
+### ✅ Pro Mode Configuration UI -- SHIPPED v0.84.0
+
+Settings → Pro tab renders feature status indicators per tier, license-key entry with backend validation, current-plan display, waitlist join, and a feature-discovery matrix. The matrix currently lists declared Pro flags; the in-progress feature suite (above) lands the actual implementations behind those flags.
 
 ---
 
@@ -59,8 +63,9 @@ Settings → Pro tab renders feature status indicators per tier, license-key ent
 
 ### Expanded File Type Handling
 - Specialized parsers for code (AST extraction for Python, JS/TS)
-- Image OCR for scanned PDFs (Pro tier)
-- Audio transcription for meeting notes (Pro tier — anchor feature for Pro path)
+- Image OCR for scanned PDFs (community — `ocr_parsing` already enabled for all tiers)
+- Plain audio transcription via Whisper (community — `audio_transcription_plain`, ships with `voice_memos_watch`)
+- Meeting capture + speaker diarization (Pro — anchor feature, see in-progress Pro feature suite above)
 - Markdown frontmatter extraction (YAML/TOML headers -> metadata)
 
 ### Bulk Import Enhancements
@@ -73,10 +78,13 @@ Settings → Pro tab renders feature status indicators per tier, license-key ent
 - Dead-letter queue, BM25 rollback, triage-to-ingest bridge, per-file status
 
 #### Core Data Sources
-- IMAP email (env vars scaffolded in settings.py), RSS feeds, browser bookmarks, inbound webhooks, clipboard, macOS Quick Actions
+- IMAP email (env vars scaffolded in settings.py), RSS feeds, browser bookmarks, inbound webhooks, clipboard, Safari Reading List (community, Mac-native), Voice Memos watch (community, Mac-native)
 
-#### Pro Data Sources
-- Gmail OAuth, Outlook Graph, Apple Notes, Calendar sync, Docling parser
+#### Pro Cloud Connectors (via MCP-over-HTTP — `taylorwilsdon/google_workspace_mcp` + `softeria/ms-365-mcp-server`)
+- Gmail + Google Calendar (bundled), Outlook + Outlook Calendar (bundled), Docling parser (community after v0.97)
+
+#### Pro Apple Connectors (native helpers, requires FDA + TCC grants)
+- Apple Notes, Apple Mail, Messages (iMessage), Apple Calendar via EventKit, Reminders via EventKit, Photos
 
 #### Storage Dashboard
 - Storage metrics, usage bars, persistent history, activity feed

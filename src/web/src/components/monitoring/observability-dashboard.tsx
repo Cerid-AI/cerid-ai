@@ -18,6 +18,7 @@ import {
   Database,
   Shield,
   Cpu,
+  type LucideIcon,
 } from "lucide-react"
 import {
   fetchObservabilityMetrics,
@@ -111,7 +112,7 @@ function TrendIndicator({ current, previous }: { current: number | null; previou
 
 interface MetricCardProps {
   title: string
-  icon: React.ElementType
+  icon: LucideIcon
   value: string
   subtitle?: string
   sparklineData?: number[]

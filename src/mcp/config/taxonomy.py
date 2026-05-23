@@ -41,6 +41,40 @@ TAXONOMY = {
         "icon": "message-circle",
         "sub_categories": ["facts", "decisions", "preferences", "action-items", "general"],
     },
+    # ── Pro-tier connector domains (Phases D-J) ────────────────────
+    # Each Pro-tier ingest connector writes into its own domain so
+    # retrieval can filter by source and the RAG weights UI can
+    # surface per-domain weights (kb:<domain> keys).
+    "notes": {
+        "description": "Apple Notes (and other note-app content)",
+        "icon": "sticky-note",
+        "sub_categories": ["apple_notes", "general"],
+    },
+    "mail": {
+        "description": "Email messages from Apple Mail / Gmail / Outlook",
+        "icon": "mail",
+        "sub_categories": ["apple_mail", "gmail", "outlook", "general"],
+    },
+    "messages": {
+        "description": "iMessage conversations (privacy-gated; requires private_mode Level 2+)",
+        "icon": "message-square",
+        "sub_categories": ["imessage", "general"],
+    },
+    "meetings": {
+        "description": "Meeting recordings: transcripts + speaker diarization + calendar stitching",
+        "icon": "mic",
+        "sub_categories": ["recorded", "summary", "general"],
+    },
+    "inbox": {
+        "description": "AI-triaged inbox threads (urgent / actionable / personal / newsletter / promo)",
+        "icon": "inbox",
+        "sub_categories": ["urgent", "actionable", "personal", "newsletter", "promo", "general"],
+    },
+    "digests": {
+        "description": "Cerid daily/weekly synthesis digests (Phase K)",
+        "icon": "calendar-days",
+        "sub_categories": ["daily", "weekly", "general"],
+    },
 }
 
 # User-defined custom domains via env var (JSON object with same shape as TAXONOMY entries)
@@ -148,5 +182,39 @@ TAG_VOCABULARY: dict[str, list[str]] = {
     "conversations": [
         "fact", "decision", "preference", "action-item", "insight",
         "question", "recommendation", "follow-up", "context", "memory",
+    ],
+    # Pro-tier connector domains (Phases D–J). Each entry mirrors the
+    # tag bias the AI categorizer should apply when a new artifact
+    # lands in that domain. Vocabularies kept short — connectors carry
+    # their own metadata which dominates the categorizer's choice.
+    "notes": [
+        "note", "idea", "draft", "todo", "list", "quote",
+        "highlight", "fleeting", "snippet", "memo", "outline",
+        "annotation", "bookmark",
+    ],
+    "mail": [
+        "thread", "reply", "newsletter", "receipt", "notification",
+        "calendar-invite", "personal", "work", "promotional",
+        "automated", "transactional", "subscription",
+    ],
+    "messages": [
+        "chat", "thread", "group", "direct-message", "attachment",
+        "voice-note", "reaction", "mention", "link-share",
+        "media-share", "scheduled-message",
+    ],
+    "meetings": [
+        "transcript", "summary", "action-item", "decision",
+        "attendee", "agenda", "recording", "follow-up",
+        "interview", "standup", "review",
+    ],
+    "inbox": [
+        "urgent", "actionable", "personal", "newsletter", "promo",
+        "spam", "follow-up", "triaged", "awaiting-reply",
+        "scheduled", "snoozed",
+    ],
+    "digests": [
+        "daily", "weekly", "summary", "highlights", "trending",
+        "recap", "rollup", "briefing", "newsletter-summary",
+        "activity-report",
     ],
 }

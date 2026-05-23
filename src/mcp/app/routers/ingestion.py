@@ -76,6 +76,18 @@ class IngestRequest(BaseModel):
     domain: str = "general"
 
 
+class StructuredIngestRequest(BaseModel):
+    """Payload for the Apple connectors and any other client that produces
+    artifact-shaped content with arbitrary tag metadata. Differs from
+    `IngestRequest` in that arbitrary metadata flows directly into the
+    artifact's tags (not just X-Client-ID header)."""
+
+    content: str
+    domain: str = "general"
+    metadata: dict[str, str] = Field(default_factory=dict)
+    source_id: str | None = None  # Idempotency key — Apple Notes id, Mail Message-ID, etc.
+
+
 class IngestFileRequest(BaseModel):
     file_path: str
     domain: str = ""
@@ -130,6 +142,34 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
         asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
     except Exception as e:
         log_swallowed_error("routers.ingestion.ingest_cache_invalidate", e)
+    return result
+
+
+@router.post("/ingest/structured")
+async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Request):
+    """Structured-content ingest. Used by the Apple connectors (Notes,
+    Mail, Messages) — each maps a source row to one artifact with rich
+    tag metadata that retrieval can filter by source.
+
+    Metadata keys are merged into the artifact's tag set. `source_id`
+    is treated as an idempotency hint — re-ingesting the same source_id
+    is currently a no-op only in the sense that ChromaDB collapses
+    duplicate content_hashes; explicit dedup-by-source_id is tracked
+    for Phase D.2.
+    """
+    client_source = request.headers.get("X-Client-ID", "")
+    metadata: dict[str, str] = dict(req.metadata)
+    if client_source:
+        metadata["client_source"] = client_source
+    if req.source_id:
+        metadata["source_id"] = req.source_id
+    async with _ingest_semaphore:
+        result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
+    try:
+        from utils.query_cache import invalidate_cache_non_blocking
+        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
+    except Exception as e:
+        log_swallowed_error("routers.ingestion.ingest_structured_cache_invalidate", e)
     return result
 
 

@@ -30,7 +30,9 @@ router = APIRouter(prefix="/setup", tags=["setup"])
 # ---------------------------------------------------------------------------
 
 _REQUIRED_KEYS = ["OPENROUTER_API_KEY"]
-_OPTIONAL_KEYS = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"]
+# HF_TOKEN is Pro-tier optional: only needed for meeting_capture diarization
+# (pyannote gated models). Surfaced in wizard but doesn't block setup.
+_OPTIONAL_KEYS = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY", "HF_TOKEN"]
 
 # .env location: use CERID_ENV_FILE if set, otherwise find repo root by walking
 # up until we find .env or docker-compose.yml. In Docker the .env is loaded via

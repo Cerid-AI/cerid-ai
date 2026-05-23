@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { CheckCircle, Minus, AlertCircle, HelpCircle } from "lucide-react"
+import { CheckCircle, Minus, AlertCircle, HelpCircle, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ConfidenceBand } from "@/lib/types/wiki"
 
@@ -14,7 +14,7 @@ const BAND_CONFIG: Record<
   ConfidenceBand,
   {
     label: string
-    Icon: React.ElementType
+    Icon: LucideIcon
     className: string
   }
 > = {

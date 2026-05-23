@@ -826,7 +826,42 @@ async def pkb_answer_with_citations(
 
     from core.agents.hallucination.extraction import extract_claims
     from core.agents.query_agent import agent_query
+    from core.retrieval.surface_router import route as _surface_route
     from core.utils.internal_llm import call_internal_llm
+
+    # Phase K3.5 — surface routing. When the router classifies the
+    # query as a compiled-summary intent AND we can resolve a wiki
+    # page, we pull the page summary into the context budget as a
+    # high-priority block ahead of chunk citations. The wiki page is
+    # a verified, NLI-gated artifact written by WikiRefreshJob;
+    # treating it as a first-class citation surface lets the answer
+    # path leverage compounding state instead of re-deriving.
+    surface_decision = _surface_route(question)
+    wiki_block: str = ""
+    wiki_page_meta: dict[str, Any] | None = None
+    if (
+        "wiki" in surface_decision.surfaces
+        and surface_decision.matched_entity_hint
+    ):
+        try:
+            from app.services.wiki_pages import get_entity_page  # noqa: PLC0415
+
+            page = await get_entity_page(
+                get_neo4j(), surface_decision.matched_entity_hint,
+            )
+            if page is not None and getattr(page, "summary", None):
+                wiki_page_meta = {
+                    "slug": page.slug,
+                    "name": page.name,
+                    "confidence_band": page.confidence_band,
+                    "last_updated_at": page.last_updated_at,
+                }
+                wiki_block = (
+                    f"[Compiled wiki summary for {page.name} "
+                    f"(confidence={page.confidence_band})]\n{page.summary}\n\n"
+                )
+        except Exception:  # noqa: BLE001 — wiki page is optional context
+            wiki_block = ""
 
     # 1. Retrieve
     retrieval = await agent_query(
@@ -840,7 +875,7 @@ async def pkb_answer_with_citations(
     )
 
     results = retrieval.get("results", [])
-    if not results:
+    if not results and not wiki_block:
         return {
             "answer": "I don't have any sources in the KB matching that question.",
             "citations": [],
@@ -852,8 +887,13 @@ async def pkb_answer_with_citations(
             "question": question,
         }
 
-    # 2. Generate answer grounded in retrieved context
-    context = retrieval.get("context", "")[:8000]
+    # 2. Generate answer grounded in retrieved context.
+    # Reserve up to 2000 chars for the wiki block; remaining budget
+    # goes to chunk context. The wiki block is structurally separate
+    # from chunks so the LLM can cite them differently.
+    chunk_budget = max(2000, 8000 - len(wiki_block))
+    chunk_context = retrieval.get("context", "")[:chunk_budget]
+    context = (wiki_block + chunk_context) if wiki_block else chunk_context
     answer = await call_internal_llm(
         _llm_call_messages(
             system=(
@@ -910,6 +950,13 @@ async def pkb_answer_with_citations(
             "domains_searched": retrieval.get("domains_searched", []),
             "total_results": retrieval.get("total_results", 0),
             "retrieval_confidence": retrieval.get("confidence"),
+            "surface_route": {
+                "primary": surface_decision.primary,
+                "surfaces": surface_decision.surfaces,
+                "intent": surface_decision.intent,
+                "confidence": surface_decision.confidence,
+            },
+            "wiki_page": wiki_page_meta,
         },
         "question": question,
     }

@@ -19,8 +19,10 @@ export function useTrustScore(): {
   data: TrustScore | undefined
   isLoading: boolean
   isError: boolean
+  error: Error | null
+  refetch: () => void
 } {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["trust-score"],
     queryFn: fetchTrustScore,
     refetchInterval: 60_000,
@@ -28,5 +30,11 @@ export function useTrustScore(): {
     retry: 1,
   })
 
-  return { data, isLoading, isError }
+  return {
+    data,
+    isLoading,
+    isError,
+    error: error as Error | null,
+    refetch: () => { void refetch() },
+  }
 }

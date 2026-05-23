@@ -55,13 +55,26 @@ _NOISY_POLL_SUBSTRINGS = ("/ingestion/progress", "/health", "/observability/queu
 # entirely) since healthcheck spans have zero diagnostic value once we have
 # /health/live and /health (uptime endpoints with their own monitoring).
 _HEALTH_TRANSACTIONS = frozenset({
+    # FastApiIntegration transaction_style="endpoint" names — function-styled.
     "app.routers.health.health_ping",
+    "app.routers.health.health_check",
+    "app.routers.health.health_check_endpoint",
     "app.routers.health.health_status_endpoint",
     "app.routers.health.liveness_probe",
     "app.routers.health.readiness_probe",
+    # SDK-side health probe (3,100 spans/24h pre-filter per 2026-05-20 audit).
+    "app.routers.sdk.sdk_health",
+    "app.routers.sdk.sdk_health_detailed",
+    # External-adapter healthcheck.
+    "app.routers.external_apis.adapter_health",
+    # Observability-dashboard health-score poll.
+    "app.routers.observability.get_health_score",
+    # URL-styled equivalents for upstream proxies / older SDK versions.
     "/health/status",
     "/health/live",
     "/health",
+    "/sdk/v1/health",
+    "/observability/health-score",
 })
 
 

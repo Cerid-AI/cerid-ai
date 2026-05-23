@@ -25,6 +25,25 @@ const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 const AgentsPane = lazy(() => import("@/components/agents/agents-pane"))
 const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
 const CommunitiesPane = lazy(() => import("@/components/kb/graph-explorer").then(m => ({ default: m.GraphExplorer })))
+const SubjectsPane = lazy(() => import("@/components/subjects/subjects-pane"))
+const SourcesPane = lazy(() => import("@/components/sources/sources-pane"))
+const QuickCaptureFab = lazy(() =>
+  import("@/components/quick-capture/quick-capture-fab").then((m) => ({ default: m.QuickCaptureFab })),
+)
+const AtlasPerfHarness = lazy(() => import("@/components/dev/atlas-perf-harness"))
+
+/**
+ * Dev-mode escape hatch: `?dev=atlas-perf` bypasses the full app shell
+ * and mounts just the perf harness. Driven by Playwright spec
+ * `tests/perf/atlas-perf.spec.ts` for budget assertions. Production
+ * builds also expose this — the harness is a synthetic-fixture page;
+ * no live data leaks — so QA can run the same check against a deployed
+ * preview build without a special build flag.
+ */
+function isDevRoute(): string | null {
+  if (typeof window === "undefined") return null
+  return new URLSearchParams(window.location.search).get("dev")
+}
 
 function PaneLoader() {
   return (
@@ -95,6 +114,21 @@ export default function App() {
       .catch((err) => { if (import.meta.env.DEV) console.warn("Settings fetch failed:", err) })
   }, [])
 
+  // Dev-mode perf harness — bypasses the full app shell entirely so
+  // measurements aren't contaminated by sidebar/chat/settings work.
+  const devRoute = isDevRoute()
+  if (devRoute === "atlas-perf") {
+    return (
+      <AppErrorBoundary>
+        <Suspense fallback={<PaneLoader />}>
+          <div className="h-screen w-screen">
+            <AtlasPerfHarness />
+          </div>
+        </Suspense>
+      </AppErrorBoundary>
+    )
+  }
+
   // Show nothing while checking setup status
   if (setupRequired === null) {
     return (
@@ -149,6 +183,8 @@ export default function App() {
           case "settings":
           case "wiki":
           case "communities":
+          case "subjects":
+          case "sources":
             return (
               <PaneErrorBoundary label={activePane}>
                 <Suspense fallback={<PaneLoader />}>
@@ -160,12 +196,19 @@ export default function App() {
                   {activePane === "agents" && <AgentsPane />}
                   {activePane === "settings" && <SettingsPane />}
                   {activePane === "wiki" && <WikiPane />}
+                  {activePane === "subjects" && <SubjectsPane />}
+                  {activePane === "sources" && <SourcesPane />}
                 </Suspense>
               </PaneErrorBoundary>
             )
         }
       }}
     </AppLayout>
+    {/* Quick-capture FAB — visible from every pane. Hidden until the
+        user interacts; ⌘⇧N opens it from anywhere. */}
+    <Suspense fallback={null}>
+      <QuickCaptureFab />
+    </Suspense>
     </KBInjectionProvider>
     </ConversationsProvider>
     </UIModeProvider>

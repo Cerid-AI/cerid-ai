@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import type { KBQueryResult } from "@/lib/types"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { useNavigation } from "@/contexts/navigation-context"
+import { KnowledgeSourceSelector, type KnowledgeSource } from "./knowledge-source-selector"
 
 interface InjectedSource {
   filename: string
@@ -34,6 +35,13 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0, injectedSources, onInputChange, onFileDrop, onArtifactDrop }: ChatInputProps) {
   const [input, setInput] = useState("")
+  const [knowledgeSource, setKnowledgeSource] = useState<KnowledgeSource>(() => {
+    try {
+      const stored = localStorage.getItem("cerid-knowledge-source")
+      if (stored === "kb" || stored === "kb_web" || stored === "llm_kb") return stored
+    } catch { /* SSR */ }
+    return "llm_kb"
+  })
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isArtifactDragOver, setIsArtifactDragOver] = useState(false)
   // Last-sent user message for ArrowUp recall (C-P1.6)
@@ -200,6 +208,13 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         rows={1}
         disabled={disabled}
         className="flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+      <KnowledgeSourceSelector
+        value={knowledgeSource}
+        onChange={(next) => {
+          setKnowledgeSource(next)
+          try { localStorage.setItem("cerid-knowledge-source", next) } catch { /* SSR */ }
+        }}
       />
       {injectedCount > 0 && (
         <Popover>

@@ -46,7 +46,11 @@ PROVIDER_CONFIGS: dict[str, dict] = {
         "base_url": "https://api.x.ai/v1",
         "env_var": "XAI_API_KEY",
         "signup_url": "https://console.x.ai",
-        "models": ["grok-4", "grok-4.1-fast"],
+        # Catalog-refreshed 2026-05-20: grok-4 + grok-4.1-fast removed
+        # from OpenRouter. xAI direct API may still serve them under
+        # legacy names, but for parity with the smart_router defaults we
+        # advertise the current public lineup.
+        "models": ["grok-4.20", "grok-4.20-multi-agent", "grok-4.3"],
     },
     "google": {
         "display_name": "Google",

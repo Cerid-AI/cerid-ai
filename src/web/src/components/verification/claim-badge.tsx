@@ -16,7 +16,7 @@
  * WCAG 2.1 AA: color paired with icon; aria-label includes band + count.
  */
 
-import { CheckCircle, Minus, XCircle } from "lucide-react"
+import { CheckCircle, Minus, XCircle, type LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   HoverCard,
@@ -62,7 +62,7 @@ const BAND_STYLES: Record<
   },
 }
 
-const BAND_ICONS: Record<VerificationBand, React.ElementType> = {
+const BAND_ICONS: Record<VerificationBand, LucideIcon> = {
   verified: CheckCircle,
   partial: Minus,
   unverified: XCircle,

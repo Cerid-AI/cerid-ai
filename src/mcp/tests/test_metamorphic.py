@@ -92,20 +92,45 @@ class TestStubDelegation:
     """Tests for the core stub (agents.hallucination.metamorphic)."""
 
     @pytest.mark.asyncio
-    async def test_skips_when_plugin_not_loaded(self):
-        """Stub returns skip sentinel when no handler is registered."""
+    async def test_skips_when_feature_gated(self):
+        """Stub returns ``feature_gated`` skip when the Pro flag is off
+        (community tier or explicit feature-flag disable). This path takes
+        precedence over plugin-load state so we render a clean upgrade CTA
+        rather than a "plugin not loaded" message that sounds broken."""
+        from unittest.mock import patch
+
         from app.agents.hallucination.metamorphic import metamorphic_score, set_metamorphic_handler
 
-        # Ensure no handler is set
         set_metamorphic_handler(None)  # type: ignore[arg-type]
-        result = await metamorphic_score("anything", "anything")
+        with patch("config.features.is_feature_enabled", return_value=False):
+            result = await metamorphic_score("anything", "anything")
 
         assert result["skipped"] is True
-        assert result["reason"] == "metamorphic_verification plugin not loaded (Pro tier)"
+        assert result["reason"] == "feature_gated"
+        assert result["feature"] == "metamorphic_verification"
+
+    @pytest.mark.asyncio
+    async def test_skips_when_plugin_not_loaded(self):
+        """When the feature flag is ON but no handler is registered, the
+        stub returns ``plugin_not_loaded`` so operators see an actionable
+        message distinct from the user-facing feature gate."""
+        from unittest.mock import patch
+
+        from app.agents.hallucination.metamorphic import metamorphic_score, set_metamorphic_handler
+
+        set_metamorphic_handler(None)  # type: ignore[arg-type]
+        with patch("config.features.is_feature_enabled", return_value=True):
+            result = await metamorphic_score("anything", "anything")
+
+        assert result["skipped"] is True
+        assert result["reason"] == "plugin_not_loaded"
+        assert result["feature"] == "metamorphic_verification"
 
     @pytest.mark.asyncio
     async def test_delegates_when_plugin_loaded(self):
-        """Stub delegates to the injected handler when set."""
+        """Stub delegates to the injected handler when set AND feature is enabled."""
+        from unittest.mock import patch
+
         from app.agents.hallucination.metamorphic import metamorphic_score, set_metamorphic_handler
 
         async def mock_handler(*args, **kwargs):
@@ -113,7 +138,8 @@ class TestStubDelegation:
 
         set_metamorphic_handler(mock_handler)
         try:
-            result = await metamorphic_score("test", "context")
+            with patch("config.features.is_feature_enabled", return_value=True):
+                result = await metamorphic_score("test", "context")
             assert result["score"] == 0.42
             assert result["from_plugin"] is True
         finally:

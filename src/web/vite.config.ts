@@ -32,6 +32,13 @@ export default defineConfig({
             return "vendor-markdown"
           }
           if (id.includes("node_modules/@tanstack/react-query")) return "vendor-query"
+          // Phase B — split the 3D stack so Constellation chunk stays
+          // under 800KB. ORDER MATTERS: check @react-three FIRST so
+          // its files (which contain "three" in path) route to r3f
+          // chunk, then catch raw three.js in vendor-three.
+          if (id.includes("@react-three/fiber") || id.includes("@react-three/drei")) return "vendor-r3f"
+          if (id.includes("node_modules/three") || id.includes("/three/three.")) return "vendor-three"
+          if (id.includes("/gsap/")) return "vendor-gsap"
         },
       },
     },
