@@ -17,8 +17,12 @@
  *
  * Interactions:
  * - Click a card → loads detail on the right (keyboard: Enter / Space)
- * - Member entity pill → `props.onEntityClick(canonical_id)` (TODO: wire to wiki route)
- * - "Ask about this community" → `props.onAskAbout(community)` (TODO: prefill chat)
+ * - Member entity pill → `props.onEntityClick(canonical_id)` (defaults to
+ *   navigation.goTo("wiki") with ?entity= URL param, matching the Phase M
+ *   Day 5 wiki deep-link convention)
+ * - "Ask about this community" → `props.onAskAbout(community)` (defaults to
+ *   navigation.composeChat({ text: <seed> }) prefilling chat with a summary
+ *   seed)
  * - Entity list in detail is collapsed by default; expanded on demand.
  */
 

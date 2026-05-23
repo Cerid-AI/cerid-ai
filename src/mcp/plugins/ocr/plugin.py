@@ -36,7 +36,7 @@ logger = logging.getLogger("ai-companion.plugins.ocr")
 
 # Minimum chars per page before OCR triggers
 OCR_MIN_TEXT_PER_PAGE = int(os.getenv("OCR_MIN_TEXT_PER_PAGE", "50"))
-OCR_ENGINE = os.getenv("OCR_ENGINE", "docling")
+OCR_ENGINE = os.getenv("OCR_ENGINE", "docling")  # env-capture-allowed: OCR engine choice — startup-only plugin config
 
 # Maximum text output size
 _MAX_TEXT_CHARS = 2_000_000

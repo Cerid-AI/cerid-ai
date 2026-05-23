@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 from parsers.structured import parse_markdown
 
-MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")
+MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")  # env-capture-allowed: CLI entrypoint script — one-shot process
 
 # Debounce: Obsidian auto-saves frequently, avoid duplicate ingests
 _recent: dict[str, float] = {}

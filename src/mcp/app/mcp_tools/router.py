@@ -1,15 +1,11 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Phase K3.4 — surface-router MCP tool.
+"""``pkb_surface_route`` — expose the surface router as an MCP tool.
 
-Exposes the surface router (Phase K3.1 / ``core/retrieval/surface_router.py``)
-as a first-class MCP tool so agents can explicitly ask "which surfaces
-should I consult for this query" without each agent re-implementing
-the routing heuristics.
-
-Useful for orchestration patterns like the Boardroom agent or custom
-templates that pre-select retrieval surfaces based on user intent.
+Lets orchestration agents (Boardroom, custom templates) ask which
+surfaces to consult without re-implementing the routing heuristics.
+Backed by ``core.retrieval.surface_router``.
 """
 from __future__ import annotations
 

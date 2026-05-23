@@ -34,7 +34,7 @@ from errors import CeridError
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 
-MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")
+MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")  # env-capture-allowed: CLI entrypoint script — one-shot process
 REQUEST_DELAY = 0.3  # seconds between requests to avoid server overload
 REQUEST_HEADERS = {"X-Client-ID": "cli-ingest"}
 

@@ -1,38 +1,13 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Processor event hooks — Phase K1.2.
+"""In-process pub/sub for processor events.
 
-Lightweight in-process pub/sub for events emitted by background jobs.
-The wiki-refresh subscriber (Phase K1.3) consumes ``entities_added``
-events to close the wiki orphan loop without coupling the entity
-extraction job to the wiki refresh job.
-
-Why in-process?
----------------
-The processor worker already runs in the same Python process as the
-FastAPI app (single deployment unit). A cross-process bus (Redis
-pub/sub, etc.) would buy nothing today and add an extra failure mode.
-Subscribers register at import time; emission is a direct function
-call dispatched through a synchronous fan-out.
-
-Event types
------------
-``"entities_added"`` — emitted by ``EntityExtractionJob`` after a
-successful Neo4j upsert. Payload:
-``{"artifact_id": str, "entity_slugs": [str], "tenant_id": str}``.
-
-``"contradiction_detected"`` — emitted when the contradiction logger
-records a finding tied to an entity slug. Payload:
-``{"finding_id": str, "entity_slug": str, "severity": str}``.
-
-``"summary_drift"`` — emitted by the weekly drift cron (Phase K2.4)
-when an entity's summary embedding has drifted past τ. Payload:
-``{"entity_slug": str, "drift": float}``.
-
-Subscribers are best-effort. Exceptions are caught and logged via
-``log_swallowed_error`` so a broken subscriber can't take down the
-emitter.
+Decouples the entity extraction job from the wiki refresh subscriber.
+Events: ``entities_added`` (``{artifact_id, entity_slugs, tenant_id}``),
+``contradiction_detected`` (``{finding_id, entity_slug, severity}``),
+``summary_drift`` (``{entity_slug, drift}``). Subscriber exceptions are
+swallowed by the dispatcher so one broken handler can't break others.
 """
 from __future__ import annotations
 

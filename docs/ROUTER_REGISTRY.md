@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 323
+**Total routes:** 324
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -322,6 +322,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/widget.html` | `widget_page` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/widget.js` | `widget_script` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/widget/config` | `widget_config` | `src/mcp/app/routers/widget.py` | Widget |  |
+| GET | `/concepts/{community_id:path}` | `get_concept_wiki_page` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/entities` | `list_entity_pages` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/entities/{slug}` | `get_entity_wiki_page` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/index` | `list_knowledge_index` | `src/mcp/app/routers/wiki.py` | wiki |  |

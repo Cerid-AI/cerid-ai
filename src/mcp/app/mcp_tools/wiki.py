@@ -1,18 +1,11 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Phase K1.5 — wiki MCP tools.
+"""Wiki MCP tools.
 
-Exposes the entity-wiki page as a first-class retrieval surface so the
-LLM can reach for a compiled summary instead of always re-deriving
-from raw chunks.
-
-Tools
------
-* ``pkb_wiki_lookup`` — fetch the entity page by slug, fuzzy-matched
-  when the input isn't an exact canonical_id. Three depth levels:
-  ``summary`` (lightweight), ``full`` (+ related + sources +
-  contradictions), ``with_refs`` (+ external references).
+``pkb_wiki_lookup`` fetches an entity or concept page by slug
+(fuzzy-matched on miss). Three depth levels: ``summary`` (light),
+``full`` (+related, sources, contradictions), ``with_refs`` (+external).
 """
 from __future__ import annotations
 
@@ -150,11 +143,8 @@ async def pkb_wiki_lookup(
     if driver is None:
         raise UpstreamUnavailableError("Neo4j unavailable")
 
-    # Phase K5 — concept slug routing. Slugs starting with "concept:"
-    # (e.g. concept:0:42) OR the community-side {level}:{native_id}
-    # bare form route directly to community page lookup before any
-    # entity work. Karpathy-shaped: concepts are first-class wiki
-    # citizens alongside entities.
+    # Concept slugs (concept:{level}:{native_id} or bare {level}:{native_id})
+    # route to community lookup before entity work.
     concept_id = _strip_concept_prefix(query)
     if concept_id is not None:
         return await _lookup_concept(driver, concept_id, depth)
@@ -212,18 +202,14 @@ async def pkb_wiki_lookup(
     return {"found": True, "kind": "entity", "page": page_dict, "candidates": []}
 
 
-# ---------------------------------------------------------------------------
-# Phase K5 — concept page lookup (Leiden communities as wiki entities)
-# ---------------------------------------------------------------------------
+# Concept page lookup (Leiden communities as wiki entities) ------------------
 
 
 def _strip_concept_prefix(query: str) -> str | None:
-    """Return the community_id if ``query`` is a concept slug, else None.
+    """Return ``community_id`` if ``query`` is a concept slug, else ``None``.
 
-    Accepts both ``concept:0:42`` (Karpathy-shaped namespace) and the
-    bare community-side ``0:42`` (matches existing /communities/{id}
-    paths). The community_id format is strictly ``{level}:{native_id}``
-    with both parts being non-negative integers.
+    Accepts ``concept:0:42`` or bare ``0:42``. Format is strictly
+    ``{level}:{native_id}`` with both parts non-negative integers.
     """
     candidate = query[len("concept:"):] if query.startswith("concept:") else query
     if ":" not in candidate:
@@ -235,12 +221,7 @@ def _strip_concept_prefix(query: str) -> str | None:
 
 
 async def _lookup_concept(driver: Any, community_id: str, depth: str) -> dict[str, Any]:
-    """Return a Karpathy-shaped concept page from a Leiden community.
-
-    Reuses the existing community-pages service (Phase R.2). On miss
-    raises ResourceNotFoundError so callers see the same 404 shape as
-    the entity path.
-    """
+    """Concept page from a Leiden community. Raises ResourceNotFoundError on miss."""
     from app.services.community_pages import get_community_page  # noqa: PLC0415
 
     try:
