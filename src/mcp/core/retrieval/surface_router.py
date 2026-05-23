@@ -1,27 +1,17 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Surface router — Phase K3.1.
+"""Classify a query and pick which knowledge surfaces to consult.
 
-Classifies a user query into one of five intent buckets and picks the
-knowledge surfaces to consult. The four primary surfaces are:
-
-  W — wiki (compiled entity summaries; entity-keyed)
-  V — vector chunks (semantic similarity over ChromaDB)
-  G — graph (Neo4j entities + relationships + contradictions)
-  M — episodic memory (decay-scored, per-user)
-
-The router is a top-level dispatcher (not the GraphRAG-mode picker in
-``query_router.py`` — that one stays internal to retrieval). It runs
-deterministic regex first to skip ~70% of queries cheaply; the LLM
-fallback path is only used for ambiguous cases and stays bounded by a
-200ms / 200-token budget.
-
-Hybrid pattern (per Karpathy LLM Wiki + RAG-vs-Memory-vs-Wiki
-comparison literature, 2026): wiki-first for "what is X" intents,
-vector-first for specific-fact lookups, graph-first for relational
-queries, memory-first for personal-context queries. Mixed/unknown
+Five intent buckets map to four surfaces (wiki / vector / graph /
+memory). Deterministic regex on the fast path; the LLM fallback for
+ambiguous cases is bounded by a 200ms / 200-token budget. Wiki-first
+for "what is X", vector-first for specific facts, graph-first for
+relational queries, memory-first for "what did we decide", mixed
 falls back to all-surfaces fusion.
+
+Distinct from ``core/retrieval/query_router.py`` which picks
+GraphRAG modes internal to retrieval.
 """
 from __future__ import annotations
 
@@ -72,9 +62,8 @@ _COMPILED_SUMMARY_PATTERNS = [
     re.compile(r"^\s*(what|who)\s+(is|are|was|were)\s+(\S+(?:\s+\S+){0,4})", re.IGNORECASE),
     re.compile(r"^\s*(tell me about|describe|overview of|summarize|summary of)\s+(.+)", re.IGNORECASE),
     re.compile(r"^\s*(give me an? )?(overview|summary)\s+(of|on|about)\s+(.+)", re.IGNORECASE),
-    # Phase K5 — concept/topic queries map to the same intent class.
-    # The wiki MCP tool will fall through to community lookup when the
-    # entity match misses.
+    # Concept/topic queries route here too — the wiki tool falls
+    # through to community lookup on entity miss.
     re.compile(r"^\s*(what|describe).*\b(concept|topic|theme|cluster)\s+(of|about|around)\s+(.+)", re.IGNORECASE),
 ]
 

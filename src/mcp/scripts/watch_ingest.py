@@ -34,7 +34,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 
-MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")
+MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")  # env-capture-allowed: CLI entrypoint script — one-shot process
 
 # Debounce: track recently processed files to avoid duplicate events
 _recent: dict[str, float] = {}

@@ -1,32 +1,13 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Wiki refresh subscriber — Phase K1.3.
+"""Enqueue ``WikiRefreshJob`` for entities surfaced by ingest events.
 
-Listens for ``entities_added`` events from ``EntityExtractionJob`` and
-enqueues ``WikiRefreshJob`` per entity, gated by a per-entity Redis
-debounce so a bulk ingest mentioning the same entity 1000 times
-doesn't enqueue 1000 refreshes.
-
-Closes the wiki orphan loop: before this subscriber existed,
-``WikiRefreshJob`` was defined but never enqueued.
-
-Debounce semantics
-------------------
-* Redis key: ``cerid:wiki:debounce:{slug}``
-* TTL: ``WIKI_REFRESH_DEBOUNCE_TTL`` env var (default 300 s).
-* On enqueue, the key is set with NX so concurrent emitters race
-  exactly one job in.
-* Contradiction-triggered refreshes (the future
-  ``contradiction_detected`` event in Phase K2.3) bypass debounce
-  by calling ``enqueue_refresh(slug, force=True)``.
-
-Failure isolation
------------------
-Subscriber failures are caught by the event_hooks dispatcher; this
-module only needs to handle *Redis* unavailability gracefully — when
-Redis is down, we log + skip the debounce check and enqueue anyway
-(fail-open is better than missing a refresh).
+Per-entity Redis debounce (``cerid:wiki:debounce:{slug}``, TTL via
+``WIKI_REFRESH_DEBOUNCE_TTL``, default 300s) prevents bulk-ingest
+write amplification. ``enqueue_refresh(slug, force=True)`` bypasses
+the debounce for contradiction-triggered refreshes. Fail-open when
+Redis is unavailable — under-refreshing is worse than over-refreshing.
 """
 from __future__ import annotations
 

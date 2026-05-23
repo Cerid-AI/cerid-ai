@@ -34,6 +34,21 @@ _tool_dispatchers: list = []
 _audit_logger = logging.getLogger("ai-companion.mcp_tool_audit")
 
 # ── MCP Tool Definitions ─────────────────────────────────────────────────────
+#
+# Cerid uses a dual-source tool registry by design:
+#   * The static ``MCP_TOOLS`` list below carries 28 legacy entries that
+#     predate the ``@register_tool`` decorator (v0.95 cerid-kb overhaul).
+#   * ``app/mcp_tools/*.py`` modules use ``@register_tool`` from
+#     ``app.tool_registry`` for 32 newer tools (Phase 1.6+).
+#
+# Both sources are composed by :func:`get_all_tools` (below) which
+# returns the union de-duplicated by name. The dispatch in
+# :func:`execute_tool` checks ``TOOL_REGISTRY`` first, then falls
+# through to the legacy ``if/elif`` branches for static entries.
+#
+# Tracked for v1.1 consolidation: promote each MCP_TOOLS entry to a
+# ``@register_tool`` decorator on its handler. Non-blocking for v1.0
+# because the union surface is correct.
 
 MCP_TOOLS = [
     # v0.96.0: pkb_query alias removed. Deprecation maturity ended per

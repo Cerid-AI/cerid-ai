@@ -1,27 +1,11 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j persistence for the knowledge log (Phase K4.1).
+"""Append-only ledger of wiki-refresh activity (the Karpathy log.md).
 
-Append-only ledger of wiki-refresh activity. Mirrors Karpathy's
-``log.md`` from the LLM-Wiki gist — gives the LLM (and the user) a
-chronological view of what the system learned and when, so the wiki
-becomes self-navigable.
-
-Schema:
-
-    (:KnowledgeLog {
-        log_id: str (uuid hex),
-        ts: ISO 8601 timestamp,
-        action: "refresh" | "enrich" | "contradict",
-        entity_slug: str | null,
-        summary: str | null,           # 1-2 sentence change description
-        source_artifact_id: str | null,
-    })
-
-Indexed by ``ts`` for cheap descending pagination.
-
-Callers: ``app.services.knowledge_log`` (service layer) only.
+Schema: ``(:KnowledgeLog {log_id, ts, action, entity_slug, summary,
+source_artifact_id})`` indexed on ``ts`` for descending pagination.
+Action is one of ``"refresh" | "enrich" | "contradict"``.
 """
 from __future__ import annotations
 

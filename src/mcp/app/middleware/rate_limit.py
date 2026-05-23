@@ -26,7 +26,7 @@ from starlette.responses import JSONResponse
 
 # Trusted proxy networks — when direct peer is trusted, use X-Forwarded-For.
 # Comma-separated CIDRs or IPs, e.g. "172.17.0.0/16,10.0.0.1"
-_trusted_raw = os.getenv("TRUSTED_PROXIES", "")
+_trusted_raw = os.getenv("TRUSTED_PROXIES", "")  # env-capture-allowed: rate-limit allowlist — read once at middleware init
 TRUSTED_PROXIES: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 for _cidr in _trusted_raw.split(","):
     _cidr = _cidr.strip()

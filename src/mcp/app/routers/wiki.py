@@ -112,6 +112,51 @@ async def get_entity_wiki_page(slug: str) -> WikiEntityPage:
     return page
 
 
+@router.get(
+    "/concepts/{community_id:path}",
+    summary="Get concept (Leiden community) wiki page (Phase K5)",
+    description=(
+        "Returns a concept page derived from a Leiden community: prose "
+        "summary + member entity list. Accepts both ``concept:{level}:"
+        "{native_id}`` (Karpathy slug form) and bare ``{level}:{native_id}`` "
+        "(matches the legacy ``/communities/{id}`` paths). Returns 404 if "
+        "no community matches."
+    ),
+)
+async def get_concept_wiki_page(community_id: str) -> dict[str, Any]:
+    from app.deps import get_neo4j
+    from app.services.community_pages import get_community_page
+
+    # Strip optional concept: prefix
+    cid = community_id[len("concept:"):] if community_id.startswith("concept:") else community_id
+
+    driver = get_neo4j()
+    if driver is None:
+        raise HTTPException(status_code=503, detail="Neo4j unavailable")
+
+    try:
+        community = await get_community_page(driver, cid)
+    except Exception as exc:
+        log_swallowed_error("wiki.get_concept_wiki_page", exc, context={"community_id": cid})
+        raise HTTPException(status_code=500, detail="Failed to retrieve concept page") from exc
+
+    if community is None:
+        raise HTTPException(status_code=404, detail=f"Concept {cid!r} not found")
+
+    page_dict = community.model_dump() if hasattr(community, "model_dump") else dict(community)
+    return {
+        "slug": f"concept:{page_dict.get('id', cid)}",
+        "name": page_dict.get("title") or f"Concept {cid}",
+        "entity_type": "CONCEPT",
+        "summary": page_dict.get("summary"),
+        "members": page_dict.get("members", []),
+        "member_count": page_dict.get("member_count", 0),
+        "level": page_dict.get("level", 0),
+        "last_updated_at": page_dict.get("summary_generated_at") or page_dict.get("updated_at"),
+        "confidence_band": "unknown",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Phase K4.2 + K4.3 — knowledge log + index
 # ---------------------------------------------------------------------------

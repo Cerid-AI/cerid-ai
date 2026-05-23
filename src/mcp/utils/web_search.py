@@ -58,7 +58,7 @@ def _tavily_api_key() -> str:
     """
     return os.getenv("TAVILY_API_KEY", "")
 
-SEARXNG_URL = os.getenv("SEARXNG_URL", "")
+SEARXNG_URL = os.getenv("SEARXNG_URL", "")  # env-capture-allowed: SearxNG endpoint — startup-only config
 ENABLE_AUTO_LEARN = os.getenv("ENABLE_AUTO_LEARN", "false").lower() == "true"
 WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
 WEB_SEARCH_RATE_LIMIT = int(os.getenv("WEB_SEARCH_RATE_LIMIT", "10"))

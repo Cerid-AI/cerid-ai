@@ -40,7 +40,7 @@ import pytest
 # Only runs when the MCP stack is available.
 pytestmark = pytest.mark.benchmark_slo
 
-MCP_URL = os.getenv("CERID_MCP_URL", "http://localhost:8888")
+MCP_URL = os.getenv("CERID_MCP_URL", "http://localhost:8888")  # env-capture-allowed: benchmark target URL — set once per CI run
 
 
 def _cold_query_payload() -> dict:
@@ -136,13 +136,16 @@ def test_chat_stream_ttft_under_2s(benchmark):
 # Cross-project SLOs (Workstream A — 2026-04-28-cross-project-slo-hardening)
 # ---------------------------------------------------------------------------
 # These budgets gate the trading-agent SDK paths surfaced in the 2026-04-28
-# soak. They are marked ``xfail(strict=True)`` until Phase 1.2 of the
-# workstream lands the latency fixes — Phase 1.1 only adds observability,
-# so the budgets are expected to FAIL on the live stack until the fix
-# (Neo4j index / per-stage timeout) ships. ``strict=True`` flips the
-# semantics so the ``xfail`` itself fails when the budget unexpectedly
-# passes — that's the signal to remove the marker and treat the budget
-# as a hard gate.
+# soak. ``test_memory_extract_under_10s`` has been passing on the live
+# stack since the Phase 1.2 per-stage asyncio.wait_for(8s) budgets landed
+# (see CHANGELOG v0.95.6). ``test_longshot_surface_under_500ms`` is still
+# XFAIL because the Neo4j composite index migration for the longshot
+# Cypher hasn't shipped — tracked for v1.1 polish.
+#
+# ``strict=True`` flips xfail semantics: if the budget unexpectedly
+# starts passing, the marker itself FAILS — the signal to remove it and
+# promote to a hard gate (which is exactly what happened for memory
+# extraction).
 
 _LONGSHOT_BUDGET_S = 0.5  # p50 < 500ms target per workstream §A1
 _MEMORY_EXTRACT_BUDGET_S = 10.0  # p99 < 10s target per workstream §A2
@@ -150,7 +153,7 @@ _MEMORY_EXTRACT_BUDGET_S = 10.0  # p99 < 10s target per workstream §A2
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Workstream A Phase 1.1: budget set; fix in Phase 1.2",
+    reason="Longshot Cypher hits Neo4j without composite index; v1.1 polish",
 )
 @pytest.mark.benchmark(group="longshot_surface", min_rounds=5, disable_gc=True)
 def test_longshot_surface_under_500ms(benchmark):
