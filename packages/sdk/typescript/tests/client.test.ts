@@ -46,6 +46,7 @@ describe("CeridClient construction", () => {
     expect(client.verify).toBeDefined();
     expect(client.memory).toBeDefined();
     expect(client.system).toBeDefined();
+    expect(client.llm).toBeDefined();
   });
 
   it("strips trailing slashes from baseUrl", async () => {
@@ -237,6 +238,91 @@ describe("Memory resource", () => {
     });
     expect(result.memories_extracted).toBe(3);
     expect(result.skipped_duplicates).toBe(1);
+  });
+
+  it("getJob() GETs the job-status endpoint and url-encodes the id", async () => {
+    const body = {
+      job_id: "abc/1",
+      status: "finished",
+      enqueued_at: "2026-04-01T00:00:00Z",
+      started_at: "2026-04-01T00:00:01Z",
+      ended_at: "2026-04-01T00:00:02Z",
+      result: {
+        conversation_id: "conv-2",
+        timestamp: "2026-04-01T00:00:02Z",
+        memories_extracted: 1,
+        memories_stored: 1,
+        skipped_duplicates: 0,
+        results: [],
+      },
+      error: null,
+    };
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse(body));
+    const client = createClient(mockFetch);
+
+    const status = await client.memory.getJob("abc/1");
+    expect(status.status).toBe("finished");
+    expect(status.result?.memories_stored).toBe(1);
+    // Verify URL encoding applied to the path segment
+    const url = (mockFetch.mock.calls[0] as [string, RequestInit])[0];
+    expect(url).toContain("/sdk/v1/memory/extract/jobs/abc%2F1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LLM resource
+// ---------------------------------------------------------------------------
+
+describe("LLM resource", () => {
+  it("complete() POSTs to /sdk/v1/llm/complete with messages", async () => {
+    const body = {
+      content: "Yes.",
+      model: "openai/gpt-4o-mini",
+      provider: "openrouter_paid",
+      reason: "task_type=internal",
+      estimated_cost_per_1k: 0.00015,
+      tier_p95_ms: 1200,
+    };
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse(body));
+    const client = createClient(mockFetch);
+
+    const result = await client.llm.complete({
+      messages: [{ role: "user", content: "Is the sky blue?" }],
+      task_type: "internal",
+      slo_budget_ms: 5000,
+    });
+    expect(result.content).toBe("Yes.");
+    expect(result.tier_p95_ms).toBe(1200);
+
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:8888/sdk/v1/llm/complete");
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      messages: [{ role: "user", content: "Is the sky blue?" }],
+      slo_budget_ms: 5000,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// External ingest
+// ---------------------------------------------------------------------------
+
+describe("KB ingestExternal", () => {
+  it("POSTs adapter-shaped payloads to /sdk/v1/ingest/external", async () => {
+    const body = { accepted: 2, skipped: 0, errors: [], source_type: "readwise" };
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse(body));
+    const client = createClient(mockFetch);
+
+    const result = await client.kb.ingestExternal({
+      source_type: "readwise",
+      payload: { highlights: [{ text: "h1" }, { text: "h2" }] },
+      field_mappings: { content: "highlights[].text" },
+    });
+    expect(result.accepted).toBe(2);
+    expect(result.source_type).toBe("readwise");
+
+    const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:8888/sdk/v1/ingest/external");
   });
 });
 

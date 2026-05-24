@@ -16,6 +16,24 @@ Usage::
 ``tasks/<monday>-k-program-metrics.md``. Reads from Neo4j
 ($NEO4J_*) and Redis ($REDIS_URL); silently emits ``available:
 false`` when env unset.
+
+Two run contexts:
+
+* **Inside docker** (`docker exec ai-companion-mcp python
+  scripts/k_program_metrics.py --cron`) — env vars are seeded by
+  ``compose`` so hostnames like ``ai-companion-neo4j`` resolve via
+  the bridge network.
+* **From the host** — the script auto-loads repo-root ``.env`` so
+  ``NEO4J_PASSWORD`` etc. are picked up. Override the docker-network
+  hostnames to ``localhost`` (preserve auth in the Redis URL)::
+
+      NEO4J_URI=bolt://localhost:7687 \
+      REDIS_URL="redis://:${REDIS_PASSWORD}@localhost:6379/0" \
+        .venv/bin/python scripts/k_program_metrics.py --cron
+
+Recommended schedule for the S4 soak: a daily cron at midnight UTC
+during the 14-day window, writing into a single Monday-rooted
+weekly file under ``tasks/``.
 """
 from __future__ import annotations
 
@@ -32,8 +50,44 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src" / "mcp"))
 
 
+def _load_dotenv_into_environ() -> None:
+    """Best-effort load of repo-root .env so the operator can run this
+    script outside Docker without exporting credentials by hand. Lines
+    already in os.environ win (Docker / CI context). Quoted values are
+    stripped. Lines starting with '#' or blank are skipped.
+
+    Silent on missing file — the metrics functions already report
+    available: false when credentials aren't reachable.
+    """
+    env_path = _REPO_ROOT / ".env"
+    if not env_path.exists():
+        return
+    try:
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key in os.environ:  # caller-set env wins
+                continue
+            value = value.strip().strip('"').strip("'")
+            os.environ[key] = value
+    except OSError:
+        return
+
+
+_load_dotenv_into_environ()
+
+
 def _get_neo4j():
-    """Get a Neo4j driver. Returns None when env not configured."""
+    """Get a Neo4j driver. Returns None when env not configured.
+
+    Notification filters silence the property-key-does-not-exist warnings
+    the driver emits when a fresh corpus hasn't materialized fields like
+    ``summary_updated_at`` yet — those are diagnosis, not failure modes,
+    and they would otherwise pollute the JSON payload on stdout.
+    """
     try:
         from neo4j import GraphDatabase
 
@@ -42,8 +96,12 @@ def _get_neo4j():
         password = os.environ.get("NEO4J_PASSWORD")
         if not password:
             return None
-        return GraphDatabase.driver(uri, auth=(user, password))
-    except Exception:
+        return GraphDatabase.driver(
+            uri,
+            auth=(user, password),
+            notifications_disabled_classifications=["UNRECOGNIZED"],
+        )
+    except Exception:  # noqa: BLE001 — driver-side error surfaces in JSON "error" field
         return None
 
 
@@ -54,7 +112,7 @@ def _get_redis():
 
         url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         return redis.from_url(url)
-    except Exception:
+    except Exception:  # noqa: BLE001 — driver-side error surfaces in JSON "error" field
         return None
 
 
@@ -88,7 +146,7 @@ def metric_wiki_coverage(driver) -> dict[str, Any]:
             "numerator": with_summary,
             "meets_target": (with_summary / active >= 0.80) if active else False,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
 
 
@@ -136,7 +194,7 @@ def metric_wiki_staleness(driver) -> dict[str, Any]:
             "denominator": len(ages_hours),
             "meets_target": p95 <= 168,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
 
 
@@ -174,7 +232,7 @@ def metric_faithfulness(redis_client) -> dict[str, Any]:
             "denominator": n,
             "meets_target": float(faithfulness or 0) >= 0.92,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
 
 
@@ -215,7 +273,7 @@ def metric_chunks_per_answer(redis_client) -> dict[str, Any]:
             "baseline_median": round(baseline, 2),
             "meets_target": reduction >= 30.0,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
 
 
@@ -250,7 +308,7 @@ def metric_memory_entity_linkage(driver) -> dict[str, Any]:
             "numerator": linked,
             "meets_target": (linked / total >= 0.70) if total else False,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
 
 
@@ -307,7 +365,7 @@ def metric_contradiction_surfacing(driver) -> dict[str, Any]:
             "meets_target": p95 <= 24,
             "note": "approximation via summary_updated_at; exact UI-view metric requires telemetry wiring",
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
 
 
@@ -363,15 +421,22 @@ def append_to_weekly_log(snapshot: dict[str, Any]) -> Path:
             f.write("Generated by `scripts/k_program_metrics.py --cron` during the S5 14-day soak.\n\n")
             f.write("| Captured at | Coverage % | Staleness p95 h | Faithfulness | Chunks reduction % | Memory linkage % | Contradiction p95 h | Targets met |\n")
             f.write("|---|---|---|---|---|---|---|---|\n")
+        def _fmt(value: Any) -> str:
+            """Render a metric value for the markdown table — em-dash for
+            unavailable or pre-data states so rows scan cleanly."""
+            if value is None:
+                return "—"
+            return str(value)
+
         m = snapshot["metrics"]
         row = (
             f"| {snapshot['captured_at']} "
-            f"| {m['wiki_coverage'].get('actual_pct', '—')} "
-            f"| {m['wiki_staleness'].get('actual_hours', '—')} "
-            f"| {m['faithfulness_compiled'].get('actual', '—')} "
-            f"| {m['chunks_per_answer_reduction'].get('actual_reduction_pct', '—')} "
-            f"| {m['memory_entity_linkage'].get('actual_pct', '—')} "
-            f"| {m['contradiction_surfacing'].get('actual_hours', '—')} "
+            f"| {_fmt(m['wiki_coverage'].get('actual_pct'))} "
+            f"| {_fmt(m['wiki_staleness'].get('actual_hours'))} "
+            f"| {_fmt(m['faithfulness_compiled'].get('actual'))} "
+            f"| {_fmt(m['chunks_per_answer_reduction'].get('actual_reduction_pct'))} "
+            f"| {_fmt(m['memory_entity_linkage'].get('actual_pct'))} "
+            f"| {_fmt(m['contradiction_surfacing'].get('actual_hours'))} "
             f"| {snapshot.get('targets_met', 0)}/{snapshot.get('targets_evaluated', 0)} |\n"
         )
         f.write(row)

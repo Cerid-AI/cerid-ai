@@ -1,14 +1,17 @@
 # Cerid AI SDK Guide
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
-survives internal refactoring of core paths. Current version: **1.1.0**.
+survives internal refactoring of core paths. Current wire-protocol version:
+**1.1.0**. Client packages: `cerid-sdk` (Python) **0.2.0**, `@cerid-ai/sdk`
+(TypeScript) **0.2.0** — both updated 2026-05-24 to expose all 15 endpoints.
 
 ## Overview
 
-The SDK exposes 12 endpoints covering knowledge base operations, health
-monitoring, content ingestion, taxonomy, search, plugin discovery, and
-server configuration. All endpoints return typed JSON responses defined
-by Pydantic models in `models/sdk.py`.
+The SDK exposes 15 endpoints covering knowledge-base operations, health
+monitoring, content ingestion (text / file / adapter-shaped), taxonomy,
+search, plugin discovery, smart-routed LLM completion, async memory
+extraction with job polling, and server configuration. All endpoints
+return typed JSON responses defined by Pydantic models in `models/sdk.py`.
 
 ## Authentication
 
@@ -110,15 +113,18 @@ console.log(resp.artifactId, resp.chunks);
 | 1 | POST | `/sdk/v1/query` | Multi-domain KB search with hybrid BM25+vector retrieval |
 | 2 | POST | `/sdk/v1/hallucination` | Verify factual claims against the KB |
 | 3 | POST | `/sdk/v1/memory/extract` | Extract facts from conversation text and store as artifacts |
-| 4 | GET | `/sdk/v1/health` | Service connectivity, version, and feature flags |
-| 5 | POST | `/sdk/v1/ingest` | Ingest raw text content into the KB |
-| 6 | POST | `/sdk/v1/ingest/file` | Ingest a file (PDF, DOCX, code, 30+ formats) |
-| 7 | GET | `/sdk/v1/collections` | List all KB collections (one per domain) |
-| 8 | GET | `/sdk/v1/taxonomy` | Domain taxonomy tree with sub-categories and tags |
-| 9 | GET | `/sdk/v1/health/detailed` | Extended health with circuit breakers and degradation tier |
-| 10 | GET | `/sdk/v1/settings` | Read-only server config: version, tier, feature flags |
-| 11 | POST | `/sdk/v1/search` | Direct vector search without agent orchestration |
-| 12 | GET | `/sdk/v1/plugins` | List loaded plugins with status and tier |
+| 4 | GET | `/sdk/v1/memory/extract/jobs/{job_id}` | Poll an async memory_extract job (when `MEMORY_QUEUE_MODE=async`) |
+| 5 | POST | `/sdk/v1/llm/complete` | Smart-routed LLM completion across FREE / CHEAP / CAPABLE / RESEARCH / EXPERT tiers |
+| 6 | GET | `/sdk/v1/health` | Service connectivity, version, and feature flags |
+| 7 | POST | `/sdk/v1/ingest` | Ingest raw text content into the KB |
+| 8 | POST | `/sdk/v1/ingest/file` | Ingest a file (PDF, DOCX, code, 30+ formats) |
+| 9 | POST | `/sdk/v1/ingest/external` | Adapter-shaped ingest for external services (Readwise / Pocket / Telegram-bot / Raindrop / Instapaper, with arbitrary `field_mappings` config) |
+| 10 | GET | `/sdk/v1/collections` | List all KB collections (one per domain) |
+| 11 | GET | `/sdk/v1/taxonomy` | Domain taxonomy tree with sub-categories and tags |
+| 12 | GET | `/sdk/v1/health/detailed` | Extended health with circuit breakers and degradation tier |
+| 13 | GET | `/sdk/v1/settings` | Read-only server config: version, tier, feature flags |
+| 14 | POST | `/sdk/v1/search` | Direct vector search without agent orchestration |
+| 15 | GET | `/sdk/v1/plugins` | List loaded plugins with status and tier |
 
 ### Request/Response Examples
 

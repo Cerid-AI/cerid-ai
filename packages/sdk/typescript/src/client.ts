@@ -7,18 +7,21 @@
  * Uses native fetch() and groups endpoints into resource objects that
  * mirror the server-side SDK router structure:
  *
- *   client.kb.query()        — POST /sdk/v1/query
- *   client.kb.search()       — POST /sdk/v1/search
- *   client.kb.ingest()       — POST /sdk/v1/ingest
- *   client.kb.ingestFile()   — POST /sdk/v1/ingest/file
- *   client.kb.collections()  — GET  /sdk/v1/collections
- *   client.kb.taxonomy()     — GET  /sdk/v1/taxonomy
- *   client.verify.check()    — POST /sdk/v1/hallucination
- *   client.memory.extract()  — POST /sdk/v1/memory/extract
- *   client.system.health()   — GET  /sdk/v1/health
+ *   client.kb.query()           — POST /sdk/v1/query
+ *   client.kb.search()          — POST /sdk/v1/search
+ *   client.kb.ingest()          — POST /sdk/v1/ingest
+ *   client.kb.ingestFile()      — POST /sdk/v1/ingest/file
+ *   client.kb.ingestExternal()  — POST /sdk/v1/ingest/external
+ *   client.kb.collections()     — GET  /sdk/v1/collections
+ *   client.kb.taxonomy()        — GET  /sdk/v1/taxonomy
+ *   client.verify.check()       — POST /sdk/v1/hallucination
+ *   client.memory.extract()     — POST /sdk/v1/memory/extract
+ *   client.memory.getJob()      — GET  /sdk/v1/memory/extract/jobs/{job_id}
+ *   client.llm.complete()       — POST /sdk/v1/llm/complete
+ *   client.system.health()      — GET  /sdk/v1/health
  *   client.system.healthDetailed() — GET /sdk/v1/health/detailed
- *   client.system.settings() — GET  /sdk/v1/settings
- *   client.system.plugins()  — GET  /sdk/v1/plugins
+ *   client.system.settings()    — GET  /sdk/v1/settings
+ *   client.system.plugins()     — GET  /sdk/v1/plugins
  */
 
 import { raiseForStatus } from "./errors.js";
@@ -29,9 +32,14 @@ import type {
   HallucinationCheckRequest,
   HallucinationResponse,
   HealthResponse,
+  IngestExternalRequest,
+  IngestExternalResponse,
   IngestFileRequest,
   IngestRequest,
   IngestResponse,
+  LLMCompleteRequest,
+  LLMCompleteResponse,
+  MemoryExtractJobStatus,
   MemoryExtractRequest,
   MemoryExtractResponse,
   PluginListResponse,
@@ -99,6 +107,16 @@ export class KBResource extends BaseResource {
     return this._post<IngestResponse>("/sdk/v1/ingest/file", params);
   }
 
+  /**
+   * Adapter-shaped ingest for external services (Readwise, Pocket,
+   * Telegram-bot, …). The caller supplies a `field_mappings` config that
+   * declares how to extract canonical fields from the raw `payload`.
+   * See `docs/INTEGRATION_GUIDE.md` for per-service mapping examples.
+   */
+  async ingestExternal(params: IngestExternalRequest): Promise<IngestExternalResponse> {
+    return this._post<IngestExternalResponse>("/sdk/v1/ingest/external", params);
+  }
+
   /** List all knowledge base collections. */
   async collections(): Promise<CollectionsResponse> {
     return this._get<CollectionsResponse>("/sdk/v1/collections");
@@ -121,6 +139,30 @@ export class MemoryResource extends BaseResource {
   /** Extract memories from conversation text and store as KB artifacts. */
   async extract(params: MemoryExtractRequest): Promise<MemoryExtractResponse> {
     return this._post<MemoryExtractResponse>("/sdk/v1/memory/extract", params);
+  }
+
+  /**
+   * Poll an async memory_extract job by `job_id`. When the server is in
+   * `MEMORY_QUEUE_MODE=async`, `extract()` may return a 202 Accepted
+   * envelope with a `job_id`; use this method to poll for completion.
+   * Status transitions: queued → started → finished | failed.
+   */
+  async getJob(jobId: string): Promise<MemoryExtractJobStatus> {
+    return this._get<MemoryExtractJobStatus>(`/sdk/v1/memory/extract/jobs/${encodeURIComponent(jobId)}`);
+  }
+}
+
+export class LLMResource extends BaseResource {
+  /**
+   * Smart-routed LLM completion. The server's `smart_router` selects a
+   * model tier (FREE / CHEAP / CAPABLE / RESEARCH / EXPERT) based on
+   * `task_type`, `query` complexity, and `cost_sensitivity`. When
+   * `slo_budget_ms` is set, tiers whose empirical p95 exceeds the budget
+   * are filtered out — if none fits, the response is HTTP 503 with a
+   * `Retry-After` header carrying the floor p95.
+   */
+  async complete(params: LLMCompleteRequest): Promise<LLMCompleteResponse> {
+    return this._post<LLMCompleteResponse>("/sdk/v1/llm/complete", params);
   }
 }
 
@@ -155,6 +197,7 @@ export class CeridClient {
   public readonly verify: VerifyResource;
   public readonly memory: MemoryResource;
   public readonly system: SystemResource;
+  public readonly llm: LLMResource;
 
   constructor(options: CeridClientOptions) {
     const baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -171,5 +214,6 @@ export class CeridClient {
     this.verify = new VerifyResource(baseUrl, headers, fetchFn);
     this.memory = new MemoryResource(baseUrl, headers, fetchFn);
     this.system = new SystemResource(baseUrl, headers, fetchFn);
+    this.llm = new LLMResource(baseUrl, headers, fetchFn);
   }
 }

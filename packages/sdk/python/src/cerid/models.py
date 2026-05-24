@@ -129,3 +129,62 @@ class PluginListResponse(_SDKBase):
 
     plugins: List[Dict[str, Any]] = Field(default_factory=list)
     total: int = Field(default=0)
+
+
+# ---------------------------------------------------------------------------
+# Async memory extract — 202 Accepted envelope + poll envelope
+# ---------------------------------------------------------------------------
+
+
+class MemoryExtractAcceptedResponse(_SDKBase):
+    """Returned from ``POST /sdk/v1/memory/extract`` when the request was
+    enqueued for background processing (``MEMORY_QUEUE_MODE=async``)."""
+
+    job_id: str = Field(default="")
+    status: str = Field(default="queued")
+    status_url: str = Field(default="")
+    conversation_id: str = Field(default="")
+
+
+class MemoryExtractJobStatus(_SDKBase):
+    """Response from ``GET /sdk/v1/memory/extract/jobs/{job_id}``.
+
+    Status transitions: queued → started → finished | failed."""
+
+    job_id: str = Field(default="")
+    status: str = Field(default="unknown")
+    enqueued_at: Optional[str] = Field(default=None)
+    started_at: Optional[str] = Field(default=None)
+    ended_at: Optional[str] = Field(default=None)
+    result: Optional[MemoryExtractResponse] = Field(default=None)
+    error: Optional[str] = Field(default=None)
+
+
+# ---------------------------------------------------------------------------
+# Smart-routed LLM completion
+# ---------------------------------------------------------------------------
+
+
+class LLMCompleteResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/llm/complete``."""
+
+    content: str = Field(default="")
+    model: str = Field(default="")
+    provider: str = Field(default="")
+    reason: str = Field(default="")
+    estimated_cost_per_1k: float = Field(default=0.0)
+    tier_p95_ms: int = Field(default=0)
+
+
+# ---------------------------------------------------------------------------
+# Generic external ingest — adapter-shaped payloads
+# ---------------------------------------------------------------------------
+
+
+class IngestExternalResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/ingest/external`` — adapter-shaped ingest."""
+
+    accepted: int = Field(default=0)
+    skipped: int = Field(default=0)
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    source_type: str = Field(default="unknown")
