@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 334
+**Total routes:** 335
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -250,6 +250,7 @@ not documented here; see the internal repo for the full registry.
 | POST | `/ingest` | `sdk_ingest` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/ingest/external` | `sdk_ingest_external` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/ingest/file` | `sdk_ingest_file` | `src/mcp/app/routers/sdk.py` | SDK |  |
+| POST | `/ingest/voice-note` | `sdk_ingest_voice_note` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/ingest/webhook/{token}` | `sdk_ingest_webhook` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/llm/complete` | `sdk_llm_complete` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/memory/extract` | `sdk_memory_extract` | `src/mcp/app/routers/sdk.py` | SDK |  |
