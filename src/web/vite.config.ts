@@ -39,6 +39,29 @@ export default defineConfig({
           if (id.includes("@react-three/fiber") || id.includes("@react-three/drei")) return "vendor-r3f"
           if (id.includes("node_modules/three") || id.includes("/three/three.")) return "vendor-three"
           if (id.includes("/gsap/")) return "vendor-gsap"
+          // 2026-05-24 (rc1 beta finding F6) — peel Atlas dependencies out
+          // of the main bundle. sigma.js + graphology + umap together
+          // account for ~157KB minified. The Atlas pane is one of four;
+          // users who never open it shouldn't pay for the load on first
+          // paint.
+          if (id.includes("node_modules/sigma") || id.includes("node_modules/graphology")) {
+            return "vendor-atlas"
+          }
+          if (id.includes("node_modules/umap-js")) return "vendor-atlas"
+          // Radix UI primitives — large ecosystem (~80-100KB across
+          // dialog/dropdown/popover/select/tooltip etc.). Peeling them
+          // into their own chunk drops main bundle below the 800KB CI
+          // cap with comfortable headroom.
+          if (id.includes("node_modules/@radix-ui/")) return "vendor-radix"
+          // React + ReactDOM — stable foundation deps; cache headers can
+          // long-pin this chunk across releases that change app code only.
+          if (
+            id.includes("node_modules/react/") ||
+            id.includes("node_modules/react-dom/") ||
+            id.includes("node_modules/scheduler/")
+          ) {
+            return "vendor-react"
+          }
         },
       },
     },

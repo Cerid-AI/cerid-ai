@@ -620,6 +620,13 @@ SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
 SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
+# Phase S4 of the unified GA program — K-program metrics snapshot.
+# Default midnight UTC. Empty string disables (operator may prefer a
+# host-side cron / launchd plist over the in-process scheduler).
+# Six metrics emitted: wiki coverage, p95 staleness, faithfulness,
+# chunks-per-answer, memory→entity linkage, contradiction p95 — each
+# appended to tasks/<monday>-k-program-metrics.md via --cron.
+SCHEDULE_K_PROGRAM_METRICS = os.getenv("SCHEDULE_K_PROGRAM_METRICS", "0 0 * * *")
 
 # ---------------------------------------------------------------------------
 # Folder Scanning

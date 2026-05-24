@@ -36,7 +36,23 @@ ENABLED_PLUGINS = [p.strip() for p in _enabled_plugins_raw.split(",") if p.strip
 # ---------------------------------------------------------------------------
 # Multi-User Auth
 # ---------------------------------------------------------------------------
+# Multi-user mode is gated through v1.0 by the EXPERIMENTAL escape hatch.
+# Two known security gaps must close before this is supported in GA deploys
+# (per the 2026-05-24 rc1 beta-test report, findings F2 + F3):
+#   * F2 — access + refresh tokens stored in localStorage; an XSS leaks
+#     every multi-tenant session. Migrate to httpOnly + same-site=strict.
+#   * F3 — get_artifact() Cypher in app/db/neo4j/artifacts.py lacks a
+#     tenant_id filter; an authenticated user A can fetch user B's
+#     artifacts by guessing UUIDs. Audit every Neo4j read for missing
+#     tenant_id parameter and add an import-linter rule that bans
+#     reads without one.
+# Until both ship, CERID_MULTI_USER=true must be paired with
+# CERID_MULTI_USER_EXPERIMENTAL=true so operators see the explicit
+# "this is unsupported" gate. Single-user mode (default) is unaffected.
 CERID_MULTI_USER = os.getenv("CERID_MULTI_USER", "false").lower() == "true"
+CERID_MULTI_USER_EXPERIMENTAL = (
+    os.getenv("CERID_MULTI_USER_EXPERIMENTAL", "false").lower() == "true"
+)
 CERID_JWT_SECRET = os.getenv("CERID_JWT_SECRET", "")
 CERID_JWT_ACCESS_TTL = int(os.getenv("CERID_JWT_ACCESS_TTL", "900"))   # 15 min
 CERID_JWT_REFRESH_TTL = int(os.getenv("CERID_JWT_REFRESH_TTL", "604800"))  # 7 days

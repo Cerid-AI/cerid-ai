@@ -471,6 +471,26 @@ async def lifespan(app: FastAPI):
     try:
         import config as _cfg
         if _cfg.CERID_MULTI_USER:
+            # Experimental gate: F2 (localStorage tokens) + F3 (missing
+            # tenant filter on get_artifact Cypher) must close before
+            # multi-user is a supported deploy mode. Operators acknowledging
+            # the risk set CERID_MULTI_USER_EXPERIMENTAL=true.
+            if not _cfg.CERID_MULTI_USER_EXPERIMENTAL:
+                raise RuntimeError(
+                    "CERID_MULTI_USER=true is gated as EXPERIMENTAL through "
+                    "v1.0 GA. Two known security gaps (F2 localStorage "
+                    "tokens, F3 missing tenant_id filter on Neo4j artifact "
+                    "reads — see tasks/2026-05-24-rc1-beta-test-report.md) "
+                    "must close first. To proceed at your own risk in a "
+                    "non-production environment, set "
+                    "CERID_MULTI_USER_EXPERIMENTAL=true alongside "
+                    "CERID_MULTI_USER=true."
+                )
+            logger.warning(
+                "Multi-user mode is EXPERIMENTAL in this release — "
+                "F2 + F3 security gaps remain open. See "
+                "tasks/2026-05-24-rc1-beta-test-report.md."
+            )
             from app.db.neo4j.users import ensure_default_tenant
             ensure_default_tenant(driver, _cfg.DEFAULT_TENANT_ID)
             logger.info("Multi-user mode enabled — default tenant ensured")
