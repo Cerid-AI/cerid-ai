@@ -2,8 +2,10 @@
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
 survives internal refactoring of core paths. Current wire-protocol version:
-**1.1.0**. Client packages: `cerid-sdk` (Python) **0.2.0**, `@cerid-ai/sdk`
-(TypeScript) **0.2.0** — both updated 2026-05-24 to expose all 15 endpoints.
+**1.1.0**. Client packages: `cerid-sdk` (Python) **0.1.1**, `@cerid-ai/sdk`
+(TypeScript) **0.1.1** — both updated 2026-05-24 to expose all 15 endpoints.
+Both client packages stay pre-1.0 through the v1.0 RC cycle; they flip to
+1.0.0 when the main product flips to GA (per `docs/SDK_PUBLISHING.md`).
 
 ## Overview
 
