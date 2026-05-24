@@ -18,6 +18,7 @@ import { KnowledgeStatsHero } from "./knowledge-stats-hero"
 import { SourcesHotkeyHelp } from "./sources-hotkey-help"
 import { AddSourceFab, type SourceFamily } from "./add-source-fab"
 import { SourceAddWizard } from "./source-add-wizard"
+import { VoiceNoteOverlayHotkeyHost } from "./voice-note-overlay"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const SourcesConnectors = lazy(() =>
@@ -217,6 +218,10 @@ export default function SourcesPane() {
       {/* F10 — hotkey help overlay. Press ? anywhere in the Sources
           pane to surface it. */}
       <SourcesHotkeyHelp />
+
+      {/* F11 — voice-note overlay. ⌘⇧V opens it from anywhere in
+          the Sources pane. Liquid Glass surface. */}
+      <VoiceNoteOverlayHotkeyHost />
     </div>
   )
 }

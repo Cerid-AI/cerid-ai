@@ -14,6 +14,8 @@ adding new cerid-series consumers.
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request
 
 import config
@@ -434,10 +436,11 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
 
     source_id = source["id"]
 
-    # Phase 2A ships the synchronous-accept-then-queue shell. The
-    # adapter-library routing per field_mappings on the source's
-    # config lands in Phase 2B; for now we mark the source as touched
-    # and enqueue the payload.
+    # Phase 2C — adapter-recipe routing. If the source declares a
+    # provider (e.g., kind=chat_capture + provider=slack), look up
+    # the matching recipe and normalize the payload into one or more
+    # CanonicalArtifact records before enqueue. Falls back to raw
+    # payload pass-through when no recipe is registered.
     try:
         srcdb.update_source_status(driver, source_id, status="connected")
     except Exception as exc:  # noqa: BLE001 — observability boundary
@@ -446,6 +449,35 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
             exc,
             context={"source_id": source_id},
         )
+
+    provider = (config.get("provider") or "").strip() if isinstance(config, dict) else ""
+    normalized: list[dict] | None = None
+    if provider:
+        try:
+            # Side-effect-imports the adapter package (registers recipes).
+            import core.ingest.adapters as _adapters  # noqa: F401
+            from core.ingest.adapters.registry import get_recipe
+
+            recipe = get_recipe(source["kind"], provider)
+            if recipe is not None:
+                artifacts = recipe.fn(payload, config or {})
+                normalized = [
+                    {
+                        "title": a.title,
+                        "content": a.content,
+                        "url": a.url,
+                        "timestamp": a.timestamp,
+                        "provider": a.provider,
+                        "raw": a.raw,
+                    }
+                    for a in artifacts
+                ]
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "sdk_ingest_webhook.recipe",
+                exc,
+                context={"source_id": source_id, "provider": provider},
+            )
 
     try:
         redis_client = get_redis()
@@ -456,6 +488,7 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
                     {
                         "received_at": request.headers.get("date", ""),
                         "payload": payload,
+                        "normalized": normalized,
                     },
                 ),
             )
@@ -466,7 +499,125 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
             context={"source_id": source_id},
         )
 
-    return {"status": "accepted", "source_id": source_id}
+    return {
+        "status": "accepted",
+        "source_id": source_id,
+        "normalized_count": str(len(normalized)) if normalized is not None else "0",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Voice-note ingest — Phase 2C (B2.6)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/ingest/voice-note",
+    summary="Voice-note transcribe + ingest",
+    description=(
+        "Accepts a short audio clip (WAV / WebM / M4A — anything ffmpeg can "
+        "decode), transcribes it with the bundled whisper.cpp pipeline, and "
+        "ingests the transcript as an artifact linked to a voice_note Source.\n\n"
+        "Recommended clip length: 30 s – 5 min. Larger clips should route "
+        "through the Meeting Capture pipeline (``/meetings``) instead."
+    ),
+    responses={
+        422: {"description": "Invalid audio payload"},
+        500: {"description": "Transcription pipeline failure"},
+        501: {"description": "Whisper runtime deps not installed"},
+    },
+    status_code=201,
+)
+async def sdk_ingest_voice_note(request: Request) -> dict:
+    """Multipart upload → transcript → artifact.
+
+    The endpoint is *synchronous*: the wizard waits for the transcript
+    so it can pulse the duration and surface a snippet in the F11
+    overlay's result step. Long-running transcription (>10s) is the
+    caller's signal to switch to the Meeting Capture pipeline.
+    """
+    import tempfile
+    import time as _time
+    from pathlib import Path as _Path
+
+    # Multipart parse — FastAPI's File()/Form() dependency injection
+    # works but Request.form() is simpler when we only need one field.
+    form = await request.form()
+    audio = form.get("audio")
+    if audio is None or not hasattr(audio, "read"):
+        raise HTTPException(status_code=422, detail="missing 'audio' multipart field")
+
+    suffix = _Path(getattr(audio, "filename", "voice.wav")).suffix or ".wav"
+    started = _time.perf_counter()
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await audio.read())
+        tmp_path = _Path(tmp.name)
+
+    try:
+        # Reuse the meeting_capture transcription path — whisper.cpp via
+        # pywhispercpp. The plugin is internal-only; community builds
+        # receive 501 with installation guidance.
+        try:
+            from plugins.meeting_capture import decode, transcribe
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    f"voice-note transcription unavailable: {exc}. "
+                    "Install meeting_capture plugin deps (pywhispercpp + ffmpeg)."
+                ),
+            ) from exc
+
+        try:
+            pcm_path = await asyncio.to_thread(decode.to_pcm16, tmp_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"audio decode failed: {exc}",
+            ) from exc
+
+        try:
+            transcript_result = await asyncio.to_thread(transcribe.transcribe_pcm, pcm_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"transcription failed: {exc}",
+            ) from exc
+
+        text = (transcript_result.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="transcript was empty")
+
+        # Ingest as a fresh artifact in the general domain. Metadata
+        # carries the voice_note marker so retrieval can filter on it.
+        from app.services.ingestion import ingest_content as _ingest_content
+
+        ingest_result = await asyncio.to_thread(
+            _ingest_content,
+            text,
+            "general",
+            {
+                "kind": "voice_note",
+                "ingest_source": "voice_note_endpoint",
+                "duration_words": len(text.split()),
+            },
+            skip_quality=False,
+        )
+
+        elapsed_ms = int((_time.perf_counter() - started) * 1000)
+        return {
+            "status": "ingested",
+            "artifact_id": ingest_result.get("artifact_id"),
+            "transcript": text,
+            "transcribe_ms": elapsed_ms,
+            "word_count": len(text.split()),
+        }
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------

@@ -9,11 +9,15 @@ exactly once via ``app.main``.
 """
 from __future__ import annotations
 
+from core.ingest.sources.connectors import bookmarks as _bookmarks
+from core.ingest.sources.connectors import clipboard as _clipboard
 from core.ingest.sources.connectors import rss as _rss
 from core.ingest.sources.connectors import url_watch as _url_watch
 from core.ingest.sources.registry import register_connector
 
 register_connector(_rss.RssConnector())
 register_connector(_url_watch.UrlWatchConnector())
+register_connector(_bookmarks.BookmarksConnector())
+register_connector(_clipboard.ClipboardConnector())
 
-__all__ = ["_rss", "_url_watch"]
+__all__ = ["_bookmarks", "_clipboard", "_rss", "_url_watch"]

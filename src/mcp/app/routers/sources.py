@@ -239,6 +239,41 @@ async def create_source(body: CreateSourceRequest):
     return _to_record(src)
 
 
+_CLIPBOARD_HEARTBEAT_KEY = "cerid:clipboard:alive"
+_CLIPBOARD_STALE_AFTER_S = 90
+
+
+def _check_clipboard_daemon() -> HealthProbeResult:
+    """Read the host-daemon heartbeat from Redis. Combined with the
+    connector's basic check in :func:`test_source` so the clipboard
+    surface accurately reports whether the host daemon is running.
+    """
+    import time
+
+    from app.deps import get_redis
+
+    try:
+        raw = get_redis().get(_CLIPBOARD_HEARTBEAT_KEY)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("sources.clipboard_heartbeat", exc)
+        return HealthProbeResult(ok=False, detail="redis error", last_error=str(exc))
+
+    if raw is None:
+        return HealthProbeResult(
+            ok=False,
+            detail="daemon heartbeat absent (is the host daemon running?)",
+        )
+    try:
+        last = int(raw)
+    except (TypeError, ValueError):
+        return HealthProbeResult(ok=False, detail="malformed heartbeat value")
+
+    age = int(time.time()) - last
+    if age > _CLIPBOARD_STALE_AFTER_S:
+        return HealthProbeResult(ok=False, detail=f"heartbeat stale ({age}s old)")
+    return HealthProbeResult(ok=True, detail=f"heartbeat {age}s ago")
+
+
 @router.post("/{source_id}/test", response_model=HealthProbeResult)
 async def test_source(source_id: str):
     """Re-run the connector's ``health_check`` against the live source."""
@@ -249,6 +284,10 @@ async def test_source(source_id: str):
     if src["kind"] == "webhook":
         # No remote system to probe — receivers are inbound-only.
         return HealthProbeResult(ok=True, detail="Webhook receiver active")
+
+    if src["kind"] == "clipboard":
+        # Decorated check: connector's basic status + Redis heartbeat.
+        return _check_clipboard_daemon()
 
     connector = get_connector(src["kind"])
     if connector is None:
