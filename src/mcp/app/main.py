@@ -68,6 +68,7 @@ from app.routers import (
     settings,
     settings_secrets,
     setup,
+    sources,
     sync,
     taxonomy,
     upload,
@@ -965,6 +966,13 @@ app.include_router(meetings.router)
 
 # Cloud connector OAuth + status surface (Phase F.2 cleanup).
 app.include_router(connectors.router)
+
+# Source-management surface backing the F1/F2/F3 wizard flow.
+# Side-effect-imports the connector package so register_connector
+# calls run at process boot (rss + url_watch as of Phase 2B).
+import core.ingest.sources.connectors  # noqa: F401, E402
+
+app.include_router(sources.router)
 
 # Custom Smart RAG weights surface (Phase I).
 app.include_router(rag_weights.router)

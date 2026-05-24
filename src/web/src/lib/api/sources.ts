@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Sources REST client — backs the F1 gallery, F2 FAB, F3 wizard, and
+ * the source-detail pane (Phase 3). Mirrors the Pydantic schemas in
+ * src/mcp/app/routers/sources.py.
+ */
+
+const API_BASE = ""
+
+export interface SourceKindMeta {
+  kind: string
+  family: string
+  tier: "core" | "pro"
+}
+
+export interface SourceRecord {
+  id: string
+  kind: string
+  family: string
+  display_name: string
+  tier: string
+  status: string
+  config: Record<string, unknown>
+  sync_cursor: Record<string, unknown>
+  total_artifacts: number
+  total_chunks: number
+  total_edges: number
+  total_artifacts_24h: number
+  connection_time_ms: number | null
+  last_sync_at: string | null
+  created_at: string | null
+  last_error: string | null
+}
+
+export interface CreateSourceRequest {
+  kind: string
+  display_name: string
+  config: Record<string, unknown>
+}
+
+export interface HealthProbeResult {
+  ok: boolean
+  detail: string
+  last_error: string | null
+}
+
+export async function listSourceKinds(): Promise<SourceKindMeta[]> {
+  const r = await fetch(`${API_BASE}/sources/kinds`)
+  if (!r.ok) throw new Error(`listSourceKinds failed: ${r.status}`)
+  return r.json()
+}
+
+export async function listSources(kind?: string): Promise<SourceRecord[]> {
+  const url = new URL(`${API_BASE}/sources`, window.location.origin)
+  if (kind) url.searchParams.set("kind", kind)
+  const r = await fetch(url.pathname + url.search)
+  if (!r.ok) throw new Error(`listSources failed: ${r.status}`)
+  return r.json()
+}
+
+export async function createSource(body: CreateSourceRequest): Promise<SourceRecord> {
+  const r = await fetch(`${API_BASE}/sources`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text()
+    throw new Error(`createSource failed: HTTP ${r.status}: ${text}`)
+  }
+  return r.json()
+}
+
+export async function testSource(sourceId: string): Promise<HealthProbeResult> {
+  const r = await fetch(`${API_BASE}/sources/${sourceId}/test`, { method: "POST" })
+  if (!r.ok) throw new Error(`testSource failed: ${r.status}`)
+  return r.json()
+}
+
+export async function deleteSource(sourceId: string, cascade = false): Promise<void> {
+  const url = new URL(`${API_BASE}/sources/${sourceId}`, window.location.origin)
+  if (cascade) url.searchParams.set("cascade", "true")
+  const r = await fetch(url.pathname + url.search, { method: "DELETE" })
+  if (!r.ok) throw new Error(`deleteSource failed: ${r.status}`)
+}
