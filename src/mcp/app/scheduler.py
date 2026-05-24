@@ -721,6 +721,35 @@ async def _run_k_program_metrics() -> None:
         logger.error("k_program_metrics scheduled job failed: %s", e)
 
 
+async def _run_knowledge_stats_snapshot() -> None:
+    """Phase 1 of the Ingestion Experience plan — daily Knowledge
+    Stats snapshot for sparkline rendering. Writes one
+    :KnowledgeStatsSnapshot node per day; idempotent re-runs
+    overwrite the same day's payload via MERGE.
+    """
+    start = time.time()
+    try:
+        from app.db.neo4j.stats import fetch_current_stats, write_stats_snapshot
+        from app.deps import get_neo4j
+
+        driver = get_neo4j()
+        snapshot = fetch_current_stats(driver)
+        write_stats_snapshot(driver, snapshot)
+        duration = time.time() - start
+        artifacts = snapshot.get("nodes", {}).get("artifacts", 0)
+        _log_execution(
+            "knowledge_stats_snapshot",
+            "success",
+            duration,
+            f"artifacts={artifacts}",
+        )
+        logger.info("knowledge_stats_snapshot complete: artifacts=%d in %.1fs", artifacts, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("knowledge_stats_snapshot", "error", duration, str(e))
+        logger.error("knowledge_stats_snapshot scheduled job failed: %s", e)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -853,6 +882,21 @@ def start_scheduler() -> AsyncIOScheduler:
             CronTrigger.from_crontab(config.SCHEDULE_K_PROGRAM_METRICS),
             id="k_program_metrics",
             name="K-program metrics snapshot (S4 soak)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Phase 1 of the Ingestion Experience plan — daily Knowledge
+    # Stats snapshot for the F9 sparklines. Default midnight UTC;
+    # empty SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT disables.
+    if getattr(config, "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *"):
+        _scheduler.add_job(
+            _run_knowledge_stats_snapshot,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *"),
+            ),
+            id="knowledge_stats_snapshot",
+            name="Knowledge Stats daily snapshot (Ingestion F9)",
             replace_existing=True,
             max_instances=1,
         )

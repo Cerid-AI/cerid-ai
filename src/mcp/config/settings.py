@@ -627,6 +627,12 @@ SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 # chunks-per-answer, memory→entity linkage, contradiction p95 — each
 # appended to tasks/<monday>-k-program-metrics.md via --cron.
 SCHEDULE_K_PROGRAM_METRICS = os.getenv("SCHEDULE_K_PROGRAM_METRICS", "0 0 * * *")
+# Phase 1 of the Ingestion Experience plan — daily Knowledge Stats
+# snapshot for the Sources pane F9 hero card's sparklines. Default
+# midnight UTC. One MERGE per day; idempotent across reruns.
+SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT = os.getenv(
+    "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *",
+)
 
 # ---------------------------------------------------------------------------
 # Folder Scanning
