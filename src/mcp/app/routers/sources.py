@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.db.neo4j import sources as srcdb
@@ -303,6 +303,100 @@ async def test_source(source_id: str):
         return HealthProbeResult(ok=False, detail="probe raised", last_error=str(exc))
 
     return HealthProbeResult(ok=probe.ok, detail=probe.detail, last_error=probe.last_error)
+
+
+@router.get("/{source_id}/webhook-url")
+async def get_webhook_url(source_id: str, request: Request):
+    """Return the live webhook receiver URL (with token) for a
+    webhook-kind source. Drives the F7 share card — the only place
+    we deliberately surface the token in cleartext.
+    """
+    src = srcdb.get_source(get_neo4j(), source_id)
+    if src is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if src["kind"] != "webhook":
+        raise HTTPException(status_code=422, detail="Not a webhook source")
+    config = src.get("config") or {}
+    token = config.get("token") if isinstance(config, dict) else None
+    if not token:
+        raise HTTPException(status_code=500, detail="Source missing token")
+    base = str(request.base_url).rstrip("/")
+    url = f"{base}/sdk/v1/ingest/webhook/{token}"
+    require_hmac = bool(config.get("hmac_secret"))
+    return {
+        "url": url,
+        "require_hmac": require_hmac,
+        "curl_example": (
+            f"curl -X POST '{url}' -H 'Content-Type: application/json' "
+            f"-d '{{\"content\": \"hello from cerid\"}}'"
+        ),
+    }
+
+
+class PolicyPatch(BaseModel):
+    """Payload for ``POST /sources/{id}/policy`` — Phase 3 retention
+    + quality-floor editing from the F4 detail pane sliders.
+    """
+
+    retention_policy: dict[str, Any] | None = None
+    quality_floor: float | None = Field(None, ge=0.0, le=1.0)
+
+
+@router.post("/{source_id}/policy", response_model=SourceRecord)
+async def update_source_policy(source_id: str, body: PolicyPatch):
+    """Patch the source's retention_policy and/or quality_floor.
+
+    Drives the F4 detail-pane sliders. Both fields are optional;
+    callers send only what changed. Validates retention_policy
+    against the modes core.ingest.retention knows about.
+    """
+    src = srcdb.get_source(get_neo4j(), source_id)
+    if src is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    if body.retention_policy is not None:
+        mode = body.retention_policy.get("mode")
+        if mode not in ("keep_all", "days", "count"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown retention mode: {mode!r}",
+            )
+        if mode == "days":
+            try:
+                days = int(body.retention_policy.get("days", 0))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="days must be int") from exc
+            if days < 0:
+                raise HTTPException(status_code=422, detail="days must be ≥ 0")
+        if mode == "count":
+            try:
+                _max = int(body.retention_policy.get("max", 0))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="max must be int") from exc
+            if _max < 0:
+                raise HTTPException(status_code=422, detail="max must be ≥ 0")
+
+        import json as _json
+
+        with get_neo4j().session() as session:
+            session.run(
+                """
+                MATCH (s:Source {id: $id})
+                SET s.retention_policy = $policy
+                """,
+                id=source_id,
+                policy=_json.dumps(body.retention_policy),
+            )
+
+    if body.quality_floor is not None:
+        from app.services.quality_floors import set_source_quality_floor
+
+        set_source_quality_floor(source_id, body.quality_floor)
+
+    refreshed = srcdb.get_source(get_neo4j(), source_id)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Source disappeared after update")
+    return _to_record(refreshed)
 
 
 @router.delete("/{source_id}", status_code=204)

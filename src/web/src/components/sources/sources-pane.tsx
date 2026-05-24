@@ -18,6 +18,7 @@ import { KnowledgeStatsHero } from "./knowledge-stats-hero"
 import { SourcesHotkeyHelp } from "./sources-hotkey-help"
 import { AddSourceFab, type SourceFamily } from "./add-source-fab"
 import { SourceAddWizard } from "./source-add-wizard"
+import { SourcesHudTicker } from "./sources-hud-ticker"
 import { VoiceNoteOverlayHotkeyHost } from "./voice-note-overlay"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
@@ -99,6 +100,9 @@ export default function SourcesPane() {
 
   return (
     <div className="flex h-full flex-col">
+      {/* F6 — live HUD ticker. Thin strip above the F9 hero. */}
+      <SourcesHudTicker />
+
       {/* F9 — Knowledge Stats hero. Pinned at the top of every
           Sources sub-tab. Click-throughs route via NavigationContext
           to the relevant filtered destination. */}

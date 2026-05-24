@@ -79,6 +79,24 @@ export async function testSource(sourceId: string): Promise<HealthProbeResult> {
   return r.json()
 }
 
+export interface PolicyPatch {
+  retention_policy?: { mode: "keep_all" } | { mode: "days"; days: number } | { mode: "count"; max: number }
+  quality_floor?: number
+}
+
+export async function patchSourcePolicy(
+  sourceId: string,
+  patch: PolicyPatch,
+): Promise<SourceRecord> {
+  const r = await fetch(`${API_BASE}/sources/${sourceId}/policy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!r.ok) throw new Error(`patchSourcePolicy failed: ${r.status}`)
+  return r.json()
+}
+
 export async function deleteSource(sourceId: string, cascade = false): Promise<void> {
   const url = new URL(`${API_BASE}/sources/${sourceId}`, window.location.origin)
   if (cascade) url.searchParams.set("cascade", "true")

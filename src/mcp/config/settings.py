@@ -634,6 +634,12 @@ SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT = os.getenv(
     "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *",
 )
 
+# Phase 3 (B3.5) — nightly per-source retention enforcement. Walks
+# every (:Source) and applies its retention_policy. Default 2 AM UTC.
+SCHEDULE_RETENTION_ENFORCE = os.getenv(
+    "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *",
+)
+
 # ---------------------------------------------------------------------------
 # Folder Scanning
 # ---------------------------------------------------------------------------
@@ -1169,6 +1175,13 @@ MS365_MCP_URL = os.getenv("MS365_MCP_URL", "http://cerid-ms365-mcp:3000/mcp")
 # flow + refresh-token rotation; Cerid backend never touches them.
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+
+# Phase 3 (B3.3) — Microsoft / Outlook OAuth. ``MICROSOFT_OAUTH_TENANT``
+# is ``common`` for personal MSA accounts or a specific tenant GUID
+# for org-only flows.
+MICROSOFT_OAUTH_CLIENT_ID = os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "")
+MICROSOFT_OAUTH_CLIENT_SECRET = os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET", "")
+MICROSOFT_OAUTH_TENANT = os.getenv("MICROSOFT_OAUTH_TENANT", "common")
 
 if not NEO4J_PASSWORD:
     _config_logger.warning(
