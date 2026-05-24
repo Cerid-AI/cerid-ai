@@ -519,6 +519,37 @@
   animation-delay: calc(var(--i, 0) * 40ms);
 }
 
+/* Radial stagger — used by the Sources pane source-add FAB petals
+   (F2 in the 2026-05-24 Ingestion Experience plan). Each petal
+   supplies `--petal-x` + `--petal-y` for the orbital target offset
+   and `--petal-index` for the cascade delay. The petals emerge
+   from the FAB's center scaled at 0.4 → 1.0 over 180ms with a
+   40ms step between adjacent petals. */
+@keyframes cerid-radial-emerge {
+  from {
+    transform: scale(0.4) translate(0, 0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translate(var(--petal-x, 0), var(--petal-y, 0));
+    opacity: 1;
+  }
+}
+.cerid-radial-stagger {
+  animation: cerid-radial-emerge var(--duration-snug) var(--ease-fluid) both;
+  animation-delay: calc(var(--petal-index, 0) * 40ms);
+}
+
+/* Sparkline path tween — used by the Sparkline primitive
+   (src/web/src/components/ui/sparkline.tsx). When the SSE
+   artifact-arrival stream pushes a new point onto the right edge,
+   the path `d` attribute changes; this transition interpolates
+   linearly between the old and new path strings (the component
+   guarantees equal command-count across renders). */
+.cerid-sparkline-pulse path {
+  transition: d var(--duration-grand) var(--ease-fluid);
+}
+
 /* Skeleton → content cross-fade. Wrap both states in `.cerid-fade-swap`
    and toggle `data-state="loading|ready"` on the parent — the child with
    the matching state fades in while the other fades out. */
@@ -552,10 +583,11 @@
   .metric-pulse,
   .metric-value-pulse,
   .cerid-stagger,
-  .cerid-stagger-fast {
+  .cerid-stagger-fast,
+  .cerid-radial-stagger {
     animation: none !important;
     opacity: 1 !important;
-    transform: none !important;
+    transform: scale(1) translate(var(--petal-x, 0), var(--petal-y, 0)) !important;
   }
   .cerid-press,
   .cerid-fade-swap > [data-state] {

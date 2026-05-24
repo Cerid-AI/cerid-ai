@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 324
+**Total routes:** 327
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -188,12 +188,15 @@ not documented here; see the internal repo for the full registry.
 | GET | `/cost` | `get_cost_breakdown` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/cost-per-query` | `get_cost_per_query` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/health-score` | `get_health_score` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/knowledge-stats` | `get_knowledge_stats` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/knowledge-stats/history` | `get_knowledge_stats_history` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/metrics` | `get_aggregated_metrics` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/metrics/{name}` | `get_metric_timeseries` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/quality` | `get_quality_metrics` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/queue-depth` | `queue_depth_endpoint` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/ragas` | `get_ragas_metrics` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/restarts` | `get_restart_info` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/source-activity` | `source_activity_stream` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/trust-score` | `get_trust_score` | `src/mcp/app/routers/observability.py` | observability |  |
 | POST | `/chat` | `chat_completion` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |
 | GET | `/models` | `list_ollama_models` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |
