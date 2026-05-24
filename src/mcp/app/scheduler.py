@@ -661,6 +661,66 @@ async def _run_config_recommender() -> None:
         logger.error("config_recommender scheduled job failed: %s", e)
 
 
+async def _run_k_program_metrics() -> None:
+    """Phase S4 of the unified GA program — daily K-program metrics
+    snapshot. Runs ``scripts/k_program_metrics.py --cron`` in-process so
+    the output lands in ``tasks/<monday>-k-program-metrics.md`` and the
+    operator inherits 14 days of timestamped rows without leaving the
+    container.
+
+    The script is process-isolated by design — it opens its own Neo4j
+    and Redis drivers from the same env the MCP picked up. Running it
+    in-process here keeps the scheduling consistent with the other
+    K-program crons (wiki_stale_sweep, wiki_drift_lint).
+    """
+    start = time.time()
+    try:
+        import subprocess
+        from pathlib import Path
+
+        # Walk up from this file to the repo root (src/mcp/app/scheduler.py).
+        repo_root = Path(__file__).resolve().parents[3]
+        script = repo_root / "scripts" / "k_program_metrics.py"
+        if not script.exists():
+            logger.warning(
+                "k_program_metrics script not found at %s — skip", script,
+            )
+            return
+        # Use the same Python the container is running.
+        import sys as _sys
+
+        result = subprocess.run(
+            [_sys.executable, str(script), "--cron"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        duration = time.time() - start
+        if result.returncode != 0:
+            _log_execution(
+                "k_program_metrics",
+                "error",
+                duration,
+                result.stderr.strip().split("\n")[-1][:200],
+            )
+            logger.error(
+                "k_program_metrics scheduled job failed (rc=%d): %s",
+                result.returncode,
+                result.stderr.strip()[-500:],
+            )
+            return
+        # Successful run; stderr carries the human-readable path emit
+        detail = result.stderr.strip().split("\n")[-1][:200] if result.stderr else ""
+        _log_execution("k_program_metrics", "success", duration, detail)
+        logger.info("k_program_metrics snapshot complete in %.1fs", duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("k_program_metrics", "error", duration, str(e))
+        logger.error("k_program_metrics scheduled job failed: %s", e)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -779,6 +839,23 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
         max_instances=1,
     )
+
+    # Phase S4 of the unified GA program — K-program metrics snapshot.
+    # Runs scripts/k_program_metrics.py --cron once per day so the
+    # 14-day soak window captures six metrics (wiki coverage, p95
+    # staleness, faithfulness, chunks-per-answer, memory→entity
+    # linkage, contradiction p95) into tasks/<monday>-k-program-metrics.md.
+    # Empty SCHEDULE_K_PROGRAM_METRICS disables the in-process cron
+    # (operator may prefer host-side launchd / system cron).
+    if getattr(config, "SCHEDULE_K_PROGRAM_METRICS", ""):
+        _scheduler.add_job(
+            _run_k_program_metrics,
+            CronTrigger.from_crontab(config.SCHEDULE_K_PROGRAM_METRICS),
+            id="k_program_metrics",
+            name="K-program metrics snapshot (S4 soak)",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # v0.95.1 Phase 6 follow-up — quarantine auto-purge: daily sweep of
     # :Artifact nodes whose purge_after has elapsed. Drops the Neo4j
