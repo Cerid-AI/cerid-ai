@@ -272,6 +272,16 @@ services:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
     environment:
       - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+      # Frontend Sentry (GA_CHECKLIST P0). Empty by default — the SDK
+      # no-ops without a DSN. Set in .env or the host shell to start
+      # shipping FE errors to the cerid-ai-web Sentry project. Re-read
+      # by docker-entrypoint.sh at every container start so DSN rotation
+      # does not require a rebuild.
+      - VITE_SENTRY_DSN_WEB=${VITE_SENTRY_DSN_WEB:-}
+      # Stamped into Sentry's `release` tag. Defaults to "dev"; production
+      # operators should pin to a versioned tag matching the MCP backend's
+      # SENTRY_RELEASE so traces line up across the stack.
+      - VITE_APP_VERSION=${VITE_APP_VERSION:-}
     depends_on:
       mcp-server:
         condition: service_healthy

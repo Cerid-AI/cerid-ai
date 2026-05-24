@@ -21,7 +21,7 @@
  */
 
 // Client
-export { CeridClient, KBResource, VerifyResource, MemoryResource, SystemResource } from "./client.js";
+export { CeridClient, KBResource, VerifyResource, MemoryResource, SystemResource, LLMResource } from "./client.js";
 
 // Types
 export type {
@@ -32,11 +32,16 @@ export type {
   HallucinationResponse,
   MemoryExtractRequest,
   MemoryExtractResponse,
+  MemoryExtractJobStatus,
   HealthResponse,
   DetailedHealthResponse,
   IngestRequest,
   IngestFileRequest,
   IngestResponse,
+  IngestExternalRequest,
+  IngestExternalResponse,
+  LLMCompleteRequest,
+  LLMCompleteResponse,
   CollectionsResponse,
   TaxonomyResponse,
   SettingsResponse,

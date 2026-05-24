@@ -5,11 +5,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from cerid.errors import _raise_for_status
 from cerid.models import (
     CollectionsResponse,
+    IngestExternalResponse,
     IngestResponse,
     QueryResponse,
     SearchResponse,
@@ -92,6 +93,30 @@ class KBResource:
         resp = self._http.post(self._client._url("/ingest/file"), json=body)
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())
+
+    def ingest_external(
+        self,
+        *,
+        source_type: str,
+        payload: Dict[str, Any],
+        field_mappings: Dict[str, Any],
+    ) -> IngestExternalResponse:
+        """Adapter-shaped ingest for external services (Readwise, Pocket, Telegram-bot, …).
+
+        Pass an arbitrary JSON ``payload`` plus a ``field_mappings`` config that
+        declares how to extract canonical fields (content, source URI,
+        timestamp, tags, title, external ID). A single payload can map to N
+        ingest items via array fan-out. See ``docs/INTEGRATION_GUIDE.md`` for
+        per-service mapping examples.
+        """
+        body = {
+            "source_type": source_type,
+            "payload": payload,
+            "field_mappings": field_mappings,
+        }
+        resp = self._http.post(self._client._url("/ingest/external"), json=body)
+        _raise_for_status(resp)
+        return IngestExternalResponse.model_validate(resp.json())
 
     def collections(self) -> CollectionsResponse:
         """List all knowledge base collections."""
@@ -176,6 +201,23 @@ class AsyncKBResource:
         resp = await self._http.post(self._client._url("/ingest/file"), json=body)
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())
+
+    async def ingest_external(
+        self,
+        *,
+        source_type: str,
+        payload: Dict[str, Any],
+        field_mappings: Dict[str, Any],
+    ) -> IngestExternalResponse:
+        """Async variant of :meth:`KBResource.ingest_external`."""
+        body = {
+            "source_type": source_type,
+            "payload": payload,
+            "field_mappings": field_mappings,
+        }
+        resp = await self._http.post(self._client._url("/ingest/external"), json=body)
+        _raise_for_status(resp)
+        return IngestExternalResponse.model_validate(resp.json())
 
     async def collections(self) -> CollectionsResponse:
         """List all knowledge base collections."""

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Component, type ReactNode } from "react"
+import { captureException } from "@/lib/sentry"
 
 interface Props { children: ReactNode }
 interface State { hasError: boolean; error: Error | null }
@@ -15,6 +16,9 @@ export class AppErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("[AppErrorBoundary] Caught render error:", error, info.componentStack)
+    // Forward to Sentry so production crashes show up with the React
+    // component stack as the `componentStack` extra. No-op in dev / no-DSN.
+    captureException(error, { componentStack: info.componentStack })
   }
 
   render() {

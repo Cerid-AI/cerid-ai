@@ -29,14 +29,21 @@ export async function initSentry(): Promise<SentryShape | null> {
   _initialized = true
 
   if (import.meta.env.DEV) return null
-  const dsn = import.meta.env.VITE_SENTRY_DSN_WEB
+  // Runtime config (window.__ENV__ from docker-entrypoint.sh) takes precedence
+  // over build-time Vite env vars — matches the pattern in lib/api/common.ts.
+  // Lets operators rotate the DSN by restarting the container, no rebuild.
+  const runtimeEnv = (globalThis as Record<string, unknown>).__ENV__ as
+    | Record<string, string>
+    | undefined
+  const dsn = runtimeEnv?.VITE_SENTRY_DSN_WEB || import.meta.env.VITE_SENTRY_DSN_WEB
   if (!dsn) return null
+  const release = runtimeEnv?.VITE_APP_VERSION || import.meta.env.VITE_APP_VERSION || "dev"
 
   try {
     const Sentry = (await import(/* @vite-ignore */ "@sentry/react" as string)) as SentryShape
     Sentry.init({
       dsn,
-      release: import.meta.env.VITE_APP_VERSION ?? "dev",
+      release,
       environment: import.meta.env.MODE,
       tracesSampleRate: 0.1,
       replaysSessionSampleRate: 0,

@@ -11,6 +11,7 @@ import httpx
 
 from cerid._base import DEFAULT_TIMEOUT, _BaseClient
 from cerid.resources.kb import KBResource
+from cerid.resources.llm import LLMResource
 from cerid.resources.memory import MemoryResource
 from cerid.resources.system import SystemResource
 from cerid.resources.verify import VerifyResource
@@ -51,6 +52,7 @@ class CeridClient(_BaseClient):
         self._verify: Optional[VerifyResource] = None
         self._memory: Optional[MemoryResource] = None
         self._system: Optional[SystemResource] = None
+        self._llm: Optional[LLMResource] = None
 
     # -- Resource properties (lazy-initialized) --
 
@@ -81,6 +83,13 @@ class CeridClient(_BaseClient):
         if self._system is None:
             self._system = SystemResource(self, self._http)
         return self._system
+
+    @property
+    def llm(self) -> LLMResource:
+        """Smart-routed LLM completion: ``client.llm.complete([{role, content}])``."""
+        if self._llm is None:
+            self._llm = LLMResource(self, self._http)
+        return self._llm
 
     # -- Lifecycle --
 
