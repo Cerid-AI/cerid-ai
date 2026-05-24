@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState } from "react"
+import { useFocusOnMount } from "@/hooks/use-focus-on-mount"
 import type { Automation, AutomationCreate } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -55,6 +56,10 @@ function resolvePresetKey(cron: string): string {
 
 export default function AutomationDialog({ open, onClose, automation, onSave, saving }: AutomationDialogProps) {
   const isEdit = !!automation
+
+  // Focus the name field when the dialog first opens. Pass `open` so
+  // re-mounts (close → reopen) re-focus.
+  const nameInputRef = useFocusOnMount<HTMLInputElement>(open)
 
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -134,10 +139,10 @@ export default function AutomationDialog({ open, onClose, automation, onSave, sa
             <Label htmlFor="auto-name">Name</Label>
             <Input
               id="auto-name"
+              ref={nameInputRef}
               placeholder="e.g. Morning Research Digest"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              autoFocus
             />
           </div>
 

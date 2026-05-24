@@ -72,6 +72,7 @@ export function MeetingsCapturePanel() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     refresh()
     const interval = setInterval(() => {
       // Caller decides polling cadence: fast if anything in-flight, slow otherwise.

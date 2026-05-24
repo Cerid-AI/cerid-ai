@@ -114,6 +114,7 @@ export function AtlasSavedViews({
                 setName("")
               }
             }}
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
             autoFocus
             placeholder="View name"
             maxLength={80}

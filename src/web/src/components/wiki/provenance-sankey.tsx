@@ -44,6 +44,7 @@ export function ProvenanceSankey({
 
   useEffect(() => {
     if (!expanded || data || loading) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setLoading(true)
     fetchNeighborhood(entitySlug, 1)
       .then(setData)

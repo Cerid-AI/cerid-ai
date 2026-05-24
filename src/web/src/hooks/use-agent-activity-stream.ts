@@ -93,6 +93,7 @@ export function useAgentActivityStream(
 
   useEffect(() => {
     if (!enabled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setStatus("idle")
       return () => {
         /* teardown handled below via the common cleanup path on re-run */

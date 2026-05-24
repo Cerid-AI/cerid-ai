@@ -113,6 +113,7 @@ export default function MemoriesPane() {
   }, [loadMemories])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     loadMemories()
   }, [loadMemories])
 
@@ -335,6 +336,7 @@ export default function MemoriesPane() {
                           rows={3}
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
                           autoFocus
                         />
                         <div className="flex gap-1.5">

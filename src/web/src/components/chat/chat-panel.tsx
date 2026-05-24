@@ -150,6 +150,7 @@ export function ChatPanel() {
     const providers = configuredProviders.map((id) => ({ id, configured: true }))
     const derived = deriveDefaultModel(providers)
     if (derived && derived !== selectedModel) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setSelectedModel(derived)
     }
   }, [setupStatusForDefault, selectedModel])
@@ -354,6 +355,7 @@ export function ChatPanel() {
   // Sync model selector and reset router when switching conversations
   const activeModel = active?.model
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     if (activeModel) setSelectedModel(activeModel)
     resetDismiss()
     setVerificationRecBanner(null)

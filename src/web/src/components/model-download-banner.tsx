@@ -239,6 +239,7 @@ export function ModelDownloadBanner() {
 
 // Test-only — clear the dismissed flag so a unit test can re-render the
 // banner without DOM-state leakage between cases.
+// eslint-disable-next-line react-refresh/only-export-components -- test-only reset helper; lives alongside the component to share module-level state
 export function _resetDismissedForTest(): void {
   try {
     window.localStorage.removeItem(DISMISS_KEY)

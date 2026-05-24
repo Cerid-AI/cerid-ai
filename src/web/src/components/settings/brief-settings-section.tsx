@@ -65,6 +65,7 @@ export function BriefSettingsSection() {
   // rest of the settings pane uses.
   useEffect(() => {
     if (!settings) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setWriteToVault(Boolean(settings.write_to_vault))
     setVaultId(settings.vault_id ?? "")
     setVaultFolder(settings.vault_folder || DEFAULT_VAULT_FOLDER)

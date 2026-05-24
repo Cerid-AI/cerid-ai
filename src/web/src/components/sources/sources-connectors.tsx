@@ -146,6 +146,13 @@ function SourceRow({
             e.stopPropagation()
             if (!busy) onToggle()
           }}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === " ") && !busy) {
+              e.preventDefault()
+              e.stopPropagation()
+              onToggle()
+            }
+          }}
           className={`flex h-5 shrink-0 items-center rounded-full px-2 text-label-xxs font-medium transition-colors ${
             source.enabled
               ? "bg-primary/15 text-primary"

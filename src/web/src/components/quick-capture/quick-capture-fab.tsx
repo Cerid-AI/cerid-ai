@@ -137,6 +137,7 @@ export function QuickCaptureFab() {
 
       {/* Modal */}
       {open && (
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- modal backdrop; handlers dismiss on outside-click / Escape
         <div
           role="dialog"
           aria-modal="true"
@@ -144,6 +145,9 @@ export function QuickCaptureFab() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) void withViewTransition(() => setOpen(false))
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") void withViewTransition(() => setOpen(false))
           }}
         >
           <div

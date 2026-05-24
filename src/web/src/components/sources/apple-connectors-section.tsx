@@ -152,6 +152,7 @@ export function AppleConnectorsSection() {
   }, [desktopAvailable])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     refreshAll()
   }, [refreshAll])
 

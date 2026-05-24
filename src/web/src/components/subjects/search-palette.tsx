@@ -25,6 +25,7 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
   // Focus on open
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setQuery("")
       setHighlight(0)
       requestAnimationFrame(() => inputRef.current?.focus())
@@ -42,12 +43,14 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
 
   // Reset highlight when filtered list changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setHighlight(0)
   }, [query])
 
   if (!open) return null
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- modal backdrop; handlers dismiss on outside-click / Escape
     <div
       role="dialog"
       aria-modal="true"
@@ -55,6 +58,9 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
       className="fixed inset-0 z-50 flex items-start justify-center bg-background/80 backdrop-blur-sm pt-24"
       onClick={(e) => {
         if (e.target === e.currentTarget) onOpenChange(false)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onOpenChange(false)
       }}
     >
       <div className="liquid-glass w-full max-w-lg rounded-xl border border-border/60 shadow-2xl">

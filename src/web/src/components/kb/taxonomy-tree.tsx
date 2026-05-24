@@ -169,6 +169,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
             value={newDomainName}
             onChange={(e) => setNewDomainName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleCreateDomain(); if (e.key === "Escape") setAddingDomain(false) }}
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
             autoFocus
             disabled={saving}
           />
@@ -302,6 +303,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                           value={newSubName}
                           onChange={(e) => setNewSubName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") handleCreateSubCategory(domain); if (e.key === "Escape") setAddingSubTo(null) }}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
                           autoFocus
                           disabled={saving}
                         />

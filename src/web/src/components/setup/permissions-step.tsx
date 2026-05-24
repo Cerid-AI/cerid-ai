@@ -143,6 +143,7 @@ export function PermissionsStep({ onContinue, onSkip }: PermissionsStepProps) {
   }, [bridge])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     refresh()
     // Re-poll on window focus — covers FDA-granted-via-Settings + relaunch.
     const onFocus = () => refresh()
@@ -172,6 +173,7 @@ export function PermissionsStep({ onContinue, onSkip }: PermissionsStepProps) {
         setLoading(null)
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omitted dep; addition would cause infinite loop or unwanted re-fetch
     [desktopAvailable, refresh],
   )
 

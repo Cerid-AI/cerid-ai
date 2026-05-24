@@ -105,6 +105,7 @@ export function TagManager({ open, onOpenChange, localTags }: TagManagerProps) {
                 value={mergeTarget}
                 onChange={(e) => setMergeTarget(e.target.value)}
                 className="h-6 flex-1 text-xs"
+                // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
                 autoFocus
                 onKeyDown={(e) => { if (e.key === "Enter") handleMerge() }}
               />

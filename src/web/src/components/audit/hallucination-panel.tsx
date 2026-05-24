@@ -124,9 +124,17 @@ function ClaimBadge({
     }
   }
 
+  // The card itself stays a non-interactive container — `role="button"` here
+  // collides with axe's nested-interactive rule because the card contains
+  // feedback / sparkle / action buttons. The click-to-expand is captured by
+  // the inner header chip below (the badge row) via its own button. This
+  // outer onClick is the touch-friendly affordance for the entire card area;
+  // axe-compatible pattern.
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events,jsx-a11y/no-static-element-interactions -- keyboard interaction is handled by inner badge-row buttons (axe's nested-interactive rule forbids role=button on this outer container)
     <div
       data-claim-index={index}
+      data-expanded={expanded}
       className={cn(
         "rounded-lg border bg-card px-3 py-2.5 transition-all cursor-pointer shadow-sm",
         focused && "ring-2 ring-brand bg-brand/5",

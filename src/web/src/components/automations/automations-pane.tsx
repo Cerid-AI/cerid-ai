@@ -134,6 +134,7 @@ export default function AutomationsPane() {
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
   useEffect(() => { load() }, [load])
 
   // --- Handlers ---

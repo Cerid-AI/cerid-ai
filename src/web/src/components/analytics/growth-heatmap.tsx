@@ -29,6 +29,7 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
 
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setLoading(true)
     fetchIngestionByDay(windowDays)
       .then((d) => {

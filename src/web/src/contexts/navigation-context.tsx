@@ -186,6 +186,7 @@ export function NavigationProvider({
   return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- consumer hook exported alongside the Provider component (standard React context pattern)
 export function useNavigation(): NavigationContextValue {
   return useContext(NavigationContext)
 }

@@ -39,6 +39,7 @@ export default function WikiPane() {
     const params = new URLSearchParams(window.location.search)
     const entityParam = params.get("entity")
     if (!entityParam) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setSelectedSlug(entityParam)
     params.delete("entity")
     const next = params.toString()

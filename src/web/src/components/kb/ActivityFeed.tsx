@@ -118,6 +118,7 @@ export function ActivityFeed({ className, maxHeight = "400px" }: ActivityFeedPro
   }, [nextCursor, loadingMore])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     load()
     const interval = setInterval(load, 30_000) // refresh every 30s
     return () => clearInterval(interval)

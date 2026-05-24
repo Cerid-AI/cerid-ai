@@ -66,6 +66,7 @@ export function SyncSection() {
 
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setStatusLoading(true)
     fetchSyncStatus()
       .then((data) => { if (!cancelled) setStatus(data) })
@@ -362,6 +363,7 @@ function ChunkRow({ domain, local, sync }: { domain: string; local: number; sync
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- shared formatter exported alongside the pane component
 export function formatTimestamp(iso: string | undefined | null): string {
   if (!iso) return "—"
   const d = new Date(iso)

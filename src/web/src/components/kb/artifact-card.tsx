@@ -161,6 +161,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             <div className="flex items-center gap-1.5">
               {editingTitle ? (
                 <input
+                  // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline title edit; mount means edit was explicitly invoked
                   autoFocus
                   className="min-w-0 w-full bg-transparent text-sm font-medium outline-none border-b border-brand"
                   value={titleValue}
@@ -393,7 +394,11 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
 
         {/* Inline tag editing */}
         {!compact && editingTags && onUpdateTags && (
-          <div className="mt-2 rounded border bg-muted/30 p-2" onClick={(e) => e.stopPropagation()}>
+          // role="presentation" + onKeyDown stopPropagation keep this
+          // container from being treated as interactive by a11y tooling
+          // while preserving the click/key isolation from the parent
+          // card's onClick/onKeyDown handlers.
+          <div role="presentation" className="mt-2 rounded border bg-muted/30 p-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
             <div className="flex flex-wrap gap-1 mb-1.5">
               {editedTags.map((tag) => (
                 <span key={tag} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-label-xs text-primary">
@@ -446,7 +451,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
 
         {/* Delete confirmation */}
         {!compact && confirmDelete && onDelete && (
-          <div className="mt-2 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 p-2" onClick={(e) => e.stopPropagation()}>
+          <div role="presentation" className="mt-2 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 p-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
             <span className="text-label-sm text-destructive">Delete this artifact?</span>
             <div className="flex-1" />
             <Button

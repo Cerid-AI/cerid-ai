@@ -38,7 +38,6 @@ function Alert({
 
 function AlertTitle({ className, children, ...props }: React.ComponentProps<"h5">) {
   return (
-    // eslint-disable-next-line jsx-a11y/heading-has-content -- children forwarded through props spread
     <h5
       data-slot="alert-title"
       className={cn("mb-1 font-medium leading-none tracking-tight", className)}
