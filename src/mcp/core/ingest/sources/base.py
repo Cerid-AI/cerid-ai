@@ -88,13 +88,13 @@ class SourceConnector(Protocol):
     async def connect(self, config: dict[str, Any]) -> ConnectResult:
         ...
 
-    async def fetch_since(
+    def fetch_since(
         self, source_id: str, cursor: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
         ...
 
-    async def health_check(self, source_id: str) -> HealthStatus:
+    async def health_check(self, source_id: str, config: dict[str, Any]) -> HealthStatus:
         ...
 
-    async def disconnect(self, source_id: str) -> None:
+    async def disconnect(self, source_id: str, config: dict[str, Any]) -> None:
         ...

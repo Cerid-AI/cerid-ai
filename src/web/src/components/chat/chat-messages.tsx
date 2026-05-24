@@ -195,9 +195,9 @@ function MessageRow({
         isSelected && "rounded-xl ring-2 ring-brand/40 bg-brand/3 shadow-[0_0_16px_oklch(0.55_0.12_185/15%)]",
         canSelectForVerification && !isSelected && "cursor-pointer hover:bg-muted/20 rounded-xl",
       )}
-      onClick={isInteractive ? handleBubbleClick : undefined}
+      onClick={isInteractive && handleBubbleClick ? handleBubbleClick : undefined}
       onKeyDown={
-        isInteractive
+        isInteractive && handleBubbleClick
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()

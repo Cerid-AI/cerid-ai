@@ -16,6 +16,8 @@ import { useNavigation } from "@/contexts/navigation-context"
 import { useHotkey } from "@/hooks/use-hotkey"
 import { KnowledgeStatsHero } from "./knowledge-stats-hero"
 import { SourcesHotkeyHelp } from "./sources-hotkey-help"
+import { AddSourceFab, type SourceFamily } from "./add-source-fab"
+import { SourceAddWizard } from "./source-add-wizard"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const SourcesConnectors = lazy(() =>
@@ -72,6 +74,19 @@ export default function SourcesPane() {
   }, [])
 
   const navigation = useNavigation()
+
+  // F2/F3 — wizard state. ``wizardFamily`` filters the kind picker;
+  // ``wizardKind`` jumps straight to the configure step when the user
+  // entered the wizard from the F1 gallery (kind already known).
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardFamily, setWizardFamily] = useState<SourceFamily | undefined>(undefined)
+  const [wizardKind, setWizardKind] = useState<string | undefined>(undefined)
+
+  const openWizardWithFamily = useCallback((family: SourceFamily) => {
+    setWizardFamily(family)
+    setWizardKind(undefined)
+    setWizardOpen(true)
+  }, [])
 
   // F10 — Sources hotkey suite. ⌘1-⌘4 jump to sub-tabs; the rest of
   // the documented hotkeys (⌘⇧S, ⌘⇧C, ⌘⇧V, etc.) bind in their
@@ -182,6 +197,22 @@ export default function SourcesPane() {
           </Suspense>
         )}
       </div>
+
+      {/* F2 — Add Source FAB radial menu. ⌘⇧S also toggles. */}
+      <AddSourceFab onSelectFamily={openWizardWithFamily} />
+
+      {/* F3 — Add Source wizard. Driven by the FAB and the F1 gallery. */}
+      <SourceAddWizard
+        open={wizardOpen}
+        initialFamily={wizardFamily}
+        initialKind={wizardKind}
+        onClose={() => setWizardOpen(false)}
+        onCreated={() => {
+          // Surface the new source in the connectors tab so the user
+          // can immediately see it land in the live list.
+          handleModeChange("connectors")
+        }}
+      />
 
       {/* F10 — hotkey help overlay. Press ? anywhere in the Sources
           pane to surface it. */}

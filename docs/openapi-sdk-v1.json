@@ -1206,6 +1206,59 @@
         ]
       }
     },
+    "/sdk/v1/ingest/webhook/{token}": {
+      "post": {
+        "description": "Generic inbound endpoint for any external service. The ``{token}`` path segment identifies a previously-created webhook-kind Source record whose ``config`` carries the matching token + optional HMAC secret. Returns ``202 Accepted`` immediately and queues the payload for async processing.\n\n**Authentication:** the token itself is the credential. For higher assurance, configure an HMAC secret on the source and require ``X-Cerid-Signature: sha256=<hex>`` on every request; mismatched signatures return 401.\n\n**Adapter routing:** payloads can carry the canonical fields directly OR the source's config can declare per-source ``field_mappings`` (Readwise / Pocket / Slack / GitHub-events / etc.) that extract them from a third-party-shaped payload.",
+        "operationId": "sdk_ingest_webhook_sdk_v1_ingest_webhook__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Sdk Ingest Webhook Sdk V1 Ingest Webhook  Token  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "HMAC signature missing or invalid"
+          },
+          "404": {
+            "description": "Unknown webhook token"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Token-gated webhook receiver",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
     "/sdk/v1/llm/complete": {
       "post": {
         "description": "Tier-aware LLM completion. Consumers describe the task (`task_type`, `cost_sensitivity`); the smart_router selects the best model from FREE / CHEAP / CAPABLE / RESEARCH / EXPERT tiers, preferring Ollama when available. Returns content plus the model actually used and an estimated cost-per-1K-tokens for budget tracking.",

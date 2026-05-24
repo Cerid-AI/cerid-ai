@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 328
+**Total routes:** 334
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -282,6 +282,12 @@ not documented here; see the internal repo for the full registry.
 | GET | `/status` | `setup_status` | `src/mcp/app/routers/setup.py` | setup |  |
 | GET | `/system-check` | `system_check` | `src/mcp/app/routers/setup.py` | setup |  |
 | POST | `/validate-key` | `validate_key` | `src/mcp/app/routers/setup.py` | setup |  |
+| GET | `` | `list_sources` | `src/mcp/app/routers/sources.py` | sources |  |
+| POST | `` | `create_source` | `src/mcp/app/routers/sources.py` | sources |  |
+| GET | `/kinds` | `list_source_kinds` | `src/mcp/app/routers/sources.py` | sources |  |
+| DELETE | `/{source_id}` | `delete_source` | `src/mcp/app/routers/sources.py` | sources |  |
+| GET | `/{source_id}` | `get_source` | `src/mcp/app/routers/sources.py` | sources |  |
+| POST | `/{source_id}/test` | `test_source` | `src/mcp/app/routers/sources.py` | sources |  |
 | POST | `/sync/export` | `sync_export_endpoint` | `src/mcp/app/routers/sync.py` |  |  |
 | POST | `/sync/import` | `sync_import_endpoint` | `src/mcp/app/routers/sync.py` |  |  |
 | GET | `/sync/status` | `sync_status_endpoint` | `src/mcp/app/routers/sync.py` |  |  |
