@@ -1,18 +1,17 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bookmarks one-shot importer — B2.4.
+"""Bookmarks one-shot importer.
 
 Accepts a NETSCAPE-formatted HTML export (the universal interchange
 format produced by Chrome, Firefox, Safari, Edge, Brave, etc.).
-Parses out (title, url) pairs, stores them in the (:Source) node's
-config under ``parsed_bookmarks`` for the Phase 2C-follow-up worker
-to convert to artifacts.
+Parses out (title, url) pairs and stores them in the (:Source) node's
+config under ``parsed_bookmarks`` for the ingest worker to consume.
 
 Cursor shape: ``{"imported": bool}`` — flipped to ``true`` once the
-worker has finished ingesting all parsed bookmarks. This is a
-one-shot source: there's no fetch_since cadence; the source's
-lifetime is just the import + provenance record.
+worker has finished ingesting all parsed bookmarks. One-shot source:
+no fetch_since cadence; the source's lifetime is the import + a
+provenance record.
 """
 from __future__ import annotations
 
@@ -96,9 +95,9 @@ class BookmarksConnector(SourceConnector):
     async def fetch_since(
         self, source_id: str, cursor: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
-        """One-shot import — no cadenced fetch. The Phase 2C-follow-up
-        worker reads ``config.parsed_bookmarks`` and emits artifacts
-        once, flipping cursor.imported=True so we never re-import."""
+        """One-shot import — no cadenced fetch. The ingest worker
+        reads ``config.parsed_bookmarks``, emits artifacts once, and
+        flips ``cursor.imported=True`` so we never re-import."""
         if False:  # pragma: no cover
             yield SourceArtifactEvent(  # type: ignore[unreachable]
                 source_id=source_id,

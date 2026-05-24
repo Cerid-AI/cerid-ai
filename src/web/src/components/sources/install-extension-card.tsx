@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * F12 / Phase 4b B4b.4 — Install browser extension card.
+ * Install browser extension card.
  *
  * Lives inside the Connectors sub-tab. Two deep-link buttons to the
  * Chrome Web Store and Firefox Add-ons. Plain card surface (not

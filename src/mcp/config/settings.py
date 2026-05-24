@@ -627,15 +627,15 @@ SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 # chunks-per-answer, memory→entity linkage, contradiction p95 — each
 # appended to tasks/<monday>-k-program-metrics.md via --cron.
 SCHEDULE_K_PROGRAM_METRICS = os.getenv("SCHEDULE_K_PROGRAM_METRICS", "0 0 * * *")
-# Phase 1 of the Ingestion Experience plan — daily Knowledge Stats
-# snapshot for the Sources pane F9 hero card's sparklines. Default
-# midnight UTC. One MERGE per day; idempotent across reruns.
+# Daily Knowledge Stats snapshot for the Sources pane hero card's
+# sparklines. Default midnight UTC. One MERGE per day; idempotent
+# across reruns.
 SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT = os.getenv(
     "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *",
 )
 
-# Phase 3 (B3.5) — nightly per-source retention enforcement. Walks
-# every (:Source) and applies its retention_policy. Default 2 AM UTC.
+# Nightly per-source retention enforcement. Walks every (:Source)
+# and applies its retention_policy. Default 2 AM UTC.
 SCHEDULE_RETENTION_ENFORCE = os.getenv(
     "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *",
 )
@@ -1176,9 +1176,8 @@ MS365_MCP_URL = os.getenv("MS365_MCP_URL", "http://cerid-ms365-mcp:3000/mcp")
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
 
-# Phase 3 (B3.3) — Microsoft / Outlook OAuth. ``MICROSOFT_OAUTH_TENANT``
-# is ``common`` for personal MSA accounts or a specific tenant GUID
-# for org-only flows.
+# Microsoft / Outlook OAuth. ``MICROSOFT_OAUTH_TENANT`` is ``common``
+# for personal MSA accounts or a specific tenant GUID for org-only flows.
 MICROSOFT_OAUTH_CLIENT_ID = os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "")
 MICROSOFT_OAUTH_CLIENT_SECRET = os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET", "")
 MICROSOFT_OAUTH_TENANT = os.getenv("MICROSOFT_OAUTH_TENANT", "common")

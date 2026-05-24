@@ -2,16 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * F5 — Sources Constellation (MVP, tier-1 overview).
+ * Sources Constellation — tier-1 overview.
  *
- * The "wow" surface for the Sources pane. A central anchor (the
- * Cerid mark) with source nodes orbiting at radius proportional to
- * recency. This MVP ships tier-1 only — sources + anchor; artifact
- * shells (tier-2) and inter-entity edges + particle stream (tier-3)
- * are Phase 3-follow-up.
+ * Central anchor (the Cerid mark) with source nodes orbiting at radius
+ * proportional to recency. Tier-2 (artifact shells per source) and
+ * tier-3 (inter-entity edges + particle stream) wire alongside the
+ * SSE activity stream when needed.
  *
- * The scene reuses the vendor-r3f chunk already loaded for Subjects
- * → Constellation, so no new bundle cost.
+ * Reuses the vendor-r3f chunk already loaded for Subjects →
+ * Constellation, so no new bundle cost.
  */
 
 import { Suspense, useMemo, useRef } from "react"

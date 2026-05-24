@@ -12,13 +12,11 @@ import {
 import { useHotkey } from "@/hooks/use-hotkey"
 
 /**
- * F10 — Sources hotkey help overlay. Press `?` to surface.
+ * Sources hotkey help overlay. Press `?` to surface.
  *
- * Documents the 11 documented Sources-pane hotkeys per the
- * 2026-05-24 Ingestion Experience plan §5.6. Some entries no-op
- * until the corresponding surface lands (e.g. ⌘⇧S opens the FAB
- * which ships in Phase 2B); the table documents intent + binds
- * the keys so future surfaces just install handlers.
+ * Documents the Sources-pane hotkey suite. Bindings that have no
+ * target surface yet render with a "coming soon" badge; binding
+ * the keys up front lets new surfaces just install a handler.
  *
  * Renders a Liquid-Glass surface? No — Radix Dialog's standard
  * surface is correct here; the Liquid-Glass treatment is reserved

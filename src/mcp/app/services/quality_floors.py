@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Per-source quality floors — B3.6.
+"""Per-source quality floors.
 
 Each (:Source) node carries a ``quality_floor`` float in [0.0, 1.0].
 Artifacts whose computed weighted quality score falls below their

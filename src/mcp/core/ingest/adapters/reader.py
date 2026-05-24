@@ -1,15 +1,14 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Reader adapter recipes — B2.9.
+"""Reader adapter recipes.
 
 Providers: readwise, pocket, instapaper, raindrop, telegram.
 
 These services either push webhooks (Readwise highlights, Telegram
 forwards) or expose polled APIs (Pocket, Instapaper, Raindrop). The
-adapter recipes here normalize the *push* shape; polled adapters
-will reuse the same recipe applied to each page of the polled
-response (Phase 2C-follow-up worker).
+adapter recipes here normalize the *push* shape; the polled worker
+applies the same recipe to each page of the polled response.
 """
 from __future__ import annotations
 

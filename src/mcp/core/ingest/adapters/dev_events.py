@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Dev-events adapter recipes — B2.8.
+"""Dev-events adapter recipes.
 
 Providers: github, linear, sentry, stripe.
 

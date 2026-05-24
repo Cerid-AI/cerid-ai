@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Apple Reminders SourceConnector — Phase 4a B4a.4.
+"""Apple Reminders SourceConnector.
 
 Wraps the ``ceridreminders`` Swift helper. Mirrors the Apple Mail
 shape — Pro tier, subprocess to a TCC-entitled binary.
@@ -93,8 +93,8 @@ class AppleRemindersConnector(SourceConnector):
     async def fetch_since(
         self, source_id: str, cursor: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
-        """Phase 4a stub — predicate-based EventKit fetch lands when
-        the Swift helper's `since` subcommand returns reminders.
+        """Empty iterator until the helper's ``since`` subcommand
+        returns reminder records.
         """
         if False:  # pragma: no cover
             yield SourceArtifactEvent(  # type: ignore[unreachable]

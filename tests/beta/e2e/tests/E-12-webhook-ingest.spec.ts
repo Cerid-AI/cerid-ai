@@ -4,7 +4,7 @@
 import { test, expect } from "@playwright/test"
 
 /**
- * E-12 — Phase 2A/2C webhook receiver end-to-end (Phase 5 hardening).
+ * E-12 — Webhook receiver end-to-end with adapter-recipe routing.
  *
  * Covers:
  *   - Create a webhook source via POST /sources

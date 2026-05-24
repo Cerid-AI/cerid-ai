@@ -4,13 +4,13 @@
 import { test, expect } from "@playwright/test"
 
 /**
- * E-13 — Phase 5 hardening: Knowledge Stats endpoint performance.
+ * E-13 — Knowledge Stats endpoint performance regression guard.
  *
- * Plan §8 verification gate: ``/observability/knowledge-stats`` must
- * land < 50 ms p95 (Redis-cached). This test fires 20 sequential
- * requests and asserts the 95th percentile against a generous 250 ms
- * budget — gross-regression catcher rather than a precise SLO probe
- * (true SLO probing lives in benchmark_slo).
+ * ``/observability/knowledge-stats`` is the F9 hero's data source.
+ * Fires 20 sequential requests and asserts the 95th percentile
+ * against a generous 250 ms budget — gross-regression catcher
+ * rather than a precise SLO probe (true SLO probing lives in
+ * benchmark_slo).
  */
 test("E-13 Knowledge Stats endpoint p95 under regression budget", async ({ request }) => {
   // Prime the Redis cache.

@@ -11,9 +11,9 @@
  * for hero surfaces). Connection-time metric pulses on completion
  * using .metric-pulse — that's the gamification beat.
  *
- * Phase 2B ships configure UIs for: rss, url_watch, webhook.
- * Other kinds render a "coming soon" placeholder; the wizard still
- * lands them via the (future) connector module.
+ * Configure UIs ship for rss, url_watch, webhook. Other kinds fall
+ * back to a generic placeholder + default settings; their connectors
+ * accept the empty config.
  */
 
 import { useMemo, useState } from "react"

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Cerid AI service worker. Single responsibility for the Phase 4b
- * scope: seed default storage values on install. The popup handles
- * everything else; we don't run a persistent background listener.
+ * Cerid AI service worker. Single responsibility: seed default
+ * storage values on install. The popup handles everything else; we
+ * don't run a persistent background listener.
  */
 
 chrome.runtime.onInstalled.addListener(async () => {

@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Phase 3 B3.4 — Meeting Capture E2E coverage.
+"""Meeting Capture E2E coverage.
 
 Exercises the meeting_capture plugin's full 8-stage pipeline against
 fixture audio files. Skipped when the plugin's heavy runtime deps

@@ -21,7 +21,7 @@ import {
  *   * artifacts → Library tab
  *   * chunks    → Library tab with chunk-breakdown view
  *   * entities  → Subjects pane (Atlas mode)
- *   * diversity → Sources Constellation toggle (Phase 3)
+ *   * diversity → Sources Constellation toggle
  *   * age       → first-ever artifact
  *
  * Numbers pulse via `.metric-pulse` on update. Diversity bar uses

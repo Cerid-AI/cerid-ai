@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * F4 — Source-detail pane (one card per source, four sections).
+ * Source-detail pane (one card per source, four sections).
  *
- * Layout (per the plan §F4):
  *   - Header — Liquid Glass: icon, display name, status pill, connection-time
- *   - Activity — streaming feed (placeholder for now; SSE wire-in is Phase 3-follow-up)
+ *   - Activity — streaming feed (SSE wire-in consumes /observability/source-activity)
  *   - Health — sync cursor position, last-sync timestamp, error badge
  *   - Policy — retention slider, quality-floor slider, disconnect button
  *
@@ -153,7 +152,7 @@ function SourceDetailInner({
         {/* Activity — placeholder for SSE feed */}
         <Section title="Activity">
           <p className="text-label-xs text-muted-foreground">
-            Live feed streams here as artifacts arrive (Phase 3-follow-up SSE wiring).
+            Live artifacts stream in via /observability/source-activity once wired.
           </p>
           <div className="mt-2 grid grid-cols-3 gap-3 rounded-md border border-border bg-card/30 px-3 py-2 text-center">
             <Stat label="artifacts" value={source.total_artifacts} />

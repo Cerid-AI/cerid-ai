@@ -2,6 +2,149 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — v1.0 RC2: Ingestion Experience workstream (2026-05-24)
+
+Full delivery of `tasks/2026-05-24-ingestion-experience-plan.md` — the
+single largest UX upgrade between RC1 and GA. Brings a real `(:Source)`
+model, a unified protocol-driven connector layer, 22 source kinds (11
+Core + 11 Pro) spanning 9 families, a recipe-driven adapter library
+for inbound webhooks, voice-note ingest, retention + quality-floor
+policy editing, OAuth scaffolding for Gmail / Outlook, host-side Apple
+ecosystem stubs, a Manifest V3 browser extension, and a full Sources
+pane redesign (hero, FAB, wizard, detail pane, Constellation MVP,
+hotkey overlay).
+
+### Backend — ingestion architecture
+
+- **(:Source) node + protocol layer** — Neo4j `(:Source)` records the
+  canonical state of every ingestion stream; migration `m0003`
+  installs the constraint + indexes. `core.ingest.sources.base` defines
+  the `SourceConnector` protocol (`connect` / `fetch_since` /
+  `health_check` / `disconnect`), and `app.db.neo4j.sources` is the
+  data-access shim. Eight connectors registered: RSS, URL-watch,
+  webhook, bookmarks (NETSCAPE HTML one-shot), clipboard, apple_mail,
+  apple_reminders. (`45a95e4`, `534cd44`, `261a7ad`, `4ab69ed`)
+- **Sync-cursor service** — Redis-first hot reads with Neo4j fallback +
+  cache warm; writes go to both so a Redis flush loses at most the
+  last in-flight cursor. (`45a95e4`)
+- **Sources REST surface** — `GET /sources`, `GET /sources/kinds`,
+  `POST /sources`, `GET /sources/{id}`, `POST /sources/{id}/test`,
+  `POST /sources/{id}/policy`, `GET /sources/{id}/webhook-url`,
+  `DELETE /sources/{id}`. Credentials redacted on every read except
+  the dedicated webhook-url endpoint. (`534cd44`, `d105c01`)
+- **Webhook receiver** — `POST /sdk/v1/ingest/webhook/{token}` with
+  token-only or HMAC-required modes; constant-time signature compare;
+  Redis enqueue per source-id. Adapter-recipe routing via the
+  `core.ingest.adapters` package: 13 registered recipes spanning Slack,
+  Discord, Teams, Matrix (chat_capture); GitHub, Linear, Sentry,
+  Stripe (dev_events); Readwise, Pocket, Instapaper, Raindrop,
+  Telegram (external_adapter). A provider→canonical-kind index lets
+  the receiver dispatch on `config.provider` while the source itself
+  stays `kind=webhook` (security boundary). (`8b71e06`, `261a7ad`)
+- **Voice-note endpoint** — `POST /sdk/v1/ingest/voice-note` (multipart
+  audio). Reuses the meeting_capture decode + transcribe stages;
+  synchronous so the overlay can surface the transcript inline.
+  Returns 501 with install guidance when the plugin runtime deps
+  aren't present. (`261a7ad`)
+- **Knowledge Stats** — `GET /observability/knowledge-stats` (Redis-
+  cached, 60s TTL), `GET /observability/knowledge-stats/history` for
+  sparkline rendering, daily MERGE snapshot scheduler. SSE
+  `/observability/source-activity` skeleton for the live activity
+  stream. (`45a95e4`)
+- **Per-source retention** — `core.ingest.retention` policy planner
+  (keep_all / days / count modes); `app.services.retention` applies
+  plans against Chroma + Neo4j; nightly `SCHEDULE_RETENTION_ENFORCE`
+  scheduler entry. (`d105c01`)
+- **Per-source quality floors** — `app.services.quality_floors` with
+  per-source memoization + invalidator; floors editable via the
+  `/sources/{id}/policy` endpoint. (`d105c01`)
+- **OAuth scaffold** — `app.routers.oauth` exposes `/oauth/google/start`
+  + `/callback` and the Microsoft mirror, Redis-backed state tokens
+  with 10-minute TTL and single-use semantics. Token exchange against
+  the upstream providers is configuration-driven (sibling MCP). (`d105c01`)
+- **Apple ecosystem connectors** — `apple_mail` + `apple_reminders`
+  Python connectors subprocess to the host-side Swift helpers; status
+  reflects helper binary availability. (`4ab69ed`)
+
+### Frontend — Sources pane redesign
+
+- **Knowledge Stats hero** — Liquid Glass card with five metric cards
+  (artifacts / chunks / entities / edges / diversity), each carrying a
+  60×16 SVG sparkline; 7d / 30d window toggle; 22-segment gold→teal
+  diversity bar; click-through navigation to filtered destinations.
+  (`8b71e06`)
+- **Empty-state gallery** — 22-tile picker, Core/Pro split with lock
+  badges on Pro; `.cerid-stagger` cascade on entrance. (`534cd44`)
+- **Add-Source FAB radial menu** — 9-petal arc with
+  `.cerid-radial-stagger`, ⌘⇧S toggle, Esc + click-away dismiss.
+  (`534cd44`)
+- **Source-add wizard** — three-step dialog (pick → configure →
+  result), per-kind config UIs for rss / url_watch / webhook,
+  `.metric-value-pulse` on the result `connection_time_ms`. (`534cd44`)
+- **Source-detail pane** — Liquid Glass header, Activity / Health /
+  Policy / Danger zone sections; retention picker + quality-floor
+  slider commit in one PATCH. (`d105c01`)
+- **Sources Constellation MVP** — R3F scene with central anchor +
+  orbital source nodes, family-color palette, auto-rotate. Reuses the
+  `vendor-r3f` chunk (no new bundle cost). (`d105c01`)
+- **Live HUD ticker** — thin strip above the hero showing total
+  artifacts, ingestion rate, median connect time, diversity. (`d105c01`)
+- **Webhook share card** — Liquid Glass receiver-URL + curl-example
+  surface in the wizard's result step. (`d105c01`)
+- **Pro upgrade overlay** — Liquid Glass dialog for Pro-gated kinds.
+  (`d105c01`)
+- **Voice-note overlay** — Liquid Glass dialog with WebAudio waveform
+  (32-bar peak sampler at rAF cadence), MediaRecorder capture, ⌘⇧V.
+  (`261a7ad`)
+- **Hotkey overlay** — `useHotkey` hook + Sources-context Radix dialog,
+  `?` to open, ⌘1-⌘4 sub-tab switching. (`8b71e06`)
+- **Install-extension card** — Chrome + Firefox deep-link surface for
+  the new browser extension. (`4ab69ed`)
+- **Sparkline primitive** — `components/ui/sparkline.tsx`, zero-dep
+  SVG, tweens via the `.cerid-sparkline-pulse` utility. (`45a95e4`)
+
+### Host-side scaffolds
+
+- **`packages/desktop/swift/CeridMail/`** — Mail.app archive reader
+  with subcommands `{scan | since | message}`; .emlx walker wires
+  alongside the host-binary build. (`4ab69ed`)
+- **`packages/desktop/swift/CeridReminders/`** — EventKit Reminders
+  reader, TCC-scoped via `requestFullAccessToReminders` (macOS 14+).
+  (`4ab69ed`)
+- **`packages/desktop/shortcuts/`** — three Apple Shortcuts action
+  templates (Save to Cerid / Search Cerid / Ask Cerid) in JSON form;
+  operator generates `.shortcut` plists from the templates. (`4ab69ed`)
+- **`packages/extension/`** — Manifest V3 browser extension; popup
+  with Save Page + Open Cerid; inline readability extractor; Playwright
+  spec; works on Chrome + Firefox. (`4ab69ed`)
+
+### Tests
+
+- Five new unit suites (webhook_tokens 5 cases, sparkline 6 cases,
+  knowledge-stats-hero 6 cases).
+- Three new beta E2E specs (E-11 Sources pane mount + paint budget,
+  E-12 webhook recipe round-trip, E-13 Knowledge Stats p95 regression
+  guard).
+- Two new integration test files (`test_meeting_capture_e2e.py`,
+  `test_apple_connectors_e2e.py`) — skip-aware when fixtures or
+  helper binaries aren't present.
+
+### Regression posture
+
+- ruff / mypy clean, import-linter `core → app` KEPT across every
+  commit, eslint 0 warnings, vitest 1339/1341 (2 pre-existing latency-
+  SLO benchmarks unrelated).
+- Vite main bundle steady at 534.75 KB through all six phase commits.
+- env / router-registry / sync-manifest / sdk-openapi drift gates
+  all green.
+- Live contract matrix verified against `http://localhost:8888` for
+  every new endpoint.
+
+### Commits
+
+`45a95e4` Phase 1 · `8b71e06` Phase 2A · `534cd44` Phase 2B ·
+`261a7ad` Phase 2C · `d105c01` Phase 3 · `4ab69ed` Phase 4a + 4b + 5
+
 ## Unreleased — Post-rc1 polish: tech-debt sweep + S2 doc reconciliation + Sentry/SDK closeouts (2026-05-24)
 
 Tail-end work on top of v1.0.0-rc1, after the UX polish sprint, executing

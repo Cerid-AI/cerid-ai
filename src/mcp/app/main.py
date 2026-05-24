@@ -970,7 +970,7 @@ app.include_router(connectors.router)
 
 # Source-management surface backing the F1/F2/F3 wizard flow.
 # Side-effect-imports the connector package so register_connector
-# calls run at process boot (rss + url_watch as of Phase 2B).
+# calls run at process boot.
 import core.ingest.sources.connectors  # noqa: F401, E402
 
 app.include_router(sources.router)

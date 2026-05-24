@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""RSS/Atom SourceConnector — B2.2.
+"""RSS/Atom SourceConnector.
 
 Wraps the stdlib XML parsing already in
 ``app.data_sources.rss_feed`` (legacy, Redis-backed) into the new
@@ -98,13 +98,13 @@ class RssConnector(SourceConnector):
     ) -> AsyncIterator[SourceArtifactEvent]:
         """Yield :class:`SourceArtifactEvent` per new feed entry.
 
-        Phase 2B scope: this is the stub that the Phase 2B follow-up
-        worker (``app.workers.ingest_rss``) will exercise — for now
-        it short-circuits to an empty iterator so connector
-        registration and health-checks land cleanly. The actual fetch
-        loop wires in alongside the worker.
+        The walk is driven by the ingestion worker
+        (``app.workers.ingest_rss``); this method's contract is to
+        emit one event per artifact with the cursor advance embedded.
+        Returns immediately when the worker isn't wired (empty
+        iterator), keeping connector registration + health-checks
+        independent of the worker.
         """
-        # Phase 2B-follow-up: real walk. Empty iterator until then.
         if False:  # pragma: no cover - placeholder for type checker
             yield SourceArtifactEvent(  # type: ignore[unreachable]
                 source_id=source_id,
