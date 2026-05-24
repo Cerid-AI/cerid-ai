@@ -55,6 +55,7 @@ from app.routers import (
     meetings,
     memories,
     models,
+    oauth,
     observability,
     ollama_proxy,
     plugins,
@@ -973,6 +974,9 @@ app.include_router(connectors.router)
 import core.ingest.sources.connectors  # noqa: F401, E402
 
 app.include_router(sources.router)
+
+# Phase 3 (B3.2 / B3.3) — Pro connector OAuth entry + callback.
+app.include_router(oauth.router)
 
 # Custom Smart RAG weights surface (Phase I).
 app.include_router(rag_weights.router)

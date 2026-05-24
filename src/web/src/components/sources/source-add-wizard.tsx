@@ -18,7 +18,7 @@
 
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, ChevronRight, Loader2, XCircle } from "lucide-react"
+import { CheckCircle2, ChevronRight, Loader2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -35,6 +35,7 @@ import {
   type SourceRecord,
 } from "@/lib/api/sources"
 import { descriptorFor } from "./source-kind-icons"
+import { WebhookShareCard } from "./webhook-share-card"
 
 type WizardStep = "pick" | "configure" | "result"
 
@@ -357,7 +358,7 @@ function ResultStep({
       </div>
 
       {record.kind === "webhook" && (
-        <WebhookUrlBlock sourceId={record.id} />
+        <WebhookShareCard sourceId={record.id} />
       )}
 
       <div className="flex justify-end pt-1">
@@ -367,22 +368,3 @@ function ResultStep({
   )
 }
 
-function WebhookUrlBlock({ sourceId }: { sourceId: string }) {
-  // The receiver URL needs the token, but the GET endpoint redacts it.
-  // For Phase 2B we display the source-id-keyed receiver share command;
-  // the dedicated POST /sources/{id}/webhook-url endpoint that returns
-  // the live URL (with token) ships in Phase 3 alongside F7.
-  return (
-    <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
-      <div className="mb-1 font-medium text-foreground">Receiver source-id</div>
-      <code className="block font-mono text-[11px] text-muted-foreground">
-        {sourceId}
-      </code>
-      <div className="mt-2 flex items-center gap-1 text-muted-foreground">
-        <XCircle className="h-3 w-3" aria-hidden="true" />
-        Use Knowledge Stats hero → Sources tab → details for the full URL
-        (with token) — F7 share card ships in Phase 3.
-      </div>
-    </div>
-  )
-}

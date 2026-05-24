@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 335
+**Total routes:** 341
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -181,6 +181,10 @@ not documented here; see the internal repo for the full registry.
 | GET | `/updates` | `list_model_updates` | `src/mcp/app/routers/models.py` | models |  |
 | POST | `/updates/check` | `check_model_updates` | `src/mcp/app/routers/models.py` | models |  |
 | POST | `/updates/dismiss/{update_id}` | `dismiss_model_update` | `src/mcp/app/routers/models.py` | models |  |
+| GET | `/google/callback` | `google_oauth_callback` | `src/mcp/app/routers/oauth.py` | oauth |  |
+| POST | `/google/start` | `google_oauth_start` | `src/mcp/app/routers/oauth.py` | oauth |  |
+| GET | `/microsoft/callback` | `microsoft_oauth_callback` | `src/mcp/app/routers/oauth.py` | oauth |  |
+| POST | `/microsoft/start` | `microsoft_oauth_start` | `src/mcp/app/routers/oauth.py` | oauth |  |
 | GET | `/claim-accuracy` | `get_claim_accuracy` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/claim-accuracy/{domain}` | `get_claim_accuracy_by_domain` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/communities` | `list_communities_endpoint` | `src/mcp/app/routers/observability.py` | observability |  |
@@ -288,7 +292,9 @@ not documented here; see the internal repo for the full registry.
 | GET | `/kinds` | `list_source_kinds` | `src/mcp/app/routers/sources.py` | sources |  |
 | DELETE | `/{source_id}` | `delete_source` | `src/mcp/app/routers/sources.py` | sources |  |
 | GET | `/{source_id}` | `get_source` | `src/mcp/app/routers/sources.py` | sources |  |
+| POST | `/{source_id}/policy` | `update_source_policy` | `src/mcp/app/routers/sources.py` | sources |  |
 | POST | `/{source_id}/test` | `test_source` | `src/mcp/app/routers/sources.py` | sources |  |
+| GET | `/{source_id}/webhook-url` | `get_webhook_url` | `src/mcp/app/routers/sources.py` | sources |  |
 | POST | `/sync/export` | `sync_export_endpoint` | `src/mcp/app/routers/sync.py` |  |  |
 | POST | `/sync/import` | `sync_import_endpoint` | `src/mcp/app/routers/sync.py` |  |  |
 | GET | `/sync/status` | `sync_status_endpoint` | `src/mcp/app/routers/sync.py` |  |  |

@@ -721,6 +721,34 @@ async def _run_k_program_metrics() -> None:
         logger.error("k_program_metrics scheduled job failed: %s", e)
 
 
+async def _run_retention_enforce() -> None:
+    """Phase 3 (B3.5) — nightly per-source retention enforcement.
+    Walks every (:Source) and applies its ``retention_policy``,
+    purging artifacts that fall outside the policy window.
+    """
+    start = time.time()
+    try:
+        from app.services.retention import enforce_all_retention
+
+        summary = enforce_all_retention()
+        duration = time.time() - start
+        _log_execution(
+            "retention_enforce",
+            "success",
+            duration,
+            f"purged={summary.get('total_purged', 0)}",
+        )
+        logger.info(
+            "retention_enforce complete: %d artifacts purged in %.1fs",
+            summary.get("total_purged", 0),
+            duration,
+        )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("retention_enforce", "error", duration, str(e))
+        logger.error("retention_enforce scheduled job failed: %s", e)
+
+
 async def _run_knowledge_stats_snapshot() -> None:
     """Phase 1 of the Ingestion Experience plan — daily Knowledge
     Stats snapshot for sparkline rendering. Writes one
@@ -897,6 +925,20 @@ def start_scheduler() -> AsyncIOScheduler:
             ),
             id="knowledge_stats_snapshot",
             name="Knowledge Stats daily snapshot (Ingestion F9)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Phase 3 (B3.5) — nightly per-source retention enforcement.
+    # Default 2 AM UTC; empty SCHEDULE_RETENTION_ENFORCE disables.
+    if getattr(config, "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *"):
+        _scheduler.add_job(
+            _run_retention_enforce,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *"),
+            ),
+            id="retention_enforce",
+            name="Per-source retention enforcement (Ingestion B3.5)",
             replace_existing=True,
             max_instances=1,
         )
