@@ -429,16 +429,23 @@ async def get_timeline(
                 )
                 payload["cached"] = True
                 return TimelineResponse(**payload)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("timeline cache read failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.timeline_cache_read",
+            exc,
+            context={"cache_key": cache_key},
+        )
         redis = None
 
     # Pull mention events from Neo4j
     try:
         from app.deps import get_neo4j
         driver = get_neo4j()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("timeline: neo4j unavailable: %s", exc)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.timeline_neo4j_unavailable",
+            exc,
+        )
         return TimelineResponse(
             entity=entity,
             from_date=start_dt.isoformat(),
@@ -484,8 +491,12 @@ async def get_timeline(
     try:
         import asyncio
         rows = await asyncio.to_thread(_run_timeline_cypher, driver, cypher, params)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("timeline cypher failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.timeline_cypher_failed",
+            exc,
+            context={"entity": entity or "", "granularity": gran},
+        )
         return TimelineResponse(
             entity=entity,
             from_date=start_dt.isoformat(),
@@ -578,8 +589,11 @@ def _run_timeline_cypher(driver: Any, cypher: str, params: dict) -> list[dict]:
     try:
         with driver.session() as session:
             return [dict(r) for r in session.run(cypher, params)]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("timeline cypher exec failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.timeline_cypher_exec_failed",
+            exc,
+        )
         return []
 
 

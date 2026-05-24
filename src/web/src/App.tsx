@@ -16,6 +16,8 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
 import { SetupWizard } from "@/components/setup/setup-wizard"
 import { useTheme } from "@/hooks/use-theme"
+import { LiquidGlassDefs } from "@/components/ui/liquid-glass-defs"
+import { OpeningSequence } from "@/components/ui/opening-sequence"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pane"))
@@ -157,6 +159,12 @@ export default function App() {
 
   return (
     <AppErrorBoundary>
+    {/* SVG filter defs for .liquid-glass; mounted once. Zero render cost
+        until a `.liquid-glass` surface references `filter: url(#cerid-liquid-glass)`. */}
+    <LiquidGlassDefs />
+    {/* First-paint reveal — auto-skipped on revisit via sessionStorage flag,
+        and on prefers-reduced-motion. */}
+    <OpeningSequence />
     {/* Mount TooltipProvider once at app root per shadcn convention (ui-ux-pro-max
         shadcn rule #39). Without this, panes that use `<Tooltip>` without their
         own local provider crash on mount — Memories pane was the symptom. */}

@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useUIMode } from "@/contexts/ui-mode-context"
+import { withViewTransition } from "@/lib/view-transitions"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { fetchModelUpdatesFull } from "@/lib/api"
@@ -104,19 +105,11 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     })
   }
 
-  // M-A.5: feature-detected View Transition wrapper for active-pane indicator
-  // slide. Browsers without the API (Firefox <129, Safari <18) get the direct
-  // call — no spinner, no slide, but no breakage either.
-  type ViewTransitionDoc = Document & {
-    startViewTransition?: (cb: () => void) => unknown
-  }
+  // Feature-detected View Transition wrapper for active-pane indicator
+  // slide. Centralized in `lib/view-transitions` so all surfaces share
+  // the same reduced-motion + feature-detect behavior.
   const triggerPaneChange = (pane: Pane) => {
-    const doc = document as ViewTransitionDoc
-    if (typeof doc.startViewTransition === "function") {
-      doc.startViewTransition(() => onPaneChange(pane))
-    } else {
-      onPaneChange(pane)
-    }
+    void withViewTransition(() => onPaneChange(pane))
   }
 
   const handleSelectConversation = (id: string) => {

@@ -62,7 +62,7 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
   }, [])
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
+    <div className="cerid-content-rise flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
       <div className="vignette" aria-hidden="true" />
       {/* Phase E.6.6: first-query model-download notification —
           self-suppressing when both ONNX models are cached or the user

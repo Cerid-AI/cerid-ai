@@ -29,6 +29,7 @@ function PopoverContent({
       <PopoverPrimitive.Content
         align={align}
         sideOffset={sideOffset}
+        style={{ transformOrigin: "var(--radix-popover-content-transform-origin)" }}
         className={cn(
           "z-50 min-w-[10rem] rounded-md border bg-popover p-1 text-popover-foreground shadow-md outline-none",
           "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",

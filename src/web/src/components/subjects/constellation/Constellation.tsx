@@ -83,7 +83,8 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
 
   return (
     <div
-      className="relative h-full w-full bg-[#0A1F3D]"
+      className="cerid-stagger-fast relative h-full w-full bg-[#0A1F3D]"
+      style={{ ["--i" as string]: 0 }}
       role="application"
       aria-roledescription="3D knowledge graph"
       aria-label={`Constellation view of ${data.count} entities`}

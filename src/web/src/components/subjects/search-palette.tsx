@@ -57,7 +57,7 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
         if (e.target === e.currentTarget) onOpenChange(false)
       }}
     >
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl">
+      <div className="liquid-glass w-full max-w-lg rounded-xl border border-border/60 shadow-2xl">
         {/* Input row */}
         <div className="flex items-center gap-2 border-b px-4 py-3">
           <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -104,7 +104,13 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
             </li>
           ) : (
             filtered.map((entity, idx) => (
-              <li key={entity.slug} role="option" aria-selected={idx === highlight}>
+              <li
+                key={entity.slug}
+                role="option"
+                aria-selected={idx === highlight}
+                style={{ ["--i" as string]: Math.min(idx, 8) }}
+                className="cerid-stagger-fast"
+              >
                 <button
                   type="button"
                   onClick={() => onPick(entity.slug)}

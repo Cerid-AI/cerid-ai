@@ -126,8 +126,12 @@ export default function WikiPane() {
 
             {!isLoading && !isError && entities && entities.length > 0 && (
               <ul className="space-y-1 p-2" aria-label="Entity list">
-                {entities.map((entity) => (
-                  <li key={entity.slug}>
+                {entities.map((entity, idx) => (
+                  <li
+                    key={entity.slug}
+                    style={{ ["--i" as string]: Math.min(idx, 8) }}
+                    className="cerid-stagger-fast"
+                  >
                     <EntityListItem
                       entity={entity}
                       selected={entity.slug === selectedSlug}
