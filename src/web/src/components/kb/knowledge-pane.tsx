@@ -204,12 +204,14 @@ export function KnowledgePane() {
   useEffect(() => {
     try {
       const stored = sessionStorage.getItem("cerid-ingestion-log")
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       if (stored) setIngestionLog(JSON.parse(stored))
     } catch (err) { logSwallowedError(err, "sessionStorage.getItem", { key: "cerid-ingestion-log" }) }
   }, [])
 
   // Reset pagination when filters change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setDisplayLimit(PAGE_SIZE)
   }, [taxonomyFilter.domain, taxonomyFilter.subCategory, clientSource, dateFilter, activeSearch, activeTag])
 

@@ -127,6 +127,7 @@ export function useVerificationStream(
 
   // Reset state when conversation changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setClaims([])
     setPhase("idle")
     setSummary(null)

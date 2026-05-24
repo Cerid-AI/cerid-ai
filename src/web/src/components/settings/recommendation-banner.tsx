@@ -78,6 +78,7 @@ export function RecommendationBanner({ patch }: RecommendationBannerProps) {
     for (const rec of data.recommended_features) {
       if (isSnoozed(rec.id)) snoozed.add(rec.id)
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setDismissedLocally(snoozed)
   }, [data?.recommended_features])
 

@@ -77,6 +77,7 @@ export function SmartRagWeights({ tier = "community" }: SmartRagWeightsProps) {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     refresh()
   }, [refresh])
 

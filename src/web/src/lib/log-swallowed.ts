@@ -26,7 +26,6 @@ export function logSwallowedError(
 ): void {
   const errMessage = err instanceof Error ? err.message : String(err)
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
     console.warn(`[swallowed] ${reason}`, err, extra ?? {})
   }
   // Always add a breadcrumb (no-op when Sentry isn't initialized).

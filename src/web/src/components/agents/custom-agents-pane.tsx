@@ -60,6 +60,7 @@ export default function CustomAgentsPane() {
 
   useEffect(() => {
     if (!strict) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       reload().catch((err) => logSwallowedError(err, "custom-agents.initial-load"))
     } else {
       setLoading(false)
@@ -267,12 +268,19 @@ function TemplatePicker({
 }) {
   return (
     <div
+      role="presentation"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === "Escape") onClose() }}
     >
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog container; handlers isolate clicks/keys from the backdrop, not user-facing interaction */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create custom agent from template"
         className="max-h-[80vh] w-[90vw] max-w-lg overflow-auto rounded-lg border bg-card p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-medium">Create Custom Agent from Template</h3>

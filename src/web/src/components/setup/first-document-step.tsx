@@ -208,7 +208,16 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
           {/* Drag-drop upload zone */}
           <div
             {...dragHandlers}
+            role="button"
+            tabIndex={0}
+            aria-label="Click to choose a file or drag a file here to upload"
             onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                fileInputRef.current?.click()
+              }
+            }}
             className={cn(
               "relative flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors",
               isDragOver

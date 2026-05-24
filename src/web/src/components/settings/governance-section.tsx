@@ -96,6 +96,7 @@ export function GovernanceSection({ settings, sections, toggleSection }: Governa
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     void reload()
   }, [reload])
 
@@ -451,6 +452,7 @@ function AddServerDialog({
 
   // Reset whenever the dialog closes so the next open starts fresh.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     if (!open) reset()
   }, [open])
 

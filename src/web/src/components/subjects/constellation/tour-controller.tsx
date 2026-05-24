@@ -113,7 +113,7 @@ export function TourControlPanel({
       const arc = await generateTour({ focal_entity: focalEntity ?? null })
       onStart(arc)
     } catch (err) {
-      console.error("tour generation failed:", err)  // eslint-disable-line no-console
+      console.error("tour generation failed:", err)
     }
   }, [focalEntity, onStart])
 
@@ -216,6 +216,7 @@ export function TourControlPanel({
 
 export type { TourState }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook exported alongside the component that owns the tour state
 export function useTourState() {
   const [state, setState] = useState<TourState>({ kind: "idle" })
 

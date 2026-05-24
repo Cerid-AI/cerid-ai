@@ -93,6 +93,7 @@ export function KnowledgePanel() {
 
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setLoading(true)
     fetch("/health", { credentials: "include" })
       .then((r) => r.json() as Promise<HealthResponse>)

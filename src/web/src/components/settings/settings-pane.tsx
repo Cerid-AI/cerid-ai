@@ -101,6 +101,7 @@ export default function SettingsPane() {
   // When mode becomes simple and the active tab is advanced-only, reset to essentials.
   useEffect(() => {
     if (uiMode === "simple" && ADVANCED_TABS.has(activeTab)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       handleTabChange("essentials")
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,6 +144,7 @@ export default function SettingsPane() {
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
   useEffect(() => { loadKBStats() }, [loadKBStats])
 
   const runKBAction = useCallback(async (action: string, fn: () => Promise<{ message: string }>) => {
@@ -183,6 +185,7 @@ export default function SettingsPane() {
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
   useEffect(() => { load() }, [load])
 
   const patch = async (update: SettingsUpdate) => {

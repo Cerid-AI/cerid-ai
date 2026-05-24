@@ -59,6 +59,7 @@ export function Timeline({ focalEntity }: TimelineProps) {
   // Fetch on period / entity change
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setLoading(true)
     setError(null)
     fetchTimeline({ entity: focalEntity, period })

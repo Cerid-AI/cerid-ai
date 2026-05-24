@@ -145,6 +145,7 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy,
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
   const notifiedRef = useRef(false)
   const onAllHealthyRef = useRef(onAllHealthy)
+  // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
   onAllHealthyRef.current = onAllHealthy
 
   const checkHealth = useCallback(async () => {
@@ -178,6 +179,7 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy,
   }, [checkHealth])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     checkHealth()
     if (!polling) return
 

@@ -55,17 +55,22 @@ export function AmbientParticles({ count = 800, radius = 18 }: AmbientParticlesP
       // distribute on a thick shell rather than concentrating at center.
       let x = 0, y = 0, z = 0, len = 0
       do {
+        // eslint-disable-next-line react-hooks/purity -- intentional randomness (Math.random() for particle/animation generation)
         x = Math.random() * 2 - 1
+        // eslint-disable-next-line react-hooks/purity -- intentional randomness (Math.random() for particle/animation generation)
         y = Math.random() * 2 - 1
+        // eslint-disable-next-line react-hooks/purity -- intentional randomness (Math.random() for particle/animation generation)
         z = Math.random() * 2 - 1
         len = x * x + y * y + z * z
       } while (len > 1 || len < 0.04)
+      // eslint-disable-next-line react-hooks/purity -- intentional randomness (Math.random() for particle/animation generation)
       const r = radius * (0.5 + Math.random() * 0.5)
       const inv = r / Math.sqrt(len)
       positions[i * 3 + 0] = x * inv
       positions[i * 3 + 1] = y * inv
       positions[i * 3 + 2] = z * inv
 
+      // eslint-disable-next-line react-hooks/purity -- intentional randomness (Math.random() for particle/animation generation)
       const palette = PALETTE[Math.floor(Math.random() * PALETTE.length)]
       colors[i * 3 + 0] = palette[0]
       colors[i * 3 + 1] = palette[1]

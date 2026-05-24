@@ -323,6 +323,7 @@ export function ConversationList({
                 <div className="min-w-0 flex-1 max-w-[calc(100%-4rem)] scroll-title">
                   {renamingId === convo.id ? (
                     <input
+                      // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline rename input; mount means rename was explicitly invoked
                       autoFocus
                       className="w-full bg-transparent text-xs outline-none border-b border-brand"
                       value={renameValue}

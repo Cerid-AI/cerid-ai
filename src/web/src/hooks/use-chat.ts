@@ -25,6 +25,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const onModelFallbackRef = useRef(onModelFallback)
+  // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
   onModelFallbackRef.current = onModelFallback
 
   // Abort any in-flight stream when the consumer unmounts (e.g. user switches

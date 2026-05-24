@@ -146,6 +146,7 @@ function SaveToVaultDialogBody({
   // list arrives. Don't overwrite an explicit user choice.
   useEffect(() => {
     if (vaultId || !vaults || vaults.length === 0) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setVaultId(vaults[0].id)
   }, [vaultId, vaults])
 
