@@ -2,6 +2,114 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Post-rc1 polish: tech-debt sweep + S2 doc reconciliation + Sentry/SDK closeouts (2026-05-24)
+
+Tail-end work on top of v1.0.0-rc1, after the UX polish sprint, executing
+phases S1–S3 of the unified GA program plus the SDK-coverage audit
+findings.
+
+### Tech debt + observability
+
+- **Atlas hover type fix** — `AtlasNodeAttributes.highlighted?: boolean`
+  declared so the K-program sigma hover handler typechecks under CI's
+  stricter `keyof T` inference. The CI failure cascaded across `frontend`,
+  `preservation`, and `benchmark / slo` via the cerid-web docker build;
+  one fix cleared all three. (`541218b`)
+- **Graph timeline broad-excepts wired to `log_swallowed_error`** — four
+  sites in `app/routers/graph.py` (timeline cache read, neo4j-unavailable,
+  cypher-failed, cypher-exec-failed) migrated from
+  `logger.debug`/`warning` to the canonical helper so failures surface
+  in `/health.swallowed_errors_last_hour` and Sentry context tagging.
+  (`88b8b68`)
+- **Drift artifacts regenerated** — `docs/ROUTER_REGISTRY.md` 362 → 363
+  routes (the K5 `/concepts/{community_id:path}` row that had been
+  missing since the K-program landed); `requirements.lock` brought into
+  sync with pip-compile for fastapi/starlette/uvicorn patches. (`b39ea30`)
+
+### Documentation reconciliation (Phase S2 of the unified GA program)
+
+- **`docs/COMPLETED_PHASES.md`** — five new entries cover the gap from
+  v0.93.7 → v1.0.0-rc1: v0.93.8–v0.95.x stack, v0.96.0+v0.96.1 ablation
+  hardening, v1.0 master plan Phases A–N + L + M, Knowledge Architecture
+  program K1–K6, v1.0.0-rc1 + UX polish sprint.
+- **`CLAUDE.md` + `docs/ROADMAP.md`** — preservation counts corrected
+  to actual (55 test functions across 11 modules; was claimed 79/15).
+- **`tasks/todo.md`** — pruned 289 → 92 lines: K-program section flipped
+  to SHIPPED with pointer to the master plan's S4 metric soak;
+  pre-v1.0 historical sections removed (v0.96 candidate themes,
+  Workstream E status, Post-v0.90.0 candidates, cerid-trading-agent
+  backend issues — all resolved or absorbed into the unified GA program).
+- **`tasks/lessons.md` graduation** — 486 → 332 LOC. Tightened
+  operational gotchas to recipe-form while preserving the irreplaceable
+  hardware/recovery runbooks (GPU on Mac Pro Vega II, Neo4j WAL recovery,
+  Docker bind-mount drift, setup-wizard env file) at full length.
+  Removed two entries already cross-referenced as graduated in the
+  table above (Chrome localhost cache → CONVENTIONS Frontend;
+  external:true network bridge → CONVENTIONS Docker). (`5ec9f6d`)
+
+### Frontend Sentry production wiring (GA_CHECKLIST P0)
+
+Three real gaps closed in the otherwise-wired `@sentry/react` integration:
+
+- **`AppErrorBoundary.componentDidCatch` → `captureException`** with the
+  React component stack as a `componentStack` extra. Render-time crashes
+  previously never reached production observability. (`645e0d2`)
+- **`lib/sentry.ts` prefers `window.__ENV__.VITE_SENTRY_DSN_WEB`** over
+  `import.meta.env`, matching the runtime-override pattern already in
+  `lib/api/common.ts` for `VITE_MCP_URL`. DSN rotation no longer
+  requires a rebuild.
+- **`docker-entrypoint.sh` + `docker-compose.yml`** emit
+  `VITE_SENTRY_DSN_WEB` + `VITE_APP_VERSION` into `window.__ENV__` at
+  container boot, plumbed from the host environment.
+
+`CLAUDE.md` Sentry table updated to list `cerid-ai-web` as Active. The
+DSN itself is operator-provisioned (next step: create the
+`cerid-ai-web` Sentry project + add `SENTRY_DSN_WEB` to the GitHub
+secrets + `.env` on operator hosts).
+
+### S4 soak instrumentation
+
+- **`scripts/k_program_metrics.py` polish** — auto-load repo-root `.env`
+  for host-side runs; `notifications_disabled_classifications=["UNRECOGNIZED"]`
+  silences Neo4j property-key warnings on fresh corpora; `_fmt()`
+  renders `None` as em-dash in the `--cron` weekly markdown so rows
+  scan cleanly before metric writers have emitted samples. Verified
+  end-to-end against the live stack: all 6 metrics report
+  `available: true`. (`e4e60a1`)
+
+### SDK client coverage (audit closeout, pre-GA)
+
+Server exposed 15 endpoints at wire-protocol 1.1.0; client packages
+at 0.1.0 covered only 12 of them. Three real capability gaps closed
+across both Python + TypeScript clients:
+
+- **`GET /sdk/v1/memory/extract/jobs/{job_id}`** — async memory-extract
+  callers received a `job_id` from `POST /memory/extract` and had no
+  SDK method to poll it; the entire `MEMORY_QUEUE_MODE=async` flow was
+  broken end-to-end through typed clients.
+- **`POST /sdk/v1/llm/complete`** — smart-routed LLM completion across
+  FREE/CHEAP/CAPABLE/RESEARCH/EXPERT tiers with `slo_budget_ms`-aware
+  tier filtering. New `LLMResource` (sync + async) on the Python client;
+  new `LLMResource` on the TypeScript client.
+- **`POST /sdk/v1/ingest/external`** — adapter-shaped ingest for
+  Readwise / Pocket / Telegram-bot / Raindrop / Instapaper integrations.
+  `kb.ingest_external()` (Python) / `kb.ingestExternal()` (TypeScript).
+
+Client packages bumped **0.1.0 → 0.1.1** (patch, additive — both stay
+pre-1.0 through the v1.0 RC cycle and flip to 1.0.0 when the main
+product goes GA). Wire-protocol stays at 1.1.0 (no server change —
+these endpoints already shipped server-side; only the clients caught
+up). `docs/SDK_GUIDE.md` corrected from "12 endpoints" to "15
+endpoints"; full table refresh. (`4ca8f2c`)
+
+### Verification
+
+- 5,537 backend tests + 1,329 frontend tests + 24 Python SDK tests +
+  28 TypeScript SDK tests pass on `c739eb8`.
+- CI green on `main` end-to-end after the drift-artifact regeneration
+  and Atlas TS fix.
+- Public mirror synced (`scripts/sync-repos.py`); leak-scanner clean.
+
 ## Unreleased — UX polish sprint: motion design system + Liquid Glass + shared-element transitions (2026-05-24)
 
 Three-commit cohesive UX sprint atop v1.0.0-rc1. Introduces a project-wide
