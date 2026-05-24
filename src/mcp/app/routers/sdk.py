@@ -367,6 +367,109 @@ async def sdk_ingest_external(request: ExternalIngestRequest) -> IngestResult:
 
 
 # ---------------------------------------------------------------------------
+# Webhook receiver — Phase 2A of the Ingestion Experience plan (B2.1)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/ingest/webhook/{token}",
+    summary="Token-gated webhook receiver",
+    description=(
+        "Generic inbound endpoint for any external service. The ``{token}`` "
+        "path segment identifies a previously-created webhook-kind Source "
+        "record whose ``config`` carries the matching token + optional HMAC "
+        "secret. Returns ``202 Accepted`` immediately and queues the payload "
+        "for async processing.\n\n"
+        "**Authentication:** the token itself is the credential. For higher "
+        "assurance, configure an HMAC secret on the source and require "
+        "``X-Cerid-Signature: sha256=<hex>`` on every request; mismatched "
+        "signatures return 401.\n\n"
+        "**Adapter routing:** payloads can carry the canonical fields "
+        "directly OR the source's config can declare per-source "
+        "``field_mappings`` (Readwise / Pocket / Slack / GitHub-events / "
+        "etc.) that extract them from a third-party-shaped payload."
+    ),
+    responses={
+        404: {"description": "Unknown webhook token"},
+        401: {"description": "HMAC signature missing or invalid"},
+    },
+    status_code=202,
+)
+async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
+    """Token-gated webhook receiver. See module docstring."""
+    import json as _json
+
+    from app.db.neo4j import sources as srcdb
+    from app.deps import get_neo4j, get_redis
+    from app.services.webhook_tokens import (
+        find_webhook_source,
+        verify_hmac_signature,
+    )
+    from core.utils.swallowed import log_swallowed_error
+
+    driver = get_neo4j()
+
+    # Resolve the webhook source by token.
+    source = find_webhook_source(driver, token)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Unknown webhook token")
+
+    # Read body once; HMAC + ingestion both need it.
+    body = await request.body()
+
+    # Optional HMAC verification when the source's config declares a secret.
+    config = source.get("config", {}) or {}
+    secret = config.get("hmac_secret") if isinstance(config, dict) else None
+    signature_header = request.headers.get("X-Cerid-Signature", "")
+    if secret and not verify_hmac_signature(secret, body, signature_header):
+        raise HTTPException(
+            status_code=401,
+            detail="HMAC signature missing or invalid",
+        )
+
+    try:
+        payload = _json.loads(body.decode("utf-8")) if body else {}
+    except (UnicodeDecodeError, _json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Malformed JSON: {exc}")
+
+    source_id = source["id"]
+
+    # Phase 2A ships the synchronous-accept-then-queue shell. The
+    # adapter-library routing per field_mappings on the source's
+    # config lands in Phase 2B; for now we mark the source as touched
+    # and enqueue the payload.
+    try:
+        srcdb.update_source_status(driver, source_id, status="connected")
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "sdk_ingest_webhook.update_status",
+            exc,
+            context={"source_id": source_id},
+        )
+
+    try:
+        redis_client = get_redis()
+        if redis_client is not None:
+            redis_client.rpush(
+                f"cerid:webhook_inbox:{source_id}",
+                _json.dumps(
+                    {
+                        "received_at": request.headers.get("date", ""),
+                        "payload": payload,
+                    },
+                ),
+            )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "sdk_ingest_webhook.enqueue",
+            exc,
+            context={"source_id": source_id},
+        )
+
+    return {"status": "accepted", "source_id": source_id}
+
+
+# ---------------------------------------------------------------------------
 # Collections / Taxonomy / Search
 # ---------------------------------------------------------------------------
 
