@@ -1088,6 +1088,11 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/setup/": (20, 60),
             "/admin/": (20, 60),
             "/observability/": (30, 60),
+            # Auth endpoints (only mounted when CERID_MULTI_USER=true). Tight
+            # 5-per-60s budget stops brute-force credential guessing before
+            # the password-equality work runs. /refresh shares the bucket so
+            # a leaked refresh token can't be replayed at high rate either.
+            "/auth/": (5, 60),
         },
         "allowed_domains": None,
         "strict_domains": False,
