@@ -90,6 +90,13 @@ export interface AtlasNodeAttributes extends GraphNode {
    * shader with sigma's NodeCircleProgram via createNodeCompoundProgram.
    */
   type: "haloed"
+  /**
+   * Sigma built-in node attribute toggled by hover handlers (`enterNode`
+   * / `leaveNode`). When true, sigma renders the node above its peers
+   * and applies the default highlight palette. Declared optional so
+   * callers don't have to seed it at graph build time.
+   */
+  highlighted?: boolean
 }
 
 /** Atlas-internal edge attributes */

@@ -149,14 +149,14 @@ export function TourControlPanel({
           <button
             type="button"
             onClick={handleStart}
-            className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-card/95 px-4 py-2 text-sm font-medium text-foreground shadow-lg backdrop-blur hover:bg-accent"
+            className="liquid-glass pointer-events-auto flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/30"
           >
             <Play className="h-3.5 w-3.5" aria-hidden="true" />
             Take a tour
           </button>
         )}
         {state.kind === "loading" && (
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-card/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
+          <div className="liquid-glass pointer-events-auto flex items-center gap-2 rounded-full px-4 py-2 text-sm">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
             Composing tour…
           </div>
@@ -164,7 +164,7 @@ export function TourControlPanel({
         {(state.kind === "playing" || state.kind === "paused") && (
           <div className="pointer-events-auto flex max-w-xl flex-col items-center gap-2">
             {/* Controls */}
-            <div className="flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 py-1 shadow-lg backdrop-blur">
+            <div className="liquid-glass flex items-center gap-1.5 rounded-full px-3 py-1">
               {state.kind === "playing" ? (
                 <button type="button" onClick={onPause} aria-label="Pause" className="rounded-full p-1 hover:bg-accent/40">
                   <Pause className="h-3.5 w-3.5" />
@@ -195,7 +195,7 @@ export function TourControlPanel({
               </button>
             </div>
             {/* Subtitle — always rendered (a11y) */}
-            <div className="rounded-md bg-background/90 px-4 py-2 text-center text-sm text-foreground shadow-lg backdrop-blur">
+            <div className="liquid-glass rounded-md px-4 py-2 text-center text-sm text-foreground">
               {state.arc.stops[state.stopIndex]?.narration}
             </div>
           </div>

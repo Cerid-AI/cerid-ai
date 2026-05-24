@@ -19,6 +19,7 @@ import { useNavigation } from "@/contexts/navigation-context"
 import { Atlas } from "./atlas/Atlas"
 import { SubjectsSearchPalette } from "./search-palette"
 import { SubjectsViewsSidebar } from "./subjects-views-sidebar"
+import { withViewTransition } from "@/lib/view-transitions"
 
 const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
 // Lazy-load Constellation so the three.js bundle (~250KB gzipped)
@@ -107,7 +108,12 @@ export default function SubjectsPane() {
   const handleModeChange = useCallback((next: SubjectsMode) => {
     const def = MODE_DEFS.find((d) => d.id === next)
     if (!def || !def.available) return
-    setMode(next)
+    // Wrap in a view transition where supported — Chrome 111+ /
+    // Safari 18+ get shared-element morphing for free; everyone else
+    // falls back to the CSS mode-swap keyframes on the container.
+    void withViewTransition(() => {
+      setMode(next)
+    })
   }, [])
 
   const handleSearchPalette = useCallback(() => setPaletteOpen(true), [])
@@ -152,9 +158,9 @@ export default function SubjectsPane() {
                 aria-controls={`subjects-panel-${def.id}`}
                 disabled={!def.available}
                 onClick={() => handleModeChange(def.id)}
-                className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors ${
+                className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm transition-all duration-200 ${
                   isActive
-                    ? "bg-accent text-accent-foreground"
+                    ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_rgba(0,229,216,0.30),0_0_12px_rgba(0,229,216,0.18)]"
                     : def.available
                       ? "text-foreground/80 hover:bg-accent/40"
                       : "cursor-not-allowed text-muted-foreground/50"
@@ -167,6 +173,16 @@ export default function SubjectsPane() {
             )
           })}
         </div>
+        {focalEntity && mode !== "wiki" && (
+          <span
+            className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-0.5 text-label-xs font-medium text-foreground"
+            style={{ viewTransitionName: "focal-entity" }}
+            aria-label={`Focal entity: ${focalEntity}`}
+            data-testid="subjects-focal-entity-chip"
+          >
+            {focalEntity}
+          </span>
+        )}
         <div className="grow" />
         {sinceFilter && (
           <button
@@ -216,7 +232,10 @@ export default function SubjectsPane() {
             />
           </div>
         )}
-        <div className="grow overflow-hidden">
+        <div
+          key={mode}
+          className={`grow overflow-hidden ${mode === "constellation" ? "mode-swap-deep" : "mode-swap"}`}
+        >
         {mode === "atlas" && (
           focalEntity ? (
             <Atlas

@@ -2,6 +2,164 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — UX polish sprint: motion design system + Liquid Glass + shared-element transitions (2026-05-24)
+
+Three-commit cohesive UX sprint atop v1.0.0-rc1. Introduces a project-wide
+motion design system (one easing curve + four duration steps), the Liquid
+Glass surface treatment, View Transitions API integration with
+shared-element morphing, and broad polish across panes, lists, popovers,
+and buttons. Authored alongside two new global skills
+(`fluid-design` + `cerid-ux-best-practices`) that codify the patterns
+for future contributors and agent sessions.
+
+### Frontend — motion foundation
+
+- **Motion design tokens** (`src/web/src/index.css`): `--ease-fluid`
+  (cubic-bezier 0.16/1/0.3/1) and four duration tokens —
+  `--duration-fast` 120ms (hover/focus/press), `--duration-snug` 180ms
+  (chip/menu/popover), `--duration-medium` 260ms (drawer/sheet/mode swap),
+  `--duration-grand` 480ms (hero/opening sequence). Every animation now
+  references these instead of hardcoding values.
+- **New utilities**: `.liquid-glass` (backdrop-filter + SVG refraction +
+  inset rim light, with `prefers-reduced-transparency` solid fallback),
+  `.cerid-stagger` / `.cerid-stagger-fast` (`--i`-indexed list cascade
+  capped at 8 to avoid jank on long lists), `.cerid-press` (0.97 scale
+  on `:active`, longhand-declared so Tailwind transition utilities don't
+  clobber it), `.cerid-fade-swap` (data-state-driven content cross-fade),
+  `.metric-pulse` + `.metric-value-pulse` (teal halo + scale tween on
+  numeric value change). All honor `prefers-reduced-motion`.
+
+### Frontend — shared-element transitions
+
+- **`lib/view-transitions.ts`**: feature-detected wrapper around
+  `document.startViewTransition` with `withViewTransition(update)` and
+  `tagForTransition(el, name)` helpers. Bypasses on
+  `prefers-reduced-motion` or when the API is absent (Firefox <129 /
+  Safari <18 fall through to direct execution).
+- **Shared-element morphs wired**: focal-entity name morphs between the
+  Subjects mode-switcher chip and the Wiki H1 (`view-transition-name:
+  "focal-entity"`); Quick-capture FAB morphs into the modal surface
+  (`"quick-capture-surface"`); sidebar active-pane indicator slides
+  between buttons (`"active-pane-indicator"` — consolidated onto the
+  shared helper from the prior inline implementation).
+
+### Frontend — Liquid Glass surfaces
+
+- **`<LiquidGlassDefs />`** (`components/ui/liquid-glass-defs.tsx`):
+  SVG `<filter>` with `feTurbulence` + `feDisplacementMap` mounted once
+  at App root; reused by every `.liquid-glass` surface via
+  `filter: url(#cerid-liquid-glass)`. Subtle refraction (scale=6) gives
+  the surface a hint of physical material without distorting content
+  underneath.
+- **Applied to**: Atlas lens panel, Tour controller (idle button +
+  loading pill + control pill + subtitle bar), Quick-capture modal
+  panel, Search palette, Wiki entity-detail sticky header.
+
+### Frontend — opening sequence
+
+- **`<OpeningSequence />`** (`components/ui/opening-sequence.tsx`):
+  3-phase state machine — "playing" (gold ring reveals, navy shield,
+  teal opening "C" draws in, inner glow blooms, 1100ms) → "fading"
+  (overlay fades to transparent, 400ms) → "done" (overlay unmounts,
+  content rises). `sessionStorage` flag `cerid:opening-sequence-played`
+  skips on revisit; `prefers-reduced-motion` also skips. Mounted at
+  z-index 9999 with a navy backdrop above all panes.
+
+### Frontend — list stagger + cross-fades
+
+- **List stagger**: Conversation list, Wiki entity list, Subjects search
+  palette results now cascade in via `.cerid-stagger-fast` with
+  `--i = Math.min(idx, 8)`. Applied only to lists meeting the user on
+  navigation; in-place updates are not staggered.
+- **Cross-fade mount**: Wiki entity-detail-view root and Constellation
+  root use `.cerid-stagger-fast --i=0` so the canvas/content fades up
+  rather than hard-cutting from the loading state.
+
+### Frontend — press anticipation + popover origin
+
+- **Button**: `.cerid-press` applied at the cva base variant so every
+  shadcn `<Button>` gets the 0.97 scale-down on `:active` with token
+  durations. Replaced `transition-all` (which was clobbering the press
+  transition) with the longhand declaration inside `.cerid-press`.
+- **Popover**: `transformOrigin` pinned to
+  `var(--radix-popover-content-transform-origin)` so menus grow from
+  their trigger, not from the center. (`<Select>` was already
+  origin-aware via the shadcn template.)
+
+### Frontend — sigma hover affordance
+
+- **Atlas** (`components/subjects/atlas/Atlas.tsx`): `enterNode` /
+  `leaveNode` handlers toggle sigma's built-in `highlighted` graph
+  attribute, with a try/catch swallowing the race where a node is
+  removed mid-event. Provides a hover affordance on canvas-rendered
+  nodes that CSS hover transforms can't reach.
+
+### Frontend — knowledge panel metric pulse
+
+- **`<MetricCard>`** (`components/analytics/knowledge-panel.tsx`):
+  tracks the previous value with `useRef`, applies `.metric-pulse`
+  (teal box-shadow halo) + `.metric-value-pulse` (scale + brand-teal
+  color tween) for 900ms when the underlying value changes. Reduced-
+  motion compliant.
+
+### Frontend — utilities
+
+- **`lib/flip.ts`** + tests: vanilla FLIP (First, Last, Invert, Play)
+  helper for layout changes. `snapshotPositions`, `playFromSnapshot`,
+  and the `flip(elements, mutate, options?)` convenience wrapper.
+  WeakMap-tracked in-flight cancels so overlapping `flip()` calls on
+  the same element don't race on inline-style resets. 5 unit tests
+  including the concurrent-call regression case.
+
+### Skills (global)
+
+- **`fluid-design`** (kemiljk/fluid-design) installed at
+  `~/.agents/skills/fluid-design`. Karim El Kholy's 10-principle guide
+  to fluid interfaces (physics-based motion, interruptibility, direct
+  manipulation, velocity preservation, shared-element transitions,
+  input-method adaptation, animated layout, rubber-banding, choreography,
+  reduced motion).
+- **`cerid-ux-best-practices`** (new, authored this sprint) at
+  `~/.agents/skills/cerid-ux-best-practices`. Codifies the Cerid-specific
+  patterns the codebase has converged on — motion tokens, Liquid Glass
+  utility, View Transitions helpers, stagger + FLIP, origin-based
+  popovers, metric-pulse pattern, sigma hover affordance, opening
+  sequence, mode swap choreography, anti-patterns, and a cohesion
+  checklist. Available to future sessions across every supported agent
+  surface (Claude Code, Codex, Cursor, etc.) via the standard skills
+  symlink.
+
+### Tests
+
+- `__tests__/opening-sequence.test.tsx` — 5 tests: SVG renders on first
+  paint, skip when sessionStorage flag set, skip on prefers-reduced-
+  motion, auto-dismiss after 1400ms, `LiquidGlassDefs` mounts the
+  filter.
+- `__tests__/view-transitions.test.ts` — 6 tests: fallback when API
+  unavailable, uses `startViewTransition` when present, bypasses on
+  reduced-motion, `tagForTransition` null + restore semantics.
+- `__tests__/flip.test.ts` — 5 tests covering snapshot semantics,
+  reduced-motion bypass, empty-input no-op, compose helper, and the
+  concurrent-call regression.
+
+### Verification
+
+- Frontend Vitest suite: 1325 passed / 2 skipped (up from 1320 / 2).
+- `tsc --noEmit`: 0 errors.
+- `vite build`: succeeds with the long-standing ~800KB bundle advisory.
+- ESLint: 0 errors; all 8 warnings on touched files are pre-existing.
+- Independent code review (`feature-dev:code-reviewer` subagent): two
+  high-confidence findings (Button transition collision, FLIP concurrent
+  race) caught and fixed in the follow-up commit `314f9cd`.
+
+### Commits
+
+- `a79c276` feat(ux): Liquid Glass + opening sequence + mode transitions
+  + View Transitions API
+- `800a765` feat(ux): motion tokens, stagger, FLIP, glass + sigma hover
+  sweep
+- `314f9cd` fix(ux): review-driven follow-ups to motion sweep
+
 ## Unreleased — Phases K2–K6: Cross-surface linkage + surface router + Karpathy log/index + ops (2026-05-22)
 
 Completes the Knowledge Architecture program (K1 shipped earlier

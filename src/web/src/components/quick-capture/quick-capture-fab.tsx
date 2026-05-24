@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Plus, X, Upload, Link as LinkIcon, FileText, Loader2 } from "lucide-react"
 import { useNavigation } from "@/contexts/navigation-context"
 import { uploadFile } from "@/lib/api/kb"
+import { withViewTransition } from "@/lib/view-transitions"
 
 type CaptureMode = "url" | "note" | "upload"
 
@@ -37,9 +38,9 @@ export function QuickCaptureFab() {
       const isMod = e.metaKey || e.ctrlKey
       if (isMod && e.shiftKey && e.key.toLowerCase() === "n") {
         e.preventDefault()
-        setOpen(true)
+        void withViewTransition(() => setOpen(true))
       } else if (e.key === "Escape" && open) {
-        setOpen(false)
+        void withViewTransition(() => setOpen(false))
       }
     }
     document.addEventListener("keydown", onKey)
@@ -124,9 +125,10 @@ export function QuickCaptureFab() {
       {!open && (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => withViewTransition(() => setOpen(true))}
           aria-label="Quick capture"
           title="Quick capture (⌘⇧N)"
+          style={{ viewTransitionName: "quick-capture-surface" }}
           className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform hover:scale-105 hover:bg-primary/90"
         >
           <Plus className="h-5 w-5" aria-hidden="true" />
@@ -141,11 +143,12 @@ export function QuickCaptureFab() {
           aria-label="Quick capture"
           className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setOpen(false)
+            if (e.target === e.currentTarget) void withViewTransition(() => setOpen(false))
           }}
         >
           <div
-            className="w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl"
+            style={{ viewTransitionName: "quick-capture-surface" }}
+            className="liquid-glass w-full max-w-lg rounded-xl"
             onDragOver={(e) => e.preventDefault()}
             onDrop={onDrop}
           >
@@ -153,7 +156,7 @@ export function QuickCaptureFab() {
               <span className="grow text-sm font-semibold">Quick capture</span>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => withViewTransition(() => setOpen(false))}
                 className="rounded p-1 text-muted-foreground hover:bg-accent/40"
                 aria-label="Close"
               >

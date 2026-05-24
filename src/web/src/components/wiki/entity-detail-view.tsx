@@ -128,33 +128,35 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
   const showLowConfidenceMarker = data.confidence_band === "low"
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="space-y-6 p-6">
-        {/* ----------------------------------------------------------------- */}
-        {/* Header                                                            */}
-        {/* ----------------------------------------------------------------- */}
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold text-foreground">{data.name}</h1>
-            {refreshOverdue ? (
-              <span
-                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-                aria-label="Updating from new evidence"
-              >
-                <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
-                Updating from new evidence
-              </span>
-            ) : (
-              <ConfidenceBandBadge band={data.confidence_band} />
-            )}
-            {showLowConfidenceMarker && <ProvenanceMarker kind="uncertain" />}
-            {data.contradictions.length > 0 && <ProvenanceMarker kind="contradicted" />}
-          </div>
-          {relativeUpdated && (
-            <p className="text-xs text-muted-foreground">Updated {relativeUpdated}</p>
+    <div className="cerid-stagger-fast h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}>
+      <div className="liquid-glass sticky top-0 z-10 space-y-1 px-6 pb-3 pt-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1
+            className="text-xl font-semibold text-foreground"
+            style={{ viewTransitionName: "focal-entity" }}
+          >
+            {data.name}
+          </h1>
+          {refreshOverdue ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+              aria-label="Updating from new evidence"
+            >
+              <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
+              Updating from new evidence
+            </span>
+          ) : (
+            <ConfidenceBandBadge band={data.confidence_band} />
           )}
+          {showLowConfidenceMarker && <ProvenanceMarker kind="uncertain" />}
+          {data.contradictions.length > 0 && <ProvenanceMarker kind="contradicted" />}
         </div>
+        {relativeUpdated && (
+          <p className="text-xs text-muted-foreground">Updated {relativeUpdated}</p>
+        )}
+      </div>
 
+      <div className="space-y-6 px-6 pb-6 pt-3">
         <Separator />
 
         {/* ----------------------------------------------------------------- */}

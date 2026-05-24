@@ -31,6 +31,18 @@
     --text-label-xxs: 0.5625rem;
     --text-label-xs: 0.625rem;
     --text-label-sm: 0.6875rem;
+    /* Motion design tokens. One easing curve + four duration steps cover
+       every animated surface in the app. Hover/focus/press → fast (120ms),
+       chip/menu/popover → snug (180ms), drawer/sheet → medium (260ms),
+       mode swap / hero → grand (480ms). The easing approximates a
+       critically-damped spring; interruptible CSS transitions inherit it
+       so reversals stay smooth. */
+    --ease-fluid: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-fluid-soft: cubic-bezier(0.22, 1, 0.36, 1);
+    --duration-fast: 120ms;
+    --duration-snug: 180ms;
+    --duration-medium: 260ms;
+    --duration-grand: 480ms;
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);
@@ -381,6 +393,177 @@
 /* KB artifact card action buttons — always show pointer cursor */
 .artifact-action-btn {
   cursor: pointer;
+}
+
+/* ===================================================================
+   Liquid Glass — Apple-inspired DOM treatment for transient overlays
+   ===================================================================
+   Apply to high-attention surfaces (command palette, modal dialogs,
+   floating toolbars). Never to content (chat bubbles, wiki body).
+   Cap at 2 visible at a time — multiple stacked backdrop-filter
+   layers tank framerate on Intel iGPUs.
+
+   Stack:
+   - backdrop-filter blur+saturate for the frosted base
+   - SVG filter (#cerid-liquid-glass) for subtle refraction
+   - inset rim light + teal inner border for the bevel
+   - subtle gradient fill for tonal warmth
+
+   Fallbacks: prefers-reduced-motion AND prefers-reduced-transparency
+   each disable the effect, swapping to a solid panel surface.
+   =================================================================== */
+.liquid-glass {
+  position: relative;
+  background: linear-gradient(135deg,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(0, 229, 216, 0.04) 100%);
+  backdrop-filter: blur(18px) saturate(180%) contrast(115%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%) contrast(115%);
+  filter: url(#cerid-liquid-glass);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(0, 229, 216, 0.10),
+    0 8px 32px rgba(10, 31, 61, 0.40),
+    0 2px 8px rgba(10, 31, 61, 0.20);
+  border-radius: 12px;
+}
+.dark .liquid-glass {
+  background: linear-gradient(135deg,
+    rgba(10, 31, 61, 0.55) 0%,
+    rgba(0, 229, 216, 0.06) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 0 0 1px rgba(0, 229, 216, 0.14),
+    0 12px 40px rgba(0, 0, 0, 0.50),
+    0 0 24px rgba(0, 229, 216, 0.08);
+}
+
+/* Fallback: solid panel when transparency or motion is disabled */
+@media (prefers-reduced-transparency: reduce),
+       (prefers-reduced-motion: reduce) {
+  .liquid-glass {
+    background: var(--card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    filter: none;
+    box-shadow:
+      0 4px 12px rgba(10, 31, 61, 0.18),
+      0 1px 0 rgba(0, 229, 216, 0.12) inset;
+  }
+}
+
+/* ===================================================================
+   Opening sequence — first-paint app reveal
+   =================================================================== */
+@keyframes cerid-mark-reveal {
+  0%   { opacity: 0; transform: scale(0.92); filter: blur(8px); }
+  60%  { opacity: 1; transform: scale(1.0); filter: blur(0); }
+  100% { opacity: 0; transform: scale(1.04); filter: blur(2px); }
+}
+@keyframes cerid-content-rise {
+  0%   { opacity: 0; transform: scale(0.96) translateY(8px); }
+  100% { opacity: 1; transform: scale(1.0) translateY(0); }
+}
+@keyframes cerid-pane-mode-swap {
+  0%   { opacity: 0; transform: scale(0.985); filter: blur(2px); }
+  100% { opacity: 1; transform: scale(1.0); filter: blur(0); }
+}
+@keyframes cerid-pane-mode-swap-deep {
+  /* For Constellation — slightly more theatrical */
+  0%   { opacity: 0; transform: scale(0.92); filter: blur(6px) brightness(0.7); }
+  60%  { opacity: 1; filter: blur(0) brightness(1.1); }
+  100% { opacity: 1; transform: scale(1.0); filter: blur(0) brightness(1.0); }
+}
+
+@keyframes cerid-metric-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(0, 229, 216, 0.45); }
+  50%  { box-shadow: 0 0 0 6px rgba(0, 229, 216, 0.18); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 229, 216, 0.0); }
+}
+
+@keyframes cerid-metric-value-pulse {
+  0%   { transform: scale(1.0); color: inherit; }
+  35%  { transform: scale(1.08); color: oklch(0.82 0.16 178); }
+  100% { transform: scale(1.0); color: inherit; }
+}
+
+.cerid-mark-reveal { animation: cerid-mark-reveal 1100ms var(--ease-fluid) forwards; }
+.cerid-content-rise { animation: cerid-content-rise 540ms var(--ease-fluid) forwards; }
+/* Mode swap is intentionally kept as a one-shot keyframe so React's
+   key-based remount (subjects-pane wraps the mode container with key={mode})
+   produces a clean enter animation. The view-transitions wrapper handles
+   reversal mid-swap for browsers that support the API; non-supporting
+   browsers see the keyframe complete and the next mode begin. */
+.mode-swap { animation: cerid-pane-mode-swap var(--duration-medium) var(--ease-fluid); }
+.mode-swap-deep { animation: cerid-pane-mode-swap-deep var(--duration-grand) var(--ease-fluid); }
+.metric-pulse { animation: cerid-metric-pulse 900ms var(--ease-fluid); }
+.metric-value-pulse {
+  display: inline-block;
+  animation: cerid-metric-value-pulse 900ms var(--ease-fluid);
+}
+
+/* Stagger utility — set `--i` on each child to its index. Capped at 600ms
+   total per the fluid-design Principle 9 guideline (8–10 items × 60ms).
+   For longer lists, use `cerid-stagger-fast` (40ms step) or render the
+   remainder without the class. */
+.cerid-stagger {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: cerid-content-rise var(--duration-medium) var(--ease-fluid) forwards;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+.cerid-stagger-fast {
+  opacity: 0;
+  transform: translateY(6px);
+  animation: cerid-content-rise var(--duration-snug) var(--ease-fluid) forwards;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+/* Skeleton → content cross-fade. Wrap both states in `.cerid-fade-swap`
+   and toggle `data-state="loading|ready"` on the parent — the child with
+   the matching state fades in while the other fades out. */
+.cerid-fade-swap > [data-state] {
+  transition: opacity var(--duration-medium) var(--ease-fluid);
+}
+.cerid-fade-swap[data-state="loading"] > [data-state="ready"],
+.cerid-fade-swap[data-state="ready"] > [data-state="loading"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Press anticipation — buttons feel physical when they sink slightly on
+   press. Declared with longhand properties so Tailwind's `transition-all`
+   / `transition-colors` on the same element doesn't clobber the
+   transform+shadow track. */
+.cerid-press {
+  transition-property: transform, box-shadow, background-color, border-color, color, opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-fluid);
+}
+.cerid-press:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cerid-mark-reveal,
+  .cerid-content-rise,
+  .mode-swap,
+  .mode-swap-deep,
+  .metric-pulse,
+  .metric-value-pulse,
+  .cerid-stagger,
+  .cerid-stagger-fast {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .cerid-press,
+  .cerid-fade-swap > [data-state] {
+    transition: none !important;
+  }
+  .cerid-press:active {
+    transform: none !important;
+  }
 }
 
 /* --- Touch device overrides (iPad, phones) --- */

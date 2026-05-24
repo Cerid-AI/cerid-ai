@@ -22,7 +22,7 @@ export function AtlasLensPanel({ active, onToggle, visible }: AtlasLensPanelProp
 
   return (
     <div
-      className="absolute right-3 top-3 z-10 rounded-lg border border-border bg-card/95 p-3 shadow-lg backdrop-blur"
+      className="liquid-glass absolute right-3 top-3 z-10 rounded-lg p-3"
       role="group"
       aria-label="Atlas lens controls"
     >

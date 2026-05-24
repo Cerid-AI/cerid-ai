@@ -16,7 +16,7 @@
 // Reads from /health.wiki_freshness which K6.1 populated. Lightweight
 // component — pure data display, no animation.
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { AlertTriangle, BookOpen, Clock, GitMerge, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -47,11 +47,23 @@ interface MetricCardProps {
 }
 
 function MetricCard({ label, value, hint, icon, warn }: MetricCardProps) {
+  const prevRef = useRef<string | number>(value)
+  const [pulsing, setPulsing] = useState(false)
+
+  useEffect(() => {
+    if (prevRef.current === value) return
+    prevRef.current = value
+    setPulsing(true)
+    const t = window.setTimeout(() => setPulsing(false), 900)
+    return () => window.clearTimeout(t)
+  }, [value])
+
   return (
     <Card
       className={cn(
-        "p-3 flex flex-col gap-1",
+        "p-3 flex flex-col gap-1 transition-shadow",
         warn && "border-amber-500/40 bg-amber-500/5",
+        pulsing && "metric-pulse",
       )}
       data-testid={`knowledge-metric-${label.toLowerCase().replace(/\s+/g, "-")}`}
     >
@@ -59,7 +71,14 @@ function MetricCard({ label, value, hint, icon, warn }: MetricCardProps) {
         {icon}
         {label}
       </div>
-      <div className="text-2xl font-mono tabular-nums">{value}</div>
+      <div
+        className={cn(
+          "text-2xl font-mono tabular-nums",
+          pulsing && "metric-value-pulse",
+        )}
+      >
+        {value}
+      </div>
       {hint && (
         <div className="text-[10px] text-muted-foreground leading-tight">{hint}</div>
       )}

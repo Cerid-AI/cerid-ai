@@ -152,6 +152,20 @@ export function Atlas({
     if (onNodeDoubleClick) {
       sigma.on("doubleClickNode", ({ node }) => onNodeDoubleClick(node))
     }
+    sigma.on("enterNode", ({ node }) => {
+      try {
+        graph.setNodeAttribute(node, "highlighted", true)
+      } catch {
+        // node may have been removed mid-event
+      }
+    })
+    sigma.on("leaveNode", ({ node }) => {
+      try {
+        graph.setNodeAttribute(node, "highlighted", false)
+      } catch {
+        // node may have been removed mid-event
+      }
+    })
     sigma.on("rightClickNode", ({ node, event }) => {
       const attrs = graph.getNodeAttributes(node)
       const original = event.original as MouseEvent | undefined
