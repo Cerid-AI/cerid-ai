@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Per-source retention enforcement — B3.5.
+"""Per-source retention enforcement.
 
 Each (:Source) node carries a ``retention_policy`` JSON blob with one
 of these shapes:

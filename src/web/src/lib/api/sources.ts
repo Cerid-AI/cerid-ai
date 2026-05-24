@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sources REST client — backs the F1 gallery, F2 FAB, F3 wizard, and
- * the source-detail pane (Phase 3). Mirrors the Pydantic schemas in
- * src/mcp/app/routers/sources.py.
+ * Sources REST client — backs the gallery, FAB, wizard, and detail
+ * pane. Mirrors the Pydantic schemas in src/mcp/app/routers/sources.py.
  */
 
 const API_BASE = ""

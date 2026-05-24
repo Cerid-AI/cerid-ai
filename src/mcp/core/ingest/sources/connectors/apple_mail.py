@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Apple Mail SourceConnector — Phase 4a B4a.1.
+"""Apple Mail SourceConnector.
 
 Wraps the ``ceridmail`` Swift helper (``packages/desktop/swift/CeridMail/``).
 The helper holds the TCC entitlement; this connector marshals
@@ -95,8 +95,9 @@ class AppleMailConnector(SourceConnector):
     async def fetch_since(
         self, source_id: str, cursor: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
-        """Phase 4a stub — full incremental walk lands when the
-        Swift helper's `since` subcommand parses .emlx into JSON.
+        """Empty iterator until the Swift helper's ``since`` subcommand
+        parses .emlx into JSON. The protocol stays valid; the walk
+        loop wires alongside the host-binary build.
         """
         if False:  # pragma: no cover
             yield SourceArtifactEvent(  # type: ignore[unreachable]

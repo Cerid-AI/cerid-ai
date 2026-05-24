@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * F7 — Webhook share card.
+ * Webhook share card.
  *
- * Liquid Glass surface (one of the 9). Shows the receiver URL (with
- * copy button and brand-mark pulse on copy), a pre-filled curl
- * example, and the require-HMAC toggle status. QR code is deferred
- * to Phase 3-follow-up — adding a QR lib would push the bundle cap.
+ * Liquid Glass surface. Shows the receiver URL (with copy button +
+ * brand-mark pulse on copy), a pre-filled curl example, and the
+ * require-HMAC toggle status.
  *
- * Mounts inside the F3 wizard's result step when the freshly-created
- * source is kind=webhook, replacing the placeholder block.
+ * Mounts inside the wizard's result step when the freshly-created
+ * source has kind=webhook.
  */
 
 import { useState } from "react"

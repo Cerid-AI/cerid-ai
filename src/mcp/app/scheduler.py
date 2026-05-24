@@ -722,9 +722,9 @@ async def _run_k_program_metrics() -> None:
 
 
 async def _run_retention_enforce() -> None:
-    """Phase 3 (B3.5) — nightly per-source retention enforcement.
-    Walks every (:Source) and applies its ``retention_policy``,
-    purging artifacts that fall outside the policy window.
+    """Nightly per-source retention enforcement. Walks every
+    (:Source) and applies its ``retention_policy``, purging artifacts
+    that fall outside the policy window.
     """
     start = time.time()
     try:
@@ -750,10 +750,9 @@ async def _run_retention_enforce() -> None:
 
 
 async def _run_knowledge_stats_snapshot() -> None:
-    """Phase 1 of the Ingestion Experience plan — daily Knowledge
-    Stats snapshot for sparkline rendering. Writes one
-    :KnowledgeStatsSnapshot node per day; idempotent re-runs
-    overwrite the same day's payload via MERGE.
+    """Daily Knowledge Stats snapshot for sparkline rendering.
+    Writes one :KnowledgeStatsSnapshot node per day; idempotent
+    re-runs overwrite the same day's payload via MERGE.
     """
     start = time.time()
     try:
@@ -914,9 +913,8 @@ def start_scheduler() -> AsyncIOScheduler:
             max_instances=1,
         )
 
-    # Phase 1 of the Ingestion Experience plan — daily Knowledge
-    # Stats snapshot for the F9 sparklines. Default midnight UTC;
-    # empty SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT disables.
+    # Daily Knowledge Stats snapshot for the Sources hero sparklines.
+    # Default midnight UTC; empty SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT disables.
     if getattr(config, "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *"):
         _scheduler.add_job(
             _run_knowledge_stats_snapshot,
@@ -924,13 +922,13 @@ def start_scheduler() -> AsyncIOScheduler:
                 getattr(config, "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *"),
             ),
             id="knowledge_stats_snapshot",
-            name="Knowledge Stats daily snapshot (Ingestion F9)",
+            name="Knowledge Stats daily snapshot",
             replace_existing=True,
             max_instances=1,
         )
 
-    # Phase 3 (B3.5) — nightly per-source retention enforcement.
-    # Default 2 AM UTC; empty SCHEDULE_RETENTION_ENFORCE disables.
+    # Nightly per-source retention enforcement. Default 2 AM UTC;
+    # empty SCHEDULE_RETENTION_ENFORCE disables.
     if getattr(config, "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *"):
         _scheduler.add_job(
             _run_retention_enforce,
@@ -938,7 +936,7 @@ def start_scheduler() -> AsyncIOScheduler:
                 getattr(config, "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *"),
             ),
             id="retention_enforce",
-            name="Per-source retention enforcement (Ingestion B3.5)",
+            name="Per-source retention enforcement",
             replace_existing=True,
             max_instances=1,
         )

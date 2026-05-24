@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Phase 4a B4a.8 — Apple connector E2E coverage.
+"""Apple connector E2E coverage.
 
 Exercises the Swift-backed Apple connectors (Mail, Calendar,
 Reminders, Photos, Spotlight) end-to-end. Each test skips when its

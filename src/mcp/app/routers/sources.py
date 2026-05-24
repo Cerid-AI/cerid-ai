@@ -14,11 +14,11 @@ Endpoints:
 * ``POST   /sources/{id}/test``     — re-run ``health_check`` against
   the live connector
 * ``DELETE /sources/{id}``          — remove the node + clear cursor
+* ``POST   /sources/{id}/policy``   — patch retention_policy / quality_floor
+* ``GET    /sources/{id}/webhook-url`` — webhook source's receiver URL
 
-Phase 2B scope. The connectors registered as of this phase are
-``rss`` and ``url_watch`` (B2.2 / B2.5); ``webhook`` sources are
-created here too but the actual ingest path is the Phase 2A
-``POST /sdk/v1/ingest/webhook/{token}`` receiver.
+Webhook sources are created here, but inbound traffic flows through
+``POST /sdk/v1/ingest/webhook/{token}`` (the security boundary).
 """
 from __future__ import annotations
 
@@ -334,8 +334,8 @@ async def get_webhook_url(source_id: str, request: Request):
 
 
 class PolicyPatch(BaseModel):
-    """Payload for ``POST /sources/{id}/policy`` — Phase 3 retention
-    + quality-floor editing from the F4 detail pane sliders.
+    """Payload for ``POST /sources/{id}/policy`` — retention + quality-
+    floor editing from the source-detail pane sliders.
     """
 
     retention_policy: dict[str, Any] | None = None

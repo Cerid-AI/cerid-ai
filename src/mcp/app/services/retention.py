@@ -1,12 +1,11 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Per-source retention enforcement — app-layer driver for B3.5.
+"""Per-source retention enforcement — app-layer driver.
 
 Calls into :mod:`core.ingest.retention` for the policy logic, then
 applies the resulting purge plans against Chroma + Neo4j. Triggered
-nightly by the scheduler (``SCHEDULE_RETENTION_ENFORCE``) and on
-demand via ``POST /sources/{id}/enforce-retention`` (Phase 3-follow-up).
+nightly by the scheduler (``SCHEDULE_RETENTION_ENFORCE``).
 """
 from __future__ import annotations
 

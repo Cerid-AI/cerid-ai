@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Clipboard SourceConnector — B2.3.
+"""Clipboard SourceConnector.
 
 Promotes the existing host-side clipboard daemon
 (``scripts/clipboard_daemon.py``) into the SourceConnector protocol.
@@ -38,10 +38,9 @@ _STALE_AFTER_S = 90
 class ClipboardConnector(SourceConnector):
     """Records that a host-side clipboard daemon is active.
 
-    Phase 2C scope: registry stub + health-check. The daemon writes
-    artifacts via the existing ``POST /ingest/webhook`` endpoint
-    (legacy path), so this connector doesn't need to drive the
-    ingest itself.
+    The daemon writes artifacts via ``POST /ingest/webhook``, so this
+    connector is a registry stub plus a health-check decorator that
+    surfaces the daemon's heartbeat status to the source-detail pane.
     """
 
     kind = "clipboard"

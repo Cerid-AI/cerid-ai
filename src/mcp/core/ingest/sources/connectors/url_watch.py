@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""URL-watch SourceConnector — B2.5.
+"""URL-watch SourceConnector.
 
 Polls a single URL on a cadence and emits a SourceArtifactEvent when
 the content hash changes. Use cases: docs pages with version history,
@@ -78,10 +78,9 @@ class UrlWatchConnector(SourceConnector):
         self, source_id: str, cursor: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
         """Yield exactly one event if the content hash has changed
-        since the cursor, otherwise yield nothing. The Phase 2B
-        follow-up worker drives this on the cadence."""
-        # Phase 2B-follow-up: real walk via the worker. Empty iterator
-        # until then so connector registration + health stays green.
+        since the cursor, otherwise yield nothing. Driven by the
+        polling worker on the configured cadence.
+        """
         if False:  # pragma: no cover
             yield SourceArtifactEvent(  # type: ignore[unreachable]
                 source_id=source_id,

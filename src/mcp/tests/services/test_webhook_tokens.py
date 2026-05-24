@@ -33,7 +33,8 @@ def test_generate_hmac_secret_distinct_from_token():
 def test_find_webhook_source_matches_against_dict_config():
     """Confirms the matcher works against the actual stored shape —
     a dict (already deserialized by srcdb._node_to_dict), not a raw
-    JSON string. Regression guard against the 2026-05-24 fix.
+    JSON string. The previous Cypher-CONTAINS form was fragile
+    against ``json.dumps`` whitespace conventions.
     """
     fake_sources = [
         {"id": "a", "kind": "webhook", "config": {"token": "wanted-token"}},

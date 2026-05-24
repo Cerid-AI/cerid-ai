@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 4b B4b.5 — cross-browser smoke test.
+ * Cross-browser smoke test for the page-capture flow.
  *
  * Loads the built extension into a fresh chromium context, opens a
  * known page, triggers the popup's Save Page button, and asserts a

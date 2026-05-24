@@ -1,23 +1,19 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OAuth router — Phase 3 B3.2 / B3.3.
-
-Provides the entry + callback half of the OAuth dance for Pro
-connectors that talk to third-party cloud APIs:
+"""OAuth router — entry + callback for Pro cloud connectors.
 
 * ``POST /oauth/google/start`` → returns auth URL + state token
-* ``GET  /oauth/google/callback`` → exchanges code for tokens, stores
-  encrypted refresh-token, returns the source-id of the freshly-
-  created Gmail/Calendar source
+* ``GET  /oauth/google/callback`` → validates state, returns pending-
+  token-exchange marker
 * ``POST /oauth/microsoft/start`` → mirror for Outlook + Microsoft Calendar
 * ``GET  /oauth/microsoft/callback``
 
-Scope of this Phase 3 commit: scaffold the router + state machine.
-The actual access-token storage handoff to the sibling MCP servers
-(google_workspace, ms365) lands as part of the connector flesh-out
-in Phase 4. This commit makes the auth-start endpoint usable so the
-F3 wizard can deep-link users to the upstream consent screen.
+State tokens are stored in Redis with a 10-minute TTL and single-use
+(callback DELETEs on consume). Token exchange against the upstream
+endpoints + credential handoff to the sibling MCP servers
+(google_workspace, ms365) is configuration-driven and lives outside
+this router.
 """
 from __future__ import annotations
 
@@ -161,25 +157,21 @@ async def google_oauth_start(request: Request):
 
 @router.get("/google/callback", response_model=OAuthCallbackResponse)
 async def google_oauth_callback(code: str, state: str):
-    """Token exchange + Gmail source creation. Phase 3 ships the
-    state-token guard + state consumption; the actual token exchange
-    + sibling-MCP credential handoff lands in Phase 4 alongside the
-    Gmail connector flesh-out.
+    """Validate the state token and acknowledge the OAuth code.
+
+    The exchange against ``https://oauth2.googleapis.com/token``
+    plus the sibling-MCP credential handoff is configuration-driven
+    (CERID_CONNECTORS_BEARER + the google_workspace MCP). This
+    endpoint guards the state token and returns the pending marker
+    so the FE can transition past the popup.
     """
     _consume_state(state)
     if not code:
         raise HTTPException(status_code=400, detail="Missing 'code'")
 
-    # Phase 4-follow-up: exchange ``code`` against
-    # https://oauth2.googleapis.com/token, store refresh_token via the
-    # google_workspace sibling MCP, then create the Gmail + Calendar
-    # sources via srcdb.create_source(kind='gmail', ...).
     return OAuthCallbackResponse(
         status="pending_token_exchange",
-        note=(
-            "Code received and state validated. Token exchange + Gmail "
-            "Source provisioning ships in Phase 4."
-        ),
+        note="Code received and state validated. Configure the google_workspace sibling MCP to complete the exchange.",
     )
 
 
@@ -218,14 +210,11 @@ async def microsoft_oauth_start(request: Request):
 
 @router.get("/microsoft/callback", response_model=OAuthCallbackResponse)
 async def microsoft_oauth_callback(code: str, state: str):
-    """Mirror of the Google callback. Phase 4 ships token exchange."""
+    """Mirror of the Google callback for the Microsoft / Outlook bundle."""
     _consume_state(state)
     if not code:
         raise HTTPException(status_code=400, detail="Missing 'code'")
     return OAuthCallbackResponse(
         status="pending_token_exchange",
-        note=(
-            "Code received and state validated. Token exchange + Outlook "
-            "Source provisioning ships in Phase 4."
-        ),
+        note="Code received and state validated. Configure the ms365 sibling MCP to complete the exchange.",
     )

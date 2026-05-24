@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Chat-capture adapter recipes — B2.7.
+"""Chat-capture adapter recipes.
 
 Providers: slack, discord, teams, matrix.
 """

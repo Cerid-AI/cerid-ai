@@ -369,7 +369,7 @@ async def sdk_ingest_external(request: ExternalIngestRequest) -> IngestResult:
 
 
 # ---------------------------------------------------------------------------
-# Webhook receiver — Phase 2A of the Ingestion Experience plan (B2.1)
+# Webhook receiver — generic inbound HTTP endpoint per (:Source)
 # ---------------------------------------------------------------------------
 
 
@@ -436,9 +436,9 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
 
     source_id = source["id"]
 
-    # Phase 2C — adapter-recipe routing. If the source declares a
-    # provider (e.g., kind=chat_capture + provider=slack), look up
-    # the matching recipe and normalize the payload into one or more
+    # Adapter-recipe routing. If the source declares a provider
+    # (e.g., kind=chat_capture + provider=slack), look up the
+    # matching recipe and normalize the payload into one or more
     # CanonicalArtifact records before enqueue. Falls back to raw
     # payload pass-through when no recipe is registered.
     try:
@@ -507,7 +507,7 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Voice-note ingest — Phase 2C (B2.6)
+# Voice-note ingest — multipart upload → transcript → artifact
 # ---------------------------------------------------------------------------
 
 

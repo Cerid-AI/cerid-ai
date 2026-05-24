@@ -34,8 +34,9 @@ class ConnectResult:
 @dataclass(frozen=True)
 class HealthStatus:
     """Per-connector health probe result. Surfaces on the source-
-    detail pane's "Health" section and feeds the operator dashboard
-    ``/observability/connector-health`` (Phase 3)."""
+    detail pane's "Health" section and feeds the operator dashboard's
+    connector-health view.
+    """
 
     ok: bool
     detail: str = ""

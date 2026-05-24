@@ -244,6 +244,9 @@ Served by `/`, `/health`, and `/openapi.json`. Single source of truth: `pyprojec
 | Sidebar pane shape + redirect map? | [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) |
 | Atlas + Constellation perf budgets? | [`docs/PERF_BUDGETS.md`](PERF_BUDGETS.md) |
 | Visualization endpoints? | `/graph/neighborhood`, `/graph/embeddings/3d`, `/graph/tour/generate`, `/atlas/views/*` |
+| How do connectors work? | `core/ingest/sources/base.py` + `core/ingest/sources/registry.py`; one connector module per `kind` under `core/ingest/sources/connectors/` |
+| How does the webhook receiver dispatch by provider? | `core/ingest/adapters/` recipes; `(kind, provider)` index resolves `kind=webhook + config.provider=slack` → `chat_capture/slack` recipe |
+| Where's the Source-management REST surface? | `src/mcp/app/routers/sources.py` (list / kinds / create / test / policy / webhook-url / delete) |
 
 ## Visualization tier (Cerid v1.0)
 
@@ -264,6 +267,114 @@ Subjects pane hosts the 2D and 3D graph experiences:
 
 See [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) for the full pane shape,
 NavigationProvider redirect map, and component layout reference.
+
+## Ingestion architecture (Cerid v1.0 RC2)
+
+Every ingestion stream is a `(:Source)` node in Neo4j with a `kind`
+from one of 22 supported kinds (11 Core + 11 Pro) across 9 families
+(files / feeds / chat / mail / calendar / media / webhook / adapter /
+pack). Connectors are protocol objects under
+`core/ingest/sources/connectors/`; each implements the four
+lifecycle methods of `core.ingest.sources.base.SourceConnector`:
+
+| Method | When called |
+|---|---|
+| `connect(config) → ConnectResult` | Once per source — validates config, performs one-time setup (OAuth callback, watch handle, …), returns initial cursor + connection_time_ms |
+| `fetch_since(source_id, cursor)` | Driven by the polling worker (cadence per kind); async-iterates `SourceArtifactEvent` with the cursor advance embedded |
+| `health_check(source_id, config)` | Cheap probe; surfaces on the source-detail pane and `/observability/connector-health` |
+| `disconnect(source_id, config)` | Cleanup — OAuth revocation, watch teardown, daemon stop. Idempotent |
+
+`health_check` and `disconnect` take `config` alongside `source_id`
+so connectors stay inside the `core → app` import contract — the
+router owns the Neo4j round-trip.
+
+### Source kinds + tiers
+
+11 Core kinds: `folder`, `bookmarks`, `rss`, `url_watch`, `webhook`,
+`chat_capture`, `dev_events`, `clipboard`, `voice_note`,
+`external_adapter`, `knowledge_pack`.
+
+11 Pro kinds: `gmail`, `outlook`, `google_calendar`,
+`outlook_calendar`, `meeting_audio`, `apple_notes`, `apple_mail`,
+`imessage`, `apple_calendar`, `apple_photos`, `apple_reminders`.
+
+Single source of truth: `core/ingest/sources/kinds.py` (Literal +
+KIND_FAMILY + KIND_TIER maps; import-time asserts enforce drift).
+
+### Sync cursor service
+
+`app.services.sync_cursor` — Redis-first hot reads (sub-ms), Neo4j
+fallback + cache warm on miss. Writes go to BOTH stores so a Redis
+flush loses at most the last in-flight cursor. Cursor shape is
+connector-defined; the service treats it as opaque JSON.
+
+### Webhook receiver + adapter recipes
+
+Inbound HTTP traffic lands at `POST /sdk/v1/ingest/webhook/{token}`.
+The receiver:
+
+1. Resolves the `(:Source)` by token (constant-time compare, kind
+   filter to `webhook` for security).
+2. Optionally verifies `X-Cerid-Signature: sha256=<hex>` against the
+   source's `hmac_secret`.
+3. Parses JSON body.
+4. Looks up an **adapter recipe** by `config.provider` via the
+   `core.ingest.adapters` registry's provider→canonical-kind index.
+   13 recipes ship: Slack / Discord / Teams / Matrix (chat_capture),
+   GitHub / Linear / Sentry / Stripe (dev_events), Readwise / Pocket /
+   Instapaper / Raindrop / Telegram (external_adapter). Each recipe
+   normalizes the provider-shaped payload into one or more
+   `CanonicalArtifact` records.
+5. Enqueues the (raw + normalized) payload to
+   `cerid:webhook_inbox:{source_id}` for the ingest worker.
+
+Returns 202 immediately. The token is the routing credential; the
+canonical destination kind comes from the recipe — `kind=webhook`
+stays the security boundary, recipes provide the routing flexibility.
+
+### Knowledge Stats + sparklines
+
+`GET /observability/knowledge-stats` returns five orthogonal corpus
+dimensions (artifacts, chunks, entities, edges-total, source-kinds
+diversity) in a single Cypher round-trip; Redis-cached 60s.
+`GET /observability/knowledge-stats/history?days=N` returns daily
+snapshots for sparkline rendering. The nightly snapshot scheduler
+(`SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT`, default midnight UTC) MERGEs
+one `:KnowledgeStatsSnapshot` per day.
+
+### Per-source policies
+
+Each source carries:
+
+- `retention_policy: { mode: "keep_all" | "days" | "count", … }`
+  applied nightly by `SCHEDULE_RETENTION_ENFORCE` via
+  `core.ingest.retention.plan_for_source` + `app.services.retention.apply_retention_plan`.
+- `quality_floor: float [0.0, 1.0]` — artifacts with a computed
+  quality_score below the floor are dropped before chunking +
+  embedding. Lookup is memoized per-source in
+  `app.services.quality_floors`.
+
+Both edit through `POST /sources/{id}/policy`.
+
+### OAuth flow (Pro cloud connectors)
+
+`app.routers.oauth` exposes start + callback endpoints for Google
+(Gmail + Calendar) and Microsoft (Outlook + Calendar). Redis-backed
+state tokens with 10-minute TTL and single-use semantics. Token
+exchange against the upstream providers is configuration-driven via
+the sibling MCP servers (`google_workspace`, `ms365`).
+
+### Browser extension + Apple ecosystem
+
+`packages/extension/` is a Manifest V3 browser extension — popup
+with Save Page → readability extraction → `POST /sdk/v1/ingest`.
+Works on Chrome + Firefox; Edge + Safari deferred.
+
+`packages/desktop/swift/CeridMail/` + `CeridReminders/` are TCC-
+scoped Swift helper binaries. The Python connectors at
+`core/ingest/sources/connectors/apple_mail.py` and `apple_reminders.py`
+subprocess to them. Health-check reports helper-binary availability
+on the host's PATH.
 
 ## Pro tier (Cerid v1.0 Phases D-H)
 
