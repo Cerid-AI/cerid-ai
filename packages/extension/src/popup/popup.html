@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Cerid AI</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1c1c1c;
+    --muted: #6b7280;
+    --accent: #d4a44e;
+    --teal: oklch(0.82 0.16 178);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121212; --fg: #eeeeee; --muted: #9ca3af; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    width: 280px;
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .mark {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent); display: inline-block;
+  }
+  p {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  button {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    margin-bottom: 8px;
+    transition: opacity 0.15s ease;
+  }
+  button.ghost {
+    background: transparent;
+    color: var(--fg);
+    border-color: var(--muted);
+  }
+  button:disabled { opacity: 0.5; cursor: progress; }
+  .status {
+    font-size: 12px;
+    margin-top: 8px;
+    color: var(--muted);
+    min-height: 16px;
+  }
+  .ok { color: var(--teal); }
+  .err { color: #d44; }
+</style>
+</head>
+<body>
+  <h1><span class="mark"></span> Cerid AI</h1>
+  <p>Save this page to your local knowledge base.</p>
+  <button id="capture">Save page</button>
+  <button class="ghost" id="open-cerid">Open Cerid</button>
+  <div class="status" id="status"></div>
+  <script type="module" src="popup.ts"></script>
+</body>
+</html>
