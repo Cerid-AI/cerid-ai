@@ -110,7 +110,12 @@ if $RUN_FUNCTIONAL; then
   echo ""
 
   # Determine Docker network name
-  DOCKER_NETWORK=$(docker network ls --format '{{.Name}}' | grep 'llm-network' | head -1)
+  # Resolve the network the live ai-companion-mcp container is on —
+  # multiple compose projects share the substring "llm-network" so a
+  # naive grep can return a sibling network the container isn't on.
+  DOCKER_NETWORK=$(docker inspect ai-companion-mcp \
+    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
+    | grep 'llm-network' | head -1)
   if [[ -z "$DOCKER_NETWORK" ]]; then
     echo "⚠️  llm-network not found, trying cerid-ai_llm-network"
     DOCKER_NETWORK="cerid-ai_llm-network"
@@ -191,7 +196,12 @@ if $RUN_INTEGRATION; then
   echo "╚══════════════════════════════════════╝"
   echo ""
 
-  DOCKER_NETWORK=$(docker network ls --format '{{.Name}}' | grep 'llm-network' | head -1)
+  # Resolve the network the live ai-companion-mcp container is on —
+  # multiple compose projects share the substring "llm-network" so a
+  # naive grep can return a sibling network the container isn't on.
+  DOCKER_NETWORK=$(docker inspect ai-companion-mcp \
+    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
+    | grep 'llm-network' | head -1)
   [[ -z "$DOCKER_NETWORK" ]] && DOCKER_NETWORK="cerid-ai_llm-network"
 
   docker run --rm --network "$DOCKER_NETWORK" \
@@ -285,11 +295,55 @@ if $RUN_SECURITY; then
 fi
 
 # ─────────────────────────────────────────────────
-# TIER 6: BROWSER E2E (placeholder — run interactively via Playwright MCP)
+# TIER 6: BROWSER E2E (Playwright — E-01 through E-10)
 # ─────────────────────────────────────────────────
 if $RUN_BROWSER; then
   report_section "Browser E2E Tests"
-  report_text "\n> Browser E2E tests are run interactively via Playwright MCP tools.\n> See the test plan for E-01 through E-10 test cases.\n"
+
+  E2E_DIR="${SCRIPT_DIR}/e2e"
+  if [[ ! -f "${E2E_DIR}/playwright.config.ts" ]]; then
+    report_text "\n> Playwright config not found at ${E2E_DIR}/playwright.config.ts — tier skipped.\n"
+  else
+    # Install Playwright + browsers on first run; subsequent invocations
+    # are a no-op once node_modules is populated.
+    if [[ ! -d "${E2E_DIR}/node_modules" ]]; then
+      report_text "\n> Installing Playwright + Chromium (first run only)...\n"
+      (cd "${E2E_DIR}" && npm install --silent && npx playwright install chromium --with-deps 2>&1 | tail -3)
+    fi
+
+    mkdir -p "${SCRIPT_DIR}/reports"
+    (cd "${E2E_DIR}" && npx playwright test --reporter=list,junit 2>&1)
+    E2E_EXIT=$?
+
+    if [[ -f "${SCRIPT_DIR}/reports/e2e.xml" ]]; then
+      python3 -c "
+import xml.etree.ElementTree as ET
+tree = ET.parse('${SCRIPT_DIR}/reports/e2e.xml')
+root = tree.getroot()
+for tc in root.iter('testcase'):
+    name = tc.get('name', 'unknown').replace('|', ' ')
+    time_val = tc.get('time', '0')
+    failure = tc.find('failure')
+    error = tc.find('error')
+    skip = tc.find('skipped')
+    if failure is not None or error is not None:
+        msg = ((failure or error).get('message', '') or '')[:80]
+        print(f'FAIL|E2E|{name}|{time_val}s|{msg}')
+    elif skip is not None:
+        print(f'SKIP|E2E|{name}|{time_val}s|skipped')
+    else:
+        print(f'PASS|E2E|{name}|{time_val}s|')
+" > "${SCRIPT_DIR}/reports/e2e.results" 2>/dev/null || true
+      report_append_results "${SCRIPT_DIR}/reports/e2e.results"
+    fi
+
+    if [[ "${E2E_EXIT:-0}" -ne 0 ]]; then
+      report_issue "high" "playwright_e2e" "browser_e2e" "E-XX" "infra" \
+        "Investigate failing E2E test(s) in tests/beta/reports/e2e-html/" \
+        "All E-01..E-10 pass" \
+        "Playwright reported failures — open the HTML report or rerun with --headed."
+    fi
+  fi
 fi
 
 # ─────────────────────────────────────────────────
@@ -302,7 +356,12 @@ if ${RUN_EVAL:-false}; then
   echo "╚══════════════════════════════════════╝"
   echo ""
 
-  DOCKER_NETWORK=$(docker network ls --format '{{.Name}}' | grep 'llm-network' | head -1)
+  # Resolve the network the live ai-companion-mcp container is on —
+  # multiple compose projects share the substring "llm-network" so a
+  # naive grep can return a sibling network the container isn't on.
+  DOCKER_NETWORK=$(docker inspect ai-companion-mcp \
+    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
+    | grep 'llm-network' | head -1)
   [[ -z "$DOCKER_NETWORK" ]] && DOCKER_NETWORK="cerid-ai_llm-network"
 
   mkdir -p "${SCRIPT_DIR}/eval/reports"
