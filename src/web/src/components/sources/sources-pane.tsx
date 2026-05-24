@@ -12,6 +12,10 @@
 
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Loader2, Files, Activity, Settings as SettingsIcon, FileAudio } from "lucide-react"
+import { useNavigation } from "@/contexts/navigation-context"
+import { useHotkey } from "@/hooks/use-hotkey"
+import { KnowledgeStatsHero } from "./knowledge-stats-hero"
+import { SourcesHotkeyHelp } from "./sources-hotkey-help"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const SourcesConnectors = lazy(() =>
@@ -67,8 +71,30 @@ export default function SourcesPane() {
     setMode(next)
   }, [])
 
+  const navigation = useNavigation()
+
+  // F10 — Sources hotkey suite. ⌘1-⌘4 jump to sub-tabs; the rest of
+  // the documented hotkeys (⌘⇧S, ⌘⇧C, ⌘⇧V, etc.) bind in their
+  // respective phase commits when their target surfaces ship.
+  useHotkey("meta+1", () => handleModeChange("library"))
+  useHotkey("meta+2", () => handleModeChange("activity"))
+  useHotkey("meta+3", () => handleModeChange("meetings"))
+  useHotkey("meta+4", () => handleModeChange("connectors"))
+
   return (
     <div className="flex h-full flex-col">
+      {/* F9 — Knowledge Stats hero. Pinned at the top of every
+          Sources sub-tab. Click-throughs route via NavigationContext
+          to the relevant filtered destination. */}
+      <div className="shrink-0 px-4 py-3">
+        <KnowledgeStatsHero
+          onArtifactsClick={() => handleModeChange("library")}
+          onChunksClick={() => handleModeChange("library")}
+          onEntitiesClick={() => navigation.goTo("subjects")}
+          onDiversityClick={() => handleModeChange("connectors")}
+        />
+      </div>
+
       {/* Mode switcher header */}
       <div className="flex shrink-0 items-center gap-2 border-b bg-card/40 px-4 py-2">
         <div
@@ -156,6 +182,10 @@ export default function SourcesPane() {
           </Suspense>
         )}
       </div>
+
+      {/* F10 — hotkey help overlay. Press ? anywhere in the Sources
+          pane to surface it. */}
+      <SourcesHotkeyHelp />
     </div>
   )
 }
