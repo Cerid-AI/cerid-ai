@@ -1080,8 +1080,8 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (80, 60),       # 80 req/min — 5 concurrent sessions burst
             "/agent/": (80, 60),
         },
-        "allowed_domains": ["trading"],
-        "strict_domains": True,      # No bleed into personal/finance/coding data
+        "allowed_domains": ["finance"],
+        "strict_domains": True,      # Finance domain for crypto/perps signals; no bleed into personal
     },
     "folder_scanner": {
         "rate_limits": {
