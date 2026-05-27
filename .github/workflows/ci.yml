@@ -307,6 +307,19 @@ jobs:
           # httpx's Cookies API, not by libcurl's. No upstream Debian fix yet;
           # re-eval 2026-06-30.
           CVE-2026-6276
+          # perl-base Archive::Tar symlink — pulled into Debian base layer.
+          # We never invoke perl from application code (no Archive::Tar calls,
+          # no perl scripts in container). Trivy flags it transitively. No
+          # upstream fix in Debian 13 yet. Re-eval 2026-07-31.
+          CVE-2026-42496
+          # perl-base heap buffer overflow during compilation — same surface
+          # as CVE-2026-42496; perl interpreter never executes in container.
+          # No upstream fix; re-eval 2026-07-31.
+          CVE-2026-8376
+          # perl-base Archive::Tar memory exhaustion (HIGH) — same surface;
+          # no Archive::Tar usage from application code. No upstream fix;
+          # re-eval 2026-07-31.
+          CVE-2026-9538
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
