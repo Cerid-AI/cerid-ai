@@ -48,11 +48,15 @@ interface HealthCardsProps {
 
 export function HealthCards({ health }: HealthCardsProps) {
   if (!health) return null
+  // Backend may return MaintenanceHealth with `services` omitted when the
+  // maintenance pipeline is degraded; default to an empty map so the grid
+  // renders nothing rather than crashing in PaneErrorBoundary.
+  const services = health.services ?? {}
 
   return (
     <TooltipProvider>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {Object.entries(health.services).map(([name, status]) => {
+        {Object.entries(services).map(([name, status]) => {
           const meta = SERVICE_META[name] ?? { ...DEFAULT_META, label: name }
           const Icon = meta.icon
           const normalizedStatus = status.toLowerCase()
