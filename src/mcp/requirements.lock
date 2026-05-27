@@ -1398,9 +1398,9 @@ lark==1.3.1 \
     --hash=sha256:b426a7a6d6d53189d318f2b6236ab5d6429eaf09259f1ca33eb716eed10d2905 \
     --hash=sha256:c629b661023a014c37da873b4ff58a817398d12635d3bbb2c5a03be7fe5d1e12
     # via rtfde
-lightning==2.6.4 \
-    --hash=sha256:79a4eaf3db09e88485d0589abb6aa1beedde81e4e52536b1ddbb4478cda22235 \
-    --hash=sha256:e2079d61a3459bc5b24d76474b40e86548bd409251c0ef1133dd9cb3a185e34a
+lightning==2.6.5 \
+    --hash=sha256:16a30310ed69afde3748491feb5d13508908effd70390d2bfc203dc0812a4b4a \
+    --hash=sha256:3702fb7ef4ab51a8c3d4a140f4674514fe72973a9673dfa05e07a078e2767389
     # via pyannote-audio
 lightning-utilities==0.15.3 \
     --hash=sha256:6c55f1bee70084a1cbeaa41ada96e4b3a0fea5909e844dd335bd80f5a73c5f91 \
@@ -1995,9 +1995,9 @@ neo4j==6.2.0 \
     #   -r requirements.txt
     #   graphdatascience
     #   neo4j-graphrag
-neo4j-graphrag==1.16.1 \
-    --hash=sha256:784bce9c4ade24f0d5c620b8a80111a81ddf93e031a536dd113417ea89eff353 \
-    --hash=sha256:cbc4ab7cedfecf7d5d3ff170939551f7802ae1bb595612f5ed8cd269b7c1a074
+neo4j-graphrag==1.17.0 \
+    --hash=sha256:87c1b41859032f1ac9a4d6a2fa29375e38aabc3d6d240f6b6ede8622aaae030d \
+    --hash=sha256:c95077a3b0a750dfbeaa89a6bb4c78ce3501053dc7ca0848504514e9bfa32570
     # via -r requirements.txt
 networkx==3.6.1 \
     --hash=sha256:26b7c357accc0c8cde558ad486283728b65b6a95d85ee1cd66bafab4c8168509 \
@@ -3335,9 +3335,9 @@ python-pptx==1.0.2 \
     --hash=sha256:160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba \
     --hash=sha256:479a8af0eaf0f0d76b6f00b0887732874ad2e3188230315290cd1f9dd9cc7095
     # via -r requirements.txt
-pytorch-lightning==2.6.4 \
-    --hash=sha256:78115f8648d61438236fe2cf503647e7984e5a6e43262a1811496654155b1b00 \
-    --hash=sha256:fdd2a7052b9afb92394968205b9b55baab426aa57dec11b95bf1b84a67c2bc25
+pytorch-lightning==2.6.5 \
+    --hash=sha256:1c32cefa76a1a9c4c5250338272d961d1e48b180e68396849efe128538ddb28e \
+    --hash=sha256:62d9c8549b2278fedc3364f0a5607a56c6063d18635008f8cf3fae8d802b0d76
     # via lightning
 pytorch-metric-learning==2.9.0 \
     --hash=sha256:27a626caf5e2876a0fd666605a78cb67ef7597e25d7a68c18053dd503830701f \

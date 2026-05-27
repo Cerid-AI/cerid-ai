@@ -16,6 +16,28 @@ vi.mock("@/lib/api", () => ({
   fetchDigest: vi.fn().mockResolvedValue({ summary: "", stats: {}, period_hours: 24 }),
   fetchObservabilityMetrics: vi.fn().mockResolvedValue({ metrics: {}, window_minutes: 60 }),
   fetchObservabilityHealthScore: vi.fn().mockResolvedValue({ score: 90, grade: "A", components: {}, window_minutes: 60 }),
+  // ObservabilityDashboard (rendered inside MonitoringPane) calls fetchHealthStatus
+  // for the Degradation Tier + Pipeline Routing cards. Without this mock the
+  // useQuery resolves to undefined and the dashboard renders the "no data" branch
+  // silently — production crashes here go unobserved by these tests.
+  fetchHealthStatus: vi.fn().mockResolvedValue({
+    status: "healthy",
+    services: { chromadb: "connected", redis: "connected", neo4j: "connected" },
+    degradation_tier: "full",
+    can_retrieve: true,
+    can_verify: true,
+    can_generate: true,
+    pipeline_providers: {
+      claim_extraction: "ollama",
+      query_decomposition: "ollama",
+      topic_extraction: "ollama",
+      memory_resolution: "ollama",
+      verification_simple: "ollama",
+      verification_complex: "bifrost",
+      reranking: "ollama",
+      chat_generation: "bifrost",
+    },
+  }),
 }))
 
 import { fetchMaintenance } from "@/lib/api"

@@ -70,8 +70,19 @@ vi.mock("@/components/kb/tag-manager", () => ({
 vi.mock("@/components/kb/duplicate-detector", () => ({
   DuplicateDetector: () => null,
 }))
+// Expose a way for tests to invoke the dialog's onPackInstalled callback so
+// we can exercise the F-05-01 filter-broadening behavior without spinning up
+// the real pack-install flow.
 vi.mock("@/components/kb/knowledge-library-dialog", () => ({
-  KnowledgeLibraryDialog: () => null,
+  KnowledgeLibraryDialog: ({ onPackInstalled }: { onPackInstalled?: (id: string) => void }) => (
+    <button
+      type="button"
+      data-testid="trigger-pack-installed"
+      onClick={() => onPackInstalled?.("irs-publications")}
+    >
+      simulate pack install
+    </button>
+  ),
 }))
 
 import { fetchArtifacts, queryKB } from "@/lib/api"
@@ -364,6 +375,33 @@ describe("KnowledgePane — four-state matrix (D.2)", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
     }, { timeout: 3000 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F-05-01 (rc2.1): pack install broadens the source filter
+// ---------------------------------------------------------------------------
+
+describe("KnowledgePane — F-05-01 pack-install filter broadening", () => {
+  it("switches the source filter to 'All sources' when a pack install completes", async () => {
+    // Seed two artifacts so the source dropdown shows a value before install.
+    mockFetchArtifacts.mockResolvedValue([
+      makeArtifact({ id: "a1", filename: "personal.pdf" }),
+    ])
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+
+    // Default selection is "Personal" (gui).
+    const sourceCombobox = await screen.findByRole("combobox", { name: /filter by source/i })
+    expect(sourceCombobox).toHaveTextContent(/personal/i)
+
+    // Simulate the pack-install callback firing from the dialog mock.
+    fireEvent.click(screen.getByTestId("trigger-pack-installed"))
+
+    // Filter should broaden to "All sources" so newly-ingested pack rows
+    // (which lack the "gui" client_source tag) appear without manual action.
+    await waitFor(() => {
+      expect(sourceCombobox).toHaveTextContent(/all sources/i)
+    })
   })
 })
 

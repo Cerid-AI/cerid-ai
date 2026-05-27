@@ -63,11 +63,20 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
     onPeriodChange?.(Number(value))
   }
 
+  // Backend may return a partial digest payload (missing artifacts/relationships
+  // when the maintenance pipeline is degraded). Guard every nested member so
+  // the pane renders an empty state instead of crashing in PaneErrorBoundary.
+  const artifactCount = digest?.artifacts?.count ?? 0
+  const relationshipsNewCount = digest?.relationships?.new_count ?? 0
+  const recentEvents = digest?.recent_events ?? 0
+  const byDomain = digest?.artifacts?.by_domain ?? {}
+  const artifactItems = digest?.artifacts?.items ?? []
+
   const isEmpty =
     !digest ||
-    (digest.artifacts.count === 0 &&
-      digest.relationships.new_count === 0 &&
-      digest.recent_events === 0 &&
+    (artifactCount === 0 &&
+      relationshipsNewCount === 0 &&
+      recentEvents === 0 &&
       errorCount === 0)
 
   return (
@@ -114,21 +123,21 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
             {/* Summary stats */}
             <div className="grid grid-cols-5 gap-2 text-center">
               <div>
-                <div className="text-2xl font-bold">{digest.artifacts.count}</div>
+                <div className="text-2xl font-bold">{artifactCount}</div>
                 <div className="text-xs text-muted-foreground">Artifacts</div>
               </div>
               <div>
                 <div className="text-2xl font-bold">
-                  {Object.keys(digest.artifacts.by_domain).length}
+                  {Object.keys(byDomain).length}
                 </div>
                 <div className="text-xs text-muted-foreground">Domains</div>
               </div>
               <div>
-                <div className="text-2xl font-bold">{digest.relationships.new_count}</div>
+                <div className="text-2xl font-bold">{relationshipsNewCount}</div>
                 <div className="text-xs text-muted-foreground">Relationships</div>
               </div>
               <div>
-                <div className="text-2xl font-bold">{digest.recent_events}</div>
+                <div className="text-2xl font-bold">{recentEvents}</div>
                 <div className="text-xs text-muted-foreground">Events</div>
               </div>
               {errorCount > 0 ? (
@@ -156,13 +165,13 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
             </div>
 
             {/* Domain breakdown */}
-            {Object.keys(digest.artifacts.by_domain).length > 0 && (
+            {Object.keys(byDomain).length > 0 && (
               <div>
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
                   By Domain
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {Object.entries(digest.artifacts.by_domain).map(([domain, count]) => (
+                  {Object.entries(byDomain).map(([domain, count]) => (
                     <Badge key={domain} variant="secondary" className="text-xs">
                       {count} {domain}
                     </Badge>
@@ -172,13 +181,13 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
             )}
 
             {/* Recent artifacts */}
-            {digest.artifacts.items.length > 0 && (
+            {artifactItems.length > 0 && (
               <div>
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
                   Recent Artifacts
                 </div>
                 <ul className="space-y-1">
-                  {digest.artifacts.items.slice(0, 10).map((item) => (
+                  {artifactItems.slice(0, 10).map((item) => (
                     <li
                       key={item.id}
                       className="flex items-center justify-between text-xs"
@@ -195,9 +204,9 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
                     </li>
                   ))}
                 </ul>
-                {digest.artifacts.items.length > 10 && (
+                {artifactItems.length > 10 && (
                   <p className="mt-1 text-label-xs text-muted-foreground">
-                    {digest.artifacts.items.length - 10} more…
+                    {artifactItems.length - 10} more…
                   </p>
                 )}
               </div>
