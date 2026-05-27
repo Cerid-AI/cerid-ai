@@ -594,6 +594,18 @@ export function KnowledgePane() {
           setShowKnowledgeLibrary(next)
           if (!next) refetch()
         }}
+        onPackInstalled={() => {
+          // F-05-01: pack artifacts land outside the default "Personal"
+          // namespace, so a user who just installed one sees no new content
+          // until they manually flip the source dropdown. Broaden the filter
+          // automatically and clear any taxonomy / search / tag narrowing
+          // that would still hide the just-arrived rows.
+          setClientSource("all")
+          setTaxonomyFilter({ domain: null, subCategory: null })
+          setActiveTag(null)
+          setActiveSearch("")
+          setSearchInput("")
+        }}
       />
 
       {/* Search + filters */}

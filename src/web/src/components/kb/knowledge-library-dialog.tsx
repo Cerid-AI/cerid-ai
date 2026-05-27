@@ -31,9 +31,16 @@ import {
 interface KnowledgeLibraryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * Fires when a pack install completes successfully. The parent pane uses
+   * this to broaden its source filter so newly-ingested pack artifacts
+   * appear without the user manually changing the Personal/External
+   * dropdown (F-05-01).
+   */
+  onPackInstalled?: (packId: string) => void
 }
 
-export function KnowledgeLibraryDialog({ open, onOpenChange }: KnowledgeLibraryDialogProps) {
+export function KnowledgeLibraryDialog({ open, onOpenChange, onPackInstalled }: KnowledgeLibraryDialogProps) {
   const queryClient = useQueryClient()
   const [busyPackId, setBusyPackId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -56,11 +63,14 @@ export function KnowledgeLibraryDialog({ open, onOpenChange }: KnowledgeLibraryD
       setBusyPackId(packId)
       setErrorMessage(null)
     },
-    onSuccess: () => {
+    onSuccess: (_data, packId) => {
       // Refresh installed list + the artifact pages so newly-ingested
       // content shows up in the KB pane immediately.
       queryClient.invalidateQueries({ queryKey: ["knowledge-packs"] })
       queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+      // Tell the parent so it can broaden its filter to surface pack content
+      // that lives outside the "Personal" namespace (F-05-01).
+      onPackInstalled?.(packId)
     },
     onError: (err: Error) => setErrorMessage(err.message),
     onSettled: () => setBusyPackId(null),

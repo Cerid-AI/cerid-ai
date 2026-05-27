@@ -69,6 +69,19 @@ describe("HealthCards", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  // Regression: F-RC2.1-A1.2 — backend may return MaintenanceHealth with
+  // `services` omitted when the health probe partially fails. The grid must
+  // render zero cards rather than crash in PaneErrorBoundary with
+  // "Cannot convert undefined or null to object".
+  it("renders an empty grid when health.services is undefined (partial payload)", () => {
+    const partial = { overall: "degraded" } as unknown as MaintenanceHealth
+    const { container } = render(<HealthCards health={partial} />)
+    // TooltipProvider + empty grid → container has children but no service cards
+    expect(container.firstChild).not.toBeNull()
+    expect(screen.queryByText("ChromaDB")).not.toBeInTheDocument()
+    expect(screen.queryByText("Redis")).not.toBeInTheDocument()
+  })
+
   it("shows skipped status for bifrost", () => {
     const health = makeHealth({
       services: {
