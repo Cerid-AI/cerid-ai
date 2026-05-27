@@ -47,7 +47,11 @@ jobs:
       - run: pip install -r src/mcp/requirements.txt
       - run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
       - name: Run tests with coverage
-        run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
+        # `not integration` deselects tests that require live external services
+        # (Redis, MCP HTTP server). Those tests run under the preservation gate
+        # which boots the full stack; running them here would fail with
+        # connection-refused on the bare ubuntu runner.
+        run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo and not integration" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
       - name: Upload coverage to Codecov
         if: success()
         uses: codecov/codecov-action@v5
