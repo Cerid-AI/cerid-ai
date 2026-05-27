@@ -39,6 +39,32 @@ function displayFilename(raw: string): string {
   return base
 }
 
+/** True when the filename is an auto-generated chat conversation ID like
+ *  `chat_3e4bd73e_20260526_224339`. These are unhelpful as titles; the
+ *  first message preview is a better primary label (F-02-02). */
+function isAutoChatId(raw: string): boolean {
+  return /^chat_[0-9a-f]{6,}/.test(normalizeFilename(raw))
+}
+
+/** Best effort to derive a human-readable title for a result. Prefers the
+ *  first non-empty content line for system-generated chat IDs; falls back to
+ *  the cleaned filename otherwise. */
+function deriveTitle(filename: string, content: string): string {
+  if (isAutoChatId(filename) && content) {
+    const firstLine = content
+      .split(/\n+/)
+      .map((s) => s.trim())
+      .find((s) => s.length > 0)
+    if (firstLine) {
+      // Trim to a reasonable length — the truncate class still ellipsizes
+      // anything that exceeds the container, but capping here keeps the
+      // tooltip content sane too.
+      return firstLine.length > 120 ? firstLine.slice(0, 120) + "…" : firstLine
+    }
+  }
+  return displayFilename(filename)
+}
+
 /** Returns a human-readable relative time string like "3d ago", "2h ago", "5m ago". */
 function timeAgo(date: string): string {
   const now = Date.now()
@@ -181,11 +207,23 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <p
-                  className="min-w-0 truncate text-sm font-medium cursor-text"
-                  title={`${result.filename} (double-click to rename)`}
-                  onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
-                >{displayFilename(result.filename)}</p>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p
+                      className="min-w-0 truncate text-sm font-medium cursor-text"
+                      onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
+                    >{deriveTitle(result.filename, result.content)}</p>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[360px] break-words">
+                    {deriveTitle(result.filename, result.content)}
+                    {isAutoChatId(result.filename) ? (
+                      <div className="mt-1 text-[10px] opacity-70">
+                        {normalizeFilename(result.filename)}
+                      </div>
+                    ) : null}
+                    <div className="mt-1 text-[10px] opacity-70">Double-click to rename</div>
+                  </TooltipContent>
+                </Tooltip>
               )}
               {chunkCount != null && (
                 <TooltipProvider delayDuration={200}>
@@ -284,11 +322,21 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         </div>
 
         {/* Compact content preview — outside header flex to avoid layout interference */}
-        {compact && result.content && (
-          <p className="mt-0.5 truncate text-label-sm leading-tight text-muted-foreground">
-            {result.content.replace(/[#*_[\]|>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80)}
-          </p>
-        )}
+        {compact && result.content && (() => {
+          const previewText = result.content.replace(/[#*_[\]|>]/g, "").replace(/\s+/g, " ").trim()
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <p className="mt-0.5 truncate text-label-sm leading-tight text-muted-foreground">
+                  {previewText.slice(0, 80)}
+                </p>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[360px] break-words">
+                {previewText.slice(0, 320)}{previewText.length > 320 ? "…" : ""}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })()}
 
         {/* Content */}
         {!compact && (cleanContent.length > 10 ? (

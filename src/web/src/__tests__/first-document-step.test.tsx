@@ -21,18 +21,13 @@ vi.mock("@/hooks/use-drag-drop", () => ({
   }),
 }))
 
-import { FirstDocumentStep } from "@/components/setup/first-document-step"
+import { FirstDocumentStep, type FirstDocState } from "@/components/setup/first-document-step"
 
-const DEFAULT_STATE = {
+const DEFAULT_STATE: FirstDocState = {
   ingested: false,
   queried: false,
   skipped: false,
-}
-
-interface FirstDocState {
-  ingested: boolean
-  queried: boolean
-  skipped: boolean
+  documentCount: 0,
 }
 
 const onChange = vi.fn<(state: FirstDocState) => void>()

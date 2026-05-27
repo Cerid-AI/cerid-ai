@@ -5,7 +5,7 @@ import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Settings2, ChevronDown, ChevronRight, Check, Cpu, Globe, Zap } from "lucide-react"
-import { OllamaStep } from "./ollama-step"
+import { LocalLLMStep } from "./local-llm-step"
 
 interface OllamaState {
   detected: boolean
@@ -89,7 +89,8 @@ export function OptionalFeaturesStep({
             )
           }
         >
-          <OllamaStep
+          <LocalLLMStep
+            inferenceBackend={null}
             ollamaDetected={ollamaDetected}
             ollamaModels={ollamaModels}
             state={ollamaState}

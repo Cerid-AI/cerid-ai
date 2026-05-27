@@ -149,3 +149,12 @@ export function parseTags(value: unknown): string[] {
   }
   return []
 }
+/**
+ * Coerce an unknown value to a typed array.
+ * Returns the value if it's already an array, empty array otherwise.
+ * Use at useQuery / fetch boundaries to prevent `.map is not a function` crashes
+ * when a backend contract violation or CI fixture returns null/undefined.
+ */
+export function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}

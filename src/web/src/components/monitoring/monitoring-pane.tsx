@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PaneError } from "@/components/ui/pane-error"
@@ -21,6 +21,7 @@ import { ProcessorPane } from "@/components/processor"
 import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
 
 export function MonitoringPane() {
+  const queryClient = useQueryClient()
   const { data: maintenance, isLoading: loadingMaintenance, isError: errorMaintenance, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["maintenance"],
     queryFn: () => fetchMaintenance(["health", "collections"]),
@@ -82,31 +83,31 @@ export function MonitoringPane() {
       ) : (
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-4 p-4">
-            <PaneErrorBoundary label="Knowledge Digest">
+            <PaneErrorBoundary label="Knowledge Digest" queryClient={queryClient}>
               <DigestCard digest={digest} isLoading={loadingDigest} onPeriodChange={setDigestHours} />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="Processor">
+            <PaneErrorBoundary label="Processor" queryClient={queryClient}>
               <ProcessorPane />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="Observability">
+            <PaneErrorBoundary label="Observability" queryClient={queryClient}>
               <ObservabilityDashboard />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="Health Cards">
+            <PaneErrorBoundary label="Health Cards" queryClient={queryClient}>
               <HealthCards health={maintenance?.health} />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="Operational Invariants">
+            <PaneErrorBoundary label="Operational Invariants" queryClient={queryClient}>
               <InvariantsCard />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="Collection Chart">
+            <PaneErrorBoundary label="Collection Chart" queryClient={queryClient}>
               <CollectionChart collections={maintenance?.collections} />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="KB Operations">
+            <PaneErrorBoundary label="KB Operations" queryClient={queryClient}>
               <KBOperations />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="Ingestion Timeline">
+            <PaneErrorBoundary label="Ingestion Timeline" queryClient={queryClient}>
               <IngestionTimeline entries={ingestLog?.entries} />
             </PaneErrorBoundary>
-            <PaneErrorBoundary label="Scheduler Status">
+            <PaneErrorBoundary label="Scheduler Status" queryClient={queryClient}>
               <SchedulerStatus scheduler={scheduler} />
             </PaneErrorBoundary>
           </div>

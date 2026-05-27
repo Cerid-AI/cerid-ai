@@ -12,8 +12,8 @@ import { test, expect, suppressFirstRun } from "./fixtures"
  * Glass treatment and a search input.
  */
 test("E-08 search palette opens + accepts input", async ({ page }) => {
-  await page.goto("/")
   await suppressFirstRun(page)
+  await page.goto("/")
   await page.getByRole("button", { name: "Subjects", exact: true }).click()
 
   await page.getByRole("button", { name: /open search palette/i }).click()

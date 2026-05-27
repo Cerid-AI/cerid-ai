@@ -16,8 +16,8 @@ import { test, expect, suppressFirstRun } from "./fixtures"
  */
 test("E-02 chat streaming end-to-end", async ({ page }) => {
   test.setTimeout(60_000)
-  await page.goto("/")
   await suppressFirstRun(page)
+  await page.goto("/")
 
   // Empty state surfaces a "New Conversation" CTA in the main pane
   // (uid 5_30 from the live DOM snapshot). The sidebar's "+" button is

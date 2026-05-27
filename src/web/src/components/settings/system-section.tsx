@@ -300,6 +300,7 @@ function KBManagementSection({
                       className="h-5 w-5 p-0 text-destructive/60 hover:text-destructive"
                       onClick={() => setClearConfirmDomain(domain)}
                       title={`Clear ${domain}`}
+                      aria-label={`Clear ${domain} knowledge base`}
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
@@ -1067,7 +1068,7 @@ function WatchedFoldersSection() {
               <div className="flex items-center gap-1 shrink-0">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleScan(folder.id)} disabled={actionId === folder.id}>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleScan(folder.id)} disabled={actionId === folder.id} aria-label={`Scan watched folder ${folder.label}`}>
                       <Play className="h-3 w-3" />
                     </Button>
                   </TooltipTrigger>
@@ -1075,7 +1076,7 @@ function WatchedFoldersSection() {
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => handleRemove(folder.id)} disabled={actionId === folder.id}>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => handleRemove(folder.id)} disabled={actionId === folder.id} aria-label={`Remove watched folder ${folder.label}`}>
                       <Trash2 className="h-3 w-3" />
                     </Button>
                   </TooltipTrigger>

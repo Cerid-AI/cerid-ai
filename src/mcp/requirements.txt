@@ -1,5 +1,5 @@
 # Core framework
-fastapi>=0.136.1,<0.137
+fastapi>=0.136.1,!=0.136.3,<0.137  # 0.136.3 excluded — OSV MAL-2026-4750 (malicious `fastar` dep in [standard] extra)
 sentry-sdk[fastapi]>=2.35.0
 uvicorn[standard]>=0.46.0,<1
 pydantic>=2.0,<3

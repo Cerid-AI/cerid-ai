@@ -61,8 +61,11 @@ describe("StepIndicator", () => {
     )
     const stepDivs = container.querySelectorAll("div.flex.items-center.gap-0\\.5.rounded-full")
     // Step 1 and step 3 should have skipped styling (text-muted-foreground/50)
-    expect(stepDivs[1]?.className).toContain("text-muted-foreground/50")
-    expect(stepDivs[3]?.className).toContain("text-muted-foreground/50")
+    // Skipped pips: muted color + line-through (Cluster E visual distinction).
+    expect(stepDivs[1]?.className).toContain("text-muted-foreground/60")
+    expect(stepDivs[1]?.className).toContain("line-through")
+    expect(stepDivs[3]?.className).toContain("text-muted-foreground/60")
+    expect(stepDivs[3]?.className).toContain("line-through")
     // Step 0 and step 2 should be completed (not skipped)
     expect(stepDivs[0]?.className).toContain("text-green-600")
     expect(stepDivs[2]?.className).toContain("text-green-600")

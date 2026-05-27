@@ -67,8 +67,8 @@ MIN_RESPONSE_LENGTH = 100
 # Soak data: 5.7% ReadTimeouts at the httpx 20s default — these bounds
 # replace that ceiling and surface the timeout branch via
 # log_swallowed_error.
-MEMORY_LLM_BUDGET_S = 12.0
-MEMORY_CONFLICT_LLM_BUDGET_S = 8.0
+MEMORY_LLM_BUDGET_S = 6.0
+MEMORY_CONFLICT_LLM_BUDGET_S = 3.0
 
 MEMORY_TYPES = {
     "empirical", "decision", "preference", "project_context", "temporal", "conversational",
@@ -224,11 +224,19 @@ async def extract_and_store_memories(
     except ImportError:
         pass
 
-    results = []
-    stored_count = 0
-    skipped_count = 0
+    # F-AUTO-03: parallelize per-memory consolidation+ingest. Each memory's
+    # work is a chain of independent LLM (classify_memory, conflict resolve)
+    # + Neo4j + KB ingest calls; serializing them blew the 10s SLO. asyncio.gather
+    # lets the LLM calls overlap and the synchronous KB/Neo4j work runs on
+    # the default executor via asyncio.to_thread inside the helper.
+    async def _process_one_memory(idx: int, mem: dict) -> dict:
+        """Run consolidation + conflict-detection + ingest for one memory.
 
-    for idx, mem in enumerate(memories):
+        Returns a result dict that gets appended to ``results`` by the
+        caller, plus carries internal status fields (``_stored`` /
+        ``_skipped``) for counter aggregation. These underscore-prefixed
+        fields are stripped before the final list returns to the caller.
+        """
         try:
             # Consolidation check: ADD / UPDATE / NOOP
             action_label = "ADD"
@@ -246,14 +254,13 @@ async def extract_and_store_memories(
                     logger.debug(
                         "Memory consolidation: NOOP — %s", action.reason,
                     )
-                    skipped_count += 1
-                    results.append({
+                    return {
                         "memory_type": mem["memory_type"],
                         "summary": mem["summary"],
                         "status": "skipped_duplicate",
                         "reason": action.reason,
-                    })
-                    continue
+                        "_skipped": True,
+                    }
 
                 if action_label == "UPDATE":
                     supersede_target = action.target_id
@@ -282,17 +289,10 @@ async def extract_and_store_memories(
                             effective_content = resolution["merged_text"]
                 except Exception as exc:  # noqa: BLE001 — conflict-detection failure must not lose the memory
                     # Phase 44 conflict detection/resolution spans several LLM
-                    # + graph calls (detect_memory_conflict + resolve_memory_conflict),
-                    # so many exception types are reachable: httpx HTTPError,
-                    # neo4j driver errors, asyncio timeouts, JSON parse errors.
-                    # Issue #51 resolution: keep broad-catch with observability.
-                    # Propagating would cancel the parent loop iteration and
-                    # lose the memory we were about to store — strictly worse
-                    # than the duplicate-accumulation problem we're swallowing.
-                    # The accumulation rate is visible on
-                    # /health.swallowed_errors_last_hour; if it spikes, a
-                    # background deduplication sweep is the answer (tracked
-                    # under future-task), not narrowing here.
+                    # + graph calls; many exception types are reachable.
+                    # Propagating would cancel the per-memory task and lose
+                    # the memory — strictly worse than the duplicate-
+                    # accumulation problem we're swallowing.
                     log_swallowed_error(
                         "core.agents.memory.phase44_conflict_detection",
                         exc,
@@ -313,10 +313,16 @@ async def extract_and_store_memories(
                 "access_count": "0",
             }
 
-            result = ingest_fn(effective_content, "conversations", metadata=metadata)
+            # ingest_fn is synchronous KB ingest — hand off to a worker
+            # thread so we don't stall the event loop while parallel
+            # memories' LLM calls are still in flight.
+            result = await asyncio.to_thread(
+                ingest_fn, effective_content, "conversations", metadata=metadata
+            )
 
+            stored = False
             if result.get("status") == "success":
-                stored_count += 1
+                stored = True
                 new_artifact_id = result.get("artifact_id", "")
 
                 # Mark superseded memory if this was an UPDATE
@@ -327,7 +333,9 @@ async def extract_and_store_memories(
                     and new_artifact_id
                     and mark_superseded is not None
                 ):
-                    mark_superseded(neo4j_driver, supersede_target, new_artifact_id)
+                    await asyncio.to_thread(
+                        mark_superseded, neo4j_driver, supersede_target, new_artifact_id
+                    )
 
                 if redis_client:
                     try:
@@ -343,7 +351,7 @@ async def extract_and_store_memories(
                                 "consolidation_action": action_label,
                             },
                         )
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 — observability boundary
                         log_swallowed_error(
                             "core.agents.memory.log_extraction_event",
                             exc,
@@ -351,7 +359,7 @@ async def extract_and_store_memories(
                         )
 
                 if neo4j_driver and new_artifact_id:
-                    try:
+                    def _link_extracted_from() -> None:
                         with neo4j_driver.session() as session:
                             session.run(
                                 "MATCH (m:Artifact {id: $memory_id}) "
@@ -360,23 +368,16 @@ async def extract_and_store_memories(
                                 memory_id=new_artifact_id,
                                 convo_id=conversation_id,
                             )
-                    except Exception as e:  # Neo4j driver exceptions vary by version
-                        logger.warning("Failed to create EXTRACTED_FROM relationship: %s", e)
+                    try:
+                        await asyncio.to_thread(_link_extracted_from)
+                    except Exception as exc:  # noqa: BLE001 — neo4j driver exceptions vary by version
+                        log_swallowed_error(
+                            "core.agents.memory.link_extracted_from",
+                            exc,
+                            redis_client=redis_client,
+                        )
 
                 # Phase K2.1 — entity extraction enqueue for the memory.
-                # Reuses the K1.1 machinery: EntityExtractionJob upserts
-                # entities + MENTIONS edges → emits entities_added → wiki
-                # refresh subscriber fires. Result: memories become first-
-                # class graph citizens with the same compounding loop as
-                # ingested artifacts.
-                #
-                # Layering: core/ must not import app/ (import-linter
-                # contract). We use the DI-threaded registry pattern
-                # established by hallucination.authoritative_verify —
-                # callers (the MCP tool / router layer) install an
-                # enqueue callback at startup; this module dispatches
-                # through it. When the callback isn't installed (e.g.
-                # in unit tests), the enqueue is a no-op.
                 if new_artifact_id and _entity_extraction_enqueue is not None:
                     try:
                         _entity_extraction_enqueue(new_artifact_id)
@@ -393,18 +394,56 @@ async def extract_and_store_memories(
                 "status": result.get("status", "error"),
                 "artifact_id": result.get("artifact_id", ""),
                 "consolidation_action": action_label,
+                "_stored": stored,
             }
             if conflict_resolutions:
                 entry["conflict_resolutions"] = conflict_resolutions
-            results.append(entry)
-        except Exception as e:
-            logger.warning(f"Failed to store memory: {e}")
-            results.append({
+            return entry
+        except Exception as exc:  # noqa: BLE001 — top-level per-memory failure boundary
+            log_swallowed_error(
+                "core.agents.memory.process_one_memory",
+                exc,
+                redis_client=redis_client,
+            )
+            return {
                 "memory_type": mem["memory_type"],
                 "summary": mem["summary"],
                 "status": "error",
-                "error": str(e),
+                "error": str(exc),
+            }
+
+    raw_results = await asyncio.gather(
+        *[_process_one_memory(idx, mem) for idx, mem in enumerate(memories)],
+        return_exceptions=True,
+    )
+
+    results: list[dict] = []
+    stored_count = 0
+    skipped_count = 0
+    for idx, r in enumerate(raw_results):
+        if isinstance(r, BaseException):
+            # _process_one_memory swallows its own exceptions; reaching
+            # here means gather captured something exceptional (e.g.
+            # CancelledError). Log and continue so one bad memory does
+            # not poison the batch's response shape.
+            log_swallowed_error(
+                "core.agents.memory.gather_unexpected",
+                r if isinstance(r, Exception) else Exception(repr(r)),
+                redis_client=redis_client,
+            )
+            mem = memories[idx]
+            results.append({
+                "memory_type": mem.get("memory_type", "unknown"),
+                "summary": mem.get("summary", ""),
+                "status": "error",
+                "error": str(r),
             })
+            continue
+        if r.pop("_stored", False):
+            stored_count += 1
+        if r.pop("_skipped", False):
+            skipped_count += 1
+        results.append(r)
 
     return {
         "conversation_id": conversation_id,

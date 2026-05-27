@@ -55,7 +55,7 @@ export function ProAutomationsCard({ tier = "community" }: ProAutomationsCardPro
     setError(null)
     try {
       const list = await listProAutomations()
-      setAutomations(list)
+      setAutomations(Array.isArray(list) ? list : [])
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load automations")
     }
@@ -224,6 +224,7 @@ export function ProAutomationsCard({ tier = "community" }: ProAutomationsCardPro
                   <button
                     role="switch"
                     aria-checked={auto.enabled}
+                    aria-label={`${auto.enabled ? "Disable" : "Enable"} ${auto.feature}`}
                     onClick={() => handleToggle(auto.feature, !auto.enabled)}
                     disabled={featureLocked || rowBusy}
                     className={cn(
@@ -246,6 +247,7 @@ export function ProAutomationsCard({ tier = "community" }: ProAutomationsCardPro
                     onClick={() => handleRunNow(auto.feature)}
                     disabled={featureLocked || rowBusy}
                     data-testid={`pro-automation-run-${auto.feature}`}
+                    aria-label={`Run ${auto.feature} now`}
                   >
                     {busy === `${auto.feature}:run` ? (
                       <Loader2 className="w-3 h-3 animate-spin" />

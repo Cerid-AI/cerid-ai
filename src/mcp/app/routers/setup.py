@@ -718,9 +718,17 @@ _RERANKER_FILES = ("onnx/model.onnx", "tokenizer.json")
 _EMBEDDER_FILES = ("onnx/model.onnx", "tokenizer.json")
 
 
-def _model_cache_status(repo_id: str, filenames: tuple[str, ...],
-                       cache_dir: str | None) -> dict:
+def _model_cache_status(
+    repo_id: str,
+    filenames: tuple[str, ...],
+    cache_dir: str | None,
+    provider: str = "local",
+) -> dict:
     """Probe whether a HuggingFace model is cached locally.
+
+    When provider is non-local (quenchforge/cloud), the model is served
+    remotely and there's nothing to cache locally. Returns ``needs_local_cache=False``
+    so the GUI knows to hide the download-banner UI.
 
     Uses ``try_to_load_from_cache`` which is read-only and never
     triggers a download. Returns a dict with the per-file cache
@@ -728,22 +736,26 @@ def _model_cache_status(repo_id: str, filenames: tuple[str, ...],
     """
     from huggingface_hub import try_to_load_from_cache
 
+    needs_local_cache = provider == "local"
     files: dict[str, str | None] = {}
-    for filename in filenames:
-        try:
-            path = try_to_load_from_cache(
-                repo_id=repo_id, filename=filename, cache_dir=cache_dir,
-            )
-        except Exception:  # noqa: BLE001 — observability boundary
-            log_swallowed_error(
-                "app.routers.setup.model_cache_probe",
-                Exception(f"try_to_load_from_cache repo={repo_id} file={filename}"),
-            )
-            path = None
-        files[filename] = str(path) if path else None
+    if needs_local_cache:
+        for filename in filenames:
+            try:
+                path = try_to_load_from_cache(
+                    repo_id=repo_id, filename=filename, cache_dir=cache_dir,
+                )
+            except Exception as exc:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "app.routers.setup.model_cache_probe",
+                    exc,
+                )
+                path = None
+            files[filename] = str(path) if path else None
     return {
         "repo": repo_id,
-        "cached": all(p is not None for p in files.values()),
+        "provider": provider,
+        "needs_local_cache": needs_local_cache,
+        "cached": not needs_local_cache or all(p is not None for p in files.values()),
         "files": files,
     }
 
@@ -787,11 +799,15 @@ async def models_status() -> dict:
 
     rerank_cache = config.RERANK_MODEL_CACHE_DIR or None
     embed_cache = config.EMBEDDING_MODEL_CACHE_DIR or None
+    rerank_provider = (os.getenv("RERANK_PROVIDER") or "local").lower()
+    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "local").lower()
     reranker = _model_cache_status(
         config.RERANK_CROSS_ENCODER_MODEL, _RERANKER_FILES, rerank_cache,
+        provider=rerank_provider,
     )
     embedder = _model_cache_status(
         config.EMBEDDING_MODEL, _EMBEDDER_FILES, embed_cache,
+        provider=embed_provider,
     )
     reranker["loading"] = _is_loading("reranker")
     embedder["loading"] = _is_loading("embedder")
@@ -816,41 +832,53 @@ async def models_preload() -> dict:
 
     started = time.perf_counter()
     result: dict = {"status": "ok"}
+    rerank_provider = (os.getenv("RERANK_PROVIDER") or "local").lower()
+    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "local").lower()
 
     # Reranker
-    try:
-        from core.retrieval.reranker import _load_model as _load_reranker
+    if rerank_provider != "local":
+        result["reranker_status"] = "remote_provider"
+        result["reranker_provider"] = rerank_provider
+        result["reranker_ms"] = 0.0
+    else:
+        try:
+            from core.retrieval.reranker import _load_model as _load_reranker
 
-        rt0 = time.perf_counter()
-        await asyncio.to_thread(_load_reranker)
-        result["reranker_ms"] = round((time.perf_counter() - rt0) * 1000, 1)
-        result["reranker_status"] = "loaded"
-    except Exception as exc:  # noqa: BLE001 — observability boundary
-        log_swallowed_error("app.routers.setup.preload_reranker", exc)
-        result["reranker_status"] = "failed"
-        result["reranker_error"] = str(exc)
-        result["status"] = "partial"
+            rt0 = time.perf_counter()
+            await asyncio.to_thread(_load_reranker)
+            result["reranker_ms"] = round((time.perf_counter() - rt0) * 1000, 1)
+            result["reranker_status"] = "loaded"
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error("app.routers.setup.preload_reranker", exc)
+            result["reranker_status"] = "failed"
+            result["reranker_error"] = str(exc)
+            result["status"] = "partial"
 
     # Embedder — only when EMBEDDING_MODEL is a HuggingFace ONNX model
     # (when it equals the ChromaDB server default the embedding happens
     # server-side and there's nothing to preload here).
-    try:
-        from core.utils.embeddings import get_embedding_function
+    if embed_provider != "local":
+        result["embedder_status"] = "remote_provider"
+        result["embedder_provider"] = embed_provider
+        result["embedder_ms"] = 0.0
+    else:
+        try:
+            from core.utils.embeddings import get_embedding_function
 
-        ef = await asyncio.to_thread(get_embedding_function)
-        if ef is None:
-            result["embedder_status"] = "skipped_server_side"
-            result["embedder_ms"] = 0.0
-        else:
-            et0 = time.perf_counter()
-            await asyncio.to_thread(ef._load)
-            result["embedder_ms"] = round((time.perf_counter() - et0) * 1000, 1)
-            result["embedder_status"] = "loaded"
-    except Exception as exc:  # noqa: BLE001 — observability boundary
-        log_swallowed_error("app.routers.setup.preload_embedder", exc)
-        result["embedder_status"] = "failed"
-        result["embedder_error"] = str(exc)
-        result["status"] = "partial"
+            ef = await asyncio.to_thread(get_embedding_function)
+            if ef is None:
+                result["embedder_status"] = "skipped_server_side"
+                result["embedder_ms"] = 0.0
+            else:
+                et0 = time.perf_counter()
+                await asyncio.to_thread(ef._load)
+                result["embedder_ms"] = round((time.perf_counter() - et0) * 1000, 1)
+                result["embedder_status"] = "loaded"
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error("app.routers.setup.preload_embedder", exc)
+            result["embedder_status"] = "failed"
+            result["embedder_error"] = str(exc)
+            result["status"] = "partial"
 
     result["total_ms"] = round((time.perf_counter() - started) * 1000, 1)
     return result

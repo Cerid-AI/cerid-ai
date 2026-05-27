@@ -73,7 +73,7 @@ preservation-check: ## Run capability-preservation invariants (I1-I8) against a 
 
 # -- Latency SLO benchmarks --
 slo: ## Run latency SLO benchmarks against localhost:8888 (requires running stack)
-	cd src/mcp && pytest tests/test_latency_slo.py -m benchmark_slo --benchmark-only -v
+	cd src/mcp && ../../.venv/bin/python -m pytest tests/test_latency_slo.py -m benchmark_slo --benchmark-only -v
 
 help:
 	@echo "Available targets:"

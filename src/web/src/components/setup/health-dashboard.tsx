@@ -26,7 +26,10 @@ const SERVICE_META: Record<string, { label: string; port: number; description: s
   mcp: { label: "MCP Server (API)", port: 8888, description: "Core API — powers everything", category: "infrastructure", tooltip: "The brain of Cerid — processes queries, manages your KB, and coordinates all services", fixAction: "Check Docker Desktop is running" },
   chromadb: { label: "ChromaDB (Vectors)", port: 8001, description: "Semantic search over your knowledge", category: "infrastructure", tooltip: "Stores document embeddings for fast semantic search — finds relevant content even when wording differs", fixAction: "docker compose up chromadb -d" },
   redis: { label: "Redis (Cache)", port: 6379, description: "Query cache and audit log", category: "infrastructure", tooltip: "Speeds up repeated queries and stores your conversation audit trail", fixAction: "docker compose up redis -d" },
-  neo4j: { label: "Neo4j (Graph DB)", port: 7687, description: "Graph relationships between documents", category: "infrastructure", tooltip: "Tracks relationships between your documents — which topics connect to which sources", fixAction: "docker compose up neo4j -d" },
+  // Show Browser HTTP port (:7474) — that's what a user opens in a browser.
+  // Bolt protocol port (:7687) was previously shown, which led operators to
+  // try connecting to it as if it were the web UI (F-04-06).
+  neo4j: { label: "Neo4j (Graph DB)", port: 7474, description: "Graph relationships between documents", category: "infrastructure", tooltip: "Tracks relationships between your documents — which topics connect to which sources. Browser at :7474, Bolt protocol at :7687.", fixAction: "docker compose up neo4j -d" },
   verification_pipeline: { label: "Verification Pipeline", port: 0, description: "Claim verification and fact-checking", category: "ai_pipeline", optional: true, tooltip: "Fact-checks AI responses against your KB and external sources" },
 }
 

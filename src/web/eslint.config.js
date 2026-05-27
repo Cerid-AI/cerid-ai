@@ -8,6 +8,10 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import { createRequire } from 'module'
+
+const require = createRequire(import.meta.url)
+const noUnsafeArrayOnQueryData = require('./eslint-rules/no-unsafe-array-on-query-data.cjs')
 
 export default defineConfig([
   globalIgnores(['dist']),
@@ -24,7 +28,11 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    plugins: {
+      cerid: { rules: { 'no-unsafe-array-on-query-data': noUnsafeArrayOnQueryData } },
+    },
     rules: {
+      'cerid/no-unsafe-array-on-query-data': 'warn',
       // react-hooks v7 strict rules — warn for now, fix incrementally.
       // 7.1.x added `refs`, `immutability`, `component-hook-factories`,
       // and `preserve-manual-memoization` as errors-by-default; existing

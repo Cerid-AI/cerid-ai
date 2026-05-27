@@ -42,6 +42,8 @@ function ModelRow({
       </div>
     )
   }
+  const provider = status.provider ?? "local"
+  const isRemote = status.needs_local_cache === false
   return (
     <div className="flex items-center justify-between py-2">
       <div className="min-w-0">
@@ -50,15 +52,21 @@ function ModelRow({
           {status.repo}
         </div>
       </div>
-      {status.cached ? (
-        <Badge variant="default" className="gap-1 text-xs">
-          <CheckCircle2 className="h-3 w-3" /> cached
-        </Badge>
-      ) : (
-        <Badge variant="outline" className="gap-1 text-xs">
-          <Download className="h-3 w-3" /> not cached
-        </Badge>
-      )}
+      <div className="flex items-center gap-2">
+        {isRemote ? (
+          <Badge variant="secondary" className="text-[10px]">
+            served by {provider}
+          </Badge>
+        ) : status.cached ? (
+          <Badge variant="default" className="gap-1 text-xs">
+            <CheckCircle2 className="h-3 w-3" /> cached
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="gap-1 text-xs">
+            <Download className="h-3 w-3" /> not cached
+          </Badge>
+        )}
+      </div>
     </div>
   )
 }

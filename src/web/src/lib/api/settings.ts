@@ -53,6 +53,13 @@ export async function fetchHealthStatus(): Promise<HealthStatusResponse> {
 
 export type ModelCacheStatus = {
   repo: string
+  // F-07-01: provider per model so the banner can hide when models are
+  // served remotely (e.g., "quenchforge"). Absent on older server builds;
+  // treat undefined as "local".
+  provider?: string
+  // F-07-01: false when the model is served remotely (no local cache needed).
+  // Absent on older server builds; treat undefined as `true`.
+  needs_local_cache?: boolean
   cached: boolean
   files: Record<string, string | null>
   // Workstream E Phase E.6.6: true when a worker thread is currently
@@ -68,10 +75,12 @@ export type ModelsStatusResponse = {
 
 export type ModelsPreloadResponse = {
   status: "ok" | "partial"
-  reranker_status: "loaded" | "failed" | "skipped_server_side"
+  reranker_status: "loaded" | "failed" | "skipped_server_side" | "remote_provider"
+  reranker_provider?: string
   reranker_ms?: number
   reranker_error?: string
-  embedder_status: "loaded" | "failed" | "skipped_server_side"
+  embedder_status: "loaded" | "failed" | "skipped_server_side" | "remote_provider"
+  embedder_provider?: string
   embedder_ms?: number
   embedder_error?: string
   total_ms: number
@@ -1065,7 +1074,7 @@ export async function listProAutomations(): Promise<AutomationState[]> {
   const res = await fetch(`${MCP_BASE}/settings/pro-automations`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to fetch automations"))
   const body = await res.json()
-  return body.automations
+  return Array.isArray(body.automations) ? body.automations : []
 }
 
 export async function updateProAutomation(

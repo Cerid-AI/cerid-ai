@@ -442,7 +442,7 @@ if [ -z "$OLLAMA_CONFIGURED" ]; then
     echo "  Hardware: ${CERID_GPU_LABEL:-Unknown}"
     if [ "${CERID_OLLAMA_IMAGE:-}" = "native" ]; then
         echo "  Note:     macOS Metal detected — Ollama runs natively (not in Docker)"
-        echo "            Install via: brew install ollama && ollama serve"
+        echo "            Install via: brew install cerid-ai/tap/quenchforge (recommended on AMD-Mac, see https://github.com/Cerid-AI/quenchforge) OR brew install ollama && ollama serve"
     fi
     echo ""
     OLLAMA_ANSWER="n"

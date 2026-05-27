@@ -134,7 +134,7 @@ function renderWithQuery(ui: React.ReactNode) {
 
 import { SamplePackTab } from "@/components/setup/sample-pack-tab"
 
-const onComplete = vi.fn<(packId: string) => void>()
+const onComplete = vi.fn<(packId: string, articleCount: number) => void>()
 
 beforeEach(() => {
   vi.restoreAllMocks()

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -339,17 +340,24 @@ export function ConversationList({
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
-                    <span
-                      className="scroll-title-inner"
-                      onDoubleClick={(e) => {
-                        if (!onRename) return
-                        e.stopPropagation()
-                        setRenamingId(convo.id)
-                        setRenameValue(convo.title)
-                      }}
-                    >
-                      <HighlightedText text={convo.title} query={debouncedQuery} />
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="scroll-title-inner"
+                          onDoubleClick={(e) => {
+                            if (!onRename) return
+                            e.stopPropagation()
+                            setRenamingId(convo.id)
+                            setRenameValue(convo.title)
+                          }}
+                        >
+                          <HighlightedText text={convo.title} query={debouncedQuery} />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[360px] break-words">
+                        {convo.title}
+                      </TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
                 {!editMode && (

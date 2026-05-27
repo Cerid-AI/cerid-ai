@@ -44,12 +44,16 @@ export function StepIndicator({ steps, currentStep, skippedSteps }: StepIndicato
                 "flex items-center gap-0.5 rounded-full px-1 py-0.5 text-label-xxs font-medium whitespace-nowrap transition-colors",
                 state === "active" && "bg-brand/10 text-brand",
                 state === "completed" && "text-green-600 dark:text-green-400",
-                state === "skipped" && "text-muted-foreground/50",
+                // Skipped pips: muted color + line-through so the user can
+                // clearly distinguish "I deliberately skipped this" from
+                // "I completed this" at a glance (F-04 step-indicator).
+                state === "skipped" && "text-muted-foreground/60 line-through decoration-from-font",
                 state === "pending" && "text-muted-foreground/40",
               )}
+              aria-label={`Step ${i + 1}: ${step.label} — ${state}`}
             >
               {state === "completed" && <Check className="h-2 w-2" />}
-              {state === "skipped" && <SkipForward className="h-2 w-2" />}
+              {state === "skipped" && <SkipForward className="h-2 w-2 no-underline" />}
               {state === "active" && (
                 <div className="h-1.5 w-1.5 rounded-full bg-brand" />
               )}

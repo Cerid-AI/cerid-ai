@@ -13,8 +13,8 @@ import { test, expect, suppressFirstRun } from "./fixtures"
  */
 test("E-06 settings pane — 7 tabs + tab switch", async ({ page }) => {
   test.setTimeout(45_000)
-  await page.goto("/")
   await suppressFirstRun(page)
+  await page.goto("/")
   await page.getByRole("button", { name: "Settings", exact: true }).click()
 
   // Wait for the settings-pane lazy chunk to mount its tablist.

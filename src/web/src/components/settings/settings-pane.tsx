@@ -296,36 +296,36 @@ export default function SettingsPane() {
                 {/* Adaptive recommendations (C3.2): banner at the top of
                     the Settings pane so the user sees the next-step
                     nudge before scanning the tab list. */}
-                <PaneErrorBoundary label="Recommendations">
+                <PaneErrorBoundary label="Recommendations" queryClient={queryClient}>
                   <RecommendationBanner patch={patch} />
                 </PaneErrorBoundary>
-                <PaneErrorBoundary label="Essentials">
+                <PaneErrorBoundary label="Essentials" queryClient={queryClient}>
                   <EssentialsSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} credits={credits} />
                 </PaneErrorBoundary>
               </TabsContent>
 
               <AdvancedMode>
                 <TabsContent value="pipeline" className="space-y-1 pt-2">
-                  <PaneErrorBoundary label="Pipeline">
+                  <PaneErrorBoundary label="Pipeline" queryClient={queryClient}>
                     <PipelineSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} />
                   </PaneErrorBoundary>
                 </TabsContent>
               </AdvancedMode>
 
               <TabsContent value="system" className="space-y-3 pt-2">
-                <PaneErrorBoundary label="Inference Models">
+                <PaneErrorBoundary label="Inference Models" queryClient={queryClient}>
                   <InferenceModelsCard />
                 </PaneErrorBoundary>
-                <PaneErrorBoundary label="Whisper Models">
+                <PaneErrorBoundary label="Whisper Models" queryClient={queryClient}>
                   <WhisperModelManager />
                 </PaneErrorBoundary>
-                <PaneErrorBoundary label="Pro Automations">
+                <PaneErrorBoundary label="Pro Automations" queryClient={queryClient}>
                   <ProAutomationsCard tier={settings.feature_tier ?? "community"} />
                 </PaneErrorBoundary>
-                <PaneErrorBoundary label="Brief Settings">
+                <PaneErrorBoundary label="Brief Settings" queryClient={queryClient}>
                   <BriefSettingsSection />
                 </PaneErrorBoundary>
-                <PaneErrorBoundary label="System">
+                <PaneErrorBoundary label="System" queryClient={queryClient}>
                   <SystemSection
                     settings={settings}
                     sections={sections}
@@ -347,12 +347,12 @@ export default function SettingsPane() {
 
               <AdvancedMode>
                 <TabsContent value="governance" className="space-y-1 pt-2">
-                  <PaneErrorBoundary label="Governance">
+                  <PaneErrorBoundary label="Governance" queryClient={queryClient}>
                     {settings && (
                       <GovernanceSection settings={settings} sections={sections} toggleSection={toggleSection} />
                     )}
                   </PaneErrorBoundary>
-                  <PaneErrorBoundary label="External APIs">
+                  <PaneErrorBoundary label="External APIs" queryClient={queryClient}>
                     <ExternalAPIsSection
                       open={sections.external_apis}
                       onToggle={() => toggleSection("external_apis")}
@@ -363,14 +363,14 @@ export default function SettingsPane() {
 
               <AdvancedMode>
                 <TabsContent value="plugins" className="space-y-1 pt-2">
-                  <PaneErrorBoundary label="Plugins">
+                  <PaneErrorBoundary label="Plugins" queryClient={queryClient}>
                     <PluginsSection />
                   </PaneErrorBoundary>
                 </TabsContent>
               </AdvancedMode>
 
               <TabsContent value="diagnostics" className="h-[calc(100vh-12rem)] pt-2">
-                <PaneErrorBoundary label="Diagnostics">
+                <PaneErrorBoundary label="Diagnostics" queryClient={queryClient}>
                   <DiagnosticsSection
                     tier={settings.feature_tier ?? "community"}
                     initialTab={(typeof window !== "undefined"
@@ -390,7 +390,7 @@ export default function SettingsPane() {
               </TabsContent>
 
               <TabsContent value="pro" className="space-y-1 pt-2">
-                <PaneErrorBoundary label="Pro">
+                <PaneErrorBoundary label="Pro" queryClient={queryClient}>
                   <ProSection
                     featureTier={settings?.feature_tier ?? "community"}
                     featureFlags={settings?.feature_flags ?? {}}

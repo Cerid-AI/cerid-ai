@@ -70,7 +70,7 @@ def test_find_webhook_source_tolerates_empty_or_missing_config():
 
 
 def test_verify_hmac_signature_accepts_prefixed_and_bare():
-    secret = "test-secret"
+    secret = "test-secret"  # pragma: allowlist secret
     body = b'{"hello":"world"}'
     import hmac
 

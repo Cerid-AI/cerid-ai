@@ -4,12 +4,19 @@
 import { Sparkles, Cpu, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import type { RecommendedLocalBackend } from "@/lib/types"
 
 interface HardwareInfo {
   ram_gb: number
   cpu: string
   gpu: string
   gpu_acceleration: string
+}
+
+const BACKEND_LABELS: Record<RecommendedLocalBackend, string> = {
+  ollama: "Ollama",
+  quenchforge: "Quenchforge",
+  cloud: "Cloud",
 }
 
 /** Recommend a mode based on hardware capabilities. */
@@ -43,8 +50,20 @@ interface ModeSelectionStepProps {
     providerNames: string[]
     domainCount: number
     ollamaEnabled: boolean
+    /**
+     * Chat-model label for the summary line. The wizard owns the
+     * backend-aware selection logic (e.g. `llama3.1-8b` for Quenchforge,
+     * skip for Cloud, the actually-pulled model for Ollama). null hides the
+     * "Local LLM" line entirely instead of mislabelling a reranker as a
+     * chat model.
+     */
     ollamaModel: string | null
     documentCount: number
+    /**
+     * Inference backend selected on the Welcome step. Added to the summary
+     * so users see their Step 1 choice reflected here (F-04-05).
+     */
+    inferenceBackend?: RecommendedLocalBackend | null
   }
   hardware?: HardwareInfo | null
 }
@@ -63,9 +82,23 @@ export function ModeSelectionStep({
     ? `${configSummary.documentCount} document${configSummary.documentCount !== 1 ? "s" : ""} ingested`
     : "0 documents"
 
+  // Backend choice from Welcome step (F-04-05). Always show; the inference
+  // backend is the most consequential decision in the wizard so the user
+  // should see it reflected on the Mode summary even when no local model
+  // has been pulled yet.
+  const backendText = configSummary.inferenceBackend
+    ? `Backend: ${BACKEND_LABELS[configSummary.inferenceBackend]}`
+    : null
+
+  // Chat-model line. Hide the line entirely when there's no chat model
+  // (rather than mislabelling the rerank slot as a chat LLM — F-04-08).
   const ollamaText = configSummary.ollamaEnabled && configSummary.ollamaModel
-    ? `Local LLM: ${configSummary.ollamaModel}`
-    : "Local LLM: not configured"
+    ? `Chat model: ${configSummary.ollamaModel}`
+    : null
+
+  const summaryParts = [providerText, kbText, backendText, ollamaText].filter(
+    (s): s is string => Boolean(s),
+  )
 
   const recommendation = recommendMode(hardware ?? null)
 
@@ -79,7 +112,7 @@ export function ModeSelectionStep({
       <h3 className="mb-2 text-center text-lg font-semibold">Choose Your Mode</h3>
 
       <div className="mb-4 rounded-lg border bg-card px-3 py-2 text-center text-label-sm text-muted-foreground">
-        {providerText} · {kbText} · {ollamaText}
+        {summaryParts.join(" · ")}
       </div>
 
       {/* Hardware recommendation */}
