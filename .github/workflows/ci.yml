@@ -188,16 +188,30 @@ jobs:
         run: npm test
       - name: Vite build
         run: npx vite build
-      - name: Check bundle size (fail if any chunk > 800KB)
+      - name: Check bundle size (fail if any chunk exceeds caps)
+        # 800KB main cap protects the initial-load surface. Constellation's
+        # lazy 3D stack (three + R3F + drei) needs ~900KB minified / ~240KB
+        # gzipped on its own chunk — that's the cost of a WebGL2 3D engine
+        # and is fine because it only loads when the user picks Constellation
+        # mode (lazy import). Allowlist any chunk whose name starts with the
+        # known-large lazy entry markers up to 1.2MB.
         run: |
-          max_bytes=$((800 * 1024))
+          main_max=$((800 * 1024))
+          lazy3d_max=$((1200 * 1024))
           fail=0
           for file in dist/assets/*.js; do
             size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
             size_kb=$((size / 1024))
+            base=$(basename "$file")
             echo "$file: ${size_kb}KB"
-            if [ "$size" -gt "$max_bytes" ]; then
-              echo "::error::Bundle chunk $file exceeds 800KB limit: ${size_kb}KB"
+            cap=$main_max
+            cap_name="800KB"
+            if [[ "$base" == vendor-r3f-* || "$base" == vendor-three-* || "$base" == Constellation-* ]]; then
+              cap=$lazy3d_max
+              cap_name="1.2MB (lazy 3D)"
+            fi
+            if [ "$size" -gt "$cap" ]; then
+              echo "::error::Bundle chunk $file exceeds $cap_name limit: ${size_kb}KB"
               fail=1
             fi
           done
