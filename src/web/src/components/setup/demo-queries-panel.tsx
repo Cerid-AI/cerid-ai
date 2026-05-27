@@ -5,9 +5,11 @@
  * DemoQueriesPanel — shown after a sample pack installs successfully.
  *
  * Renders 3 canned queries for the installed pack. Clicking a query runs it
- * against /agent/query (via queryKB) and renders the top result as plain
- * text. A "Continue to chat" button calls the completion callback so the
- * wizard can advance.
+ * against /agent/query (via queryKB) scoped to the just-installed pack via
+ * ``metadata_filter: { pack_id }`` so retrieval can't bleed into the rest of
+ * the KB. The top result's filename + relevance score is rendered alongside
+ * the answer so the user can verify provenance. "Continue to chat" calls the
+ * completion callback so the wizard can advance.
  *
  * Design constraints:
  * - shadcn/ui + lucide icons only; no hex literals; no inline style={{}}
@@ -18,10 +20,11 @@
 import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, ChevronRight, MessagesSquare, Check, AlertCircle } from "lucide-react"
+import { Loader2, ChevronRight, MessagesSquare, Check, AlertCircle, FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { queryKB } from "@/lib/api/kb"
 import type { KnowledgePackSummary } from "@/lib/api/knowledge-packs"
+import type { KBQueryResult } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Per-pack canned demo queries
@@ -92,6 +95,10 @@ interface DemoQueriesPanelProps {
 interface QueryResult {
   query: string
   answer: string
+  /** Top KB hit that produced ``answer`` — used to render source attribution
+   *  under the answer card. ``undefined`` when the response had no results
+   *  (e.g. the pack was empty or retrieval timed out into ``context`` only). */
+  topSource?: KBQueryResult
 }
 
 export function DemoQueriesPanel({ pack, onComplete }: DemoQueriesPanelProps) {
@@ -114,19 +121,27 @@ export function DemoQueriesPanel({ pack, onComplete }: DemoQueriesPanelProps) {
         [pack.domain],
         3,
         undefined,
-        { useReranking: false, skipCache: true },
+        {
+          useReranking: false,
+          skipCache: true,
+          // Pin retrieval to the just-installed pack so the demo can't bleed
+          // into pre-seeded eval corpora or other namespaces. ``pack_id`` is
+          // stamped onto every chunk's chromadb metadata by
+          // ``app.services.knowledge_packs._install_one``.
+          metadataFilter: { pack_id: pack.id },
+        },
       )
       const topResult = response.results?.[0]
       const answer = topResult?.content
         ?? response.context
         ?? `Found ${response.total_results} result(s) — query your knowledge base for details.`
-      setResult({ query, answer })
+      setResult({ query, answer, topSource: topResult })
     } catch {
       setQueryError("Query failed — the knowledge base may still be indexing. Try another question.")
     } finally {
       setLoadingQuery(null)
     }
-  }, [loadingQuery, pack.domain])
+  }, [loadingQuery, pack.domain, pack.id])
 
   return (
     <div className="space-y-4">
@@ -216,6 +231,26 @@ export function DemoQueriesPanel({ pack, onComplete }: DemoQueriesPanelProps) {
           <p className="text-xs leading-relaxed text-foreground line-clamp-6">
             {result.answer}
           </p>
+
+          {/* Source attribution — filename + relevance %.
+              Mirrors the main chat's ``SourceAttribution`` (card variant) at
+              a compact one-line scale so the wizard step stays under fold. */}
+          {result.topSource && (
+            <div
+              className="mt-2 flex items-center gap-1.5 border-t pt-2 text-xs text-muted-foreground"
+              aria-label="Source for this answer"
+            >
+              <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 truncate font-medium text-foreground">
+                {result.topSource.filename}
+              </span>
+              {result.topSource.relevance > 0 && (
+                <span className="ml-auto shrink-0 tabular-nums">
+                  {Math.round(result.topSource.relevance * 100)}%
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

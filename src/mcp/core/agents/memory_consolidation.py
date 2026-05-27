@@ -34,7 +34,7 @@ from errors import RetrievalError
 # Per-stage LLM budget (Workstream A Phase 1.2). Mirrors the bound in
 # core.agents.memory; consolidation is the heaviest fan-out call inside
 # extract_and_store_memories so this is the most-load-bearing budget.
-CONSOLIDATION_LLM_BUDGET_S = 8.0
+CONSOLIDATION_LLM_BUDGET_S = 3.0
 
 logger = logging.getLogger("ai-companion.memory_consolidation")
 

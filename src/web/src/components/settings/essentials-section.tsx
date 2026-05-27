@@ -221,7 +221,7 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 value={settings.rag_mode ?? "smart"}
                 onValueChange={(v) => patch({ rag_mode: v })}
               >
-                <SelectTrigger size="sm" className="w-36" aria-label="KB Injection Mode">
+                <SelectTrigger size="sm" className="w-44" aria-label="KB Injection Mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

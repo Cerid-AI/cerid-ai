@@ -29,7 +29,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldOff, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen } from "lucide-react"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldOff, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen, Menu } from "lucide-react"
 import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
@@ -248,6 +248,8 @@ interface ChatToolbarProps {
   changePrivateModeLevel: (level: number) => void
   // Actions
   onNewChat: () => void
+  // Mobile navigation
+  onOpenSidebar?: () => void
 }
 
 export function ChatToolbar({
@@ -267,6 +269,7 @@ export function ChatToolbar({
   configuredProviders,
   privateModeEnabled, privateModeLevel, togglePrivateMode, changePrivateModeLevel,
   onNewChat,
+  onOpenSidebar,
 }: ChatToolbarProps) {
   const cycleRagMode = useCallback(() => {
     const next: RagMode = ragMode === "manual" ? "smart" : ragMode === "smart" ? "custom_smart" : "manual"
@@ -316,6 +319,24 @@ export function ChatToolbar({
             : "border-amber-500/40 text-amber-500"
   return (
     <div className="flex items-center gap-2 border-b px-4 py-2">
+      {isNarrow && onOpenSidebar && (
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Open navigation"
+                onClick={onOpenSidebar}
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Navigation</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
       <Button variant="ghost" size="sm" onClick={onNewChat}>
         <Plus className="mr-1 h-4 w-4" />
         {!isNarrow && "New chat"}

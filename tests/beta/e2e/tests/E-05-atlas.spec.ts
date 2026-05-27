@@ -15,8 +15,8 @@ import { test, expect, suppressFirstRun } from "./fixtures"
  * state copy.
  */
 test("E-05 Subjects pane — 4 visualization modes render", async ({ page }) => {
-  await page.goto("/")
   await suppressFirstRun(page)
+  await page.goto("/")
   await page.getByRole("button", { name: "Subjects", exact: true }).click()
 
   // 4-tab strip: Atlas, Constellation, Timeline, Wiki.

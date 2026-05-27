@@ -249,6 +249,7 @@ function DeprecatedCard({
           size="sm"
           className="h-6 w-6 shrink-0 p-0 text-amber-600 hover:text-amber-700"
           onClick={() => onDismiss(item.update_id)}
+          aria-label="Dismiss deprecation warning"
         >
           <X className="h-3 w-3" />
         </Button>
@@ -292,6 +293,7 @@ function NewModelRow({
         size="sm"
         className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground"
         onClick={() => onDismiss(item.update_id)}
+        aria-label={`Dismiss new model notification for ${name}`}
       >
         <X className="h-3 w-3" />
       </Button>
@@ -375,6 +377,7 @@ function PriceChangeRow({
         size="sm"
         className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground"
         onClick={() => onDismiss(item.update_id)}
+        aria-label={`Dismiss price change notification for ${item.model_id}`}
       >
         <X className="h-3 w-3" />
       </Button>

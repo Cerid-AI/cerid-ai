@@ -136,24 +136,30 @@ def test_chat_stream_ttft_under_2s(benchmark):
 # Cross-project SLOs (Workstream A — 2026-04-28-cross-project-slo-hardening)
 # ---------------------------------------------------------------------------
 # These budgets gate the trading-agent SDK paths surfaced in the 2026-04-28
-# soak. ``test_memory_extract_under_10s`` has been passing on the live
-# stack since the Phase 1.2 per-stage asyncio.wait_for(8s) budgets landed
-# (see CHANGELOG v0.95.6). ``test_longshot_surface_under_500ms`` is still
-# XFAIL because the Neo4j composite index migration for the longshot
-# Cypher hasn't shipped — tracked for v1.1 polish.
+# soak. Both have been promoted to STRICT (Tier A) hard gates:
+# ``test_memory_extract_under_10s`` since Phase 1.2's per-stage
+# asyncio.wait_for(8s) budgets landed (v0.95.6); the longshot budget
+# followed after the Neo4j composite index migration shipped — the
+# previous strict-xfail marker started failing as XPASS, which is the
+# signal to remove it and promote to a hard gate.
 #
-# ``strict=True`` flips xfail semantics: if the budget unexpectedly
-# starts passing, the marker itself FAILS — the signal to remove it and
-# promote to a hard gate (which is exactly what happened for memory
-# extraction).
+# The longshot endpoint is trading-agent-only and is not mounted in the
+# public/CI stack. The budget IS a hard gate when the endpoint is
+# reachable; gate execution on ``CERID_TRADING_ENABLED`` so CI doesn't
+# 404 against a route that the public surface intentionally omits.
 
 _LONGSHOT_BUDGET_S = 0.5  # p50 < 500ms target per workstream §A1
 _MEMORY_EXTRACT_BUDGET_S = 10.0  # p99 < 10s target per workstream §A2
 
+_TRADING_AVAILABLE = os.getenv("CERID_TRADING_ENABLED", "").lower() in {"1", "true", "yes"}
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Longshot Cypher hits Neo4j without composite index; v1.1 polish",
+
+@pytest.mark.skipif(
+    not _TRADING_AVAILABLE,
+    reason=(
+        "CERID_TRADING_ENABLED not set — /sdk/v1/trading/longshot-surface is "
+        "trading-agent-only and unavailable in the public/CI stack"
+    ),
 )
 @pytest.mark.benchmark(group="longshot_surface", min_rounds=5, disable_gc=True)
 def test_longshot_surface_under_500ms(benchmark):

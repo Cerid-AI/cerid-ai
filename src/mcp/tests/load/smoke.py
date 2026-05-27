@@ -2,18 +2,34 @@
 """Cerid-AI smoke / load test harness. Read-only probes against localhost."""
 
 import asyncio
+import os
 import random
 import statistics
 import sys
 import time
+from pathlib import Path
 
 try:
     import httpx
 except ImportError:
-    import subprocess
-
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "httpx"])
-    import httpx
+    # Refuse to self-install on a host venv — silent `pip install` from a
+    # test harness pollutes whichever interpreter happens to be on PATH
+    # (often the user's global site-packages) and the CI failure mode is
+    # confusing ("httpx is installed where?"). Inside the MCP container
+    # httpx is part of requirements.txt, so an ImportError here is
+    # genuinely an environment bug worth surfacing.
+    _in_container = (
+        Path("/.dockerenv").exists()
+        or os.environ.get("CERID_IN_CONTAINER") == "1"
+    )
+    where = "container" if _in_container else "host venv"
+    sys.stderr.write(
+        f"smoke.py: httpx import failed in {where}.\n"
+        "  Install it explicitly — this harness will NOT self-install.\n"
+        "  Host venv:  .venv/bin/pip install httpx\n"
+        "  Container:  add httpx to src/mcp/requirements.txt and rebuild\n"
+    )
+    sys.exit(1)
 
 MCP = "http://127.0.0.1:8888"
 GUI = "http://127.0.0.1:3000"
@@ -160,18 +176,24 @@ async def test_source_shape_invariant(client):
 
 async def test_rate_limit(client):
     print(
-        "\n== TEST E: rate-limit (fire 25 /agent/query under X-Client-ID=gui which is 20/min) =="
+        "\n== TEST E: rate-limit (fire 130 /agent/query under X-Client-ID=gui which is 120/min) =="
     )
-    tasks = [
-        post(
-            client,
-            "/agent/query",
-            {"query": f"rate test {i}", "domains": ["general"], "n_results": 3},
-            HEADERS_GUI,
-        )
-        for i in range(25)
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Use a dedicated client with raised connection-pool limits — the
+    # shared client's default 100-conn cap would itself produce ERR
+    # instead of 429 when we burst past it. With max_connections=200 the
+    # rate-limit (429) becomes the dominant failure signal as intended.
+    limits = httpx.Limits(max_connections=200, max_keepalive_connections=200)
+    async with httpx.AsyncClient(timeout=60.0, limits=limits) as e_client:
+        tasks = [
+            post(
+                e_client,
+                "/agent/query",
+                {"query": f"rate test {i}", "domains": ["general"], "n_results": 3},
+                HEADERS_GUI,
+            )
+            for i in range(130)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
     codes = [(r[1] if not isinstance(r, Exception) else "ERR") for r in results]
     from collections import Counter
 
@@ -215,7 +237,7 @@ async def test_sse_chat_stream():
                         )
                     if chunks >= 40:
                         break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — load-test diagnostic; error is printed inline
             print(f"  stream ERR: {type(e).__name__}: {e}")
     total = time.perf_counter() - t0
     print(
@@ -250,8 +272,8 @@ async def test_head_of_line_blocking(client):
     for b in bg:
         try:
             await b
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"  bg drain swallowed: {exc!r}")
     print(
         f"  /health during load: p50={statistics.median(mids):.2f}s p95={sorted(mids)[-1]:.2f}s max={max(mids):.2f}s"
     )
@@ -404,7 +426,7 @@ async def check_verification_lifecycle_lands(
 
     try:
         driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — returns structured skip with reason
         return {
             "pass": True,
             "skipped": True,
@@ -460,7 +482,7 @@ async def check_verification_lifecycle_lands(
                             },
                         }
                 await asyncio.sleep(1.0)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — returns structured failure with reason
         return {
             "pass": False,
             "details": {

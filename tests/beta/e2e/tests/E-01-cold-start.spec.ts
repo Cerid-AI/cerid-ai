@@ -15,8 +15,8 @@ import { test, expect, suppressFirstRun } from "./fixtures"
  * visibility, runtime __ENV__ injection.
  */
 test("E-01 cold-start render", async ({ page }) => {
-  await page.goto("/")
   await suppressFirstRun(page)
+  await page.goto("/")
 
   await expect(page).toHaveTitle(/Cerid AI/i)
 

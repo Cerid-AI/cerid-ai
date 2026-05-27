@@ -787,6 +787,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log_swallowed_error("app.main.lifespan.register_sibling_mcp", exc)
 
+    # F-PERF-04: pre-warm the /health cache so the first request after
+    # boot doesn't pay the ~700ms cold-cache cost while concurrent
+    # /agent/query loads compete for the executor's thread pool.
+    try:
+        import app.routers.health as _health_mod
+        from app.routers.health import _build_health_payload
+        _health_mod._health_cache = await asyncio.to_thread(_build_health_payload)
+        _health_mod._health_cache_ts = time.monotonic()
+        logger.info("health cache pre-warmed at startup")
+    except Exception as exc:
+        log_swallowed_error("app.main.lifespan.health_prewarm", exc)
+
     yield
 
     # Cancel SSE reaper before tearing down sessions.

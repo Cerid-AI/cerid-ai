@@ -15,8 +15,8 @@ import { test, expect, suppressFirstRun } from "./fixtures"
  * Covers: Phase 7's FLIP wire-in + the conversation-list utility.
  */
 test("E-03 conversation archive removes row", async ({ page }) => {
-  await page.goto("/")
   await suppressFirstRun(page)
+  await page.goto("/")
 
   // Need at least one conversation in the list. Skip if none.
   const firstRow = page.locator("[data-flip-item]").first()

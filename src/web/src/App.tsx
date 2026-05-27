@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
 import { AppErrorBoundary } from "@/components/layout/app-error-boundary"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
@@ -19,14 +20,14 @@ import { useTheme } from "@/hooks/use-theme"
 import { LiquidGlassDefs } from "@/components/ui/liquid-glass-defs"
 import { OpeningSequence } from "@/components/ui/opening-sequence"
 
-const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
-const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pane"))
-const AuditPane = lazy(() => import("@/components/audit/audit-pane"))
-const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
+// Phase A/B/C consolidation aftermath — only the 4 user-facing panes are
+// mounted here. Legacy panes (knowledge / monitoring / audit / memories /
+// agents / wiki / communities) live on as sub-views inside SourcesPane,
+// SettingsPane → DiagnosticsSection, and SubjectsPane; any `goTo("monitoring")`
+// etc. is rewritten by NavigationProvider's `applyRedirect` map before
+// `setActivePane` fires, so this switch never sees the legacy values.
+// See `contexts/navigation-context.tsx::LEGACY_PANE_REDIRECTS`.
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
-const AgentsPane = lazy(() => import("@/components/agents/agents-pane"))
-const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
-const CommunitiesPane = lazy(() => import("@/components/kb/graph-explorer").then(m => ({ default: m.GraphExplorer })))
 const SubjectsPane = lazy(() => import("@/components/subjects/subjects-pane"))
 const SourcesPane = lazy(() => import("@/components/sources/sources-pane"))
 const QuickCaptureFab = lazy(() =>
@@ -61,6 +62,7 @@ export default function App() {
   // work in the setup wizard path where AppLayout is not mounted.
   useTheme()
 
+  const queryClient = useQueryClient()
   const [multiUser, setMultiUser] = useState(false)
   const [featureTier, setFeatureTier] = useState("community")
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -175,40 +177,31 @@ export default function App() {
     <ConversationsProvider>
     <KBInjectionProvider>
     <AppLayout featureTier={featureTier} onCycleTier={cycleTier}>
-      {(activePane) => {
+      {(activePane, openSidebar) => {
         switch (activePane) {
           case "chat":
             return (
-              <PaneErrorBoundary label="Chat">
-                <ChatPanel />
+              <PaneErrorBoundary label="Chat" queryClient={queryClient}>
+                <ChatPanel onOpenSidebar={openSidebar} />
               </PaneErrorBoundary>
             )
-          case "knowledge":
-          case "monitoring":
-          case "audit":
-          case "memories":
-          case "agents":
           case "settings":
-          case "wiki":
-          case "communities":
           case "subjects":
           case "sources":
             return (
-              <PaneErrorBoundary label={activePane}>
+              <PaneErrorBoundary label={activePane} queryClient={queryClient}>
                 <Suspense fallback={<PaneLoader />}>
-                  {activePane === "knowledge" && <KnowledgePane />}
-                  {activePane === "monitoring" && <MonitoringPane />}
-                  {activePane === "audit" && <AuditPane />}
-                  {activePane === "memories" && <MemoriesPane />}
-                  {activePane === "communities" && <CommunitiesPane />}
-                  {activePane === "agents" && <AgentsPane />}
                   {activePane === "settings" && <SettingsPane />}
-                  {activePane === "wiki" && <WikiPane />}
                   {activePane === "subjects" && <SubjectsPane />}
                   {activePane === "sources" && <SourcesPane />}
                 </Suspense>
               </PaneErrorBoundary>
             )
+          // Legacy panes (knowledge / monitoring / audit / memories / agents /
+          // wiki / communities) are not handled here — NavigationProvider's
+          // redirect map rewrites them to subjects/sources/settings before
+          // they reach this switch. Keeping them in the Pane type union
+          // preserves the goTo() contract for programmatic callers.
         }
       }}
     </AppLayout>

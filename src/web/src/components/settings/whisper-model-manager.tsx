@@ -33,9 +33,9 @@ export function WhisperModelManager() {
   const refresh = useCallback(async () => {
     try {
       const list = await fetchWhisperModels()
-      setModels(list.models)
-      setCacheDir(list.cache_dir)
-      setDefaultModel(list.current_default)
+      setModels(list.models ?? [])
+      setCacheDir(list.cache_dir ?? "")
+      setDefaultModel(list.current_default ?? "")
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load models")
     }

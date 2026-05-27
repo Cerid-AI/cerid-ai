@@ -1036,8 +1036,8 @@ if CATEGORIZE_MODE not in ("manual", "smart", "pro"):
 CONSUMER_REGISTRY: dict[str, dict] = {
     "gui": {
         "rate_limits": {
-            "/agent/": (20, 60),
-            "/sdk/": (20, 60),
+            "/agent/": (120, 60),
+            "/sdk/": (120, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
             # Audit C-11: state-mutating setup + polling admin/observability surfaces
@@ -1080,8 +1080,8 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (80, 60),       # 80 req/min — 5 concurrent sessions burst
             "/agent/": (80, 60),
         },
-        "allowed_domains": ["finance"],
-        "strict_domains": True,      # Finance domain for crypto/perps signals; no bleed into personal
+        "allowed_domains": ["trading"],
+        "strict_domains": True,      # No bleed into personal/finance/coding data
     },
     "folder_scanner": {
         "rate_limits": {
@@ -1100,8 +1100,8 @@ CONSUMER_REGISTRY: dict[str, dict] = {
     },
     "_default": {
         "rate_limits": {
-            "/agent/": (30, 60),
-            "/sdk/": (30, 60),
+            "/agent/": (120, 60),
+            "/sdk/": (120, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
             "/setup/": (20, 60),

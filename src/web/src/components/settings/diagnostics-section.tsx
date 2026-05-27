@@ -13,6 +13,7 @@
 // redirects legacy goTo("monitoring"|"audit"|"agents") calls here.
 
 import { lazy, Suspense } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
@@ -46,6 +47,7 @@ function PaneLoader({ label }: { label: string }) {
 }
 
 export function DiagnosticsSection({ initialTab = "status", onTabChange, tier = "community" }: DiagnosticsSectionProps) {
+  const queryClient = useQueryClient()
   return (
     <Tabs
       defaultValue={initialTab}
@@ -59,7 +61,7 @@ export function DiagnosticsSection({ initialTab = "status", onTabChange, tier = 
       </TabsList>
 
       <TabsContent value="status" className="grow overflow-auto pt-2">
-        <PaneErrorBoundary label="Diagnostics — Status">
+        <PaneErrorBoundary label="Diagnostics — Status" queryClient={queryClient}>
           <Suspense fallback={<PaneLoader label="status" />}>
             <MonitoringPane />
           </Suspense>
@@ -70,12 +72,12 @@ export function DiagnosticsSection({ initialTab = "status", onTabChange, tier = 
         {/* Phase L — advanced analytics surface on top of the legacy
             audit pane. The audit pane stays below for now (it carries
             existing claim-accuracy + privacy-audit panels). */}
-        <PaneErrorBoundary label="Diagnostics — Analytics">
+        <PaneErrorBoundary label="Diagnostics — Analytics" queryClient={queryClient}>
           <Suspense fallback={<PaneLoader label="analytics" />}>
             <AnalyticsPanel tier={tier} />
           </Suspense>
         </PaneErrorBoundary>
-        <PaneErrorBoundary label="Diagnostics — Audit">
+        <PaneErrorBoundary label="Diagnostics — Audit" queryClient={queryClient}>
           <Suspense fallback={<PaneLoader label="audit" />}>
             <AuditPane />
           </Suspense>
@@ -83,7 +85,7 @@ export function DiagnosticsSection({ initialTab = "status", onTabChange, tier = 
       </TabsContent>
 
       <TabsContent value="activity" className="grow overflow-auto pt-2">
-        <PaneErrorBoundary label="Diagnostics — Activity">
+        <PaneErrorBoundary label="Diagnostics — Activity" queryClient={queryClient}>
           <Suspense fallback={<PaneLoader label="activity" />}>
             <AgentsPane />
           </Suspense>

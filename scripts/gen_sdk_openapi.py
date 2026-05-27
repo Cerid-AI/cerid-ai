@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +39,18 @@ MCP_SRC = REPO_ROOT / "src" / "mcp"
 # Mirror gen_router_registry.py's sys.path setup so ``from app.routers...``
 # resolves without requiring the caller to export PYTHONPATH.
 sys.path.insert(0, str(MCP_SRC))
+
+
+def _runtime_deps_available() -> bool:
+    """Quick probe for the MCP runtime stack without importing it."""
+    return importlib.util.find_spec("fastapi") is not None
+
+
+def _in_container() -> bool:
+    return (
+        Path("/.dockerenv").exists()
+        or os.environ.get("CERID_IN_CONTAINER") == "1"
+    )
 
 
 def _render() -> str:
@@ -51,6 +65,21 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="CI drift mode — exit 1 on mismatch")
     args = ap.parse_args()
+
+    if not _runtime_deps_available():
+        where = "container" if _in_container() else "host"
+        msg = (
+            f"gen_sdk_openapi.py: fastapi not importable from this {where} Python "
+            f"({sys.executable}).\n"
+            "  This script needs the MCP runtime stack. Options:\n"
+            "    Host venv:  .venv/bin/python scripts/gen_sdk_openapi.py [--check]\n"
+            "    Container:  docker compose run --rm cerid-mcp python scripts/gen_sdk_openapi.py [--check]\n"
+        )
+        sys.stderr.write(msg)
+        # In --check mode this is a hard CI failure; bare invocations
+        # from a stray host interpreter also fail loudly rather than
+        # writing a partial spec.
+        return 1
 
     rendered = _render()
 

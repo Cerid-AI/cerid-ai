@@ -148,4 +148,22 @@ describe("ProAutomationsCard", () => {
     render(<ProAutomationsCard tier="pro" />)
     expect(await screen.findByRole("alert")).toHaveTextContent(/backend down/)
   })
+
+  it("does not throw when listProAutomations resolves with null body.automations", async () => {
+    // Simulate CI fixture or backend contract violation returning null
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ automations: null }),
+    } as Response)
+
+    try {
+      expect(() => render(<ProAutomationsCard tier="pro" />)).not.toThrow()
+      // Card renders in empty state — no automation rows
+      await screen.findByTestId("pro-automations-card")
+      expect(screen.queryByTestId(/pro-automation-row-/)).not.toBeInTheDocument()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { AlertTriangle, Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
+import { AlertTriangle, Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck, Menu } from "lucide-react"
 import { CreditBanner } from "./credit-banner"
 import { DegradationBanner } from "./degradation-banner"
 import { ChatToolbar } from "./chat-toolbar"
@@ -72,7 +72,11 @@ function OllamaCopyRow({ os, cmd, accent }: { os: string; cmd: string; accent: "
   )
 }
 
-export function ChatPanel() {
+interface ChatPanelProps {
+  onOpenSidebar?: () => void
+}
+
+export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
   const isNarrow = useSyncExternalStore(narrowSubscribe, getIsNarrow)
   const { isSimple } = useUIMode()
   const {
@@ -479,7 +483,18 @@ export function ChatPanel() {
 
   if (!active) {
     return (
-      <div className="flex h-full items-center justify-center bg-background bg-brand-gradient bg-hero-glow">
+      <div className="relative flex h-full items-center justify-center bg-background bg-brand-gradient bg-hero-glow">
+        {isNarrow && onOpenSidebar && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-2 left-2 h-8 w-8"
+            aria-label="Open navigation"
+            onClick={onOpenSidebar}
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        )}
         <div className="relative flex max-w-md flex-col items-center gap-6 px-6 text-center">
           {/* Subtle pulsing brand glow */}
           <div className="pointer-events-none absolute -top-12 h-32 w-32 animate-pulse rounded-full bg-brand/10 blur-2xl" />
@@ -534,6 +549,7 @@ export function ChatPanel() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <ChatToolbar
         isNarrow={isNarrow}
+        onOpenSidebar={onOpenSidebar}
         isSimple={isSimple}
         showKB={showKB}
         onToggleKB={() => setShowKB(!showKB)}

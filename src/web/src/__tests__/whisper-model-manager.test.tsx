@@ -132,4 +132,16 @@ describe("WhisperModelManager", () => {
     render(<WhisperModelManager />)
     expect(await screen.findByRole("alert")).toHaveTextContent(/Backend unreachable/)
   })
+
+  it("does not throw when fetchWhisperModels returns null models field", async () => {
+    mockList.mockResolvedValue({
+      models: null,
+      cache_dir: "/cache",
+      current_default: "medium-q5_0",
+    } as never)
+
+    expect(() => render(<WhisperModelManager />)).not.toThrow()
+    await screen.findByTestId("whisper-model-manager")
+    expect(screen.queryByTestId(/whisper-model-row-/)).not.toBeInTheDocument()
+  })
 })

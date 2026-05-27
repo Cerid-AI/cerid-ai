@@ -75,10 +75,11 @@ def apply_retention_plan(driver, decision: RetentionDecision) -> int:
                 for collection in chroma.list_collections():
                     try:
                         collection.delete(ids=[artifact_id])
-                    except Exception:  # noqa: BLE001
+                    except Exception as exc:  # noqa: BLE001
                         # Per-collection failure is fine; Chroma raises
-                        # on missing-id deletes for some backends.
-                        pass
+                        # on missing-id deletes for some backends. Log so
+                        # the failure is visible in /health.swallowed_errors_last_hour.
+                        log_swallowed_error("retention.chroma_per_collection_delete", exc)
             except Exception as exc:  # noqa: BLE001
                 log_swallowed_error("retention.chroma_delete", exc)
             purged += 1

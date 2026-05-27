@@ -4,6 +4,7 @@
 """Health check and collection listing endpoints."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -29,7 +30,43 @@ async def health_ping() -> dict:
 # In-memory health cache — avoids blocking I/O on every poll
 _health_cache: dict = {}
 _health_cache_ts: float = 0.0
-_HEALTH_CACHE_TTL = 10.0  # seconds
+_HEALTH_CACHE_TTL = 30.0  # seconds
+
+# F-PERF-04: coalesce concurrent cache-miss builds. Without this, a thundering
+# herd of /health requests on cold cache would each spawn its own
+# asyncio.to_thread(_build_health_payload) and saturate the default executor's
+# thread pool — pushing /health p95 to 5-8s under load. The lock-protected
+# in-flight future shares one build across all concurrent waiters.
+_health_build_lock: asyncio.Lock | None = None
+_health_build_inflight: asyncio.Future | None = None
+
+
+def _get_health_build_lock() -> asyncio.Lock:
+    """Lazily construct the lock so it binds to the running event loop."""
+    global _health_build_lock
+    if _health_build_lock is None:
+        _health_build_lock = asyncio.Lock()
+    return _health_build_lock
+
+
+async def _refresh_health_cache() -> dict:
+    """Rebuild the cached health payload off the event loop.
+
+    Always runs the build via asyncio.to_thread so blocking I/O lands
+    on the default executor. Updates _health_cache/_health_cache_ts on
+    success. Failures are swallowed (with breadcrumb) — the previous
+    stale payload remains in cache, which is strictly better than
+    returning an empty response.
+    """
+    global _health_cache, _health_cache_ts
+    try:
+        payload = await asyncio.to_thread(_build_health_payload)
+        _health_cache = payload
+        _health_cache_ts = time.monotonic()
+        return payload
+    except Exception as exc:  # noqa: BLE001 — refresh boundary
+        log_swallowed_error("app.routers.health.refresh_health_cache", exc)
+        return _health_cache or {"services": {}, "invariants": {}}
 
 
 def health_check() -> dict:
@@ -493,8 +530,116 @@ def _load_recommendations(
     return out
 
 
+def _build_health_payload() -> dict:
+    """Run the blocking health checks + invariants snapshot + augmentations.
+
+    Lives in its own helper so the async ``/health`` endpoint can hand
+    this off via ``asyncio.to_thread`` instead of blocking the event
+    loop on Neo4j cold-cache queries. See F-PERF-04.
+
+    All trust-score / processor-metrics / memory-consolidation /
+    inference-routing / recommendations augmentations also run on the
+    worker thread for the same reason — they each touch Redis or Neo4j.
+    """
+    result = health_check()
+    result["invariants"] = _invariants_snapshot()
+    # Phase E.5 (v0.92): trust-score summary alongside core invariants.
+    # Pure metadata — not part of the healthy/degraded gate. Failures
+    # here must never affect the /health response code.
+    try:
+        from app.services.trust_score import trust_score_24h_summary
+        try:
+            _ts_driver = get_neo4j()
+        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+            log_swallowed_error("app.routers.health.trust_score_24h.get_neo4j", _exc)
+            _ts_driver = None
+        result["invariants"]["trust_score_24h"] = trust_score_24h_summary(_ts_driver)
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.trust_score_24h", _exc)
+    # Phase 3b (v0.92): processor metrics alongside core invariants.
+    # Pure metadata — not part of the healthy/degraded gate. Failures
+    # must never affect the /health response code.
+    try:
+        from app.processor.metrics import (
+            _sync_cost_usd_7d,
+            _sync_jobs_completed_24h,
+            _sync_throttled_ticks,
+        )
+        _proc_redis = None
+        try:
+            _proc_redis = get_redis()
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed_error("app.routers.health.processor_metrics.get_redis", _exc)
+
+        if _proc_redis is not None:
+            result["invariants"]["processor_jobs_completed_24h"] = (
+                _sync_jobs_completed_24h(_proc_redis)
+            )
+            result["invariants"]["processor_cost_usd_7d"] = float(
+                _sync_cost_usd_7d(_proc_redis)
+            )
+            result["invariants"]["processor_throttled_ticks"] = (
+                _sync_throttled_ticks(_proc_redis, 3600.0)
+            )
+        else:
+            result["invariants"]["processor_jobs_completed_24h"] = 0
+            result["invariants"]["processor_cost_usd_7d"] = 0.0
+            result["invariants"]["processor_throttled_ticks"] = 0
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.processor_metrics", _exc)
+        result["invariants"].setdefault("processor_jobs_completed_24h", 0)
+        result["invariants"].setdefault("processor_cost_usd_7d", 0.0)
+        result["invariants"].setdefault("processor_throttled_ticks", 0)
+    # Phase O.2 (v0.92): memory consolidation failure count alongside core
+    # invariants. Pure metadata — not part of the healthy/degraded gate.
+    # Failures here must never affect the /health response code.
+    try:
+        from app.services.memory_metrics import memory_consolidation_failures_24h as _mcf24h
+
+        _mcf_redis = None
+        try:
+            _mcf_redis = get_redis()
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed_error(
+                "app.routers.health.memory_consolidation_failures.get_redis", _exc
+            )
+        if _mcf_redis is not None:
+            result["invariants"]["memory_consolidation_failures_last_24h"] = _mcf24h(
+                _mcf_redis
+            )
+        else:
+            result["invariants"]["memory_consolidation_failures_last_24h"] = 0
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.memory_consolidation_failures", _exc)
+        result["invariants"].setdefault("memory_consolidation_failures_last_24h", 0)
+    # v0.93.8 — inference routing snapshot. Pure metadata.
+    try:
+        from core.utils.inference_routing import get_routing_snapshot
+        result["inference_routing"] = get_routing_snapshot()
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.inference_routing", _exc)
+        result.setdefault("inference_routing", {})
+    # Cycle 3.2 — adaptive feature recommendations. Pure metadata.
+    try:
+        from app.routers.recommendations import _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY
+        _rec_redis = None
+        try:
+            _rec_redis = get_redis()
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed_error(
+                "app.routers.health.recommendations.get_redis", _exc,
+            )
+        result["recommended_features"] = _load_recommendations(
+            _rec_redis, _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY,
+        )
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.recommendations", _exc)
+        result.setdefault("recommended_features", [])
+    return result
+
+
 @router.get("/health")
-def health_check_endpoint():
+async def health_check_endpoint():
     """Return infrastructure health.
 
     Returns HTTP 200 when all required services are reachable ("healthy") and
@@ -511,123 +656,47 @@ def health_check_endpoint():
     violation flips the endpoint to 503 even when transport connections
     are nominally healthy.
     """
-    global _health_cache, _health_cache_ts
+    global _health_cache, _health_cache_ts, _health_build_inflight
     now = time.monotonic()
-    if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+    cache_age = now - _health_cache_ts if _health_cache else float("inf")
+    if _health_cache and cache_age < _HEALTH_CACHE_TTL:
+        # Hot path: cache fresh — return immediately, no I/O.
+        result = _health_cache
+    elif _health_cache:
+        # F-PERF-04: stale-while-revalidate. Serve the stale payload
+        # immediately and kick off a background refresh. This keeps
+        # /health p95 latency at sub-millisecond regardless of how
+        # cold the underlying infra probes are. The refresh runs via
+        # asyncio.to_thread so it never blocks the event loop, and
+        # the in-flight Future is shared so concurrent stale serves
+        # don't each spawn a refresh.
+        lock = _get_health_build_lock()
+        async with lock:
+            now = time.monotonic()
+            if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+                pass  # someone else refreshed while we queued
+            elif _health_build_inflight is None or _health_build_inflight.done():
+                _health_build_inflight = asyncio.ensure_future(
+                    _refresh_health_cache()
+                )
         result = _health_cache
     else:
-        result = health_check()
-        result["invariants"] = _invariants_snapshot()
-        # Phase E.5 (v0.92): trust-score summary alongside core invariants.
-        # Pure metadata — not part of the healthy/degraded gate. Failures
-        # here must never affect the /health response code.
-        try:
-            from app.services.trust_score import trust_score_24h_summary
-            try:
-                _ts_driver = get_neo4j()
-            except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-                log_swallowed_error("app.routers.health.trust_score_24h.get_neo4j", _exc)
-                _ts_driver = None
-            result["invariants"]["trust_score_24h"] = trust_score_24h_summary(_ts_driver)
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.trust_score_24h", _exc)
-        # Phase 3b (v0.92): processor metrics alongside core invariants.
-        # Pure metadata — not part of the healthy/degraded gate. Failures
-        # must never affect the /health response code.
-        # Note: health_check_endpoint is sync; call the synchronous Redis
-        # operations directly via the private helpers in metrics to avoid
-        # running coroutines from a sync context.
-        try:
-            from app.processor.metrics import (
-                _sync_cost_usd_7d,
-                _sync_jobs_completed_24h,
-                _sync_throttled_ticks,
-            )
-            _proc_redis = None
-            try:
-                _proc_redis = get_redis()
-            except Exception as _exc:  # noqa: BLE001
-                log_swallowed_error("app.routers.health.processor_metrics.get_redis", _exc)
-
-            if _proc_redis is not None:
-                result["invariants"]["processor_jobs_completed_24h"] = (
-                    _sync_jobs_completed_24h(_proc_redis)
+        # Empty cache — block on the first build. With the lifespan
+        # pre-warm wired, this branch only fires if the pre-warm
+        # itself failed at boot.
+        future_to_await: asyncio.Future | None = None
+        lock = _get_health_build_lock()
+        async with lock:
+            if _health_cache:
+                pass
+            elif _health_build_inflight is None or _health_build_inflight.done():
+                _health_build_inflight = asyncio.ensure_future(
+                    _refresh_health_cache()
                 )
-                result["invariants"]["processor_cost_usd_7d"] = float(
-                    _sync_cost_usd_7d(_proc_redis)
-                )
-                result["invariants"]["processor_throttled_ticks"] = (
-                    _sync_throttled_ticks(_proc_redis, 3600.0)
-                )
-            else:
-                result["invariants"]["processor_jobs_completed_24h"] = 0
-                result["invariants"]["processor_cost_usd_7d"] = 0.0
-                result["invariants"]["processor_throttled_ticks"] = 0
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.processor_metrics", _exc)
-            result["invariants"].setdefault("processor_jobs_completed_24h", 0)
-            result["invariants"].setdefault("processor_cost_usd_7d", 0.0)
-            result["invariants"].setdefault("processor_throttled_ticks", 0)
-        # Phase O.2 (v0.92): memory consolidation failure count alongside core
-        # invariants. Pure metadata — not part of the healthy/degraded gate.
-        # Failures here must never affect the /health response code.
-        try:
-            from app.services.memory_metrics import memory_consolidation_failures_24h as _mcf24h
-
-            _mcf_redis = None
-            try:
-                _mcf_redis = get_redis()
-            except Exception as _exc:  # noqa: BLE001
-                log_swallowed_error(
-                    "app.routers.health.memory_consolidation_failures.get_redis", _exc
-                )
-            if _mcf_redis is not None:
-                result["invariants"]["memory_consolidation_failures_last_24h"] = _mcf24h(
-                    _mcf_redis
-                )
-            else:
-                result["invariants"]["memory_consolidation_failures_last_24h"] = 0
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.memory_consolidation_failures", _exc)
-            result["invariants"].setdefault("memory_consolidation_failures_last_24h", 0)
-
-        # v0.93.8 — inference routing snapshot.  Surfaces which
-        # provider is active for each inference workload (LLM, embed,
-        # rerank, sparse, NLI).  Operators reading the
-        # AMD_GPU_MODEL_RECOMMENDATIONS doc use this to verify their
-        # Quenchforge env vars are actually in scope inside the MCP
-        # container.  Pure metadata; never affects the /health
-        # response code.
-        try:
-            from core.utils.inference_routing import get_routing_snapshot
-            result["inference_routing"] = get_routing_snapshot()
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.inference_routing", _exc)
-            result.setdefault("inference_routing", {})
-
-        # Cycle 3.2 — adaptive feature recommendations. Pure metadata
-        # surfaced at the top level of the /health response so the
-        # Settings-pane banner can poll a single endpoint and react to
-        # corpus growth.  Filters out per-tenant dismissals.  Failures
-        # here must never affect the /health response code.
-        try:
-            from app.routers.recommendations import _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY
-            _rec_redis = None
-            try:
-                _rec_redis = get_redis()
-            except Exception as _exc:  # noqa: BLE001
-                log_swallowed_error(
-                    "app.routers.health.recommendations.get_redis", _exc,
-                )
-            result["recommended_features"] = _load_recommendations(
-                _rec_redis, _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY,
-            )
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.recommendations", _exc)
-            result.setdefault("recommended_features", [])
-
-        _health_cache = result
-        _health_cache_ts = now
+            future_to_await = _health_build_inflight
+        if future_to_await is not None and not _health_cache:
+            await future_to_await
+        result = _health_cache or {"services": {}, "invariants": {}}
 
     # A service is "ok" when connected OR intentionally disabled (lightweight neo4j).
     def _ok(v: str) -> bool:

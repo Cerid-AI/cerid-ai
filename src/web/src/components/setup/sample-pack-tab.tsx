@@ -151,9 +151,11 @@ function PackCard({ pack, onInstall, isInstalling, isInstallingThisPack }: PackC
 interface SamplePackTabProps {
   /**
    * Called when the user has installed a pack and clicked "Continue to chat".
-   * Receives the pack_id so the wizard can mark firstDoc.ingested = true.
+   * Receives the pack_id and the pack's article count so the wizard can mark
+   * `firstDoc.ingested = true` AND populate the Review / Mode "X documents"
+   * summary correctly (instead of the stale "0 documents" we used to show).
    */
-  onComplete: (packId: string) => void
+  onComplete: (packId: string, articleCount: number) => void
 }
 
 export function SamplePackTab({ onComplete }: SamplePackTabProps) {
@@ -191,7 +193,7 @@ export function SamplePackTab({ onComplete }: SamplePackTabProps) {
 
   const handleComplete = useCallback(() => {
     const id = installedPackId ?? selectedPack?.id
-    if (id) onComplete(id)
+    if (id) onComplete(id, selectedPack?.artifact_count ?? 0)
   }, [installedPackId, selectedPack, onComplete])
 
   // Show demo panel once install succeeded

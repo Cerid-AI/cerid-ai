@@ -162,35 +162,35 @@ export function AuditPane() {
             ) : (
               <div className="space-y-4">
                 {enabledReports.activity && (
-                  <PaneErrorBoundary label="Activity Chart">
+                  <PaneErrorBoundary label="Activity Chart" queryClient={queryClient}>
                     <ActivityChart activity={audit?.activity} />
                   </PaneErrorBoundary>
                 )}
                 {enabledReports.costs && (
-                  <PaneErrorBoundary label="Cost Breakdown">
+                  <PaneErrorBoundary label="Cost Breakdown" queryClient={queryClient}>
                     <CostBreakdown costs={audit?.costs} hours={hours} />
                   </PaneErrorBoundary>
                 )}
                 {enabledReports.conversations && (
-                  <PaneErrorBoundary label="Conversation Stats">
+                  <PaneErrorBoundary label="Conversation Stats" queryClient={queryClient}>
                     <ConversationStats conversations={audit?.conversations} />
                   </PaneErrorBoundary>
                 )}
                 {enabledReports.queries && (
-                  <PaneErrorBoundary label="Query Stats">
+                  <PaneErrorBoundary label="Query Stats" queryClient={queryClient}>
                     <QueryStats queries={audit?.queries} />
                   </PaneErrorBoundary>
                 )}
                 {enabledReports.ingestion && (
-                  <PaneErrorBoundary label="Ingestion Stats">
+                  <PaneErrorBoundary label="Ingestion Stats" queryClient={queryClient}>
                     <IngestionStats ingestion={audit?.ingestion} />
                   </PaneErrorBoundary>
                 )}
-                <PaneErrorBoundary label="Recent Failures">
+                <PaneErrorBoundary label="Recent Failures" queryClient={queryClient}>
                   <RecentFailures failures={audit?.activity?.recent_failures} />
                 </PaneErrorBoundary>
                 {enabledReports.verification && (
-                  <PaneErrorBoundary label="Verification Accuracy">
+                  <PaneErrorBoundary label="Verification Accuracy" queryClient={queryClient}>
                     <AccuracyDashboard verification={audit?.verification} />
                   </PaneErrorBoundary>
                 )}

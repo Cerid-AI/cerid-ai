@@ -268,7 +268,7 @@ export function SyncSection() {
               value={conflictStrategy}
               onValueChange={(v) => setConflictStrategy(v as ConflictStrategy)}
             >
-              <SelectTrigger className="h-6 w-36 text-label-xs">
+              <SelectTrigger className="h-6 w-36 text-label-xs" aria-label="Conflict strategy">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

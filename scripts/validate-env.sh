@@ -180,7 +180,7 @@ if [ -n "$OLLAMA_ENABLED_VAL" ]; then
         if curl -sf "$OLLAMA_URL_VAL/api/tags" >/dev/null 2>&1; then
             pass "Ollama (native) is reachable at $OLLAMA_URL_VAL"
         else
-            warn "Ollama enabled but not running — start with: ollama serve (native) or docker compose --profile ollama up -d"
+            warn "Local LLM enabled but not running — start with: launchctl kickstart -k gui/\$UID/com.cerid.quenchforge (quenchforge), or: ollama serve (native ollama), or: docker compose --profile ollama up -d"
         fi
     else
         warn "Container cerid-ollama is $ollama_container_status"

@@ -234,4 +234,36 @@ describe("ModelDownloadBanner", () => {
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(container.querySelector("[role=alert]")).toBeNull()
   })
+
+  it("hides itself when both providers are remote (Quenchforge)", async () => {
+    // F-07-01: when models are served remotely (e.g., by Quenchforge),
+    // there's no local cache to populate — the cache probe returns
+    // cached=false but the banner must still hide. Backend signals this
+    // via needs_local_cache=false; banner respects it.
+    vi.spyOn(settingsApi, "fetchModelsStatus").mockResolvedValue({
+      reranker: {
+        repo: "x",
+        provider: "quenchforge",
+        needs_local_cache: false,
+        cached: false,
+        files: {},
+      },
+      embedder: {
+        repo: "y",
+        provider: "quenchforge",
+        needs_local_cache: false,
+        cached: false,
+        files: {},
+      },
+    })
+
+    const { container } = render(<ModelDownloadBanner />, { wrapper })
+    await waitFor(() =>
+      expect(settingsApi.fetchModelsStatus).toHaveBeenCalled(),
+    )
+    // Allow React Query to flush the resolved data through to render.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(container.querySelector("[role=alert]")).toBeNull()
+    expect(container.querySelector("[role=status]")).toBeNull()
+  })
 })

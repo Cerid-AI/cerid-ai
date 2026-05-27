@@ -134,12 +134,12 @@ function RecommendationCard({ rec, onEnable, onSnooze, onDismiss }: Recommendati
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-2">
             <Sparkles className="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-400" />
-            <div className="grid gap-1">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-sm">{rec.label}</span>
+            <div className="grid min-w-0 gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 font-medium text-sm">{rec.label}</span>
                 <Badge
                   variant="outline"
-                  className="border-amber-500/40 bg-amber-100/50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+                  className="shrink-0 whitespace-nowrap px-2 border-amber-500/40 bg-amber-100/50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
                 >
                   Recommended
                 </Badge>

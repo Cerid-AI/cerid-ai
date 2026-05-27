@@ -136,7 +136,7 @@ describe("SetupWizard", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
         <FirstDocumentStep
-          state={{ ingested: false, queried: false, skipped: false }}
+          state={{ ingested: false, queried: false, skipped: false, documentCount: 0 }}
           onChange={onChange}
         />
       </QueryClientProvider>,
@@ -151,7 +151,7 @@ describe("SetupWizard", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
         <FirstDocumentStep
-          state={{ ingested: false, queried: false, skipped: false }}
+          state={{ ingested: false, queried: false, skipped: false, documentCount: 0 }}
           onChange={onChange}
         />
       </QueryClientProvider>,

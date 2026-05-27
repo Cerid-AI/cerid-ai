@@ -162,6 +162,13 @@ export function ModelDownloadBanner() {
   const bannerStatus: BannerStatus = (() => {
     if (dismissed) return "hidden"
     if (!status) return "hidden"
+    // F-07-01 provider awareness: when neither model needs a local cache
+    // (e.g., both served by Quenchforge), there's nothing to download —
+    // hide the banner so it isn't perpetually warning about a cache that
+    // can never satisfy itself.
+    const rerankerRemote = status.reranker.needs_local_cache === false
+    const embedderRemote = status.embedder.needs_local_cache === false
+    if (rerankerRemote && embedderRemote) return "hidden"
     if (isBothCached(status)) return "cached"
     if (isAnyLoading(status) || downloading) return "loading"
     return "idle_uncached"
@@ -179,11 +186,11 @@ export function ModelDownloadBanner() {
         className="flex items-center gap-3 border-b border-blue-500/30 bg-blue-500/5 px-4 py-2 text-sm"
       >
         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-500" />
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <span className="font-medium">
             Downloading inference models
           </span>
-          <span className="ml-2 text-muted-foreground">
+          <span className="ml-2 text-muted-foreground hidden md:inline">
             One-time setup (~38 MB) — this takes 5–15 seconds, then
             subsequent queries are full speed.
           </span>
@@ -199,9 +206,9 @@ export function ModelDownloadBanner() {
       className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-sm"
     >
       <Info className="h-4 w-4 shrink-0 text-amber-500" />
-      <div className="flex-1">
+      <div className="flex-1 min-w-0">
         <span className="font-medium">First semantic query will trigger model download</span>
-        <span className="ml-2 text-muted-foreground">
+        <span className="ml-2 text-muted-foreground hidden md:inline">
           One-time setup (~38 MB, ~15s). Download now or accept the
           first-query stall.
         </span>

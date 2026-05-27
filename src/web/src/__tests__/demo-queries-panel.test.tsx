@@ -41,6 +41,16 @@ const PYTHON_PACK = {
 }
 
 const MOCK_KB_ANSWER = "Python's pathlib module provides an object-oriented filesystem interface."
+const MOCK_TOP_SOURCE = {
+  content: MOCK_KB_ANSWER,
+  relevance: 0.87,
+  artifact_id: "art-1",
+  filename: "pathlib_intro.md",
+  domain: "coding",
+  chunk_index: 0,
+  collection: "coding",
+  ingested_at: "2026-05-26T00:00:00Z",
+}
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -67,8 +77,13 @@ const onComplete = vi.fn<() => void>()
 beforeEach(() => {
   vi.restoreAllMocks()
   onComplete.mockClear()
+  // ``vi.restoreAllMocks`` resets *spies* to their originals but does NOT
+  // clear call history on plain ``vi.fn()`` mocks. Without an explicit
+  // ``mockClear`` here, ``toHaveBeenCalledTimes(1)`` assertions in later
+  // tests count calls from earlier tests in the file.
+  mockQueryKB.mockClear()
   mockQueryKB.mockResolvedValue({
-    results: [{ content: MOCK_KB_ANSWER }],
+    results: [MOCK_TOP_SOURCE],
     total_results: 1,
     confidence: 0.95,
   })
@@ -104,8 +119,35 @@ describe("DemoQueriesPanel", () => {
       ["coding"],
       3,
       undefined,
-      expect.objectContaining({ useReranking: false, skipCache: true }),
+      expect.objectContaining({
+        useReranking: false,
+        skipCache: true,
+        // Pack-scoped retrieval — F-06-01 regression guard.
+        // Without ``metadata_filter: { pack_id }`` the demo query bleeds
+        // into pre-seeded eval corpora and returns off-topic answers.
+        metadataFilter: { pack_id: "python-stdlib-docs" },
+      }),
     )
+  })
+
+  it("scopes retrieval to the just-installed pack via pack_id (F-06-01)", async () => {
+    const irsPack = { ...PYTHON_PACK, id: "irs-publications-curated", domain: "personal" }
+    renderWithQuery(<DemoQueriesPanel pack={irsPack} onComplete={onComplete} />)
+    fireEvent.click(screen.getByText("What is the standard deduction for a single filer?"))
+    await waitFor(() => expect(mockQueryKB).toHaveBeenCalledTimes(1))
+    const opts = mockQueryKB.mock.calls[0][4]
+    expect(opts.metadataFilter).toEqual({ pack_id: "irs-publications-curated" })
+  })
+
+  it("renders source attribution (filename + relevance %) under the answer (F-06-02)", async () => {
+    renderWithQuery(<DemoQueriesPanel pack={PYTHON_PACK} onComplete={onComplete} />)
+    fireEvent.click(screen.getByText("How do I read a file with Python's pathlib?"))
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_KB_ANSWER)).toBeInTheDocument()
+    })
+    // Filename + relevance % must appear so the user can verify provenance.
+    expect(screen.getByText("pathlib_intro.md")).toBeInTheDocument()
+    expect(screen.getByText("87%")).toBeInTheDocument()
   })
 
   it("shows the answer text after a query succeeds", async () => {
