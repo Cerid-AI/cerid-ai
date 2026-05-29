@@ -8,6 +8,9 @@
 .env.*.backup
 .env.pre-live-*
 .env.post-live-*
+.env.public-sandbox
+.env.sandbox
+.env.*-sandbox
 !.env.example
 *.key
 OPENROUTER_API_KEY*

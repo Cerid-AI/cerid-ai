@@ -4,6 +4,7 @@
 """Tests for /analytics REST surface — Phase L."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -172,9 +173,14 @@ class TestQualityTimeline:
         assert body["latest"]["ndcg"] is None
 
     def test_aggregates_points_to_daily_average(self, client):
+        # Use today's date so the test points always land inside the
+        # rolling 7-day window. A hardcoded date would silently fall out
+        # of the window the moment the calendar moved past it + 7 days,
+        # turning this into a time-bomb test.
+        today_iso = datetime.now(tz=timezone.utc).date().isoformat()
         ndcg_pts = [
-            SimpleNamespace(timestamp="2026-05-22T10:00:00Z", value=0.8, tags={}),
-            SimpleNamespace(timestamp="2026-05-22T22:00:00Z", value=0.9, tags={}),
+            SimpleNamespace(timestamp=f"{today_iso}T10:00:00Z", value=0.8, tags={}),
+            SimpleNamespace(timestamp=f"{today_iso}T22:00:00Z", value=0.9, tags={}),
         ]
 
         def _get(name, _window):
@@ -187,10 +193,10 @@ class TestQualityTimeline:
         with patch("utils.metrics.get_metrics_collector", return_value=c):
             body = client.get("/analytics/quality-timeline?window_days=7").json()
 
-        # Find the 2026-05-22 entry and check averaged ndcg
-        day = next((p for p in body["points"] if p["date"] == "2026-05-22"), None)
-        if day is not None:
-            assert day["ndcg"] == pytest.approx(0.85)
+        # Find today's entry and check averaged ndcg
+        day = next((p for p in body["points"] if p["date"] == today_iso), None)
+        assert day is not None, f"today ({today_iso}) should be in the rolling window"
+        assert day["ndcg"] == pytest.approx(0.85)
         # latest carries the avg
         assert body["latest"]["ndcg"] == pytest.approx(0.85)
 
