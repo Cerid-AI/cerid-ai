@@ -784,7 +784,7 @@ async def verify_response_streaming(
         if idx in batch_candidate_indices and batch_task is not None:
             try:
                 await asyncio.wait_for(asyncio.shield(batch_task), timeout=3.0)
-            except (TimeoutError, Exception):
+            except (TimeoutError, Exception):  # silent-catch-allowed: batch race; fall back to per-claim verification
                 pass  # batch not done yet or failed — proceed individually
         # Skip if already resolved by batch verification or cache
         if collected_results[idx] is not None:
@@ -1133,7 +1133,7 @@ async def verify_response_streaming(
         key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
         redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
     except Exception as e:
-        logger.warning("Failed to persist streaming report to Redis: %s", e)
+        log_swallowed_error("core.agents.hallucination.streaming.persist_streaming_report", e)
 
     # --- Round 2 sweep: retry timed-out and errored claims ---
     # Claims that timed out (sim=0.0, method=timeout) or errored were not
@@ -1170,7 +1170,7 @@ async def verify_response_streaming(
                             "Sweep retry resolved claim %d: %s → %s ('%s...')",
                             idx, old_status, result["status"], claim_text[:40],
                         )
-            except (TimeoutError, Exception):
+            except (TimeoutError, Exception):  # silent-catch-allowed: retry timed out/failed; keep original result
                 pass  # Keep the original timeout/error result
 
         try:

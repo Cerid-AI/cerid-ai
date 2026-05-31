@@ -4,11 +4,19 @@
 > GPU (Vega II, W6800X, W6900X, RDNA1/2) and using Quenchforge as the
 > local inference backend.
 > **First written:** v0.93.8 (2026-05-12).
+> **Updated:** 2026-05-31 — quenchforge **v0.8.0** (final, signed +
+> notarized): GPU mode shipped for all four slots, plus **automatic
+> VRAM-tier sizing** (see below).
 
-Quenchforge runs llama.cpp + whisper.cpp under a Go gateway with a
-single ggml-on-AMD-Mac correctness patch.  This doc is the matrix of
+Quenchforge runs llama.cpp + whisper.cpp under a Go gateway with two
+ggml-on-AMD-Mac correctness patches: `0001` gates the broken
+simdgroup-reduction / bfloat kernels to Apple Silicon so every AMD card
+takes the correct scalar path, and `0002` adds a Metal staging-buffer
+pool that fixes the sustained-load SIGABRT.  This doc is the matrix of
 GGUF models cerid recommends for each workload on AMD GPU hardware,
-sized by VRAM tier.
+sized by VRAM tier.  As of v0.8.0 the runtime context + embed ubatch are
+sized automatically from detected VRAM (see "Automatic VRAM-tier
+sizing"); the model picks below remain the operator's call.
 
 The recommendations below produce the **best quality-per-watt on AMD
 Mac** as of mid-2026.  They are not the same picks you'd make on
@@ -25,6 +33,37 @@ model catalog is available.
 | **Mid** | 16 GB | RX 6800, RX 6800 XT, RX 6900 XT | Supported |
 | **Low** | 8 GB | RX 5700, RX 5700 XT, RX 6700 | Supported, tight |
 | **Apple Silicon** | unified | M1–M4 | Non-degraded (but Ollama is the supported path) |
+
+---
+
+## Automatic VRAM-tier sizing (quenchforge v0.8.0+)
+
+Before v0.8.0 every AMD-discrete card inherited the 32 GB Vega II bench
+constants (`--ctx-size 8192`, embed `--ubatch-size 1024`); operators on
+smaller cards had to discover and set `QUENCHFORGE_MAX_CONTEXT` /
+`QUENCHFORGE_EMBED_UBATCH_SIZE` by hand or risk a VRAM-oversubscription
+crash.  v0.8.0 derives both from the detected headline VRAM, so the
+tiers above now map to runtime sizing with **no hand-tuning**:
+
+| VRAM | `--ctx-size` ceiling | embed `--ubatch-size` | Cards |
+|---|---|---|---|
+| ≥ 12 GB | none (full `QUENCHFORGE_MAX_CONTEXT`) | 1024 | Vega II/Duo, W6800X, W6900X, Vega 56/64, 5600M |
+| 7–11 GB | 4096 | 512 | RX 5700 / 5700 XT, W5700X |
+| ≤ 6 GB | 2048 | 256 | 4 GB MacBook Pro dGPUs (5300M/5500M), Polaris 560X |
+
+- The ceiling only ever **lowers** `QUENCHFORGE_MAX_CONTEXT`; a high-VRAM
+  operator who raised it is never clamped.
+- A VRAM-probe miss (0 / unknown) is treated as the high tier, so the
+  validated Vega II path is never throttled by a detection failure.
+- An explicit `QUENCHFORGE_EMBED_UBATCH_SIZE` overrides the tier ubatch;
+  the context ceiling is an independent safety knob.
+
+This is **sizing, not correctness**.  The correctness fix (patch `0001`)
+is family-agnostic and already covers every non-Apple Metal device, so a
+card not listed above still runs correctly — it just inherits the
+closest tier's memory footprint. Sizing is validated on the 32 GB Vega
+II; the smaller-tier values are conservative defaults, not bench-tuned
+per card.
 
 ---
 
@@ -154,7 +193,7 @@ Cerid doesn't ship audio features yet, but Quenchforge exposes
 
 ## SPLADE-v3 sparse (NOT Quenchforge-routable)
 
-Quenchforge has no sparse-encode endpoint as of v0.3.1.  Cerid's own
+Quenchforge has no sparse-encode endpoint as of v0.8.0 (still none).  Cerid's own
 sidecar (`scripts/cerid-sidecar.py`) serves SPLADE at `/encode/sparse`,
 giving GPU acceleration on Mac ARM64 (CoreML) and Linux (CUDA/ROCm) —
 but NOT on Intel Mac + AMD where ONNX runtime has no execution

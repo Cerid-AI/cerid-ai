@@ -2,7 +2,47 @@
 
 All notable changes to cerid-ai are documented here.
 
-## Unreleased — v1.0 RC2: Ingestion Experience workstream (2026-05-24)
+## Unreleased — post-rc2.1: auto-latest model selection + CI hardening (2026-05-31)
+
+### Backend — model selection
+
+- **Auto-find + auto-apply the latest in-family model per role.** New
+  `core/routing/model_catalog.py` fetches the OpenRouter catalog and resolves
+  the newest in-family version for each role's pinned model — preserving variant
+  and size suffixes (`-fast`, `:free`, `70b`), never crossing families, and
+  leaving ids without a dotted version pinned. `POST /models/updates/check`
+  (dry-run diff), `POST /models/updates/apply` (persist assignments + regenerate
+  the Bifrost config), and `GET /models/updates` now do real catalog-backed work
+  (were no-op stubs). A weekly `model_auto_update` scheduler job adopts the
+  latest per role, gated by `MODEL_AUTO_UPDATE_ENABLED` (default on) /
+  `SCHEDULE_MODEL_AUTO_UPDATE`. (#100)
+
+### Dependencies
+
+- pydantic `>=2.13.4,<3`, PyStemmer `>=3.0.0` (→ 3.1.0), cryptography
+  `>=48.0.0,<49`, reportlab `>=4.5.1,<5` (dev), sentry-sdk `>=2.61.0`, and the
+  npm group (14 updates). Locks regenerated via `scripts/regen-lock.sh`. (#64,
+  #98, #101, #106)
+- pywhispercpp `transcribe()` call uses `detect_language=True` for auto-detect —
+  the newer stub types `language` as `str` (not `str | None`). (#106)
+
+### CI / build
+
+- Temporal ("right now") queries route to a web-search-capable model; the
+  model-router test was de-time-bombed. (#99)
+- Live-stack gates (`preservation`, `benchmark-slo`): runner is now
+  `LIVESTACK_RUNNER`-driven, defaulting to `ubuntu-latest` so they run even when
+  the self-hosted Mac Pro pool is offline. On the self-hosted runner they build a
+  venv from the runner's `python3.12` instead of `actions/setup-python` (which
+  `sudo`s on macOS). (#103, #105, #107)
+- `lock-sync` seeds the committed lock before `pip-compile` so it only diffs on
+  real `requirements.txt` changes (no more daily latest-resolve drift); Trivy
+  scans add `ignore-unfixed: true`; chromadb + perl-base CVEs ignored in
+  pip-audit and Trivy with dated re-eval. (#102, #108, #109)
+
+## v1.0.0-rc2 — 2026-05-27
+
+### RC2: Ingestion Experience workstream (2026-05-24)
 
 Full delivery of `tasks/2026-05-24-ingestion-experience-plan.md` — the
 single largest UX upgrade between RC1 and GA. Brings a real `(:Source)`
@@ -145,7 +185,7 @@ hotkey overlay).
 `45a95e4` Phase 1 · `8b71e06` Phase 2A · `534cd44` Phase 2B ·
 `261a7ad` Phase 2C · `d105c01` Phase 3 · `4ab69ed` Phase 4a + 4b + 5
 
-## Unreleased — Post-rc1 polish: tech-debt sweep + S2 doc reconciliation + Sentry/SDK closeouts (2026-05-24)
+### Post-rc1 polish: tech-debt sweep + S2 doc reconciliation + Sentry/SDK closeouts (2026-05-24)
 
 Tail-end work on top of v1.0.0-rc1, after the UX polish sprint, executing
 phases S1–S3 of the unified GA program plus the SDK-coverage audit
@@ -253,7 +293,7 @@ endpoints"; full table refresh. (`4ca8f2c`)
   and Atlas TS fix.
 - Public mirror synced (`scripts/sync-repos.py`); leak-scanner clean.
 
-## Unreleased — UX polish sprint: motion design system + Liquid Glass + shared-element transitions (2026-05-24)
+### UX polish sprint: motion design system + Liquid Glass + shared-element transitions (2026-05-24)
 
 Three-commit cohesive UX sprint atop v1.0.0-rc1. Introduces a project-wide
 motion design system (one easing curve + four duration steps), the Liquid
@@ -411,7 +451,9 @@ for future contributors and agent sessions.
   sweep
 - `314f9cd` fix(ux): review-driven follow-ups to motion sweep
 
-## Unreleased — Phases K2–K6: Cross-surface linkage + surface router + Karpathy log/index + ops (2026-05-22)
+## v1.0.0-rc1 — 2026-05-23
+
+### Phases K2–K6: Cross-surface linkage + surface router + Karpathy log/index + ops (2026-05-22)
 
 Completes the Knowledge Architecture program (K1 shipped earlier
 today). The four knowledge surfaces (wiki / vector / graph /
@@ -510,7 +552,7 @@ router that picks among them.
   (146 + 50 tests still pass).
 - Frontend typecheck: clean.
 
-## Unreleased — Phase K1: Close the wiki orphan loop (2026-05-22)
+### Phase K1: Close the wiki orphan loop (2026-05-22)
 
 First phase of the Knowledge Architecture program (plan:
 `tasks/2026-05-22-knowledge-architecture-redesign.md`). Closes the
@@ -565,7 +607,7 @@ wiki pages now compound on ingest, not on backfill scripts.
 All 23 new tests pass; full suite for ingestion + entity
 extraction stays green (146/146).
 
-## Unreleased — Phase M: Timeline + Tour preview + Wiki mini-viz + Saved-views generalization (2026-05-22)
+### Phase M: Timeline + Tour preview + Wiki mini-viz + Saved-views generalization (2026-05-22)
 
 Round-trips the four Subjects modes (Atlas / Constellation / Timeline /
 Wiki) into a unified analytic surface. Saved views become a
@@ -623,7 +665,7 @@ a Pro upgrade path via a 15s preview.
   SubjectsViewsSidebar. Pre-existing subjects-pane regression
   flipped to assert the Timeline tab is enabled.
 
-## Unreleased — Phase L: Advanced Analytics (2026-05-22)
+### Phase L: Advanced Analytics (2026-05-22)
 
 Four visualizations land in Settings → Diagnostics → Analytics. Two
 free-tier (trust + growth), two Pro-tier (cost + quality timeline).
@@ -685,7 +727,7 @@ read for our use case while keeping the dep tree flat.
 
 ---
 
-## Unreleased — Phase K: Daily Digest (2026-05-22)
+### Phase K: Daily Digest (2026-05-22)
 
 Pro-tier: scheduled LLM-synthesized "what happened in the last 24h"
 summary, persisted as a KB artifact + delivered via webhook event.
@@ -755,7 +797,7 @@ into Subjects with this param set, so "Open" shows last-24h state.
 
 ---
 
-## Unreleased — Phase J: AI Inbox Triage (2026-05-22)
+### Phase J: AI Inbox Triage (2026-05-22)
 
 Pro-tier: Cerid runs an LLM categorization pass over recent unread
 Gmail + Outlook threads every 15 minutes, persists each as a KB
@@ -813,7 +855,7 @@ privacy, troubleshooting. `.env.example` regenerated.
 
 ---
 
-## Unreleased — Phase I: Custom Smart RAG (2026-05-21)
+### Phase I: Custom Smart RAG (2026-05-21)
 
 Pro-tier per-source weight tuning. Users can adjust how each data
 source + KB collection influences retrieval rankings, with effects
@@ -897,7 +939,7 @@ privacy-gated content.
 
 ---
 
-## Unreleased — Phase G + H + deferred cleanups (2026-05-21)
+### Phase G + H + deferred cleanups (2026-05-21)
 
 Three coordinated drops: native Apple Swift CLI helpers (Phase G), real
 metamorphic verification plugin (Phase H), and three high-value
@@ -1019,7 +1061,7 @@ outlook_calendar, apple_calendar, apple_photos).
 
 ---
 
-## Unreleased — Phase F: MCP cloud connectors (2026-05-21)
+### Phase F: MCP cloud connectors (2026-05-21)
 
 Gmail / Google Calendar / Outlook / Outlook Calendar land as Pro-tier
 connectors backed by sibling MCP servers running in their own Docker
@@ -1104,7 +1146,7 @@ enablement, and troubleshooting for each connector.
 
 ---
 
-## Unreleased — Phase E: Meeting capture runtime (2026-05-21)
+### Phase E: Meeting capture runtime (2026-05-21)
 
 Activated the existing meeting_capture plugin's runtime: Whisper +
 pyannote + calendar stitching + 8-stage job orchestration.
@@ -1169,7 +1211,7 @@ job 404, jobs list shape).
 
 ---
 
-## Unreleased — Phase D: Apple ecosystem connectors (2026-05-21)
+### Phase D: Apple ecosystem connectors (2026-05-21)
 
 MacOS-native data sources land in the Electron desktop app: Notes, Mail,
 and iMessage read directly from their on-disk SQLite + emlx + protobuf
@@ -1234,7 +1276,7 @@ also deferred — they need the same Swift helper infrastructure.
 
 ---
 
-## Unreleased — v1.0.0 candidate: visualization tier + pane consolidation (2026-05-21)
+### v1.0.0 candidate: visualization tier + pane consolidation (2026-05-21)
 
 Cerid v1.0's visual + UX shape. Three plan phases shipped in one
 2026-05-21 sprint: Phase A (Atlas + Subjects pane), Phase B
@@ -1358,7 +1400,7 @@ documented in `docs/PERF_BUDGETS.md` with path-to-60fps options
 - Chat composer knowledge-source selector → retrieval-route wiring
 - Particle ingestion stream → SSE upgrade (currently polling)
 
-## Unreleased — v0.96.1 candidate: ablation hardening + LongMemEval throughput
+## v0.96.1 candidate — ablation hardening + LongMemEval throughput (folded into v1.0.0-rc1; never separately tagged)
 
 The 2026-05-18 expert audit follow-on (post the [2026-05-17 ablation results](tasks/2026-05-17-ablation-results.md))
 that hardens the eval surface against the silent-zero / canonical-

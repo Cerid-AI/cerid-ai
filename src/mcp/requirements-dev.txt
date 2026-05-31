@@ -10,6 +10,6 @@ pytest-benchmark>=5.2.3,<6
 # Workstream E Phase 2b.5 — generates synthetic PDFs in test fixtures
 # (the runtime PDF parser is pdfplumber, already in requirements.txt;
 # reportlab only writes test files and never ships in production).
-reportlab>=4.0,<5
+reportlab>=4.5.1,<5
 # Phase 3a — in-process Redis fake for processor queue tests
 fakeredis>=2.0,<3

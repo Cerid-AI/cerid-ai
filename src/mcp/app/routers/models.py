@@ -15,6 +15,12 @@ from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from pydantic import BaseModel, Field
 
 from config.providers import PROVIDER_REGISTRY
+from core.routing.model_catalog import (
+    catalog_ids,
+    diff_assignments,
+    fetch_openrouter_catalog,
+    resolve_assignments,
+)
 
 router = APIRouter(prefix="/models", tags=["models"])
 _logger = logging.getLogger("ai-companion.models")
@@ -243,35 +249,80 @@ async def update_assignments(body: ModelAssignments):
     )
 
 
+def _current_assignments() -> dict[str, str]:
+    """Active role→model map: defaults overlaid with persisted user config."""
+    merged = dict(DEFAULT_ASSIGNMENTS)
+    merged.update(_load_config().get("assignments", {}))
+    return merged
+
+
+async def _compute_model_updates() -> dict:
+    """Resolve the latest in-family model for every role against the live
+    OpenRouter catalog. Pure read — no persistence. Empty catalog (offline /
+    fetch failure) yields no updates rather than an error."""
+    current = _current_assignments()
+    ids = catalog_ids(await fetch_openrouter_catalog())
+    resolved = resolve_assignments(current, ids) if ids else dict(current)
+    updates = diff_assignments(current, resolved)
+    return {
+        "updates": updates,
+        "new": updates,
+        "deprecated": [],
+        "last_checked": datetime.now(timezone.utc).isoformat(),
+        "catalog_size": len(ids),
+        "resolved": resolved,
+    }
+
+
+async def apply_latest_assignments() -> dict:
+    """Fetch the catalog, resolve the latest in-family model per role, and —
+    if anything changed — persist the new assignments and regenerate the
+    Bifrost config. Returns the applied diff. Used by the scheduler auto-update
+    job and the ``POST /models/updates/apply`` endpoint. (Bifrost restart still
+    required for the change to take effect, as with manual assignment edits.)"""
+    result = await _compute_model_updates()
+    applied: list[dict[str, str]] = result["updates"]
+    if not applied:
+        return {"applied": [], "restart_required": False, "catalog_size": result["catalog_size"]}
+
+    _save_config(result["resolved"])
+    try:
+        generate_bifrost_config(result["resolved"])
+    except FileNotFoundError as exc:
+        _logger.warning("Bifrost config regen skipped (template missing): %s", exc)
+    for row in applied:
+        _logger.info("model auto-update: %s %s -> %s", row["role"], row["from"], row["to"])
+    return {"applied": applied, "restart_required": True, "catalog_size": result["catalog_size"]}
+
+
 @router.get("/updates")
 async def list_model_updates():
-    """List pending model updates.
-
-    Returns both the flat ``updates`` list (ModelUpdatesFullResponse) and the
-    categorised ``new``/``deprecated`` buckets (ModelUpdatesResponse) so both
-    frontend callers get the shape they expect.
-    """
-    return {
-        "updates": [],
-        "new": [],
-        "deprecated": [],
-        "last_checked": None,
-        "catalog_size": 0,
-    }
+    """Latest in-family model updates available per role (live OpenRouter check)."""
+    result = await _compute_model_updates()
+    result.pop("resolved", None)
+    return result
 
 
 @router.post("/updates/check")
 async def check_model_updates():
-    """Trigger a model update check against OpenRouter."""
-    # Future: compare local model registry against OpenRouter /api/v1/models
+    """Check OpenRouter for newer in-family models per role (dry-run, no apply)."""
+    result = await _compute_model_updates()
     return {
         "checked": True,
         "success": True,
-        "new_updates": 0,
-        "new_count": 0,
+        "new_updates": len(result["updates"]),
+        "new_count": len(result["updates"]),
         "deprecated_count": 0,
-        "last_checked": None,
+        "updates": result["updates"],
+        "last_checked": result["last_checked"],
+        "catalog_size": result["catalog_size"],
     }
+
+
+@router.post("/updates/apply")
+async def apply_model_updates():
+    """Adopt the latest in-family model for every role + regenerate Bifrost."""
+    return await apply_latest_assignments()
 
 
 @router.post("/updates/dismiss/{update_id}")

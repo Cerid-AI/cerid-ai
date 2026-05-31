@@ -222,11 +222,13 @@ async def quenchforge_embed(
     breaker = get_breaker("quenchforge")
     url = _get_quenchforge_url()
     client = await _get_client()
-    model = os.getenv("QUENCHFORGE_EMBED_MODEL", "")
+    from config import settings as _cfg
+    model = os.getenv("QUENCHFORGE_EMBED_MODEL") or getattr(_cfg, "QUENCHFORGE_EMBED_MODEL", "")
     if not model:
         raise RuntimeError(
-            "EMBEDDINGS_PROVIDER=quenchforge requires QUENCHFORGE_EMBED_MODEL "
-            "to be set so the daemon knows which model to load.",
+            "EMBEDDINGS_PROVIDER=quenchforge requires QUENCHFORGE_EMBED_MODEL to be "
+            "set — it must match the model your corpus was embedded with (same "
+            "dimension is necessary but not sufficient; the vector space must match).",
         )
 
     t0 = time.perf_counter()
@@ -295,11 +297,11 @@ async def quenchforge_rerank(
     breaker = get_breaker("quenchforge")
     url = _get_quenchforge_url()
     client = await _get_client()
-    model = os.getenv("QUENCHFORGE_RERANK_MODEL", "")
+    from config import settings as _cfg
+    model = os.getenv("QUENCHFORGE_RERANK_MODEL") or getattr(_cfg, "QUENCHFORGE_RERANK_MODEL", "")
     if not model:
         raise RuntimeError(
-            "RERANK_PROVIDER=quenchforge requires QUENCHFORGE_RERANK_MODEL "
-            "to be set so the daemon knows which model to load.",
+            "RERANK_PROVIDER=quenchforge requires QUENCHFORGE_RERANK_MODEL to be set.",
         )
 
     t0 = time.perf_counter()

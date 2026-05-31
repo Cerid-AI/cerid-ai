@@ -83,8 +83,8 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_FEEDBACK_LOOP` | `false` | Conversation feedback loop |
-| `ENABLE_HALLUCINATION_CHECK` | `false` | Hallucination detection |
-| `ENABLE_MEMORY_EXTRACTION` | `false` | Memory extraction from conversations |
+| `ENABLE_HALLUCINATION_CHECK` | `true` | Hallucination detection |
+| `ENABLE_MEMORY_EXTRACTION` | `true` | Memory extraction from conversations |
 | `ENABLE_MODEL_ROUTER` | `false` | Automatic model routing |
 | `ENABLE_ENCRYPTION` | `false` | Field-level Fernet encryption |
 | `ENABLE_EXTERNAL_VERIFICATION` | `true` | Cross-model claim verification |
@@ -99,11 +99,35 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | `HYBRID_KEYWORD_WEIGHT` | `0.4` | BM25 keyword weight in hybrid retrieval |
 | `RERANK_LLM_WEIGHT` | `0.6` | LLM reranker weight |
 | `RERANK_ORIGINAL_WEIGHT` | `0.4` | Original score weight after reranking |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence embedding model |
-| `EMBEDDING_DIMENSIONS` | `384` | Embedding vector dimensions |
+| `EMBEDDING_MODEL` | `Snowflake/snowflake-arctic-embed-m-v1.5` | Sentence embedding model (768-dim) |
+| `EMBEDDING_DIMENSIONS` | `768` | Embedding vector dimensions |
 | `QUALITY_MIN_RELEVANCE_THRESHOLD` | `0.15` | Minimum relevance for results |
 | `CONTEXT_BOOST_WEIGHT` | `0.08` | Conversation context alignment boost |
 | `AUTO_INJECT_THRESHOLD` | `0.82` | Min relevance for auto-injection |
+
+### Quenchforge / local GPU inference (optional)
+
+Route LLM, embedding, and rerank calls to a local [Quenchforge](AMD_GPU_MODEL_RECOMMENDATIONS.md)
+daemon (Ollama/OpenAI-compatible) instead of an external API. Each surface
+opts in independently via its `*_PROVIDER` toggle.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INTERNAL_LLM_PROVIDER` | `openrouter` | Set to `quenchforge` to route chat/LLM calls to the local daemon |
+| `EMBEDDINGS_PROVIDER` | `sidecar` | Set to `quenchforge` to route embeddings to the local daemon |
+| `RERANK_PROVIDER` | `sidecar` | Set to `quenchforge` to route reranking to the local daemon |
+| `QUENCHFORGE_URL` | `http://host.docker.internal:11434` | Quenchforge daemon base URL (falls back to `OLLAMA_URL`) |
+| `QUENCHFORGE_EMBED_MODEL` | _(empty — required when `EMBEDDINGS_PROVIDER=quenchforge`)_ | Embedding model name the daemon serves |
+| `QUENCHFORGE_RERANK_MODEL` | `bge-reranker-v2-m3` | Rerank model name the daemon serves |
+
+> ⚠ **`QUENCHFORGE_EMBED_MODEL` has no default on purpose.** It must match
+> the model your corpus was embedded with. Matching `EMBEDDING_DIMENSIONS`
+> (768) is necessary but **not sufficient** — `nomic-embed-text-v1.5` and
+> `Snowflake/snowflake-arctic-embed-m-v1.5` are both 768-dim but occupy
+> different vector spaces; swapping one for the other without re-embedding
+> silently collapses retrieval quality. The client raises rather than guess.
+> Rerank is a cross-encoder score (no stored vectors), so a default is safe.
+> Full model matrix: [`AMD_GPU_MODEL_RECOMMENDATIONS.md`](AMD_GPU_MODEL_RECOMMENDATIONS.md).
 
 ### Verification (optional)
 
@@ -126,6 +150,7 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | `SCHEDULE_STALE_DETECTION` | `0 4 * * 0` | Stale artifact detection (Sunday 4 AM) |
 | `SCHEDULE_STALE_DAYS` | `90` | Days before artifact is considered stale |
 | `SCHEDULE_SYNC_EXPORT` | *(empty)* | Sync export cron (empty = disabled) |
+| `SCHEDULE_MODEL_AUTO_UPDATE` | `0 6 * * 1` | Auto-adopt latest in-family model per role (Mon 6 AM) |
 
 ### Database URLs (optional)
 
@@ -186,7 +211,7 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENABLE_MEMORY_EXTRACTION` | `false` | Enable memory extraction |
+| `ENABLE_MEMORY_EXTRACTION` | `true` | Enable memory extraction |
 | `MEMORY_RETENTION_DAYS` | `180` | Memory retention period |
 
 ### Cost Management (optional)
@@ -194,4 +219,5 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_MODEL_ROUTER` | `false` | Automatic model routing |
+| `MODEL_AUTO_UPDATE_ENABLED` | `true` | Auto-adopt the latest in-family model per role from the OpenRouter catalog (gates the `model_auto_update` scheduled job) |
 | `COST_SENSITIVITY` | `medium` | Cost sensitivity level: low, medium, high |

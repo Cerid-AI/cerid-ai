@@ -74,10 +74,14 @@ def transcribe_pcm(pcm_path: Path) -> dict[str, Any]:
     )
 
     raw_language = os.getenv("WHISPER_LANGUAGE", "auto")
-    language: str | None = None if raw_language == "auto" else raw_language
 
     logger.info("Transcribing %s (metal=%s, threads=%d)", pcm_path.name, use_metal, n_threads)
-    segments = model.transcribe(str(pcm_path), language=language)
+    if raw_language == "auto":
+        # pywhispercpp drives auto-detection via detect_language=True; its
+        # `language` param is a str (default "") and does not accept None.
+        segments = model.transcribe(str(pcm_path), detect_language=True)
+    else:
+        segments = model.transcribe(str(pcm_path), language=raw_language)
 
     text_parts: list[str] = []
     words: list[dict[str, Any]] = []
@@ -100,7 +104,7 @@ def transcribe_pcm(pcm_path: Path) -> dict[str, Any]:
 
     return {
         "text": " ".join(text_parts).strip(),
-        "language": getattr(model, "language", language) or "unknown",
+        "language": getattr(model, "language", None) or (None if raw_language == "auto" else raw_language) or "unknown",
         "duration": total_duration,
         "words": words,
     }

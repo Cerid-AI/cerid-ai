@@ -91,8 +91,8 @@ export async function fetchCommunities({
   if (!res.ok) {
     throw new Error(`Community list fetch failed (${res.status})`)
   }
-  const data = (await res.json()) as Record<string, unknown>[]
-  return data.map(normalizeCommunitySummary)
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return rows.map(normalizeCommunitySummary)
 }
 
 /**
