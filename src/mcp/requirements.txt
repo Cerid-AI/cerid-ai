@@ -11,7 +11,7 @@ mcp>=1.27.0,<2
 httpx>=0.24,<0.29
 
 # Templating (Bifrost config generation)
-jinja2>=3.1,<4
+jinja2>=3.1.6,<4
 
 # Databases
 chromadb>=1,<2      # client on 1.x; server image pin lifted in chromadb migration Phase 3 (data-volume migration)
