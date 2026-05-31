@@ -640,6 +640,13 @@ SCHEDULE_RETENTION_ENFORCE = os.getenv(
     "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *",
 )
 
+# Auto-adopt the latest in-family model per role from the OpenRouter catalog.
+# MODEL_AUTO_UPDATE_ENABLED gates the scheduler job; set "false" to keep the
+# pinned assignments. Same-family + must-exist-in-catalog bounds the drift;
+# model_config.json stays revertible via PUT /models/assignments.
+MODEL_AUTO_UPDATE_ENABLED = os.getenv("MODEL_AUTO_UPDATE_ENABLED", "true").lower() in ("true", "1")
+SCHEDULE_MODEL_AUTO_UPDATE = os.getenv("SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * 1")  # Mon 6 AM
+
 # ---------------------------------------------------------------------------
 # Folder Scanning
 # ---------------------------------------------------------------------------
@@ -831,6 +838,22 @@ QUENCHFORGE_URL = os.getenv(
     "QUENCHFORGE_URL",
     os.getenv("OLLAMA_URL", "http://host.docker.internal:11434"),
 )
+
+# Model names the Quenchforge client sends in /v1/embeddings + /v1/rerank
+# requests (the gateway dispatches to the matching slot by this name). Only
+# read when EMBEDDINGS_PROVIDER / RERANK_PROVIDER = quenchforge.
+#
+# QUENCHFORGE_EMBED_MODEL has NO default ON PURPOSE: it must match the model
+# your corpus was embedded with (see EMBEDDING_MODEL above). Matching the output
+# dimension is necessary but NOT sufficient — e.g. nomic-embed-text-v1.5 and
+# Snowflake/snowflake-arctic-embed-m-v1.5 are both 768-dim but live in different
+# vector spaces; querying one against a corpus embedded by the other silently
+# collapses retrieval. Switching the embed model requires re-embedding the corpus.
+# Leaving it empty makes the client raise + fall back to the ONNX embedder.
+QUENCHFORGE_EMBED_MODEL = os.getenv("QUENCHFORGE_EMBED_MODEL", "")
+# Rerank is a cross-encoder score (no stored vectors), so a sensible default is
+# safe. Must be a reranking model Quenchforge serves.
+QUENCHFORGE_RERANK_MODEL = os.getenv("QUENCHFORGE_RERANK_MODEL", "bge-reranker-v2-m3")
 
 # Cached hardware-profile token, populated by scripts/detect-gpu.sh and read
 # by the setup wizard / /system-check endpoint. One of:

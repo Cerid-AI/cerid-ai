@@ -1,9 +1,9 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-05-23 (Cerid v1.0.0-rc1 tagged — feature complete).
+> **Last updated:** 2026-05-31 (post-rc2.1 correctness sprint + GA tech-debt sweep; counts re-verified against code).
 > **Current candidate:** `v1.0.0-rc1`. The release-candidate captures Phases A–N of the master plan + K-program (K1–K6) + visualization polish (L, M). The `-rc1` suffix drops once the GA Polish Sprint closes — see `docs/GA_CHECKLIST.md`.
 > **What's still pending for v1.0.0:** 14-day soak window, Apple App Store submission, Stripe live-mode flip, demo video + marketing site, P0 docs (RUNBOOK + ROLLBACK + GA_CHECKLIST landed 2026-05-23).
-> **Currently shipped:** Atlas 2D + Constellation 3D, Subjects/Sources/Settings consolidation (4-pane), Apple ecosystem connectors, meeting capture runtime, cloud connectors via sibling MCP, Swift CLI helpers, metamorphic verification, Custom Smart RAG, AI inbox triage, daily digest, advanced analytics, Timeline + Tour preview + Wiki mini-viz, Knowledge Architecture program (wiki orphan loop closed, four-surface cross-linkage, surface router, Karpathy log + index, concept pages MVP, operational excellence dashboard). 60 MCP tools. 5,500+ Python tests. 1,300+ frontend tests. 55 preservation test functions across 11 modules. See `docs/COMPLETED_PHASES.md` for the full ledger.
+> **Currently shipped:** Atlas 2D + Constellation 3D, Subjects/Sources/Settings consolidation (4-pane), Apple ecosystem connectors, meeting capture runtime, cloud connectors via sibling MCP, Swift CLI helpers, metamorphic verification, Custom Smart RAG, AI inbox triage, daily digest, advanced analytics, Timeline + Tour preview + Wiki mini-viz, Knowledge Architecture program (wiki orphan loop closed, four-surface cross-linkage, surface router, Karpathy log + index, concept pages MVP, operational excellence dashboard). 60 MCP tools. 5,573 Python tests. 1,347 frontend test cases. 113 preservation tests (`pytest -m preservation`). See `docs/COMPLETED_PHASES.md` for the full ledger.
 > **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 > **Internal sprint backlog:** `tasks/todo.md` (internal-only).
 

@@ -777,6 +777,28 @@ async def _run_knowledge_stats_snapshot() -> None:
         logger.error("knowledge_stats_snapshot scheduled job failed: %s", e)
 
 
+async def _run_model_auto_update() -> None:
+    """Adopt the latest in-family model for every role from the OpenRouter
+    catalog (gated by MODEL_AUTO_UPDATE_ENABLED). Same-family + must-exist
+    bounds the drift; the change applies on the next Bifrost restart."""
+    start = time.time()
+    try:
+        from app.routers.models import apply_latest_assignments
+
+        outcome = await apply_latest_assignments()
+        applied = outcome.get("applied", [])
+        duration = time.time() - start
+        _log_execution("model_auto_update", "success", duration, f"applied={len(applied)}")
+        if applied:
+            logger.info(
+                "model_auto_update: %d role(s) updated to latest in-family", len(applied)
+            )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("model_auto_update", "error", duration, str(e))
+        logger.error("model_auto_update scheduled job failed: %s", e)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -850,6 +872,20 @@ def start_scheduler() -> AsyncIOScheduler:
         name="Weekly tombstone purge",
         replace_existing=True,
     )
+
+    # Weekly auto-adoption of the latest in-family model per role from the
+    # OpenRouter catalog. Gated by MODEL_AUTO_UPDATE_ENABLED (default on).
+    if getattr(config, "MODEL_AUTO_UPDATE_ENABLED", True):
+        _scheduler.add_job(
+            _run_model_auto_update,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * 1"),
+            ),
+            id="model_auto_update",
+            name="Auto-update models to latest in-family",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # Phase K1.4 — nightly wiki refresh sweep (3 AM local). Catches
     # entities whose summaries are overdue (next_refresh_due elapsed)

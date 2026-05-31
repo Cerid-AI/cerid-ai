@@ -136,8 +136,8 @@ export async function fetchWikiEntities({
   if (!res.ok) {
     throw new Error(`Wiki entities fetch failed (${res.status})`)
   }
-  const data = (await res.json()) as Record<string, unknown>[]
-  return data.map(normalizeEntitySummary)
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return rows.map(normalizeEntitySummary)
 }
 
 /**
@@ -243,6 +243,6 @@ export async function fetchContradictions({
   if (!res.ok) {
     throw new Error(`Contradictions fetch failed (${res.status})`)
   }
-  const data = (await res.json()) as Record<string, unknown>[]
-  return data.map(normalizeContradiction)
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return rows.map(normalizeContradiction)
 }

@@ -126,3 +126,6 @@ tests/BUG_REPORT.md
 # Smoke test scratch directory (host path, outside repo)
 /tmp/cerid-smoke/
 test-results/
+
+# Playwright MCP runtime output
+.playwright-mcp/

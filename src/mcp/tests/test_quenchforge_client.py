@@ -142,11 +142,29 @@ async def test_embed_sorts_by_index(monkeypatch):
 # rerank — required-model guard + alignment with input order
 # ---------------------------------------------------------------------------
 
-async def test_rerank_requires_model_env(monkeypatch):
-    from utils.quenchforge_client import quenchforge_rerank
+async def test_rerank_defaults_model_when_env_unset(monkeypatch):
+    """rerank carries a safe default (a cross-encoder score needs no stored
+    vectors), so an unset env falls back to bge-reranker-v2-m3 instead of
+    raising — unlike embed, whose model must match the corpus's vector space."""
     monkeypatch.delenv("QUENCHFORGE_RERANK_MODEL", raising=False)
-    with pytest.raises(RuntimeError, match="QUENCHFORGE_RERANK_MODEL"):
-        await quenchforge_rerank("q", ["d1", "d2"])
+    import config.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "QUENCHFORGE_RERANK_MODEL", "bge-reranker-v2-m3")
+    from utils import quenchforge_client
+
+    fake_response = _async_mock_response({"results": [{"index": 0, "relevance_score": 0.4}]})
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(return_value=fake_response)
+    fake_breaker = MagicMock()
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            scores = await quenchforge_client.quenchforge_rerank("q", ["d0"])
+
+    assert scores == [0.4]
+    assert fake_client.post.call_args.kwargs["json"]["model"] == "bge-reranker-v2-m3"
 
 
 async def test_rerank_aligns_scores_to_input_order(monkeypatch):

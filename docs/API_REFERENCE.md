@@ -722,7 +722,9 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 **Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
 
 ### Model Updates
-- `GET /models/updates` — New and deprecated models since last catalog check (populated by scheduled job)
+- `GET /models/updates` — Latest in-family model updates available per role (live OpenRouter catalog check)
+- `POST /models/updates/check` — Dry-run: diff each role's pinned model against the newest in-family version in the OpenRouter catalog (no changes applied)
+- `POST /models/updates/apply` — Adopt the latest in-family model for every role and regenerate the Bifrost config. Also runs weekly via the `model_auto_update` scheduler job (gated by `MODEL_AUTO_UPDATE_ENABLED`)
 
 ### Agent Activity
 - `GET /agents/activity/stream` — SSE stream of real-time agent activity events (exempted from API key auth)
