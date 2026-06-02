@@ -54,6 +54,22 @@ def should_fire_external_crag(
     return max_rel < threshold
 
 
+def _kb_low_confidence(kb_result: dict, threshold: float) -> bool:
+    """True when the best KB relevance is below the quality threshold (GA P0.5 B2a).
+
+    Surfaced as ``low_confidence`` on the response so callers/UI can hedge a weak
+    KB answer even when external augmentation fired (the CRAG threshold only
+    decided whether to *fire* external; it never marked the KB result itself).
+    Mirrors :func:`should_fire_external_crag`'s max-relevance rule. Pure signal —
+    no behaviour change.
+    """
+    results = kb_result.get("results") if isinstance(kb_result, dict) else None
+    if not results:
+        return True
+    max_rel = max((r.get("relevance", 0.0) for r in results), default=0.0)
+    return max_rel < threshold
+
+
 class AgentQueryRequest(BaseModel):
     query: str
     domains: list[str] | None = None
@@ -320,6 +336,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             # Audit RC-B: launching external unconditionally in parallel ate the
             # 10s /agent/query budget even when KB had strong hits. The CRAG gate
             # below skips external when KB is already authoritative.
+            _kb_low_conf = False  # conversation-only path has no KB to judge
             if _cs.get("kb", True) is False:
                 result = {
                     "context": "", "sources": [], "confidence": 0.0,
@@ -350,6 +367,8 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             # CRAG gate: fire external only when KB quality is below threshold.
             # Saves the 5s-per-source hang cost when KB already has strong hits.
             _threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
+            # B2a: capture KB-only confidence before any external augmentation.
+            _kb_low_conf = _kb_low_confidence(result, _threshold)
             if should_fire_external_crag(
                 ext_on=_ext_on, kb_result=result, threshold=_threshold,
             ):
@@ -388,6 +407,10 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                         for r in _ext_results
                     ])
                     result = env.to_dict()
+
+        # B2a: surface the KB-quality signal (additive; survives external merge).
+        if isinstance(result, dict):
+            result["low_confidence"] = _kb_low_conf
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG

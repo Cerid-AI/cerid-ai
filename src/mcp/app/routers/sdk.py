@@ -19,6 +19,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 
 import config
+from app.middleware.idempotency import idempotent
 from app.models.sdk import (
     SDKHallucinationResponse,
     SDKHealthResponse,
@@ -132,7 +133,7 @@ async def sdk_hallucination(req: HallucinationCheckRequest):
         503: _503,
     },
 )
-async def sdk_memory_extract(req: MemoryExtractionRequest, wait: bool = False):
+async def sdk_memory_extract(req: MemoryExtractionRequest, request: Request, wait: bool = False):
     """Default-async endpoint with sync escape hatch.
 
     Routing:
@@ -150,7 +151,9 @@ async def sdk_memory_extract(req: MemoryExtractionRequest, wait: bool = False):
     from fastapi.responses import JSONResponse
 
     if wait or not is_memory_async_mode():
-        return await memory_extract_endpoint(req)
+        # Idempotency-Key (GA P0.5 D1) on the sync path only; the async/202 path
+        # is already job-id idempotent via the queue.
+        return await idempotent(request, lambda: memory_extract_endpoint(req))
 
     queue = get_memory_queue()
     job = queue.enqueue(
@@ -323,18 +326,22 @@ def sdk_health():
 
 
 @router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})
-def sdk_ingest(req: dict):
+async def sdk_ingest(req: dict, request: Request):
     # Preserve client-supplied provenance metadata (GA P0.2): external clients
     # pass rich metadata (title / provenance / source_file / …). Keep the
     # legacy `tags` field alongside it rather than overwriting with tags-only.
     metadata = dict(req.get("metadata") or {})
     metadata.setdefault("tags", req.get("tags", ""))
-    result = ingest_content(
-        req.get("content", ""),
-        domain=req.get("domain", "general"),
-        metadata=metadata,
+    # Idempotency-Key (GA P0.5 D1): a retried ingest with the same key does not
+    # double-write. No-op when the header is absent.
+    return await idempotent(
+        request,
+        lambda: ingest_content(
+            req.get("content", ""),
+            domain=req.get("domain", "general"),
+            metadata=metadata,
+        ),
     )
-    return result
 
 
 @router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})
@@ -366,11 +373,13 @@ async def sdk_ingest_file(req: dict):
     ),
     responses={422: _422, 503: _503},
 )
-async def sdk_ingest_external(request: ExternalIngestRequest) -> IngestResult:
+async def sdk_ingest_external(request: ExternalIngestRequest, http_request: Request) -> IngestResult:
     from core.context.identity import get_tenant_id
 
     tenant = get_tenant_id()
-    return await ingest_external(request, tenant=tenant)
+    # Idempotency-Key (GA P0.5 D1): `request` here is the body model; headers
+    # live on the FastAPI `http_request`. No-op without the header.
+    return await idempotent(http_request, lambda: ingest_external(request, tenant=tenant))
 
 
 # ---------------------------------------------------------------------------
