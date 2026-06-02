@@ -223,7 +223,7 @@ def get_context_budget_for_model(model: str | None) -> int:
         if model_lower.startswith(prefix):
             return budget
     return QUERY_CONTEXT_MAX_CHARS
-QUERY_RERANK_CANDIDATES = 15        # max candidates sent to reranker
+QUERY_RERANK_CANDIDATES = int(os.getenv("QUERY_RERANK_CANDIDATES", "15"))  # max candidates sent to reranker (GA P0.5 B2c: eval-tunable; default unchanged)
 QUERY_CONTEXT_MESSAGES = 5          # max conversation messages used for query enrichment
 
 # ---------------------------------------------------------------------------

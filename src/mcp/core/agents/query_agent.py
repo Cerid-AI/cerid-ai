@@ -10,6 +10,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from typing import Any
 
@@ -1804,6 +1805,144 @@ async def _augment_with_hype(
         return results
 
 
+def _surface_route_dict(query: str) -> dict[str, Any]:
+    """Compute the knowledge-surface route for a query (GA P0.5 A1a).
+
+    Surfaces *which* intent/surface the query maps to (wiki / vector / graph /
+    memory) so the chosen route is visible end-to-end (API/UI/eval) instead of
+    living only in observability tooling. Behaviour-neutral for now — A1b biases
+    retrieval on this; A2 wires the memory surface. Graceful: never breaks the
+    query path.
+    """
+    try:
+        from core.retrieval.surface_router import route as _surface_route
+
+        sr = _surface_route(query)
+        return {
+            "intent": sr.intent,
+            "primary": sr.primary,
+            "surfaces": list(sr.surfaces),
+            "confidence": round(sr.confidence, 4),
+            "matched_entity_hint": sr.matched_entity_hint,
+        }
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.surface_route", exc)
+        return {}
+
+
+def _should_skip_graph(
+    high_conf_count: int,
+    effective_top_k: int,
+    surface_route: dict[str, Any],
+    biased_enabled: bool,
+) -> bool:
+    """Decide whether to skip graph expansion (GA P0.5 A1b).
+
+    Default rule: skip when vector already returned enough high-confidence hits
+    (saves a Neo4j round-trip). When surface-biased retrieval is enabled, a
+    ``relational`` intent ALWAYS consults the graph surface — the early-exit
+    would otherwise starve the very queries the graph exists to answer. Pure
+    decision function so it's unit-testable without the live stack.
+    """
+    if biased_enabled and surface_route.get("intent") == "relational":
+        return False
+    return high_conf_count >= effective_top_k
+
+
+# GA P0.5 C2 — wiki / compiled-summary surface. Core stays decoupled from the
+# app-layer wiki service via a registered fetcher (mirrors set_data_source_registry
+# / set_entity_extraction_enqueue); app startup wires it. Unwired → no-op.
+_wiki_page_fetcher: Callable[[str], Awaitable[dict[str, Any] | None]] | None = None
+
+
+def set_wiki_page_fetcher(
+    fn: Callable[[str], Awaitable[dict[str, Any] | None]] | None,
+) -> None:
+    """Register the app-layer compiled-wiki-page fetcher (called from app startup)."""
+    global _wiki_page_fetcher
+    _wiki_page_fetcher = fn
+
+
+async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
+    """Fetch the compiled wiki page for an entity and adapt it (GA P0.5 C2).
+
+    Wires the wiki surface into the query path for ``compiled_summary`` queries
+    ("what is X"). Returns [] when no fetcher is wired (app startup didn't
+    register one) or no page exists. Graceful on any fetcher error.
+    """
+    if _wiki_page_fetcher is None or not entity_hint:
+        return []
+    try:
+        page = await _wiki_page_fetcher(entity_hint)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.wiki_surface", exc)
+        return []
+    if not page:
+        return []
+    return [
+        {
+            "content": page.get("content", ""),
+            "relevance": 1.0,  # the compiled summary is authoritative for this intent
+            "domain": "wiki",
+            "artifact_id": page.get("slug", entity_hint),
+            "chunk_index": 0,
+            "source_type": "wiki",
+            "source_authority": "compiled_wiki",
+            "title": page.get("title", ""),
+        }
+    ]
+
+
+async def _recall_memory_surface(
+    query: str,
+    chroma_client: Any,
+    neo4j_driver: Any,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """Recall episodic memories and adapt them to the query-result shape (GA P0.5 A2).
+
+    Wires the dormant memory surface into the query path: for ``personal_context``
+    queries (e.g. "what did we decide"), recall scored memories and merge them so
+    they participate in dedup/rerank/assembly like any other source. Adapts
+    ``recall_memories``' dict shape (text/adjusted_score/memory_id) onto the
+    retrieval contract (content/relevance/artifact_id/source_type). Graceful:
+    returns [] on any failure so the query path never breaks.
+    """
+    try:
+        from core.agents.memory import recall_memories
+
+        mems = await recall_memories(
+            query, chroma_client=chroma_client, neo4j_driver=neo4j_driver, top_k=top_k,
+        )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.memory_surface", exc)
+        return []
+    return [
+        {
+            "content": m.get("text", ""),
+            "relevance": m.get("adjusted_score", 0.0),
+            "domain": "conversations",
+            "artifact_id": m.get("memory_id", ""),
+            "chunk_index": 0,
+            "source_type": "memory",
+            "source_authority": "user_memory",
+            "memory_type": m.get("memory_type", "fact"),
+        }
+        for m in mems
+    ]
+
+
+def _domains_no_results(requested: list[str], results: list[dict[str, Any]]) -> list[str]:
+    """Requested domains that contributed zero results (GA P0.5 B2b).
+
+    Surfaced so a caller/UI can distinguish "this domain returned nothing"
+    from a generic empty answer — the "my notes vanished" UX the audit flagged
+    as the top retrieval complaint. Behaviour-neutral; pure signal.
+    """
+    hit = {r.get("domain") for r in results}
+    return [d for d in requested if d not in hit]
+
+
 async def _agent_query_impl(
     query: str,
     domains: list[str] | None = None,
@@ -1823,6 +1962,9 @@ async def _agent_query_impl(
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
+    # GA P0.5 A1a — compute the surface route once and surface it in every
+    # return path so callers/UI/eval can see which surface intent fired.
+    _surface_route = _surface_route_dict(query)
     from config.features import (
         ENABLE_ADAPTIVE_RETRIEVAL,
         ENABLE_INTELLIGENT_ASSEMBLY,
@@ -1830,6 +1972,7 @@ async def _agent_query_impl(
         ENABLE_MMR_DIVERSITY,
         ENABLE_QUERY_DECOMPOSITION,
         ENABLE_SEMANTIC_CACHE,
+        ENABLE_SURFACE_BIASED_RETRIEVAL,
     )
 
     # Semantic cache early-return — check before any retrieval work
@@ -1880,6 +2023,7 @@ async def _agent_query_impl(
                 "results": [],
                 "retrieval_skipped": True,
                 "retrieval_reason": decision.reason,
+                "surface_route": _surface_route,
             }
         if decision.action == "light":
             effective_top_k = decision.top_k
@@ -1912,6 +2056,7 @@ async def _agent_query_impl(
                 "results": [],
                 "retrieval_skipped": True,
                 "retrieval_reason": "consumer_domain_restricted",
+                "surface_route": _surface_route,
             }
 
     # Step 0.5: Query decomposition — may split into parallel sub-queries
@@ -1944,6 +2089,30 @@ async def _agent_query_impl(
                     metadata_filter=metadata_filter,
                 )
         breadcrumb(f"vector search complete: {len(results)} results", category="retrieval")
+
+    # GA P0.5 A2 — memory surface. For personal-context queries, recall episodic
+    # memories and merge them so they participate in rerank/assembly. Behind the
+    # surface-bias flag (default OFF) pending the eval-gate flip.
+    if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "personal_context":
+        with timer.step("memory_surface"):
+            _mem = await _recall_memory_surface(
+                search_query, chroma_client, neo4j_driver, effective_top_k,
+            )
+            if _mem:
+                results = results + _mem
+                breadcrumb(f"memory surface: +{len(_mem)} memories", category="retrieval")
+
+    # GA P0.5 C2 — wiki surface. For "what is X" queries, prepend the compiled
+    # wiki/concept page for the matched entity. Behind the surface-bias flag
+    # (default OFF) and a no-op until app startup registers a wiki fetcher.
+    if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "compiled_summary":
+        _hint = _surface_route.get("matched_entity_hint")
+        if _hint:
+            with timer.step("wiki_surface"):
+                _wiki = await _recall_wiki_surface(_hint)
+                if _wiki:
+                    results = _wiki + results
+                    breadcrumb("wiki surface: +1 compiled page", category="retrieval")
 
     # CRAG quality gate lives at the router layer (app/routers/agents.py).
     # The router owns the single-source-of-truth decision for firing external
@@ -1993,7 +2162,9 @@ async def _agent_query_impl(
         # Early-exit: skip graph expansion when vector search already returned
         # enough high-confidence results (saves a Neo4j round-trip).
         _high_conf = [r for r in results if r.get("relevance", 0) > 0.8]
-        if len(_high_conf) >= effective_top_k:
+        if _should_skip_graph(
+            len(_high_conf), effective_top_k, _surface_route, ENABLE_SURFACE_BIASED_RETRIEVAL,
+        ):
             logger.debug(
                 "Skipping graph expansion: %d/%d results above 0.8 confidence",
                 len(_high_conf), effective_top_k,
@@ -2220,6 +2391,10 @@ async def _agent_query_impl(
         "token_budget_used": char_count,
         "graph_results": graph_results_added,
         "results": results,
+        "surface_route": _surface_route,
+        "domains_no_results": _domains_no_results(
+            list(effective_domains) if effective_domains else list(DOMAINS), results
+        ),
     }
 
     timings = timer.result()
