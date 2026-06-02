@@ -393,7 +393,6 @@ export default function SettingsPane() {
                 <PaneErrorBoundary label="Pro" queryClient={queryClient}>
                   <ProSection
                     featureTier={settings?.feature_tier ?? "community"}
-                    featureFlags={settings?.feature_flags ?? {}}
                     onRefresh={load}
                   />
                 </PaneErrorBoundary>

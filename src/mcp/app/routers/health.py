@@ -382,6 +382,7 @@ def _invariants_snapshot() -> dict:
             snap: dict[str, Any] = {
                 "verification_report_orphans": 0,
                 "collections_empty": [],
+                "custom_collections": [],
                 "errors": [],
             }
             from app.startup.invariants import _probe_chroma, _probe_nli

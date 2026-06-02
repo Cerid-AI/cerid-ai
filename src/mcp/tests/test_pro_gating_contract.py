@@ -47,6 +47,54 @@ def test_pro_gating_lint_passes() -> None:
         )
 
 
+def _load_allowlist() -> set[str]:
+    path = REPO_ROOT / "scripts" / "pro_gating_allowlist.txt"
+    flags: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            flags.add(line)
+    return flags
+
+
+def test_connector_flags_are_gate_asserted_not_allowlisted() -> None:
+    """Regression lock for the plugin-loader fix.
+
+    The connector / meeting / intelligence flags load their gates through the
+    class-based plugin loader. They must NOT sit in the allowlist — if their
+    gate ever disappears (e.g. a loader regression), the lint must catch it.
+    """
+    allowlist = _load_allowlist()
+    must_be_gated = {
+        "gmail_connector",
+        "outlook_connector",
+        "google_calendar_sync",
+        "outlook_calendar_sync",
+        "apple_calendar_eventkit",
+        "apple_photos_reader",
+        "meeting_diarization",
+        "calendar_stitching",
+        "meeting_summary",
+        "custom_smart_rag",
+        "daily_digest",
+        "inbox_triage",
+        "advanced_analytics",
+    }
+    leaked = must_be_gated & allowlist
+    assert not leaked, (
+        f"these flags are gated and must not be allowlisted: {sorted(leaked)}"
+    )
+
+
+def test_allowlist_is_only_unimplemented_flags() -> None:
+    """The allowlist is down to flags with genuinely no gate yet."""
+    assert _load_allowlist() == {
+        "apple_mail_reader",
+        "imessage_reader",
+        "reminders_eventkit",
+    }
+
+
 def test_feature_buckets_well_formed() -> None:
     """FEATURE_BUCKETS members must all be valid flags in FEATURE_FLAGS."""
     from config.features import FEATURE_BUCKETS, FEATURE_FLAGS

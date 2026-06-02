@@ -188,7 +188,7 @@ opts in independently via its `*_PROVIDER` toggle.
 | `CERID_TIER` | `community` | Feature tier: community or pro |
 | `CERID_PLUGIN_DIR` | `plugins` | Plugin directory |
 | `CERID_ENABLED_PLUGINS` | *(empty)* | Enabled plugin list |
-| `CERID_CUSTOM_DOMAINS` | *(empty)* | Custom domain JSON |
+| `CERID_CUSTOM_DOMAINS` | *(empty)* | JSON registering **built-in-like** custom domains (with descriptions/icons). Optional — external clients can ingest to and query **any** ad-hoc domain name without registering it here; this var is only for domains you want treated like built-ins. |
 
 ### Multi-User Auth (optional)
 

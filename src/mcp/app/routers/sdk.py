@@ -324,10 +324,15 @@ def sdk_health():
 
 @router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})
 def sdk_ingest(req: dict):
+    # Preserve client-supplied provenance metadata (GA P0.2): external clients
+    # pass rich metadata (title / provenance / source_file / …). Keep the
+    # legacy `tags` field alongside it rather than overwriting with tags-only.
+    metadata = dict(req.get("metadata") or {})
+    metadata.setdefault("tags", req.get("tags", ""))
     result = ingest_content(
         req.get("content", ""),
         domain=req.get("domain", "general"),
-        metadata={"tags": req.get("tags", "")},
+        metadata=metadata,
     )
     return result
 

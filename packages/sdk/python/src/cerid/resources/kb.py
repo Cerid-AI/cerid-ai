@@ -68,9 +68,18 @@ class KBResource:
         *,
         domain: str = "general",
         tags: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> IngestResponse:
-        """Ingest raw text content into the knowledge base."""
-        body = self._client._build_json(content=content, domain=domain, tags=tags)
+        """Ingest raw text content into the knowledge base.
+
+        ``metadata`` carries arbitrary provenance/attribution fields
+        (e.g. ``{"title": ..., "provenance": ..., "source_file": ...}``)
+        that are stored with the artifact and queryable. ``tags`` is the
+        legacy convenience field and is preserved alongside ``metadata``.
+        """
+        body = self._client._build_json(
+            content=content, domain=domain, tags=tags, metadata=metadata
+        )
         resp = self._http.post(self._client._url("/ingest"), json=body)
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())
@@ -176,9 +185,16 @@ class AsyncKBResource:
         *,
         domain: str = "general",
         tags: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> IngestResponse:
-        """Ingest raw text content into the knowledge base."""
-        body = self._client._build_json(content=content, domain=domain, tags=tags)
+        """Ingest raw text content into the knowledge base.
+
+        ``metadata`` carries arbitrary provenance/attribution fields stored
+        with the artifact and queryable; ``tags`` is preserved alongside it.
+        """
+        body = self._client._build_json(
+            content=content, domain=domain, tags=tags, metadata=metadata
+        )
         resp = await self._http.post(self._client._url("/ingest"), json=body)
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())

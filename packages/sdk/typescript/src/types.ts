@@ -59,6 +59,12 @@ export interface IngestRequest {
   content: string;
   domain?: string;
   tags?: string;
+  /**
+   * Arbitrary provenance/attribution metadata stored with the artifact and
+   * queryable (e.g. { title, provenance, source_file }). Preserved alongside
+   * `tags`. (External-client backend support.)
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface IngestFileRequest {
