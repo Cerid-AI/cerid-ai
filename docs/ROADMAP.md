@@ -1,6 +1,7 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-05-31 (consolidated into the Commercial-GA program).
+> **Last updated:** 2026-06-02 (Commercial-GA Track 1: Pro feature truth-up & gating
+> lock-in and External agent / client backend support both **landed** — see ✅ markers below).
 > **Current candidate:** `v1.0.0-rc2.1`. The release-candidate captures Phases A–N of the
 > master plan + the K-program (K1–K6) + visualization polish (L, M). The `-rc` suffix
 > drops when the Commercial-GA program below closes.
@@ -39,8 +40,12 @@ Priority legend: **P0** blocker · **P1** high · **P2** medium · **P3** low.
 The Pro tier's *features* are largely built and gated; this track makes the *commerce
 around them* production-grade and the *gating* trustworthy end-to-end.
 
-### P0 — Pro feature truth-up & gating lock-in
+### P0 — Pro feature truth-up & gating lock-in — ✅ Landed (2026-06-01)
 Make the tier system tell the truth and hold it against regression.
+*Shipped: connector loader fixed so class-based plugins load and gate (with a boot test);
+gating allowlist pruned to the genuinely-pending features; previously-ungated analytics now
+gated; the feature/tier matrix is generated from the source of truth and drift-gated in CI;
+the Pro settings pane renders live from the capabilities API.*
 - Reconcile the runtime-gating ledger so every shipped Pro feature is gate-asserted by the
   gating lint (no silently-ungated paid features, no stale exemptions).
 - Close the remaining gating gaps on Pro surfaces that are reachable without a tier check.
@@ -79,9 +84,11 @@ Land the remaining Apple-native readers so the advertised Pro suite is whole at 
 - Billing-path error monitoring + payment-failure alerting.
 - Operational runbook for the test→live migration and the GA charge/refund proof.
 
-### P0 — External agent / client backend support
+### P0 — External agent / client backend support — ✅ Landed (2026-06-01)
 Make Cerid usable as a shared knowledge + LLM + memory backend for other applications
-without per-client shims — a GA-required surface, not a v1.1 follow-on.
+without per-client shims — a GA-required surface, not a v1.1 follow-on. *All five points
+below shipped and are canary-validated; the "Cerid as a backend" guide is published in
+[`docs/SDK_GUIDE.md`](SDK_GUIDE.md).*
 - **First-class custom knowledge domains:** clients ingest to and query their own domain
   names without pre-registration (today only built-in / env-registered domains pass
   validation); an unknown-but-unused domain degrades to empty results, never an error.
