@@ -103,6 +103,19 @@ below shipped and are canary-validated; the "Cerid as a backend" guide is publis
   reference external client running end-to-end with no compatibility shims. See
   [`docs/plans/2026-06-improve-cerid-support-for-external-clients.md`](plans/2026-06-improve-cerid-support-for-external-clients.md).
 
+### P0 — Knowledge-architecture depth & retrieval quality  _(added 2026-06-02)_
+Make the differentiator real and measured before GA, not just described.
+- **All four knowledge surfaces first-class in the query path** — unify routing so wiki,
+  vector, graph, and episodic-memory are selected per intent on the live query path (not only
+  surfaced as observability), with the chosen surface returned in the response; wire
+  episodic-memory auto-recall for personal-context queries.
+- **Retrieval-quality validation** — artifact-level rank fusion; honest, published retrieval
+  and verification benchmarks as the release floor; surface low-confidence and
+  empty-collection signals so the UI never silently returns nothing.
+- **Idempotent ingest** across the SDK write surface, completing the external-backend story.
+- **Verification, evidenced** — publish the NLI-faithfulness benchmark that substantiates the
+  trust differentiator (no competitor ships entailment-gated retrieval).
+
 ---
 
 ## Track 2 — Validation & launch
@@ -131,6 +144,21 @@ below shipped and are canary-validated; the "Cerid as a backend" guide is publis
 - External-client backend **polish** (the GA core ships in Track 1): per-client LLM
   routing hints, namespaced/registered custom domains with descriptions, and an optional
   per-namespace audit store for pure-client workloads.
+
+### Competitive backlog _(from the 2026-06-02 market study + audits)_
+- **Developer-API depth:** batch ingest, cursor pagination, rate-limit/cost response headers,
+  streaming SDK methods (incl. streaming verification), and quality/eval endpoints — the
+  ergonomics the "knowledge-backend for agents" segment now expects.
+- **Retrieval depth:** relevance-score calibration with confidence intervals, adaptive
+  reranking, sparse-retrieval activation as corpora grow, and a GPU verification path.
+- **Onboarding:** a guided setup wizard with auto-tuning — the single biggest adoption lever
+  for a self-hosted product.
+- **Ecosystem:** publish Cerid in the MCP server registry; expand the public benchmark suite.
+- **Pro depth:** an "always-fresh knowledge" staleness/provenance dashboard; a scheduled
+  "knowledge health" verification report; multi-modal capture (audio/video transcription,
+  image OCR); and a governance/audit layer for teams.
+- **Packaging:** a team tier and usage-based pricing for the API-backend audience, alongside
+  the existing solo Pro.
 
 ---
 
