@@ -27,6 +27,44 @@ def client():
     return TestClient(_make_app())
 
 
+@pytest.fixture(autouse=True)
+def _pro_tier():
+    """The /analytics surface is the Pro `advanced_analytics` feature, so the
+    functional tests run at Pro tier. Restores the original tier afterward."""
+    from config.features import FEATURE_TIER, set_tier
+
+    original = FEATURE_TIER
+    set_tier("pro")
+    try:
+        yield
+    finally:
+        set_tier(original)
+
+
+# ── advanced_analytics gate ───────────────────────────────────────────
+
+class TestAdvancedAnalyticsGate:
+    ENDPOINTS = [
+        "/analytics/ingestion-by-day",
+        "/analytics/cost-by-stage",
+        "/analytics/quality-timeline?window_days=7",
+    ]
+
+    def test_community_tier_is_denied(self, client):
+        from config.features import set_tier
+
+        set_tier("community")
+        for path in self.ENDPOINTS:
+            resp = client.get(path)
+            assert resp.status_code == 403, f"{path} should be Pro-gated"
+
+    def test_pro_tier_is_allowed(self, client):
+        # _pro_tier fixture already set Pro; gate must not block.
+        with patch("app.deps.get_neo4j", side_effect=RuntimeError("down")):
+            resp = client.get("/analytics/ingestion-by-day")
+        assert resp.status_code == 200
+
+
 # ── ingestion-by-day ──────────────────────────────────────────────────
 
 class TestIngestionByDay:

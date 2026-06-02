@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import logging
 import sys
@@ -77,6 +78,31 @@ def _is_plugin_enabled(name: str) -> bool:
     return True
 
 
+def _find_plugin_class(module: Any) -> type | None:
+    """Return the single concrete ``CeridPlugin`` subclass defined in a module.
+
+    Class-based plugins (ConnectorPlugin / ParserPlugin / ToolPlugin / …)
+    implement ``register`` as an instance method rather than a module-level
+    function. Returns the class, or ``None`` if the module defines none.
+    Raises ``PluginLoadError`` if it defines more than one (ambiguous entry).
+    """
+    from plugins.base import CeridPlugin
+
+    candidates = [
+        obj
+        for _, obj in inspect.getmembers(module, inspect.isclass)
+        if issubclass(obj, CeridPlugin)
+        and obj.__module__ == module.__name__
+        and not inspect.isabstract(obj)
+    ]
+    if len(candidates) > 1:
+        raise PluginLoadError(
+            "plugin.py defines multiple CeridPlugin subclasses: "
+            f"{[c.__name__ for c in candidates]}"
+        )
+    return candidates[0] if candidates else None
+
+
 def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
     """
     Load a single plugin from its directory.
@@ -121,10 +147,13 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
         )
         return None
 
-    # Check dependencies
+    # Check dependencies. Only a list of pip module specs gates loading; a
+    # dict-form `requires` is declarative metadata (env vars, platform,
+    # sibling services, TCC grants) validated elsewhere, not importable here.
     requires = manifest.get("requires", [])
+    pip_deps = requires if isinstance(requires, list) else []
     missing_deps = []
-    for dep in requires:
+    for dep in pip_deps:
         try:
             importlib.import_module(dep.split(">=")[0].split("==")[0].strip())
         except ImportError:
@@ -136,27 +165,48 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
         )
         return None
 
-    # Load the plugin module
+    # Load the plugin module. `submodule_search_locations` makes the module a
+    # package, so plugins may relative-import sibling modules
+    # (e.g. `from .data_source import X`) — the in-tree connector/parser
+    # plugins rely on this.
+    mod_name = f"cerid_plugin_{name}"
     try:
         spec = importlib.util.spec_from_file_location(
-            f"cerid_plugin_{name}", str(plugin_module_path)
+            mod_name,
+            str(plugin_module_path),
+            submodule_search_locations=[str(plugin_dir)],
         )
         if spec is None or spec.loader is None:
             raise PluginLoadError(f"Plugin '{name}': failed to create module spec")
 
         module = importlib.util.module_from_spec(spec)
-        sys.modules[f"cerid_plugin_{name}"] = module
+        sys.modules[mod_name] = module
         spec.loader.exec_module(module)
     except PluginLoadError:
         raise
-    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+    except (ConfigError, ImportError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise PluginLoadError(f"Plugin '{name}': failed to import: {e}") from e
 
-    # Call register()
+    # Resolve the registration entry point. Two supported authoring styles:
+    #   1. Procedural — a module-level `register()` function.
+    #   2. Class-based — a concrete CeridPlugin subclass with instance
+    #      register(self). Instantiate it, expose it as module `_instance`
+    #      (the tool-collection pass reads that), and use its register.
     register_fn = getattr(module, "register", None)
     if not callable(register_fn):
+        plugin_instance = getattr(module, "_instance", None)
+        if plugin_instance is None:
+            plugin_cls = _find_plugin_class(module)
+            if plugin_cls is not None:
+                plugin_instance = plugin_cls()
+                setattr(module, "_instance", plugin_instance)
+        if plugin_instance is not None:
+            register_fn = plugin_instance.register
+
+    if not callable(register_fn):
         raise PluginLoadError(
-            f"Plugin '{name}': plugin.py must define a register() function"
+            f"Plugin '{name}': plugin.py must define a register() function "
+            "or a concrete CeridPlugin subclass"
         )
 
     try:

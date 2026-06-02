@@ -11,7 +11,7 @@ going forward.
 
 For every flag mapped to the Pro tier (per ``_PRO_TIER_FLAGS`` in
 ``config.features``) we require at least one of the following call patterns
-to appear anywhere under ``src/mcp/``::
+to appear anywhere under ``src/mcp/`` or the top-level ``plugins/`` tree::
 
     require_feature("<flag>")
     is_feature_enabled("<flag>")
@@ -36,6 +36,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MCP_ROOT = REPO_ROOT / "src" / "mcp"
+# First-party commercial (BSL-1.1) plugins live in the top-level plugins/ tree
+# and carry their own gates (e.g. apple_notes_reader, calendar_sync). Scan it
+# too so those gates are asserted, not just the ones under src/mcp/.
+PLUGINS_ROOT = REPO_ROOT / "plugins"
 ALLOWLIST = REPO_ROOT / "scripts" / "pro_gating_allowlist.txt"
 
 GATE_FUNCTIONS = frozenset({"require_feature", "is_feature_enabled", "check_feature"})
@@ -105,7 +109,7 @@ def main() -> int:
         return 2
 
     pro_flags = set(_PRO_TIER_FLAGS)
-    gated = discover_gated_flags([MCP_ROOT])
+    gated = discover_gated_flags([MCP_ROOT, PLUGINS_ROOT])
     allowlist = load_allowlist()
 
     if args.list:

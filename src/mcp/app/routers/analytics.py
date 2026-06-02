@@ -28,6 +28,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
+from config.features import require_feature
+
 logger = logging.getLogger("ai-companion.analytics")
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -121,6 +123,7 @@ def _provider_for_stage(stage: str) -> str:
 
 
 @router.get("/ingestion-by-day", response_model=IngestionByDayResponse)
+@require_feature("advanced_analytics")
 async def ingestion_by_day(
     window_days: int = Query(default=365, ge=1, le=730),
 ) -> IngestionByDayResponse:
@@ -192,6 +195,7 @@ async def ingestion_by_day(
 
 
 @router.get("/cost-by-stage", response_model=CostByStageResponse)
+@require_feature("advanced_analytics")
 async def cost_by_stage(
     window_days: int = Query(default=30, ge=1, le=90),
 ) -> CostByStageResponse:
@@ -263,6 +267,7 @@ async def cost_by_stage(
 
 
 @router.get("/quality-timeline", response_model=QualityTimelineResponse)
+@require_feature("advanced_analytics")
 async def quality_timeline(
     window_days: int = Query(default=90, ge=7, le=365),
 ) -> QualityTimelineResponse:

@@ -224,6 +224,32 @@ class TestKBResource:
             assert result.total == 2
             assert "general" in result.collections
 
+    def test_ingest_includes_metadata(self) -> None:
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            mock_resp = _mock_response(
+                200, {"status": "success", "artifact_id": "a1", "chunks": 1, "domain": "my_client"}
+            )
+            client._http.post = MagicMock(return_value=mock_resp)
+
+            client.kb.ingest(
+                "content", domain="my_client",
+                metadata={"title": "T", "provenance": "gtm_pack"},
+            )
+            body = client._http.post.call_args.kwargs["json"]
+            assert body["metadata"] == {"title": "T", "provenance": "gtm_pack"}
+            assert body["domain"] == "my_client"
+
+    def test_ingest_omits_metadata_when_none(self) -> None:
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            mock_resp = _mock_response(
+                200, {"status": "success", "artifact_id": "a2", "chunks": 1, "domain": "general"}
+            )
+            client._http.post = MagicMock(return_value=mock_resp)
+
+            client.kb.ingest("content")
+            body = client._http.post.call_args.kwargs["json"]
+            assert "metadata" not in body  # _build_json drops None
+
 
 class TestSystemResource:
     def test_health_parses_response(self) -> None:

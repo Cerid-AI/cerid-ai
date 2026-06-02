@@ -2,6 +2,34 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Commercial-GA P0: Pro-gating truth-up + external-client backend (2026-06-01)
+
+### Pro-tier gating truth-up & lock-in
+
+- **Plugin loader now loads class-based plugins.** `ConnectorPlugin`/`ParserPlugin`
+  subclasses (gmail, outlook, google/outlook calendar, apple calendar/photos, meeting
+  capture) failed to load — the loader required a module-level `register()`, mis-read
+  dict-form `requires`, and lacked package context for relative imports. Fixed all three;
+  added a boot test so Pro connectors can't silently fail to register their DataSources.
+- **Gating regression lock.** Pruned the Pro-gating allowlist (18→4) so the lint asserts
+  gates for the 15 already-gated flags; gated `advanced_analytics` (the `/analytics` surface)
+  behind `@require_feature`; generated `docs/TIER_MATRIX.md` from the flag source of truth
+  with a drift gate; drove the Settings → Pro pane from the live `/billing/capabilities`
+  (which now returns a complete flat `features` map).
+
+### External agent / client backend support
+
+- **Custom knowledge domains are first-class.** Clients may ingest to and query their own
+  domain names without pre-registration; unknown domains degrade to empty results instead
+  of `400`. Custom collections are surfaced in `/health.invariants.custom_collections`, and
+  the built-in "empty collection" signal is scoped to built-in domains.
+- **Provenance metadata on ingest.** `/sdk/v1/ingest` and both SDKs (`kb.ingest(metadata=…)`)
+  preserve arbitrary client metadata end-to-end (previously dropped to tags-only).
+- **Flexible LLM task types.** `/sdk/v1/llm/complete` accepts client-defined `task_type`
+  values, mapping unknown ones to safe internal routing instead of erroring.
+- **Docs:** `SDK_GUIDE.md` gains a "Using Cerid as a backend for external agents / clients"
+  guide; SDK quickstarts corrected to the resource API (`client.kb.*`, `client.system.*`).
+
 ## Unreleased — post-rc2.1: auto-latest model selection + CI hardening (2026-05-31)
 
 ### Backend — model selection

@@ -8,7 +8,7 @@
 ## MCP Server API (src/mcp/main.py)
 
 **Core endpoints:**
-- `GET /health` — Full health check with circuit breaker states (cached 10s)
+- `GET /health` — Full health check with circuit breaker states (cached 10s). `invariants.collections_empty` is scoped to built-in domains; `invariants.custom_collections` lists client-created collections so operators can see external-client activity without false empty-collection alerts.
 - `GET /health/live` — Liveness probe (always 200 unless process crashed)
 - `GET /health/ready` — Readiness probe (503 when critical deps unreachable)
 - `GET /health/status` — Detailed degradation report with circuit breaker states, pipeline providers, feature tier, and per-capability flags (`can_retrieve`, `can_verify`, `can_generate`)
@@ -174,6 +174,8 @@ Versioned facade for external consumers. Delegates to existing agent endpoints b
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
 - `GET /sdk/v1/health` — Health check with `version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model)
+
+**External-client backend support.** `/sdk/v1/ingest` and `/sdk/v1/query` accept **arbitrary client-defined domains** (no pre-registration — unknown domains degrade to empty results, never a 400). `/sdk/v1/ingest` accepts a `metadata` object (arbitrary provenance, stored + retrievable; `tags` preserved alongside). `/sdk/v1/llm/complete` accepts custom `task_type` values (unknown → safe internal routing). See [`SDK_GUIDE.md` § Using Cerid as a backend](SDK_GUIDE.md).
 
 **Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
 

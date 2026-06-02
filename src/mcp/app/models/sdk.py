@@ -161,7 +161,11 @@ class SDKLLMCompleteRequest(BaseModel):
     )
     task_type: str = Field(
         default="internal",
-        description="Task category: chat | internal | verification | classification | research",
+        description=(
+            "Task category: chat | internal | verification | classification | research. "
+            "Clients may also pass custom values (e.g. 'gtm_creative', 'agent_phase_2'); "
+            "unknown values map to safe internal routing."
+        ),
     )
     query: str = Field(
         default="",

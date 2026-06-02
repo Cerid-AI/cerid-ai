@@ -481,7 +481,18 @@ async def route_and_call(
     """
     from core.routing.smart_router import TaskType, route
 
-    task = TaskType(task_type)
+    # Client-defined task types (external clients use domain-specific labels
+    # like "gtm_creative" or custom agent phases) map to safe INTERNAL routing
+    # rather than raising. Stage-based provider routing (PROVIDER_STAGE_*) is a
+    # separate mechanism keyed on `stage=`, unaffected by this. (GA P0.3)
+    try:
+        task = TaskType(task_type)
+    except ValueError:
+        _logger.warning(
+            "route_and_call: unknown task_type %r — defaulting to internal routing",
+            task_type,
+        )
+        task = TaskType.INTERNAL
     decision = await route(
         query,
         task_type=task,

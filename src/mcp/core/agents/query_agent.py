@@ -379,9 +379,18 @@ async def multi_domain_query(
     if domains is None:
         domains = DOMAINS
 
-    invalid_domains = [d for d in domains if d not in DOMAINS]
-    if invalid_domains:
-        raise ValueError(f"Invalid domains: {invalid_domains}. Valid: {DOMAINS}")
+    # Custom/client-defined domains are allowed: external clients use Cerid as
+    # a backend and ingest to their own domain names. Built-in DOMAINS are the
+    # default set; an unknown domain is queried when its collection exists and
+    # degrades to empty results otherwise (see query_domain below). Warn, never
+    # reject — a hard 400 forces external clients into shims (GA P0.1).
+    custom_domains = [d for d in domains if d not in DOMAINS]
+    if custom_domains:
+        logger.warning(
+            "multi_domain_query: non-built-in domain(s) %s — querying as custom "
+            "client domains (built-in: %s)",
+            custom_domains, DOMAINS,
+        )
 
     if chroma_client is None:
         raise ValueError("chroma_client is required")

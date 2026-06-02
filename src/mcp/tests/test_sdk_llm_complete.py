@@ -68,6 +68,33 @@ class TestSdkLlmCompleteBudget:
         assert body["content"] == "ok"
         assert body["tier_p95_ms"] == 10_000
 
+    def test_explicit_null_slo_and_response_format_tolerated(self, client):
+        """Clients (and JSON serializers) often send explicit null for optional
+        fields; null must be treated as omitted, never a 422/500. Verifies the
+        reported P0.4 500 is not reproducible with the current Pydantic v2 model
+        (slo_budget_ms / response_format are `... | None` with default None)."""
+        from core.routing.smart_router import RouteDecision
+
+        decision = RouteDecision(
+            model="m", provider="ollama", reason="r",
+            estimated_cost_per_1k=0.0, tier_p95_ms=5000,
+        )
+        with patch(
+            "core.utils.llm_client.route_and_call",
+            new=AsyncMock(return_value=("ok", decision)),
+        ):
+            res = client.post(
+                "/sdk/v1/llm/complete",
+                json={
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "task_type": "internal",
+                    "slo_budget_ms": None,
+                    "response_format": None,
+                },
+            )
+        assert res.status_code == 200, res.text
+        assert res.json()["content"] == "ok"
+
     def test_returns_503_with_retry_after_when_budget_unsatisfiable(self, client):
         """When the smart_router rejects the budget, the handler must
         return 503 + Retry-After + structured detail. Silent downgrades

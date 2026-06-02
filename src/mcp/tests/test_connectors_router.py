@@ -4,11 +4,31 @@
 """Tests for /connectors REST surface (Phase F.2 deferred cleanup)."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_every_connector_instruction_doc_exists() -> None:
+    """Every ConnectorMeta.instruction_doc must point at a real file.
+
+    Operators are shown these paths in connector status + TCC banners, so a
+    dangling link is a user-facing bug. Guards docs/PRO_*.md against being
+    renamed or removed without updating connectors.py.
+    """
+    from app.routers.connectors import _CONNECTORS
+
+    missing = {
+        slug: meta.instruction_doc
+        for slug, meta in _CONNECTORS.items()
+        if not (REPO_ROOT / meta.instruction_doc).is_file()
+    }
+    assert not missing, f"connectors point at non-existent docs: {missing}"
 
 
 def _make_app() -> FastAPI:
