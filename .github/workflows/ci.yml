@@ -349,6 +349,19 @@ jobs:
           # no Archive::Tar usage from application code. No upstream fix;
           # re-eval 2026-07-31.
           CVE-2026-9538
+          # MIT Kerberos 5 DoS via integer underflow — affects libgssapi-krb5-2,
+          # libk5crypto3, libkrb5-3, libkrb5support0. Container never initiates
+          # GSSAPI/Kerberos handshakes (httpx-only HTTP/HTTPS). No upstream fix in
+          # Debian 13. Re-eval 2026-07-31.
+          CVE-2026-40356
+          # perl-base Archive::Tar hardlink — companion to CVE-2026-42496 (the
+          # symlink variant). Same rationale; no Archive::Tar usage from
+          # application code. No upstream fix; re-eval 2026-07-31.
+          CVE-2026-42497
+          # perl-base perl-IO-Compress arbitrary code execution (HIGH) — same
+          # perl-base surface; the perl interpreter never executes in the
+          # container. No upstream fix in Debian 13 yet. Re-eval 2026-07-31.
+          CVE-2026-48962
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
