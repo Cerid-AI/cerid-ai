@@ -6,7 +6,6 @@ import { Crown } from "lucide-react"
 
 interface ProSectionProps {
   featureTier: string
-  featureFlags: Record<string, boolean>
   onRefresh?: () => void
 }
 
