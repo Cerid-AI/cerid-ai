@@ -255,6 +255,14 @@ NLI_ONNX_FILENAME = os.getenv("NLI_ONNX_FILENAME", "onnx/model.onnx")
 NLI_MODEL_CACHE_DIR = os.getenv("NLI_MODEL_CACHE_DIR", "")
 NLI_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ENTAILMENT_THRESHOLD", "0.7"))
 NLI_CONTRADICTION_THRESHOLD = float(os.getenv("NLI_CONTRADICTION_THRESHOLD", "0.6"))
+# The retrieval NLI contradiction gate (query_agent Step 5.65) runs NLI on
+# (doc, query) pairs — but a query is a question, not a declarative hypothesis,
+# so DeBERTa-MNLI false-positives "contradiction" on definitional answers (it
+# dropped a 0.93-relevance "Photosynthesis is…" doc for "what is photosynthesis",
+# zeroing recall). The top-K retrieval matches are EXEMPT from the contradiction
+# drop: a noisy (doc, question) signal must never override a strong retrieval
+# rank. 0 disables the exemption (legacy behaviour). Eval-tunable.
+NLI_GATE_EXEMPT_TOP_K = int(os.getenv("NLI_GATE_EXEMPT_TOP_K", "3"))
 
 # Phase 6: decompose multi-fact heuristic claims into atomic sub-claims via
 # an LLM call before scoring each independently against the premise. The

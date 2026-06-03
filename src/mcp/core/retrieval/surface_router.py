@@ -76,18 +76,26 @@ _SPECIFIC_FACT_PATTERNS = [
 ]
 
 # Relational signals: "how does X relate to Y", "what connects A and B",
-# "list everything mentioning Z", "compare X and Y".
+# "list everything mentioning Z", "compare X and Y", "X vs Y".
 _RELATIONAL_PATTERNS = [
     re.compile(r"\b(relate(?:s|d)?|connect(?:s|ed)?|connection|link(?:ed|s)?)\b.*\b(to|and|between|with)\b", re.IGNORECASE),
     re.compile(r"^\s*(compare|contrast|differences? between|relationship between)\b", re.IGNORECASE),
     re.compile(r"^\s*(list|show|surface)\s+(everything|all|every)\s+(that mentions|mentioning|about|involving)\b", re.IGNORECASE),
     re.compile(r"\b(network|graph|neighbors|adjacent|connected to)\b", re.IGNORECASE),
+    # Finding #3: "vs"/"vs."/"versus" comparisons are relational — they should
+    # consult the graph surface, not fall through to mixed.
+    re.compile(r"\b(vs\.?|versus)\b", re.IGNORECASE),
 ]
 
 # Personal-context signals: first-person, "we", "I", "did we", "last time".
+# Checked BEFORE compiled_summary so "what is my preference…" routes to memory,
+# not wiki (Finding #2: the compiled_summary "what is X" pattern would otherwise
+# greedily capture preference/decision questions).
 _PERSONAL_CONTEXT_PATTERNS = [
     re.compile(r"^\s*(what did (we|i)|did (we|i)|we discussed|i (said|told|asked|mentioned)|last time)\b", re.IGNORECASE),
-    re.compile(r"^\s*(my|our)\s+(preference|decision|note|view|opinion|policy)\b", re.IGNORECASE),
+    # Finding #2: a possessive over a personal noun anywhere in the query
+    # (unanchored) — catches "what is my preference", "remind me of our decision".
+    re.compile(r"\b(my|our)\s+(preference|decision|note|view|opinion|policy|choice|plan|stance)s?\b", re.IGNORECASE),
     re.compile(r"\b(remember when|earlier (i|we)|previously (i|we)|i (prefer|chose|decided))\b", re.IGNORECASE),
 ]
 

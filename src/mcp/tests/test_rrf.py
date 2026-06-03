@@ -7,7 +7,54 @@ from __future__ import annotations
 
 import pytest
 
-from core.retrieval.rrf import DEFAULT_K, rrf_fuse
+from core.retrieval.rrf import DEFAULT_K, rrf_fuse, rrf_fuse_by_artifact
+
+
+def _art(cid: str) -> str:
+    """chunk id 'a#0' → artifact id 'a'."""
+    return cid.split("#", 1)[0]
+
+
+class TestArtifactLevelRRF:
+    """GA P0.5 B1 — artifact-level RRF stops multi-chunk artifacts from
+    consuming rank slots and demoting competitors."""
+
+    def test_multichunk_artifact_counted_once_and_does_not_demote(self):
+        # Artifact 'a' has 3 chunks at ranks 0,1,2; artifact 'b' one chunk after.
+        ranking = [("a#0", 0.9), ("a#1", 0.8), ("a#2", 0.7), ("b#0", 0.6)]
+        fused = rrf_fuse_by_artifact([ranking], _art, k=60)
+        # 'a' counted once at the best (0th) rank; 'b' is the 2nd DISTINCT
+        # artifact → rank 1, NOT rank 3. Its three chunks didn't push 'b' down.
+        assert fused["a"] == pytest.approx(1 / (60 + 1))
+        assert fused["b"] == pytest.approx(1 / (60 + 2))
+
+    def test_chunk_level_would_demote_b(self):
+        # Contrast: chunk-level RRF puts 'b#0' at rank index 3 → a weaker score.
+        # This is the regression artifact-level fusion removes.
+        ranking = [("a#0", 0.9), ("a#1", 0.8), ("a#2", 0.7), ("b#0", 0.6)]
+        chunk_fused = dict(rrf_fuse([ranking], k=60))
+        art_fused = rrf_fuse_by_artifact([ranking], _art, k=60)
+        assert chunk_fused["b#0"] == pytest.approx(1 / (60 + 4))  # 0-indexed rank 3 → +1
+        assert art_fused["b"] > chunk_fused["b#0"]  # artifact-level keeps b higher
+
+    def test_consensus_across_retrievers_still_sums(self):
+        vec = [("a#0", 0.9), ("b#0", 0.5)]
+        bm25 = [("b#1", 9.0), ("a#1", 8.0)]  # same artifacts, different chunks
+        fused = rrf_fuse_by_artifact([vec, bm25], _art, k=60)
+        # 'a': rank0 in vec + rank1 in bm25; 'b': rank1 in vec + rank0 in bm25 — equal.
+        assert fused["a"] == pytest.approx(1 / 61 + 1 / 62)
+        assert fused["b"] == pytest.approx(1 / 62 + 1 / 61)
+
+    def test_unknown_artifact_falls_back_to_singleton(self):
+        ranking = [("x", 0.9), ("y", 0.5)]  # _art('x')='x' (no '#')
+        fused = rrf_fuse_by_artifact([ranking], _art, k=60)
+        assert set(fused) == {"x", "y"}
+
+    def test_bad_k_and_weights_raise(self):
+        with pytest.raises(ValueError):
+            rrf_fuse_by_artifact([[("a", 1.0)]], _art, k=0)
+        with pytest.raises(ValueError):
+            rrf_fuse_by_artifact([[("a", 1.0)]], _art, weights=[1.0, 2.0])
 
 
 def test_rrf_default_k_is_60():

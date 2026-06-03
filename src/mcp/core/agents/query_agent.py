@@ -499,7 +499,21 @@ async def multi_domain_query(
                     fused_map: dict[str, float] = {}
 
                     if fusion_mode in {"rrf", "tri_rrf"}:
-                        from core.retrieval.rrf import rrf_fuse
+                        from core.retrieval.rrf import rrf_fuse_by_artifact
+                        # GA P0.5 B1 — artifact-level RRF. Chunk-level fusion let a
+                        # multi-chunk artifact consume several rank slots, both
+                        # compounding its own score and demoting competitors (the
+                        # documented Phase-3a regression). Build chunk→artifact
+                        # from the vector hits (known); bm25/sparse-only chunks
+                        # fall back to chunk-as-artifact (singletons, no inflation).
+                        _chunk_art = {
+                            e["chunk_id"]: (e.get("artifact_id") or e["chunk_id"])
+                            for e in formatted
+                        }
+
+                        def _art_of(cid: str, _m: dict[str, str] = _chunk_art) -> str:
+                            return _m.get(cid, cid)
+
                         vector_ranking = [
                             (entry["chunk_id"], entry["relevance"])
                             for entry in formatted
@@ -514,15 +528,22 @@ async def multi_domain_query(
                             weights.append(
                                 getattr(config, "HYBRID_RRF_SPARSE_WEIGHT", 1.0),
                             )
-                        fused = rrf_fuse(
+                        _art_fused = rrf_fuse_by_artifact(
                             rankings,
+                            _art_of,
                             k=config.HYBRID_RRF_K,
                             weights=weights,
                         )
-                        fused_map = dict(fused)
+                        # Map each artifact's fused score back onto every ranked
+                        # chunk (a chunk inherits its artifact's score).
+                        fused_map = {
+                            cid: _art_fused.get(_art_of(cid), 0.0)
+                            for ranking in rankings
+                            for cid, _ in ranking
+                        }
                         for entry in formatted:
                             entry["relevance"] = round(
-                                fused_map.get(entry["chunk_id"], 0.0), 6,
+                                _art_fused.get(_art_of(entry["chunk_id"]), 0.0), 6,
                             )
                         # Drop entries already represented from bm25_map /
                         # sparse_map so the bm25-only fetch below only
@@ -1578,13 +1599,16 @@ def assemble_context(
     artifact_counts: dict[str, int] = defaultdict(int)
 
     for result in results:
-        artifact_id = result["artifact_id"]
+        # Defensive .get(): surface-injected results (wiki has no filename) and
+        # external results may omit optional display fields — assembly must not
+        # KeyError at this presentation boundary.
+        artifact_id = result.get("artifact_id", "")
 
         # Skip if this artifact already has enough chunks in context
         if artifact_counts[artifact_id] >= max_chunks_per_artifact:
             continue
 
-        content = result["content"]
+        content = result.get("content", "")
         content_len = len(content)
 
         if char_count + content_len > max_chars:
@@ -1593,11 +1617,11 @@ def assemble_context(
         context_parts.append(content)
         included_sources.append({
             "content": content[:200],  # Preview only
-            "relevance": result["relevance"],
+            "relevance": result.get("relevance", 0.0),
             "artifact_id": artifact_id,
-            "filename": result["filename"],
-            "domain": result["domain"],
-            "chunk_index": result["chunk_index"],
+            "filename": result.get("filename", ""),
+            "domain": result.get("domain", ""),
+            "chunk_index": result.get("chunk_index", 0),
         })
         char_count += content_len
         artifact_counts[artifact_id] += 1
@@ -1885,6 +1909,7 @@ async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
             "relevance": 1.0,  # the compiled summary is authoritative for this intent
             "domain": "wiki",
             "artifact_id": page.get("slug", entity_hint),
+            "filename": page.get("slug", entity_hint),
             "chunk_index": 0,
             "source_type": "wiki",
             "source_authority": "compiled_wiki",
@@ -1923,6 +1948,7 @@ async def _recall_memory_surface(
             "relevance": m.get("adjusted_score", 0.0),
             "domain": "conversations",
             "artifact_id": m.get("memory_id", ""),
+            "filename": m.get("memory_id", ""),
             "chunk_index": 0,
             "source_type": "memory",
             "source_authority": "user_memory",
@@ -2312,8 +2338,14 @@ async def _agent_query_impl(
             _nli_pairs = [(r.get("content", "")[:512], query) for r in results[:15]]
             _nli_scores = batch_nli_score(_nli_pairs)
             _nli_filtered = []
-            for r, nli in zip(results[:15], _nli_scores):
-                if nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
+            # results[:15] are already relevance-sorted (Step 5.4). Exempt the
+            # top-K matches from the contradiction drop: NLI on (doc, query)
+            # pairs false-positives on definitional answers, so a noisy
+            # contradiction must not override a strong retrieval rank.
+            _exempt_top_k = getattr(config, "NLI_GATE_EXEMPT_TOP_K", 3)
+            for _idx, (r, nli) in enumerate(zip(results[:15], _nli_scores)):
+                _exempt = _idx < _exempt_top_k
+                if not _exempt and nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
                     logger.debug("NLI gate removed contradictory result: %s", r.get("filename", "")[:40])
                     continue
                 if nli["entailment"] >= 0.5:

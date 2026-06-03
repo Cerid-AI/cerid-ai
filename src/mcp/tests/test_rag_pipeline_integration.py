@@ -186,16 +186,23 @@ class TestNliGateInPipeline:
             {"contradiction": 0.02, "entailment": 0.90, "neutral": 0.08, "label": "entailment"},
         ]
 
-        with patch.multiple("config.features", **{k.split(".")[-1]: v for k, v in _FEATURE_OVERRIDES.items()}):
-            with patch("core.utils.nli.batch_nli_score", return_value=nli_results):
-                with patch("core.retrieval.bm25.is_available", return_value=False):
-                    result = await agent_query(
-                        query="benefits of PostgreSQL",
-                        domains=["coding"],
-                        chroma_client=chroma_client,
-                        neo4j_driver=neo4j_driver,
-                        use_reranking=False,
-                    )
+        # Exercise the contradiction-drop path directly: NLI_GATE_EXEMPT_TOP_K
+        # defaults to 3 (the top ranks are exempt from the drop so a noisy
+        # contradiction can't override a strong retrieval rank), which would keep
+        # the top-ranked drawbacks.md. Pin it to 0 here so this test asserts the
+        # removal mechanism itself; the exemption behavior is covered by the
+        # isolated eval (tests/eval/test_isolated_retrieval_eval.py).
+        with patch("config.NLI_GATE_EXEMPT_TOP_K", 0):
+            with patch.multiple("config.features", **{k.split(".")[-1]: v for k, v in _FEATURE_OVERRIDES.items()}):
+                with patch("core.utils.nli.batch_nli_score", return_value=nli_results):
+                    with patch("core.retrieval.bm25.is_available", return_value=False):
+                        result = await agent_query(
+                            query="benefits of PostgreSQL",
+                            domains=["coding"],
+                            chroma_client=chroma_client,
+                            neo4j_driver=neo4j_driver,
+                            use_reranking=False,
+                        )
 
         filenames = [r["filename"] for r in result["results"]]
         assert "drawbacks.md" not in filenames, "Contradictory result should be removed"

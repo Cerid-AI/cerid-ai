@@ -550,6 +550,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Memory→entity extraction wiring failed: {e}")
 
+    # GA P0.5 C2 — wire the compiled-wiki fetcher so surface-biased retrieval can
+    # prepend an entity's wiki page for "what is X" (compiled_summary) queries.
+    # Same core↛app DI pattern; the fetcher resolves the entity hint to a slug and
+    # reads the cached summary from Neo4j. Graceful: returns None on miss so C2 is
+    # a no-op when the entity has no page.
+    try:
+        import re as _re
+
+        from app.deps import get_neo4j as _get_neo4j_for_wiki
+        from app.services.wiki_pages import get_entity_page as _get_entity_page
+        from core.agents.query_agent import set_wiki_page_fetcher
+
+        def _slug_for(hint: str) -> str:
+            return _re.sub(r"[^a-z0-9]+", "-", (hint or "").lower()).strip("-")
+
+        async def _fetch_wiki_page(entity_hint: str) -> dict | None:
+            driver = _get_neo4j_for_wiki()
+            if driver is None or not entity_hint:
+                return None
+            page = await _get_entity_page(driver, _slug_for(entity_hint))
+            if page is None or not page.summary:
+                return None
+            return {"content": page.summary, "title": page.name, "slug": page.slug}
+
+        set_wiki_page_fetcher(_fetch_wiki_page)
+    except Exception as e:
+        logger.warning(f"Wiki-page fetcher wiring failed (C2 surface disabled): {e}")
+
     # Load plugins
     try:
         from plugins import load_plugins
