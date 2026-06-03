@@ -362,6 +362,12 @@ jobs:
           # perl-base surface; the perl interpreter never executes in the
           # container. No upstream fix in Debian 13 yet. Re-eval 2026-07-31.
           CVE-2026-48962
+          # chromadb 1.5.9 pre-auth code injection via trust_remote_code=true on
+          # the collections endpoint. Not reachable — trust_remote_code is set
+          # nowhere in the codebase (grep-verified) and the Chroma server binds
+          # loopback-only. Mirrors the pip-audit ignore in the security job.
+          # Re-eval 2026-09-30 (chromadb patch cadence).
+          CVE-2026-45829
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
