@@ -8,6 +8,39 @@ import pytest
 
 from core.retrieval.surface_router import classify_intent, route
 
+
+class TestRoutingFindingsFixed:
+    """Regression tests for the routing findings surfaced by the eval harness."""
+
+    @pytest.mark.parametrize("query", [
+        "what is my preference for budgeting",
+        "what are our preferences here",
+        "remind me of our decision on the schema",
+        "summarize my opinion on remote work",
+    ])
+    def test_finding_2_preference_questions_route_to_memory(self, query):
+        # Finding #2: the compiled_summary "what is X" pattern used to swallow
+        # preference/decision questions, so the memory surface (A2) never fired.
+        intent, _, _ = classify_intent(query)
+        assert intent == "personal_context", f"{query!r} → {intent}"
+
+    @pytest.mark.parametrize("query", [
+        "B-tree versus GIN indexes in Postgres",
+        "Optional vs Union in Python type hints",
+        "Redis vs. Memcached",
+        "compare Roth versus Traditional",
+    ])
+    def test_finding_3_vs_versus_routes_relational(self, query):
+        # Finding #3: "vs"/"vs."/"versus" comparisons should consult the graph
+        # surface, not fall through to mixed.
+        intent, _, _ = classify_intent(query)
+        assert intent == "relational", f"{query!r} → {intent}"
+
+    def test_plain_what_is_still_compiled_summary(self):
+        # The fixes must not over-capture: a plain definitional query is unchanged.
+        assert classify_intent("what is photosynthesis")[0] == "compiled_summary"
+        assert classify_intent("what is my budget")[0] == "compiled_summary"  # 'budget' not a personal noun
+
 # ---------------------------------------------------------------------------
 # Intent classification (regex pass)
 # ---------------------------------------------------------------------------

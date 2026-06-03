@@ -13,6 +13,11 @@ import pytest
 # can target them without triggering real imports. Post-Sprint E the
 # canonical path is ``core.agents.*`` — pre-seeding against the old
 # ``agents.*`` bridge breaks collection because that bridge is gone.
+# Track which stubs THIS module installs so a module-scoped teardown can remove
+# them — otherwise a bare (submodule-less) stub leaks into later tests that need
+# the real package, e.g. ``core.agents.hallucination.verification`` (surfaced
+# when surface-biased retrieval became default-ON and shifted import timing).
+_STUBBED_MODULES: list[str] = []
 if "core.agents.query_agent" not in sys.modules:
     _stub = ModuleType("core.agents.query_agent")
     _stub.agent_query = None  # type: ignore[attr-defined]
@@ -21,6 +26,7 @@ if "core.agents.query_agent" not in sys.modules:
     sys.modules["core.agents.query_agent"] = _stub
     import core.agents as _core_agents
     _core_agents.query_agent = _stub  # type: ignore[attr-defined]
+    _STUBBED_MODULES.append("core.agents.query_agent")
 
 if "core.agents.hallucination" not in sys.modules:
     _hall_stub = ModuleType("core.agents.hallucination")
@@ -28,8 +34,9 @@ if "core.agents.hallucination" not in sys.modules:
     sys.modules["core.agents.hallucination"] = _hall_stub
     import core.agents as _core_agents_pkg2
     _core_agents_pkg2.hallucination = _hall_stub  # type: ignore[attr-defined]
+    _STUBBED_MODULES.append("core.agents.hallucination")
 
-import config
+import config  # noqa: E402
 from core.agents.self_rag import (  # noqa: E402
     _assess_claims,
     _merge_results,
@@ -41,6 +48,20 @@ from core.agents.self_rag import (  # noqa: E402
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_stubbed_modules():
+    """Remove the sys.modules stubs this module installed so they don't leak the
+    bare stand-ins (no submodules) into later tests that need the real package."""
+    yield
+    import core.agents as _ca
+    for name in _STUBBED_MODULES:
+        sys.modules.pop(name, None)
+        try:
+            delattr(_ca, name.rsplit(".", 1)[1])
+        except AttributeError:
+            pass
 
 def _make_query_result(**overrides):
     """Build a minimal agent_query result dict."""
