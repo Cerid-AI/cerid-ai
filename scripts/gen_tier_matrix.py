@@ -59,7 +59,7 @@ LABELS = {
     "image_understanding": "Image understanding",
     "imessage_reader": "iMessage reader",
     "inbox_triage": "AI inbox triage",
-    "keychain_secrets": "Keychain secrets",
+    "keychain_secrets": "Keychain secrets",  # pragma: allowlist secret
     "live_metrics": "Live metrics",
     "meeting_diarization": "Meeting diarization",
     "meeting_summary": "Meeting summary",

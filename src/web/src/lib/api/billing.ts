@@ -23,6 +23,6 @@ export interface CapabilitiesResponse {
 
 export async function fetchCapabilities(): Promise<CapabilitiesResponse> {
   const res = await fetch(`${MCP_BASE}/billing/capabilities`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res))
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch capabilities"))
   return res.json()
 }
