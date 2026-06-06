@@ -103,7 +103,7 @@ def check_chroma():
     """Verify ChromaDB is reachable at CHROMA_HOST_URL."""
     import httpx
     try:
-        resp = httpx.get(f"{CHROMA_HOST_URL}/api/v1/heartbeat", timeout=10.0)
+        resp = httpx.get(f"{CHROMA_HOST_URL}/api/v2/heartbeat", timeout=10.0)
         resp.raise_for_status()
     except Exception as exc:
         raise ConnectionError(f"ChromaDB unreachable at {CHROMA_HOST_URL}: {exc}") from exc

@@ -9,6 +9,8 @@
 #   ./scripts/start-cerid.sh --build   # rebuild images before starting (after code changes)
 #   ./scripts/start-cerid.sh --force   # bypass pre-flight checks
 #   ./scripts/start-cerid.sh --legacy  # use legacy 4-step compose startup
+#   ./scripts/start-cerid.sh --reclaim # take over container names held by a
+#                                      # foreign project/dir (stop+rm them)
 
 set -euo pipefail
 CERID_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,9 +31,10 @@ for arg in "$@"; do
         --build) BUILD_FLAG="--build" ;;
         --force) FORCE_FLAG="1" ;;
         --legacy) LEGACY_FLAG="1" ;;
+        --reclaim) export CERID_RECLAIM="true" ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--build] [--force] [--legacy]"
+            echo "Usage: $0 [--build] [--force] [--legacy] [--reclaim]"
             exit 1
             ;;
     esac
@@ -587,6 +590,25 @@ fi
 # (especially ChromaDB's SQLite) fail with write permission errors.
 mkdir -p "$CERID_ROOT/stacks/infrastructure/data/"{chroma,neo4j,neo4j-logs,redis}
 
+# Conflict preflight — a container from a DIFFERENT compose project or working
+# dir (e.g. a second clone, or a leftover from a renamed install) can hold our
+# exact container_names while RUNNING, which cleanup_zombies (stopped-only)
+# misses and `docker compose up` then dies on with a raw daemon error. Detect +
+# reclaim (or abort with a precise fix) before we ever reach compose.
+OUR_PROJECT="${COMPOSE_PROJECT_NAME:-cerid}"
+REQUIRED_NAMES=$(docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" config --format json 2>/dev/null \
+    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(s["container_name"] for s in d.get("services",{}).values() if s.get("container_name")))' 2>/dev/null || true)
+[ -z "$REQUIRED_NAMES" ] && REQUIRED_NAMES="ai-companion-neo4j ai-companion-chroma ai-companion-redis ai-companion-mcp cerid-web"
+if ! detect_conflicts "$OUR_PROJECT" "$CERID_ROOT" $REQUIRED_NAMES; then
+    if [ -n "$FORCE_FLAG" ]; then
+        echo "[conflict] --force set — proceeding anyway (compose up may still fail)."
+    else
+        exit 1
+    fi
+fi
+detect_port_conflicts "${CERID_PORT_GUI}" "${CERID_PORT_MCP}" "${CERID_PORT_NEO4J}" \
+    "${CERID_PORT_NEO4J_BOLT}" "${CERID_PORT_CHROMA}" "${CERID_PORT_REDIS}"
+
 # Zombie-container cleanup — any ai-companion-*/cerid-* container in
 # Exited/Dead/Created state holds its name, causing `docker compose up`
 # to fail with an opaque conflict error. Remove them up front.
@@ -665,7 +687,7 @@ else
     wait_for_service "Neo4j" "http://127.0.0.1:${CERID_PORT_NEO4J}" 60 && echo " ready" || echo " timeout"
 fi
 echo -n "  ChromaDB..."
-wait_for_service "ChromaDB" "http://127.0.0.1:${CERID_PORT_CHROMA}/api/v1/heartbeat" 30 && echo " ready" || echo " timeout"
+wait_for_service "ChromaDB" "http://127.0.0.1:${CERID_PORT_CHROMA}/api/v2/heartbeat" 30 && echo " ready" || echo " timeout"
 echo -n "  MCP..."
 wait_for_service "MCP" "http://localhost:${CERID_PORT_MCP}/health" 90 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
 echo -n "  React GUI..."
@@ -736,7 +758,7 @@ else
     check_neo4j ai-companion-neo4j "${NEO4J_USER:-neo4j}" "${NEO4J_PASSWORD:-}" || true
 fi
 
-check_http  "ChromaDB" "http://localhost:${CERID_PORT_CHROMA}/api/v1/heartbeat" || true
+check_http  "ChromaDB" "http://localhost:${CERID_PORT_CHROMA}/api/v2/heartbeat" || true
 check_redis ai-companion-redis "${REDIS_PASSWORD:-}" || true
 
 echo ""

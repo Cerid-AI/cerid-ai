@@ -286,3 +286,103 @@ cleanup_zombies() {
         fi
     done <<< "$zombies"
 }
+
+# ── detect_conflicts ─────────────────────────────────────────────────────────
+# Defensive preflight for the cross-project/dir squatter class that
+# cleanup_zombies MISSES — it only reaps *stopped* containers and treats every
+# ai-companion-*/cerid-* as ours. A *running* container from a DIFFERENT compose
+# project or working dir (e.g. a second clone, or a leftover from a renamed
+# install) that holds one of our exact container_names makes `docker compose up`
+# die with a raw daemon "name is already in use" error and zero remediation hint.
+#
+# Usage: detect_conflicts <our_project> <our_dir> <name1> [name2 ...]
+# Returns non-zero (caller aborts) if unresolved foreign holders remain.
+#   CERID_RECLAIM=true  → stop+rm the foreign holders and continue
+#   interactive TTY     → prompt to reclaim
+#   non-interactive     → abort with a precise message + the one-liner fix
+#                         (never auto-destroys another instance unprompted)
+detect_conflicts() {
+    local our_project="$1" our_dir="$2"; shift 2
+    local foreign=()
+    local name cid proj dir state
+    for name in "$@"; do
+        [ -z "$name" ] && continue
+        cid=$(docker ps -aq --filter "name=^/${name}$" 2>/dev/null | head -1)
+        [ -z "$cid" ] && continue
+        proj=$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project" }}' 2>/dev/null || true)
+        dir=$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null || true)
+        state=$(docker inspect "$cid" --format '{{.State.Status}}' 2>/dev/null || true)
+        # Ours iff same project AND (no dir label OR same dir). Else foreign.
+        if [ "$proj" = "$our_project" ] && { [ -z "$dir" ] || [ "$dir" = "$our_dir" ]; }; then
+            continue
+        fi
+        foreign+=("${name}|${proj:-<none>}|${dir:-<none>}|${state}")
+    done
+
+    [ "${#foreign[@]}" -eq 0 ] && return 0
+
+    {
+        echo ""
+        echo "[conflict] Container names needed by THIS instance are held by a"
+        echo "[conflict] different instance (project/dir mismatch) — 'docker compose"
+        echo "[conflict] up' would fail with a raw name-conflict. This instance:"
+        echo "             project=${our_project}  dir=${our_dir}"
+        local entry n p d s
+        for entry in "${foreign[@]}"; do
+            IFS='|' read -r n p d s <<< "$entry"
+            echo "  - ${n}  ←  project=${p}  dir=${d}  (${s})"
+        done
+    } >&2
+
+    local reclaim=false
+    if [ "${CERID_RECLAIM:-}" = "true" ]; then
+        reclaim=true
+    elif [ -t 0 ]; then
+        local ans=""
+        read -r -p "[conflict] Reclaim these names for this instance (stop+rm them)? [y/N]: " ans </dev/tty 2>/dev/null || ans="n"
+        case "${ans}" in y|Y|yes|YES) reclaim=true ;; *) reclaim=false ;; esac
+    fi
+
+    if [ "$reclaim" != "true" ]; then
+        {
+            echo "[conflict] Aborting — refusing to silently take over another instance's"
+            echo "[conflict] containers. To take them over for this instance, re-run with:"
+            echo "             CERID_RECLAIM=true \"\$0\"   (or: ./scripts/start-cerid.sh --reclaim)"
+            echo "[conflict] Or stop the other instance first (e.g. \`docker compose -p <project> down\`)."
+        } >&2
+        return 1
+    fi
+
+    local entry n p d s
+    for entry in "${foreign[@]}"; do
+        IFS='|' read -r n p d s <<< "$entry"
+        if docker rm -f "$n" >/dev/null 2>&1; then
+            echo "[conflict] Reclaimed ${n} (removed foreign container from project=${p})." >&2
+        else
+            echo "[conflict] ERROR: failed to remove ${n}" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
+# ── detect_port_conflicts ────────────────────────────────────────────────────
+# Reports host ports already bound by something that is NOT one of our
+# containers, before `docker compose up` fails with a bind error. Best-effort:
+# uses lsof (present on macOS/most Linux); silent no-op if lsof is unavailable.
+# Usage: detect_port_conflicts <port1> [port2 ...]   (warn-only, never aborts)
+detect_port_conflicts() {
+    command -v lsof >/dev/null 2>&1 || return 0
+    local port pids cmd
+    for port in "$@"; do
+        [ -z "$port" ] && continue
+        pids=$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true)
+        [ -z "$pids" ] && continue
+        cmd=$(ps -o comm= -p "$(echo "$pids" | head -1)" 2>/dev/null || true)
+        case "$cmd" in
+            *docker*|*vpnkit*|*com.docker*) : ;;  # docker-published; handled by detect_conflicts
+            *) warn "Port ${port} already in use by '${cmd:-pid $pids}' — Cerid needs it; stop that process or change the CERID_PORT_* override." ;;
+        esac
+    done
+    return 0
+}
