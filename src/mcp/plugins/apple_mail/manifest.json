@@ -1,0 +1,14 @@
+{
+  "name": "apple_mail",
+  "version": "0.1.0",
+  "type": "connector",
+  "tier": "pro",
+  "description": "Apple Mail (.emlx) via signed Swift helper",
+  "feature_flags": ["apple_mail_reader"],
+  "requires": {
+    "platform": "darwin",
+    "macos_min": "14.0",
+    "swift_helpers": ["ceridmail"],
+    "tcc_grants": ["full_disk_access"]
+  }
+}

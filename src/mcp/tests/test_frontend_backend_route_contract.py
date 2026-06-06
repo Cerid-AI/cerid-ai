@@ -59,6 +59,10 @@ ALLOWLIST: set[tuple[str, str]] = {
     # the routers/ entry in _build_route_set) but is intentionally not locally
     # served in the public/community edition — billing is hosted there.
     ("GET", "/billing/capabilities"),
+    # openBillingPortal() POSTs /billing/portal. Same open-core split as
+    # /billing/capabilities: served by the internal-only billing router, hosted
+    # (not locally served) in the public/community edition.
+    ("POST", "/billing/portal"),
 }
 
 

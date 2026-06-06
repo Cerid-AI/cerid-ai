@@ -77,9 +77,6 @@ def _load_dotenv_into_environ() -> None:
         return
 
 
-_load_dotenv_into_environ()
-
-
 def _get_neo4j():
     """Get a Neo4j driver. Returns None when env not configured.
 
@@ -241,29 +238,56 @@ def metric_faithfulness(redis_client) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def metric_chunks_per_answer(redis_client) -> dict[str, Any]:
-    """Median chunks fetched per answer for compiled-summary class.
+def _median(values: list[float]) -> float | None:
+    """Median of a list, or None when empty. Even length → mean of the two
+    middle samples."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2:
+        return float(ordered[mid])
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
 
-    Read from a Redis time-series populated by
-    ``pkb_answer_with_citations`` — keyed by
-    ``cerid:metrics:chunks_per_answer:<intent>:<bucket>``.
+
+def _read_chunks_samples(redis_client, stream: str, bucket: str) -> list[float]:
+    """Read one day's chunks-per-answer samples for a stream as floats."""
+    key = f"cerid:metrics:chunks_per_answer:samples:{stream}:{bucket}"
+    out: list[float] = []
+    for v in redis_client.lrange(key, 0, -1) or []:
+        try:
+            out.append(float(v if isinstance(v, str) else v.decode()))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def metric_chunks_per_answer(redis_client, now: datetime | None = None) -> dict[str, Any]:
+    """Median chunks fetched per answer for the compiled-summary class.
+
+    Compares today's compiled-summary arm against the baseline arm a week
+    ago — a stable denominator unaffected by today's traffic mix. Both arms
+    are populated per-answer by ``core.utils.cache.record_chunks_per_answer``
+    on the ``pkb_answer_with_citations`` path, keyed by
+    ``cerid:metrics:chunks_per_answer:samples:<stream>:<bucket>``. ``now`` is
+    injectable for tests.
     """
     if redis_client is None:
         return {"available": False, "reason": "redis_unavailable"}
     try:
-        bucket = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-        prev_week = (datetime.now(tz=timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
-        cur_raw = redis_client.get(f"cerid:metrics:chunks_per_answer:compiled_summary:{bucket}")
-        baseline_raw = redis_client.get(f"cerid:metrics:chunks_per_answer:baseline:{prev_week}")
-        if not cur_raw or not baseline_raw:
+        now = now or datetime.now(tz=timezone.utc)
+        bucket = now.strftime("%Y-%m-%d")
+        prev_week = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        cur = _median(_read_chunks_samples(redis_client, "compiled_summary", bucket))
+        baseline = _median(_read_chunks_samples(redis_client, "baseline", prev_week))
+        if cur is None or baseline is None:
             return {
                 "available": True,
                 "target_reduction_pct": 30.0,
                 "actual_reduction_pct": None,
                 "note": "needs a week of data; daily buckets accumulate post-deploy",
             }
-        cur = float(cur_raw if isinstance(cur_raw, str) else cur_raw.decode())
-        baseline = float(baseline_raw if isinstance(baseline_raw, str) else baseline_raw.decode())
         reduction = 100.0 * (baseline - cur) / baseline if baseline else 0.0
         return {
             "available": True,
@@ -444,6 +468,9 @@ def append_to_weekly_log(snapshot: dict[str, Any]) -> Path:
 
 
 def main() -> None:
+    # Load repo-root .env here (CLI/scheduler path) — NOT at import — so that
+    # exec-loading this module in a test never mutates the global os.environ.
+    _load_dotenv_into_environ()
     parser = argparse.ArgumentParser(description="K-program §9 metrics collector")
     parser.add_argument("--output", type=str, default=None, help="Write JSON to this path (default: stdout)")
     parser.add_argument("--cron", action="store_true", help="Append weekly markdown row")

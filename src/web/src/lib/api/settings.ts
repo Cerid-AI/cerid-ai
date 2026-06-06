@@ -1133,3 +1133,37 @@ export async function updateBriefSettings(body: BriefSettings): Promise<BriefSet
   if (!res.ok) throw new Error(await extractError(res, "Failed to update brief settings"))
   return res.json()
 }
+
+// ── Model compatibility doctor (GET /models/doctor) ──────────────────────────
+// Hardware-aware audit: are the configured models the most capable ones that
+// actually run on this platform, and are they current? Consumed by the
+// Settings → Models UX and the setup wizard's backend step.
+
+export interface ModelDoctorFinding {
+  kind: "incompatible" | "dead_pin" | "local_currency"
+  severity: "error" | "warn" | "info"
+  role: string
+  model: string
+  detail: string
+}
+
+export interface ModelDoctorUpgrade {
+  model: string
+  why: string
+  validate: string
+}
+
+export interface ModelDoctorReport {
+  hardware_profile: string
+  ok: boolean
+  findings: ModelDoctorFinding[]
+  known_good_local: Record<string, string>
+  candidate_upgrades: Record<string, ModelDoctorUpgrade[]>
+  catalog_size: number
+}
+
+export async function fetchModelDoctor(): Promise<ModelDoctorReport> {
+  const res = await fetch(`${MCP_BASE}/models/doctor`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`model doctor request failed: ${res.status}`)
+  return res.json()
+}

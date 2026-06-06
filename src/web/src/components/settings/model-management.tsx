@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { ModelCompatStatus } from "@/components/settings/model-compat-status"
 import {
   Sparkles,
   RefreshCw,
@@ -117,6 +118,9 @@ export function ModelManagement() {
           Check for updates
         </Button>
       </div>
+
+      {/* Hardware compatibility + currency audit */}
+      <ModelCompatStatus />
 
       {/* Check result */}
       {checkResult && (

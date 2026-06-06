@@ -1,6 +1,6 @@
 .PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
-       test test-all test-eval smoke slo help
+       test test-all test-eval ci-local smoke slo help
 
 # -- Python deps --
 lock-python:
@@ -51,6 +51,27 @@ test-eval:
 
 # -- Combined --
 check-all: deps-check lint-frontend typecheck-frontend test-frontend
+
+# -- Full local validation (run by the pre-push hook; mirrors PR+merge CI) --
+# Validates locally so Action minutes are only spent at merge time. Excludes
+# preservation/benchmark/integration/eval — all need a live stack (Neo4j/Chroma/Redis)
+# and would hard-fail on a host without it. Mirrors CI's unit-test job, which also runs
+# -m "not benchmark_slo and not integration" (ci.yml). Escape hatch: git push --no-verify
+ci-local: ## Full local validation before push (backend + frontend + guard)
+	@echo "[ci-local] backend · ruff"
+	.venv/bin/ruff check src/mcp/
+	@echo "[ci-local] backend · mypy"
+	.venv/bin/mypy src/mcp/
+	@echo "[ci-local] backend · import contracts"
+	cd src/mcp && ../../.venv/bin/lint-imports
+	@echo "[ci-local] backend · tests"
+	PYTHONPATH=src/mcp .venv/bin/pytest src/mcp/tests/ --ignore=src/mcp/tests/eval \
+	  -m "not benchmark_slo and not preservation and not integration" -x -q -p no:cacheprovider
+	@echo "[ci-local] frontend · eslint + tsc + vitest"
+	cd src/web && npx eslint . && npx tsc --noEmit && npx vitest run
+	@echo "[ci-local] supply-chain guard"
+	bash scripts/guard-no-ai-commits.sh
+	@echo "[ci-local] ✓ all local checks passed"
 
 # -- Load testing --
 smoke:

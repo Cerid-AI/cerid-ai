@@ -49,7 +49,7 @@ METRIC_NAMES = frozenset({
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "anthropic/claude-sonnet-4.6": (3.0, 15.0),
     "anthropic/claude-opus-4.6": (5.0, 25.0),
-    "x-ai/grok-4.1-fast": (0.20, 0.50),
+    "x-ai/grok-4.3": (1.25, 2.50),
     "openai/o3-mini": (1.10, 4.40),
     "google/gemini-3-flash-preview": (0.50, 3.0),
     "openai/gpt-4o-mini": (0.15, 0.60),

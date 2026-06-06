@@ -46,11 +46,11 @@ _TEMPLATE_NAME = "config.yaml.template"
 
 DEFAULT_ASSIGNMENTS: dict[str, str] = {
     "coding": "anthropic/claude-sonnet-4.6",
-    "research": "x-ai/grok-4.1-fast",
+    "research": "x-ai/grok-4.3",
     "simple": "google/gemini-2.5-flash",
     "general": "openai/gpt-4o-mini",
     "classifier": "meta-llama/llama-3.3-70b-instruct",
-    "verification": "x-ai/grok-4.1-fast",
+    "verification": "x-ai/grok-4.3",
     "categorization": "meta-llama/llama-3.3-70b-instruct:free",
     "synopsis": "meta-llama/llama-3.3-70b-instruct:free",
 }
@@ -260,9 +260,14 @@ async def _compute_model_updates() -> dict:
     """Resolve the latest in-family model for every role against the live
     OpenRouter catalog. Pure read — no persistence. Empty catalog (offline /
     fetch failure) yields no updates rather than an error."""
+    import config as _settings  # module-level `config` is shadowed by a param elsewhere
+
     current = _current_assignments()
     ids = catalog_ids(await fetch_openrouter_catalog())
-    resolved = resolve_assignments(current, ids) if ids else dict(current)
+    # Hardware-compatibility guard: the auto-update never adopts a model the
+    # active platform can't run (e.g. a Metal-crash model on amd-mac).
+    profile = getattr(_settings, "CERID_HARDWARE_PROFILE", "")
+    resolved = resolve_assignments(current, ids, hardware_profile=profile) if ids else dict(current)
     updates = diff_assignments(current, resolved)
     return {
         "updates": updates,
@@ -365,3 +370,49 @@ async def list_available_models():
             )
 
     return AvailableModelsResponse(models=models, total=len(models))
+
+
+@router.get("/doctor")
+async def model_doctor():
+    """Audit the live model config against the active hardware profile + the
+    OpenRouter catalog.
+
+    Surfaces: hardware-incompatible pins (error), dead remote pins (warn), and
+    local-model currency vs the known-good set (info), plus validate-on-device
+    upgrade candidates. Consumed by the setup wizard + Settings → Models UX so
+    the operator always sees whether the configured models are the most capable
+    ones compatible with their hardware. Read-only; never mutates config.
+    """
+    import config as _settings
+    from core.routing.model_compat import build_compat_report
+
+    profile = getattr(_settings, "CERID_HARDWARE_PROFILE", "")
+    provider = getattr(_settings, "INTERNAL_LLM_PROVIDER", "")
+
+    configured: dict[str, str] = dict(_current_assignments())  # OpenRouter roles
+    local_roles: dict[str, str] = {}
+
+    internal_model = getattr(_settings, "INTERNAL_LLM_MODEL", "")
+    if internal_model:
+        configured["INTERNAL_LLM_MODEL"] = internal_model
+        # Only a local provider makes INTERNAL_LLM_MODEL a local "chat" pin;
+        # under openrouter it's a remote id (dead-pin/incompat checks apply).
+        if provider in ("quenchforge", "ollama"):
+            local_roles["INTERNAL_LLM_MODEL"] = "chat"
+    for var, role in (
+        ("OLLAMA_DEFAULT_MODEL", "chat"),
+        ("QUENCHFORGE_EMBED_MODEL", "embed"),
+        ("QUENCHFORGE_RERANK_MODEL", "rerank"),
+    ):
+        val = getattr(_settings, var, "")
+        if val:
+            configured[var] = val
+            local_roles[var] = role
+
+    ids = catalog_ids(await fetch_openrouter_catalog())
+    return build_compat_report(
+        configured=configured,
+        hardware_profile=profile,
+        catalog_ids=ids,
+        local_roles=local_roles,
+    )

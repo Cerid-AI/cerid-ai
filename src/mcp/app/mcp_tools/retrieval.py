@@ -827,6 +827,7 @@ async def pkb_answer_with_citations(
     from core.agents.hallucination.extraction import extract_claims
     from core.agents.query_agent import agent_query
     from core.retrieval.surface_router import route as _surface_route
+    from core.utils.cache import record_chunks_per_answer
     from core.utils.internal_llm import call_internal_llm
 
     # Phase K3.5 — surface routing. When the router classifies the
@@ -886,6 +887,16 @@ async def pkb_answer_with_citations(
             },
             "question": question,
         }
+
+    # Record chunks-per-answer for the K-program soak collector. Emitted
+    # only on the grounded-answer path (past the no-sources early return),
+    # so a "no sources" reply doesn't deflate the baseline. A wiki-only
+    # answer legitimately records 0 chunks — that is the compiled-summary win.
+    record_chunks_per_answer(
+        get_redis(),
+        intent=surface_decision.intent,
+        chunk_count=len(results),
+    )
 
     # 2. Generate answer grounded in retrieved context.
     # Reserve up to 2000 chars for the wiki block; remaining budget

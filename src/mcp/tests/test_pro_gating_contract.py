@@ -72,6 +72,9 @@ def test_connector_flags_are_gate_asserted_not_allowlisted() -> None:
         "outlook_calendar_sync",
         "apple_calendar_eventkit",
         "apple_photos_reader",
+        "reminders_eventkit",
+        "apple_mail_reader",
+        "imessage_reader",
         "meeting_diarization",
         "calendar_stitching",
         "meeting_summary",
@@ -87,12 +90,9 @@ def test_connector_flags_are_gate_asserted_not_allowlisted() -> None:
 
 
 def test_allowlist_is_only_unimplemented_flags() -> None:
-    """The allowlist is down to flags with genuinely no gate yet."""
-    assert _load_allowlist() == {
-        "apple_mail_reader",
-        "imessage_reader",
-        "reminders_eventkit",
-    }
+    """The allowlist is empty — every Pro flag now has a runtime gate
+    (the Apple connector suite, Phase 4.1/4.2, closed the last entries)."""
+    assert _load_allowlist() == set()
 
 
 def test_feature_buckets_well_formed() -> None:

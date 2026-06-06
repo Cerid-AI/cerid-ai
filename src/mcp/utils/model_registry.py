@@ -23,7 +23,7 @@ ACTIVE_MODELS: dict[str, dict[str, Any]] = {
         "advanced": "openrouter/anthropic/claude-sonnet-4.6",
         "frontier": "openrouter/anthropic/claude-opus-4.6",
         "reasoning": "openrouter/openai/o3-mini",
-        "fast": "openrouter/x-ai/grok-4.1-fast",
+        "fast": "openrouter/x-ai/grok-4.3",
     },
     "internal": {
         "default": "openrouter/openai/gpt-4o-mini",
@@ -35,9 +35,9 @@ ACTIVE_MODELS: dict[str, dict[str, Any]] = {
         "pool": [
             "openrouter/openai/gpt-4o-mini",
             "openrouter/google/gemini-2.5-flash",
-            "openrouter/x-ai/grok-4.1-fast",
+            "openrouter/x-ai/grok-4.3",
         ],
-        "web_search": "openrouter/x-ai/grok-4.1-fast:online",
+        "web_search": "openrouter/x-ai/grok-4.3:online",
         "consistency": "openrouter/google/gemini-2.5-flash",
         "complex": "openrouter/google/gemini-2.5-flash",
     },
@@ -45,7 +45,7 @@ ACTIVE_MODELS: dict[str, dict[str, Any]] = {
         "free": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
         "cheap": "openrouter/openai/gpt-4o-mini",
         "capable": "openrouter/anthropic/claude-sonnet-4.6",
-        "research": "openrouter/x-ai/grok-4.1-fast",
+        "research": "openrouter/x-ai/grok-4.3",
         "expert": "openrouter/anthropic/claude-opus-4.6",
     },
 }
@@ -56,7 +56,7 @@ _FALLBACK_PRICING: dict[str, tuple[float, float]] = {  # per 1M tokens
     "openrouter/anthropic/claude-sonnet-4.6": (3.0, 15.0),
     "openrouter/anthropic/claude-opus-4.6": (15.0, 75.0),
     "openrouter/google/gemini-2.5-flash": (0.15, 0.60),
-    "openrouter/x-ai/grok-4.1-fast": (0.20, 0.50),
+    "openrouter/x-ai/grok-4.3": (0.20, 0.50),
     "openrouter/meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),
     "openrouter/openai/o3-mini": (1.10, 4.40),
 }

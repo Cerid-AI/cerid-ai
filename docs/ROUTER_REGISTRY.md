@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 342
+**Total routes:** 343
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -178,6 +178,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/assignments` | `get_assignments` | `src/mcp/app/routers/models.py` | models |  |
 | PUT | `/assignments` | `update_assignments` | `src/mcp/app/routers/models.py` | models |  |
 | GET | `/available` | `list_available_models` | `src/mcp/app/routers/models.py` | models |  |
+| GET | `/doctor` | `model_doctor` | `src/mcp/app/routers/models.py` | models |  |
 | GET | `/updates` | `list_model_updates` | `src/mcp/app/routers/models.py` | models |  |
 | POST | `/updates/apply` | `apply_model_updates` | `src/mcp/app/routers/models.py` | models |  |
 | POST | `/updates/check` | `check_model_updates` | `src/mcp/app/routers/models.py` | models |  |

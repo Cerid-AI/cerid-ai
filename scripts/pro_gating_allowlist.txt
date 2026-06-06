@@ -12,7 +12,7 @@
 # calendar_sync left the list once the lint began scanning the top-level
 # plugins/ tree where their gates live.
 
-# Apple readers not yet implemented (Commercial-GA P3).
-apple_mail_reader
-imessage_reader
-reminders_eventkit
+# All Apple Pro connectors are now implemented + gated (Commercial-GA Phase 4
+# complete): apple_mail_reader (4.1) + imessage_reader (4.2) gated 2026-06-06 via
+# src/mcp/plugins/apple_mail and src/mcp/plugins/apple_imessage. The allowlist is
+# now empty — every Pro flag has a runtime gate.
