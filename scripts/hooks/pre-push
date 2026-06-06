@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Generic pre-push hook: run full local validation before allowing a push, so
+# GitHub Action minutes are only spent on the merge-time/post-merge gate, not on
+# broken pushes. Auto-detects the repo's stack.
+#
+# Install: git config core.hooksPath scripts/hooks   (or: make install-hooks)
+# Escape hatch: git push --no-verify
+set -euo pipefail
+
+ZERO=0000000000000000000000000000000000000000
+deleting_only=true
+while read -r _l local_sha _r _rs; do
+  [ "$local_sha" != "$ZERO" ] && deleting_only=false
+done
+$deleting_only && exit 0
+
+cd "$(git rev-parse --show-toplevel)"
+echo "── pre-push: full local validation (override: git push --no-verify) ──"
+
+# Prefer a repo-defined target if present (internal has `make ci-local`).
+if [ -f Makefile ] && grep -qE '^ci-local:' Makefile; then
+  make ci-local; echo "── pre-push: ✓ ──"; exit 0
+fi
+
+fail() { echo "── pre-push: ✗ $1 — push blocked (git push --no-verify to override) ──"; exit 1; }
+
+# Python backend (ruff + mypy + pytest) where a venv + sources exist.
+if [ -x .venv/bin/ruff ]; then
+  echo "[pre-push] python · ruff";  .venv/bin/ruff check . || fail "ruff"
+  [ -x .venv/bin/mypy ] && { echo "[pre-push] python · mypy"; .venv/bin/mypy . || fail "mypy"; }
+  if [ -x .venv/bin/pytest ]; then
+    echo "[pre-push] python · pytest"
+    .venv/bin/pytest -x -q -p no:cacheprovider -m "not benchmark_slo and not preservation" || fail "pytest"
+  fi
+fi
+
+# Node frontend (lint + typecheck + tests) where a package.json exists.
+for pkg in package.json src/web/package.json; do
+  [ -f "$pkg" ] || continue
+  dir=$(dirname "$pkg")
+  echo "[pre-push] node · $dir (lint/typecheck/test)"
+  ( cd "$dir" && \
+    { ! grep -q '"lint"' package.json || npm run -s lint; } && \
+    { ! grep -q '"typecheck"' package.json || npm run -s typecheck; } && \
+    { ! grep -q '"test"' package.json || npm test --silent -- --run 2>/dev/null || npx vitest run; } ) || fail "node:$dir"
+done
+
+# Supply-chain guard (always, where present).
+[ -f scripts/guard-no-ai-commits.sh ] && { echo "[pre-push] supply-chain guard"; bash scripts/guard-no-ai-commits.sh || fail "guard"; }
+
+echo "── pre-push: ✓ local validation passed ──"
