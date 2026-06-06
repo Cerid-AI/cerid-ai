@@ -75,7 +75,7 @@ class UrlWatchConnector(SourceConnector):
         )
 
     async def fetch_since(
-        self, source_id: str, cursor: dict[str, Any]
+        self, source_id: str, cursor: dict[str, Any], config: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
         """Yield exactly one event if the content hash has changed
         since the cursor, otherwise yield nothing. Driven by the

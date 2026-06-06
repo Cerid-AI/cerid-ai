@@ -90,7 +90,10 @@ def _corpus_size(neo4j_driver) -> int:
             res = sess.run(
                 "MATCH (a:Artifact) "
                 "WHERE coalesce(a.sub_category, '') <> 'eval-corpus' "
-                "RETURN count(DISTINCT a.artifact_id) AS n",
+                # Artifact's identifier property is `a.id` (a.artifact_id never
+                # existed → this counted 0 over a 10k-artifact corpus, so feature
+                # recommendations never fired). count(a) is exact: nodes are unique.
+                "RETURN count(a) AS n",
             )
             row = res.single()
             return int(row["n"]) if row and row["n"] is not None else 0

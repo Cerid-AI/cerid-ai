@@ -280,7 +280,7 @@ lifecycle methods of `core.ingest.sources.base.SourceConnector`:
 | Method | When called |
 |---|---|
 | `connect(config) → ConnectResult` | Once per source — validates config, performs one-time setup (OAuth callback, watch handle, …), returns initial cursor + connection_time_ms |
-| `fetch_since(source_id, cursor)` | Driven by the polling worker (cadence per kind); async-iterates `SourceArtifactEvent` with the cursor advance embedded |
+| `fetch_since(source_id, cursor, config)` | Driven by the `source_poll` scheduler worker (`SCHEDULE_SOURCE_POLL`, rss/url_watch); async-iterates `SourceArtifactEvent`, persisting `cursor_after` after each ingested artifact (crash-safe). `config` carries the feed url/domain so core stays app-import-free. |
 | `health_check(source_id, config)` | Cheap probe; surfaces on the source-detail pane and `/observability/connector-health` |
 | `disconnect(source_id, config)` | Cleanup — OAuth revocation, watch teardown, daemon stop. Idempotent |
 

@@ -303,9 +303,15 @@ async def _verify_against_cited_url(
     entail = float(nli_result.get("entailment", 0.0))
     contra = float(nli_result.get("contradiction", 0.0))
 
-    if contra > 0.5:
+    # Use the SAME configured NLI thresholds as every other verification band
+    # (KB-NLI main path, self_rag). Previously hardcoded 0.5/0.6, which made the
+    # cited-URL path simultaneously looser on entailment (>0.6 vs the configured
+    # 0.7) and stricter on contradiction (>0.5 vs 0.6) than the rest of the
+    # system — so a claim entailed at 0.6-0.69 by its own cited source showed
+    # "verified" while the identical score against a KB source showed "uncertain".
+    if contra >= config.NLI_CONTRADICTION_THRESHOLD:
         status = "unverified"
-    elif entail > 0.6:
+    elif entail >= config.NLI_ENTAILMENT_THRESHOLD:
         status = "verified"
     else:
         status = "uncertain"
@@ -1884,6 +1890,29 @@ async def verify_claim(
                     })
                 # If external verification failed/errored, fall through to the
                 # original terminal-contradiction verdict below as a safety net.
+
+            # Persist to the contradiction ledger (Wiki contradiction surface +
+            # weekly synthesis). Gated + best-effort; the sink is wired from app
+            # startup because core/ cannot import app.services.contradiction_log.
+            if config.ENABLE_CONTRADICTION_LEDGER:
+                from core.agents.hallucination.contradiction_sink import (
+                    get_contradiction_sink,
+                )
+
+                _csink = get_contradiction_sink()
+                if _csink is not None:
+                    try:
+                        await _csink(
+                            claim_text=claim,
+                            source_text=top_result.get("content", "")[:500],
+                            source_artifact_id=top_result.get("artifact_id", ""),
+                            severity="high",
+                        )
+                    except Exception as exc:  # noqa: BLE001 — ledger write must not block verification
+                        log_swallowed_error(
+                            "core.agents.hallucination.verification.contradiction_sink",
+                            exc,
+                        )
 
             return await _cache_result({
                 "claim": claim,
