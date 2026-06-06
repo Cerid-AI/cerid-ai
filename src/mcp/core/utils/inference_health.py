@@ -27,6 +27,8 @@ import threading
 import time
 from typing import Any
 
+from core.utils.swallowed import log_swallowed_error
+
 # A degradation older than this (with no refresh and no success-clear) is no
 # longer reported as current — avoids a stale "red" lingering after recovery
 # when nothing has exercised the workload since.
@@ -65,8 +67,8 @@ def record_fallback(
             ev["detail"] = (detail or "")[:200]
             ev["last_event_ts"] = time.time()
             ev["fallback_count"] = int(ev.get("fallback_count", 0)) + 1
-    except Exception:  # noqa: BLE001 — observability must never break the caller
-        pass
+    except Exception as exc:  # noqa: BLE001 — observability must never break the caller
+        log_swallowed_error(__name__, exc)
 
 
 def record_success(workload: str, *, provider: str) -> None:
@@ -83,8 +85,8 @@ def record_success(workload: str, *, provider: str) -> None:
             ev["served_by"] = provider or ev.get("served_by", "unknown")
             ev["degraded"] = False
             ev["last_event_ts"] = time.time()
-    except Exception:  # noqa: BLE001 — observability must never break the caller
-        pass
+    except Exception as exc:  # noqa: BLE001 — observability must never break the caller
+        log_swallowed_error(__name__, exc)
 
 
 def _status_for(ev: dict[str, Any], now: float) -> dict[str, Any]:
@@ -108,8 +110,8 @@ def snapshot() -> dict[str, dict[str, Any]]:
             now = time.time()
             for workload, ev in _EVENTS.items():
                 out[workload] = _status_for(ev, now)
-    except Exception:  # noqa: BLE001 — observability fallback
-        pass
+    except Exception as exc:  # noqa: BLE001 — observability fallback
+        log_swallowed_error(__name__, exc)
     return out
 
 
