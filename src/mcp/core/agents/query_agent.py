@@ -1164,6 +1164,7 @@ async def _maybe_rerank_via_quenchforge(
         return None
     if not is_rerank_provider_quenchforge():
         return None
+    from core.utils import inference_health
     try:
         from utils.quenchforge_client import quenchforge_rerank
         documents = [r.get("content", "") for r in results]
@@ -1172,9 +1173,17 @@ async def _maybe_rerank_via_quenchforge(
         for r, s in zip(results, scores, strict=False):
             r["relevance"] = float(s)
             r["reranker_status"] = "quenchforge"
+        inference_health.record_success("rerank", provider="quenchforge")
         return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
     except Exception as exc:  # noqa: BLE001 — fall through to sidecar / local ONNX
         log_swallowed_error("core.agents.query_agent.quenchforge_rerank", exc)
+        # Configured for quenchforge GPU rerank but it failed — the chain will
+        # serve from the sidecar or local ONNX. Record the degradation so
+        # /health.inference_routing.rerank reports it instead of advertising a
+        # provider that isn't answering.
+        inference_health.record_fallback(
+            "rerank", configured="quenchforge", served_by="onnx", detail=str(exc),
+        )
         return None
 
 
@@ -1408,8 +1417,13 @@ def _apply_active_learning_signals(
             chunk["_filtered_reason"] = f"flag:{meta['flag']}"
             continue
         if meta and meta["weight"] != 1.0:
-            old = float(chunk.get("relevance") or 0.0)
-            chunk["relevance"] = round(old * meta["weight"], 4)
+            # Store the endorsement weight; do NOT pre-multiply relevance here.
+            # The cross-encoder rerank (Step 5) overwrites relevance outright on
+            # the quenchforge/sidecar paths (and blends it on the ONNX fallback),
+            # so a value multiplied in here is silently washed out — the reason
+            # endorse/demote was a no-op under the live GPU config. The weight is
+            # re-applied ONCE post-rerank (Step 5.05) so the signal is
+            # provider-independent.
             chunk["_endorsement_weight"] = meta["weight"]
         filtered.append(chunk)
     return filtered
@@ -2301,6 +2315,18 @@ async def _agent_query_impl(
             query=query,
             use_reranking=use_reranking,
         )
+
+    # Step 5.05: Apply active-learning endorsement AFTER reranking. Step 4.7
+    # stores each artifact's endorsement_weight but no longer pre-multiplies it,
+    # because the reranker overwrites/blends relevance and washed the signal out.
+    # Fold it into the final reranked score here — once, on every provider path —
+    # then re-sort so a promoted (weight>1) / demoted (weight<1) artifact moves.
+    if any(r.get("_endorsement_weight") for r in results):
+        for _r in results:
+            _w = _r.get("_endorsement_weight")
+            if _w and _w != 1.0:
+                _r["relevance"] = round(float(_r.get("relevance") or 0.0) * float(_w), 4)
+        results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
     # Step 5.1: Late interaction refinement — ColBERT-style MaxSim on top candidates
     with timer.step("late_interaction"):

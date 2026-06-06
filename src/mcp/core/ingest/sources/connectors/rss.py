@@ -19,11 +19,17 @@ ingest paths, same artifact-id space.)
 """
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import logging
+import socket
 import time
 import uuid
+import xml.etree.ElementTree as ET
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, AsyncIterator
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -38,6 +44,179 @@ logger = logging.getLogger("ai-companion.connectors.rss")
 
 _USER_AGENT = "CeridAI-RSS/1.0"
 _FETCH_TIMEOUT = 10.0
+_MAX_FEED_BYTES = 8 * 1024 * 1024  # cap untrusted feed body (memory / DoS guard)
+_ATOM = "{http://www.w3.org/2005/Atom}"
+_CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}encoded"
+_MAX_REDIRECTS = 5
+
+
+def _is_blocked_ip(ip_str: str) -> bool:
+    """True if an IP must not be fetched (loopback / private / link-local /
+    reserved / multicast / unspecified — the SSRF target ranges)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparseable → block
+    return bool(
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _assert_fetchable(url: str) -> None:
+    """SSRF guard for an operator-supplied feed URL. Raises ValueError unless the
+    URL is http(s) AND every resolved A/AAAA address is public.
+
+    Resolving ALL records and rejecting if ANY is internal defeats split-horizon
+    / multi-record tricks. Callers must also disable auto-redirects and re-run
+    this guard on each redirect hop (a 3xx Location is attacker-controlled too).
+    Residual: a DNS-rebinding race between this resolve and the client's own
+    resolve is not closed here (full pinning needs a custom transport + SNI
+    handling); the no-auto-redirect + per-hop revalidation closes the common
+    direct + redirect SSRF paths.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"blocked url scheme: {parsed.scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("url has no host")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ValueError(f"dns resolution failed for {host!r}: {exc}") from exc
+    addrs = {str(info[4][0]) for info in infos}
+    if not addrs:
+        raise ValueError(f"no addresses resolved for {host!r}")
+    blocked = sorted(a for a in addrs if _is_blocked_ip(a))
+    if blocked:
+        raise ValueError(f"refusing internal/private address(es) {blocked} for {host!r} (SSRF guard)")
+
+
+async def _guarded_get(url: str, *, method: str = "GET") -> httpx.Response:
+    """SSRF-guarded fetch. Validates the target, disables auto-redirects, and
+    manually follows up to ``_MAX_REDIRECTS`` hops re-validating each Location.
+    Raises ValueError on a blocked target / redirect loop; httpx.HTTPError on
+    network failure. Returns the final (non-redirect) response.
+    """
+    current = url
+    async with httpx.AsyncClient(
+        timeout=_FETCH_TIMEOUT,
+        follow_redirects=False,  # validate every hop ourselves
+        headers={"User-Agent": _USER_AGENT},
+    ) as client:
+        for _hop in range(_MAX_REDIRECTS + 1):
+            await asyncio.to_thread(_assert_fetchable, current)  # blocking DNS off the loop
+            resp = await client.request(method, current)
+            location = resp.headers.get("location")
+            if resp.is_redirect and location:
+                current = urljoin(current, location)
+                continue
+            return resp
+    raise ValueError(f"too many redirects (> {_MAX_REDIRECTS})")
+
+
+def _text(el: ET.Element | None) -> str:
+    return (el.text or "").strip() if el is not None else ""
+
+
+def _normalize_date(raw: str) -> str | None:
+    """Best-effort ISO-8601 from an RSS RFC-822 or Atom ISO date string."""
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw).isoformat()  # RSS <pubDate>
+    except (TypeError, ValueError, IndexError):
+        pass
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).isoformat()  # Atom
+    except (TypeError, ValueError):
+        return raw  # keep raw if unparseable — still usable as an ordering hint
+
+
+def _parse_feed(
+    xml_text: str, cursor: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Parse an RSS or Atom feed into NEW entries (oldest-first) + advanced cursor.
+
+    Pure + deterministic (no network) so the parsing — the risky part — is unit
+    tested against crafted samples. Feeds are newest-first on the wire; we walk
+    from the top collecting entries until we reach ``cursor['last_guid']`` (the
+    last one already ingested), then reverse so the caller ingests oldest→newest
+    and the cursor advances monotonically. Malformed XML → ``([], cursor)``.
+    """
+    cursor = cursor or {}
+    last_guid = cursor.get("last_guid")
+    # XXE / billion-laughs hardening (feeds are untrusted external input):
+    # RSS/Atom never legitimately declare a DTD, so refuse any feed containing a
+    # DOCTYPE or ENTITY declaration. Both XXE (external entities) and entity-
+    # expansion DoS require such a declaration, so this is the dependency-free
+    # equivalent of defusedxml's forbid_dtd/forbid_entities for this input.
+    lowered = xml_text.lower()
+    if "<!doctype" in lowered or "<!entity" in lowered:
+        logger.warning(
+            "rss._parse_feed: refusing feed with DOCTYPE/ENTITY declaration "
+            "(XXE / entity-expansion guard)",
+        )
+        return [], cursor
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return [], cursor
+
+    items: list[dict[str, Any]] = []
+    # RSS 2.0: <item>
+    for it in root.iter("item"):
+        guid = _text(it.find("guid")) or _text(it.find("link"))
+        if not guid:
+            continue
+        items.append({
+            "guid": guid,
+            "title": _text(it.find("title")),
+            "url": _text(it.find("link")),
+            "content": _text(it.find("description")) or _text(it.find(_CONTENT_NS)),
+            "published_at": _normalize_date(_text(it.find("pubDate"))),
+        })
+    # Atom: <entry>
+    for en in root.iter(f"{_ATOM}entry"):
+        link_el = en.find(f"{_ATOM}link")
+        url = link_el.get("href", "") if link_el is not None else ""
+        guid = _text(en.find(f"{_ATOM}id")) or url or _text(en.find(f"{_ATOM}title"))
+        if not guid:
+            continue
+        items.append({
+            "guid": guid,
+            "title": _text(en.find(f"{_ATOM}title")),
+            "url": url,
+            "content": _text(en.find(f"{_ATOM}content")) or _text(en.find(f"{_ATOM}summary")),
+            "published_at": _normalize_date(
+                _text(en.find(f"{_ATOM}published")) or _text(en.find(f"{_ATOM}updated"))
+            ),
+        })
+
+    if not items:
+        return [], cursor
+
+    new_items: list[dict[str, Any]] = []
+    for parsed in items:  # feed order = newest-first
+        if last_guid is not None and parsed["guid"] == last_guid:
+            break
+        new_items.append(parsed)
+    if not new_items:
+        return [], cursor
+
+    newest = items[0]
+    new_cursor = {
+        "last_guid": newest["guid"],
+        "last_published_at": newest.get("published_at"),
+    }
+    new_items.reverse()  # oldest-first for monotonic cursor advance
+    return new_items, new_cursor
 
 
 class RssConnector(SourceConnector):
@@ -65,15 +244,13 @@ class RssConnector(SourceConnector):
         # One real fetch to confirm the feed is reachable + parses. Use
         # a small read; we just need the root element.
         try:
-            async with httpx.AsyncClient(
-                timeout=_FETCH_TIMEOUT,
-                follow_redirects=True,
-                headers={"User-Agent": _USER_AGENT},
-            ) as client:
-                resp = await client.get(url)
+            resp = await _guarded_get(url)  # SSRF-guarded (scheme + non-internal + no auto-redirect)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise ValueError(f"feed fetch failed: {exc}") from exc
+        # _guarded_get raises ValueError on a blocked/internal target — that
+        # propagates as the connect() validation error (same type), rejecting
+        # the source at creation time.
 
         # Cheap shape check — body must contain either <rss or <feed
         body_lower = resp.text[:4096].lower()
@@ -94,25 +271,74 @@ class RssConnector(SourceConnector):
         )
 
     async def fetch_since(
-        self, source_id: str, cursor: dict[str, Any]
+        self, source_id: str, cursor: dict[str, Any], config: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
-        """Yield :class:`SourceArtifactEvent` per new feed entry.
+        """Fetch the feed, ingest each entry newer than ``cursor``, and yield one
+        :class:`SourceArtifactEvent` per ingested artifact with the cursor
+        advance embedded (``cursor_after``) so the polling worker persists it
+        incrementally — crash-safe resume.
 
-        The walk is driven by the ingestion worker
-        (``app.workers.ingest_rss``); this method's contract is to
-        emit one event per artifact with the cursor advance embedded.
-        Returns immediately when the worker isn't wired (empty
-        iterator), keeping connector registration + health-checks
-        independent of the worker.
+        Yields nothing (empty iterator) when the ingest sink isn't wired or the
+        source has no ``url``, keeping registration + health-checks independent
+        of the worker. ``config`` carries the source's ``url`` / ``domain`` (the
+        app layer owns the Neo4j round-trip — same contract as health_check).
         """
-        if False:  # pragma: no cover - placeholder for type checker
-            yield SourceArtifactEvent(  # type: ignore[unreachable]
+        from core.ingest.sources.ingest_sink import get_source_ingest_fn
+        from core.utils.swallowed import log_swallowed_error
+
+        ingest_fn = get_source_ingest_fn()
+        url = (config.get("url") or "").strip()
+        if ingest_fn is None or not url:
+            return
+
+        try:
+            resp = await _guarded_get(url)  # SSRF-guarded fetch
+            resp.raise_for_status()
+            body = resp.text[:_MAX_FEED_BYTES]
+        except (httpx.HTTPError, ValueError) as exc:
+            # ValueError = blocked/internal target (SSRF guard) → skip this source
+            # gracefully rather than crash the poll sweep.
+            logger.warning("rss.fetch_since: feed fetch blocked/failed for %s: %s", source_id, exc)
+            return
+
+        entries, _new_cursor = _parse_feed(body, cursor)
+        domain = (config.get("domain") or "general").strip() or "general"
+
+        for entry in entries:  # oldest-first → monotonic cursor advance
+            content = (entry.get("content") or entry.get("title") or "").strip()
+            if not content:
+                continue
+            t0 = time.monotonic()
+            try:
+                artifact_id = await ingest_fn(
+                    content,
+                    domain=domain,
+                    metadata={
+                        "source_id": source_id,
+                        "source_type": "rss",
+                        "title": entry.get("title", ""),
+                        "url": entry.get("url", ""),
+                        "guid": entry.get("guid", ""),
+                        "published_at": entry.get("published_at") or "",
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 — one bad entry must not abort the source
+                log_swallowed_error("core.ingest.sources.connectors.rss.fetch_since", exc)
+                # Stop here WITHOUT advancing past this entry — the cursor sits at
+                # the last successfully-yielded event, so this one is retried next
+                # poll (at-least-once; ingest_content dedups re-delivery).
+                return
+            yield SourceArtifactEvent(
                 source_id=source_id,
-                artifact_id="",
-                elapsed_ms=0,
-                cursor_after={},
+                artifact_id=str(artifact_id or ""),
+                elapsed_ms=int((time.monotonic() - t0) * 1000),
+                cursor_after={
+                    "last_guid": entry["guid"],
+                    "last_published_at": entry.get("published_at"),
+                },
+                title=entry.get("title", ""),
+                domain=domain,
             )
-        return
 
     async def health_check(self, source_id: str, config: dict[str, Any]) -> HealthStatus:
         """Cheap HEAD/GET probe — confirms the feed is still reachable.
@@ -126,20 +352,10 @@ class RssConnector(SourceConnector):
             return HealthStatus(ok=False, detail="source has no url")
 
         try:
-            async with httpx.AsyncClient(
-                timeout=_FETCH_TIMEOUT,
-                follow_redirects=True,
-                headers={"User-Agent": _USER_AGENT},
-            ) as client:
-                resp = await client.head(url)
+            resp = await _guarded_get(url, method="HEAD")  # SSRF-guarded probe
             if resp.status_code >= 400:
                 # Some servers don't support HEAD; retry with GET
-                async with httpx.AsyncClient(
-                    timeout=_FETCH_TIMEOUT,
-                    follow_redirects=True,
-                    headers={"User-Agent": _USER_AGENT},
-                ) as client:
-                    resp = await client.get(url)
+                resp = await _guarded_get(url)
             if resp.status_code >= 400:
                 return HealthStatus(
                     ok=False,
@@ -147,6 +363,9 @@ class RssConnector(SourceConnector):
                     last_error=resp.text[:200],
                 )
             return HealthStatus(ok=True, detail=f"HTTP {resp.status_code}")
+        except ValueError as exc:
+            # Blocked/internal target (SSRF guard) — surface as an unhealthy probe.
+            return HealthStatus(ok=False, detail="blocked target", last_error=str(exc))
         except httpx.HTTPError as exc:
             return HealthStatus(ok=False, detail="network error", last_error=str(exc))
 

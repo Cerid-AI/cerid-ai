@@ -61,7 +61,7 @@ class ClipboardConnector(SourceConnector):
         )
 
     async def fetch_since(
-        self, source_id: str, cursor: dict[str, Any]
+        self, source_id: str, cursor: dict[str, Any], config: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
         """No-op — the daemon ingests via POST /ingest/webhook directly."""
         if False:  # pragma: no cover

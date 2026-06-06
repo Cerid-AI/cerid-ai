@@ -288,12 +288,17 @@ cleanup_zombies() {
 }
 
 # ── detect_conflicts ─────────────────────────────────────────────────────────
-# Defensive preflight for the cross-project/dir squatter class that
+# Defensive preflight for the cross-project/cross-dir squatter class that
 # cleanup_zombies MISSES — it only reaps *stopped* containers and treats every
 # ai-companion-*/cerid-* as ours. A *running* container from a DIFFERENT compose
-# project or working dir (e.g. a second clone, or a leftover from a renamed
-# install) that holds one of our exact container_names makes `docker compose up`
-# die with a raw daemon "name is already in use" error and zero remediation hint.
+# project or working dir that holds one of our exact container_names makes
+# `docker compose up` die with a raw daemon "name is already in use" error and
+# zero remediation hint.
+#
+# Real trigger (2026-06-06): the public-mirror repo's compose (same hardcoded
+# container_names + ports) was run from ~/Develop/cerid-ai, creating project
+# "cerid-ai" that held the personal names while running; the personal rebuild
+# (project "cerid-ai-internal") then collided.
 #
 # Usage: detect_conflicts <our_project> <our_dir> <name1> [name2 ...]
 # Returns non-zero (caller aborts) if unresolved foreign holders remain.
@@ -367,21 +372,25 @@ detect_conflicts() {
 }
 
 # ── detect_port_conflicts ────────────────────────────────────────────────────
-# Reports host ports already bound by something that is NOT one of our
+# Reports host ports that are already bound by something that is NOT one of our
 # containers, before `docker compose up` fails with a bind error. Best-effort:
 # uses lsof (present on macOS/most Linux); silent no-op if lsof is unavailable.
 # Usage: detect_port_conflicts <port1> [port2 ...]   (warn-only, never aborts)
 detect_port_conflicts() {
     command -v lsof >/dev/null 2>&1 || return 0
-    local port pids cmd
+    local port pids hits=0
     for port in "$@"; do
         [ -z "$port" ] && continue
         pids=$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true)
         [ -z "$pids" ] && continue
+        # If the listener is com.docker.backend / vpnkit (a published container
+        # port), we can't easily attribute it here — leave conflict reclaim to
+        # detect_conflicts. Only warn for clearly-foreign non-docker listeners.
+        local cmd
         cmd=$(ps -o comm= -p "$(echo "$pids" | head -1)" 2>/dev/null || true)
         case "$cmd" in
             *docker*|*vpnkit*|*com.docker*) : ;;  # docker-published; handled by detect_conflicts
-            *) warn "Port ${port} already in use by '${cmd:-pid $pids}' — Cerid needs it; stop that process or change the CERID_PORT_* override." ;;
+            *) warn "Port ${port} already in use by '${cmd:-pid $pids}' — Cerid needs it; stop that process or change the CERID_PORT_* override."; hits=$((hits+1)) ;;
         esac
     done
     return 0

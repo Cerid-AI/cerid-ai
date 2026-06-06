@@ -65,11 +65,14 @@ async def _session_reaper() -> None:
         try:
             await asyncio.sleep(60)
             now = time.monotonic()
+            # Capture the idle duration alongside the sid BEFORE eviction — the
+            # log line below runs after the pop, so reading _session_last_seen
+            # there would always compute now-now=0.
             stale = [
-                sid for sid, last in _session_last_seen.items()
+                (sid, now - last) for sid, last in _session_last_seen.items()
                 if now - last > _IDLE_TIMEOUT_S
             ]
-            for sid in stale:
+            for sid, idle in stale:
                 q = _sessions.pop(sid, None)
                 _session_last_seen.pop(sid, None)
                 if q is not None:
@@ -79,7 +82,7 @@ async def _session_reaper() -> None:
                         pass
                 logger.info(
                     "MCP session reaper: evicted idle session %s (idle=%ds)",
-                    sid, int(now - _session_last_seen.get(sid, now)),
+                    sid, int(idle),
                 )
         except asyncio.CancelledError:
             return

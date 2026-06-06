@@ -93,7 +93,7 @@ class AppleMailConnector(SourceConnector):
         )
 
     async def fetch_since(
-        self, source_id: str, cursor: dict[str, Any]
+        self, source_id: str, cursor: dict[str, Any], config: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
         """Empty iterator until the Swift helper's ``since`` subcommand
         parses .emlx into JSON. The protocol stays valid; the walk

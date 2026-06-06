@@ -181,6 +181,15 @@ def detect_communities(
                     WITH c
                     MATCH (e:Entity {canonical_id: $entity_id})
                     MERGE (e)-[:IN_COMMUNITY]->(c)
+                    // Level 0 = finest partition. Expose it as the scalar
+                    // e.community_id the graph renderers (app/routers/graph.py
+                    // neighborhood + embeddings/3d, processor/jobs/compute_umap_3d)
+                    // actually read — they never parsed leiden_communityIds, so
+                    // node coloring was null for every entity. Higher levels stay
+                    // in leiden_communityIds for hierarchical drill-up.
+                    SET e.community_id = CASE
+                        WHEN $level = 0 THEN $cid ELSE e.community_id
+                    END
                     """,
                     cid=community_id,
                     level=level,

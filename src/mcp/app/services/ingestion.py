@@ -938,6 +938,14 @@ def ingest_content(
             sub_category=base_meta.get("sub_category", ""),
             default_sub_category=config.DEFAULT_SUB_CATEGORY,
             ingested_at=base_meta.get("ingested_at"),
+            # Thread the in-scope signals the scorer weights but previously
+            # received as defaults: content drives the richness dimension (25%
+            # weight — collapsed to 0 without it), domain enables domain-adaptive
+            # scoring, source_type carries authority. retrieval_count stays 0
+            # (nothing has been retrieved at ingest time — correct).
+            content=content,
+            domain=domain,
+            source_type=base_meta.get("source_type", "upload"),
         )
 
     artifact_created = False

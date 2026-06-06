@@ -90,8 +90,11 @@ class SourceConnector(Protocol):
         ...
 
     def fetch_since(
-        self, source_id: str, cursor: dict[str, Any]
+        self, source_id: str, cursor: dict[str, Any], config: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
+        # ``config`` is passed by the polling worker (which already holds the
+        # source row) so the connector gets its URL/credentials without a
+        # core→app Neo4j round-trip — same contract as health_check/disconnect.
         ...
 
     async def health_check(self, source_id: str, config: dict[str, Any]) -> HealthStatus:

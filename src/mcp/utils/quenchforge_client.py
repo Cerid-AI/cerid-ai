@@ -219,7 +219,10 @@ async def quenchforge_embed(
     pre-prefix client-side.
     """
     _ = is_query  # accepted for symmetry
-    breaker = get_breaker("quenchforge")
+    # Per-workload breaker — isolated from chat/rerank so a slow chat slot's
+    # transient 502 can't open the (healthy) embed circuit. See
+    # tasks/2026-06-06-data-level-audit.md.
+    breaker = get_breaker("quenchforge-embed")
     url = _get_quenchforge_url()
     client = await _get_client()
     from config import settings as _cfg
@@ -294,7 +297,8 @@ async def quenchforge_rerank(
     with the original document order so the caller's existing
     sigmoid-clipped score contract stays intact.
     """
-    breaker = get_breaker("quenchforge")
+    # Per-workload breaker — isolated from chat/embed (see quenchforge_embed).
+    breaker = get_breaker("quenchforge-rerank")
     url = _get_quenchforge_url()
     client = await _get_client()
     from config import settings as _cfg

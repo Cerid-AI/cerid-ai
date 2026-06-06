@@ -198,8 +198,9 @@ async def _query_neighborhood(
     if driver is None:
         raise HTTPException(status_code=503, detail="Neo4j unavailable")
 
-    # Cypher: APOC neighbors.byhop is the canonical pattern per 2026-05-21
-    # validation. Filter narrows by entity type if specified. We also pull
+    # Cypher: native variable-length expansion (Neo4j 5.x). Degree cap uses the
+    # COUNT {} subquery form — size() over a relationship pattern was removed in
+    # Neo4j 5.x. Filter narrows by entity type if specified. We also pull
     # edge attestation + contradiction flags for the visual encoding.
     type_filter = ""
     if filter:
@@ -209,7 +210,7 @@ async def _query_neighborhood(
         MATCH (n:Entity {{canonical_id: $entity}})
         OPTIONAL MATCH path = (n)-[*1..{hops}]-(e:Entity)
         WHERE e.canonical_id IS NOT NULL {type_filter}
-          AND size((e)--()) < $max_degree
+          AND COUNT {{ (e)--() }} < $max_degree
         WITH n, collect(DISTINCT e) AS related, collect(DISTINCT relationships(path)) AS rel_lists
         UNWIND ([n] + related) AS node
         OPTIONAL MATCH (node)-[r]-(other:Entity)

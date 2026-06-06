@@ -528,6 +528,81 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"DataSourceRegistry wiring failed (authoritative verify disabled): {e}")
 
+    # Wire the contradiction-ledger sink into core/verification via DI (same
+    # pattern as above — core/ cannot import app.services.contradiction_log).
+    # When the NLI guard finds a claim contradicting KB evidence, this persists
+    # a ContradictionFinding so the Wiki contradiction surface + weekly synthesis
+    # light up. Stable content-derived IDs make re-detection idempotent.
+    try:
+        from app.services.contradiction_log import ContradictionFinding, log_contradiction
+        from core.agents.hallucination.contradiction_sink import set_contradiction_sink, stable_id
+
+        async def _contradiction_sink(
+            *,
+            claim_text: str,
+            source_text: str,
+            source_artifact_id: str = "",
+            severity: str = "medium",
+            entity_slug: str | None = None,
+            query_ctx_id: str | None = None,
+        ) -> None:
+            # Anchor the contradiction to the most-prominent entity mentioned by
+            # the contradicting source artifact so it surfaces on that entity's
+            # wiki page AND fires the contradiction_detected wiki-refresh event
+            # (record_contradiction only writes the HAS_CONTRADICTION edge — the
+            # signal knowledge-stats counts — when an entity_slug is present).
+            if entity_slug is None and source_artifact_id:
+                try:
+                    from app.deps import get_neo4j
+                    _drv = get_neo4j()
+                    if _drv is not None:
+                        with _drv.session() as _sess:
+                            _row = _sess.run(
+                                "MATCH (a:Artifact {id: $aid})-[:MENTIONS]->(e:Entity) "
+                                "RETURN e.canonical_id AS slug "
+                                "ORDER BY coalesce(e.mention_count, 0) DESC LIMIT 1",
+                                aid=source_artifact_id,
+                            ).single()
+                            if _row and _row.get("slug"):
+                                entity_slug = _row["slug"]
+                except Exception as _exc:  # noqa: BLE001 — anchor lookup is best-effort
+                    log_swallowed_error("app.main.contradiction_sink.entity_lookup", _exc)
+            finding = ContradictionFinding(
+                finding_id=stable_id(claim_text, source_artifact_id),
+                claim_a_id=stable_id(claim_text),
+                claim_b_id=stable_id(source_artifact_id or source_text),
+                claim_a_text=claim_text[:1000],
+                claim_b_text=source_text[:1000],
+                entity_slug=entity_slug,
+                severity=severity,  # type: ignore[arg-type]
+                query_ctx_id=query_ctx_id,
+                source_artifacts=[source_artifact_id] if source_artifact_id else [],
+            )
+            await log_contradiction(finding)
+
+        set_contradiction_sink(_contradiction_sink)
+    except Exception as e:
+        logger.warning(f"Contradiction-ledger sink wiring failed (ledger disabled): {e}")
+
+    # Wire the connector ingest sink into core/ingest via DI (same pattern) so
+    # SourceConnector.fetch_since can persist fetched feed entries via the real
+    # ingest_content without a core→app import. Powers the source_poll worker.
+    try:
+        from app.services.ingestion import ingest_content as _ingest_content
+        from core.ingest.sources.ingest_sink import set_source_ingest_fn
+
+        async def _source_ingest_fn(
+            content: str, *, domain: str = "general", metadata: dict | None = None,
+        ) -> str | None:
+            res = await asyncio.to_thread(
+                _ingest_content, content=content, domain=domain, metadata=metadata or {},
+            )
+            return res.get("artifact_id") if isinstance(res, dict) else None
+
+        set_source_ingest_fn(_source_ingest_fn)
+    except Exception as e:
+        logger.warning(f"Source ingest-sink wiring failed (connector polling disabled): {e}")
+
     # Phase K2.1 — wire the entity-extraction enqueue callback into
     # core.agents.memory so freshly-stored memories trigger graph
     # entity upserts (and the K1.3 wiki refresh chain). Keeps core/

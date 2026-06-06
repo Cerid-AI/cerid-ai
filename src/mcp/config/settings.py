@@ -153,6 +153,30 @@ SPARSE_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "sparse")
 # at sub-cron interval it can't deadlock with ingest.
 SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * * *")
 
+# Graph/memory freshness sweeps (Cerid v1.0 enablement). Each is gated — set the
+# env var empty to disable the in-process cron (operators may prefer host cron).
+# Cadences are GPU/cost-conscious on a single-GPU host:
+#  - Community re-detection (GDS Leiden, cheap) + summaries (LLM, but
+#    skip-existing bounds it) — weekly, Sunday 02:00 UTC.
+#  - Constellation 3D coords (fallback layout, no LLM) — nightly 03:30 UTC.
+#  - Memory archival sweep (safe, no LLM re-abstraction) — weekly, Sunday 05:00.
+SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0")
+SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
+SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0")
+
+# Webhook-inbox drain: the receiver (POST /sdk/v1/ingest/webhook/{token}) returns
+# 202 and rpush'es normalized artifacts onto cerid:webhook_inbox:{source_id};
+# this consumer routes them into the KB (without it, payloads were stranded).
+# Every 2 min so inbound webhooks land promptly. Empty disables.
+SCHEDULE_WEBHOOK_DRAIN = os.getenv("SCHEDULE_WEBHOOK_DRAIN", "*/2 * * * *")
+WEBHOOK_DRAIN_MAX_PER_RUN = int(os.getenv("WEBHOOK_DRAIN_MAX_PER_RUN", "200"))
+
+# Connector polling: drives SourceConnector.fetch_since on a cadence for active
+# pollable sources (rss, url_watch, …), advancing the sync cursor only after a
+# successful ingest (crash-safe resume). Empty disables.
+SCHEDULE_SOURCE_POLL = os.getenv("SCHEDULE_SOURCE_POLL", "*/15 * * * *")
+SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE = int(os.getenv("SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE", "50"))
+
 # Contextual retrieval per-tenant monthly USD budget (Workstream E
 # Phase 3). When breached, the circuit breaker disables further
 # contextual generation for that tenant for the rest of the calendar
@@ -575,7 +599,12 @@ MEMORY_MIN_RECALL_BY_TYPE: dict[str, float] = {
 }
 
 # Memory Salience — per-type stability and scoring
-# Stability = base half-life in days for decay. Higher = slower fade.
+# Stability (S) = decay scale in days. Higher = slower fade.
+# NOTE on the effective half-life (the age at which decay = 0.5):
+#   - exponential types (2^(-t/S)):           half-life = S days exactly.
+#   - power-law types ((1 + t/(9S))^-0.5):     half-life = 27·S days (solve
+#     (1+t/(9S))^-0.5 = 0.5 → t = 27S). So "decision" S=90 ≈ a 2430-day
+#     half-life, not 90. Tune power-law S with the 27× factor in mind.
 # "empirical" uses float("inf") — permanent facts never decay.
 MEMORY_TYPE_STABILITY: dict[str, float] = {
     "empirical": float("inf"),       # "Python has a GIL" — no decay

@@ -141,7 +141,15 @@ def _read_faithfulness() -> tuple[float | None, str | None, str | None]:
     # returned None.
     metrics = data.get("metrics") or {}
     value = metrics.get("faithfulness")
-    last = data.get("last_updated") or data.get("last_run_at")
+    # The committed ragas.json (release-snapshot shape) stamps the time under
+    # ``updated_at``; the CI save_baselines() writer uses ``last_updated``.
+    # Accept both (+ legacy last_run_at) so the freshness chip isn't perpetually
+    # null on the committed baseline.
+    last = (
+        data.get("last_updated")
+        or data.get("last_run_at")
+        or data.get("updated_at")
+    )
     if value is None:
         return None, last, "faithfulness baseline not yet established (run RAGAS)"
     return float(value), last, None
