@@ -92,8 +92,14 @@ async def promote_verified_facts(
             confidence = float(claim_data.get("similarity", claim_data.get("confidence", 0.0)))
             claim_type = claim_data.get("type", "factual")
             claim_text = claim_data.get("claim", "")
-            # NLI entailment from kb_nli path; cross-model verified claims use similarity as proxy
-            nli_entailment = float(claim_data.get("nli_entailment", confidence))
+            # Real KB-NLI entailment exists only on the kb_nli verification path;
+            # cross-model-verified claims carry no NLI score (None here). We do
+            # NOT fabricate one from confidence — Filter 4 below gates kb_nli
+            # claims on the genuine NLI score and cross-model claims on their
+            # confidence (cross-model agreement IS the signal), at the same
+            # numeric bar, so the gate is honest about which evidence it used.
+            _raw_nli = claim_data.get("nli_entailment")
+            nli_entailment = float(_raw_nli) if _raw_nli is not None else None
 
             # Filter 1: Only "supported" / "verified" verdicts
             if verdict not in ("supported", "verified"):
@@ -110,8 +116,13 @@ async def promote_verified_facts(
                 counts["skipped_type"] += 1
                 continue
 
-            # Filter 4: NLI entailment bar (cross-model verified at 1.0 passes automatically)
-            if nli_entailment < min_nli_entailment:
+            # Filter 4: entailment/agreement bar. kb_nli claims gate on the real
+            # NLI entailment score; cross-model claims (no NLI score) gate on
+            # confidence — the strength of the cross-model agreement — at the
+            # SAME bar. Cross-model "verified" at confidence 1.0 clears it, but
+            # via its actual signal, not a confidence-masquerading-as-NLI proxy.
+            gate_value = nli_entailment if nli_entailment is not None else confidence
+            if gate_value < min_nli_entailment:
                 counts["skipped_low_confidence"] += 1
                 continue
 

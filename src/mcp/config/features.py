@@ -335,6 +335,13 @@ COST_SENSITIVITY = os.getenv("COST_SENSITIVITY", "medium")  # low/medium/high
 # ---------------------------------------------------------------------------
 ENABLE_MEMORY_CONSOLIDATION = os.getenv("ENABLE_MEMORY_CONSOLIDATION", "true").lower() == "true"
 ENABLE_CONTEXT_COMPRESSION = os.getenv("ENABLE_CONTEXT_COMPRESSION", "true").lower() == "true"
+# Contradiction ledger: when a claim is found to contradict KB evidence during
+# verification (kb_nli terminal-contradiction), persist a ContradictionFinding
+# (HAS_CONTRADICTION edge) so the Wiki contradiction surface + weekly synthesis
+# reflect it. Default on (a documented Wiki primitive; cost is one MERGE per
+# detected contradiction on an already-running verification path). Set false to
+# disable persistence without touching the verification logic.
+ENABLE_CONTRADICTION_LEDGER = os.getenv("ENABLE_CONTRADICTION_LEDGER", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Unified toggle registry — single source of truth for all boolean toggles.
@@ -360,6 +367,7 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_memory_consolidation": ENABLE_MEMORY_CONSOLIDATION,
     "enable_context_compression": ENABLE_CONTEXT_COMPRESSION,
     "enable_parent_child_retrieval": ENABLE_PARENT_CHILD_RETRIEVAL,
+    "enable_contradiction_ledger": ENABLE_CONTRADICTION_LEDGER,
 }
 
 # ---------------------------------------------------------------------------

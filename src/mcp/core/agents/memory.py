@@ -764,20 +764,35 @@ async def recall_memories(
         access_count = int(metadata.get("access_count", 0))
         artifact_id = metadata.get("artifact_id", chunk_id)
 
-        # Step 2: Apply decay/reinforcement
+        mem_type = metadata.get("memory_type", "decision")
+        # Step 2a: Ranking score — reinforcement (access frequency, ≤5×) boosts
+        # ORDER among recalled memories.
         adjusted_score = calculate_memory_score(
             base_score=base_similarity,
             access_count=access_count,
             age_days=age_days,
-            memory_type=metadata.get("memory_type", "decision"),
+            memory_type=mem_type,
+        )
+        # Step 2b: Relevance score — base similarity × decay WITHOUT the
+        # reinforcement multiplier. All recall/relevance GATING uses this so a
+        # frequently-accessed but semantically-poor match cannot clear the
+        # relevance floor on popularity alone (reinforcement, capped at 5×,
+        # previously inflated a 0.2-similarity memory to 0.8 and slipped it past
+        # both the per-type floor and the keyword-guard). Reinforcement affects
+        # ranking order only, never whether a memory is recalled.
+        relevance_score = calculate_memory_score(
+            base_score=base_similarity,
+            access_count=0,
+            age_days=age_days,
+            memory_type=mem_type,
         )
 
-        # Per-type minimum recall threshold
+        # Per-type minimum recall threshold (gated on relevance, not reinforced)
         type_min = config.MEMORY_MIN_RECALL_BY_TYPE.get(
-            metadata.get("memory_type", "decision"),
+            mem_type,
             config.MEMORY_MIN_RECALL_SCORE,
         )
-        if adjusted_score < type_min:
+        if relevance_score < type_min:
             continue
 
         # NLI relevance check — ensure memory is semantically relevant, not just keyword match
@@ -787,8 +802,8 @@ async def recall_memories(
             mem_nli = nli_score(doc[:512], query)
             if mem_nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
                 continue  # Memory contradicts query context — skip
-            if mem_nli["entailment"] < 0.3 and adjusted_score < 0.5:
-                continue  # Low entailment + low score = keyword match, not relevant
+            if mem_nli["entailment"] < 0.3 and relevance_score < 0.5:
+                continue  # Low entailment + low (decayed, non-reinforced) relevance = keyword match
         except Exception as exc:
             # NLI unavailable — fall back to adjusted_score alone.
             log_swallowed_error("core.agents.memory.recall_memories_nli_relevance", exc)

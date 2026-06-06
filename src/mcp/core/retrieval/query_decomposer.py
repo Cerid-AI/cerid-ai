@@ -29,6 +29,24 @@ _COMPARISON_PATTERN = re.compile(
 )
 _MULTI_QUESTION = re.compile(r"\?\s*(?:and|also|additionally|plus|what|how|why|when)", re.IGNORECASE)
 _LIST_PATTERN = re.compile(r"\b(?:first|second|third|1\)|2\)|3\)|\d+\.)\s", re.IGNORECASE)
+# The comparison capture window extends a few words backward, so it absorbs the
+# leading command/interrogative verb ("What is the difference between X and Y"
+# → term "the"). Strip these lead-ins (repeatedly) so synthesized sub-queries
+# are "What is X?" not "What is the?".
+_COMPARISON_LEADIN = re.compile(
+    r"^(?:compare|contrast|explain|describe|what\s+is|what\s+are|whats|what's"
+    r"|tell\s+me\s+about|the|an?|difference\s+between)(?:\s+|$)",
+    re.IGNORECASE,
+)
+
+
+def _clean_comparison_term(term: str) -> str:
+    """Strip leading command/article words from a captured comparison term."""
+    t, prev = term.strip(), None
+    while t and t != prev:
+        prev = t
+        t = _COMPARISON_LEADIN.sub("", t).strip()
+    return t
 
 
 def needs_decomposition(query: str) -> bool:
@@ -71,12 +89,17 @@ def decompose_heuristic(query: str) -> list[str]:
     # Try comparison decomposition first
     match = _COMPARISON_PATTERN.search(q)
     if match:
-        term_a, term_b = match.group(1), match.group(2)
-        return [
-            f"What is {term_a}?",
-            f"What is {term_b}?",
-            q,  # Keep the original comparison question too
-        ][:QUERY_DECOMPOSITION_MAX_SUBQUERIES]
+        term_a = _clean_comparison_term(match.group(1))
+        term_b = _clean_comparison_term(match.group(2))
+        # Only synthesize per-term sub-queries when both cleaned terms are real
+        # (≥2 chars). Otherwise the capture grabbed only lead-in words — fall
+        # through to the other split strategies instead of emitting "What is the?".
+        if len(term_a) >= 2 and len(term_b) >= 2:
+            return [
+                f"What is {term_a}?",
+                f"What is {term_b}?",
+                q,  # Keep the original comparison question too
+            ][:QUERY_DECOMPOSITION_MAX_SUBQUERIES]
 
     # Try splitting on conjunction patterns
     parts = _CONJUNCTION_SPLIT.split(q)

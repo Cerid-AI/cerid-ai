@@ -93,7 +93,7 @@ class BookmarksConnector(SourceConnector):
         )
 
     async def fetch_since(
-        self, source_id: str, cursor: dict[str, Any]
+        self, source_id: str, cursor: dict[str, Any], config: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
         """One-shot import — no cadenced fetch. The ingest worker
         reads ``config.parsed_bookmarks``, emits artifacts once, and

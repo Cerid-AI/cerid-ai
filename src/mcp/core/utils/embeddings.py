@@ -455,14 +455,24 @@ class OnnxEmbeddingFunction:
         # voided the client cache and added ~1s of TCP-rebuild overhead
         # per call — verified by the 14h vs 75min projected runtime
         # delta on the v0.96.0 LongMemEval canonical baseline.
+        from core.utils import inference_health
         try:
             from core.utils.async_bridge import run_async
             from utils.quenchforge_client import quenchforge_embed
-            return run_async(quenchforge_embed(texts), timeout=60.0)
+            result = run_async(quenchforge_embed(texts), timeout=60.0)
+            inference_health.record_success("embed", provider="quenchforge")
+            return result
         except Exception as exc:  # noqa: BLE001 — observability boundary
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error(
                 "core.utils.embeddings.quenchforge_fallthrough", exc,
+            )
+            # Quenchforge embed was configured but failed — the chain serves
+            # from the sidecar / local ONNX (a DIFFERENT model). Recall stays
+            # consistent because vectors are namespaced per provider+model, but
+            # the GPU path is down: record it so /health reports the degradation.
+            inference_health.record_fallback(
+                "embed", configured="quenchforge", served_by="onnx", detail=str(exc),
             )
             return None
 

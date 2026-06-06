@@ -85,6 +85,15 @@ _RELATIONAL_PATTERNS = [
     # Finding #3: "vs"/"vs."/"versus" comparisons are relational — they should
     # consult the graph surface, not fall through to mixed.
     re.compile(r"\b(vs\.?|versus)\b", re.IGNORECASE),
+    # UNANCHORED comparison/relationship terms: natural phrasings lead with a
+    # verb/wh-word ("what's the difference between X and Y", "how is X different
+    # from Y"), so the ^-anchored pattern above misses them and they fall through
+    # to mixed instead of graph-first. Match the comparison term mid-query.
+    re.compile(
+        r"\b(compare|contrast|difference between|differences between"
+        r"|relationship between|different (?:from|than))\b",
+        re.IGNORECASE,
+    ),
 ]
 
 # Personal-context signals: first-person, "we", "I", "did we", "last time".

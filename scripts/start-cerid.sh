@@ -591,13 +591,14 @@ fi
 mkdir -p "$CERID_ROOT/stacks/infrastructure/data/"{chroma,neo4j,neo4j-logs,redis}
 
 # Conflict preflight — a container from a DIFFERENT compose project or working
-# dir (e.g. a second clone, or a leftover from a renamed install) can hold our
-# exact container_names while RUNNING, which cleanup_zombies (stopped-only)
-# misses and `docker compose up` then dies on with a raw daemon error. Detect +
-# reclaim (or abort with a precise fix) before we ever reach compose.
-OUR_PROJECT="${COMPOSE_PROJECT_NAME:-cerid}"
+# dir (e.g. the public mirror run from its own clone) can hold our exact
+# container_names while RUNNING, which cleanup_zombies (stopped-only) misses and
+# `docker compose up` then dies on with a raw daemon error. Detect + reclaim
+# (or abort with a precise fix) before we ever reach compose.
+OUR_PROJECT="${COMPOSE_PROJECT_NAME:-cerid-ai-internal}"
 REQUIRED_NAMES=$(docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" config --format json 2>/dev/null \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(s["container_name"] for s in d.get("services",{}).values() if s.get("container_name")))' 2>/dev/null || true)
+# Fallback to the canonical set if config derivation is unavailable.
 [ -z "$REQUIRED_NAMES" ] && REQUIRED_NAMES="ai-companion-neo4j ai-companion-chroma ai-companion-redis ai-companion-mcp cerid-web"
 if ! detect_conflicts "$OUR_PROJECT" "$CERID_ROOT" $REQUIRED_NAMES; then
     if [ -n "$FORCE_FLAG" ]; then

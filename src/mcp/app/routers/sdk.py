@@ -422,6 +422,7 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
         verify_hmac_signature,
     )
     from core.utils.swallowed import log_swallowed_error
+    from core.utils.time import utcnow_iso
 
     driver = get_neo4j()
 
@@ -466,6 +467,7 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
 
     provider = (config.get("provider") or "").strip() if isinstance(config, dict) else ""
     normalized: list[dict] | None = None
+    requires_sig = False
     if provider:
         try:
             # Side-effect-imports the adapter package (registers recipes).
@@ -474,6 +476,7 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
 
             recipe = get_recipe(source["kind"], provider)
             if recipe is not None:
+                requires_sig = bool(getattr(recipe, "requires_signature", False))
                 artifacts = recipe.fn(payload, config or {})
                 normalized = [
                     {
@@ -493,6 +496,20 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
                 context={"source_id": source_id, "provider": provider},
             )
 
+    # Enforce the recipe's signature mandate: a provider whose recipe declares
+    # requires_signature (e.g. github, stripe) MUST have an hmac_secret on the
+    # source to verify against — otherwise the receiver silently accepts
+    # unauthenticated payloads. The HMAC value-check above only fires when a
+    # secret is present; this closes the "mandated but unconfigured" gap.
+    if requires_sig and not secret:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Provider {provider!r} requires HMAC signing; configure an "
+                "hmac_secret on the source before sending webhooks."
+            ),
+        )
+
     try:
         redis_client = get_redis()
         if redis_client is not None:
@@ -500,7 +517,7 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
                 f"cerid:webhook_inbox:{source_id}",
                 _json.dumps(
                     {
-                        "received_at": request.headers.get("date", ""),
+                        "received_at": utcnow_iso(),
                         "payload": payload,
                         "normalized": normalized,
                     },

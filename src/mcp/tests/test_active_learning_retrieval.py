@@ -8,8 +8,12 @@ Two invariants:
 1. Artifacts with ``flag_reason`` set are filtered out of the result
    set (default-retrieval exclusion). They reappear when the flag is
    cleared.
-2. ``endorsement_weight != 1.0`` multiplies the result's relevance
-   score before reranking — boosted artifacts rise, demoted ones sink.
+2. ``endorsement_weight != 1.0`` is recorded on the result as
+   ``_endorsement_weight`` and applied AFTER reranking (Step 5.05). It is no
+   longer pre-multiplied into relevance here, because the cross-encoder rerank
+   overwrites relevance downstream — a pre-rerank multiply was a silent no-op
+   under the GPU/sidecar paths. Boosted artifacts rise, demoted ones sink in
+   the post-rerank pass.
 """
 from __future__ import annotations
 
@@ -45,7 +49,7 @@ def _fake_driver(meta_by_id: dict[str, dict]):
     return fake_driver
 
 
-def test_endorsement_weight_multiplies_relevance():
+def test_endorsement_weight_recorded_for_postrerank():
     results = [
         {"artifact_id": "a-endorsed", "relevance": 0.5, "text": "x"},
         {"artifact_id": "a-plain",    "relevance": 0.5, "text": "y"},
@@ -58,11 +62,16 @@ def test_endorsement_weight_multiplies_relevance():
     })
 
     out = _apply_active_learning_signals(results, driver)
-    rel_by_id = {r["artifact_id"]: r["relevance"] for r in out}
+    by_id = {r["artifact_id"]: r for r in out}
 
-    assert rel_by_id["a-endorsed"] == pytest.approx(1.0)  # 0.5 * 2.0
-    assert rel_by_id["a-plain"] == pytest.approx(0.5)     # unchanged
-    assert rel_by_id["a-demoted"] == pytest.approx(0.25)  # 0.5 * 0.5
+    # Relevance is UNCHANGED at this stage — the reranker overwrites it, so the
+    # weight is recorded and applied post-rerank (Step 5.05) instead.
+    assert by_id["a-endorsed"]["relevance"] == pytest.approx(0.5)
+    assert by_id["a-endorsed"]["_endorsement_weight"] == pytest.approx(2.0)
+    assert by_id["a-plain"]["relevance"] == pytest.approx(0.5)
+    assert "_endorsement_weight" not in by_id["a-plain"]  # weight 1.0 → not stamped
+    assert by_id["a-demoted"]["relevance"] == pytest.approx(0.5)
+    assert by_id["a-demoted"]["_endorsement_weight"] == pytest.approx(0.5)
 
 
 def test_flagged_artifacts_filtered_out():

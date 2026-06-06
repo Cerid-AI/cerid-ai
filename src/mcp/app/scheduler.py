@@ -15,10 +15,13 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+if TYPE_CHECKING:
+    from core.ingest.sources.kinds import SourceKind
 
 import config
 from app.deps import get_chroma, get_neo4j, get_redis
@@ -799,6 +802,263 @@ async def _run_model_auto_update() -> None:
         logger.error("model_auto_update scheduled job failed: %s", e)
 
 
+async def _run_community_refresh() -> None:
+    """Weekly Leiden community re-detection + summary refresh (graph/atlas).
+
+    Re-clusters the entity graph (GDS Leiden — cheap), rewrites Community nodes,
+    IN_COMMUNITY edges, and the scalar Entity.community_id the renderers read,
+    then summarizes communities lacking a summary (skip-existing bounds the
+    single-GPU LLM cost). Gated via SCHEDULE_COMMUNITY_REFRESH.
+    """
+    start = time.time()
+    try:
+        from app.db.neo4j.community_detection import detect_communities
+        from app.db.neo4j.community_summaries import summarize_communities
+        from app.deps import get_chroma, get_neo4j
+
+        driver = get_neo4j()
+        if driver is None:
+            _log_execution("community_refresh", "skipped", time.time() - start, "neo4j unavailable")
+            return
+        det = await asyncio.to_thread(detect_communities, driver)
+        summ = await summarize_communities(driver, get_chroma())
+        duration = time.time() - start
+        detail = (
+            f"edges={det.get('edges', det.get('skipped', '?'))} "
+            f"summarised={summ.get('summarised', '?')}"
+        )
+        _log_execution("community_refresh", "success", duration, detail)
+        logger.info("community_refresh: %s in %.1fs", detail, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("community_refresh", "error", duration, str(e))
+        logger.error("community_refresh scheduled job failed: %s", e)
+
+
+async def _run_compute_umap_3d() -> None:
+    """Nightly Constellation 3D-coordinate compute.
+
+    Enqueues ComputeUmap3DJob via the processor queue when available, else runs
+    it directly (mirrors _run_ingest_recovery). Emits the deterministic fallback
+    layout today (no umap dependency); coords key off community_id so the
+    Constellation/atlas view renders. Gated via SCHEDULE_COMPUTE_UMAP_3D.
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = ComputeUmap3DJob()
+        if queue is not None:
+            record = job.new_record()
+            await queue.enqueue(record)
+            _log_execution("compute_umap_3d", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            await job.run(_noop)
+            _log_execution("compute_umap_3d", "success", time.time() - start)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("compute_umap_3d", "error", duration, str(e))
+        logger.error("compute_umap_3d scheduled job failed: %s", e)
+
+
+async def _run_memory_consolidation_sweep() -> None:
+    """Weekly SAFE memory archival sweep — archival only, no LLM re-abstraction.
+
+    Calls archive_old_memories (cheap, no LLM): marks old conversation memories
+    archived/deprioritized. Per research, continuous aggressive LLM consolidation
+    degrades utility below baseline, so supersession stays write-time + explicit;
+    this scheduled path does only the safe archival. Gated via
+    SCHEDULE_MEMORY_CONSOLIDATION.
+    """
+    start = time.time()
+    try:
+        from app.deps import get_neo4j
+        from core.agents.memory import archive_old_memories
+
+        driver = get_neo4j()
+        if driver is None:
+            _log_execution(
+                "memory_consolidation_sweep", "skipped", time.time() - start, "neo4j unavailable",
+            )
+            return
+        res = await archive_old_memories(driver)
+        duration = time.time() - start
+        detail = f"archived={res.get('archived_count', '?')}"
+        _log_execution("memory_consolidation_sweep", "success", duration, detail)
+        logger.info("memory_consolidation_sweep: %s in %.1fs", detail, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("memory_consolidation_sweep", "error", duration, str(e))
+        logger.error("memory_consolidation_sweep scheduled job failed: %s", e)
+
+
+async def _run_webhook_drain() -> None:
+    """Consume cerid:webhook_inbox:* and route entries into the KB.
+
+    The webhook receiver (POST /sdk/v1/ingest/webhook/{token}) verifies the
+    token + HMAC, normalizes via the adapter recipe, rpush'es onto
+    cerid:webhook_inbox:{source_id}, and returns 202 — but nothing consumed that
+    list, so every webhook payload was accepted then stranded. This is that
+    consumer. Per entry: LPOP → ingest_content (dedup-safe) → on failure move to
+    cerid:webhook_deadletter:{source_id} so one poison entry can't loop forever
+    or stall the source. Bounded per run. Gated via SCHEDULE_WEBHOOK_DRAIN.
+    """
+    import json as _json
+
+    start = time.time()
+    try:
+        from app.services.ingestion import ingest_content
+
+        rc = get_redis()
+        if rc is None:
+            _log_execution("webhook_drain", "skipped", time.time() - start, "redis unavailable")
+            return
+        driver = get_neo4j()
+        max_per_run = int(getattr(config, "WEBHOOK_DRAIN_MAX_PER_RUN", 200))
+        keys = [
+            k.decode() if isinstance(k, bytes) else k
+            for k in rc.scan_iter(match="cerid:webhook_inbox:*", count=100)
+        ]
+        ingested = failed = 0
+        for key in keys:
+            source_id = key.rsplit(":", 1)[-1]
+            # Resolve the source's domain once per key (default general).
+            domain = "general"
+            if driver is not None:
+                try:
+                    with driver.session() as _s:
+                        _row = _s.run(
+                            "MATCH (src:Source {id: $id}) "
+                            "RETURN coalesce(src.domain, 'general') AS d",
+                            id=source_id,
+                        ).single()
+                        if _row and _row.get("d"):
+                            domain = _row["d"]
+                except Exception as exc:  # noqa: BLE001 — domain lookup best-effort
+                    log_swallowed_error("app.scheduler.webhook_drain.domain", exc)
+            n = 0
+            while n < max_per_run:
+                raw = rc.lpop(key)
+                if raw is None:
+                    break
+                n += 1
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", "replace")
+                try:
+                    entry = _json.loads(raw)
+                    arts = entry.get("normalized") or [
+                        {"content": _json.dumps(entry.get("payload", {})), "title": "webhook payload"}
+                    ]
+                    for art in arts:
+                        content = (art.get("content") or "").strip()
+                        if not content:
+                            continue
+                        meta = {
+                            "source_id": source_id,
+                            "source_type": "webhook",
+                            "title": art.get("title", ""),
+                            "url": art.get("url", ""),
+                            "provider": art.get("provider", ""),
+                            "received_at": entry.get("received_at", ""),
+                        }
+                        # ingest_content is sync + dedup-safe (content-hash), so a
+                        # re-delivery is idempotent.
+                        await asyncio.to_thread(
+                            ingest_content, content=content, domain=domain, metadata=meta,
+                        )
+                        ingested += 1
+                except Exception as exc:  # noqa: BLE001 — isolate poison entries
+                    failed += 1
+                    try:
+                        rc.rpush(f"cerid:webhook_deadletter:{source_id}", raw)
+                    except Exception as dlx:  # noqa: BLE001
+                        log_swallowed_error("app.scheduler.webhook_drain.deadletter", dlx)
+                    log_swallowed_error("app.scheduler.webhook_drain.ingest", exc)
+        duration = time.time() - start
+        detail = f"keys={len(keys)} ingested={ingested} failed={failed}"
+        _log_execution("webhook_drain", "success", duration, detail)
+        if ingested or failed:
+            logger.info("webhook_drain: %s in %.1fs", detail, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("webhook_drain", "error", duration, str(e))
+        logger.error("webhook_drain scheduled job failed: %s", e)
+
+
+_POLLABLE_KINDS: tuple[SourceKind, ...] = ("rss", "url_watch")
+
+
+async def _run_source_poll() -> None:
+    """Drive SourceConnector.fetch_since for active pollable sources on a cadence.
+
+    The missing spine of incremental connector ingestion: for each connected
+    rss/url_watch source it reads the sync cursor, async-iterates fetch_since
+    (which fetches the feed, ingests each new entry via the DI ingest sink, and
+    yields a per-artifact event), and persists event.cursor_after after EACH
+    ingested artifact — so the cursor only advances past committed work
+    (crash-safe at-least-once resume; ingest_content dedups re-delivery).
+    Bounded per source. Gated via SCHEDULE_SOURCE_POLL.
+    """
+    start = time.time()
+    try:
+        import core.ingest.sources.connectors as _conns  # noqa: F401 — side-effect: registers connectors
+        from app.db.neo4j.sources import list_sources
+        from app.services.sync_cursor import get_cursor, set_cursor
+        from core.ingest.sources.registry import get_connector
+
+        rc = get_redis()
+        driver = get_neo4j()
+        if driver is None:
+            _log_execution("source_poll", "skipped", time.time() - start, "neo4j unavailable")
+            return
+        max_arts = int(getattr(config, "SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE", 50))
+        polled = ingested = 0
+        for kind in _POLLABLE_KINDS:
+            connector = get_connector(kind)
+            if connector is None:
+                continue
+            for src in list_sources(driver, kind=kind):
+                status = src.get("status")
+                if status and status != "connected":
+                    continue  # skip paused / error / needs_auth
+                source_id = src.get("id")
+                if not source_id:
+                    continue
+                cfg = dict(src.get("config") or {})
+                cfg.setdefault("domain", src.get("domain", "general"))
+                cursor = get_cursor(rc, driver, source_id)
+                polled += 1
+                n = 0
+                try:
+                    async for event in connector.fetch_since(source_id, cursor, cfg):
+                        # Persist after each committed artifact — crash-safe.
+                        set_cursor(rc, driver, source_id, event.cursor_after)
+                        ingested += 1
+                        n += 1
+                        if n >= max_arts:
+                            break
+                except Exception as exc:  # noqa: BLE001 — one source's failure mustn't stop the sweep
+                    log_swallowed_error("app.scheduler.source_poll.fetch", exc)
+        duration = time.time() - start
+        detail = f"polled={polled} ingested={ingested}"
+        _log_execution("source_poll", "success", duration, detail)
+        if ingested:
+            logger.info("source_poll: %s in %.1fs", detail, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("source_poll", "error", duration, str(e))
+        logger.error("source_poll scheduled job failed: %s", e)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -916,6 +1176,79 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
         max_instances=1,
     )
+
+    # Graph/atlas freshness — weekly Leiden re-detection + summaries. Gated;
+    # empty SCHEDULE_COMMUNITY_REFRESH disables. Writes Entity.community_id so
+    # the graph renderers light up; skip-existing summaries bound GPU cost.
+    if getattr(config, "SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0"):
+        _scheduler.add_job(
+            _run_community_refresh,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0"),
+            ),
+            id="community_refresh",
+            name="Leiden community re-detection + summaries",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Constellation 3D coords — nightly. Gated; empty SCHEDULE_COMPUTE_UMAP_3D
+    # disables. Fallback layout today (no umap dep); keyed off community_id.
+    if getattr(config, "SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *"):
+        _scheduler.add_job(
+            _run_compute_umap_3d,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *"),
+            ),
+            id="compute_umap_3d",
+            name="Constellation 3D coordinate compute",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Memory archival sweep — weekly, SAFE (archival only, no LLM). Gated;
+    # empty SCHEDULE_MEMORY_CONSOLIDATION disables.
+    if getattr(config, "SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0"):
+        _scheduler.add_job(
+            _run_memory_consolidation_sweep,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0"),
+            ),
+            id="memory_consolidation_sweep",
+            name="Memory archival sweep (safe consolidation)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Webhook-inbox drain — consume cerid:webhook_inbox:* into the KB (the
+    # receiver returns 202 + enqueues; this is the missing consumer). Every 2
+    # min by default. Gated; empty SCHEDULE_WEBHOOK_DRAIN disables.
+    if getattr(config, "SCHEDULE_WEBHOOK_DRAIN", "*/2 * * * *"):
+        _scheduler.add_job(
+            _run_webhook_drain,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_WEBHOOK_DRAIN", "*/2 * * * *"),
+            ),
+            id="webhook_drain",
+            name="Webhook inbox drain",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Connector polling — drive fetch_since for active rss/url_watch sources,
+    # advancing the cursor only past committed artifacts (crash-safe). Every 15
+    # min by default. Gated; empty SCHEDULE_SOURCE_POLL disables.
+    if getattr(config, "SCHEDULE_SOURCE_POLL", "*/15 * * * *"):
+        _scheduler.add_job(
+            _run_source_poll,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_SOURCE_POLL", "*/15 * * * *"),
+            ),
+            id="source_poll",
+            name="Connector polling (fetch_since)",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # Cycle 3.2 — config recommender: scan corpus + flag state every
     # 6 h and refresh cerid:recommendations in Redis.  LOW priority,
