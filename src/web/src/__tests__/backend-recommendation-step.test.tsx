@@ -2,9 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
+import * as settingsApi from "@/lib/api/settings"
 import type { SystemCheckResponse } from "@/lib/types"
+
+// The step now embeds <ModelCompatStatus> (useQuery → /models/doctor), so each
+// render needs a QueryClient. Wrap render and stub the doctor call.
+function render(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+}
 
 function sys(overrides: Partial<SystemCheckResponse> = {}): SystemCheckResponse {
   return {
@@ -31,6 +40,14 @@ const onSelect = vi.fn<(b: "ollama" | "quenchforge" | "cloud") => void>()
 
 beforeEach(() => {
   onSelect.mockClear()
+  vi.spyOn(settingsApi, "fetchModelDoctor").mockResolvedValue({
+    hardware_profile: "amd-mac",
+    ok: true,
+    findings: [],
+    known_good_local: { chat: "llama3.1-8b" },
+    candidate_upgrades: { chat: [], embed: [], rerank: [] },
+    catalog_size: 0,
+  })
 })
 
 describe("BackendRecommendationStep", () => {

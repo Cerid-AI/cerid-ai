@@ -54,6 +54,12 @@ chat:
 Each message becomes part of a per-conversation artifact tagged with
 `source: imessage`.
 
+> **Status:** the connector currently surfaces recent messages via the
+> `ceridimessage` helper's `scan`. Per-conversation opt-in enable/disable and
+> the `attributedBody` body recovery described below land with the helper's full
+> `chat.db` reader — no reconfiguration is needed when it does; the same Full
+> Disk Access grant and `private_mode` Level 2 floor cover it.
+
 ## What's NOT ingested
 
 - **Any conversation you haven't explicitly enabled.** This is the

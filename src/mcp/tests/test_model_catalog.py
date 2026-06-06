@@ -91,3 +91,17 @@ class TestResolveAssignments:
 def test_catalog_ids_extraction():
     payload = [{"id": "a/b-1.0"}, {"id": "c/d-2.0"}, {"created": 1}, {}]
     assert catalog_ids(payload) == ["a/b-1.0", "c/d-2.0"]
+
+
+# --- hardware-compatibility guard (auto-update must never adopt a crash model) ---
+
+def test_resolve_assignments_skips_hardware_incompatible_successor():
+    """A newer in-family model that is incompatible with the active hardware
+    must NOT be adopted — the resolver filters the catalog by profile first."""
+    current = {"chat": "meta-llama/llama-3.1-3b-instruct"}
+    catalog = ["meta-llama/llama-3.2-3b-instruct"]  # incompatible on amd-mac
+    # Without a profile, the resolver bumps to the newer in-family model.
+    assert resolve_assignments(current, catalog)["chat"] == "meta-llama/llama-3.2-3b-instruct"
+    # On amd-mac, llama-3.2-3b is denylisted → stays pinned to the safe current.
+    guarded = resolve_assignments(current, catalog, hardware_profile="amd-mac")
+    assert guarded["chat"] == "meta-llama/llama-3.1-3b-instruct"

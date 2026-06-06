@@ -112,6 +112,16 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         data_source_name="apple_photos",
         instruction_doc="docs/PRO_APPLE_PHOTOS.md",
     ),
+    "apple_reminders": ConnectorMeta(
+        slug="apple_reminders",
+        display_name="Apple Reminders",
+        feature_flag="reminders_eventkit",
+        auth_kind="tcc_only",
+        requires_env=[],
+        requires_sibling=None,
+        data_source_name="apple_reminders",
+        instruction_doc="docs/PRO_APPLE_REMINDERS.md",
+    ),
 }
 
 

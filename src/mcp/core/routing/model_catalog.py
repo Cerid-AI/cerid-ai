@@ -79,10 +79,22 @@ def resolve_latest(current_id: str, catalog_ids: list[str]) -> str:
 
 
 def resolve_assignments(
-    current: dict[str, str], catalog_ids: list[str]
+    current: dict[str, str], catalog_ids: list[str], hardware_profile: str = ""
 ) -> dict[str, str]:
-    """Resolve every role's model to the latest in its family."""
-    return {role: resolve_latest(model_id, catalog_ids) for role, model_id in current.items()}
+    """Resolve every role's model to the latest *compatible* in its family.
+
+    When ``hardware_profile`` is set, the catalog is filtered through the
+    hardware-compatibility guard first, so the auto-update never adopts a newer
+    model that is known not to run on the platform (e.g. a Metal-crash model on
+    ``amd-mac``). Already-pinned incompatible models are not silenced here — the
+    config doctor (``model_compat.audit_model_config``) surfaces those.
+    """
+    safe_ids = catalog_ids
+    if hardware_profile:
+        from core.routing.model_compat import compatible_catalog_ids
+
+        safe_ids = compatible_catalog_ids(catalog_ids, hardware_profile)
+    return {role: resolve_latest(model_id, safe_ids) for role, model_id in current.items()}
 
 
 def diff_assignments(

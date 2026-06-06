@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Cpu, Cloud, HardDrive, Sparkles, Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { backendOptionsForHardware } from "@/lib/hardware-profile"
+import { ModelCompatStatus } from "@/components/settings/model-compat-status"
 import type { RecommendedLocalBackend, SystemCheckResponse } from "@/lib/types"
 
 interface BackendRecommendationStepProps {
@@ -117,6 +118,11 @@ export function BackendRecommendationStep({
           )}
         </div>
       )}
+
+      {/* Hardware-aware model compatibility + recommended local models */}
+      <div className="mt-3">
+        <ModelCompatStatus compact />
+      </div>
     </>
   )
 }

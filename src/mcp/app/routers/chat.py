@@ -66,7 +66,7 @@ router = APIRouter(tags=["chat"])
 CHAT_FALLBACK_POOL = [
     "openai/gpt-4o-mini",
     "google/gemini-2.5-flash",
-    "x-ai/grok-4.1-fast",
+    "x-ai/grok-4.3",
     "anthropic/claude-sonnet-4.6",
 ]
 

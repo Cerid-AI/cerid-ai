@@ -2,6 +2,18 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — soak metric: chunks-per-answer instrumentation (2026-06-05)
+
+### Observability — K-program soak
+
+- **Chunks-per-answer is now measured end-to-end.** The grounded-answer path
+  (`pkb_answer_with_citations`) records one sample per answer — the retrieved-chunk
+  count, tagged by surface-router intent (compiled-summary vs baseline) — into a daily
+  Redis list. `scripts/k_program_metrics.py` reads those lists and reports the median
+  reduction. Closes the open half of the soak's metric 4 (the collector previously read
+  scalar keys nothing wrote); the metric is now soak-evaluable. Best-effort emit: a
+  metric write never fails a user query.
+
 ## Unreleased — Commercial-GA P0: Pro-gating truth-up + external-client backend (2026-06-01)
 
 ### Pro-tier gating truth-up & lock-in
@@ -16,6 +28,16 @@ All notable changes to cerid-ai are documented here.
   behind `@require_feature`; generated `docs/TIER_MATRIX.md` from the flag source of truth
   with a drift gate; drove the Settings → Pro pane from the live `/billing/capabilities`
   (which now returns a complete flat `features` map).
+
+### Pro billing & licensing
+
+- **Pro purchase & management surface.** Buy Pro through hosted checkout, manage the
+  subscription via the customer portal, and see live subscription status in Settings → Pro.
+- **Offline-verifiable license keys.** Manually-entered Pro keys validate locally — no
+  phone-home — with a tamper-proof embedded expiry. An activated tier now survives restarts
+  and lapses gracefully back to Community when the license expires (Stripe-managed
+  subscriptions remain governed by their billing lifecycle). License status reports the
+  remaining period.
 
 ### External agent / client backend support
 

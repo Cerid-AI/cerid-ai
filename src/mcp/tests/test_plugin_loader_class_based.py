@@ -159,6 +159,9 @@ class TestProConnectorBoot:
         "outlook_calendar",
         "apple_calendar",
         "apple_photos",
+        "apple_reminders",
+        "apple_mail",
+        "apple_imessage",
     ]
 
     def _plugin_root(self) -> Path:

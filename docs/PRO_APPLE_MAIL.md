@@ -38,6 +38,12 @@ For each message:
 
 Each message becomes a single artifact tagged with `source: apple_mail`.
 
+> **Status:** the connector currently surfaces recent message **headers**
+> (subject / sender / date / mailbox) via the `ceridmail` helper's `scan`. Full
+> `.emlx` body extraction + query-side search land with the helper's body walk —
+> no reconfiguration is needed when it does; the same Full Disk Access grant
+> covers it.
+
 Recipient extraction (`To`, `Cc`, `Bcc`) is deferred to v1.1 — current
 ingestion focuses on the fields that drive retrieval quality (subject +
 body + sender).

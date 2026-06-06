@@ -48,7 +48,7 @@ def client(monkeypatch):
 
 
 class TestListConnectors:
-    def test_lists_all_six(self, client):
+    def test_lists_all_seven(self, client):
         resp = client.get("/connectors")
         assert resp.status_code == 200
         slugs = [c["slug"] for c in resp.json()["connectors"]]
@@ -58,6 +58,7 @@ class TestListConnectors:
         assert "outlook_calendar" in slugs
         assert "apple_calendar" in slugs
         assert "apple_photos" in slugs
+        assert "apple_reminders" in slugs
 
     def test_each_carries_required_fields(self, client):
         connectors = client.get("/connectors").json()["connectors"]
