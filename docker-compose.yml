@@ -17,6 +17,13 @@
 #   docker compose up -d --build  # rebuild MCP + Web images
 #   docker compose logs -f        # tail all logs
 
+# Pinned project name. Compose's default project name is the invocation
+# directory's basename, so running this file from a renamed/moved clone creates
+# a *second* project that then collides on the hardcoded container_names below.
+# Pinning makes the instance identity deterministic regardless of the clone
+# path. Overridable via COMPOSE_PROJECT_NAME for advanced multi-instance setups.
+name: cerid
+
 services:
   # ──────────────────────────────────────────────
   # Layer 1: Infrastructure (no dependencies)
