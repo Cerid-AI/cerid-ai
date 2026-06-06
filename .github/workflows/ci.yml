@@ -157,6 +157,10 @@ jobs:
           # CVE-2026-45829: pre-auth code injection in chromadb >=1.0.0 via trust_remote_code=true on the
           #                collections endpoint. Not reachable — trust_remote_code is never set anywhere in
           #                the codebase (grep-verified) and Chroma binds loopback-only. Re-eval 2026-09-30.
+          # PYSEC-2026-196: pip treats console_scripts/gui_scripts as paths (not file names) without sanitizing
+          #                the resolved install dir; fixed in pip 26.1.2. Same class as CVE-2026-6357/3219 —
+          #                affects only the runner's pre-installed pip; installs use --require-hashes against
+          #                requirements.lock with self-update disabled. Re-eval 2026-08-31.
           # Migration planned for Phase 11
           pip-audit --desc \
             --ignore-vuln CVE-2026-26013 \
@@ -168,7 +172,8 @@ jobs:
             --ignore-vuln GHSA-fv5p-p927-qmxr \
             --ignore-vuln CVE-2026-6357 \
             --ignore-vuln PYSEC-2025-183 \
-            --ignore-vuln CVE-2026-45829
+            --ignore-vuln CVE-2026-45829 \
+            --ignore-vuln PYSEC-2026-196
       - name: ReDoS regex audit (dlint)
         run: |
           pip install dlint flake8
