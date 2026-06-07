@@ -995,7 +995,12 @@ async def _run_webhook_drain() -> None:
         logger.error("webhook_drain scheduled job failed: %s", e)
 
 
-_POLLABLE_KINDS: tuple[SourceKind, ...] = ("rss", "url_watch")
+_POLLABLE_KINDS: tuple[SourceKind, ...] = (
+    "rss",
+    "url_watch",
+    "apple_mail",
+    "apple_reminders",
+)
 
 
 async def _run_source_poll() -> None:
