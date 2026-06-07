@@ -64,7 +64,7 @@ export default defineConfig(({ mode }) => {
       dts({
         include: ["src"],
         outDir: "dist",
-        rollupTypes: true,
+        bundleTypes: true,
       }),
     ],
     define: {

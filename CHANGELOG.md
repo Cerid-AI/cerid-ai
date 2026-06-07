@@ -2,6 +2,65 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — GA engineering close-out: Apple suite, idempotent ingest, inference reliability (2026-06-06 → 2026-06-07)
+
+### Pro connectors
+
+- **Apple Mail + iMessage readers complete the Pro Apple suite.** Joining the
+  already-shipped Notes, Calendar, and Photos readers, both ship behind their feature
+  gate and TCC / Full-Disk-Access consent; iMessage honors Private Mode (Level 2+) at
+  query time. With these landed the Pro-gating allowlist is now **empty** — every Pro
+  flag has a runtime gate. (#130, #133)
+
+### Model management
+
+- **Model-currency + hardware-compatibility guard.** Settings and the setup wizard now
+  surface a `GET /models/doctor` report that flags stale or hardware-incompatible model
+  assignments (e.g. a model known to crash on the detected GPU). (#132)
+
+### Ingestion & retrieval
+
+- **Idempotent ingest.** Artifacts get a content-addressed `artifact_id` (content hash)
+  with deterministic chunk ids and `upsert` / `MERGE` writes, so re-delivering the same
+  content produces zero duplicate chunks (concurrency-safe via the id-unique constraint). (#144)
+- **Ingestion / corpus backlog cleared.** Server-side URL fetches route through a shared
+  SSRF guard (`safe_fetch`: scheme allowlist + resolve-and-reject-internal + per-hop
+  revalidation); failed ingests land in a dead-letter store; per-source quality-floor is
+  enforced; daily-digest items carry tags; community summaries are length-capped. (#140)
+- **Source kinds are capability-gated.** `GET /sources/kinds` reports availability
+  (available / oauth / coming_soon) and the UI disables unavailable kinds — no more
+  `POST /sources` 501s; edge attestation defaults honestly to `inferred`. (#142)
+
+### Reliability & observability
+
+- **Per-workload inference circuit breakers.** Separate `quenchforge-chat` / `-embed` /
+  `-rerank` breakers with retry inside the breaker; `/health.inference_routing` reports
+  truthful serving / degraded state. (#138)
+- **NLI-faithfulness benchmark published** as the soak floor —
+  `docs/NLI_FAITHFULNESS_BENCHMARK.md` (faithfulness 0.93, recall@10 0.842), with a
+  per-intent soak metric wired. (#129)
+
+### Operability / CI
+
+- **Stack-launch safety.** `start-cerid.sh` asserts the compose project identity, refuses
+  to open a data dir a foreign container already bind-mounts (corruption guard), and
+  repairs a corrupt Redis AOF before boot.
+- **`make prepush`** gives full pre-push parity with the remote `lint` job (the drift +
+  silent-catch gates that `ci-local` alone omits). (#141)
+- **Live-stack CI is fully namespaced** (`-ci` containers / isolated network / offset
+  ports / project-scoped volumes / distinct image identity) so the merge-only
+  `preservation` + `benchmark-slo` gates on a self-hosted runner can no longer clobber a
+  co-located dev stack.
+
+### Dependencies
+
+- **Embeddable widget dev stack upgraded** — TypeScript 6.0, jsdom 29, vite-plugin-dts 5
+  (now with `@microsoft/api-extractor` for single-file type bundling; `rollupTypes` →
+  `bundleTypes`), jest-axe 10, axe-core 4.12. (#152)
+- Python (python-docx 1.2, python-pptx 1.0.2, extract-msg 0.55, pywhispercpp 1.5, ragas
+  floor 0.4.3), nginx 1.31-alpine, and the `src/web` npm group bumped; 6 dev-scope
+  security alerts cleared. (#116–#122, #151, #153)
+
 ## Unreleased — soak metric: chunks-per-answer instrumentation (2026-06-05)
 
 ### Observability — K-program soak
