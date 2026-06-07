@@ -35,6 +35,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from core.utils.artifact_tags import parse_tag_object
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.daily_digest")
@@ -161,7 +162,7 @@ def _fetch_inbox_urgent(driver: Any, since_iso: str, limit: int = 20) -> list[di
         recent = graph_db.list_artifacts(driver, domain="inbox", since=since_iso, limit=limit) or []
         return [
             a for a in recent
-            if (a.get("tags") or {}).get("category") in ("urgent", "actionable")
+            if parse_tag_object(a.get("tags")).get("category") in ("urgent", "actionable")
         ]
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error("daily_digest._fetch_inbox", exc)
@@ -204,7 +205,7 @@ def _build_inbox_snapshot(artifacts: list[dict[str, Any]]) -> str:
         return "(no urgent/actionable inbox threads)"
     lines = []
     for a in artifacts:
-        tags = a.get("tags") or {}
+        tags = parse_tag_object(a.get("tags"))
         cat = tags.get("category", "?")
         subject = tags.get("subject") or a.get("filename") or "(no subject)"
         summary = tags.get("summary") or ""

@@ -27,6 +27,7 @@ This module lives in ``app/services/`` and must never be imported by
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -35,8 +36,14 @@ from typing import Any
 
 import config
 from app.db import neo4j as graph
-from app.deps import get_chroma, get_neo4j
+from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils.swallowed import log_swallowed_error
+
+# Dead-letter: an orphan chunk's content + metadata are persisted here BEFORE it
+# is purged from Chroma, so an unrecoverable orphan (Neo4j permanently down
+# through the retry budget) is operator-recoverable instead of silently lost.
+_DEADLETTER_KEY = "cerid:ingest_deadletter"
+_DEADLETTER_MAX = 1000  # bound the list; oldest trimmed
 
 logger = logging.getLogger("ai-companion.ingest_recovery")
 
@@ -360,7 +367,10 @@ async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
     if new_attempt_count < _MAX_RECOVERY_ATTEMPTS:
         return RecoveryAction.DEFERRED
 
-    # Budget exhausted — purge and raise a Sentry breadcrumb.
+    # Budget exhausted — dead-letter the content, raise a Sentry breadcrumb,
+    # then purge. Dead-lettering BEFORE the delete means the chunk's text +
+    # metadata survive even when Neo4j is permanently down (no silent data loss).
+    await _deadletter_orphan(orphan, new_attempt_count)
     _escalate_orphan(orphan, new_attempt_count)
     try:
         await asyncio.to_thread(collection.delete, ids=[orphan.chunk_id])
@@ -377,6 +387,41 @@ async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
             context={"chunk_id": orphan.chunk_id},
         )
     return RecoveryAction.PURGED
+
+
+async def _deadletter_orphan(orphan: OrphanRecord, attempt_count: int) -> None:
+    """Persist an unrecoverable orphan's content + metadata to Redis before it
+    is purged from Chroma. Best-effort: a Redis failure is logged (the Sentry
+    breadcrumb still records identifiers) but never blocks the purge.
+    """
+    rc = get_redis()
+    if rc is None:
+        logger.warning(
+            "ingest_recovery.deadletter_skipped chunk=%s (redis unavailable)",
+            orphan.chunk_id,
+        )
+        return
+    record = json.dumps({
+        "chunk_id": orphan.chunk_id,
+        "artifact_id": orphan.artifact_id,
+        "domain": orphan.domain,
+        "collection_name": orphan.collection_name,
+        "idempotency_key": orphan.idempotency_key,
+        "pending_at": orphan.pending_at,
+        "attempt_count": attempt_count,
+        "document": orphan.document,
+        "metadata": orphan.metadata,
+        "deadlettered_at": datetime.now(timezone.utc).isoformat(),
+    })
+    try:
+        await asyncio.to_thread(rc.rpush, _DEADLETTER_KEY, record)
+        await asyncio.to_thread(rc.ltrim, _DEADLETTER_KEY, -_DEADLETTER_MAX, -1)
+    except Exception as e:  # noqa: BLE001 — best-effort; purge proceeds regardless
+        log_swallowed_error(
+            "app.services.ingest_recovery.deadletter",
+            e,
+            context={"chunk_id": orphan.chunk_id},
+        )
 
 
 def _escalate_orphan(orphan: OrphanRecord, attempt_count: int) -> None:

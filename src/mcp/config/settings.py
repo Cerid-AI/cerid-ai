@@ -163,6 +163,10 @@ SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * 
 SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0")
 SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
 SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0")
+# Cap LLM summaries generated per community-refresh run so a first run on a
+# large corpus can't issue an unbounded GPU batch. skip-existing already bounds
+# steady state; this bounds the cold-start. 0 / unset = no cap.
+COMMUNITY_SUMMARY_MAX_PER_RUN = int(os.getenv("COMMUNITY_SUMMARY_MAX_PER_RUN", "200"))
 
 # Webhook-inbox drain: the receiver (POST /sdk/v1/ingest/webhook/{token}) returns
 # 202 and rpush'es normalized artifacts onto cerid:webhook_inbox:{source_id};

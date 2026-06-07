@@ -19,17 +19,14 @@ ingest paths, same artifact-id space.)
 """
 from __future__ import annotations
 
-import asyncio
-import ipaddress
 import logging
-import socket
 import time
 import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, AsyncIterator
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 import httpx
 
@@ -39,88 +36,14 @@ from core.ingest.sources.base import (
     SourceArtifactEvent,
     SourceConnector,
 )
+from core.ingest.sources.safe_fetch import guarded_get
 
 logger = logging.getLogger("ai-companion.connectors.rss")
 
 _USER_AGENT = "CeridAI-RSS/1.0"
-_FETCH_TIMEOUT = 10.0
 _MAX_FEED_BYTES = 8 * 1024 * 1024  # cap untrusted feed body (memory / DoS guard)
 _ATOM = "{http://www.w3.org/2005/Atom}"
 _CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}encoded"
-_MAX_REDIRECTS = 5
-
-
-def _is_blocked_ip(ip_str: str) -> bool:
-    """True if an IP must not be fetched (loopback / private / link-local /
-    reserved / multicast / unspecified — the SSRF target ranges)."""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return True  # unparseable → block
-    return bool(
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
-
-
-def _assert_fetchable(url: str) -> None:
-    """SSRF guard for an operator-supplied feed URL. Raises ValueError unless the
-    URL is http(s) AND every resolved A/AAAA address is public.
-
-    Resolving ALL records and rejecting if ANY is internal defeats split-horizon
-    / multi-record tricks. Callers must also disable auto-redirects and re-run
-    this guard on each redirect hop (a 3xx Location is attacker-controlled too).
-    Residual: a DNS-rebinding race between this resolve and the client's own
-    resolve is not closed here (full pinning needs a custom transport + SNI
-    handling); the no-auto-redirect + per-hop revalidation closes the common
-    direct + redirect SSRF paths.
-    """
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"blocked url scheme: {parsed.scheme!r}")
-    host = parsed.hostname
-    if not host:
-        raise ValueError("url has no host")
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
-        raise ValueError(f"dns resolution failed for {host!r}: {exc}") from exc
-    addrs = {str(info[4][0]) for info in infos}
-    if not addrs:
-        raise ValueError(f"no addresses resolved for {host!r}")
-    blocked = sorted(a for a in addrs if _is_blocked_ip(a))
-    if blocked:
-        raise ValueError(f"refusing internal/private address(es) {blocked} for {host!r} (SSRF guard)")
-
-
-async def _guarded_get(url: str, *, method: str = "GET") -> httpx.Response:
-    """SSRF-guarded fetch. Validates the target, disables auto-redirects, and
-    manually follows up to ``_MAX_REDIRECTS`` hops re-validating each Location.
-    Raises ValueError on a blocked target / redirect loop; httpx.HTTPError on
-    network failure. Returns the final (non-redirect) response.
-    """
-    current = url
-    async with httpx.AsyncClient(
-        timeout=_FETCH_TIMEOUT,
-        follow_redirects=False,  # validate every hop ourselves
-        headers={"User-Agent": _USER_AGENT},
-    ) as client:
-        for _hop in range(_MAX_REDIRECTS + 1):
-            await asyncio.to_thread(_assert_fetchable, current)  # blocking DNS off the loop
-            resp = await client.request(method, current)
-            location = resp.headers.get("location")
-            if resp.is_redirect and location:
-                current = urljoin(current, location)
-                continue
-            return resp
-    raise ValueError(f"too many redirects (> {_MAX_REDIRECTS})")
-
-
 def _text(el: ET.Element | None) -> str:
     return (el.text or "").strip() if el is not None else ""
 
@@ -244,7 +167,7 @@ class RssConnector(SourceConnector):
         # One real fetch to confirm the feed is reachable + parses. Use
         # a small read; we just need the root element.
         try:
-            resp = await _guarded_get(url)  # SSRF-guarded (scheme + non-internal + no auto-redirect)
+            resp = await guarded_get(url, user_agent=_USER_AGENT)  # SSRF-guarded (scheme + non-internal + no auto-redirect)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise ValueError(f"feed fetch failed: {exc}") from exc
@@ -292,7 +215,7 @@ class RssConnector(SourceConnector):
             return
 
         try:
-            resp = await _guarded_get(url)  # SSRF-guarded fetch
+            resp = await guarded_get(url, user_agent=_USER_AGENT)  # SSRF-guarded fetch
             resp.raise_for_status()
             body = resp.text[:_MAX_FEED_BYTES]
         except (httpx.HTTPError, ValueError) as exc:
@@ -352,10 +275,10 @@ class RssConnector(SourceConnector):
             return HealthStatus(ok=False, detail="source has no url")
 
         try:
-            resp = await _guarded_get(url, method="HEAD")  # SSRF-guarded probe
+            resp = await guarded_get(url, method="HEAD", user_agent=_USER_AGENT)  # SSRF-guarded probe
             if resp.status_code >= 400:
                 # Some servers don't support HEAD; retry with GET
-                resp = await _guarded_get(url)
+                resp = await guarded_get(url, user_agent=_USER_AGENT)
             if resp.status_code >= 400:
                 return HealthStatus(
                     ok=False,

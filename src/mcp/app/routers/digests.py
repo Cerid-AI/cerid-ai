@@ -14,13 +14,14 @@ by `core.agents.daily_digest.generate_daily_digest`.
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from core.utils.artifact_tags import parse_tag_object
 
 logger = logging.getLogger("ai-companion.digests")
 
@@ -77,29 +78,8 @@ def _list_digest_artifacts(driver: Any, limit: int = 30) -> list[dict[str, Any]]
         return []
 
 
-def _parse_tags(raw: Any) -> dict[str, Any]:
-    """Coerce an artifact's ``tags`` field to a dict.
-
-    ``list_artifacts`` returns ``tags`` as the raw JSON string stored in
-    Neo4j (canonically ``"[]"``, or a serialized object), not a parsed
-    structure — every other reader does ``json.loads(... or "[]")``. Digest
-    summaries read object-keyed metadata, so normalize string/list/None to a
-    dict and never let a non-dict shape raise (a serialized list parses to a
-    list → treated as no metadata).
-    """
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str) and raw:
-        try:
-            parsed = json.loads(raw)
-        except (ValueError, TypeError):
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
-
-
 def _artifact_to_summary(a: dict[str, Any]) -> DigestSummary:
-    tags = _parse_tags(a.get("tags"))
+    tags = parse_tag_object(a.get("tags"))
     return DigestSummary(
         digest_id=tags.get("digest_id", a.get("id", "")),
         generated_at=tags.get("generated_at", ""),
@@ -178,7 +158,7 @@ async def get_digest_by_date(date: str) -> DigestSummary | None:
     artifacts = _list_digest_artifacts(driver, limit=60)  # ~2-month window
     target_date = parsed.date().isoformat()
     for a in artifacts:
-        tags = _parse_tags(a.get("tags"))
+        tags = parse_tag_object(a.get("tags"))
         if tags.get("generated_at", "").startswith(target_date):
             return _artifact_to_summary(a)
     return None
