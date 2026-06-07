@@ -49,6 +49,21 @@ updates:
     commit-message:
       prefix: "deps(npm):"
 
+  # NPM — embeddable widget (separate package, own lockfile)
+  - package-ecosystem: npm
+    directory: /packages/widget
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      widget-npm-deps:
+        patterns: ["*"]
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps(npm):"
+
   # GitHub Actions
   - package-ecosystem: github-actions
     directory: /
