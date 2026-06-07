@@ -44,7 +44,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -492,7 +491,9 @@ def _reingest_artifact(
         }
         for i, rec in enumerate(chunk_records)
     ]
-    collection.add(
+    # upsert (not add): content-addressed chunk IDs make re-delivery of identical
+    # content overwrite the same rows instead of duplicating them (idempotent).
+    collection.upsert(
         ids=chunk_ids,
         documents=chunk_documents,
         metadatas=chunk_metadatas,
@@ -597,8 +598,14 @@ def ingest_content(
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
 
-    artifact_id = str(uuid.uuid4())
     content_hash = _content_hash(content)
+    # Content-addressed artifact_id → the chunker derives chunk IDs as
+    # ``{artifact_id}_chunk_{i}`` etc., so identical content re-delivered (e.g. a
+    # connector replays within the pending window before the Neo4j node commits)
+    # upserts the SAME rows instead of creating duplicates — idempotent ingest.
+    # content_hash is globally UNIQUE, so a content-addressed id is consistent
+    # with the one-artifact-per-content model the DB already enforces.
+    artifact_id = content_hash
 
     existing = _check_duplicate(content_hash, domain)
     if existing:
@@ -919,7 +926,9 @@ def ingest_content(
                 "timestamp": utcnow_iso(),
             }
 
-    collection.add(
+    # upsert (not add): content-addressed chunk IDs make re-delivery of identical
+    # content overwrite the same rows instead of duplicating them (idempotent).
+    collection.upsert(
         ids=chunk_ids,
         documents=chunk_documents,
         metadatas=chunk_metadatas,

@@ -40,8 +40,13 @@ def create_artifact(
         result = session.run(
             """
             MERGE (d:Domain {name: $domain})
-            CREATE (a:Artifact {
-                id: $artifact_id,
+            // MERGE (not CREATE) on the content-addressed id makes ingest
+            // idempotent + concurrency-safe: a racing/replayed ingest of
+            // identical content MATCHES the existing node (no a.id-UNIQUE
+            // violation, so no rollback that would delete the other ingest's
+            // upserted chunks). Neo4j locks on the id constraint during MERGE.
+            MERGE (a:Artifact {id: $artifact_id})
+            ON CREATE SET a += {
                 filename: $filename,
                 domain: $domain,
                 sub_category: $sub_category,
@@ -55,8 +60,12 @@ def create_artifact(
                 client_source: $client_source,
                 ingested_at: $ingested_at,
                 updated_at: $ingested_at
-            })
-            CREATE (a)-[:BELONGS_TO]->(d)
+            }
+            ON MATCH SET
+                a.updated_at = $ingested_at,
+                a.chunk_count = $chunk_count,
+                a.chunk_ids = $chunk_ids_json
+            MERGE (a)-[:BELONGS_TO]->(d)
             RETURN a.id AS id
             """,
             artifact_id=artifact_id,
