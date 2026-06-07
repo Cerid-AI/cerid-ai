@@ -524,29 +524,22 @@ def _reingest_artifact(
             "app.services.ingestion.sparse_index_reingest", e,
         )
 
-    # Compute quality_score for re-ingested content
-    _summary = base_meta.get("summary", "")
-    _tags = base_meta.get("tags_json", "[]")
-    _sub_cat = base_meta.get("sub_category", "")
-    _qscore = 0.0
-    if _summary and _summary != content[:200]:
-        _qscore += 0.20
-    try:
-        _tag_list = json.loads(_tags) if _tags else []
-    except (json.JSONDecodeError, TypeError):
-        _tag_list = []
-    if _tag_list:
-        _qscore += 0.15
-    if len(chunks) > 1:
-        _qscore += 0.15
-    if len(content) > 500:
-        _qscore += 0.15
-    if domain:
-        _qscore += 0.10
-    if _sub_cat and _sub_cat != config.DEFAULT_SUB_CATEGORY:
-        _qscore += 0.10
-    _qscore += 0.15  # dedup passed
-    quality_score = round(min(_qscore, 1.0), 2)
+    # Compute quality_score with the canonical 6-dimension scorer (same as the
+    # fresh-ingest path) so re-ingested artifacts aren't scored by a divergent
+    # simplified formula.
+    from core.utils.quality import compute_quality_score as _compute_quality
+
+    quality_score = _compute_quality(
+        summary=base_meta.get("summary", ""),
+        keywords=base_meta.get("keywords_json", "[]"),
+        tags=base_meta.get("tags_json", "[]"),
+        sub_category=base_meta.get("sub_category", ""),
+        default_sub_category=config.DEFAULT_SUB_CATEGORY,
+        ingested_at=base_meta.get("ingested_at"),
+        content=content,
+        domain=domain,
+        source_type=base_meta.get("source_type", "upload"),
+    )
 
     # Update Neo4j artifact (preserves relationships)
     try:
@@ -881,6 +874,51 @@ def ingest_content(
                 "parent_chunk_id": rec["parent_id"],
             }
             chunk_metadatas.append(md)
+
+    # Compute quality_score using the weighted 6-dimension formula (skip in fast
+    # paths where summary/keywords haven't been populated — curator re-scores
+    # later; neutral 0.5 lets retrieval work in the meantime).
+    if skip_quality:
+        quality_score = 0.5
+    else:
+        from core.utils.quality import compute_quality_score as _compute_quality
+
+        quality_score = _compute_quality(
+            summary=base_meta.get("summary", ""),
+            keywords=base_meta.get("keywords_json", "[]"),
+            tags=base_meta.get("tags_json", "[]"),
+            sub_category=base_meta.get("sub_category", ""),
+            default_sub_category=config.DEFAULT_SUB_CATEGORY,
+            ingested_at=base_meta.get("ingested_at"),
+            # Thread the in-scope signals the scorer weights but previously
+            # received as defaults: content drives the richness dimension (25%
+            # weight — collapsed to 0 without it), domain enables domain-adaptive
+            # scoring, source_type carries authority. retrieval_count stays 0
+            # (nothing has been retrieved at ingest time — correct).
+            content=content,
+            domain=domain,
+            source_type=base_meta.get("source_type", "upload"),
+        )
+        # Phase 0.5 #10 — per-source quality floor. Apply the drop gate BEFORE
+        # any chunk is staged so a drop is fully atomic (no Chroma/Neo4j write
+        # to roll back, no embedding cost incurred). No-op unless an operator
+        # set this source's quality_floor > 0 (scores clamp at QUALITY_MIN_FLOOR).
+        from app.services.quality_floors import should_drop
+
+        if should_drop(base_meta.get("source_id"), quality_score):
+            logger.info(
+                "Dropped below source quality floor: source=%s score=%.3f",
+                base_meta.get("source_id"), quality_score,
+            )
+            return {
+                "status": "dropped",
+                "reason": "below_source_quality_floor",
+                "quality_score": quality_score,
+                "domain": domain,
+                "chunks": 0,
+                "timestamp": utcnow_iso(),
+            }
+
     collection.add(
         ids=chunk_ids,
         documents=chunk_documents,
@@ -923,30 +961,8 @@ def ingest_content(
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error("app.services.ingestion.sparse_index", e)
 
-    # Compute quality_score using weighted 4-dimension formula (skip in fast
-    # paths where summary/keywords haven't been populated — curator re-scores
-    # later; neutral 0.5 lets retrieval work in the meantime).
-    if skip_quality:
-        quality_score = 0.5
-    else:
-        from core.utils.quality import compute_quality_score as _compute_quality
-
-        quality_score = _compute_quality(
-            summary=base_meta.get("summary", ""),
-            keywords=base_meta.get("keywords_json", "[]"),
-            tags=base_meta.get("tags_json", "[]"),
-            sub_category=base_meta.get("sub_category", ""),
-            default_sub_category=config.DEFAULT_SUB_CATEGORY,
-            ingested_at=base_meta.get("ingested_at"),
-            # Thread the in-scope signals the scorer weights but previously
-            # received as defaults: content drives the richness dimension (25%
-            # weight — collapsed to 0 without it), domain enables domain-adaptive
-            # scoring, source_type carries authority. retrieval_count stays 0
-            # (nothing has been retrieved at ingest time — correct).
-            content=content,
-            domain=domain,
-            source_type=base_meta.get("source_type", "upload"),
-        )
+    # quality_score was computed + the per-source floor gate applied above,
+    # before chunk staging (Phase 0.5 #10), so the drop stays atomic.
 
     artifact_created = False
     try:

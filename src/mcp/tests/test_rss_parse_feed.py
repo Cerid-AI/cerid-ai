@@ -96,7 +96,7 @@ def test_doctype_entity_feed_is_refused() -> None:
 #     are resolved offline, so these are deterministic without real DNS. ---
 import pytest  # noqa: E402
 
-from core.ingest.sources.connectors.rss import _assert_fetchable, _is_blocked_ip  # noqa: E402
+from core.ingest.sources.safe_fetch import assert_fetchable, is_blocked_ip  # noqa: E402
 
 
 def test_ssrf_blocks_internal_targets() -> None:
@@ -109,24 +109,24 @@ def test_ssrf_blocks_internal_targets() -> None:
         "http://[::1]/x",
     ):
         with pytest.raises(ValueError):
-            _assert_fetchable(bad)
+            assert_fetchable(bad)
 
 
 def test_ssrf_blocks_non_http_schemes() -> None:
     for bad in ("file:///etc/passwd", "ftp://host/x", "gopher://host/x"):
         with pytest.raises(ValueError):
-            _assert_fetchable(bad)
+            assert_fetchable(bad)
 
 
 def test_ssrf_allows_public_ip_literals() -> None:
-    _assert_fetchable("http://8.8.8.8/feed.xml")   # public → must not raise
-    _assert_fetchable("https://1.1.1.1/feed")
+    assert_fetchable("http://8.8.8.8/feed.xml")   # public → must not raise
+    assert_fetchable("https://1.1.1.1/feed")
 
 
 def test_is_blocked_ip_ranges() -> None:
-    assert _is_blocked_ip("127.0.0.1")
-    assert _is_blocked_ip("169.254.169.254")
-    assert _is_blocked_ip("10.1.2.3")
-    assert _is_blocked_ip("::1")
-    assert _is_blocked_ip("not-an-ip")  # unparseable → blocked
-    assert not _is_blocked_ip("8.8.8.8")
+    assert is_blocked_ip("127.0.0.1")
+    assert is_blocked_ip("169.254.169.254")
+    assert is_blocked_ip("10.1.2.3")
+    assert is_blocked_ip("::1")
+    assert is_blocked_ip("not-an-ip")  # unparseable → blocked
+    assert not is_blocked_ip("8.8.8.8")
