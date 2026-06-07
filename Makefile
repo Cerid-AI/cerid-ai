@@ -1,6 +1,6 @@
 .PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
-       test test-all test-eval ci-local smoke slo help
+       test test-all test-eval ci-local drift-check prepush smoke slo help
 
 # -- Python deps --
 lock-python:
@@ -72,6 +72,40 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	@echo "[ci-local] supply-chain guard"
 	bash scripts/guard-no-ai-commits.sh
 	@echo "[ci-local] ✓ all local checks passed"
+
+drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job runs (NOT in ci-local)
+	@echo "[drift] env-example"
+	.venv/bin/python scripts/gen_env_example.py --check
+	@echo "[drift] router-registry"
+	.venv/bin/python scripts/gen_router_registry.py --check
+	@echo "[drift] sdk-openapi"
+	.venv/bin/python scripts/gen_sdk_openapi.py --check
+	@echo "[drift] sync-manifest"
+	@test -f scripts/lint-sync-manifest.py \
+	  && .venv/bin/python scripts/lint-sync-manifest.py \
+	  || echo "  (internal-only gate — not present in this checkout, skipped)"
+	@echo "[drift] silent-catch"
+	.venv/bin/python scripts/lint-no-silent-catch.py src/mcp/
+	@echo "[drift] no-legacy-neo4j-tree"
+	.venv/bin/python scripts/lint-no-legacy-neo4j-tree.py
+	@echo "[drift] import-star-without-all"
+	.venv/bin/python scripts/lint-import-star-without-all.py
+	@echo "[drift] no-module-getenv-mutable"
+	.venv/bin/python scripts/lint-no-module-getenv-mutable.py
+	@echo "[drift] docker-healthcheck-localhost"
+	.venv/bin/python scripts/lint-docker-healthcheck-localhost.py
+	@echo "[drift] web-no-crypto-randomuuid"
+	.venv/bin/python scripts/lint-web-no-crypto-randomuuid.py
+	@echo "[drift] dts-basename-collision"
+	.venv/bin/python scripts/lint-dts-basename-collision.py
+	@echo "[drift] product-story"
+	.venv/bin/python scripts/lint-product-story.py
+	@echo "[drift] mcp-descriptions"
+	.venv/bin/python scripts/lint-mcp-descriptions.py
+	@echo "[drift] ✓ drift + lint gates passed"
+
+prepush: ci-local drift-check ## FULL pre-push parity with remote CI (run before every push)
+	@echo "[prepush] ✓ complete — safe to push"
 
 # -- Load testing --
 smoke:
