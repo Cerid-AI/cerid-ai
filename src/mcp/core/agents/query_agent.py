@@ -2132,7 +2132,7 @@ async def _agent_query_impl(
 
     # GA P0.5 A2 — memory surface. For personal-context queries, recall episodic
     # memories and merge them so they participate in rerank/assembly. Behind the
-    # surface-bias flag (default OFF) pending the eval-gate flip.
+    # surface-bias flag ENABLE_SURFACE_BIASED_RETRIEVAL (default ON).
     if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "personal_context":
         with timer.step("memory_surface"):
             _mem = await _recall_memory_surface(
@@ -2144,7 +2144,8 @@ async def _agent_query_impl(
 
     # GA P0.5 C2 — wiki surface. For "what is X" queries, prepend the compiled
     # wiki/concept page for the matched entity. Behind the surface-bias flag
-    # (default OFF) and a no-op until app startup registers a wiki fetcher.
+    # ENABLE_SURFACE_BIASED_RETRIEVAL (default ON) — a no-op until app startup
+    # registers a wiki fetcher.
     if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "compiled_summary":
         _hint = _surface_route.get("matched_entity_hint")
         if _hint:

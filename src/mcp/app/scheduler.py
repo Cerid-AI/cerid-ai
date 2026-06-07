@@ -821,7 +821,8 @@ async def _run_community_refresh() -> None:
             _log_execution("community_refresh", "skipped", time.time() - start, "neo4j unavailable")
             return
         det = await asyncio.to_thread(detect_communities, driver)
-        summ = await summarize_communities(driver, get_chroma())
+        _summary_cap = int(getattr(config, "COMMUNITY_SUMMARY_MAX_PER_RUN", 200)) or None
+        summ = await summarize_communities(driver, get_chroma(), max_communities=_summary_cap)
         duration = time.time() - start
         detail = (
             f"edges={det.get('edges', det.get('skipped', '?'))} "
