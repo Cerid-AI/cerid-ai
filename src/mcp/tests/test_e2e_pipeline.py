@@ -104,7 +104,7 @@ class TestIngestionPipeline:
         assert result["chunks"] > 0
         assert result["relationships_created"] == 2
         assert "artifact_id" in result and "timestamp" in result
-        collection.add.assert_called_once()
+        collection.upsert.assert_called_once()
         g.create_artifact.assert_called_once()
 
     @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
@@ -125,7 +125,7 @@ class TestIngestionPipeline:
         assert result["status"] == "duplicate"
         assert result["artifact_id"] == "existing-id"
         assert result["duplicate_of"] == "adr-001.md"
-        collection.add.assert_not_called()
+        collection.upsert.assert_not_called()
 
     @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
@@ -167,7 +167,7 @@ class TestIngestionPipeline:
 
         assert result["status"] == "success"
         assert result["chunks"] > 1
-        add_call = collection.add.call_args
+        add_call = collection.upsert.call_args
         ids = add_call.kwargs.get("ids") or add_call.args[0]
         assert len(ids) == result["chunks"]
 
@@ -177,7 +177,7 @@ class TestIngestionPipeline:
     @patch("app.services.ingestion.get_chroma")
     def test_ingest_rollback_on_chroma_failure(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, _mock_monitor_redis):
         client, collection = _chroma_mocks()
-        collection.add.side_effect = RuntimeError("ChromaDB connection timeout")
+        collection.upsert.side_effect = RuntimeError("ChromaDB connection timeout")
         mock_chroma_fn.return_value = client
         driver, session = _neo4j_mocks()
         mock_neo4j_fn.return_value = driver

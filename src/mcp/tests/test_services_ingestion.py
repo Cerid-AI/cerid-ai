@@ -268,8 +268,8 @@ class TestIngestChromaDB:
             ingest_content("a " * 100, domain="coding")
 
         # Verify collection.add was called with chunk data
-        collection.add.assert_called_once()
-        call_kwargs = collection.add.call_args
+        collection.upsert.assert_called_once()
+        call_kwargs = collection.upsert.call_args
         assert "ids" in call_kwargs.kwargs or len(call_kwargs.args) > 0
 
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
