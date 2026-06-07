@@ -54,6 +54,25 @@ class SourceKindMeta(BaseModel):
     kind: str
     family: str
     tier: str  # "core" | "pro"
+    availability: str = "coming_soon"  # "available" | "oauth" | "coming_soon"
+
+
+def _kind_availability(kind: str, oauth_kinds: set[str]) -> str:
+    """Capability flag for a source kind, so the wizard can gate kinds that
+    have no working ingestion path (rather than letting POST /sources 501).
+
+    - ``available``   — a SourceConnector is registered, or the webhook special-case.
+    - ``oauth``       — connectable via the /connectors OAuth flow (Gmail, etc.).
+    - ``coming_soon`` — declared in SOURCE_KINDS but not yet implemented.
+    """
+    import core.ingest.sources.connectors as _conns  # noqa: F401 — registers connectors
+    from core.ingest.sources.registry import get_connector
+
+    if kind == "webhook" or get_connector(kind) is not None:  # type: ignore[arg-type]
+        return "available"
+    if kind in oauth_kinds:
+        return "oauth"
+    return "coming_soon"
 
 
 class CreateSourceRequest(BaseModel):
@@ -140,8 +159,16 @@ async def list_source_kinds():
     """Enumerate the 22 supported kinds with family + tier metadata.
     Drives the F1 gallery and the F2 radial menu's family grouping.
     """
+    from app.routers.connectors import oauth_connector_kinds
+
+    oauth_kinds = oauth_connector_kinds()
     return [
-        SourceKindMeta(kind=k, family=KIND_FAMILY[k], tier=KIND_TIER[k])
+        SourceKindMeta(
+            kind=k,
+            family=KIND_FAMILY[k],
+            tier=KIND_TIER[k],
+            availability=_kind_availability(k, oauth_kinds),
+        )
         for k in SOURCE_KINDS
     ]
 

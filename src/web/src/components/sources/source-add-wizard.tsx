@@ -173,17 +173,40 @@ function PickStep({
       {kinds.map((k) => {
         const desc = descriptorFor(k.kind)
         const Icon = desc.icon
+        const availability = k.availability ?? "available"
+        const selectable = availability === "available"
+        const prefix =
+          availability === "coming_soon"
+            ? "Soon · "
+            : availability === "oauth"
+              ? "Settings · "
+              : k.tier === "pro"
+                ? "Pro · "
+                : ""
         return (
           <button
             key={k.kind}
             type="button"
             onClick={() => onPick(k.kind)}
-            className="cerid-press flex flex-col items-start gap-1 rounded-lg border border-border/60 bg-card/40 px-3 py-2 text-left hover:border-border hover:bg-card/70"
+            disabled={!selectable}
+            className={cn(
+              "flex flex-col items-start gap-1 rounded-lg border border-border/60 bg-card/40 px-3 py-2 text-left",
+              selectable
+                ? "cerid-press hover:border-border hover:bg-card/70"
+                : "cursor-not-allowed opacity-55",
+            )}
+            aria-label={
+              selectable
+                ? `Add ${desc.label}`
+                : availability === "oauth"
+                  ? `${desc.label} — connect in Settings`
+                  : `${desc.label} — coming soon`
+            }
           >
             <Icon className="h-4 w-4 text-foreground/70" aria-hidden="true" />
             <span className="text-sm font-medium">{desc.label}</span>
             <span className="text-label-xs text-muted-foreground">
-              {k.tier === "pro" ? "Pro · " : ""}
+              {prefix}
               {desc.blurb}
             </span>
           </button>
