@@ -8,10 +8,17 @@
 
 const API_BASE = ""
 
+export type SourceAvailability = "available" | "oauth" | "coming_soon"
+
 export interface SourceKindMeta {
   kind: string
   family: string
   tier: "core" | "pro"
+  // Whether this kind is connectable via the add-source wizard. "available" →
+  // has a SourceConnector (or webhook); "oauth" → connect via Settings →
+  // Connectors; "coming_soon" → declared but not yet implemented. Backend
+  // default for older payloads is "coming_soon".
+  availability?: SourceAvailability
 }
 
 export interface SourceRecord {

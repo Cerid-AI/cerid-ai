@@ -78,7 +78,8 @@ class GraphEdge(BaseModel):
     target: str
     type: str = "mentions"        # mentions / works_on / discussed_with / contradicts / temporal
     weight: float = 1.0           # log(co_mentions+1) normalized 0..1
-    attestation: str = "attested" # attested / inferred
+    attestation: str = "inferred" # attested / inferred — default honest: an edge
+    # without an explicit attestation is inferred (auto-extracted), not attested.
     contradiction: bool = False
 
 
@@ -222,7 +223,7 @@ async def _query_neighborhood(
                 to:   endNode(r).canonical_id,
                 type: type(r),
                 weight: coalesce(r.weight, 1),
-                attestation: coalesce(r.attestation, 'attested'),
+                attestation: coalesce(r.attestation, 'inferred'),
                 contradiction: coalesce(r.contradiction, false)
             }}) AS edges_for_node
         RETURN
@@ -280,7 +281,7 @@ async def _query_neighborhood(
                     target=tgt,
                     type=etype,
                     weight=float(e.get("weight") or 1),
-                    attestation=e.get("attestation") or "attested",
+                    attestation=e.get("attestation") or "inferred",
                     contradiction=bool(e.get("contradiction")),
                 )
 
