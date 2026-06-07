@@ -17,6 +17,8 @@ import { Bot, Plus, Trash2, ShieldX, Loader2, AlertTriangle, X } from "lucide-re
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PaneError } from "@/components/ui/pane-error"
 import { fetchSettings } from "@/lib/api/settings"
 import {
   listCustomAgents,
@@ -35,12 +37,14 @@ export default function CustomAgentsPane() {
   const [agents, setAgents] = useState<CustomAgentDefinition[]>([])
   const [templates, setTemplates] = useState<AgentTemplate[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [actionPending, setActionPending] = useState<string | null>(null)
 
   const reload = async () => {
     setLoading(true)
+    setLoadError(null)
     setError(null)
     try {
       const [agentsRes, templatesRes] = await Promise.all([
@@ -51,7 +55,7 @@ export default function CustomAgentsPane() {
       setTemplates(templatesRes.templates)
     } catch (err) {
       const msg = err instanceof Error ? err.message : "load failed"
-      setError(msg)
+      setLoadError(msg)
       logSwallowedError(err, "custom-agents.reload")
     } finally {
       setLoading(false)
@@ -149,9 +153,17 @@ export default function CustomAgentsPane() {
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading custom agents…
+          <div className="grid gap-2" aria-label="Loading custom agents" role="status">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-lg" />
+            ))}
           </div>
+        ) : loadError ? (
+          <PaneError
+            title="Failed to load custom agents"
+            description="Check that the backend is running, then retry."
+            onRetry={() => void reload()}
+          />
         ) : agents.length === 0 ? (
           <EmptyState
             templateCount={templates.length}

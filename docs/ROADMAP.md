@@ -9,8 +9,8 @@
 > consolidation (4-pane), Apple ecosystem baseline, meeting-capture runtime, cloud
 > connectors, Swift CLI helpers, metamorphic verification, Custom Smart RAG, AI inbox
 > triage, daily digest, advanced analytics, Timeline + Tour + Wiki mini-viz, the Knowledge
-> Architecture program, Pro billing/checkout + license activation. 60 MCP tools, 5,573
-> Python tests, 1,347 frontend cases, 113 preservation tests. Full ledger:
+> Architecture program, Pro billing/checkout + license activation. 60 MCP tools, 5,910
+> Python tests, 1,411 frontend cases, 113 preservation tests. Full ledger:
 > [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md).
 > **Shipped releases:** [CHANGELOG.md](../CHANGELOG.md) and the
 > [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
@@ -101,7 +101,7 @@ below shipped and are canary-validated; the "Cerid as a backend" guide is publis
 - A complete, documented **"Cerid as a backend" SDK surface** (most endpoints already
   ship; closes the ingest-metadata gap) plus an integration guide, validated by a
   reference external client running end-to-end with no compatibility shims. See
-  [`docs/plans/2026-06-improve-cerid-support-for-external-clients.md`](plans/2026-06-improve-cerid-support-for-external-clients.md).
+  [`docs/SDK_GUIDE.md`](SDK_GUIDE.md).
 
 ### P0 — Knowledge-architecture depth & retrieval quality  _(added 2026-06-02)_
 Make the differentiator real and measured before GA, not just described.

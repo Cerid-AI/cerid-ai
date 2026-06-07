@@ -88,7 +88,7 @@ def _parse_feed(
         )
         return [], cursor
     try:
-        root = ET.fromstring(xml_text)
+        root = ET.fromstring(xml_text)  # nosec B314 — XXE/entity guarded above (DOCTYPE/ENTITY feeds refused)
     except ET.ParseError:
         return [], cursor
 
