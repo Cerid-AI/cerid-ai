@@ -15,6 +15,20 @@ import "./index.css"
 // can mount before the SDK chunk loads.
 void initSentry()
 
+// Stale-chunk recovery. Lazy-loaded panes (Sources/Subjects/Settings) are
+// code-split; after a deploy the chunk hashes change, so a tab still running
+// the old app shell will 404 when it lazily imports a now-missing chunk and the
+// pane fails to load. Vite fires `vite:preloadError` on that failure — reload
+// once to pull the fresh index + chunk hashes. Guarded by a 10s timestamp so a
+// genuinely-broken chunk (not merely stale) can't cause a reload loop.
+window.addEventListener("vite:preloadError", () => {
+  const KEY = "cerid:last-chunk-reload"
+  const last = Number(sessionStorage.getItem(KEY) ?? 0)
+  if (Date.now() - last < 10_000) return
+  sessionStorage.setItem(KEY, String(Date.now()))
+  window.location.reload()
+})
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

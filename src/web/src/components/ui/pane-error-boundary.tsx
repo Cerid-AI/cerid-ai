@@ -77,6 +77,16 @@ export class PaneErrorBoundary extends Component<Props, State> {
         </Card>
       )
     }
-    return <div key={this.state.retryKey}>{this.props.children}</div>
+    // h-full propagates the app-shell's bounded height (the <main> in
+    // app-layout is overflow-hidden) down to each pane, so panes that rely
+    // on `h-full` + an inner scroll container (e.g. SettingsPane's ScrollArea)
+    // are constrained to the viewport and scroll instead of overflowing.
+    // Without it this wrapper grows to content height and breaks scrolling
+    // on any pane taller than the viewport.
+    return (
+      <div key={this.state.retryKey} className="h-full min-h-0">
+        {this.props.children}
+      </div>
+    )
   }
 }

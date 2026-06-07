@@ -19,7 +19,14 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="focus-visible:ring-ring/50 size-full overflow-x-hidden rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1"
+        // Radix renders the viewport content in a wrapper div forced to
+        // `display:table; min-width:100%` (for scroll measurement). With
+        // `overflow-x-hidden` that table still grows to the intrinsic width
+        // of non-wrapping content (e.g. a long conversation title or memory
+        // summary), pushing every card past the panel even though the title
+        // has `truncate`/`scroll-title`. Override the wrapper to a block so it
+        // respects the viewport width and the children truncate as intended.
+        className="focus-visible:ring-ring/50 size-full overflow-x-hidden rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1 [&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

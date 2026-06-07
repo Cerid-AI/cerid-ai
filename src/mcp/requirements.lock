@@ -702,9 +702,9 @@ fastapi==0.136.1 \
     # via
     #   -r requirements.txt
     #   sentry-sdk
-filelock==3.29.1 \
-    --hash=sha256:85199dfd706869641b72b2e8955d5416a4b2b7dc4b0e8e6d97b4cc1299a6983b \
-    --hash=sha256:d97e6b1b9757569626c58caa07dc4beb1613f4a2938b1e8cc81afca398906c9e
+filelock==3.29.0 \
+    --hash=sha256:69974355e960702e789734cb4871f884ea6fe50bd8404051a3530bc07809cf90 \
+    --hash=sha256:96f5f6344709aa1572bbf631c640e4ebeeb519e08da902c39a001882f30ac258
     # via
     #   huggingface-hub
     #   pyannote-pipeline
@@ -915,9 +915,9 @@ googleapis-common-protos==1.75.0 \
     --hash=sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd \
     --hash=sha256:961ed60399c457ceb0ee8f285a84c870aabc9c6a832b9d37bb281b5bebde43ed
     # via opentelemetry-exporter-otlp-proto-grpc
-graphdatascience==1.22 \
-    --hash=sha256:00bfad65dcaccd3d40f1f4e23661125dc7400ecffdb5a04c34512fc9a287f5a9 \
-    --hash=sha256:e2dfbd206daa61c39d00653d420edc63f409674d1449d6d0253794e1807b7604
+graphdatascience==1.21 \
+    --hash=sha256:4813c3fa6eef5d469a7d344ac37b8992461ed067ee30b6b11bd17c3d5c471592 \
+    --hash=sha256:5a9f16be010eee69d027c5b1ea76bba7029fad8426646c603f137cc9841e3934
     # via -r requirements.txt
 greenlet==3.5.1 \
     --hash=sha256:001775efe7b8e758861294c7a27c28af87f3f3f1c20468a2bc618c45b346c061 \
@@ -1158,9 +1158,9 @@ httpx-sse==0.4.3 \
     --hash=sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc \
     --hash=sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d
     # via mcp
-huggingface-hub==1.18.0 \
-    --hash=sha256:729be4a976fb706dcc02d176bcda8a3f32bdf21a294e8f4b3dda6fbcbc9c1ab1 \
-    --hash=sha256:f0c5ecd1ef8c6a60f86f61ee278f2c1570ba9e279c9f54de9094210723b3613b
+huggingface-hub==1.17.0 \
+    --hash=sha256:3b8156d23118e87f6a587648bfbc04f04a12a757ccb4ed298b35c4ae638bf24c \
+    --hash=sha256:fad842b6763ef70ebc3919665b1b9273645203185400a7d6c5eddc2323cc3435
     # via
     #   pyannote-audio
     #   speechbrain
@@ -1194,9 +1194,9 @@ joblib==1.5.3 \
     # via
     #   scikit-learn
     #   speechbrain
-json-repair==0.60.1 \
-    --hash=sha256:841661cdd2df507c9a4e189097f38ca6bc372e06d4b4e36d72e590f68176c290 \
-    --hash=sha256:ba6ff974f2a8bef2f7768144a7f03f870a816443f03da27a49cdd0ec31a78049
+json-repair==0.59.10 \
+    --hash=sha256:2e4b85537c752d8a513ea28fdad891e5ede32c83de745366b97f648b8c34ede7 \
+    --hash=sha256:5468fa3eaadcc9b4a5646776bc4176e2fe5f374b5848a15f468cce3b60e3db0e
     # via neo4j-graphrag
 jsonpatch==1.33 \
     --hash=sha256:0ae28c0cd062bbd8b8ecc26d7d164fbbea9652a1a3693f3b956c1eae5145dade \
@@ -1216,9 +1216,8 @@ jsonschema-specifications==2025.9.1 \
     --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe \
     --hash=sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d
     # via jsonschema
-julius==0.2.8 \
-    --hash=sha256:6891235cbc355e629d839f87489bff8ca46e57a0e7cc35abb909c7a2aa538c25 \
-    --hash=sha256:d691e651200930affea4f6c849c26e95fec846087281ae3d1a7757eac90253d5
+julius==0.2.7 \
+    --hash=sha256:3c0f5f5306d7d6016fcc95196b274cae6f07e2c9596eed314e4e7641554fbb08
     # via torch-audiomentations
 kiwisolver==1.5.0 \
     --hash=sha256:012b1eb16e28718fa782b5e61dc6f2da1f0792ca73bd05d54de6cb9561665fc9 \
@@ -1343,9 +1342,9 @@ kubernetes==36.0.2 \
     --hash=sha256:03551fcb49cae1f708f63624041e37403545b7aaed10cbf54e2b01a37a5438e3 \
     --hash=sha256:faf9b5241b58de0c4a5069f2a0ffc8ac06fece7215156cd3d3ba081a78a858b6
     # via chromadb
-langchain-core==1.4.1 \
-    --hash=sha256:8234eb8cd3200f690e278159b7d7cee5976381ec90ece7b48db8d8e8850ab37d \
-    --hash=sha256:e5dee06e70c123cb98cb0158e4416efac1e386ff47a484901ccf88555e28eec6
+langchain-core==1.4.0 \
+    --hash=sha256:1dc341eed802ed9c117c0df3923c991e5e9e226571e5725c194eeb5bd93d1a7f \
+    --hash=sha256:23cbbdb46e38ddd1dd5247e6167e96013eae74bea4c5949c550809970a9e565c
     # via
     #   -r requirements.txt
     #   langchain-text-splitters
@@ -1381,9 +1380,9 @@ langgraph-sdk==0.4.2 \
     --hash=sha256:75fa5096c1177ce39c847096a8fe3745ffd480ddb412995f836e9f5f884c43dd \
     --hash=sha256:b88f0f5f6328ac0680d6790614a905b2bcfa257f2276dba4e38f0e86db0aa738
     # via langgraph
-langsmith==0.8.9 \
-    --hash=sha256:c9519cabc75568d088df045710d1b86eae9780c91054528b2aa7e6cb1fc80c52 \
-    --hash=sha256:f16e37fcd5a8a2d4db30eae0e399a866a65ce5cc86218825c59409ed57a3bf53
+langsmith==0.8.8 \
+    --hash=sha256:9d00e54f54d833c1914003527ff03ad0364741034330da72f0adbeaba852b6cf \
+    --hash=sha256:9d60d724c0d187c036e184b3ffdf9fa5c6822aa0bb88144a5fb898e79be645af
     # via
     #   -r requirements.txt
     #   langchain-core
@@ -1981,9 +1980,9 @@ multimethod==2.0.2 \
     --hash=sha256:4f753e9ef0eb08f25037fb7d04f3de22547716c4af257a978e1c4d660edab8f4 \
     --hash=sha256:e6e61347765ec0c154aef827bd6952a685a6693eb9d927fb530a6c364c77939e
     # via graphdatascience
-narwhals==2.22.1 \
-    --hash=sha256:60567d774edf77db53906f89d9fbd164e66e56d66d388e1e6990f17ac33cfb53 \
-    --hash=sha256:d62920805a0a43b7ff8b54b0c0d3142d796f8a9301836ada37e573d6a33cbcd9
+narwhals==2.22.0 \
+    --hash=sha256:1421797ede01789cc1537619dbc3f36f840737240f748fdb24a60a0225fc80be \
+    --hash=sha256:6486282bb7e4b4ab55963efbd8be1451b764cc4874b74d1fd625eba9dc60b86f
     # via scikit-learn
 neo4j==6.2.0 \
     --hash=sha256:b87abdd13a5cc2e3bd51026926c2f20ac38fa3febe98c340520dce19e97388d0 \
@@ -3194,9 +3193,9 @@ pyparsing==3.3.2 \
     # via
     #   matplotlib
     #   oletools
-pypdf==6.13.0 \
-    --hash=sha256:558683ec9daf6b91c280c322c84c32f5cc216afd3eaa3a37de5ae88ae0c3b787 \
-    --hash=sha256:de1294ae49d6956edb4e5c41527fb9e8716ddd2b120f2185c68aab784d4ffe60
+pypdf==6.12.2 \
+    --hash=sha256:111669eb6680c04495ae0c113a1476e3bf93a95761d23c7406b591c80a6490b1 \
+    --hash=sha256:67b2699357a1f3f4c945940ea80826349ee507c9e2577724a14b4941982c104d
     # via neo4j-graphrag
 pypdfium2==5.9.0 \
     --hash=sha256:040f5513b808db705d4878f57e2bf0b9dc6e6a0ad8d765c36cf62febf3933b28 \
@@ -3322,9 +3321,9 @@ python-dotenv==1.2.2 \
     # via
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.32 \
-    --hash=sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e \
-    --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23
+python-multipart==0.0.30 \
+    --hash=sha256:0edfe0475c1f46ddd3ff7785a626f6118af32bdcf359bb21260367313bb32118 \
+    --hash=sha256:830964def8c90607ac5daa00514e3987815865713ade8d20febc9177ac0c3c5b
     # via
     #   -r requirements.txt
     #   mcp
@@ -3492,9 +3491,9 @@ quotequail==0.5.0 \
 red-black-tree-mod==1.22 \
     --hash=sha256:38e3652903a2bf96379c27c2082ca0b7b905158662dd7ef0c97f4fd93a9aa908
     # via extract-msg
-redis==7.4.1 \
-    --hash=sha256:1a1df5067062cf7cbe677994e391f8ee0840f499d370f1a71266e0dd3aa9308e \
-    --hash=sha256:1fa4647af1c5e93a2c685aa248ee44cce092691146d41390518dabe9a99839b0
+redis==7.4.0 \
+    --hash=sha256:64a6ea7bf567ad43c964d2c30d82853f8df927c5c9017766c55a1d1ed95d18ad \
+    --hash=sha256:a9c74a5c893a5ef8455a5adb793a31bb70feb821c86eccb62eebef5a19c429ec
     # via
     #   -r requirements.txt
     #   rq
@@ -3781,9 +3780,9 @@ rpds-py==2026.5.1 \
     # via
     #   jsonschema
     #   referencing
-rq==2.9.1 \
-    --hash=sha256:092624e1bc3b3ca9d2ce7ff4049bd7667f772f84695c9dc66a7a662f67f1939a \
-    --hash=sha256:2ae30c452bd1e8e26b4a213340d4b6e3957cae23176a92f9132c661d73d0c179
+rq==2.9.0 \
+    --hash=sha256:665b9ad34e36ea15913e60d2a32e1775fef1e9aff907bcae297d6f70dccffed2 \
+    --hash=sha256:db5dfc1e1fe80ef977fd557d4305107dcf99a80b33d381c9a06e8a2bb11730e5
     # via -r requirements.txt
 rtfde==0.1.2.2 \
     --hash=sha256:2f0cd6ecd644071e39452e6fc4f4a1435453af0ec7c90ea86fb4fc96010c7f1b \
@@ -4053,16 +4052,15 @@ sortedcontainers==2.4.0 \
     --hash=sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88 \
     --hash=sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0
     # via pyannote-core
-soundfile==0.14.0 \
-    --hash=sha256:0a6ae43c50c71b4e020cc55382925cb89451c1ed1a0c3d0f5d802da269226849 \
-    --hash=sha256:19be05428da76ed61a4cad29b8e4bcf43a3e5c100089d2ec81dc961eed1b0dd4 \
-    --hash=sha256:1e38bac1853412871318e82a1ba69a8be677619b56025bbfcccdb41b6cafe82d \
-    --hash=sha256:299491d3499460fb1b74bb4bd78b57ffc2d243a5fafa7b6ec1b264875c78453e \
-    --hash=sha256:8ba81ae3a89fd5ab3bef8a8eb481fbbe794e806309675a89b4df48b8d31908a8 \
-    --hash=sha256:ba1c1a2d618bca5c406647c83b89f07cc8810fa506a50622a6993ba130c1de11 \
-    --hash=sha256:d828d35a059626da52f1415b5faee610aeab393319cb3fc4a9aef47b619fc14c \
-    --hash=sha256:e090704718e124e7c844695236f1fce8d18a5e761eaf7c82dfcd124620805f98 \
-    --hash=sha256:e85724a90bc99a6e8062c0b4ddf725f53b2a3b70afd4da875e9d2cfc4e92f377
+soundfile==0.13.1 \
+    --hash=sha256:03267c4e493315294834a0870f31dbb3b28a95561b80b134f0bd3cf2d5f0e618 \
+    --hash=sha256:1e70a05a0626524a69e9f0f4dd2ec174b4e9567f4d8b6c11d38b5c289be36ee9 \
+    --hash=sha256:743f12c12c4054921e15736c6be09ac26b3b3d603aef6fd69f9dde68748f2593 \
+    --hash=sha256:82dc664d19831933fe59adad199bf3945ad06d84bc111a5b4c0d3089a5b9ec33 \
+    --hash=sha256:9c9e855f5a4d06ce4213f31918653ab7de0c5a8d8107cd2427e44b42df547deb \
+    --hash=sha256:a23c717560da2cf4c7b5ae1142514e0fd82d6bbd9dfc93a50423447142f2c445 \
+    --hash=sha256:b2c68dab1e30297317080a5b43df57e302584c49e2942defdde0acccc53f0e5b \
+    --hash=sha256:c734564fab7c5ddf8e9be5bf70bab68042cd17e9c214c06e365e20d64f9a69d5
     # via
     #   pyannote-audio
     #   speechbrain
@@ -4346,9 +4344,9 @@ torchmetrics==1.9.0 \
     #   lightning
     #   pyannote-audio
     #   pytorch-lightning
-tqdm==4.68.1 \
-    --hash=sha256:fc163d96b287bd031e1aa24421ce4411b25559bd0a1be4fe649bdaa4d2c02bf5 \
-    --hash=sha256:fea4a90e4023f764914569f7802a297277c5ab1a66be5144143e142e1a4031d8
+tqdm==4.67.3 \
+    --hash=sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb \
+    --hash=sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf
     # via
     #   chromadb
     #   graphdatascience
@@ -4468,7 +4466,6 @@ typing-extensions==4.15.0 \
     #   pytorch-lightning
     #   quotequail
     #   referencing
-    #   soundfile
     #   sqlalchemy
     #   starlette
     #   torch
@@ -4609,9 +4606,9 @@ uuid-utils==0.16.0 \
     # via
     #   langchain-core
     #   langsmith
-uvicorn[standard]==0.49.0 \
-    --hash=sha256:ba3d14c3ee7e41c6c654c46c9eb489d33213cdd30aa1696eab1374337c13f68f \
-    --hash=sha256:ebf4271aa580d9de97f93192d4595176df6e91f9aae919ca73e4fc07df1e66a3
+uvicorn[standard]==0.48.0 \
+    --hash=sha256:48097851328b87ec36117d3d575234519eb58c2b22d79666e9bbc6c49a761dad \
+    --hash=sha256:a5504207195d08c2511bf9125ede5ac4a4b71725d519e758d01dcf0bc2d31c37
     # via
     #   -r requirements.txt
     #   chromadb

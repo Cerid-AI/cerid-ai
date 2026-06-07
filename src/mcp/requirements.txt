@@ -33,13 +33,13 @@ langgraph>=0.3.0,<2.0  # langgraph 1.x OK — audit verified: only StateGraph/EN
 
 # File parsing
 pdfplumber>=0.11.9,<0.12
-python-docx>=0.8,<2
-python-pptx>=1.0,<2
+python-docx>=1.2.0,<2
+python-pptx>=1.0.2,<2
 openpyxl>=3.1,<4
 pandas>=2.0,<3.1
 # .msg (single Outlook message) parser — small pure-Python dep, no system libs.
 # Used by app/parsers/email.py::parse_msg. .pst is deferred (needs libpff).
-extract-msg>=0.50,<1
+extract-msg>=0.55.0,<1
 
 # Search
 bm25s>=0.3.6,<1.0
@@ -95,7 +95,7 @@ python-multipart>=0.0.27,<1
 
 # Meeting Capture (Phase E — Pro tier, system dep: ffmpeg in Dockerfile)
 # whisper.cpp Python bindings (CPU-portable; Metal auto-routes on Apple Silicon)
-pywhispercpp>=1.3,<2
+pywhispercpp>=1.5.0,<2
 # Speaker diarization (HF gated: pyannote/speaker-diarization-3.1 + segmentation-3.0).
 # Brings torch + torchaudio as transitive deps (~700MB wheel — accepted for Pro tier).
 pyannote.audio>=3.3,<4
