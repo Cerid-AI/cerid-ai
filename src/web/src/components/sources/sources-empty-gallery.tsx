@@ -14,7 +14,7 @@
  */
 
 import { useEffect } from "react"
-import { Lock } from "lucide-react"
+import { Clock, Lock, Settings2 } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { listSourceKinds, type SourceKindMeta } from "@/lib/api/sources"
@@ -100,20 +100,48 @@ function Tile({
   const desc = descriptorFor(meta.kind)
   const Icon = desc.icon
   const isPro = meta.tier === "pro"
+  const availability = meta.availability ?? "available"
+  const selectable = availability === "available"
 
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={!selectable}
       className={cn(
-        "cerid-press group relative flex flex-col items-start gap-2 rounded-lg border border-border/60 bg-card/40 px-4 py-3 text-left transition-colors",
-        "hover:border-border hover:bg-card/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative flex flex-col items-start gap-2 rounded-lg border border-border/60 bg-card/40 px-4 py-3 text-left transition-colors",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        selectable
+          ? "cerid-press hover:border-border hover:bg-card/70"
+          : "cursor-not-allowed opacity-55",
       )}
-      aria-label={`Add ${desc.label}${isPro ? " (Pro)" : ""}`}
+      aria-label={
+        selectable
+          ? `Add ${desc.label}${isPro ? " (Pro)" : ""}`
+          : availability === "oauth"
+            ? `${desc.label} — connect in Settings`
+            : `${desc.label} — coming soon`
+      }
     >
       <div className="flex w-full items-center justify-between">
         <Icon className="h-5 w-5 text-foreground/70 transition-colors group-hover:text-foreground" />
-        {isPro && (
+        {availability === "coming_soon" ? (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-label-xs font-medium text-muted-foreground"
+            aria-label="Coming soon"
+          >
+            <Clock className="h-2.5 w-2.5" aria-hidden="true" />
+            Soon
+          </span>
+        ) : availability === "oauth" ? (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-label-xs font-medium text-muted-foreground"
+            aria-label="Connect in Settings"
+          >
+            <Settings2 className="h-2.5 w-2.5" aria-hidden="true" />
+            Settings
+          </span>
+        ) : isPro ? (
           <span
             className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-label-xs font-medium text-amber-500"
             aria-label="Pro tier"
@@ -121,7 +149,7 @@ function Tile({
             <Lock className="h-2.5 w-2.5" aria-hidden="true" />
             Pro
           </span>
-        )}
+        ) : null}
       </div>
       <div>
         <div className="text-sm font-medium text-foreground">{desc.label}</div>

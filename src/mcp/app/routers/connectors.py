@@ -125,6 +125,13 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
 }
 
 
+def oauth_connector_kinds() -> set[str]:
+    """Source kinds reachable via the OAuth/system-permission flow at
+    ``/connectors/*`` (rather than the SourceConnector wizard). Used by
+    ``/sources/kinds`` to mark these as connectable-via-OAuth."""
+    return set(_CONNECTORS.keys())
+
+
 # ── response shapes ───────────────────────────────────────────────────
 
 class ConnectorStatus(BaseModel):
