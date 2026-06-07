@@ -595,7 +595,26 @@ mkdir -p "$CERID_ROOT/stacks/infrastructure/data/"{chroma,neo4j,neo4j-logs,redis
 # container_names while RUNNING, which cleanup_zombies (stopped-only) misses and
 # `docker compose up` then dies on with a raw daemon error. Detect + reclaim
 # (or abort with a precise fix) before we ever reach compose.
-OUR_PROJECT="${COMPOSE_PROJECT_NAME:-cerid-ai-internal}"
+# Project identity is the basename of the repo dir — `cerid-ai-internal` here,
+# `cerid-ai` in the public mirror. This file syncs verbatim to both, so it must
+# NOT hardcode a name (see the docker-compose.yml note). Compose derives the same
+# default from the compose file's dir, so OUR_PROJECT stays in step with it.
+EXPECTED_PROJECT="$(basename "$CERID_ROOT")"
+OUR_PROJECT="${COMPOSE_PROJECT_NAME:-$EXPECTED_PROJECT}"
+# Identity assertion — a stale exported COMPOSE_PROJECT_NAME that doesn't match
+# this repo's dir would repoint the whole stack (and its bind mounts) at a
+# foreign project: the 2026-06-07 cross-wiring class. Refuse it.
+if [ "$OUR_PROJECT" != "$EXPECTED_PROJECT" ]; then
+    if [ -n "$FORCE_FLAG" ]; then
+        echo "[identity] --force: launching as project '$OUR_PROJECT' (dir basename is '$EXPECTED_PROJECT')."
+    else
+        echo "Error: COMPOSE_PROJECT_NAME='$OUR_PROJECT' does not match this repo's" >&2
+        echo "       directory ('$EXPECTED_PROJECT'). A mismatched project name repoints" >&2
+        echo "       the stack and its data mounts at a foreign project. Unset" >&2
+        echo "       COMPOSE_PROJECT_NAME or pass --force to override." >&2
+        exit 1
+    fi
+fi
 REQUIRED_NAMES=$(docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" config --format json 2>/dev/null \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(s["container_name"] for s in d.get("services",{}).values() if s.get("container_name")))' 2>/dev/null || true)
 # Fallback to the canonical set if config derivation is unavailable.
@@ -609,6 +628,24 @@ if ! detect_conflicts "$OUR_PROJECT" "$CERID_ROOT" $REQUIRED_NAMES; then
 fi
 detect_port_conflicts "${CERID_PORT_GUI}" "${CERID_PORT_MCP}" "${CERID_PORT_NEO4J}" \
     "${CERID_PORT_NEO4J_BOLT}" "${CERID_PORT_CHROMA}" "${CERID_PORT_REDIS}"
+
+# Data-dir collision preflight — refuse to start if a foreign running container
+# already bind-mounts a store we'd open (two procs on one Redis AOF / Neo4j store
+# corrupt it). This is the corruption half of the 2026-06-07 cross-wiring; the
+# name half is handled by detect_conflicts above.
+DATA_ROOT="$CERID_ROOT/stacks/infrastructure/data"
+if ! detect_datadir_conflicts "$OUR_PROJECT" "$CERID_ROOT" \
+        "$DATA_ROOT/redis" "$DATA_ROOT/neo4j" "$DATA_ROOT/chroma"; then
+    if [ -n "$FORCE_FLAG" ]; then
+        echo "[datadir] --force set — proceeding anyway (data CORRUPTION is likely)."
+    else
+        exit 1
+    fi
+fi
+
+# Redis AOF self-heal — repair a corrupt append-only file before compose up so a
+# crash-loop can't strand mcp/web in `Created` with no signal.
+ensure_redis_aof_healthy "$DATA_ROOT/redis"
 
 # Zombie-container cleanup — any ai-companion-*/cerid-* container in
 # Exited/Dead/Created state holds its name, causing `docker compose up`
