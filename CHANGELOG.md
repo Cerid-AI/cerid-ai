@@ -22,6 +22,11 @@ All notable changes to cerid-ai are documented here.
     pollable kinds, so a connected source syncs on the `SCHEDULE_SOURCE_POLL`
     cadence. Reading the archives requires the helper's TCC grant (Full Disk
     Access for Mail; Reminders access), inherited from the signed desktop bundle.
+- **Desktop host invoker for Reminders.** The desktop app now reads Reminders by
+  invoking the bundled `ceridreminders` helper (EventKit is unreachable from the
+  Node/TS layer, so this is the host path), parsing its JSON and posting each
+  reminder to `/ingest/structured` — mirroring the existing Apple Mail/Notes
+  desktop connectors, exposed over IPC for the UI to trigger scan + ingest.
 
 ## Unreleased — GA engineering close-out: Apple suite, idempotent ingest, inference reliability (2026-06-06 → 2026-06-07)
 
