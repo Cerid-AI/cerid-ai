@@ -5,18 +5,51 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - 'tasks/**'
-      - '*.md'
+    # No paths-ignore here: the workflow must run on EVERY PR so the `ci-ok`
+    # aggregator (the single required status check) always reports. A
+    # workflow-level paths-ignore skips the whole workflow on docs-only PRs,
+    # which leaves required checks "expected, never reported" → PR blocked
+    # forever. The `changes` job below skips the real work on docs-only PRs, so
+    # cost is preserved without the deadlock.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Detect whether any non-docs path changed. FAIL-SAFE: any error/empty diff
+  # yields code=true (run CI), so a detector bug can never skip required CI on a
+  # real code change — worst case it runs cheap CI on a docs PR.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: detect
+        run: |
+          code=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=200 origin "${{ github.base_ref }}" >/dev/null 2>&1 || true
+            files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>/dev/null || true)
+          else
+            files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null || true)
+          fi
+          # code=false ONLY when we got a non-empty list AND every file is docs.
+          if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/|tasks/|[^/]*\.md$)'; then
+            code=false
+          fi
+          echo "changed files:"; printf '%s\n' "$files"
+          echo "code=$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   # Python backend
   lint:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -31,6 +64,8 @@ jobs:
         run: cd src/mcp && lint-imports
 
   typecheck:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -43,9 +78,9 @@ jobs:
       - run: cd src/mcp && python -m mypy . --config-file ../../pyproject.toml
 
   test:
-    needs: [lint, typecheck]
+    needs: [changes, lint, typecheck]
     # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -76,8 +111,8 @@ jobs:
 
   security:
     # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: github.event_name != 'pull_request'
-    needs: [lint, typecheck]
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    needs: [changes, lint, typecheck]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -180,6 +215,8 @@ jobs:
           python -m flake8 --select=DUO138 src/mcp/
 
   lock-sync:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Use same Python image as Dockerfile to ensure identical pip-compile output
@@ -195,9 +232,9 @@ jobs:
 
   # Frontend
   frontend:
-    needs: [lint, typecheck]
+    needs: [changes, lint, typecheck]
     # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -255,9 +292,9 @@ jobs:
   # Docker
   docker:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, security, lock-sync, frontend]
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend]
     # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -392,3 +429,27 @@ jobs:
 
   # frontend-marketing: removed — marketing site separated to Cerid-AI/cerid-ai-marketing repo
   # frontend-desktop: removed — desktop (Electron) build lives in internal repo only
+
+  # ── Single required status check ──────────────────────────────────────────
+  # Branch protection requires THIS job, not the individual jobs. It always
+  # runs (if: always()), aggregates the real jobs, and passes when they
+  # succeeded OR were skipped — so a docs-only PR (where every job above skips
+  # via the `changes` gate) still gets a green required check. Fixes the
+  # "required check never reported → docs PR blocked forever" deadlock.
+  ci-ok:
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require no failures (skipped is OK)
+        run: |
+          results='${{ join(needs.*.result, ',') }}'
+          echo "job results: $results"
+          case "$results" in
+            *failure*|*cancelled*)
+              echo "::error::a required CI job failed or was cancelled"
+              exit 1 ;;
+            *)
+              echo "all required jobs passed or were skipped" ;;
+          esac
