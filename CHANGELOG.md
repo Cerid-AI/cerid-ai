@@ -26,7 +26,9 @@ All notable changes to cerid-ai are documented here.
   invoking the bundled `ceridreminders` helper (EventKit is unreachable from the
   Node/TS layer, so this is the host path), parsing its JSON and posting each
   reminder to `/ingest/structured` — mirroring the existing Apple Mail/Notes
-  desktop connectors, exposed over IPC for the UI to trigger scan + ingest.
+  desktop connectors. An **Apple Reminders card** in the Sources → Apple Sources
+  pane shows the reminder/list counts (or a "needs access" state) and a
+  one-click "Sync to KB" action, alongside the Notes/Mail/Messages cards.
 
 ## Unreleased — GA engineering close-out: Apple suite, idempotent ingest, inference reliability (2026-06-06 → 2026-06-07)
 

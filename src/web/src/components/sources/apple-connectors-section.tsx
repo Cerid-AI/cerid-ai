@@ -17,6 +17,7 @@ import {
   FileText,
   Mail,
   MessageCircle,
+  ListChecks,
   Loader2,
   AlertTriangle,
   CheckCircle2,
@@ -53,6 +54,18 @@ interface MailIngestResult {
   ingest: { ingested: number; failed: number; errors: string[] }
 }
 
+interface RemindersScanResult {
+  ok: boolean
+  total_reminders: number
+  list_count: number
+  error?: string
+}
+
+interface RemindersIngestResult {
+  scan: RemindersScanResult
+  ingest: { ingested: number; failed: number; errors: string[] }
+}
+
 interface IMessageConversation {
   chat_id: number
   guid: string
@@ -80,6 +93,17 @@ interface CeridAppleBridge {
       scan: (opts?: { limit?: number }) => Promise<MailScanResult & { messages: unknown[] }>
       ingest: (payload: { mcp_base_url: string; limit?: number }) => Promise<MailIngestResult>
     }
+    reminders: {
+      scan: (opts?: {
+        since?: string
+        limit?: number
+      }) => Promise<RemindersScanResult & { reminders: unknown[] }>
+      ingest: (payload: {
+        mcp_base_url: string
+        since?: string
+        limit?: number
+      }) => Promise<RemindersIngestResult>
+    }
     imessage: {
       scan: (opts?: { limit?: number }) => Promise<IMessageScanResult>
       ingest: (payload: {
@@ -102,13 +126,21 @@ declare global {
   }
 }
 
-type BusyOp = "scanning" | "ingesting-notes" | "ingesting-mail" | "ingesting-imessage" | null
+type BusyOp =
+  | "scanning"
+  | "ingesting-notes"
+  | "ingesting-mail"
+  | "ingesting-reminders"
+  | "ingesting-imessage"
+  | null
 
 export function AppleConnectorsSection() {
   const [notesScan, setNotesScan] = useState<NotesScanResult | null>(null)
   const [notesIngest, setNotesIngest] = useState<NotesIngestResult["ingest"] | null>(null)
   const [mailScan, setMailScan] = useState<MailScanResult | null>(null)
   const [mailIngest, setMailIngest] = useState<MailIngestResult["ingest"] | null>(null)
+  const [remindersScan, setRemindersScan] = useState<RemindersScanResult | null>(null)
+  const [remindersIngest, setRemindersIngest] = useState<RemindersIngestResult["ingest"] | null>(null)
   const [imessageScan, setImessageScan] = useState<IMessageScanResult | null>(null)
   const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set())
   const [imessageIngest, setImessageIngest] = useState<{
@@ -130,7 +162,7 @@ export function AppleConnectorsSection() {
       const bridge = window.cerid!.appleConnectors!
       // We strip the heavy `notes`/`messages` payload arrays from the
       // scan responses — the summary view only needs counts.
-      const [notes, mail, imessage] = await Promise.all([
+      const [notes, mail, reminders, imessage] = await Promise.all([
         bridge.notes.scan({ limit: 100 }).then((r) => {
           const { notes: _notes, ...rest } = r  // eslint-disable-line @typescript-eslint/no-unused-vars
           return rest as NotesScanResult
@@ -139,10 +171,15 @@ export function AppleConnectorsSection() {
           const { messages: _messages, ...rest } = r  // eslint-disable-line @typescript-eslint/no-unused-vars
           return rest as MailScanResult
         }),
+        bridge.reminders.scan({ limit: 500 }).then((r) => {
+          const { reminders: _reminders, ...rest } = r  // eslint-disable-line @typescript-eslint/no-unused-vars
+          return rest as RemindersScanResult
+        }),
         bridge.imessage.scan({ limit: 100 }),
       ])
       setNotesScan(notes)
       setMailScan(mail)
+      setRemindersScan(reminders)
       setImessageScan(imessage)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scan failed")
@@ -193,6 +230,25 @@ export function AppleConnectorsSection() {
       setMailIngest(r.ingest)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Mail ingest failed")
+    } finally {
+      setBusy(null)
+    }
+  }, [desktopAvailable])
+
+  const ingestReminders = useCallback(async () => {
+    if (!desktopAvailable) return
+    setBusy("ingesting-reminders")
+    try {
+      const r = await window.cerid!.appleConnectors!.reminders.ingest({ mcp_base_url: MCP_BASE })
+      setRemindersScan({
+        ok: r.scan.ok,
+        total_reminders: r.scan.total_reminders,
+        list_count: r.scan.list_count,
+        error: r.scan.error,
+      })
+      setRemindersIngest(r.ingest)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Reminders ingest failed")
     } finally {
       setBusy(null)
     }
@@ -379,6 +435,70 @@ export function AppleConnectorsSection() {
               data-testid="apple-mail-ingest"
             >
               {busy === "ingesting-mail" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sync to KB"}
+            </Button>
+          )}
+        </div>
+      </Card>
+
+      {/* Reminders */}
+      <Card
+        className={cn(
+          "p-3",
+          remindersScan?.ok && "border-green-500/20",
+          remindersScan && !remindersScan.ok && "border-amber-500/30 bg-amber-500/5",
+        )}
+        data-testid="apple-reminders-row"
+      >
+        <div className="flex items-start gap-3">
+          <ListChecks className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">Apple Reminders</span>
+              {remindersScan?.ok && (
+                <span className="inline-flex items-center gap-1 text-xs text-green-600">
+                  <CheckCircle2 className="w-3 h-3" /> ready
+                </span>
+              )}
+              {remindersScan && !remindersScan.ok && (
+                <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                  <AlertTriangle className="w-3 h-3" /> needs access
+                </span>
+              )}
+            </div>
+            {remindersScan?.ok && (
+              <p className="text-xs text-muted-foreground">
+                {remindersScan.total_reminders} reminder{remindersScan.total_reminders !== 1 && "s"}
+                {remindersScan.list_count > 0 && ` · ${remindersScan.list_count} lists`}
+              </p>
+            )}
+            {remindersScan && !remindersScan.ok && (
+              <p className="text-xs text-amber-600">{remindersScan.error}</p>
+            )}
+            {remindersIngest && (
+              <p
+                className="text-xs text-muted-foreground pt-1"
+                data-testid="apple-reminders-ingest-result"
+              >
+                Last sync: {remindersIngest.ingested} ingested
+                {remindersIngest.failed > 0 && (
+                  <span className="text-amber-600"> · {remindersIngest.failed} failed</span>
+                )}
+              </p>
+            )}
+          </div>
+          {remindersScan?.ok && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={ingestReminders}
+              disabled={busy !== null || remindersScan.total_reminders === 0}
+              data-testid="apple-reminders-ingest"
+            >
+              {busy === "ingesting-reminders" ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Sync to KB"
+              )}
             </Button>
           )}
         </div>

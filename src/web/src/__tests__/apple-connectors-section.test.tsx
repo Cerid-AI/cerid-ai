@@ -10,6 +10,8 @@ const mockNotesScan = vi.fn()
 const mockNotesIngest = vi.fn()
 const mockMailScan = vi.fn()
 const mockMailIngest = vi.fn()
+const mockRemindersScan = vi.fn()
+const mockRemindersIngest = vi.fn()
 const mockIMessageScan = vi.fn()
 const mockIMessageIngest = vi.fn()
 
@@ -22,6 +24,8 @@ beforeEach(() => {
   mockNotesIngest.mockReset()
   mockMailScan.mockReset()
   mockMailIngest.mockReset()
+  mockRemindersScan.mockReset()
+  mockRemindersIngest.mockReset()
   mockIMessageScan.mockReset()
   mockIMessageIngest.mockReset()
   // Default: all connectors return clean empty scans so existing notes tests
@@ -34,6 +38,12 @@ beforeEach(() => {
     scanned_with_body: 0,
     messages: [],
   })
+  mockRemindersScan.mockResolvedValue({
+    ok: true,
+    total_reminders: 0,
+    list_count: 0,
+    reminders: [],
+  })
   mockIMessageScan.mockResolvedValue({
     ok: true,
     total_conversations: 0,
@@ -43,6 +53,7 @@ beforeEach(() => {
     appleConnectors: {
       notes: { scan: mockNotesScan, ingest: mockNotesIngest },
       mail: { scan: mockMailScan, ingest: mockMailIngest },
+      reminders: { scan: mockRemindersScan, ingest: mockRemindersIngest },
       imessage: { scan: mockIMessageScan, ingest: mockIMessageIngest },
     },
   }
@@ -290,5 +301,60 @@ describe("AppleConnectorsSection", () => {
       })
     })
     expect(await screen.findByTestId("imessage-ingest-result")).toHaveTextContent(/1 conversation ingested/)
+  })
+
+  it("Reminders row renders counts when scan succeeds", async () => {
+    mockNotesScan.mockResolvedValue({
+      ok: true, total_notes: 0, encrypted_skipped: 0, folder_count: 0, account_count: 0, notes: [],
+    })
+    mockRemindersScan.mockResolvedValue({
+      ok: true,
+      total_reminders: 37,
+      list_count: 4,
+      reminders: [],
+    })
+    render(<AppleConnectorsSection />)
+    const row = await screen.findByTestId("apple-reminders-row")
+    expect(row.textContent).toMatch(/37 reminders/)
+    expect(row.textContent).toMatch(/4 lists/)
+  })
+
+  it("Reminders row shows needs-access when the helper is denied", async () => {
+    mockNotesScan.mockResolvedValue({
+      ok: true, total_notes: 0, encrypted_skipped: 0, folder_count: 0, account_count: 0, notes: [],
+    })
+    mockRemindersScan.mockResolvedValue({
+      ok: false,
+      total_reminders: 0,
+      list_count: 0,
+      error: "Reminders TCC access not granted",
+      reminders: [],
+    })
+    render(<AppleConnectorsSection />)
+    const row = await screen.findByTestId("apple-reminders-row")
+    expect(row.textContent).toMatch(/needs access/)
+    expect(row.textContent).toMatch(/TCC access not granted/)
+  })
+
+  it("Reminders ingest button POSTs and surfaces result", async () => {
+    mockNotesScan.mockResolvedValue({
+      ok: true, total_notes: 0, encrypted_skipped: 0, folder_count: 0, account_count: 0, notes: [],
+    })
+    mockRemindersScan.mockResolvedValue({
+      ok: true, total_reminders: 12, list_count: 2, reminders: [],
+    })
+    mockRemindersIngest.mockResolvedValue({
+      scan: { ok: true, total_reminders: 12, list_count: 2 },
+      ingest: { ingested: 12, failed: 0, errors: [] },
+    })
+    const user = userEvent.setup()
+    render(<AppleConnectorsSection />)
+    await user.click(await screen.findByTestId("apple-reminders-ingest"))
+    await waitFor(() => {
+      expect(mockRemindersIngest).toHaveBeenCalledWith({ mcp_base_url: expect.any(String) })
+    })
+    expect(await screen.findByTestId("apple-reminders-ingest-result")).toHaveTextContent(
+      /12 ingested/,
+    )
   })
 })
