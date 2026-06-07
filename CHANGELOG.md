@@ -2,6 +2,43 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Audit & agents pane test coverage (2026-06-07)
+
+### Frontend
+
+- **4-state + axe test coverage for the `audit` and `agents` panes** — the only
+  two required panes that previously had no state-matrix or accessibility tests.
+  Adds 20 tests asserting Loading / Error+retry / Empty / Success and
+  axe-cleanliness for each.
+- **Fixed a missing-state gap in the custom-agents pane** — a load failure
+  rendered a retry-less warning card. It now renders the standard `PaneError`
+  (destructive `Alert` + Retry), and the loading state uses `Skeleton` rows
+  instead of a bare spinner. The inline banner is retained for create/delete
+  action errors so an action failure no longer clears the list.
+
+## Unreleased — Security dependency floors (2026-06-07)
+
+### Security
+
+- **Raised `jinja2` floor to `>=3.1.6`** (CVE-2025-27516 — sandbox `|attr` filter
+  bypass) and **`mcp` floor to `>=1.27.2`**. The resolved lock already pinned both
+  fixed versions, so this tightens the declared minimums to guarantee them and
+  closes the corresponding public-mirror Dependabot advisories; no lock change.
+
+## Unreleased — CI security-scan green-up (2026-06-07)
+
+### Fixed
+
+- **`main` CI `security` (bandit) job is green again.** Two findings were
+  suppressed with the wrong syntax — `# noqa: S324` is a ruff code, which bandit
+  does not honor. Both are non-issues on inspection and are now suppressed
+  correctly:
+  - `core/agents/hallucination/contradiction_sink.py` — the SHA-1 is a
+    non-crypto idempotency id; switched to `hashlib.sha1(..., usedforsecurity=False)`.
+  - `core/ingest/sources/connectors/rss.py` — `ElementTree.fromstring` (B314) is
+    fed only after a dependency-free DOCTYPE/ENTITY guard already refuses XXE /
+    entity-expansion feeds; annotated `# nosec B314` with that rationale.
+
 ## Unreleased — Apple Mail & Reminders incremental sync (2026-06-07)
 
 ### Pro connectors

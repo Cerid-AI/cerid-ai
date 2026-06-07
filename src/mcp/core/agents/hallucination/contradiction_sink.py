@@ -50,4 +50,6 @@ def stable_id(*parts: Any) -> str:
     import hashlib
 
     joined = "\x1f".join("" if p is None else str(p) for p in parts)
-    return hashlib.sha1(joined.encode("utf-8", "replace")).hexdigest()[:16]  # noqa: S324 — non-crypto id
+    return hashlib.sha1(  # noqa: S324 — non-crypto id
+        joined.encode("utf-8", "replace"), usedforsecurity=False
+    ).hexdigest()[:16]

@@ -5,13 +5,13 @@ uvicorn[standard]>=0.46.0,<1
 pydantic>=2.13.4,<3
 
 # MCP protocol
-mcp>=1.27.0,<2
+mcp>=1.27.2,<2
 
 # HTTP client
 httpx>=0.24,<0.29
 
 # Templating (Bifrost config generation)
-jinja2>=3.1,<4
+jinja2>=3.1.6,<4  # 3.1.6 floor — CVE-2025-27516 (sandbox |attr filter bypass)
 
 # Databases
 chromadb>=1,<2      # client on 1.x; server image pin lifted in chromadb migration Phase 3 (data-volume migration)
