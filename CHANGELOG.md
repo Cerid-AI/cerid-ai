@@ -2,6 +2,27 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Apple Mail & Reminders incremental sync (2026-06-07)
+
+### Pro connectors
+
+- **Apple Mail & Reminders now ingest incrementally** (previously the connectors
+  could connect + health-check but `fetch_since` was a no-op awaiting the host
+  helper). Both halves landed:
+  - **Swift host helpers** (`packages/desktop/swift/`): `ceridmail since <iso>`
+    walks the Mail.app `.emlx` archive (strips the length prefix, parses RFC822
+    headers + body, mtime-prefiltered and bounded per run) and `ceridreminders
+    since <iso>` fetches EventKit reminders modified after the cursor — both emit
+    oldest-first JSON. `CeridMail` is now in the Swift build set.
+  - **Python connectors**: real `fetch_since` marshals the helper subprocess,
+    ingests each item via the DI sink, and advances the sync cursor per artifact
+    (crash-safe at-least-once; `ingest_content` dedups re-delivery). Safe no-op
+    when the helper isn't installed or the ingest sink isn't wired.
+  - The connector poll worker now treats `apple_mail` / `apple_reminders` as
+    pollable kinds, so a connected source syncs on the `SCHEDULE_SOURCE_POLL`
+    cadence. Reading the archives requires the helper's TCC grant (Full Disk
+    Access for Mail; Reminders access), inherited from the signed desktop bundle.
+
 ## Unreleased — GA engineering close-out: Apple suite, idempotent ingest, inference reliability (2026-06-06 → 2026-06-07)
 
 ### Pro connectors

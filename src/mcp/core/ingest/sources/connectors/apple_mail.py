@@ -30,6 +30,7 @@ logger = logging.getLogger("ai-companion.connectors.apple_mail")
 
 _HELPER_BIN = "ceridmail"
 _SCAN_TIMEOUT_S = 30
+_FETCH_TIMEOUT_S = 90
 
 
 def _helper_path() -> str | None:
@@ -37,6 +38,39 @@ def _helper_path() -> str | None:
     None when the helper isn't installed (community / non-mac hosts).
     """
     return shutil.which(_HELPER_BIN)
+
+
+def _parse_messages(stdout: str) -> list[dict[str, Any]]:
+    """Normalize the ``ceridmail since`` JSON payload into message dicts
+    (oldest-first, as emitted by the helper). Raises ``ValueError`` on a
+    malformed or failure payload so ``fetch_since`` can degrade gracefully
+    rather than crash the poll sweep.
+    """
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"ceridmail since returned non-JSON: {exc}") from exc
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        detail = payload.get("error", "unknown") if isinstance(payload, dict) else "non-object"
+        raise ValueError(f"ceridmail since reported failure: {detail}")
+    raw = payload.get("messages", [])
+    if not isinstance(raw, list):
+        raise ValueError("ceridmail since: 'messages' is not a list")
+    out: list[dict[str, Any]] = []
+    for m in raw:
+        if not isinstance(m, dict):
+            continue
+        out.append(
+            {
+                "id": str(m.get("id", "")),
+                "date": str(m.get("date", "")),
+                "subject": str(m.get("subject", "")),
+                "from": str(m.get("from", "")),
+                "to": str(m.get("to", "")),
+                "body": str(m.get("body", "")),
+            }
+        )
+    return out
 
 
 class AppleMailConnector(SourceConnector):
@@ -95,18 +129,92 @@ class AppleMailConnector(SourceConnector):
     async def fetch_since(
         self, source_id: str, cursor: dict[str, Any], config: dict[str, Any]
     ) -> AsyncIterator[SourceArtifactEvent]:
-        """Empty iterator until the Swift helper's ``since`` subcommand
-        parses .emlx into JSON. The protocol stays valid; the walk
-        loop wires alongside the host-binary build.
+        """Run ``ceridmail since <cursor>``, ingest each returned message via the
+        DI sink, and yield one :class:`SourceArtifactEvent` per artifact with the
+        cursor advance embedded (``cursor_after``) so the poll worker persists it
+        incrementally — crash-safe at-least-once (``ingest_content`` dedups
+        re-delivery).
+
+        Safe no-op (empty iterator) when the helper isn't installed or the ingest
+        sink isn't wired, keeping registration + health-checks independent of the
+        worker.
         """
-        if False:  # pragma: no cover
-            yield SourceArtifactEvent(  # type: ignore[unreachable]
-                source_id=source_id,
-                artifact_id="",
-                elapsed_ms=0,
-                cursor_after={},
+        from core.ingest.sources.ingest_sink import get_source_ingest_fn
+        from core.utils.swallowed import log_swallowed_error
+
+        bin_path = _helper_path()
+        ingest_fn = get_source_ingest_fn()
+        if bin_path is None or ingest_fn is None:
+            return
+
+        since = (cursor or {}).get("last_message_iso") or ""
+        proc = await asyncio.create_subprocess_exec(
+            bin_path,
+            "since",
+            since,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=_FETCH_TIMEOUT_S
             )
-        return
+        except asyncio.TimeoutError:
+            proc.kill()
+            logger.warning("ceridmail since timed out for %s", source_id)
+            return
+
+        if proc.returncode != 0:
+            logger.warning(
+                "ceridmail since failed for %s: %s",
+                source_id,
+                stderr.decode("utf-8", errors="replace")[:200],
+            )
+            return
+
+        try:
+            messages = _parse_messages(stdout.decode("utf-8", errors="replace"))
+        except ValueError as exc:
+            logger.warning("ceridmail since parse failed for %s: %s", source_id, exc)
+            return
+
+        domain = (config.get("domain") or "general").strip() or "general"
+
+        for msg in messages:  # oldest-first → monotonic cursor advance
+            subject = msg.get("subject", "")
+            body = msg.get("body", "")
+            content = (f"{subject}\n\n{body}" if subject else body).strip()
+            if not content:
+                continue
+            t0 = time.monotonic()
+            try:
+                artifact_id = await ingest_fn(
+                    content,
+                    domain=domain,
+                    metadata={
+                        "source_id": source_id,
+                        "source_type": "apple_mail",
+                        "title": subject,
+                        "from": msg.get("from", ""),
+                        "message_id": msg.get("id", ""),
+                        "received_at": msg.get("date", ""),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 — one bad message must not abort the source
+                log_swallowed_error(
+                    "core.ingest.sources.connectors.apple_mail.fetch_since", exc
+                )
+                # Stop WITHOUT advancing past this message — cursor sits at the
+                # last successful event, so this one retries next poll.
+                return
+            yield SourceArtifactEvent(
+                source_id=source_id,
+                artifact_id=str(artifact_id or ""),
+                elapsed_ms=int((time.monotonic() - t0) * 1000),
+                cursor_after={"last_message_iso": msg.get("date", "")},
+                title=subject,
+                domain=domain,
+            )
 
     async def health_check(self, source_id: str, config: dict[str, Any]) -> HealthStatus:
         if _helper_path() is None:
