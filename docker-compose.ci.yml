@@ -25,6 +25,14 @@ services:
       llm-network:
         aliases:
           - ai-companion-neo4j
+    # Ephemeral, project-scoped store (NOT the host bind-mount). The root
+    # compose binds ./stacks/.../data/neo4j, which on a dev machine is the
+    # SAME dir the dev neo4j holds — two neo4j on one store => the CI one is
+    # unhealthy and the boot fails. Named volumes are isolated per project and
+    # `down -v` wipes them, so every CI run starts from a clean store.
+    volumes:
+      - ci-neo4j-data:/data
+      - ci-neo4j-logs:/logs
     environment:
       # Root compose sets heap=1G + pagecache=2G = 3G, which exceeds the
       # 2G cgroup limit we apply below — neo4j reads cgroup-aware memory
@@ -45,6 +53,9 @@ services:
       llm-network:
         aliases:
           - ai-companion-chroma
+    # Ephemeral store (see neo4j note) — Chroma's SQLite also can't share a dir.
+    volumes:
+      - ci-chroma-data:/data
 
   redis:
     container_name: ai-companion-redis-ci
@@ -52,6 +63,9 @@ services:
       llm-network:
         aliases:
           - ai-companion-redis
+    # Ephemeral store (see neo4j note) — two redis on one AOF dir corrupt it.
+    volumes:
+      - ci-redis-data:/data
 
   mcp-server:
     container_name: ai-companion-mcp-ci
@@ -73,3 +87,11 @@ networks:
   llm-network:
     name: cerid-ci-llm-network
     external: false
+
+volumes:
+  # Project-scoped, ephemeral CI stores — isolated from the dev stack's host
+  # bind-mounts and wiped by `down -v` so each run starts clean.
+  ci-neo4j-data:
+  ci-neo4j-logs:
+  ci-chroma-data:
+  ci-redis-data:
