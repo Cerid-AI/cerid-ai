@@ -54,6 +54,16 @@ class _FakeCollection:
         for cid, doc, meta in zip(ids, documents, metadatas):
             self.rows[cid] = {"document": doc, "metadata": dict(meta)}
 
+    # ingest_content upserts (content-addressed ids); storage already overwrites
+    # by id, so upsert == add here.
+    def upsert(
+        self,
+        ids: list[str],
+        documents: list[str],
+        metadatas: list[dict[str, Any]],
+    ) -> None:
+        self.add(ids, documents, metadatas)
+
     def update(
         self,
         ids: list[str],

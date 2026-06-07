@@ -62,6 +62,7 @@ def _make_collection_mock() -> MagicMock:
             _stored.pop(cid, None)
 
     coll.add.side_effect = _add
+    coll.upsert.side_effect = _add  # ingest_content upserts (content-addressed ids)
     coll.update.side_effect = _update
     coll.get.side_effect = _get
     coll.delete.side_effect = _delete
