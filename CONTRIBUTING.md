@@ -51,6 +51,8 @@ make preservation-check                            # 35 invariants in ~60s
 
 Every PR runs: `lint`, `typecheck`, `test`, `security`, `lock-sync`, `frontend`, `docker`, plus the drift gates (`env-example-drift`, `router-registry-drift`, `sync-manifest-drift`, `sdk-openapi-drift`, `no-legacy-neo4j-tree`, `silent-catch`) and the `preservation` live-stack integration suite. All are blocking.
 
+The single **required** status check is `ci-ok`, an aggregator that passes when the real jobs succeeded *or* were skipped. Docs-only PRs (changes confined to `docs/**`, `tasks/**`, or `*.md`) skip the code jobs via the `changes` gate, so `ci-ok` goes green without running the full suite — they merge without burning code CI.
+
 ## Project layout
 
 ```
