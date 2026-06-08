@@ -42,7 +42,7 @@ pandas>=2.0,<3.1
 extract-msg>=0.55.0,<1
 
 # Search
-bm25s>=0.3.6,<1.0
+bm25s>=0.3.9,<1.0
 PyStemmer>=3.0.0
 
 # Scheduling
