@@ -1,7 +1,7 @@
 # Core framework
 fastapi>=0.136.1,!=0.136.3,<0.137  # 0.136.3 excluded — OSV MAL-2026-4750 (malicious `fastar` dep in [standard] extra)
-sentry-sdk[fastapi]>=2.61.0
-uvicorn[standard]>=0.46.0,<1
+sentry-sdk[fastapi]>=2.61.1
+uvicorn[standard]>=0.49.0,<1
 pydantic>=2.13.4,<3
 
 # MCP protocol
@@ -71,11 +71,11 @@ langsmith>=0.8.0
 # Code AST chunker (Workstream E Phase 2b.3) — Python grammar today;
 # tree-sitter-{javascript,typescript,go,rust} added per future sub-phase.
 tree-sitter>=0.23,<1
-tree-sitter-python>=0.23,<1
+tree-sitter-python>=0.25.0,<1
 
 # Email parser (Workstream E Phase 2b.4) — RFC822 header preservation +
 # reply-chain stripping. Both libs zero-transitive-dep, pure Python.
-mail-parser>=4.0,<5
+mail-parser>=4.3.0,<5
 quotequail>=0.4,<1
 
 # Logging (used by trading agent + internal tests)
