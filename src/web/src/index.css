@@ -414,12 +414,11 @@
    =================================================================== */
 .liquid-glass {
   position: relative;
-  background: linear-gradient(135deg,
-    rgba(255, 255, 255, 0.08) 0%,
-    rgba(0, 229, 216, 0.04) 100%);
+  isolation: isolate;            /* own stacking context so the ::before glass layer nests behind the content */
+  /* Frost stays at the element level: backdrop-filter only blurs what's BEHIND
+     the surface, never its own foreground content, so text stays crisp. */
   backdrop-filter: blur(18px) saturate(180%) contrast(115%);
   -webkit-backdrop-filter: blur(18px) saturate(180%) contrast(115%);
-  filter: url(#cerid-liquid-glass);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     inset 0 0 0 1px rgba(0, 229, 216, 0.10),
@@ -427,15 +426,33 @@
     0 2px 8px rgba(10, 31, 61, 0.20);
   border-radius: 12px;
 }
-.dark .liquid-glass {
+/* Gradient fill + SVG refraction live on a layer BEHIND the content (z-index:-1).
+   The SVG `filter` (feDisplacementMap/feGaussianBlur) must never sit on the
+   .liquid-glass element itself — a CSS `filter` applies to the element AND its
+   text children, which was displacing + blurring the foreground text. Keeping it
+   on ::before refracts only the glass fill. */
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
   background: linear-gradient(135deg,
-    rgba(10, 31, 61, 0.55) 0%,
-    rgba(0, 229, 216, 0.06) 100%);
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(0, 229, 216, 0.04) 100%);
+  filter: url(#cerid-liquid-glass);
+}
+.dark .liquid-glass {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.10),
     inset 0 0 0 1px rgba(0, 229, 216, 0.14),
     0 12px 40px rgba(0, 0, 0, 0.50),
     0 0 24px rgba(0, 229, 216, 0.08);
+}
+.dark .liquid-glass::before {
+  background: linear-gradient(135deg,
+    rgba(10, 31, 61, 0.55) 0%,
+    rgba(0, 229, 216, 0.06) 100%);
 }
 
 /* Fallback: solid panel when transparency or motion is disabled */
@@ -445,10 +462,12 @@
     background: var(--card);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    filter: none;
     box-shadow:
       0 4px 12px rgba(10, 31, 61, 0.18),
       0 1px 0 rgba(0, 229, 216, 0.12) inset;
+  }
+  .liquid-glass::before {
+    display: none;
   }
 }
 
