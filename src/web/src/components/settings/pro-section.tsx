@@ -23,9 +23,21 @@ export function ProSection({ featureTier }: ProSectionProps) {
       </div>
 
       {isPro ? (
-        <p className="text-sm text-muted-foreground">
-          Pro tier is active. All advanced features are enabled.
-        </p>
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p>Pro tier is active. All advanced features are enabled.</p>
+          <p>
+            Manage or cancel your subscription anytime at{" "}
+            <a
+              href="https://cerid.ai/billing"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              cerid.ai/billing
+            </a>
+            .
+          </p>
+        </div>
       ) : (
         <div className="rounded-lg border border-border p-4 text-sm text-muted-foreground space-y-2">
           <p>
