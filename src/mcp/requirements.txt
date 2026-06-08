@@ -75,7 +75,7 @@ tree-sitter-python>=0.23,<1
 
 # Email parser (Workstream E Phase 2b.4) — RFC822 header preservation +
 # reply-chain stripping. Both libs zero-transitive-dep, pure Python.
-mail-parser>=4.0,<5
+mail-parser>=4.3.0,<5
 quotequail>=0.4,<1
 
 # Logging (used by trading agent + internal tests)
