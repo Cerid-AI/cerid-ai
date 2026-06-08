@@ -3,27 +3,41 @@
 
 """License key validation for Cerid Pro tier.
 
-Format: CERID-PRO-XXXX-XXXX-XXXX-XXXX-XXXX (5 groups of 4 characters).
-Key generation is handled server-side by the billing service.
+Format: ``CERID-PRO-`` followed by base32 groups of 4 whose decoded body is the
+signed payload + signature. Key generation and full cryptographic verification
+are handled by the commercial build / billing service; this open-source edition
+performs a format-only check and accepts any correctly-formed key.
 """
 from __future__ import annotations
+
+import base64
 
 
 def validate_license_key(key: str) -> dict[str, bool | str | None]:
     """Validate a license key format (offline check).
+
+    Format-only: confirms a well-formed ``CERID-PRO-`` token whose body
+    base32-decodes to the expected 72-byte payload+signature. The signature
+    itself is verified by the commercial build.
 
     Returns
     -------
     dict
         ``{"valid": bool, "tier": str, "error": str | None}``
     """
+    invalid: dict[str, bool | str | None] = {
+        "valid": False, "tier": "community", "error": "Invalid key format",
+    }
     if not key or not key.startswith("CERID-PRO-"):
-        return {"valid": False, "tier": "community", "error": "Invalid key format"}
+        return invalid
 
-    body = key.replace("CERID-PRO-", "")
-    parts = body.split("-")
-    if len(parts) != 5 or not all(len(p) == 4 for p in parts):
-        return {"valid": False, "tier": "community", "error": "Invalid key format"}
+    body = key[len("CERID-PRO-"):].replace("-", "")
+    try:
+        raw = base64.b32decode(body.upper() + "=" * (-len(body) % 8))
+    except (ValueError, TypeError):
+        return invalid
+    if len(raw) != 72:  # 8-byte payload + 64-byte Ed25519 signature
+        return invalid
 
     return {"valid": True, "tier": "pro", "error": None}
 
