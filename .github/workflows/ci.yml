@@ -227,8 +227,14 @@ jobs:
       - name: Check Python lock file is up to date
         run: |
           cd src/mcp
+          # Seed the output path with the committed lock so pip-compile preserves
+          # existing pins (treats them as constraints) and only changes the lock
+          # when requirements.txt itself changes — NOT whenever a new in-range
+          # transitive version publishes on PyPI. Stops the daily latest-resolve
+          # drift; intentional bumps stay a deliberate pip-compile re-run.
+          cp requirements.lock /tmp/requirements.lock
           pip-compile requirements.txt -o /tmp/requirements.lock --generate-hashes --no-header --allow-unsafe
-          diff requirements.lock /tmp/requirements.lock || (echo "::error::requirements.lock is out of date. Run: cd src/mcp && pip-compile requirements.txt -o requirements.lock --generate-hashes --no-header --allow-unsafe" && exit 1)
+          diff requirements.lock /tmp/requirements.lock || (echo "::error::requirements.lock is out of date vs requirements.txt. Run: cd src/mcp && pip-compile requirements.txt -o requirements.lock --generate-hashes --no-header --allow-unsafe" && exit 1)
 
   # Frontend
   frontend:
