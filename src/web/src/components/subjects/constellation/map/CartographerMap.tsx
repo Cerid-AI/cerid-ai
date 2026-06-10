@@ -159,6 +159,10 @@ export function CartographerMap({
       interaction: "#00c8b4", // drift-allowed: SSR fallback only, never reaches browser
       foreground: "#111", // drift-allowed: SSR fallback only, never reaches browser
       background: "#f5f5f5", // drift-allowed: SSR fallback only, never reaches browser
+      trustVerified: "#333", // drift-allowed: SSR fallback only, never reaches browser
+      trustPartial: "#555", // drift-allowed: SSR fallback only, never reaches browser
+      trustUnverified: "#888", // drift-allowed: SSR fallback only, never reaches browser
+      grid: "#eee", // drift-allowed: SSR fallback only, never reaches browser
     }
   })
 

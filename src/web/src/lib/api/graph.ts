@@ -82,3 +82,115 @@ export async function fetchTimeline(opts: FetchTimelineOptions = {}): Promise<Ti
   if (!res.ok) throw new Error(await extractError(res, "Failed to load timeline"))
   return res.json() as Promise<TimelineResponse>
 }
+
+// ---------------------------------------------------------------------------
+// Timeline Strata v2 — Stratigraph (Phase M v2)
+// ---------------------------------------------------------------------------
+
+export interface StrataCommunity {
+  community_id: string
+  label: string
+  color_slot: number
+  trust_mix: { verified: number; partial: number; unverified: number }
+  total_mentions: number
+  is_other: boolean
+}
+
+export interface StrataSeries {
+  community_id: string
+  entity_type: string
+  buckets: number[]
+  /** Per-bucket count of unverified-trust entity mentions (amendment 1) */
+  unverified_buckets?: number[]
+}
+
+export interface StrataTrack {
+  canonical_id: string
+  name: string
+  entity_type: string
+  community_id: string
+  trust_state: "verified" | "partial" | "unverified" | "unknown"
+  first_seen: string
+  rank: number
+  total_mentions: number
+  buckets: number[]
+}
+
+export interface StrataMarker {
+  date: string
+  kind: "ingest_burst" | "birth_surge" | string
+  count: number
+}
+
+export interface TimelineStrataResponse {
+  from_date: string
+  to_date: string
+  granularity: "day" | "week" | "month"
+  bucket_dates: string[]
+  communities: StrataCommunity[]
+  series: StrataSeries[]
+  tracks: StrataTrack[]
+  markers: StrataMarker[]
+  totals: { mentions: number; entities_introduced: number }
+  cached: boolean
+}
+
+export interface FetchStrataOptions {
+  period?: "7d" | "30d" | "90d" | "365d"
+  granularity?: "day" | "week" | "month"
+  from?: string
+  to?: string
+}
+
+export async function fetchTimelineStrata(
+  opts: FetchStrataOptions = {},
+): Promise<TimelineStrataResponse> {
+  const url = mcpUrl("/graph/timeline/strata", {
+    period: opts.period,
+    granularity: opts.granularity,
+    from: opts.from,
+    to: opts.to,
+  })
+  const res = await fetch(url.toString(), { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to load timeline strata"))
+  return res.json() as Promise<TimelineStrataResponse>
+}
+
+export interface TrackEventCoMention {
+  canonical_id: string
+  name: string
+}
+
+export interface TrackEvent {
+  ts: string
+  artifact_id: string
+  artifact_filename: string
+  confidence: number
+  summary: string
+  co_mentioned: TrackEventCoMention[]
+}
+
+export interface TimelineTrackResponse {
+  canonical_id: string
+  name: string
+  events: TrackEvent[]
+  cached: boolean
+}
+
+export interface FetchTrackOptions {
+  from?: string
+  to?: string
+}
+
+export async function fetchTimelineTrack(
+  canonicalId: string,
+  opts: FetchTrackOptions = {},
+): Promise<TimelineTrackResponse> {
+  const url = mcpUrl(`/graph/timeline/track/${encodeURIComponent(canonicalId)}`, {
+    from: opts.from,
+    to: opts.to,
+  })
+  const res = await fetch(url.toString(), { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to load timeline track"))
+  return res.json() as Promise<TimelineTrackResponse>
+}

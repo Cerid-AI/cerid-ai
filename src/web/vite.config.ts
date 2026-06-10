@@ -28,6 +28,9 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes("node_modules/recharts")) return "vendor-charts"
+          // Stratigraph d3 modules — timeline-only, ~30KB gz.
+          // Bundled with vendor-charts so they share the same lazy subjects chunk.
+          if (id.includes("node_modules/d3-")) return "vendor-charts"
           if (id.includes("node_modules/react-markdown") || id.includes("node_modules/remark-gfm")) {
             return "vendor-markdown"
           }

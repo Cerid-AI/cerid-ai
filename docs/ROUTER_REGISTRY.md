@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 345
+**Total routes:** 347
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -127,6 +127,8 @@ not documented here; see the internal repo for the full registry.
 | GET | `/map` | `get_graph_map` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/neighborhood` | `get_neighborhood` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/timeline` | `get_timeline` | `src/mcp/app/routers/graph.py` | graph |  |
+| GET | `/timeline/strata` | `get_timeline_strata` | `src/mcp/app/routers/graph.py` | graph |  |
+| GET | `/timeline/track/{canonical_id}` | `get_timeline_track` | `src/mcp/app/routers/graph.py` | graph |  |
 | POST | `/generate` | `generate_tour` | `src/mcp/app/routers/graph_tour.py` | graph,tour |  |
 | GET | `/health` | `tour_health` | `src/mcp/app/routers/graph_tour.py` | graph,tour |  |
 | GET | `/collections` | `list_collections_endpoint` | `src/mcp/app/routers/health.py` |  |  |
