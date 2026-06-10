@@ -409,6 +409,16 @@ jobs:
           # perl-base surface; the perl interpreter never executes in the
           # container. No upstream fix in Debian 13 yet. Re-eval 2026-07-31.
           CVE-2026-48962
+          # OpenSSL heap use-after-free in PKCS7_verify() (libssl3t64/openssl/
+          # openssl-provider-legacy). Application code never verifies
+          # PKCS7/S-MIME signatures — openssl is only exercised for TLS via
+          # httpx. No fixed version in Debian 13 as of 2026-06-10.
+          # Re-eval 2026-06-30.
+          CVE-2026-45447
+          # perl-base IO::Uncompress::Unzip CPU exhaustion on crafted zip —
+          # same never-executes-perl surface as the entries above. No upstream
+          # fix in Debian 13 as of 2026-06-10. Re-eval 2026-06-30.
+          CVE-2026-48959
           # chromadb 1.5.9 pre-auth code injection via trust_remote_code=true on
           # the collections endpoint. Not reachable — trust_remote_code is set
           # nowhere in the codebase (grep-verified) and the Chroma server binds
