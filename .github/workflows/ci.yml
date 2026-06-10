@@ -196,6 +196,9 @@ jobs:
           #                the resolved install dir; fixed in pip 26.1.2. Same class as CVE-2026-6357/3219 —
           #                affects only the runner's pre-installed pip; installs use --require-hashes against
           #                requirements.lock with self-update disabled. Re-eval 2026-08-31.
+          # CVE-2025-3000: torch.jit.script memory corruption, local-host attack vector only. torch is a
+          #                transitive inference dep; the codebase never calls torch.jit.script (grep-verified)
+          #                and never compiles untrusted TorchScript. No fixed version. Re-eval 2026-07-31.
           # Migration planned for Phase 11
           pip-audit --desc \
             --ignore-vuln CVE-2026-26013 \
@@ -208,7 +211,8 @@ jobs:
             --ignore-vuln CVE-2026-6357 \
             --ignore-vuln PYSEC-2025-183 \
             --ignore-vuln CVE-2026-45829 \
-            --ignore-vuln PYSEC-2026-196
+            --ignore-vuln PYSEC-2026-196 \
+            --ignore-vuln CVE-2025-3000
       - name: ReDoS regex audit (dlint)
         run: |
           pip install dlint flake8
