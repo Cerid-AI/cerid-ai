@@ -20,8 +20,10 @@
 //   Enter             — activate selected (calls onActivate)
 //   H                 — home (recenter on focal entity)
 //   R                 — reset zoom + position
-//   L                 — toggle lens menu (Day 7 — surfaced via onToggleLensMenu)
-//   ⌘K / Ctrl-K       — open search palette (onSearchPalette)
+//   L                 — toggle lens menu
+//   ⌘K / Ctrl-K       — open search palette
+//   1 / 2 / 3         — set hop depth (calls onHopsChange)
+//   Escape            — unpin entity card (calls onUnpin)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type Graph from "graphology"
@@ -32,23 +34,21 @@ type AtlasGraph = Graph<AtlasNodeAttributes, AtlasEdgeAttributes>
 type AtlasSigma = Sigma<AtlasNodeAttributes, AtlasEdgeAttributes>
 
 export interface UseAtlasKeyboardOptions {
-  /** Sigma instance — null while the graph hasn't mounted yet */
   sigma: AtlasSigma | null
-  /** Graphology graph — kept in sync with sigma. */
   graph: AtlasGraph | null
-  /** Focal entity (home position) */
   focalEntity: string
-  /** Called when user presses Enter on a selected node */
   onActivate?: (nodeId: string) => void
-  /** Called when user presses L */
   onToggleLensMenu?: () => void
-  /** Called when user presses ⌘K / Ctrl-K */
   onSearchPalette?: () => void
+  /** Called when user presses 1, 2, or 3 to change hop depth */
+  onHopsChange?: (hops: 1 | 2 | 3) => void
+  /** Called when user presses Escape (unpin entity card) */
+  onUnpin?: () => void
 }
 
-const PAN_STEP = 0.08      // fraction of viewport per arrow press
-const ZOOM_STEP = 1.2      // multiplicative
-const ZOOM_DURATION = 150  // ms — sigma camera animation
+const PAN_STEP = 0.08
+const ZOOM_STEP = 1.2
+const ZOOM_DURATION = 150  // ms
 
 export function useAtlasKeyboard({
   sigma,
@@ -57,23 +57,20 @@ export function useAtlasKeyboard({
   onActivate,
   onToggleLensMenu,
   onSearchPalette,
+  onHopsChange,
+  onUnpin,
 }: UseAtlasKeyboardOptions) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const selectedRef = useRef<string | null>(null)
-  useEffect(() => {
-    selectedRef.current = selectedNodeId
-  }, [selectedNodeId])
+  useEffect(() => { selectedRef.current = selectedNodeId }, [selectedNodeId])
 
-  // Visible-node list, recomputed lazily; iteration order is stable
-  // across renders because graphology preserves insertion order.
   const nodeIds = useMemo(() => {
     if (!graph) return [] as string[]
     return graph.nodes()
   }, [graph])
 
   // Reflect selectedNodeId into the node's `focused` attribute so the
-  // halo shader can amplify its intensity (×1.4 via pulseIntensity).
-  // We also reset every other node to its original focused value.
+  // border shader can amplify its intensity.
   useEffect(() => {
     if (!graph || !sigma) return
     const focalSet = new Set<string>([focalEntity, ...(selectedNodeId ? [selectedNodeId] : [])])
@@ -82,7 +79,6 @@ export function useAtlasKeyboard({
       const current = graph.getNodeAttribute(id, "focused")
       if (current !== shouldFocus) {
         graph.setNodeAttribute(id, "focused", shouldFocus)
-        // Recompute pulse intensity to match.
         const recency = graph.getNodeAttribute(id, "recency_score") ?? 0.5
         const base = Math.max(0.25, Math.min(1, recency))
         const next = shouldFocus ? Math.min(1, base * 1.4) : base
@@ -92,58 +88,39 @@ export function useAtlasKeyboard({
     sigma.refresh()
   }, [graph, sigma, selectedNodeId, focalEntity])
 
-  const cycleSelection = useCallback(
-    (direction: 1 | -1) => {
-      if (nodeIds.length === 0) return
-      const currentIdx = selectedRef.current ? nodeIds.indexOf(selectedRef.current) : -1
-      let nextIdx: number
-      if (currentIdx === -1) {
-        // From no selection, forward picks the first node and backward
-        // picks the last — matches OS-level Tab/Shift-Tab UX.
-        nextIdx = direction === 1 ? 0 : nodeIds.length - 1
-      } else {
-        nextIdx = (currentIdx + direction + nodeIds.length) % nodeIds.length
-      }
-      setSelectedNodeId(nodeIds[nextIdx])
-    },
-    [nodeIds],
-  )
+  const cycleSelection = useCallback((direction: 1 | -1) => {
+    if (nodeIds.length === 0) return
+    const currentIdx = selectedRef.current ? nodeIds.indexOf(selectedRef.current) : -1
+    let nextIdx: number
+    if (currentIdx === -1) {
+      nextIdx = direction === 1 ? 0 : nodeIds.length - 1
+    } else {
+      nextIdx = (currentIdx + direction + nodeIds.length) % nodeIds.length
+    }
+    setSelectedNodeId(nodeIds[nextIdx])
+  }, [nodeIds])
 
-  const panCamera = useCallback(
-    (dx: number, dy: number) => {
-      if (!sigma) return
-      const camera = sigma.getCamera()
-      const ratio = camera.getState().ratio
-      camera.animate(
-        {
-          x: camera.getState().x + dx * PAN_STEP * ratio,
-          y: camera.getState().y + dy * PAN_STEP * ratio,
-        },
-        { duration: ZOOM_DURATION },
-      )
-    },
-    [sigma],
-  )
+  const panCamera = useCallback((dx: number, dy: number) => {
+    if (!sigma) return
+    const camera = sigma.getCamera()
+    const ratio = camera.getState().ratio
+    camera.animate(
+      { x: camera.getState().x + dx * PAN_STEP * ratio, y: camera.getState().y + dy * PAN_STEP * ratio },
+      { duration: ZOOM_DURATION },
+    )
+  }, [sigma])
 
-  const zoomCamera = useCallback(
-    (factor: number) => {
-      if (!sigma) return
-      const camera = sigma.getCamera()
-      camera.animatedZoom({ factor, duration: ZOOM_DURATION })
-    },
-    [sigma],
-  )
+  const zoomCamera = useCallback((factor: number) => {
+    if (!sigma) return
+    sigma.getCamera().animatedZoom({ factor, duration: ZOOM_DURATION })
+  }, [sigma])
 
   const recenter = useCallback(() => {
     if (!sigma || !graph) return
     if (!graph.hasNode(focalEntity)) return
-    const camera = sigma.getCamera()
     const nodeDisplay = sigma.getNodeDisplayData(focalEntity)
     if (!nodeDisplay) return
-    camera.animate(
-      { x: nodeDisplay.x, y: nodeDisplay.y, ratio: 1 },
-      { duration: 300 },
-    )
+    sigma.getCamera().animate({ x: nodeDisplay.x, y: nodeDisplay.y, ratio: 1 }, { duration: 300 })
   }, [sigma, graph, focalEntity])
 
   const reset = useCallback(() => {
@@ -153,13 +130,11 @@ export function useAtlasKeyboard({
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      // Skip if focus is inside an input/textarea (avoid swallowing typing)
       const target = event.target as HTMLElement
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
         return
       }
 
-      // ⌘K / Ctrl-K — search palette
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
         onSearchPalette?.()
@@ -182,56 +157,28 @@ export function useAtlasKeyboard({
             onActivate?.(selectedRef.current)
           }
           break
-        case "ArrowUp":
-          event.preventDefault()
-          panCamera(0, -1)
-          break
-        case "ArrowDown":
-          event.preventDefault()
-          panCamera(0, 1)
-          break
-        case "ArrowLeft":
-          event.preventDefault()
-          panCamera(-1, 0)
-          break
-        case "ArrowRight":
-          event.preventDefault()
-          panCamera(1, 0)
-          break
+        case "ArrowUp":    event.preventDefault(); panCamera(0, -1);  break
+        case "ArrowDown":  event.preventDefault(); panCamera(0, 1);   break
+        case "ArrowLeft":  event.preventDefault(); panCamera(-1, 0);  break
+        case "ArrowRight": event.preventDefault(); panCamera(1, 0);   break
         case "+":
-        case "=":
-          event.preventDefault()
-          zoomCamera(1 / ZOOM_STEP)  // sigma "factor < 1" → closer
-          break
+        case "=":          event.preventDefault(); zoomCamera(1 / ZOOM_STEP); break
         case "-":
-        case "_":
-          event.preventDefault()
-          zoomCamera(ZOOM_STEP)
-          break
+        case "_":          event.preventDefault(); zoomCamera(ZOOM_STEP);     break
         case "h":
-        case "H":
-          event.preventDefault()
-          recenter()
-          break
+        case "H":          event.preventDefault(); recenter(); break
         case "r":
-        case "R":
-          event.preventDefault()
-          reset()
-          break
+        case "R":          event.preventDefault(); reset();    break
         case "l":
-        case "L":
-          event.preventDefault()
-          onToggleLensMenu?.()
-          break
+        case "L":          event.preventDefault(); onToggleLensMenu?.(); break
+        case "1":          event.preventDefault(); onHopsChange?.(1); break
+        case "2":          event.preventDefault(); onHopsChange?.(2); break
+        case "3":          event.preventDefault(); onHopsChange?.(3); break
+        case "Escape":     event.preventDefault(); onUnpin?.(); break
       }
     },
-    [cycleSelection, panCamera, zoomCamera, recenter, reset, onActivate, onToggleLensMenu, onSearchPalette],
+    [cycleSelection, panCamera, zoomCamera, recenter, reset, onActivate, onToggleLensMenu, onSearchPalette, onHopsChange, onUnpin],
   )
 
-  return {
-    selectedNodeId,
-    setSelectedNodeId,
-    cycleSelection,
-    onKeyDown,
-  }
+  return { selectedNodeId, setSelectedNodeId, cycleSelection, onKeyDown }
 }

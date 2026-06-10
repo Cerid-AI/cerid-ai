@@ -73,9 +73,11 @@ export interface AtlasNodeAttributes extends GraphNode {
   size: number
   /** Display label (mirrors name with truncation for long entity names) */
   label: string
-  /** Fill color hex (Leiden community palette per design-system-v2 §3.2) */
+  /** Fill color hex (community cluster from tokens pipeline) */
   color: string
-  /** Halo color hex (trust state palette per design-system-v2 §3.3) */
+  /** Border/ring color hex (trust state from tokens pipeline; consumed by NodeBorderProgram) */
+  borderColor?: string
+  /** Halo color hex (trust state palette; kept for NodeHaloProgram compat) */
   haloColor: string
   /**
    * Halo brightness scalar in [0, 1]. Derived from recency_score (×1.0)
@@ -86,10 +88,10 @@ export interface AtlasNodeAttributes extends GraphNode {
   pulseIntensity: number
   /**
    * Sigma node program key — routes the node through a registered
-   * program in nodeProgramClasses. Default "haloed" pairs the halo
-   * shader with sigma's NodeCircleProgram via createNodeCompoundProgram.
+   * program in nodeProgramClasses. "bordered" uses the Meridian
+   * NodeBorderProgram (trust ring + community fill compound).
    */
-  type: "haloed"
+  type: "haloed" | "bordered"
   /**
    * Sigma built-in node attribute toggled by hover handlers (`enterNode`
    * / `leaveNode`). When true, sigma renders the node above its peers
@@ -97,6 +99,11 @@ export interface AtlasNodeAttributes extends GraphNode {
    * callers don't have to seed it at graph build time.
    */
   highlighted?: boolean
+  /**
+   * Sigma built-in: when true, sigma always renders the label for this node
+   * regardless of the label density setting. Used for the focal node.
+   */
+  forceLabel?: boolean
 }
 
 /** Atlas-internal edge attributes */

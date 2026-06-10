@@ -13,11 +13,18 @@
 //   - Always 1-hop (mini context, not exploration); for deeper analysis
 //     the "Open in Atlas" button hands off to the full Subjects/Atlas
 //     mode via NavigationProvider.
+//
+// Color sourcing: all node/edge colors flow through communitySlot +
+// resolveMapTokens + normalizeColor inside the Atlas renderer (Agent A).
+// The mini-graph passes no override colors; it inherits the family
+// color vocabulary from Atlas's nodeReducer/edgeReducer.
 
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { ChevronDown, ChevronRight, Compass, ExternalLink, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useNavigation } from "@/contexts/navigation-context"
+import { fetchNeighborhood } from "@/lib/api/graph"
+import type { GraphNode } from "@/lib/types/graph"
 
 // Lazy-load Atlas so its WebGL deps (sigma) don't hit the wiki page
 // bundle — most wiki visits won't expand the mini-graph, and the
@@ -37,11 +44,25 @@ export interface MiniGraphProps {
 
 export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
   const [expanded, setExpanded] = useState(false)
+  const [neighbors, setNeighbors] = useState<GraphNode[]>([])
   const navigation = useNavigation()
 
   const handleOpenAtlas = () => {
     navigation.goTo("subjects", { mode: "atlas", entity: entitySlug })
   }
+
+  // Fetch neighbors once expanded so we can provide an sr-only list for AT.
+  useEffect(() => {
+    if (!expanded || neighbors.length > 0) return
+    fetchNeighborhood(entitySlug, 1)
+      .then((resp) => {
+        // Exclude the focal entity itself from the neighbor list.
+        setNeighbors(resp.nodes.filter((n) => !n.focused))
+      })
+      .catch(() => {
+        // Silent: AT neighbor list is a progressive enhancement, not a hard requirement.
+      })
+  }, [expanded, entitySlug, neighbors.length])
 
   return (
     <section aria-labelledby="wiki-minigraph-heading">
@@ -80,6 +101,17 @@ export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
           id="wiki-minigraph-panel"
           className="h-72 overflow-hidden rounded-lg border border-border bg-card/40"
         >
+          {/* SR-only 1-hop neighbor list for assistive technology */}
+          {neighbors.length > 0 && (
+            <ul className="sr-only" aria-label={`1-hop neighbors of ${entityName}`}>
+              {neighbors.map((node) => (
+                <li key={node.id}>
+                  {node.name} ({node.type}, {node.trust_state} trust,{" "}
+                  {node.mention_count} mentions)
+                </li>
+              ))}
+            </ul>
+          )}
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center text-muted-foreground">

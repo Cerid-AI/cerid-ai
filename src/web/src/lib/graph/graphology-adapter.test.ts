@@ -1,22 +1,41 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Unit tests for the graphology adapter (Cerid v1.0 Phase A).
+// Unit tests for the graphology adapter (Meridian identity pipeline).
 // Pure-logic tests; no DOM / network.
 
 import { describe, expect, it } from "vitest"
+import type { MapTokens } from "@/components/subjects/constellation/map/community-layer"
 import type { NeighborhoodResponse } from "@/lib/types/graph"
-import { __TESTING__, adaptNeighborhood } from "./graphology-adapter"
+import { __TESTING__, adaptNeighborhood, recolorGraph } from "./graphology-adapter"
 
 const {
   nodeSize,
   edgeWidth,
-  communityColor,
-  haloColor,
-  edgeColor,
   truncateLabel,
   pulseIntensity,
 } = __TESTING__
+
+// ---------------------------------------------------------------------------
+// Stub tokens — hex values so normalizeColor isn't needed in pure unit tests
+// ---------------------------------------------------------------------------
+
+const TOKENS: MapTokens = {
+  clusters: [
+    "#A0A0FF", "#A0FFA0", "#FFA0A0", "#FFFF80", // drift-allowed: test stub only
+    "#FF80FF", "#80FFFF", "#C0C0FF", "#FFC080", // drift-allowed: test stub only
+  ],
+  clusterOther: "#888888", // drift-allowed: test stub only, never reaches the design system
+  edge:          "#CCCCCC", // drift-allowed: test stub only
+  dim:           "#666666", // drift-allowed: test stub only
+  interaction:   "#00C8B4", // drift-allowed: test stub only
+  foreground:    "#111111", // drift-allowed: test stub only
+  background:    "#FFFFFF", // drift-allowed: test stub only
+  trustVerified:   "#4488FF", // drift-allowed: test stub only
+  trustPartial:    "#FFAA44", // drift-allowed: test stub only
+  trustUnverified: "#FF4444", // drift-allowed: test stub only
+  grid:          "#EEEEEE", // drift-allowed: test stub only
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,26 +87,26 @@ function mkResponse(overrides: Partial<NeighborhoodResponse> = {}): Neighborhood
 // ---------------------------------------------------------------------------
 
 describe("nodeSize", () => {
-  it("floors at 8 for zero mentions", () => {
-    expect(nodeSize(0)).toBe(8)
+  it("floors at 6 for zero mentions", () => {
+    expect(nodeSize(0)).toBe(6)
   })
 
-  it("grows logarithmically with mention count", () => {
+  it("grows with mention count (sqrt ramp)", () => {
     const small = nodeSize(1)
-    const mid = nodeSize(10)
+    const mid = nodeSize(25)
     const big = nodeSize(100)
     expect(small).toBeLessThan(mid)
     expect(mid).toBeLessThan(big)
-    // Log scaling: 100 mentions should NOT be 10x 10 mentions
-    expect(big / mid).toBeLessThan(2)
+    // sqrt scaling: 100 mentions should NOT be 10x 10 mentions
+    expect(big / mid).toBeLessThan(3)
   })
 
-  it("caps at 48px regardless of huge mention counts", () => {
-    expect(nodeSize(100_000)).toBe(48)
+  it("caps at 18px regardless of huge mention counts", () => {
+    expect(nodeSize(100_000)).toBe(18)
   })
 
   it("ignores negative mention counts (defensive)", () => {
-    expect(nodeSize(-5)).toBe(8)
+    expect(nodeSize(-5)).toBe(6)
   })
 })
 
@@ -98,58 +117,6 @@ describe("edgeWidth", () => {
 
   it("caps at 4px regardless of huge weights", () => {
     expect(edgeWidth(100_000)).toBe(4)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Color resolution
-// ---------------------------------------------------------------------------
-
-describe("communityColor", () => {
-  it("returns fallback graphite for null community", () => {
-    expect(communityColor(null)).toBe("#5C6680")
-  })
-
-  it("is stable — same input always returns same color", () => {
-    const c1 = communityColor("c1")
-    const c2 = communityColor("c1")
-    expect(c1).toBe(c2)
-  })
-
-  it("returns a valid hex color from the palette", () => {
-    const color = communityColor("anything")
-    expect(color).toMatch(/^#[0-9A-F]{6}$/i)
-  })
-})
-
-describe("haloColor", () => {
-  it.each([
-    ["verified", "#5AECCB"],
-    ["partial", "#E8C56A"],
-    ["unverified", "#D4AF37"],
-    ["contradicted", "#FF6B6B"],
-    ["unknown", "#5C6680"],
-  ])("maps %s → %s", (state, expected) => {
-    expect(haloColor(state)).toBe(expected)
-  })
-
-  it("falls back to unknown for unrecognized state", () => {
-    expect(haloColor("not_a_state")).toBe("#5C6680")
-  })
-})
-
-describe("edgeColor", () => {
-  it("uses contradicted red when contradiction=true regardless of type", () => {
-    expect(edgeColor("works_on", true)).toBe("#FF6B6B")
-  })
-
-  it("uses type-specific color when no contradiction", () => {
-    expect(edgeColor("works_on", false)).toBe("#D4AF37")
-    expect(edgeColor("mentions", false)).toBe("#7AC8E5")
-  })
-
-  it("falls back to mentions color for unrecognized type", () => {
-    expect(edgeColor("custom_type", false)).toBe("#7AC8E5")
   })
 })
 
@@ -204,11 +171,8 @@ describe("pulseIntensity", () => {
   })
 
   it("boosts focused entities by 40%, clamped", () => {
-    // 0.5 * 1.4 = 0.7
     expect(pulseIntensity(nodeWith(0.5, true))).toBeCloseTo(0.7, 5)
-    // 0.8 * 1.4 = 1.12 → clamped to 1.0
     expect(pulseIntensity(nodeWith(0.8, true))).toBe(1)
-    // floored base of 0.25 * 1.4 = 0.35
     expect(pulseIntensity(nodeWith(0, true))).toBeCloseTo(0.35, 5)
   })
 })
@@ -219,38 +183,46 @@ describe("pulseIntensity", () => {
 
 describe("adaptNeighborhood", () => {
   it("builds a graphology Graph with all nodes + edges", () => {
-    const g = adaptNeighborhood(mkResponse())
+    const g = adaptNeighborhood(mkResponse(), TOKENS)
     expect(g.order).toBe(2)
     expect(g.size).toBe(1)
     expect(g.hasNode("alex")).toBe(true)
     expect(g.hasNode("api_redesign")).toBe(true)
   })
 
-  it("populates AtlasNodeAttributes (size, label, color, haloColor, pulse, type)", () => {
-    const g = adaptNeighborhood(mkResponse())
+  it("populates AtlasNodeAttributes with identity pipeline values", () => {
+    const g = adaptNeighborhood(mkResponse(), TOKENS)
     const alex = g.getNodeAttributes("alex")
     expect(alex.id).toBe("alex")
     expect(alex.name).toBe("Alex Chen")
     expect(alex.label).toBe("Alex Chen")
     expect(alex.size).toBeGreaterThan(0)
+    // color = clusterColor (from tokens.clusters)
     expect(alex.color).toMatch(/^#[0-9A-F]{6}$/i)
-    expect(alex.haloColor).toBe("#5AECCB")  // verified
-    expect(alex.x).toBe(0)  // placeholder until layout runs
+    // borderColor = trustColor (verified → trustVerified stub)
+    expect(alex.borderColor).toBe(TOKENS.trustVerified)
+    expect(alex.x).toBe(0)
     expect(alex.focused).toBe(true)
-    // recency 0.92 * 1.4 (focused) = 1.288 → clamped to 1.0
-    expect(alex.pulseIntensity).toBe(1)
-    expect(alex.type).toBe("haloed")
+    expect(alex.pulseIntensity).toBe(1)  // 0.92 * 1.4 clamped
+    expect(alex.type).toBe("bordered")
   })
 
-  it("populates AtlasEdgeAttributes (size, color)", () => {
-    const g = adaptNeighborhood(mkResponse())
+  it("edge color = tokens.edge (neutral in rest state)", () => {
+    const g = adaptNeighborhood(mkResponse(), TOKENS)
     const edges = g.mapEdges((_key, attrs) => attrs)
     expect(edges).toHaveLength(1)
-    const edge = edges[0]
-    expect(edge.source).toBe("alex")
-    expect(edge.type).toBe("works_on")
-    expect(edge.size).toBeGreaterThan(0.4)
-    expect(edge.color).toBe("#D4AF37")  // works_on gold
+    expect(edges[0].color).toBe(TOKENS.edge)
+    expect(edges[0].type).toBe("curved")
+  })
+
+  it("contradiction flag preserved on edges for lens use", () => {
+    const res = mkResponse()
+    res.edges[0].contradiction = true
+    const g = adaptNeighborhood(res, TOKENS)
+    const edge = g.mapEdges((_k, a) => a)[0]
+    // Rest-state color remains tokens.edge; lens drives the red accent
+    expect(edge.color).toBe(TOKENS.edge)
+    expect(edge.contradiction).toBe(true)
   })
 
   it("drops nodes with missing id", () => {
@@ -265,8 +237,8 @@ describe("adaptNeighborhood", () => {
       recency_score: 0,
       focused: false,
     })
-    const g = adaptNeighborhood(res)
-    expect(g.order).toBe(2)  // not 3
+    const g = adaptNeighborhood(res, TOKENS)
+    expect(g.order).toBe(2)
   })
 
   it("drops edges pointing to unknown nodes (defensive)", () => {
@@ -279,8 +251,8 @@ describe("adaptNeighborhood", () => {
       attestation: "attested",
       contradiction: false,
     })
-    const g = adaptNeighborhood(res)
-    expect(g.size).toBe(1)  // not 2
+    const g = adaptNeighborhood(res, TOKENS)
+    expect(g.size).toBe(1)
   })
 
   it("drops self-loops", () => {
@@ -293,23 +265,15 @@ describe("adaptNeighborhood", () => {
       attestation: "attested",
       contradiction: false,
     })
-    const g = adaptNeighborhood(res)
+    const g = adaptNeighborhood(res, TOKENS)
     expect(g.size).toBe(1)
   })
 
   it("dedupes identical edges (same source+target+type)", () => {
     const res = mkResponse()
     res.edges.push({ ...res.edges[0] })
-    const g = adaptNeighborhood(res)
+    const g = adaptNeighborhood(res, TOKENS)
     expect(g.size).toBe(1)
-  })
-
-  it("colors contradiction edges red regardless of type", () => {
-    const res = mkResponse()
-    res.edges[0].contradiction = true
-    const g = adaptNeighborhood(res)
-    const edge = g.mapEdges((_k, a) => a)[0]
-    expect(edge.color).toBe("#FF6B6B")
   })
 
   it("handles empty response", () => {
@@ -319,18 +283,18 @@ describe("adaptNeighborhood", () => {
       edges: [],
       truncated: false,
       cached: false,
-    })
+    }, TOKENS)
     expect(g.order).toBe(0)
     expect(g.size).toBe(0)
   })
 
   it("preserves focused flag on the focal node", () => {
-    const g = adaptNeighborhood(mkResponse())
+    const g = adaptNeighborhood(mkResponse(), TOKENS)
     expect(g.getNodeAttribute("alex", "focused")).toBe(true)
     expect(g.getNodeAttribute("api_redesign", "focused")).toBe(false)
   })
 
-  it("scales as expected for 100 nodes (smoke test for hot path)", () => {
+  it("scales as expected for 100 nodes (smoke test)", () => {
     const nodes = Array.from({ length: 100 }, (_, i) => ({
       id: `n${i}`,
       name: `Node ${i}`,
@@ -350,16 +314,30 @@ describe("adaptNeighborhood", () => {
       contradiction: false,
     }))
     const start = performance.now()
-    const g = adaptNeighborhood({
-      focal_entity: "n0",
-      nodes,
-      edges,
-      truncated: false,
-      cached: false,
-    })
+    const g = adaptNeighborhood({ focal_entity: "n0", nodes, edges, truncated: false, cached: false }, TOKENS)
     const elapsed = performance.now() - start
     expect(g.order).toBe(100)
     expect(g.size).toBe(100)
-    expect(elapsed).toBeLessThan(50)  // <50ms for 100 nodes
+    expect(elapsed).toBeLessThan(50)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// recolorGraph — theme change re-apply
+// ---------------------------------------------------------------------------
+
+describe("recolorGraph", () => {
+  it("updates node color/borderColor to new tokens", () => {
+    const g = adaptNeighborhood(mkResponse(), TOKENS)
+    const altTokens: MapTokens = {
+      ...TOKENS,
+      clusters: Array(8).fill("#FF0000") as string[], // drift-allowed: test stub only
+      trustVerified: "#0000FF", // drift-allowed: test stub only
+      edge: "#AABBCC", // drift-allowed: test stub only
+    }
+    recolorGraph(g, altTokens)
+    expect(g.getNodeAttribute("alex", "color")).toBe("#FF0000") // drift-allowed: test assertion against stub token
+    expect(g.getNodeAttribute("alex", "borderColor")).toBe("#0000FF") // drift-allowed: test assertion against stub token
+    expect(g.mapEdges((_k, a) => a.color)[0]).toBe("#AABBCC") // drift-allowed: test assertion against stub token
   })
 })

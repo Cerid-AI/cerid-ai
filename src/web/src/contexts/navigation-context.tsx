@@ -87,15 +87,20 @@ export interface ChatSeed {
 
 /**
  * Optional state to bundle with a `goTo()` call. Each field maps to
- * a Subjects-pane URL param (`?mode=` / `?entity=`) and is written
- * before the pane change, so SubjectsPane's mount-time URL read
- * lands on the right tab + focal entity.
+ * a Subjects-pane URL param and is written before the pane change,
+ * so SubjectsPane's mount-time URL read lands on the right tab + focal entity.
  */
 export interface NavigationOptions {
   /** Subjects pane mode: atlas / constellation / timeline / wiki */
   mode?: string
   /** Focal entity canonical id (a.k.a. wiki slug) */
   entity?: string
+  /** Atlas lens to activate on arrival: contradictions / provenance / questions / quality */
+  lens?: string
+  /** Atlas hop depth (1 | 2 | 3) */
+  hops?: number
+  /** Whether to add the navigation event to the history stack */
+  track?: boolean
 }
 
 interface NavigationContextValue {
@@ -104,6 +109,10 @@ interface NavigationContextValue {
   composeChat: (input: { text: string }) => void
   /** Consume the latest pending seed; returns null if none. */
   consumeChatSeed: () => ChatSeed | null
+  /** Bumps on every goTo that carries options. Panes that read their state
+      from URL params at mount must re-read when this changes — otherwise a
+      same-pane goTo writes the URL but the view never updates. */
+  navVersion: number
 }
 
 // Default value used when no NavigationProvider is present (tests, isolated
@@ -113,11 +122,13 @@ const NULL_NAVIGATION: NavigationContextValue = {
   goTo: () => {},
   composeChat: () => {},
   consumeChatSeed: () => null,
+  navVersion: 0,
 }
 
-function writeNavigationUrl(mode: string | undefined, entity: string | undefined) {
+function writeNavigationUrl(options: NavigationOptions) {
   if (typeof window === "undefined") return
   const params = new URLSearchParams(window.location.search)
+  const { mode, entity, lens, hops } = options
   if (mode !== undefined) {
     if (mode) params.set("mode", mode)
     else params.delete("mode")
@@ -125,6 +136,13 @@ function writeNavigationUrl(mode: string | undefined, entity: string | undefined
   if (entity !== undefined) {
     if (entity) params.set("entity", entity)
     else params.delete("entity")
+  }
+  if (lens !== undefined) {
+    if (lens) params.set("lens", lens)
+    else params.delete("lens")
+  }
+  if (hops !== undefined) {
+    params.set("hops", String(hops))
   }
   const next = params.toString()
   const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
@@ -146,6 +164,7 @@ export function NavigationProvider({
 }: NavigationProviderProps) {
   const seedRef = useRef<ChatSeed | null>(null)
   const [, force] = useState(0)
+  const [navVersion, setNavVersion] = useState(0)
 
   const goTo = useCallback(
     (pane: Pane, options?: NavigationOptions) => {
@@ -153,7 +172,8 @@ export function NavigationProvider({
       // explicit options below override that.
       const resolved = applyRedirect(pane)
       if (options) {
-        writeNavigationUrl(options.mode, options.entity)
+        writeNavigationUrl(options)
+        setNavVersion((v) => v + 1)
       }
       onPaneChange(resolved)
     },
@@ -179,8 +199,8 @@ export function NavigationProvider({
   }, [])
 
   const value = useMemo<NavigationContextValue>(
-    () => ({ activePane, goTo, composeChat, consumeChatSeed }),
-    [activePane, goTo, composeChat, consumeChatSeed],
+    () => ({ activePane, goTo, composeChat, consumeChatSeed, navVersion }),
+    [activePane, goTo, composeChat, consumeChatSeed, navVersion],
   )
 
   return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>

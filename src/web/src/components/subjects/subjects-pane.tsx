@@ -87,6 +87,10 @@ export default function SubjectsPane() {
     return m && MODE_DEFS.some((d) => d.id === m) ? m : "atlas"
   })
   const [focalEntity, setFocalEntity] = useState<string | null>(() => readQueryParam("entity"))
+  const [atlasHops, setAtlasHops] = useState<1 | 2 | 3>(() => {
+    const h = readQueryParam("hops")
+    return h === "1" ? 1 : h === "3" ? 3 : 2
+  })
   // Phase K — ?since=ISO scopes Subjects to artifacts ingested after the
   // timestamp. Used by the digest notification's "Open" deep-link
   // ("show me what's new since the digest was generated").
@@ -94,13 +98,29 @@ export default function SubjectsPane() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const navigation = useNavigation()
 
-  // Reflect mode + entity changes into URL
+  // Re-read URL-borne state when a goTo carried navigation options. Without
+  // this, a same-pane goTo (e.g. Wiki capsule → "Open in Atlas") writes the
+  // URL but the pane keeps its mount-time mode/entity and silently no-ops.
+  useEffect(() => {
+    if (navigation.navVersion === 0) return
+    const m = readQueryParam("mode") as SubjectsMode | null
+    if (m && MODE_DEFS.some((d) => d.id === m)) setMode(m)
+    const e = readQueryParam("entity")
+    if (e) setFocalEntity(e)
+    const h = readQueryParam("hops")
+    if (h === "1" || h === "2" || h === "3") setAtlasHops(Number(h) as 1 | 2 | 3)
+  }, [navigation.navVersion])
+
+  // Reflect mode + entity + hops changes into URL
   useEffect(() => {
     writeQueryParam("mode", mode === "atlas" ? null : mode)
   }, [mode])
   useEffect(() => {
     writeQueryParam("entity", focalEntity)
   }, [focalEntity])
+  useEffect(() => {
+    writeQueryParam("hops", atlasHops === 2 ? null : String(atlasHops))
+  }, [atlasHops])
   useEffect(() => {
     writeQueryParam("since", sinceFilter)
   }, [sinceFilter])
@@ -136,6 +156,12 @@ export default function SubjectsPane() {
   const handleOpenInWiki = useCallback((entityId: string) => {
     setFocalEntity(entityId)
     setMode("wiki")
+  }, [])
+
+  // Open in Timeline from Atlas entity card
+  const handleOpenInTimeline = useCallback((entityId: string) => {
+    setFocalEntity(entityId)
+    setMode("timeline")
   }, [])
 
   return (
@@ -240,7 +266,8 @@ export default function SubjectsPane() {
           focalEntity ? (
             <Atlas
               entity={focalEntity}
-              hops={2}
+              hops={atlasHops}
+              onHopsChange={setAtlasHops}
               onSearchPalette={handleSearchPalette}
               onNodeClick={handleEntityPick}
               onNodeDoubleClick={(id) => {
@@ -249,10 +276,16 @@ export default function SubjectsPane() {
               }}
               onCiteInChat={handleCiteInChat}
               onOpenInWiki={handleOpenInWiki}
+              onOpenInTimeline={handleOpenInTimeline}
               onRestoreView={(view) => {
                 setFocalEntity(view.entity)
                 if (view.mode === "atlas" || view.mode === "wiki") {
-                  setMode(view.mode)
+                  setMode(view.mode as SubjectsMode)
+                }
+                // Restore hops from saved view if version >= 2
+                if (view.version && view.version >= 2 && view.hops) {
+                  const h = view.hops
+                  if (h === 1 || h === 2 || h === 3) setAtlasHops(h)
                 }
               }}
             />

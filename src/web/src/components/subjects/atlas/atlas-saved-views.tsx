@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Atlas saved-views panel — list + save + delete. Floats top-left of
-// the Atlas surface alongside the lens chips. Pin an Atlas
-// configuration (focal entity + hops + filter + active lenses +
-// camera position) as a named view to jump back to it later.
+// the Atlas surface. Pins an Atlas configuration (focal entity + hops
+// + active lenses + chips + camera) as a named view.
+//
+// Version 2 payload: {version, focal, hops, lens[], chips[], camera}.
+// Tolerant loader (normalizeView) handles unversioned legacy payloads.
 
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Bookmark, BookmarkPlus, Loader2, X } from "lucide-react"
 import {
+  buildViewPayload,
   createAtlasView,
   deleteAtlasView,
   listAtlasViews,
@@ -21,14 +24,13 @@ import type { LensId } from "@/lib/graph/lenses"
 const KEY = ["atlas-views"] as const
 
 export interface AtlasSavedViewsProps {
-  /** Currently focal entity in Atlas */
   focalEntity: string
   hops: number
   filter?: string | null
   activeLenses: Set<LensId>
-  /** Snapshot of sigma's current camera, or null if not available */
+  /** Active entity-type chip filters */
+  activeChips?: Set<string>
   getCameraState: () => AtlasCameraState | null
-  /** Called when user picks a saved view — restore it */
   onRestore: (view: AtlasView) => void
 }
 
@@ -37,6 +39,7 @@ export function AtlasSavedViews({
   hops,
   filter,
   activeLenses,
+  activeChips,
   getCameraState,
   onRestore,
 }: AtlasSavedViewsProps) {
@@ -67,15 +70,17 @@ export function AtlasSavedViews({
   const handleSave = () => {
     const trimmed = name.trim()
     if (!trimmed) return
-    saveMutation.mutate({
-      name: trimmed,
-      entity: focalEntity,
-      hops,
-      filter: filter ?? null,
-      mode: "atlas",
-      lenses: Array.from(activeLenses),
-      camera: getCameraState(),
-    })
+    saveMutation.mutate(
+      buildViewPayload({
+        name: trimmed,
+        entity: focalEntity,
+        hops,
+        filter,
+        activeLenses,
+        activeChips: activeChips ?? new Set(),
+        camera: getCameraState(),
+      })
+    )
   }
 
   return (
@@ -109,12 +114,9 @@ export function AtlasSavedViews({
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") handleSave()
-              else if (e.key === "Escape") {
-                setNaming(false)
-                setName("")
-              }
+              else if (e.key === "Escape") { setNaming(false); setName("") }
             }}
-            // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input
             autoFocus
             placeholder="View name"
             maxLength={80}
