@@ -8,6 +8,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import type { EntitySummary, WikiEntityPage } from "@/lib/types/wiki"
 
+// MutationObserver stub — TrustBandBadge (rendered inside EntityDetailView)
+// registers a theme watcher; we stub it to avoid jsdom noise.
+vi.stubGlobal("MutationObserver", class {
+  observe() {}
+  disconnect() {}
+})
+
+// Mock graph API so MiniGraph's sr-only neighbor fetch and MentionSparkline
+// don't throw in tests that render EntityDetailView.
+vi.mock("@/lib/api/graph", () => ({
+  fetchNeighborhood: vi.fn().mockResolvedValue({ focal_entity: "tesla", nodes: [], edges: [], truncated: false, cached: false }),
+  fetchTimeline: vi.fn().mockResolvedValue({ entity: "tesla", from_date: "", to_date: "", granularity: "day", buckets: [], total_mentions: 0, total_entities_introduced: 0, cached: false }),
+}))
+
 // ---------------------------------------------------------------------------
 // Mock the hooks so we can control returned data
 // ---------------------------------------------------------------------------

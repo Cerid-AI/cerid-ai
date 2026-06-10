@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useEffect } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { RefreshCw } from "lucide-react"
@@ -11,7 +12,7 @@ import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { DomainBadge } from "@/components/ui/domain-badge"
-import { ConfidenceBandBadge } from "./confidence-band-badge"
+import { TrustBandBadge, type TrustState } from "@/components/ui/trust-band-badge"
 import { ContradictionItem } from "./contradiction-item"
 import { ExternalReferencesSection } from "./external-references-section"
 import { ProvenanceMarker, type ProvenanceKind } from "./provenance-marker"
@@ -20,7 +21,11 @@ import { MentionSparkline } from "./mention-sparkline"
 import { ProvenanceSankey } from "./provenance-sankey"
 import { ContradictionLink } from "./contradiction-link"
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
+import { useNavigation } from "@/contexts/navigation-context"
 import { BookOpen } from "lucide-react"
+import { communitySlot } from "@/components/subjects/timeline/stratigraph/strata-layout"
+import { resolveMapTokens } from "@/components/subjects/constellation/map/community-layer"
+import type { ConfidenceBand } from "@/lib/types/wiki"
 
 interface EntityDetailViewProps {
   slug: string
@@ -49,6 +54,26 @@ function isRefreshOverdue(nextRefreshDue: string | null): boolean {
   } catch {
     return false
   }
+}
+
+function confidenceBandToTrust(band: ConfidenceBand): TrustState {
+  switch (band) {
+    case "high": return "verified"
+    case "medium": return "partial"
+    case "low": return "unverified"
+    default: return "unknown"
+  }
+}
+
+// Resolve community hue color for the identity rail + swatch.
+// Falls back to clusterOther when communityId is null/undefined.
+function resolveCommunityHue(communityId: string | null | undefined): string {
+  // drift-allowed: runtime token resolution — community color resolved from CSS tokens
+  if (typeof document === "undefined") return "var(--color-map-cluster-other)"
+  const tokens = resolveMapTokens(document.documentElement)
+  if (!communityId) return tokens.clusterOther
+  const slot = communitySlot(communityId)
+  return tokens.clusters[slot] ?? tokens.clusterOther
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +111,18 @@ function LoadingSkeleton() {
 
 export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProps) {
   const { data, isLoading, isError, isNotFound, refetch } = useWikiEntity(slug)
+  const navigation = useNavigation()
+
+  // Strip ?entity= deep-link param so back-navigation doesn't re-select.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (!params.has("entity")) return
+    params.delete("entity")
+    const next = params.toString()
+    const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
+    window.history.replaceState({}, "", url)
+  }, [slug])
 
   if (isLoading) return <LoadingSkeleton />
 
@@ -117,19 +154,25 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
 
   const relativeUpdated = formatLastUpdated(data.last_updated_at)
   const refreshOverdue = isRefreshOverdue(data.next_refresh_due)
+  const communityHue = resolveCommunityHue(data.community_id)
 
-  // Derive section provenance markers from the API signals we have today.
-  // The plan's 4-marker palette (🤖 / ✍️ / ⚠ / ❓) maps onto:
-  //   - Summary: "auto" when present (curator-synthesized; user-edit
-  //     tracking lands when section-edit modal ships)
-  //   - Contradictions: "contradicted" when count > 0
-  //   - Confidence band low: "uncertain" sentinel beside the header
   const summaryProvenance: ProvenanceKind = "auto"
   const showLowConfidenceMarker = data.confidence_band === "low"
 
+  const trustState: TrustState = data.trust_state ?? confidenceBandToTrust(data.confidence_band)
+
   return (
     <div className="cerid-stagger-fast h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}>
+      {/* Liquid-glass sticky header with identity capsule */}
       <div className="liquid-glass sticky top-0 z-10 space-y-1 px-6 pb-3 pt-6">
+        {/* 3px community-hue left rail — width pinned to 3px per design spec (between 1px hairline and 4px w-1) */}
+        <div
+          className="absolute left-0 top-0 h-full rounded-l"
+          style={{ width: "3px", backgroundColor: communityHue }} // drift-allowed: design-spec geometry + runtime token resolution
+          aria-hidden="true"
+        />
+
+        {/* Identity row: name + trust badge */}
         <div className="flex flex-wrap items-center gap-2">
           <h1
             className="text-xl font-semibold text-foreground"
@@ -146,11 +189,56 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
               Updating from new evidence
             </span>
           ) : (
-            <ConfidenceBandBadge band={data.confidence_band} />
+            <TrustBandBadge
+              trust={trustState}
+              corroboratingCount={data.source_artifacts.length}
+              contradictionCount={data.contradictions.length}
+            />
           )}
           {showLowConfidenceMarker && <ProvenanceMarker kind="uncertain" />}
           {data.contradictions.length > 0 && <ProvenanceMarker kind="contradicted" />}
         </div>
+
+        {/* Metadata row: community swatch + label + type chip + mention count */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 10–14px community swatch */}
+          <span
+            className="inline-block h-3 w-3 shrink-0 rounded-sm"
+            style={{ backgroundColor: communityHue }} // drift-allowed: runtime token resolution
+            aria-hidden="true"
+          />
+          {/* Community label linked via "Open in Atlas" */}
+          {data.community_id ? (
+            <button
+              type="button"
+              onClick={() =>
+                navigation.goTo("subjects", {
+                  mode: "atlas",
+                  entity: data.slug,
+                })
+              }
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              aria-label={`Open ${data.community_label ?? data.community_id} in Atlas`}
+            >
+              {data.community_label ?? data.community_id}
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground">Unassigned</span>
+          )}
+
+          {/* Entity TYPE chip */}
+          <Badge variant="outline" className="font-mono text-label-xs uppercase">
+            {data.entity_type}
+          </Badge>
+
+          {/* Mention count */}
+          {typeof data.mention_count === "number" && (
+            <span className="text-xs text-muted-foreground">
+              {data.mention_count.toLocaleString()} mentions
+            </span>
+          )}
+        </div>
+
         {relativeUpdated && (
           <p className="text-xs text-muted-foreground">Updated {relativeUpdated}</p>
         )}
@@ -184,61 +272,35 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
         <MiniGraph entitySlug={data.slug} entityName={data.name} />
 
         {/* --------------------------------------------------------------- */}
-        {/* Phase M Day 5 — mention sparkline                                */}
+        {/* Mention sparkline                                               */}
         {/* --------------------------------------------------------------- */}
         <MentionSparkline
           entitySlug={data.slug}
           entityName={data.name}
-          onOpenTimeline={(slug) => {
-            // Deep-link to Subjects → Timeline with this entity focal.
-            // Reuses the navigation pattern from Phase A.
-            if (typeof window !== "undefined") {
-              const url = new URL(window.location.href)
-              url.searchParams.set("pane", "subjects")
-              url.searchParams.set("mode", "timeline")
-              url.searchParams.set("entity", slug)
-              window.history.pushState({}, "", url.toString())
-              window.dispatchEvent(new PopStateEvent("popstate"))
-            }
+          onOpenTimeline={(slugArg) => {
+            navigation.goTo("subjects", { mode: "timeline", entity: slugArg })
           }}
         />
 
         {/* --------------------------------------------------------------- */}
-        {/* Phase M Day 5 — provenance Sankey                                */}
+        {/* Provenance Sankey                                               */}
         {/* --------------------------------------------------------------- */}
         <ProvenanceSankey
           entitySlug={data.slug}
           entityName={data.name}
-          onOpenAtlas={(slug) => {
-            if (typeof window !== "undefined") {
-              const url = new URL(window.location.href)
-              url.searchParams.set("pane", "subjects")
-              url.searchParams.set("mode", "atlas")
-              url.searchParams.set("entity", slug)
-              // Activate provenance lens via the URL param Atlas
-              // already reads (see atlas-lens-panel).
-              url.searchParams.set("lens", "provenance")
-              window.history.pushState({}, "", url.toString())
-              window.dispatchEvent(new PopStateEvent("popstate"))
-            }
+          communityId={data.community_id}
+          onOpenAtlas={(slugArg) => {
+            navigation.goTo("subjects", { mode: "atlas", entity: slugArg, lens: "provenance" })
           }}
         />
 
-        {/* Phase M Day 5 — contradiction lens jump-off, only when relevant */}
+        {/* Contradiction lens jump-off */}
         {data.contradictions.length > 0 && (
           <ContradictionLink
             entitySlug={data.slug}
             contradictionCount={data.contradictions.length}
-            onOpenAtlas={(slug) => {
-              if (typeof window !== "undefined") {
-                const url = new URL(window.location.href)
-                url.searchParams.set("pane", "subjects")
-                url.searchParams.set("mode", "atlas")
-                url.searchParams.set("entity", slug)
-                url.searchParams.set("lens", "contradiction")
-                window.history.pushState({}, "", url.toString())
-                window.dispatchEvent(new PopStateEvent("popstate"))
-              }
+            onOpenAtlas={(slugArg) => {
+              navigation.goTo("subjects", { mode: "atlas", entity: slugArg, lens: "contradiction" })
             }}
           />
         )}
@@ -306,7 +368,6 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
 
         {/* ----------------------------------------------------------------- */}
         {/* External references (Phase API.3) — hidden when empty           */}
-        {/* Always visually distinct from internal Source artifacts.         */}
         {/* ----------------------------------------------------------------- */}
         <ExternalReferencesSection refs={data.external_references ?? []} />
 

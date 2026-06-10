@@ -8,6 +8,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import type { WikiEntityPage } from "@/lib/types/wiki"
 
+// MutationObserver stub — TrustBandBadge registers a theme watcher that
+// calls MutationObserver.observe on mount; we stub it to avoid jsdom noise.
+vi.stubGlobal("MutationObserver", class {
+  observe() {}
+  disconnect() {}
+})
+
 // ---------------------------------------------------------------------------
 // Mock the hooks so we can control returned data
 // ---------------------------------------------------------------------------
@@ -15,6 +22,12 @@ import type { WikiEntityPage } from "@/lib/types/wiki"
 vi.mock("@/hooks/use-wiki-entities", () => ({
   useWikiEntities: vi.fn(),
   useWikiEntity: vi.fn(),
+}))
+
+// Mock fetchNeighborhood so MiniGraph's sr-only neighbor fetch doesn't error.
+vi.mock("@/lib/api/graph", () => ({
+  fetchNeighborhood: vi.fn().mockResolvedValue({ focal_entity: "elon-musk", nodes: [], edges: [], truncated: false, cached: false }),
+  fetchTimeline: vi.fn().mockResolvedValue({ entity: "elon-musk", from_date: "", to_date: "", granularity: "day", buckets: [], total_mentions: 0, total_entities_introduced: 0, cached: false }),
 }))
 
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
@@ -155,11 +168,11 @@ describe("EntityDetailView — settled state", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Elon Musk" })).toBeTruthy()
   })
 
-  it("renders confidence band badge", () => {
+  it("renders trust band badge for entity", () => {
     mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
     render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
-    // ConfidenceBandBadge renders aria-label="Confidence: high"
-    const badge = document.querySelector('[aria-label="Confidence: high"]')
+    // TrustBandBadge renders aria-label starting with "Trust: verified" for confidence_band="high"
+    const badge = document.querySelector('[aria-label^="Trust: verified"]')
     expect(badge).not.toBeNull()
   })
 

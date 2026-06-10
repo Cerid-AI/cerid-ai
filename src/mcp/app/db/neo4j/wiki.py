@@ -209,6 +209,7 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                     e.name                AS name,
                     e.entity_type         AS entity_type,
                     coalesce(e.mention_count, 0) AS mention_count,
+                    e.community_id        AS community_id,
                     e.summary             AS summary,
                     e.summary_updated_at  AS summary_updated_at,
                     e.updated_at          AS updated_at

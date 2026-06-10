@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Sigma from "sigma"
 import { adaptNeighborhood } from "@/lib/graph/graphology-adapter"
+import { resolveMapTokens } from "@/lib/graph/identity"
 import { applyLayout } from "@/lib/graph/apply-layout"
 import {
   ATLAS_DEFAULT_EDGE_TYPE,
@@ -96,7 +97,7 @@ export default function AtlasPerfHarness() {
       if (cancelled) return
       const t0 = performance.now()
       const fixture = generateSyntheticGraph({ nodes: nodeCount, seed: 42 + seedKey })
-      const graph = adaptNeighborhood(fixture)
+      const graph = adaptNeighborhood(fixture, resolveMapTokens(document.documentElement))
 
       const sigma = new Sigma(graph, container, {
         renderLabels: nodeCount <= 1000,  // labels at scale tank FPS

@@ -136,4 +136,12 @@ export interface WikiEntityPage {
   last_updated_at: string | null
   next_refresh_due: string | null
   confidence_band: ConfidenceBand
+  /** Leiden community ID this entity belongs to, or null if unassigned. */
+  community_id?: string | null
+  /** Human label for the community (from the cartographic map artifact). */
+  community_label?: string | null
+  /** Total corpus mentions (for display in the identity header capsule). */
+  mention_count?: number
+  /** Trust state from the graph layer, aligned with GraphNode.trust_state. */
+  trust_state?: "verified" | "partial" | "unverified" | "unknown"
 }

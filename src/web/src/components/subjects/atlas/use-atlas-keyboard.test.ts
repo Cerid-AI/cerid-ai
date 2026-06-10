@@ -320,3 +320,41 @@ describe("useAtlasKeyboard — input-aware", () => {
     expect(onSearchPalette).not.toHaveBeenCalled()
   })
 })
+
+describe("useAtlasKeyboard — hops + unpin", () => {
+  it("1/2/3 call onHopsChange with correct hop depth", () => {
+    const graph = makeGraph()
+    const stub = makeStubSigma()
+    const onHopsChange = vi.fn()
+    const { result } = renderHook(() =>
+      useAtlasKeyboard({
+        sigma: stub.instance as never,
+        graph,
+        focalEntity: "n0",
+        onHopsChange,
+      }),
+    )
+    act(() => result.current.onKeyDown(keyEvent("1")))
+    expect(onHopsChange).toHaveBeenCalledWith(1)
+    act(() => result.current.onKeyDown(keyEvent("2")))
+    expect(onHopsChange).toHaveBeenCalledWith(2)
+    act(() => result.current.onKeyDown(keyEvent("3")))
+    expect(onHopsChange).toHaveBeenCalledWith(3)
+  })
+
+  it("Escape calls onUnpin", () => {
+    const graph = makeGraph()
+    const stub = makeStubSigma()
+    const onUnpin = vi.fn()
+    const { result } = renderHook(() =>
+      useAtlasKeyboard({
+        sigma: stub.instance as never,
+        graph,
+        focalEntity: "n0",
+        onUnpin,
+      }),
+    )
+    act(() => result.current.onKeyDown(keyEvent("Escape")))
+    expect(onUnpin).toHaveBeenCalledTimes(1)
+  })
+})

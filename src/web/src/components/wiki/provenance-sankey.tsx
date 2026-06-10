@@ -19,15 +19,22 @@ import {
   Rectangle,
   Layer,
 } from "recharts"
-import { ChevronDown, ChevronRight, GitBranch, Loader2 } from "lucide-react"
+import { AlertCircle, ChevronDown, ChevronRight, GitBranch } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { EmptyState } from "@/components/ui/empty-state"
 import { fetchNeighborhood } from "@/lib/api/graph"
 import type { NeighborhoodResponse } from "@/lib/types/graph"
 import { cn } from "@/lib/utils"
+import { communitySlot } from "@/components/subjects/timeline/stratigraph/strata-layout"
+import { resolveMapTokens } from "@/components/subjects/constellation/map/community-layer"
 
 interface ProvenanceSankeyProps {
   entitySlug: string
   entityName?: string
+  /** Community ID of the focal entity, for the entity terminus hue. */
+  communityId?: string | null
   /** Click → opens the full Atlas with the entity focused + provenance lens on. */
   onOpenAtlas?: (slug: string) => void
 }
@@ -35,6 +42,7 @@ interface ProvenanceSankeyProps {
 export function ProvenanceSankey({
   entitySlug,
   entityName,
+  communityId,
   onOpenAtlas,
 }: ProvenanceSankeyProps) {
   const [expanded, setExpanded] = useState(false)
@@ -54,14 +62,9 @@ export function ProvenanceSankey({
 
   const sankeyData = useMemo(() => {
     if (!data) return null
-    // Build provider → claim type → entity flow.
-    // For v1: source type (artifact origin) → mention edge type → entity.
-    // We collapse "attested" + "inferred" attestation kinds into the
-    // edge bucket because that's the documented signal.
     const focal = data.focal_entity
 
-    // Aggregate edges by attestation bucket
-    const buckets = new Map<string, number>()  // attestation → count
+    const buckets = new Map<string, number>()
     let unattested = 0
     for (const edge of data.edges) {
       if (edge.source !== focal && edge.target !== focal) continue
@@ -72,8 +75,6 @@ export function ProvenanceSankey({
 
     if (buckets.size === 0) return null
 
-    // Nodes: "Sources" (n attested-edge count), per-attestation bucket
-    // ("attested" / "inferred"), focal entity
     const nodes = [
       { name: "Sources" },
       ...Array.from(buckets.keys()).map((b) => ({ name: b })),
@@ -81,20 +82,18 @@ export function ProvenanceSankey({
     ]
     const nodeIndex = new Map(nodes.map((n, i) => [n.name, i]))
     const links = [
-      // Sources → each attestation bucket
       ...Array.from(buckets.entries()).map(([bucket, count]) => ({
         source: nodeIndex.get("Sources") ?? 0,
         target: nodeIndex.get(bucket) ?? 0,
         value: count,
       })),
-      // Each bucket → entity
       ...Array.from(buckets.entries()).map(([bucket, count]) => ({
         source: nodeIndex.get(bucket) ?? 0,
         target: nodeIndex.get(entityName ?? focal) ?? 0,
         value: count,
       })),
     ]
-    return { nodes, links, unattested }
+    return { nodes, links, unattested, entityName: entityName ?? focal }
   }, [data, entityName])
 
   const handleOpenAtlas = useCallback(() => {
@@ -126,16 +125,24 @@ export function ProvenanceSankey({
           className="mt-2 rounded-md border border-border bg-card/50 p-3"
         >
           {loading && (
-            <div className="flex items-center justify-center py-6 text-muted-foreground text-xs">
-              <Loader2 className="w-3 h-3 animate-spin mr-1.5" />
-              Loading provenance…
+            <div className="space-y-2 py-2" role="status" aria-label="Loading provenance data">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-4/5" />
+              <Skeleton className="h-8 w-full" />
             </div>
           )}
-          {error && <div className="text-xs text-amber-600" role="alert">{error}</div>}
+          {error && (
+            <Alert variant="destructive" className="py-2">
+              <AlertCircle className="h-3.5 w-3.5" />
+              <AlertDescription className="text-xs">{error}</AlertDescription>
+            </Alert>
+          )}
           {data && (!sankeyData || sankeyData.nodes.length < 3) && (
-            <p className="text-xs text-muted-foreground py-2">
-              No source attestation recorded for {entityName ?? entitySlug} yet.
-            </p>
+            <EmptyState
+              icon={GitBranch}
+              title="No attestation recorded"
+              description={`No source attestation recorded for ${entityName ?? entitySlug} yet.`}
+            />
           )}
           {sankeyData && sankeyData.nodes.length >= 3 && (
             <>
@@ -147,8 +154,8 @@ export function ProvenanceSankey({
                     nodePadding={14}
                     linkCurvature={0.5}
                     iterations={32}
-                    node={<SankeyNode />}
-                    link={{ stroke: "#10b981", strokeOpacity: 0.4 }}
+                    node={<SankeyNode communityId={communityId} entityNodeName={sankeyData.entityName} />}
+                    link={{ stroke: "currentColor", className: "text-border/60", strokeOpacity: 0.5 }}
                   >
                     <Tooltip
                       formatter={((value: number) => [`${value}`, "edges"]) as never}
@@ -160,7 +167,7 @@ export function ProvenanceSankey({
                 <span>
                   {sankeyData.links.length / 2} attestation buckets
                   {sankeyData.unattested > 0 && (
-                    <> · <span className="text-amber-600">{sankeyData.unattested} inferred</span></>
+                    <> · <span className="text-destructive">{sankeyData.unattested} inferred</span></>
                   )}
                 </span>
                 <Button
@@ -182,19 +189,37 @@ export function ProvenanceSankey({
 }
 
 
-// Node renderer with side-aware label placement (matches the pattern
-// used by the Phase L CostSankey component).
+// Node renderer with side-aware label placement + community-hued entity terminus.
 interface SankeyNodeProps {
   x?: number
   y?: number
   width?: number
   height?: number
   payload?: { name?: string; sourceLinks?: unknown[] }
+  /** Community ID of the focal entity — drives hue on the entity terminus node */
+  communityId?: string | null
+  /** Name of the entity terminus node so we can identify it */
+  entityNodeName?: string
 }
 
 function SankeyNode(props: SankeyNodeProps) {
-  const { x = 0, y = 0, width = 8, height = 0, payload } = props
+  const { x = 0, y = 0, width = 8, height = 0, payload, communityId, entityNodeName } = props
   const isLeft = (payload?.sourceLinks?.length ?? 0) > 0
+  const name = payload?.name
+
+  // Entity terminus gets community hue; all other nodes use neutral foreground/40.
+  const isEntityNode = name === entityNodeName
+  let fillColor = "currentColor"
+  let fillOpacity = 0.35
+
+  if (isEntityNode && communityId) {
+    // drift-allowed: runtime token resolution — community color resolved from CSS tokens
+    const tokens = resolveMapTokens(document.documentElement)
+    const slot = communitySlot(communityId)
+    fillColor = tokens.clusters[slot] ?? tokens.clusterOther
+    fillOpacity = 0.75
+  }
+
   return (
     <Layer>
       <Rectangle
@@ -202,8 +227,8 @@ function SankeyNode(props: SankeyNodeProps) {
         y={y}
         width={width}
         height={height}
-        fill="#10b981"
-        fillOpacity={0.85}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
       />
       <text
         x={isLeft ? x - 4 : x + width + 4}
@@ -212,7 +237,7 @@ function SankeyNode(props: SankeyNodeProps) {
         dominantBaseline="middle"
         className="text-[9px] fill-foreground"
       >
-        {payload?.name}
+        {name}
       </text>
     </Layer>
   )

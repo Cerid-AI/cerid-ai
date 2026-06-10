@@ -143,6 +143,11 @@ class WikiEntityPage(BaseModel):
     slug: str
     name: str
     entity_type: str
+    # Identity-capsule fields (Gazetteer): the same community hue and trust
+    # vocabulary the entity wears in the graph views.
+    community_id: str | None = None
+    community_label: str | None = None
+    mention_count: int = 0
     summary: str | None = None
     related_entities: list[RelatedEntity] = []
     source_artifacts: list[SourceCitation] = []
@@ -311,10 +316,17 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         for s in raw.get("source_artifacts", [])
     ]
 
+    community_label = await asyncio.to_thread(
+        _resolve_community_label, neo4j_driver, raw.get("community_id")
+    )
+
     return WikiEntityPage(
         slug=slug,
         name=raw.get("name", ""),
         entity_type=raw.get("entity_type", "OTHER"),
+        community_id=raw.get("community_id"),
+        community_label=community_label,
+        mention_count=int(raw.get("mention_count") or 0),
         summary=raw.get("summary"),
         related_entities=related,
         source_artifacts=source_artifacts,
@@ -330,6 +342,56 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_community_label(neo4j_driver: Any, community_id: Any) -> str | None:
+    """Human label for the entity's Leiden community.
+
+    Primary source: the cartographic map artifact (same as /graph/map and
+    /graph/timeline/strata — payload shape {"communities": [...]}, only
+    hull-worthy communities present). Fallback: top-hub entity name from
+    Neo4j so small communities still read humanely. Fail-open: any miss
+    returns None and the capsule shows the raw id.
+    """
+    if not community_id:
+        return None
+    cid = str(community_id)
+    try:
+        import json as _json
+
+        from app.deps import get_redis
+
+        redis = get_redis()
+        if redis is not None:
+            raw = redis.get("cerid:graph:map:communities")
+            if raw:
+                payload = _json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+                communities = payload.get("communities", []) if isinstance(payload, dict) else payload
+                for c in communities:
+                    if str(c.get("id")) == cid:
+                        label = c.get("label")
+                        if label:
+                            return str(label)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "wiki.get_entity_page.community_label_artifact", exc,
+            context={"community_id": cid},
+        )
+    try:
+        with neo4j_driver.session() as session:
+            row = session.run(
+                "MATCH (e:Entity {community_id: $cid}) "
+                "RETURN e.name AS name ORDER BY e.mention_count DESC LIMIT 1",
+                cid=cid,
+            ).single()
+            if row and row.get("name"):
+                return str(row["name"])
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "wiki.get_entity_page.community_label_hub", exc,
+            context={"community_id": cid},
+        )
+    return None
 
 
 def _compute_next_refresh(summary_updated_at: str | None) -> str:
