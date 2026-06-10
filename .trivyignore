@@ -76,3 +76,16 @@ CVE-2026-5773
 # 13 base image; no fixed version published as of 2026-05-16.
 # Re-evaluate: 2026-06-30.
 CVE-2026-6276
+
+# OpenSSL heap use-after-free in PKCS7_verify(). Application code never
+# verifies PKCS7/S-MIME signatures — openssl is only exercised for TLS
+# via httpx. Debian 13 base image (libssl3t64/openssl/
+# openssl-provider-legacy); no fixed version published as of 2026-06-10.
+# Re-evaluate: 2026-06-30.
+CVE-2026-45447
+
+# Perl IO::Uncompress::Unzip CPU exhaustion on crafted zip. perl-base
+# ships with the Debian 13 base image only as an OS dependency; nothing
+# in the container runs perl, let alone on untrusted archives. No fixed
+# version published as of 2026-06-10. Re-evaluate: 2026-06-30.
+CVE-2026-48959
