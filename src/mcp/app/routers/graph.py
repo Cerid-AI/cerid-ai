@@ -31,7 +31,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -988,5 +990,685 @@ async def get_graph_map() -> GraphMapResponse:
         except (OSError, ValueError) as exc:
             # silent-catch-allowed: cache-write failure non-fatal.
             logger.info("graph.map.cache_write_failed: %s", exc)
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Stratigraph — Timeline v2 (Phase M)
+# ---------------------------------------------------------------------------
+
+_STRATA_TTL_SECONDS = 60
+_STRATA_TOP_COMMUNITIES = 8
+_STRATA_TOP_TRACKS = 40
+_STRATA_MAX_BUCKETS = 365
+_STRATA_WINDOW_CAP = 730
+_TRACK_MAX_EVENTS = 500
+_TRACK_CO_MENTIONED_CAP = 20
+_TRUST_STATES = frozenset({"verified", "partial", "unverified", "unknown"})
+
+
+class StrataCommunity(BaseModel):
+    """One community entry in the /graph/timeline/strata response."""
+    community_id: str
+    label: str
+    color_slot: int
+    trust_mix: dict[str, float]
+    total_mentions: int
+    is_other: bool = False
+
+
+class StrataSeriesRow(BaseModel):
+    """Per-(community, entity_type) mention buckets aligned to bucket_dates."""
+    community_id: str
+    entity_type: str
+    buckets: list[int]
+    unverified_buckets: list[int]
+
+
+class StrataTrack(BaseModel):
+    """One top-DOI entity track."""
+    canonical_id: str
+    name: str
+    entity_type: str
+    community_id: str
+    trust_state: str
+    first_seen: str
+    rank: int
+    total_mentions: int
+    buckets: list[int]
+
+
+class StrataMarker(BaseModel):
+    date: str
+    kind: str       # "ingest_burst" | "birth_surge"
+    count: int
+
+
+class StrataTotals(BaseModel):
+    mentions: int
+    entities_introduced: int
+
+
+class StrataResponse(BaseModel):
+    """Shape returned by GET /graph/timeline/strata."""
+    from_date: str
+    to_date: str
+    granularity: str
+    bucket_dates: list[str]
+    communities: list[StrataCommunity]
+    series: list[StrataSeriesRow]
+    tracks: list[StrataTrack]
+    markers: list[StrataMarker]
+    totals: StrataTotals
+    cached: bool = False
+
+
+class TrackEvent(BaseModel):
+    ts: str
+    artifact_id: str
+    artifact_filename: str
+    confidence: float
+    summary: str
+    co_mentioned: list[dict[str, str]]
+
+
+class TrackDetailResponse(BaseModel):
+    """Shape returned by GET /graph/timeline/track/{canonical_id}."""
+    canonical_id: str
+    name: str
+    events: list[TrackEvent]
+    cached: bool = False
+
+
+def _strata_cache_key(start: str, end: str, gran: str) -> str:
+    return f"cerid:graph:timeline:strata:{start}:{end}:{gran}"
+
+
+def _track_cache_key(canonical_id: str, start: str, end: str) -> str:
+    return f"cerid:graph:timeline:track:{canonical_id}:{start}:{end}"
+
+
+def _color_slot(community_id: str) -> int:
+    """Deterministic community→slot (0-7) compatible with communitySlot() on client."""
+    h = hashlib.sha1(  # noqa: S324
+        community_id.encode("utf-8"),
+        usedforsecurity=False,
+    ).digest()
+    return int.from_bytes(h[:4], "big") % 8
+
+
+def _derive_markers(
+    bucket_dates: list[str],
+    mention_counts: list[int],
+    birth_counts: list[int],
+) -> list[StrataMarker]:
+    """Derive ingest_burst and birth_surge markers per spec.
+
+    Rule: count > max(20, 3 × median of non-zero buckets).
+    """
+    def _threshold(counts: list[int]) -> float:
+        nonzero = [c for c in counts if c > 0]
+        med = statistics.median(nonzero) if nonzero else 0.0
+        return max(20.0, 3.0 * med)
+
+    mention_thresh = _threshold(mention_counts)
+    birth_thresh = _threshold(birth_counts)
+
+    markers: list[StrataMarker] = []
+    for date, m_count, b_count in zip(bucket_dates, mention_counts, birth_counts):
+        if m_count > mention_thresh:
+            markers.append(StrataMarker(date=date, kind="ingest_burst", count=m_count))
+        if b_count > birth_thresh:
+            markers.append(StrataMarker(date=date, kind="birth_surge", count=b_count))
+    return markers
+
+
+def _build_bucket_dates(start_dt: datetime, end_dt: datetime, gran: str) -> list[str]:
+    """Generate the canonical list of bucket keys covering [start_dt, end_dt)."""
+    dates: list[str] = []
+    cursor = start_dt.date()
+    end_date = end_dt.date()
+    if gran == "day":
+        while cursor <= end_date and len(dates) < _STRATA_MAX_BUCKETS:
+            dates.append(cursor.isoformat())
+            cursor += timedelta(days=1)
+    elif gran == "week":
+        # Snap to Monday
+        cursor = cursor - timedelta(days=cursor.weekday())
+        while cursor <= end_date and len(dates) < _STRATA_MAX_BUCKETS:
+            dates.append(cursor.isoformat())
+            cursor += timedelta(weeks=1)
+    else:  # month
+        year, month = cursor.year, cursor.month
+        while len(dates) < _STRATA_MAX_BUCKETS:
+            key = f"{year:04d}-{month:02d}"
+            dates.append(key)
+            if f"{year:04d}-{month:02d}" >= f"{end_date.year:04d}-{end_date.month:02d}":
+                break
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+    return dates
+
+
+def _doi_score(
+    in_window_mentions: int,
+    last_bucket_idx: int,
+    total_buckets: int,
+    trust_state: str,
+) -> float:
+    """DOI = ln(1 + mentions) + 0.5·recency + 0.5·unverified_attention."""
+    recency = 0.5 if (total_buckets > 0 and last_bucket_idx >= total_buckets * 2 // 3) else 0.0
+    attention = 0.5 if trust_state == "unverified" else 0.0
+    return math.log1p(in_window_mentions) + recency + attention
+
+
+def _run_strata_cypher(driver: Any, cypher: str, params: dict) -> list[dict]:
+    if driver is None:
+        return []
+    try:
+        with driver.session() as session:
+            return [dict(r) for r in session.run(cypher, **params).data()]
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.strata_cypher_exec",
+            exc,
+        )
+        return []
+
+
+@router.get("/timeline/strata", response_model=StrataResponse)
+async def get_timeline_strata(
+    from_date: str | None = Query(None, alias="from", description="ISO-8601 lower bound"),
+    to_date: str | None = Query(None, alias="to", description="ISO-8601 upper bound"),
+    period: str = Query("90d", description="7d/30d/90d/365d. Ignored when from/to set."),
+    granularity: str | None = Query(None, description="day/week/month. Auto when null."),
+) -> StrataResponse:
+    """Stratigraph strata payload for Timeline v2.
+
+    Returns per-community per-entity_type bucketed mention series, top-40
+    DOI entity tracks, ingest_burst/birth_surge markers, and community
+    metadata (label, trust_mix) sourced from the compute_umap_3d community
+    artifact in Redis.
+
+    Cache: Redis 60s TTL keyed on all params.
+    Degrades to empty on Neo4j or Redis failure — never 500.
+    """
+    now = datetime.now(tz=timezone.utc)
+    period_days = _parse_period(period)
+    end_dt = _parse_iso_or(to_date, now)
+    start_dt = _parse_iso_or(from_date, end_dt - timedelta(days=period_days))
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="to must be after from")
+    window_days = max(1, (end_dt - start_dt).days)
+    if window_days > _STRATA_WINDOW_CAP:
+        raise HTTPException(status_code=400, detail="window exceeds 730 days")
+    gran = _resolve_granularity(window_days, granularity)
+    bucket_dates = _build_bucket_dates(start_dt, end_dt, gran)
+    if len(bucket_dates) > _STRATA_MAX_BUCKETS:
+        bucket_dates = bucket_dates[:_STRATA_MAX_BUCKETS]
+
+    cache_key = _strata_cache_key(start_dt.isoformat(), end_dt.isoformat(), gran)
+    redis = get_redis()
+
+    # Cache fast-path
+    try:
+        if redis is not None:
+            cached_raw = redis.get(cache_key)
+            if cached_raw is not None:
+                payload = json.loads(
+                    cached_raw.decode() if isinstance(cached_raw, bytes) else cached_raw,
+                )
+                payload["cached"] = True
+                return StrataResponse(**payload)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.strata_cache_read",
+            exc,
+            context={"cache_key": cache_key},
+        )
+        redis = get_redis()  # re-obtain after error path
+
+    _empty = StrataResponse(
+        from_date=start_dt.isoformat(),
+        to_date=end_dt.isoformat(),
+        granularity=gran,
+        bucket_dates=bucket_dates,
+        communities=[],
+        series=[],
+        tracks=[],
+        markers=[],
+        totals=StrataTotals(mentions=0, entities_introduced=0),
+    )
+
+    # Get Neo4j driver
+    try:
+        driver = get_neo4j()
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.strata_neo4j_unavailable", exc)
+        return _empty
+
+    # ── Community metadata from Redis artifact ──────────────────────────────
+    community_meta: dict[str, dict[str, Any]] = {}
+    if redis is not None:
+        try:
+            raw = redis.get(_COMMUNITY_MAP_REDIS_KEY)
+            if raw:
+                artifact = json.loads(
+                    raw if isinstance(raw, str) else raw.decode("utf-8"),
+                )
+                for c in artifact.get("communities") or []:
+                    cid = str(c["id"])
+                    trust_mix_raw = c.get("trust_mix") or {}
+                    total_trust = max(1, sum(trust_mix_raw.values()))
+                    community_meta[cid] = {
+                        "label": c.get("label") or cid,
+                        "trust_mix": {
+                            k: round(v / total_trust, 4)
+                            for k, v in trust_mix_raw.items()
+                            if k in _TRUST_STATES
+                        },
+                    }
+        except Exception as exc:  # noqa: BLE001 — community meta is non-fatal
+            log_swallowed_error("app.routers.graph.strata_community_meta_read", exc)
+
+    # ── Cypher: per (community_id, entity_type, bucket) mention counts ───────
+    start_iso = start_dt.isoformat()
+    end_iso = end_dt.isoformat()
+
+    mention_cypher = """
+        MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity)
+        WHERE m.created_at >= $start AND m.created_at <= $end
+        RETURN
+            coalesce(e.community_id, '__null__') AS community_id,
+            coalesce(e.entity_type, e.type, 'unknown') AS entity_type,
+            m.created_at AS ts,
+            coalesce(e.trust_state, 'unknown') AS trust_state,
+            e.canonical_id AS canonical_id,
+            coalesce(e.name, e.canonical_id) AS name,
+            coalesce(e.mention_count, 0) AS mention_count,
+            e.created_at AS entity_created_at
+    """
+    try:
+        rows = await asyncio.to_thread(
+            _run_strata_cypher, driver, mention_cypher,
+            {"start": start_iso, "end": end_iso},
+        )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.strata_mention_query",
+            exc,
+            context={"granularity": gran},
+        )
+        return _empty
+
+    if not rows:
+        return _empty
+
+    bucket_index: dict[str, int] = {d: i for i, d in enumerate(bucket_dates)}
+    n_buckets = len(bucket_dates)
+
+    # Accumulate per-(community, entity_type) buckets
+    # key → {"buckets": [int], "unverified_buckets": [int]}
+    series_acc: dict[tuple[str, str], dict[str, list[int]]] = {}
+    # per-community total mentions (for top-8 selection)
+    community_total: dict[str, int] = {}
+    # per-entity accumulation for DOI + track buckets
+    entity_acc: dict[str, dict[str, Any]] = {}
+    # global bucket totals for markers
+    global_bucket_mentions: list[int] = [0] * n_buckets
+    global_bucket_births: list[int] = [0] * n_buckets
+
+    # Track first-seen per entity within the query (to count births)
+    entity_first_bucket: dict[str, int] = {}
+
+    for row in rows:
+        cid_raw = str(row.get("community_id") or "__null__")
+        cid = cid_raw if cid_raw != "__null__" else "other"
+        etype = str(row.get("entity_type") or "unknown")
+        ts = str(row.get("ts") or "")
+        trust = str(row.get("trust_state") or "unknown")
+        canon = str(row.get("canonical_id") or "")
+        name = str(row.get("name") or canon)
+        entity_created_at = str(row.get("entity_created_at") or "")
+
+        bkey = _bucket_key(ts, gran)
+        bidx = bucket_index.get(bkey, -1)
+        if bidx < 0:
+            continue
+
+        # Series accumulation
+        sk = (cid, etype)
+        if sk not in series_acc:
+            series_acc[sk] = {
+                "buckets": [0] * n_buckets,
+                "unverified_buckets": [0] * n_buckets,
+            }
+        series_acc[sk]["buckets"][bidx] += 1
+        if trust == "unverified":
+            series_acc[sk]["unverified_buckets"][bidx] += 1
+
+        # Community total
+        community_total[cid] = community_total.get(cid, 0) + 1
+
+        # Global bucket mentions for ingest_burst marker
+        global_bucket_mentions[bidx] += 1
+
+        # Entity accumulation for tracks
+        if canon:
+            if canon not in entity_acc:
+                entity_acc[canon] = {
+                    "name": name,
+                    "entity_type": etype,
+                    "community_id": cid,
+                    "trust_state": trust,
+                    "first_seen": entity_created_at,
+                    "buckets": [0] * n_buckets,
+                    "total": 0,
+                    "last_bucket_idx": 0,
+                }
+            ea = entity_acc[canon]
+            ea["buckets"][bidx] += 1
+            ea["total"] += 1
+            ea["last_bucket_idx"] = max(ea["last_bucket_idx"], bidx)
+
+        # Birth tracking: count entity born (created_at) in this bucket
+        if canon and canon not in entity_first_bucket:
+            birth_bkey = _bucket_key(entity_created_at, gran) if entity_created_at else ""
+            birth_bidx = bucket_index.get(birth_bkey, -1)
+            entity_first_bucket[canon] = birth_bidx
+            if birth_bidx >= 0:
+                global_bucket_births[birth_bidx] += 1
+
+    # ── Top-8 communities (+ "other" rollup) ─────────────────────────────────
+    sorted_comms = sorted(community_total.items(), key=lambda kv: kv[1], reverse=True)
+    top_comm_ids: list[str] = [cid for cid, _ in sorted_comms[:_STRATA_TOP_COMMUNITIES]]
+    top_comm_set = set(top_comm_ids)
+
+    # Build the "other" virtual community for the rest
+    other_total = sum(cnt for cid, cnt in sorted_comms[_STRATA_TOP_COMMUNITIES:])
+    if other_total > 0 and "other" not in top_comm_set:
+        top_comm_ids.append("other")
+        top_comm_set.add("other")
+
+    # Remap series rows for communities outside top-8 → "other"
+    remapped_series: dict[tuple[str, str], dict[str, list[int]]] = {}
+    for (cid, etype), acc in series_acc.items():
+        target_cid = cid if cid in top_comm_set else "other"
+        sk = (target_cid, etype)
+        if sk not in remapped_series:
+            remapped_series[sk] = {
+                "buckets": [0] * n_buckets,
+                "unverified_buckets": [0] * n_buckets,
+            }
+        for i in range(n_buckets):
+            remapped_series[sk]["buckets"][i] += acc["buckets"][i]
+            remapped_series[sk]["unverified_buckets"][i] += acc["unverified_buckets"][i]
+
+    # ── Build communities list ────────────────────────────────────────────────
+    communities_out: list[StrataCommunity] = []
+    for cid in top_comm_ids:
+        is_other = cid == "other" and cid not in {k for k, _ in sorted_comms[:_STRATA_TOP_COMMUNITIES]}
+        meta = community_meta.get(cid, {})
+        if meta:
+            label = meta["label"]
+            trust_mix = meta["trust_mix"]
+        else:
+            # Degrade: label from top entity in community, trust_mix = zeros
+            top_entity_name = next(
+                (
+                    ea["name"]
+                    for ea in sorted(
+                        (v for v in entity_acc.values() if v["community_id"] == cid),
+                        key=lambda x: x["total"],
+                        reverse=True,
+                    )
+                ),
+                cid,
+            )
+            label = top_entity_name if not is_other else "Other"
+            trust_mix = {"verified": 0.0, "partial": 0.0, "unverified": 0.0, "unknown": 0.0}
+
+        c_total = other_total if is_other else community_total.get(cid, 0)
+        communities_out.append(StrataCommunity(
+            community_id=cid,
+            label=label,
+            color_slot=_color_slot(cid),
+            trust_mix=trust_mix,
+            total_mentions=c_total,
+            is_other=is_other,
+        ))
+
+    # ── Series rows ───────────────────────────────────────────────────────────
+    series_out: list[StrataSeriesRow] = [
+        StrataSeriesRow(
+            community_id=cid,
+            entity_type=etype,
+            buckets=acc["buckets"],
+            unverified_buckets=acc["unverified_buckets"],
+        )
+        for (cid, etype), acc in remapped_series.items()
+        if cid in top_comm_set
+    ]
+
+    # ── Top-40 tracks (DOI-sorted) ────────────────────────────────────────────
+    scored: list[tuple[float, str]] = []
+    for canon, ea in entity_acc.items():
+        score = _doi_score(ea["total"], ea["last_bucket_idx"], n_buckets, ea["trust_state"])
+        scored.append((score, canon))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    top_tracks = scored[:_STRATA_TOP_TRACKS]
+
+    tracks_out: list[StrataTrack] = []
+    for rank, (_, canon) in enumerate(top_tracks, start=1):
+        ea = entity_acc[canon]
+        comm_id = ea["community_id"]
+        # Remap to "other" if outside top-8
+        if comm_id not in top_comm_set:
+            comm_id = "other"
+        tracks_out.append(StrataTrack(
+            canonical_id=canon,
+            name=ea["name"],
+            entity_type=ea["entity_type"],
+            community_id=comm_id,
+            trust_state=ea["trust_state"],
+            first_seen=ea["first_seen"],
+            rank=rank,
+            total_mentions=ea["total"],
+            buckets=ea["buckets"],
+        ))
+
+    # ── Markers ───────────────────────────────────────────────────────────────
+    markers_out = _derive_markers(bucket_dates, global_bucket_mentions, global_bucket_births)
+
+    total_mentions = sum(global_bucket_mentions)
+    total_entities = len(entity_acc)
+
+    response = StrataResponse(
+        from_date=start_dt.isoformat(),
+        to_date=end_dt.isoformat(),
+        granularity=gran,
+        bucket_dates=bucket_dates,
+        communities=communities_out,
+        series=series_out,
+        tracks=tracks_out,
+        markers=markers_out,
+        totals=StrataTotals(mentions=total_mentions, entities_introduced=total_entities),
+        cached=False,
+    )
+
+    # Cache 60s
+    if redis is not None:
+        try:
+            redis.setex(
+                cache_key,
+                _STRATA_TTL_SECONDS,
+                json.dumps(response.model_dump()),
+            )
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.routers.graph.strata_cache_write",
+                exc,
+                context={"cache_key": cache_key},
+            )
+
+    return response
+
+
+@router.get("/timeline/track/{canonical_id}", response_model=TrackDetailResponse)
+async def get_timeline_track(
+    canonical_id: str,
+    from_date: str | None = Query(None, alias="from", description="ISO-8601 lower bound"),
+    to_date: str | None = Query(None, alias="to", description="ISO-8601 upper bound"),
+) -> TrackDetailResponse:
+    """Event-level detail for one entity track (lazy, zoom-triggered).
+
+    Returns up to 500 mention events with per-event co-mentions (cap 20)
+    via shared-artifact cypher.
+
+    Cache: Redis 60s TTL.
+    """
+    now = datetime.now(tz=timezone.utc)
+    end_dt = _parse_iso_or(to_date, now)
+    start_dt = _parse_iso_or(from_date, end_dt - timedelta(days=90))
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="to must be after from")
+
+    start_iso = start_dt.isoformat()
+    end_iso = end_dt.isoformat()
+    cache_key = _track_cache_key(canonical_id, start_iso, end_iso)
+    redis = get_redis()
+
+    # Cache fast-path
+    try:
+        if redis is not None:
+            cached_raw = redis.get(cache_key)
+            if cached_raw is not None:
+                payload = json.loads(
+                    cached_raw.decode() if isinstance(cached_raw, bytes) else cached_raw,
+                )
+                payload["cached"] = True
+                return TrackDetailResponse(**payload)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.track_cache_read",
+            exc,
+            context={"cache_key": cache_key},
+        )
+        redis = get_redis()
+
+    _empty_track = TrackDetailResponse(
+        canonical_id=canonical_id,
+        name=canonical_id,
+        events=[],
+    )
+
+    try:
+        driver = get_neo4j()
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.track_neo4j_unavailable", exc)
+        return _empty_track
+
+    # Fetch mention events + co-mentioned entities (shared artifact, capped 20)
+    cypher = """
+        MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity {canonical_id: $canonical_id})
+        WHERE m.created_at >= $start AND m.created_at <= $end
+        WITH a, m
+        ORDER BY m.created_at DESC
+        LIMIT $max_events
+        OPTIONAL MATCH (a)-[:MENTIONS]->(co:Entity)
+        WHERE co.canonical_id <> $canonical_id
+        WITH a, m,
+             collect(DISTINCT {canonical_id: co.canonical_id, name: coalesce(co.name, co.canonical_id)})[..$co_cap]
+             AS co_mentioned
+        RETURN
+            m.created_at AS ts,
+            a.artifact_id AS artifact_id,
+            coalesce(a.filename, a.artifact_id) AS artifact_filename,
+            coalesce(m.confidence, 1.0) AS confidence,
+            coalesce(a.summary, '') AS summary,
+            co_mentioned
+        ORDER BY ts DESC
+    """
+    try:
+        rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            cypher,
+            {
+                "canonical_id": canonical_id,
+                "start": start_iso,
+                "end": end_iso,
+                "max_events": _TRACK_MAX_EVENTS,
+                "co_cap": _TRACK_CO_MENTIONED_CAP,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.graph.track_cypher",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+        return _empty_track
+
+    if not rows:
+        return _empty_track
+
+    # Resolve entity name from first row (the focal entity is not in the RETURN)
+    # We pull it from a separate lightweight query if rows exist.
+    entity_name = canonical_id
+    try:
+        name_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            "MATCH (e:Entity {canonical_id: $id}) RETURN coalesce(e.name, e.canonical_id) AS name LIMIT 1",
+            {"id": canonical_id},
+        )
+        if name_rows:
+            entity_name = str(name_rows[0].get("name") or canonical_id)
+    except Exception as exc:  # noqa: BLE001 — name lookup is non-fatal
+        log_swallowed_error("app.routers.graph.track_name_lookup", exc)
+
+    events: list[TrackEvent] = []
+    for row in rows:
+        co_raw = row.get("co_mentioned") or []
+        co_list: list[dict[str, str]] = []
+        for co in co_raw:
+            if isinstance(co, dict) and co.get("canonical_id"):
+                co_list.append({
+                    "canonical_id": str(co["canonical_id"]),
+                    "name": str(co.get("name") or co["canonical_id"]),
+                })
+        events.append(TrackEvent(
+            ts=str(row.get("ts") or ""),
+            artifact_id=str(row.get("artifact_id") or ""),
+            artifact_filename=str(row.get("artifact_filename") or ""),
+            confidence=float(row.get("confidence") or 1.0),
+            summary=str(row.get("summary") or "")[:200],
+            co_mentioned=co_list,
+        ))
+
+    response = TrackDetailResponse(
+        canonical_id=canonical_id,
+        name=entity_name,
+        events=events,
+        cached=False,
+    )
+
+    if redis is not None:
+        try:
+            redis.setex(
+                cache_key,
+                _STRATA_TTL_SECONDS,
+                json.dumps(response.model_dump()),
+            )
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.routers.graph.track_cache_write",
+                exc,
+                context={"cache_key": cache_key},
+            )
 
     return response

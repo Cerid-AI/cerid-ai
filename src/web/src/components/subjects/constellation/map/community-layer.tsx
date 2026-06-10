@@ -41,6 +41,12 @@ export interface MapTokens {
   /** Foreground color for label text */
   foreground: string
   background: string
+  /** Trust-band colors (neutral ramp from index.css) */
+  trustVerified: string
+  trustPartial: string
+  trustUnverified: string
+  /** Optional dot-grid underlay color */
+  grid: string
 }
 
 // Normalize any CSS color (oklch, hsl, named…) to #rrggbb via a 1×1
@@ -48,7 +54,7 @@ export interface MapTokens {
 // hex/rgb — feeding it raw oklch() token strings renders BLACK nodes.
 let _normCtx: CanvasRenderingContext2D | null = null
 function normalizeColor(cssColor: string): string {
-  if (!cssColor) return "#888888"
+  if (!cssColor) return "#888888" // drift-allowed: neutral fallback for missing CSS var; never reaches the design system
   if (cssColor.startsWith("#")) return cssColor
   if (!_normCtx) {
     const canvas = document.createElement("canvas")
@@ -79,6 +85,10 @@ export function resolveMapTokens(root: Element): MapTokens {
     interaction: get("--color-map-interaction"),
     foreground: get("--foreground"),
     background: get("--background"),
+    trustVerified: get("--color-map-trust-verified"),
+    trustPartial: get("--color-map-trust-partial"),
+    trustUnverified: get("--color-map-trust-unverified"),
+    grid: get("--color-map-grid"),
   }
 }
 
