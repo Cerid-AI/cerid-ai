@@ -138,6 +138,13 @@ FEATURE_FLAGS = {
     "advanced_analytics":        _pro_level(),
     "daily_digest":              _pro_level(),
     "inbox_triage":              _pro_level(),
+    # Pro visualization bucket — graph tour, Atlas saved-views, Constellation
+    # analytics/timeline overlays. Gated via is_feature_enabled("pro_visualization_*")
+    # in app/routers/graph_tour.py + atlas_views.py. (Were consulted but never
+    # registered → failed closed at every tier, so "Take a tour" did nothing.)
+    "pro_visualization_tour":      _pro_level(),
+    "pro_visualization_analytics": _pro_level(),
+    "pro_visualization_timeline":  _pro_level(),
     # Pro cloud connectors bucket
     "gmail_connector":           _pro_level(),
     "outlook_connector":         _pro_level(),
@@ -191,6 +198,11 @@ FEATURE_BUCKETS: dict[str, list[str]] = {
         "advanced_analytics",
         "daily_digest",
         "inbox_triage",
+    ],
+    "pro_visualization": [
+        "pro_visualization_tour",
+        "pro_visualization_analytics",
+        "pro_visualization_timeline",
     ],
     "pro_cloud_connectors": [
         "gmail_connector",
@@ -481,8 +493,23 @@ def is_tier_met(required_tier: str) -> bool:
     return current_level >= required_level
 
 
+def current_tier() -> str:
+    """Live feature tier. Always read through this, never a star-imported copy.
+
+    ``from config.features import *`` binds ``config.FEATURE_TIER`` to a
+    *separate* name; rebinding the string here would not follow it. This
+    accessor returns the canonical value so readers can't go stale.
+    """
+    return FEATURE_TIER
+
+
 def set_tier(new_tier: str) -> str:
     """Runtime tier override — recomputes FEATURE_FLAGS in place.
+
+    This is the single mutation point for the tier. It keeps the
+    ``config`` package's star-imported ``FEATURE_TIER`` copy in sync too,
+    so legacy ``config.FEATURE_TIER`` readers (plugins, multimodal) never
+    drift from the canonical value.
 
     This is a transient override (lost on restart). For persistent
     changes, set ``CERID_TIER`` in ``.env``.
@@ -492,6 +519,13 @@ def set_tier(new_tier: str) -> str:
         raise ValueError(f"Invalid tier: {new_tier!r} (valid: {list(_TIER_LEVELS)})")
     FEATURE_TIER = new_tier
     _refresh_flags()
+    # Sync the star-imported duplicate in the `config` package namespace.
+    # config is fully loaded by call time, so this lazy import is safe.
+    try:
+        import config as _config_pkg
+        _config_pkg.FEATURE_TIER = new_tier
+    except Exception as exc:  # noqa: BLE001 — best-effort namespace sync
+        _config_logger.warning("tier sync to config namespace failed: %s", exc)
     _config_logger.info("Runtime tier override: %s (flags recomputed)", new_tier)
     return new_tier
 

@@ -33,6 +33,24 @@ export default defineConfig([
     },
     rules: {
       'cerid/no-unsafe-array-on-query-data': 'warn',
+      // EC1 guard: never fetch() a bare API path. A relative MCP_BASE makes
+      // `new URL(path)` throw, and a missing /api/mcp prefix falls through nginx
+      // to the SPA shell (HTTP 200 text/html) and explodes on `.json()`. Route
+      // every MCP request through mcpUrl()+mcpHeaders() (lib/api/common.ts).
+      // The selectors only match templates/strings that START with a literal
+      // "/", so `fetch(`${MCP_BASE}/x`)` and `mcpUrl(...)` are allowed. For a
+      // genuine static-asset fetch, add an eslint-disable-next-line with a reason.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.name='fetch'] > Literal[value=/^\\//]",
+          message: 'Do not fetch() a bare API path — use mcpUrl()+mcpHeaders() from @/lib/api/common (EC1: nginx returns the SPA shell for an unprefixed path).',
+        },
+        {
+          selector: "CallExpression[callee.name='fetch'] > TemplateLiteral > TemplateElement:first-child[value.raw=/^\\//]",
+          message: 'Do not fetch() a bare API path — use mcpUrl()+mcpHeaders() from @/lib/api/common (EC1: nginx returns the SPA shell for an unprefixed path).',
+        },
+      ],
       // react-hooks v7 strict rules — warn for now, fix incrementally.
       // 7.1.x added `refs`, `immutability`, `component-hook-factories`,
       // and `preserve-manual-memoization` as errors-by-default; existing

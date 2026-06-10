@@ -6,7 +6,7 @@
  * pane. Mirrors the Pydantic schemas in src/mcp/app/routers/sources.py.
  */
 
-const API_BASE = ""
+import { mcpUrl, mcpHeaders } from "./common"
 
 export type SourceAvailability = "available" | "oauth" | "coming_soon"
 
@@ -53,23 +53,22 @@ export interface HealthProbeResult {
 }
 
 export async function listSourceKinds(): Promise<SourceKindMeta[]> {
-  const r = await fetch(`${API_BASE}/sources/kinds`)
+  const r = await fetch(mcpUrl("/sources/kinds").toString(), { headers: mcpHeaders() })
   if (!r.ok) throw new Error(`listSourceKinds failed: ${r.status}`)
   return r.json()
 }
 
 export async function listSources(kind?: string): Promise<SourceRecord[]> {
-  const url = new URL(`${API_BASE}/sources`, window.location.origin)
-  if (kind) url.searchParams.set("kind", kind)
-  const r = await fetch(url.pathname + url.search)
+  const url = mcpUrl("/sources", { kind })
+  const r = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!r.ok) throw new Error(`listSources failed: ${r.status}`)
   return r.json()
 }
 
 export async function createSource(body: CreateSourceRequest): Promise<SourceRecord> {
-  const r = await fetch(`${API_BASE}/sources`, {
+  const r = await fetch(mcpUrl("/sources").toString(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   })
   if (!r.ok) {
@@ -80,7 +79,7 @@ export async function createSource(body: CreateSourceRequest): Promise<SourceRec
 }
 
 export async function testSource(sourceId: string): Promise<HealthProbeResult> {
-  const r = await fetch(`${API_BASE}/sources/${sourceId}/test`, { method: "POST" })
+  const r = await fetch(mcpUrl(`/sources/${sourceId}/test`).toString(), { method: "POST", headers: mcpHeaders() })
   if (!r.ok) throw new Error(`testSource failed: ${r.status}`)
   return r.json()
 }
@@ -94,9 +93,9 @@ export async function patchSourcePolicy(
   sourceId: string,
   patch: PolicyPatch,
 ): Promise<SourceRecord> {
-  const r = await fetch(`${API_BASE}/sources/${sourceId}/policy`, {
+  const r = await fetch(mcpUrl(`/sources/${sourceId}/policy`).toString(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(patch),
   })
   if (!r.ok) throw new Error(`patchSourcePolicy failed: ${r.status}`)
@@ -104,8 +103,7 @@ export async function patchSourcePolicy(
 }
 
 export async function deleteSource(sourceId: string, cascade = false): Promise<void> {
-  const url = new URL(`${API_BASE}/sources/${sourceId}`, window.location.origin)
-  if (cascade) url.searchParams.set("cascade", "true")
-  const r = await fetch(url.pathname + url.search, { method: "DELETE" })
+  const url = mcpUrl(`/sources/${sourceId}`, { cascade: cascade ? "true" : undefined })
+  const r = await fetch(url.toString(), { method: "DELETE", headers: mcpHeaders() })
   if (!r.ok) throw new Error(`deleteSource failed: ${r.status}`)
 }

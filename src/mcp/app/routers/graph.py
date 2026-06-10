@@ -58,6 +58,7 @@ _EMBEDDINGS_3D_TTL_SECONDS = int(os.getenv("GRAPH_EMBEDDINGS_3D_CACHE_TTL", "864
 # unbounded scans. The Constellation client renders at most ~10K nodes
 # before LOD downsampling would kick in.
 _EMBEDDINGS_3D_MAX = int(os.getenv("GRAPH_EMBEDDINGS_3D_MAX", "10000"))
+_EMBEDDINGS_3D_MAX_LINKS = int(os.getenv("GRAPH_EMBEDDINGS_3D_MAX_LINKS", "25000"))
 
 
 class GraphNode(BaseModel):
@@ -635,18 +636,26 @@ class EntityEmbedding3D(BaseModel):
 class Embeddings3DResponse(BaseModel):
     count: int
     entities: list[EntityEmbedding3D]
+    # CO_MENTIONED linkage as compact [source_idx, target_idx, weight]
+    # triples indexing into ``entities``. Index-based (not id-based) to keep
+    # the payload small at 16K+ edges; safe because the response is built and
+    # cached atomically, so indices can't drift from the entity list.
+    links: list[tuple[int, int, float]] = []
     cached: bool = False
     computed_at: str | None = None
 
 
 def _embeddings_3d_cache_key(filter_str: str, entities_csv: str) -> str:
+    # v2 suffix: payload gained `links` — versioning the key prevents serving
+    # a cached pre-links payload. The shared bust pattern cerid:graph:emb3d:*
+    # still matches.
     if filter_str or entities_csv:
         h = hashlib.sha1(  # noqa: S324
             f"{filter_str}|{entities_csv}".encode("utf-8"),
             usedforsecurity=False,
         ).hexdigest()[:12]
-        return f"cerid:graph:emb3d:{h}"
-    return "cerid:graph:emb3d:all"
+        return f"cerid:graph:emb3d:v2:{h}"
+    return "cerid:graph:emb3d:v2:all"
 
 
 @router.get("/embeddings/3d", response_model=Embeddings3DResponse)
@@ -711,9 +720,14 @@ async def get_embeddings_3d(
         for r in rows
     ]
 
+    links = await _query_embeddings_3d_links(
+        [r["id"] for r in rows],
+    )
+
     response = Embeddings3DResponse(
         count=len(payload_entities),
         entities=payload_entities,
+        links=links,
         cached=False,
         computed_at=computed_at,
     )
@@ -730,6 +744,55 @@ async def get_embeddings_3d(
             logger.info("graph.emb3d.cache_write_failed: %s", exc)
 
     return response
+
+
+async def _query_embeddings_3d_links(
+    scope_ids: list[str],
+) -> list[tuple[int, int, float]]:
+    """CO_MENTIONED edges between in-scope entities, as index triples.
+
+    Pulls the strongest edges (ORDER BY weight DESC, capped) where both
+    endpoints carry umap coords, then keeps only pairs whose endpoints are
+    in ``scope_ids`` and maps ids → indices into the caller's entity list.
+    One unparameterized-shape query — scoping happens in Python so the
+    filtered/subset variants reuse it unchanged.
+    """
+    driver = get_neo4j()
+    if driver is None or not scope_ids:
+        return []
+
+    cypher = """
+        MATCH (a:Entity)-[r:CO_MENTIONED]->(b:Entity)
+        WHERE a.umap_x IS NOT NULL AND b.umap_x IS NOT NULL
+        RETURN
+            a.canonical_id AS s,
+            b.canonical_id AS t,
+            coalesce(r.weight, 1.0) AS w
+        ORDER BY w DESC
+        LIMIT $max_links
+    """
+
+    def _run() -> list[dict[str, Any]]:
+        with driver.session() as session:
+            return list(session.run(cypher, max_links=_EMBEDDINGS_3D_MAX_LINKS).data())
+
+    try:
+        edge_rows = await asyncio.to_thread(_run)
+    except (OSError, RuntimeError, ValueError) as exc:
+        # silent-catch-allowed: links are an enhancement layer — a failed
+        # edge query must not take down the node payload.
+        logger.warning("emb3d links query failed: %s", exc)
+        return []
+
+    index_of = {eid: i for i, eid in enumerate(scope_ids)}
+    links: list[tuple[int, int, float]] = []
+    for row in edge_rows:
+        si = index_of.get(str(row.get("s") or ""))
+        ti = index_of.get(str(row.get("t") or ""))
+        if si is None or ti is None or si == ti:
+            continue
+        links.append((si, ti, float(row.get("w") or 1.0)))
+    return links
 
 
 async def _query_embeddings_3d(
@@ -786,3 +849,144 @@ async def _query_embeddings_3d(
     # Drop rows where the projection job hasn't computed coords yet.
     # Constellation renders only entities with valid coords.
     return [r for r in rows if r.get("x") is not None and r.get("y") is not None and r.get("z") is not None]
+
+
+# ---------------------------------------------------------------------------
+# Graph map (Cartographer Phase 0) — community hulls + layout artifact
+# ---------------------------------------------------------------------------
+
+_COMMUNITY_MAP_REDIS_KEY = "cerid:graph:map:communities"
+_GRAPH_MAP_CACHE_KEY = "cerid:graph:emb3d:v2:map"
+
+
+class MapCommunity(BaseModel):
+    """One Leiden community in the cartographic map artifact."""
+
+    id: str
+    count: int
+    hull: list[tuple[float, float]]
+    anchor: tuple[float, float]
+    label: str
+    top_hubs: list[dict[str, Any]]
+    trust_mix: dict[str, int]
+
+
+class GraphMapResponse(BaseModel):
+    """Shape returned by GET /graph/map.
+
+    Bundles entity positions, CO_MENTIONED links, and precomputed community
+    artifacts into a single cached payload for the Constellation renderer.
+    """
+
+    count: int
+    entities: list[EntityEmbedding3D]
+    links: list[tuple[int, int, float]]
+    communities: list[MapCommunity]
+    silhouette: float | None = None
+    computed_at: str | None = None
+    cached: bool = False
+
+
+@router.get("/map", response_model=GraphMapResponse)
+async def get_graph_map() -> GraphMapResponse:
+    """Full cartographic map payload for Constellation.
+
+    Bundles the 2D-projected entity positions, CO_MENTIONED edge links, and
+    the precomputed community hull/anchor/trust-mix artifacts from the
+    compute_umap_3d nightly job into one cached response.
+
+    Cache: Redis SETEX ``GRAPH_EMBEDDINGS_3D_CACHE_TTL`` (default 24h).
+    The key ``cerid:graph:emb3d:v2:map`` matches the ``cerid:graph:emb3d:*``
+    bust pattern so a job recompute invalidates this endpoint automatically.
+
+    Community artifacts degrade to ``communities=[]`` when the nightly job
+    has not yet written the Redis artifact — the entity+link payload is
+    always returned.
+    """
+    redis = get_redis()
+
+    # Cache fast-path.
+    if redis:
+        try:
+            cached_raw = redis.get(_GRAPH_MAP_CACHE_KEY)
+            if cached_raw:
+                payload = json.loads(
+                    cached_raw if isinstance(cached_raw, str)
+                    else cached_raw.decode("utf-8"),
+                )
+                payload["cached"] = True
+                return GraphMapResponse(**payload)
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
+            # silent-catch-allowed: cache miss is non-fatal — re-fetch.
+            logger.info("graph.map.cache_read_miss: %s", exc)
+
+    # Entity positions and links.
+    rows = await _query_embeddings_3d(None, None)
+
+    computed_at_values = [str(r["computed_at"]) for r in rows if r.get("computed_at")]
+    computed_at: str | None = max(computed_at_values) if computed_at_values else None
+
+    payload_entities = [
+        EntityEmbedding3D(
+            id=r["id"],
+            name=r.get("name") or r["id"],
+            x=float(r.get("x") or 0.0),
+            y=float(r.get("y") or 0.0),
+            z=float(r.get("z") or 0.0),
+            type=r.get("type") or "unknown",
+            community=r.get("community"),
+            mention_count=int(r.get("mention_count") or 0),
+            trust_state=r.get("trust_state") or "unknown",
+            projection=r.get("method") or "fallback",
+        )
+        for r in rows
+    ]
+
+    links = await _query_embeddings_3d_links([r["id"] for r in rows])
+
+    # Community artifacts — degrade gracefully if missing.
+    communities: list[MapCommunity] = []
+    silhouette: float | None = None
+    if redis:
+        try:
+            raw = redis.get(_COMMUNITY_MAP_REDIS_KEY)
+            if raw:
+                artifact = json.loads(
+                    raw if isinstance(raw, str) else raw.decode("utf-8"),
+                )
+                silhouette = artifact.get("silhouette")
+                for c in artifact.get("communities") or []:
+                    communities.append(MapCommunity(
+                        id=c["id"],
+                        count=c["count"],
+                        hull=[tuple(p) for p in c.get("hull") or []],  # type: ignore[misc]
+                        anchor=tuple(c.get("anchor") or [0.0, 0.0]),  # type: ignore[arg-type]
+                        label=c.get("label") or c["id"],
+                        top_hubs=c.get("top_hubs") or [],
+                        trust_mix=c.get("trust_mix") or {},
+                    ))
+        except Exception as exc:  # noqa: BLE001 — community read is non-fatal
+            log_swallowed_error("app.routers.graph.map_community_read", exc)
+
+    response = GraphMapResponse(
+        count=len(payload_entities),
+        entities=payload_entities,
+        links=links,
+        communities=communities,
+        silhouette=silhouette,
+        computed_at=computed_at,
+        cached=False,
+    )
+
+    if redis:
+        try:
+            redis.set(
+                _GRAPH_MAP_CACHE_KEY,
+                response.model_dump_json(),
+                ex=_EMBEDDINGS_3D_TTL_SECONDS,
+            )
+        except (OSError, ValueError) as exc:
+            # silent-catch-allowed: cache-write failure non-fatal.
+            logger.info("graph.map.cache_write_failed: %s", exc)
+
+    return response

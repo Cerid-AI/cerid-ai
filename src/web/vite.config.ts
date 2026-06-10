@@ -36,7 +36,18 @@ export default defineConfig({
           // under 800KB. ORDER MATTERS: check @react-three FIRST so
           // its files (which contain "three" in path) route to r3f
           // chunk, then catch raw three.js in vendor-three.
-          if (id.includes("@react-three/fiber") || id.includes("@react-three/drei")) return "vendor-r3f"
+          // Postprocessing rides the same lazy 3D chunk as fiber/drei. A
+          // separate vendor-postfx chunk was tried and rolldown merged the
+          // three.js core into it, which would make BASE constellation load
+          // depend on the postfx chunk — worse than the ~46KB gzip it saves.
+          if (
+            id.includes("@react-three/fiber") ||
+            id.includes("@react-three/drei") ||
+            id.includes("@react-three/postprocessing") ||
+            id.includes("node_modules/postprocessing")
+          ) {
+            return "vendor-r3f"
+          }
           if (id.includes("node_modules/three") || id.includes("/three/three.")) return "vendor-three"
           if (id.includes("/gsap/")) return "vendor-gsap"
           // 2026-05-24 (rc1 beta finding F6) — peel Atlas dependencies out

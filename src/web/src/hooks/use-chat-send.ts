@@ -47,6 +47,13 @@ interface UseChatSendOptions {
   kbResults: KBQueryResult[]
   clearInjected: () => void
 
+  /** Private Mode level (0=off, 1=no logging, 2=also bypass KB injection,
+   *  3=also no memory). At level >= 2 the send path injects NO KB documents or
+   *  memories, so the model sees only what the user types. Enforced here — the
+   *  single payload-assembly boundary — because the context is assembled
+   *  client-side and a backend gate cannot un-inject it. */
+  privateModeLevel: number
+
   /** Non-empty when retrieval breached its time budget for the current query.
    *  Propagated onto the assistant ChatMessage so MessageBubble can render a
    *  warning banner explaining the answer is ungrounded. */
@@ -128,9 +135,14 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       }
       options.addMessage(convoId, userMsg)
 
+      // Private Mode L2+ ("bypass KB injection — model sees only what you type"):
+      // inject NOTHING — no manual context, no auto-inject, no memory recall.
+      // This is the single boundary that enforces the toolbar's privacy promise.
+      const bypassKB = options.privateModeLevel >= 2
+
       // Combine manually injected + auto-injected context
       // Skip chunks already sent to the model in prior turns (session dedup)
-      const manuallyInjected = [...options.injectedContext]
+      const manuallyInjected = bypassKB ? [] : [...options.injectedContext]
       const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
       const priorInjected = injectedHistoryRef.current
 
@@ -145,7 +157,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       // time, delaying the chat/stream response.  Follow-up messages benefit
       // more from context injection once the conversation topic is established.
       const isFirstMessage = !(options.activeMessages?.length)
-      if (options.autoInject && !isFirstMessage) {
+      if (options.autoInject && !isFirstMessage && !bypassKB) {
         let freshResults = options.kbResults
         // Only hit the network when the cache is cold. Wave-0 Task 3:
         // useOrchestratedQuery / useKBContext already populate TanStack

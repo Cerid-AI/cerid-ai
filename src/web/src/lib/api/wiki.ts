@@ -13,7 +13,7 @@
  *                                     save-to-vault UI)
  */
 
-import { MCP_BASE, mcpHeaders, extractError } from "./common"
+import { MCP_BASE, mcpHeaders, mcpUrl, extractError } from "./common"
 import type { WatchedFolder } from "./settings"
 import { fetchWatchedFolders } from "./settings"
 import type {
@@ -131,8 +131,10 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
  */
 export async function fetchWikiEntities({
   limit = 30,
-}: { limit?: number } = {}): Promise<EntitySummary[]> {
-  const res = await fetch(`${MCP_BASE}/wiki/entities?limit=${limit}`, { headers: mcpHeaders() })
+  q,
+}: { limit?: number; q?: string } = {}): Promise<EntitySummary[]> {
+  const url = mcpUrl("/wiki/entities", { limit, q: q?.trim() || undefined })
+  const res = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!res.ok) {
     throw new Error(`Wiki entities fetch failed (${res.status})`)
   }

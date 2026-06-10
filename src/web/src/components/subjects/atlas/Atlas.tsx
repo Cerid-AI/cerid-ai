@@ -79,6 +79,17 @@ export function Atlas({
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const sigmaRef = useRef<AtlasSigma | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Hold the node callbacks in refs so the graph-build effect can read the
+  // latest handlers WITHOUT listing them as deps — otherwise an unstable
+  // callback from the parent tears down and re-lays-out the whole Sigma
+  // graph on every parent render (F2). The effect re-runs only when `data`
+  // changes; the sigma event handlers call through the ref at click time.
+  const onNodeClickRef = useRef(onNodeClick)
+  const onNodeDoubleClickRef = useRef(onNodeDoubleClick)
+  useEffect(() => {
+    onNodeClickRef.current = onNodeClick
+    onNodeDoubleClickRef.current = onNodeDoubleClick
+  }, [onNodeClick, onNodeDoubleClick])
   const [status, setStatus] = useState<LayoutStatus>({ state: "idle" })
   const [sigmaInstance, setSigmaInstance] = useState<AtlasSigma | null>(null)
   const [graphInstance, setGraphInstance] = useState<AtlasGraph | null>(null)
@@ -147,12 +158,8 @@ export function Atlas({
     sigmaRef.current = sigma
     setSigmaInstance(sigma)
 
-    if (onNodeClick) {
-      sigma.on("clickNode", ({ node }) => onNodeClick(node))
-    }
-    if (onNodeDoubleClick) {
-      sigma.on("doubleClickNode", ({ node }) => onNodeDoubleClick(node))
-    }
+    sigma.on("clickNode", ({ node }) => onNodeClickRef.current?.(node))
+    sigma.on("doubleClickNode", ({ node }) => onNodeDoubleClickRef.current?.(node))
     sigma.on("enterNode", ({ node }) => {
       try {
         graph.setNodeAttribute(node, "highlighted", true)
@@ -212,7 +219,9 @@ export function Atlas({
       sigmaRef.current?.kill()
       sigmaRef.current = null
     }
-  }, [data, onNodeClick, onNodeDoubleClick])
+    // Callbacks are read via refs (see above) so they're intentionally not
+    // deps — only `data` should trigger a full graph rebuild + relayout.
+  }, [data])
 
   const handleLensToggle = useCallback((id: LensId) => {
     setActiveLenses((prev) => {

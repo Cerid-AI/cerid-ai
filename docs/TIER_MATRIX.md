@@ -2,7 +2,7 @@
 
 > GENERATED FILE — do not edit by hand. Regenerate with `python scripts/gen_tier_matrix.py`.
 > Source of truth: `config/features.py` (`_get_feature_tier` + `FEATURE_BUCKETS`); enforced by `tests/test_tier_matrix_drift.py`.
-> 50 feature flags across 8 sections.
+> 53 feature flags across 9 sections.
 
 ## Tiers
 
@@ -23,6 +23,14 @@
 | Daily digest | — | ✓ | ✓ | `daily_digest` |
 | AI inbox triage | — | ✓ | ✓ | `inbox_triage` |
 | Metamorphic verification | — | ✓ | ✓ | `metamorphic_verification` |
+
+### Pro Visualization
+
+| Feature | Core | Pro | Enterprise | Gate |
+|---------|------|-----|------------|------|
+| Visualization analytics overlay | — | ✓ | ✓ | `pro_visualization_analytics` |
+| Visualization timeline overlay | — | ✓ | ✓ | `pro_visualization_timeline` |
+| Guided graph tour | — | ✓ | ✓ | `pro_visualization_tour` |
 
 ### Meeting Capture — Pro
 

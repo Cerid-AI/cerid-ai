@@ -18,9 +18,18 @@ export interface SubjectsSearchPaletteProps {
 
 export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSearchPaletteProps) {
   const [query, setQuery] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
   const [highlight, setHighlight] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const { data: entities } = useWikiEntities({ limit: 50 })
+  // Server-side search (F5): the query is pushed to /wiki/entities?q= so the
+  // match spans the whole corpus, not just the first page the client fetched.
+  const { data: entities } = useWikiEntities({ limit: 50, q: debouncedQuery })
+
+  // Debounce the typed query into the server fetch (200 ms).
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 200)
+    return () => clearTimeout(t)
+  }, [query])
 
   // Focus on open
   useEffect(() => {
@@ -33,6 +42,8 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
   }, [open])
 
   const filtered = useMemo(() => {
+    // The server already filtered by `debouncedQuery`; the client-side pass
+    // just narrows the in-flight window while the debounce settles.
     const all = entities ?? []
     if (!query.trim()) return all.slice(0, 25)
     const lower = query.toLowerCase()

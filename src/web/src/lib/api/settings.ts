@@ -533,10 +533,32 @@ export async function fetchAutomationPresets(): Promise<Record<string, { label: 
 
 // --- Plugins ---
 
+/**
+ * The backend returns `plugins` as a dict keyed by id, and individual plugins
+ * may omit their array fields. Normalize to the declared PluginListResponse
+ * shape (array + guaranteed string[] fields) so every consumer can iterate and
+ * call `.includes()` safely — fixes the Connectors/Plugins render crashes at
+ * the API boundary instead of relying on per-consumer guards.
+ */
+function normalizePluginList(data: { plugins?: unknown; total?: number }): PluginListResponse {
+  const rawList = Array.isArray(data.plugins)
+    ? data.plugins
+    : Object.values((data.plugins ?? {}) as Record<string, unknown>)
+  const plugins = rawList.map((entry) => {
+    const p = entry as Partial<Plugin>
+    return {
+      ...p,
+      file_types: Array.isArray(p.file_types) ? p.file_types : [],
+      capabilities: Array.isArray(p.capabilities) ? p.capabilities : [],
+    } as Plugin
+  })
+  return { plugins, total: typeof data.total === "number" ? data.total : plugins.length }
+}
+
 export async function fetchPlugins(): Promise<PluginListResponse> {
   const res = await fetch(`${MCP_BASE}/plugins`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch plugins failed: ${res.status}`))
-  return res.json()
+  return normalizePluginList(await res.json())
 }
 
 export async function fetchPlugin(name: string): Promise<Plugin> {
@@ -585,7 +607,7 @@ export async function scanPlugins(): Promise<PluginListResponse> {
     headers: mcpHeaders(),
   })
   if (!res.ok) throw new Error(await extractError(res, `Scan plugins failed: ${res.status}`))
-  return res.json()
+  return normalizePluginList(await res.json())
 }
 
 // ---------------------------------------------------------------------------

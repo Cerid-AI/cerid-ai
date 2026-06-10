@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 343
+**Total routes:** 345
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -124,6 +124,7 @@ not documented here; see the internal repo for the full registry.
 | POST | `/feedback` | `submit_claim_feedback` | `src/mcp/app/routers/feedback.py` | feedback |  |
 | GET | `/embeddings/3d` | `get_embeddings_3d` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/health` | `graph_health` | `src/mcp/app/routers/graph.py` | graph |  |
+| GET | `/map` | `get_graph_map` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/neighborhood` | `get_neighborhood` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/timeline` | `get_timeline` | `src/mcp/app/routers/graph.py` | graph |  |
 | POST | `/generate` | `generate_tour` | `src/mcp/app/routers/graph_tour.py` | graph,tour |  |
@@ -135,6 +136,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/health/status` | `health_status_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | GET | `/plugins` | `plugins_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | GET | `/scheduler` | `scheduler_status_endpoint` | `src/mcp/app/routers/health.py` |  |  |
+| POST | `/scheduler/jobs/{job_id}/run` | `scheduler_run_job_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | POST | `/ingest` | `ingest_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
 | POST | `/ingest/feedback` | `ingest_feedback_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |
 | POST | `/ingest/structured` | `ingest_structured_endpoint` | `src/mcp/app/routers/ingestion.py` |  |  |

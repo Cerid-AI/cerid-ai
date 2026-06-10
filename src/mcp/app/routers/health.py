@@ -730,6 +730,27 @@ def scheduler_status_endpoint():
     return get_job_status()
 
 
+@router.post("/scheduler/jobs/{job_id}/run")
+async def scheduler_run_job_endpoint(job_id: str):
+    """Manually trigger a scheduled job now ("a refresh gets a refresh").
+
+    Runs the job out-of-band on the app loop and busts the serving caches it
+    feeds (e.g. compute_umap_3d → the Constellation projection). Returns
+    immediately; the job runs in the background.
+    """
+    from app.scheduler import trigger_job
+
+    try:
+        return trigger_job(job_id)
+    except KeyError:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"unknown job '{job_id}'"},
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
 @router.get("/plugins")
 def plugins_endpoint():
     """Return loaded plugins and feature flag status."""

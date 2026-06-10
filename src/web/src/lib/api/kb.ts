@@ -14,6 +14,7 @@ import type {
   CurateResponse,
   TaxonomyResponse,
   SchedulerStatus,
+  SchedulerJobRunResult,
   IngestLogResponse,
   AuditResponse,
   DigestResponse,
@@ -343,6 +344,15 @@ export async function fetchSynopsisEstimate(
 export async function fetchSchedulerStatus(): Promise<SchedulerStatus> {
   const res = await fetch(`${MCP_BASE}/scheduler`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Scheduler status failed: ${res.status}`))
+  return res.json()
+}
+
+export async function triggerSchedulerJob(jobId: string): Promise<SchedulerJobRunResult> {
+  const res = await fetch(`${MCP_BASE}/scheduler/jobs/${encodeURIComponent(jobId)}/run`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Run job failed: ${res.status}`))
   return res.json()
 }
 

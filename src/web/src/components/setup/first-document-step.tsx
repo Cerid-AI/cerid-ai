@@ -111,6 +111,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
 
     try {
       // Fetch the bundled sample content and upload it
+      // eslint-disable-next-line no-restricted-syntax -- static SPA asset, not an MCP API path; must NOT be prefixed with /api/mcp
       const res = await fetch("/sample-knowledge.md")
       if (!res.ok) {
         // Fallback: create a blob with basic content

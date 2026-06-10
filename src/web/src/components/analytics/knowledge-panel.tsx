@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { AlertTriangle, BookOpen, Clock, GitMerge, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { mcpUrl, mcpHeaders } from "@/lib/api/common"
 
 interface WikiFreshness {
   available: boolean
@@ -95,7 +96,7 @@ export function KnowledgePanel() {
     let cancelled = false
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setLoading(true)
-    fetch("/health", { credentials: "include" })
+    fetch(mcpUrl("/health").toString(), { headers: mcpHeaders() })
       .then((r) => r.json() as Promise<HealthResponse>)
       .then((body) => {
         if (cancelled) return

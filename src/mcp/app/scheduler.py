@@ -1065,6 +1065,98 @@ async def _run_source_poll() -> None:
         logger.error("source_poll scheduled job failed: %s", e)
 
 
+# ---------------------------------------------------------------------------
+# Manual job trigger ("if they want a refresh they get a refresh")
+#
+# trigger_job() runs a job out-of-band on the app's event loop and, once it
+# completes, busts the serving caches that job feeds so the next read
+# recomputes from fresh data (e.g. compute_umap_3d → the Constellation cache).
+#
+# The callable is resolved from the live scheduler's own job record
+# (``job.func``) rather than a hand-maintained id→fn map — so every job the
+# scheduler knows about is triggerable, including ones added by internal-build
+# hooks, and the registry can never drift out of sync with the add_job() calls.
+# ---------------------------------------------------------------------------
+
+# Serving caches each job feeds. After a manual run we delete these key
+# patterns so the next reader recomputes instead of serving the stale
+# projection. Keep entries here only when the (job → cache) link is exact.
+_JOB_CACHE_PATTERNS: dict[str, list[str]] = {
+    "compute_umap_3d": ["cerid:graph:emb3d:*"],
+    "community_refresh": ["cerid:graph:emb3d:*"],
+    "config_recommender": ["cerid:recommendations*"],
+}
+
+# Manual runs in flight, so a double-click can't stack a second pass over a
+# job that declares max_instances=1.
+_manual_running: set[str] = set()
+
+
+def _bust_job_caches(job_id: str) -> int:
+    """Delete every serving-cache key the job feeds. Returns keys dropped."""
+    patterns = _JOB_CACHE_PATTERNS.get(job_id)
+    if not patterns:
+        return 0
+    redis = get_redis()
+    if redis is None:
+        return 0
+    dropped = 0
+    for pattern in patterns:
+        try:
+            for key in redis.scan_iter(match=pattern, count=200):
+                redis.delete(key)
+                dropped += 1
+        except Exception as exc:  # noqa: BLE001 — cache bust is best-effort
+            log_swallowed_error("app.scheduler.trigger.cache_bust", exc)
+    return dropped
+
+
+async def _run_and_invalidate(job_id: str, func: Any, args: Any, kwargs: Any) -> None:
+    """Run a job's callable, then bust its serving caches."""
+    try:
+        result = func(*(args or ()), **(kwargs or {}))
+        if asyncio.iscoroutine(result):
+            await result
+        dropped = _bust_job_caches(job_id)
+        if dropped:
+            logger.info("manual trigger %s: busted %d cache key(s)", job_id, dropped)
+    except Exception as exc:  # noqa: BLE001 — surface, don't crash the loop task
+        log_swallowed_error("app.scheduler.trigger.run", exc, context={"job": job_id})
+    finally:
+        _manual_running.discard(job_id)
+
+
+def trigger_job(job_id: str) -> dict[str, Any]:
+    """Fire a scheduled job immediately, out-of-band, on the running loop.
+
+    The job must be live in the scheduler — a job gated off in this deployment
+    is simply absent and reported as unknown rather than force-run. Concurrent
+    manual runs of the same job are coalesced.
+
+    Raises:
+        KeyError: no such live job (router → 404).
+        ValueError: scheduler not running, or the job is already running.
+    """
+    if _scheduler is None:
+        raise ValueError("scheduler not running")
+    job = _scheduler.get_job(job_id)
+    if job is None:
+        raise KeyError(job_id)
+    if job_id in _manual_running:
+        raise ValueError(f"job '{job_id}' is already running")
+
+    _manual_running.add(job_id)
+    asyncio.create_task(
+        _run_and_invalidate(job_id, job.func, job.args, job.kwargs),
+    )
+    return {
+        "status": "started",
+        "id": job_id,
+        "name": job.name,
+        "invalidates": _JOB_CACHE_PATTERNS.get(job_id, []),
+    }
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler

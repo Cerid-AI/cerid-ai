@@ -74,12 +74,17 @@ async def list_entity_pages(
         le=200,
         description="Maximum number of entities to return (1–200, default 30).",
     ),
+    q: str | None = Query(
+        default=None,
+        description="Optional name/canonical_id search, applied server-side "
+        "before the limit so it spans the whole entity set.",
+    ),
 ) -> list[EntitySummary]:
     from app.deps import get_neo4j
 
     driver = get_neo4j()
     try:
-        return await list_entities(driver, limit=limit)
+        return await list_entities(driver, limit=limit, search=q)
     except Exception as exc:
         log_swallowed_error("wiki.list_entity_pages", exc)
         raise HTTPException(status_code=500, detail="Failed to retrieve entity list") from exc

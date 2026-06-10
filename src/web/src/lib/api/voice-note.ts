@@ -7,6 +7,8 @@
  * the result + offer "open the artifact".
  */
 
+import { mcpUrl, mcpHeaders } from "./common"
+
 export interface VoiceNoteResponse {
   status: "ingested"
   artifact_id: string
@@ -18,8 +20,9 @@ export interface VoiceNoteResponse {
 export async function ingestVoiceNote(blob: Blob): Promise<VoiceNoteResponse> {
   const fd = new FormData()
   fd.append("audio", blob, "voice-note.webm")
-  const r = await fetch("/sdk/v1/ingest/voice-note", {
+  const r = await fetch(mcpUrl("/sdk/v1/ingest/voice-note").toString(), {
     method: "POST",
+    headers: mcpHeaders(),
     body: fd,
   })
   if (!r.ok) {

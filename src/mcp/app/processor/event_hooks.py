@@ -89,3 +89,10 @@ if _importlib_util.find_spec("app.processor.subscribers.wiki_refresh") is not No
     _wiki_refresh_subscriber.register()
 else:  # pragma: no cover — subscriber package may be absent in stripped builds
     logger.info("event_hooks.wiki_refresh_subscriber_missing — graceful degradation")
+
+if _importlib_util.find_spec("app.processor.subscribers.constellation_refresh") is not None:
+    from app.processor.subscribers import constellation_refresh as _constellation_subscriber
+
+    _constellation_subscriber.register()
+else:  # pragma: no cover — subscriber package may be absent in stripped builds
+    logger.info("event_hooks.constellation_refresh_subscriber_missing — graceful degradation")

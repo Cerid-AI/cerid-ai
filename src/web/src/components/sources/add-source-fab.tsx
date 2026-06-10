@@ -115,7 +115,14 @@ export function AddSourceFab({ onSelectFamily }: AddSourceFabProps) {
               )}
               style={
                 {
-                  transform: `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px)`,
+                  // The radial offset is consumed by the `cerid-radial-emerge`
+                  // keyframe (`to { translate(var(--petal-x), var(--petal-y)) }`)
+                  // and the reduced-motion fallback. An inline `transform` here
+                  // would be clobbered by that animation, collapsing every petal
+                  // onto the FAB centre — expose the offsets as the CSS vars the
+                  // keyframe expects instead.
+                  "--petal-x": `${dx.toFixed(2)}px`,
+                  "--petal-y": `${dy.toFixed(2)}px`,
                   "--petal-index": i,
                 } as React.CSSProperties
               }

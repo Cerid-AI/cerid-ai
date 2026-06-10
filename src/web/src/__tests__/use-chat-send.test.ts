@@ -83,6 +83,7 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     injectedContext: [] as KBQueryResult[],
     kbResults: [] as KBQueryResult[],
     clearInjected: vi.fn(),
+    privateModeLevel: 0,
     onBeforeSend: vi.fn(),
     ...overrides,
     // expose sendSpy separately so callers can inspect it
@@ -159,6 +160,38 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(sysMsg!.content).toContain("<document")
     expect(sysMsg!.content).toContain("budget.xlsx")
     expect(opts.clearInjected).toHaveBeenCalled()
+  })
+
+  it("injects NOTHING at privateModeLevel >= 2 — KB bypass honored (CHAT-01)", async () => {
+    // Manual context + an auto-inject KB hit + a recalled memory are all present,
+    // but Private Mode L2 ("model sees only what you type") must drop them all.
+    const manual = makeKBResult({ artifact_id: "m1", filename: "private.xlsx", domain: "finance" })
+    const kbChunk = makeKBResult({ artifact_id: "a1", filename: "auth.py", relevance: 0.95 })
+    mockQueryKB.mockResolvedValue({ results: [kbChunk] })
+    mockRecallMemories.mockResolvedValue([
+      { content: "secret pref", relevance: 0.9, memory_type: "preference", summary: "secret pref",
+        memory_id: "m", source_authority: 0.9, base_similarity: 0.9, access_count: 1, source_type: "memory" as const },
+    ])
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      injectedContext: [manual],
+      privateModeLevel: 2,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("What is in my private docs?")
+    })
+
+    const msgs = sentMessages(opts._sendSpy)
+    // No system message at all → the payload carries no KB documents or memories.
+    expect(msgs.every((m) => m.role !== "system")).toBe(true)
+    // No source refs leak onto the assistant message either.
+    expect(sentSources(opts._sendSpy)).toBeUndefined()
+    // Auto-inject is structurally skipped — the KB is never even queried.
+    expect(mockQueryKB).not.toHaveBeenCalled()
   })
 
   it("filters out results below autoInjectThreshold", async () => {
