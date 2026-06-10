@@ -148,9 +148,14 @@ def test_admin_get_is_rate_limited(client: TestClient) -> None:
 
 
 def test_observability_get_is_rate_limited(client: TestClient) -> None:
-    """Audit C-11: GET on /observability/* is a polling surface and must be counted."""
+    """Audit C-11: GET on /observability/* is a polling surface and must be counted.
+
+    OPEN-14 raised the gui budget to 120/60 so the dashboard's read-only polls
+    don't self-throttle into a spurious 429; the surface is still counted (not
+    exempt), so a tight loop past the cap must eventually 429.
+    """
     headers = {"X-Client-ID": "gui"}
-    for _ in range(35):
+    for _ in range(140):
         r = client.get("/observability/health-score", headers=headers)
         if r.status_code == 429:
             return

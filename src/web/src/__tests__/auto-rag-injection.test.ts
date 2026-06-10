@@ -82,6 +82,7 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     injectedContext: [] as KBQueryResult[],
     kbResults: [] as KBQueryResult[],
     clearInjected: vi.fn(),
+    privateModeLevel: 0,
     onBeforeSend: vi.fn(),
     ...overrides,
     _sendSpy: sendSpy,

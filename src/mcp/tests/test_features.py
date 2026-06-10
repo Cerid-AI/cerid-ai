@@ -123,3 +123,50 @@ class TestTierHierarchy:
     def test_check_tier_passes_on_sufficient(self):
         check_tier("pro")  # Should not raise
         check_tier("community")  # Should not raise
+
+
+class TestSetTierSync:
+    """set_tier must keep config.FEATURE_TIER (star-imported copy) in sync (OPEN-15)."""
+
+    def test_set_tier_syncs_config_namespace(self):
+        import config
+        import config.features as feat
+
+        original = feat.FEATURE_TIER
+        try:
+            feat.set_tier("enterprise")
+            # Both the canonical global AND the star-imported copy must agree.
+            assert feat.FEATURE_TIER == "enterprise"
+            assert config.FEATURE_TIER == "enterprise"
+            assert feat.current_tier() == "enterprise"
+
+            feat.set_tier("community")
+            assert config.FEATURE_TIER == "community"
+            assert feat.current_tier() == "community"
+        finally:
+            feat.set_tier(original)
+
+    def test_set_tier_rejects_invalid(self):
+        import config.features as feat
+
+        with pytest.raises(ValueError, match="Invalid tier"):
+            feat.set_tier("platinum")
+
+
+class TestProVisualizationFlags:
+    """pro_visualization_* must be registered so the tour/atlas gates resolve (PE-01)."""
+
+    def test_flags_registered(self):
+        for flag in (
+            "pro_visualization_tour",
+            "pro_visualization_analytics",
+            "pro_visualization_timeline",
+        ):
+            assert flag in FEATURE_FLAGS, flag
+
+    @patch("config.features.FEATURE_TIER", "enterprise")
+    def test_tour_enabled_at_enterprise(self):
+        import config.features as feat
+
+        feat._refresh_flags()
+        assert is_feature_enabled("pro_visualization_tour") is True

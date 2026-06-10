@@ -724,8 +724,8 @@ async def set_tier(req: TierRequest):
             status_code=400,
             detail=f"Invalid tier: '{req.tier}'. Must be one of {valid_tiers}",
         )
-    config.FEATURE_TIER = req.tier
-    features_mod.FEATURE_TIER = req.tier
-    features_mod._refresh_flags()
+    # Single mutation point — set_tier rebinds the canonical global, recomputes
+    # FEATURE_FLAGS, and syncs the config-namespace copy so no reader goes stale.
+    features_mod.set_tier(req.tier)
     logger.info("Feature tier updated to '%s', flags refreshed", req.tier)
     return {"tier": req.tier, "feature_flags": config.FEATURE_FLAGS}

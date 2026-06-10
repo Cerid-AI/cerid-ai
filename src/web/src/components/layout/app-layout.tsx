@@ -26,9 +26,12 @@ interface AppLayoutProps {
   children: (activePane: Pane, openSidebar: () => void) => React.ReactNode
   featureTier?: string
   onCycleTier?: () => void
+  /** Notifies the parent of the active pane so it can gate global chrome
+      (e.g. the Quick Capture FAB is hidden on Sources, which has its own). */
+  onActivePaneChange?: (pane: Pane) => void
 }
 
-export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps) {
+export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChange }: AppLayoutProps) {
   const [activePane, setActivePane] = useState<Pane>("chat")
 
   // F-URL-01 — Switching primary nav must strip stale per-pane URL
@@ -41,7 +44,8 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
       if (next !== prev) clearForeignPaneParams(next)
       return next
     })
-  }, [])
+    onActivePaneChange?.(next)
+  }, [onActivePaneChange])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 1024)
   const [isPhone, setIsPhone] = useState(() => {
     if (typeof window === "undefined") return false

@@ -5,6 +5,8 @@
 // Atlas configuration (focal entity + hops + filter + active lenses
 // + camera state).
 
+import { mcpUrl, mcpHeaders } from "./common"
+
 export interface AtlasCameraState {
   x: number
   y: number
@@ -39,38 +41,34 @@ async function asJson<T>(res: Response): Promise<T> {
 }
 
 export async function listAtlasViews(opts?: { mode?: string }): Promise<AtlasView[]> {
-  const url = opts?.mode
-    ? `${BASE}?mode=${encodeURIComponent(opts.mode)}`
-    : BASE
-  const res = await fetch(url, { credentials: "include" })
+  const url = mcpUrl(BASE, { mode: opts?.mode })
+  const res = await fetch(url.toString(), { headers: mcpHeaders() })
   const payload = await asJson<{ views: AtlasView[] }>(res)
   return payload.views
 }
 
 export async function createAtlasView(input: AtlasViewInput): Promise<AtlasView> {
-  const res = await fetch(BASE, {
+  const res = await fetch(mcpUrl(BASE).toString(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(input),
   })
   return asJson<AtlasView>(res)
 }
 
 export async function updateAtlasView(viewId: string, input: AtlasViewInput): Promise<AtlasView> {
-  const res = await fetch(`${BASE}/${encodeURIComponent(viewId)}`, {
+  const res = await fetch(mcpUrl(`${BASE}/${encodeURIComponent(viewId)}`).toString(), {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(input),
   })
   return asJson<AtlasView>(res)
 }
 
 export async function deleteAtlasView(viewId: string): Promise<void> {
-  const res = await fetch(`${BASE}/${encodeURIComponent(viewId)}`, {
+  const res = await fetch(mcpUrl(`${BASE}/${encodeURIComponent(viewId)}`).toString(), {
     method: "DELETE",
-    credentials: "include",
+    headers: mcpHeaders(),
   })
   if (!res.ok && res.status !== 204) {
     throw new Error(`HTTP ${res.status}`)

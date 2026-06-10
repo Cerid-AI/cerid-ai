@@ -393,6 +393,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     injectedContext,
     kbResults: effectiveKBResults,
     clearInjected,
+    privateModeLevel,
     degradedReason: orchestratedContext.degradedReason,
     onBeforeSend: () => setVerificationRecBanner(null),
   })

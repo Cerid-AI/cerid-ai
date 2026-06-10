@@ -159,15 +159,20 @@ class WikiEntityPage(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def list_entities(neo4j_driver: Any, *, limit: int = 30) -> list[EntitySummary]:
+async def list_entities(
+    neo4j_driver: Any, *, limit: int = 30, search: str | None = None
+) -> list[EntitySummary]:
     """Return up to ``limit`` entity summaries ordered by recent activity.
+
+    When ``search`` is given it filters by name/canonical_id server-side
+    (before the limit), so the palette can search the full corpus.
 
     Wraps the Neo4j adapter call in ``asyncio.to_thread`` so the sync
     driver does not block the event loop.
     """
     try:
         rows = await asyncio.to_thread(
-            _neo4j_adapter.list_top_entities, neo4j_driver, limit=limit
+            _neo4j_adapter.list_top_entities, neo4j_driver, limit=limit, search=search
         )
     except Exception as exc:
         log_swallowed_error("wiki.list_entities", exc)

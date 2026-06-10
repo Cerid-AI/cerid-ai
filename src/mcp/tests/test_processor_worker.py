@@ -353,3 +353,47 @@ def test_build_default_registry_idempotent():
     r1 = build_default_registry()
     r2 = build_default_registry()
     assert set(r1.keys()) == set(r2.keys())
+
+
+def test_build_default_registry_includes_compute_umap_3d():
+    """compute_umap_3d must be registered — it is enqueued by the scheduler.
+
+    Regression for the missing-import error class: the job file existed but
+    was absent from jobs/__init__, so it never became a BaseJob subclass and
+    every enqueued record failed with 'unknown job_type'. build_default_registry
+    now auto-discovers all job modules, so existing-on-disk is sufficient.
+    """
+    registry = build_default_registry()
+    assert "compute_umap_3d" in registry
+
+
+def test_build_default_registry_covers_every_job_module():
+    """Every job_type declared under app/processor/jobs is registered.
+
+    Guards the auto-discovery contract so a newly-added job file can never
+    silently drop out of the registry (and fail only at runtime).
+    """
+    import importlib
+    import pkgutil
+
+    import app.processor.jobs as jobs_pkg
+    from core.processor.job import BaseJob
+
+    declared: set[str] = set()
+    for mod in pkgutil.iter_modules(jobs_pkg.__path__):
+        if mod.name.startswith("_"):
+            continue
+        module = importlib.import_module(f"{jobs_pkg.__name__}.{mod.name}")
+        for obj in vars(module).values():
+            if (
+                isinstance(obj, type)
+                and issubclass(obj, BaseJob)
+                and obj is not BaseJob
+                and not getattr(obj, "__abstractmethods__", None)
+                and getattr(obj, "job_type", "")
+            ):
+                declared.add(obj.job_type)
+
+    registered = set(build_default_registry().keys())
+    missing = declared - registered
+    assert not missing, f"job_types on disk but not registered: {missing}"

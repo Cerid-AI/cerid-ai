@@ -144,7 +144,9 @@ class TestListEntityPages:
         """Confirm that the limit parameter is passed through."""
         captured: list[Any] = []
 
-        async def _mock_list(driver: Any, *, limit: int = 30) -> list[EntitySummary]:
+        async def _mock_list(
+            driver: Any, *, limit: int = 30, search: str | None = None
+        ) -> list[EntitySummary]:
             captured.append(limit)
             return []
 
@@ -155,6 +157,24 @@ class TestListEntityPages:
             client.get("/wiki/entities?limit=15")
 
         assert captured == [15]
+
+    def test_search_query_param_is_forwarded(self, client: TestClient):
+        """The q param reaches list_entities as `search` (F5 server-side search)."""
+        captured: list[Any] = []
+
+        async def _mock_list(
+            driver: Any, *, limit: int = 30, search: str | None = None
+        ) -> list[EntitySummary]:
+            captured.append(search)
+            return []
+
+        with (
+            patch("app.deps.get_neo4j", return_value=None),
+            patch("app.routers.wiki.list_entities", new=_mock_list),
+        ):
+            client.get("/wiki/entities?limit=50&q=ethereum")
+
+        assert captured == ["ethereum"]
 
     def test_empty_list_returns_200(self, client: TestClient):
         with (

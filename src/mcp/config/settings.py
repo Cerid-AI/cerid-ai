@@ -1108,7 +1108,11 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             # were previously unthrottled. Bound them to prevent abuse / tight loops.
             "/setup/": (20, 60),
             "/admin/": (20, 60),
-            "/observability/": (30, 60),
+            # OPEN-14: the Diagnostics → Status pane polls several read-only
+            # /observability/ endpoints across 4 time windows with periodic
+            # refetch; 30/min self-throttled into a spurious "LLM 429". These
+            # are cheap idempotent reads — give the dashboard headroom.
+            "/observability/": (120, 60),
         },
         "allowed_domains": None,     # Full access to all domains
         "strict_domains": False,     # Cross-domain affinity enabled
@@ -1170,7 +1174,7 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/recategorize": (10, 60),
             "/setup/": (20, 60),
             "/admin/": (20, 60),
-            "/observability/": (30, 60),
+            "/observability/": (120, 60),  # OPEN-14: read-only dashboard polls
             # Auth endpoints (only mounted when CERID_MULTI_USER=true). Tight
             # 5-per-60s budget stops brute-force credential guessing before
             # the password-equality work runs. /refresh shares the bucket so

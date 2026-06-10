@@ -167,3 +167,76 @@ class TestWikiRefreshSubscriber:
         from app.processor.subscribers import wiki_refresh
 
         assert wiki_refresh.enqueue_refresh("") is False
+
+
+# ---------------------------------------------------------------------------
+# constellation_refresh subscriber (living Constellation — recompute on ingest)
+# ---------------------------------------------------------------------------
+
+
+class TestConstellationRefreshSubscriber:
+    _PAYLOAD = {"artifact_id": "a1", "entity_slugs": ["org:tesla"], "tenant_id": "default"}
+
+    def test_entities_added_enqueues_umap_job(self):
+        from app.processor.subscribers import constellation_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True  # global debounce acquired
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            constellation_refresh._on_entities_added(self._PAYLOAD)
+
+        mock_redis.set.assert_called_once_with(
+            "cerid:constellation:debounce", "1", nx=True, ex=180,
+        )
+        mock_enqueue.assert_called_once()
+        job = mock_enqueue.call_args.args[0]
+        assert job.job_type == "compute_umap_3d"
+
+    def test_debounce_coalesces_bulk_ingest(self):
+        from app.processor.subscribers import constellation_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = False  # debounce already held
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            constellation_refresh._on_entities_added(self._PAYLOAD)
+
+        mock_enqueue.assert_not_called()
+
+    def test_redis_unavailable_fails_open(self):
+        from app.processor.subscribers import constellation_refresh
+
+        mock_enqueue = MagicMock()
+        with (
+            patch("app.deps.get_redis", return_value=None),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            constellation_refresh._on_entities_added(self._PAYLOAD)
+
+        mock_enqueue.assert_called_once()
+
+    def test_disabled_via_env(self, monkeypatch):
+        from app.processor.subscribers import constellation_refresh
+
+        monkeypatch.setenv("CERID_CONSTELLATION_REFRESH_ON_INGEST", "false")
+        mock_enqueue = MagicMock()
+        with patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue):
+            constellation_refresh._on_entities_added(self._PAYLOAD)
+        mock_enqueue.assert_not_called()
+
+    def test_no_slugs_is_noop(self):
+        from app.processor.subscribers import constellation_refresh
+
+        mock_enqueue = MagicMock()
+        with patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue):
+            constellation_refresh._on_entities_added({"artifact_id": "a1", "entity_slugs": []})
+        mock_enqueue.assert_not_called()

@@ -4,6 +4,8 @@
 // Client for /graph/embeddings/3d — UMAP-projected 3D coordinates for
 // every entity in scope. Used by Constellation mode (Phase B).
 
+import { mcpUrl, mcpHeaders, extractError } from "./common"
+
 export interface EntityEmbedding3D {
   /** Canonical entity id */
   id: string
@@ -28,6 +30,11 @@ export interface Embeddings3DResponse {
   /** Total entities in payload */
   count: number
   entities: EntityEmbedding3D[]
+  /**
+   * CO_MENTIONED linkage as [sourceIdx, targetIdx, weight] triples
+   * indexing into `entities`. Drives the neural-net edge layer.
+   */
+  links: [number, number, number][]
   /** Whether served from cache */
   cached: boolean
   /** ISO timestamp the projection was last computed */
@@ -42,21 +49,14 @@ export interface FetchEmbeddings3DOptions {
   signal?: AbortSignal
 }
 
-const BASE = "/graph/embeddings/3d"
-
 export async function fetchEmbeddings3D(
   options: FetchEmbeddings3DOptions = {},
 ): Promise<Embeddings3DResponse> {
-  const params = new URLSearchParams()
-  if (options.entities && options.entities.length > 0) {
-    params.set("entities", options.entities.join(","))
-  }
-  if (options.filter) params.set("filter", options.filter)
-  const url = params.toString() ? `${BASE}?${params}` : BASE
-  const res = await fetch(url, { credentials: "include", signal: options.signal })
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}))
-    throw new Error((detail as { detail?: string }).detail ?? `HTTP ${res.status}`)
-  }
+  const url = mcpUrl("/graph/embeddings/3d", {
+    entities: options.entities && options.entities.length > 0 ? options.entities.join(",") : undefined,
+    filter: options.filter ?? undefined,
+  })
+  const res = await fetch(url.toString(), { headers: mcpHeaders(), signal: options.signal })
+  if (!res.ok) throw new Error(await extractError(res, `3D embeddings fetch failed: ${res.status}`))
   return res.json() as Promise<Embeddings3DResponse>
 }

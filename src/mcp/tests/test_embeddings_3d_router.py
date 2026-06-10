@@ -137,8 +137,8 @@ def test_embeddings_3d_filter_changes_cache_key(client, mock_neo4j_with_rows):
 def test_embeddings_3d_corrupt_cache_falls_through_to_neo4j(client, mock_neo4j_with_rows, mock_redis):
     _, set_rows = mock_neo4j_with_rows
     set_rows([_make_row("a")])
-    # Plant corrupt JSON into the cache slot
-    mock_redis._state["cerid:graph:emb3d:all"] = "not-json{"
+    # Plant corrupt JSON into the cache slot (v2 key — payload carries links)
+    mock_redis._state["cerid:graph:emb3d:v2:all"] = "not-json{"
 
     r = client.get("/graph/embeddings/3d")
     assert r.status_code == 200
@@ -161,3 +161,72 @@ def test_embeddings_3d_entity_whitelist(client, mock_neo4j_with_rows):
     assert r.status_code == 200
     payload = r.json()
     assert payload["count"] == 2
+
+
+def test_embeddings_3d_links_are_index_triples(mock_redis):
+    """links = [sourceIdx, targetIdx, weight] indexing into entities;
+    edges referencing out-of-scope ids and self-loops are dropped."""
+    from app.routers import graph as graph_router
+
+    fake_driver = MagicMock()
+    fake_session = MagicMock()
+    fake_session.__enter__ = lambda self: self
+    fake_session.__exit__ = lambda self, exc_type, exc, tb: None
+
+    def _run(query, **_kwargs):
+        result = MagicMock()
+        if "CO_MENTIONED" in query:
+            result.data = lambda: [
+                {"s": "a", "t": "b", "w": 5.0},
+                {"s": "b", "t": "c", "w": 2.0},
+                {"s": "a", "t": "ghost", "w": 9.0},  # out of scope — dropped
+                {"s": "c", "t": "c", "w": 3.0},      # self-loop — dropped
+            ]
+        else:
+            result.data = lambda: [_make_row("a"), _make_row("b"), _make_row("c")]
+        return result
+
+    fake_session.run = _run
+    fake_driver.session = lambda: fake_session
+
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=fake_driver):
+        r = TestClient(app).get("/graph/embeddings/3d")
+
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["count"] == 3
+    assert payload["links"] == [[0, 1, 5.0], [1, 2, 2.0]]
+
+
+def test_embeddings_3d_links_failure_does_not_break_nodes(mock_redis):
+    """A failed edge query degrades to links=[] — never a 500."""
+    from app.routers import graph as graph_router
+
+    fake_driver = MagicMock()
+    fake_session = MagicMock()
+    fake_session.__enter__ = lambda self: self
+    fake_session.__exit__ = lambda self, exc_type, exc, tb: None
+
+    def _run(query, **_kwargs):
+        if "CO_MENTIONED" in query:
+            raise RuntimeError("edge query down")
+        result = MagicMock()
+        result.data = lambda: [_make_row("a")]
+        return result
+
+    fake_session.run = _run
+    fake_driver.session = lambda: fake_session
+
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=fake_driver):
+        r = TestClient(app).get("/graph/embeddings/3d")
+
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["count"] == 1
+    assert payload["links"] == []

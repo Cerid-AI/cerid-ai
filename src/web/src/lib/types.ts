@@ -546,6 +546,13 @@ export interface SchedulerStatus {
   jobs: { id: string; name: string; next_run: string | null; trigger: string }[]
 }
 
+export interface SchedulerJobRunResult {
+  status: "started"
+  id: string
+  name: string
+  invalidates: string[]
+}
+
 export interface IngestLogEntry {
   event: string
   artifact_id: string

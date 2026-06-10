@@ -23,6 +23,7 @@ import {
   listAtlasViews,
   type AtlasView,
 } from "@/lib/api/atlas-views"
+import { mcpUrl, mcpHeaders } from "@/lib/api/common"
 
 export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki"
 
@@ -42,7 +43,7 @@ interface ViewsHealth {
 }
 
 async function fetchViewsHealth(): Promise<ViewsHealth> {
-  const res = await fetch("/atlas/views/health", { credentials: "include" })
+  const res = await fetch(mcpUrl("/atlas/views/health").toString(), { headers: mcpHeaders() })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }

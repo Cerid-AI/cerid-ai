@@ -344,12 +344,23 @@ class ProcessorWorker:
 def build_default_registry() -> dict[str, type[BaseJob]]:
     """Return a registry of all concrete BaseJob subclasses in app.processor.jobs.
 
-    Walks ``BaseJob.__subclasses__()`` recursively after importing the jobs
-    package so that every concrete job type is registered automatically —
-    new job classes just need to live under ``app.processor.jobs.*``.
+    Auto-discovers every module under ``app.processor.jobs`` (not just those
+    re-exported by its ``__init__``) and walks ``BaseJob.__subclasses__()``
+    recursively, so a new job file self-registers by existing — no manual
+    ``__init__`` edit. A job whose class is never imported never becomes a
+    BaseJob subclass, so it silently drops from the registry and every record
+    enqueued for it fails at runtime with "unknown job_type"; importing the
+    whole package closes that gap at its source.
     """
-    # Import the package so the subclasses are registered via __init_subclass__
-    import app.processor.jobs  # noqa: F401
+    import importlib
+    import pkgutil
+
+    import app.processor.jobs as _jobs_pkg
+
+    for mod in pkgutil.iter_modules(_jobs_pkg.__path__):
+        if mod.name.startswith("_"):
+            continue
+        importlib.import_module(f"{_jobs_pkg.__name__}.{mod.name}")
 
     registry: dict[str, type[BaseJob]] = {}
     _walk_subclasses(BaseJob, registry)  # type: ignore[arg-type]

@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react"
 import { AppErrorBoundary } from "@/components/layout/app-error-boundary"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { AppLayout } from "@/components/layout/app-layout"
+import type { Pane } from "@/components/layout/sidebar"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
 import { ConversationsProvider } from "@/contexts/conversations-context"
@@ -66,6 +67,10 @@ export default function App() {
   const [multiUser, setMultiUser] = useState(false)
   const [featureTier, setFeatureTier] = useState("community")
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
+  // Tracks the active pane so global chrome can be gated per-pane. The
+  // Sources pane has its own "Add a new source" FAB, so the global Quick
+  // Capture FAB is hidden there to avoid the two overlapping (BETA-001).
+  const [currentPane, setCurrentPane] = useState<Pane>("chat")
   const tierCycling = useRef(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
@@ -176,7 +181,7 @@ export default function App() {
     <UIModeProvider>
     <ConversationsProvider>
     <KBInjectionProvider>
-    <AppLayout featureTier={featureTier} onCycleTier={cycleTier}>
+    <AppLayout featureTier={featureTier} onCycleTier={cycleTier} onActivePaneChange={setCurrentPane}>
       {(activePane, openSidebar) => {
         switch (activePane) {
           case "chat":
@@ -205,11 +210,16 @@ export default function App() {
         }
       }}
     </AppLayout>
-    {/* Quick-capture FAB — visible from every pane. Hidden until the
-        user interacts; ⌘⇧N opens it from anywhere. */}
-    <Suspense fallback={null}>
-      <QuickCaptureFab />
-    </Suspense>
+    {/* Quick-capture FAB — visible from every pane except Sources (own
+        "Add a new source" FAB, BETA-001) and Subjects (Constellation
+        anchors its view-mode toggle + map settings in the same corner;
+        the fixed z-40 FAB sat on top and swallowed their clicks).
+        ⌘⇧N still opens quick capture from both panes. */}
+    {currentPane !== "sources" && currentPane !== "subjects" && (
+      <Suspense fallback={null}>
+        <QuickCaptureFab />
+      </Suspense>
+    )}
     </KBInjectionProvider>
     </ConversationsProvider>
     </UIModeProvider>

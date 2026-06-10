@@ -25,13 +25,14 @@ export interface GenerateTourBody {
   duration_s?: number
 }
 
+import { mcpUrl, mcpHeaders } from "./common"
+
 const BASE = "/graph/tour"
 
 export async function generateTour(body: GenerateTourBody = {}): Promise<TourArc> {
-  const res = await fetch(`${BASE}/generate`, {
+  const res = await fetch(mcpUrl(`${BASE}/generate`).toString(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   })
   if (!res.ok) {
@@ -48,7 +49,7 @@ export interface TourHealth {
 }
 
 export async function fetchTourHealth(): Promise<TourHealth> {
-  const res = await fetch(`${BASE}/health`, { credentials: "include" })
+  const res = await fetch(mcpUrl(`${BASE}/health`).toString(), { headers: mcpHeaders() })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json() as Promise<TourHealth>
 }

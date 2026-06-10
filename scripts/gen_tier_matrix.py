@@ -72,6 +72,9 @@ LABELS = {
     "parent_child_retrieval": "Parent-child retrieval",
     "priority_support": "Priority support",
     "private_mode": "Private Mode",
+    "pro_visualization_analytics": "Visualization analytics overlay",
+    "pro_visualization_timeline": "Visualization timeline overlay",
+    "pro_visualization_tour": "Guided graph tour",
     "quicklook_preview": "QuickLook preview",
     "reminders_eventkit": "Apple Reminders (EventKit)",
     "safari_reading_list": "Safari Reading List",
@@ -92,6 +95,7 @@ LABELS = {
 # tier-derived catch-alls for flags that belong to no bucket.
 _BUCKET_SECTIONS = [
     ("pro_intelligence", "Pro Intelligence"),
+    ("pro_visualization", "Pro Visualization"),
     ("pro_meeting_capture", "Meeting Capture — Pro"),
     ("pro_cloud_connectors", "Cloud Connectors — Pro"),
     ("pro_apple_connectors", "Apple Connectors — Pro"),

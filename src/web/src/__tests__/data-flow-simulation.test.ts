@@ -56,7 +56,7 @@ function makeSendOptions(overrides: Record<string, unknown> = {}) {
     routingMode: "manual", costSensitivity: "medium" as const,
     autoInject: false, autoInjectThreshold: 0.6,
     injectedContext: [] as KBQueryResult[], kbResults: [] as KBQueryResult[],
-    clearInjected: vi.fn(), onBeforeSend: vi.fn(),
+    clearInjected: vi.fn(), privateModeLevel: 0, onBeforeSend: vi.fn(),
     ...overrides, _sendSpy: sendSpy,
   }
 }

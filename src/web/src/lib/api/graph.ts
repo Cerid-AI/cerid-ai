@@ -5,7 +5,7 @@
 // Constellation/Timeline visualization modes (Cerid v1.0 Phase A onward).
 
 import type { GraphHealth, NeighborhoodResponse } from "@/lib/types/graph"
-import { MCP_BASE, mcpHeaders, extractError } from "./common"
+import { MCP_BASE, mcpHeaders, mcpUrl, extractError } from "./common"
 
 /**
  * Fetch a K-hop neighborhood around a focal entity.
@@ -25,10 +25,7 @@ export async function fetchNeighborhood(
   filter?: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<NeighborhoodResponse> {
-  const url = new URL(`${MCP_BASE}/graph/neighborhood`)
-  url.searchParams.set("entity", entity)
-  url.searchParams.set("hops", String(hops))
-  if (filter) url.searchParams.set("filter", filter)
+  const url = mcpUrl("/graph/neighborhood", { entity, hops, filter })
 
   const res = await fetch(url.toString(), {
     headers: mcpHeaders(),
@@ -76,10 +73,11 @@ export interface FetchTimelineOptions {
 }
 
 export async function fetchTimeline(opts: FetchTimelineOptions = {}): Promise<TimelineResponse> {
-  const url = new URL(`${MCP_BASE}/graph/timeline`)
-  if (opts.entity) url.searchParams.set("entity", opts.entity)
-  if (opts.period) url.searchParams.set("period", opts.period)
-  if (opts.granularity) url.searchParams.set("granularity", opts.granularity)
+  const url = mcpUrl("/graph/timeline", {
+    entity: opts.entity,
+    period: opts.period,
+    granularity: opts.granularity,
+  })
   const res = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to load timeline"))
   return res.json() as Promise<TimelineResponse>

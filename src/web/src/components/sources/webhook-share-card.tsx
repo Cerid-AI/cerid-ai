@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Check, Copy, Lock, Webhook } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { mcpUrl, mcpHeaders } from "@/lib/api/common"
 
 interface WebhookUrlPayload {
   url: string
@@ -25,7 +26,7 @@ interface WebhookUrlPayload {
 }
 
 async function fetchWebhookUrl(sourceId: string): Promise<WebhookUrlPayload> {
-  const r = await fetch(`/sources/${sourceId}/webhook-url`)
+  const r = await fetch(mcpUrl(`/sources/${sourceId}/webhook-url`).toString(), { headers: mcpHeaders() })
   if (!r.ok) throw new Error(`webhook-url fetch failed: ${r.status}`)
   return r.json()
 }

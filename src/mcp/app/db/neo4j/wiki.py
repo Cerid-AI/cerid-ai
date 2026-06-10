@@ -123,12 +123,18 @@ def _thirty_days_ago_iso() -> str:
 # ---------------------------------------------------------------------------
 
 
-def list_top_entities(driver: Any, *, limit: int = 30) -> list[dict[str, Any]]:
+def list_top_entities(
+    driver: Any, *, limit: int = 30, search: str | None = None
+) -> list[dict[str, Any]]:
     """Return up to ``limit`` entities ordered by recent activity score.
 
     ``recent_activity_score`` is the count of distinct Artifact nodes that
     mention this entity and were updated within the last 30 days. Entities
     with no recent activity sort last (score 0).
+
+    When ``search`` is given, the name/canonical_id filter runs in Cypher
+    *before* the LIMIT, so the match spans the whole entity set — not just
+    the first ``limit`` rows the client happened to fetch (F5).
 
     Returns a list of property dicts with keys:
         canonical_id, name, entity_type, mention_count,
@@ -136,12 +142,20 @@ def list_top_entities(driver: Any, *, limit: int = 30) -> list[dict[str, Any]]:
     """
     effective_limit = min(limit, 200)
     since = _thirty_days_ago_iso()
+    search_lc = (search or "").strip().lower()
+    where = (
+        "WHERE toLower(e.name) CONTAINS $search "
+        "OR toLower(e.canonical_id) CONTAINS $search"
+        if search_lc
+        else ""
+    )
 
     try:
         with driver.session() as session:
             result = session.run(
-                """
+                f"""
                 MATCH (e:Entity)
+                {where}
                 OPTIONAL MATCH (a:Artifact)-[:MENTIONS]->(e)
                   WHERE a.updated_at >= $since
                 WITH e,
@@ -159,6 +173,7 @@ def list_top_entities(driver: Any, *, limit: int = 30) -> list[dict[str, Any]]:
                 """,
                 since=since,
                 limit=effective_limit,
+                search=search_lc,
             )
             return [dict(r) for r in result]
     except Exception as exc:

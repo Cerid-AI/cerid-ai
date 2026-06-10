@@ -83,6 +83,35 @@
     --color-sidebar-ring: var(--sidebar-ring);
     --color-brand: var(--brand);
     --color-brand-foreground: var(--brand-foreground);
+
+    /* ---------------------------------------------------------------
+       Cartographer map palette tokens (flat 2D knowledge-map view)
+       8 desaturated categorical hues — OKLCH L 0.60–0.70, C 0.05–0.06
+       plus trust-ring channel and dim-token.
+       These feed sigma's nodeReducer/edgeReducer via getComputedStyle
+       and MUST NOT contain raw hex (drift gate).
+       --------------------------------------------------------------- */
+    --color-map-cluster-0: oklch(0.63 0.055 240);   /* slate-blue */
+    --color-map-cluster-1: oklch(0.65 0.055 150);   /* sage */
+    --color-map-cluster-2: oklch(0.64 0.055 35);    /* clay */
+    --color-map-cluster-3: oklch(0.66 0.055 80);    /* ochre */
+    --color-map-cluster-4: oklch(0.62 0.055 310);   /* mauve */
+    --color-map-cluster-5: oklch(0.63 0.055 195);   /* steel */
+    --color-map-cluster-6: oklch(0.64 0.055 165);   /* moss */
+    --color-map-cluster-7: oklch(0.66 0.055 60);    /* sand */
+    --color-map-cluster-other: oklch(0.60 0.010 240); /* neutral gray for OTHER */
+    /* Edge: background mixed 75% toward --background per-theme */
+    --color-map-edge: oklch(0.72 0.008 240);
+    /* Dim token: flat replaced color for non-focal nodes */
+    --color-map-dim: oklch(0.78 0.008 240);
+    /* Trust rings — neutral foreground ramp (solid/arc/dashed), not green/amber/red */
+    --color-map-trust-verified: oklch(0.40 0.015 240);
+    --color-map-trust-partial: oklch(0.52 0.012 240);
+    --color-map-trust-unverified: oklch(0.65 0.008 240);
+    /* Interaction accent (hover ring, selection ring, search hit, ingest pulse) */
+    --color-map-interaction: var(--brand);
+    /* Optional dot-grid underlay at 3% alpha */
+    --color-map-grid: oklch(0.40 0.010 240 / 3%);
 }
 
 /* ================================================================
@@ -177,6 +206,23 @@
     --sidebar-accent-foreground: oklch(0.93 0.01 230);
     --sidebar-border: oklch(0.32 0.04 230 / 45%);
     --sidebar-ring: oklch(0.50 0.03 240);
+
+    /* Cartographer dark-mode overrides — lighter fills on dark background */
+    --color-map-cluster-0: oklch(0.68 0.055 240);
+    --color-map-cluster-1: oklch(0.70 0.055 150);
+    --color-map-cluster-2: oklch(0.69 0.055 35);
+    --color-map-cluster-3: oklch(0.71 0.055 80);
+    --color-map-cluster-4: oklch(0.67 0.055 310);
+    --color-map-cluster-5: oklch(0.68 0.055 195);
+    --color-map-cluster-6: oklch(0.69 0.055 165);
+    --color-map-cluster-7: oklch(0.71 0.055 60);
+    --color-map-cluster-other: oklch(0.48 0.012 240);
+    --color-map-edge: oklch(0.30 0.015 240);
+    --color-map-dim: oklch(0.28 0.015 240);
+    --color-map-trust-verified: oklch(0.80 0.015 240);
+    --color-map-trust-partial: oklch(0.65 0.012 240);
+    --color-map-trust-unverified: oklch(0.45 0.008 240);
+    --color-map-grid: oklch(0.80 0.010 240 / 3%);
 }
 
 @layer base {

@@ -312,7 +312,10 @@ if $RUN_BROWSER; then
     fi
 
     mkdir -p "${SCRIPT_DIR}/reports"
-    (cd "${E2E_DIR}" && npx playwright test --reporter=list,junit 2>&1)
+    # Use the reporters declared in playwright.config.ts (list + junit→
+    # ../reports/e2e.xml + html). Passing --reporter here overrides the config
+    # and drops the junit outputFile, leaving the report's E2E table empty.
+    (cd "${E2E_DIR}" && npx playwright test 2>&1)
     E2E_EXIT=$?
 
     if [[ -f "${SCRIPT_DIR}/reports/e2e.xml" ]]; then
@@ -385,9 +388,11 @@ for tc in root.iter('testcase'):
     name = tc.get('name', 'unknown')
     time_val = tc.get('time', '0')
     failure = tc.find('failure')
+    error = tc.find('error')  # collection/import errors — must NOT score as PASS
     skip = tc.find('skipped')
-    if failure is not None:
-        msg = (failure.get('message', '') or '')[:80]
+    if failure is not None or error is not None:
+        node = failure if failure is not None else error
+        msg = (node.get('message', '') or '')[:80]
         print(f'FAIL|EVAL|{name}|{time_val}s|{msg}')
     elif skip is not None:
         print(f'SKIP|EVAL|{name}|{time_val}s|skipped')
