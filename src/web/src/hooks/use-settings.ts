@@ -150,9 +150,9 @@ export function useSettings() {
   const [ragMode, setRagModeState] = useState<RagMode>(() => {
     try {
       const v = localStorage.getItem("cerid-rag-mode")
-      if (v === "manual" || v === "smart" || v === "custom_smart") return v
+      if (v === "smart" || v === "always" || v === "off") return v
     } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-rag-mode" }) }
-    return "manual"
+    return "smart"
   })
 
   const [costSensitivity, setCostSensitivity] = useState<"low" | "medium" | "high">(() => {
@@ -250,7 +250,7 @@ export function useSettings() {
         if (s.enable_memory_extraction !== undefined) hydrateMemory(s.enable_memory_extraction, serverWins)
         if (s.rag_mode && (serverWins || !localStorage.getItem("cerid-rag-mode"))) {
           const rm = s.rag_mode as string
-          if (rm === "manual" || rm === "smart" || rm === "custom_smart") {
+          if (rm === "smart" || rm === "always" || rm === "off") {
             setRagModeState(rm as RagMode)
             persist("cerid-rag-mode", rm)
           }
@@ -375,7 +375,7 @@ export function useSettings() {
     setRagModeState(mode)
     persist("cerid-rag-mode", mode)
     bumpSettingsUpdatedAt()
-    updateSettings({ rag_mode: mode }).catch(() => { /* noop */ })
+    return updateSettings({ rag_mode: mode })
   }, [])
 
   const updateCostSensitivity = useCallback((value: "low" | "medium" | "high") => {

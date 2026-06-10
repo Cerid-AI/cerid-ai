@@ -67,11 +67,6 @@ vi.mock("@/contexts/conversations-context", () => ({
   }),
 }))
 
-vi.mock("@/contexts/ui-mode-context", () => ({
-  useUIMode: () => ({ mode: "simple", isSimple: true, setMode: vi.fn() }),
-  UIModeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
-
 vi.mock("@/hooks/use-settings", () => ({
   useSettings: () => ({
     feedbackLoop: false, toggleFeedbackLoop: vi.fn(),

@@ -5,7 +5,6 @@ import type { SettingsUpdate } from "./types"
 import { Crown, FlaskConical, Shield, Sparkles, Zap, type LucideIcon } from "lucide-react"
 
 export type PresetId = "quick" | "balanced" | "maximum" | "privacy_first" | "power_user"
-export type UIMode = "simple" | "advanced"
 
 /**
  * Per-automation preset configuration. Applied alongside the server
@@ -29,7 +28,6 @@ export interface UserPreset {
    *  flagged by the UI audit as the emoji-as-icon anti-pattern. */
   Icon: LucideIcon
   description: string
-  uiMode: UIMode
   settings: SettingsUpdate
   /** localStorage overrides applied alongside the server settings */
   local: Record<string, string>
@@ -47,7 +45,6 @@ export const USER_PRESETS: UserPreset[] = [
     label: "Quick",
     Icon: Zap,
     description: "Fast responses with basic verification. Best for quick questions.",
-    uiMode: "simple",
     settings: {
       enable_feedback_loop: false,
       enable_hallucination_check: true,
@@ -79,7 +76,6 @@ export const USER_PRESETS: UserPreset[] = [
     label: "Balanced",
     Icon: FlaskConical,
     description: "Thorough retrieval with full verification pipeline.",
-    uiMode: "advanced",
     settings: {
       enable_feedback_loop: false,
       enable_hallucination_check: true,
@@ -113,7 +109,6 @@ export const USER_PRESETS: UserPreset[] = [
     label: "Privacy-first",
     Icon: Shield,
     description: "Hallucination guard on. All automations off. iMessage and cloud connectors stay disabled until you opt in per source.",
-    uiMode: "simple",
     settings: {
       enable_feedback_loop: false,
       enable_hallucination_check: true,
@@ -140,7 +135,6 @@ export const USER_PRESETS: UserPreset[] = [
     label: "Power-user",
     Icon: Crown,
     description: "Pro-tier full automation. Daily digest at 7 AM UTC, inbox triage every 15 minutes, full retrieval pipeline.",
-    uiMode: "advanced",
     requiresPro: true,
     settings: {
       enable_feedback_loop: true,
@@ -180,7 +174,6 @@ export const USER_PRESETS: UserPreset[] = [
     label: "Maximum",
     Icon: Sparkles,
     description: "All features enabled. Maximum quality, higher latency.",
-    uiMode: "advanced",
     requiresPro: true,
     settings: {
       enable_feedback_loop: true,

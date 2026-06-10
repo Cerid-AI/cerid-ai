@@ -436,6 +436,42 @@
   }
 }
 
+/* Appearance — per-app reduced-motion override (Settings → Appearance).
+ * Mirrors the prefers-reduced-motion media rule above for users whose OS
+ * setting doesn't match their in-app preference. data-motion is applied to
+ * <html> by hooks/use-theme.ts before first paint. */
+html[data-motion="reduce"] *,
+html[data-motion="reduce"] *::before,
+html[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="reduce"] .dark .glow-teal,
+html[data-motion="reduce"] .dark .text-brand-shine,
+html[data-motion="reduce"] .group:hover .scroll-title-inner {
+  animation: none !important;
+}
+
+/* Appearance — density tokens (v1 scope: settings + list surfaces only).
+ * `density-row` / `density-stack` are the spacing hooks SettingRow and
+ * category pages compose; compact tightens both. data-density is applied
+ * to <html> by hooks/use-theme.ts. */
+.density-row {
+  padding-block: 0.5rem;
+}
+.density-stack {
+  display: grid;
+  gap: 1rem;
+}
+html[data-density="compact"] .density-row {
+  padding-block: 0.25rem;
+}
+html[data-density="compact"] .density-stack {
+  gap: 0.5rem;
+}
+
 /* KB artifact card action buttons — always show pointer cursor */
 .artifact-action-btn {
   cursor: pointer;

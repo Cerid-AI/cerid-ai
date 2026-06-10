@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the adaptive RecommendationBanner (C3.2 / v0.93.3).
+ * Tests for the adaptive RecommendationBanner (SEXTANT rehost).
  *
  * Covers:
  *   - banner renders only when /health includes recommendations
  *   - "Enable now" calls patch() with the rec's enable_payload + clearRecommendation
- *   - "Maybe later" snoozes the entry via sessionStorage (no network call)
- *   - "Dismiss permanently" calls the server-side dismiss endpoint
+ *   - Enable failures surface an inline destructive Alert (never silent)
+ *   - "Snooze" (labeled button) snoozes the entry via sessionStorage
+ *   - the X icon dismisses permanently via the server-side endpoint
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -64,10 +65,9 @@ describe("RecommendationBanner", () => {
     const patch = vi.fn()
     const { container } = render(wrap(<RecommendationBanner patch={patch} />))
     await waitFor(() => {
-      // Polling has run; nothing should render.
       expect(container.querySelectorAll('[role="button"]').length).toBe(0)
     })
-    expect(container.textContent).not.toContain("Recommended")
+    expect(container.textContent).toBe("")
   })
 
   it("renders one card per recommendation entry", async () => {
@@ -76,12 +76,11 @@ describe("RecommendationBanner", () => {
     render(wrap(<RecommendationBanner patch={patch} />))
     await screen.findByText("SPLADE-v3 sparse retrieval")
     expect(screen.getByText(/Your corpus is now 150 documents/)).toBeInTheDocument()
-    expect(screen.getByText("Recommended")).toBeInTheDocument()
   })
 
   it("Enable now calls patch with the rec's enable_payload", async () => {
     mockHealthFetch([SAMPLE_REC])
-    const patch = vi.fn().mockResolvedValue(undefined)
+    const patch = vi.fn().mockResolvedValue({ ok: true })
     render(wrap(<RecommendationBanner patch={patch} />))
     await screen.findByText("Enable now")
 
@@ -94,14 +93,24 @@ describe("RecommendationBanner", () => {
     })
   })
 
-  it("Maybe later snoozes the entry via sessionStorage", async () => {
+  it("surfaces enable failures as an inline alert", async () => {
+    mockHealthFetch([SAMPLE_REC])
+    const patch = vi.fn().mockResolvedValue({ ok: false, error: "PATCH rejected" })
+    render(wrap(<RecommendationBanner patch={patch} />))
+    await screen.findByText("Enable now")
+
+    await userEvent.click(screen.getByText("Enable now"))
+    expect(await screen.findByText(/Could not enable: PATCH rejected/)).toBeInTheDocument()
+    expect(screen.getByText("SPLADE-v3 sparse retrieval")).toBeInTheDocument()
+  })
+
+  it("Snooze hides the entry via sessionStorage without a network call", async () => {
     mockHealthFetch([SAMPLE_REC])
     const patch = vi.fn()
     render(wrap(<RecommendationBanner patch={patch} />))
     await screen.findByText("SPLADE-v3 sparse retrieval")
 
-    const snoozeBtn = screen.getByLabelText("Snooze for this session")
-    await userEvent.click(snoozeBtn)
+    await userEvent.click(screen.getByRole("button", { name: "Snooze" }))
 
     await waitFor(() => {
       expect(screen.queryByText("SPLADE-v3 sparse retrieval")).not.toBeInTheDocument()
@@ -109,13 +118,13 @@ describe("RecommendationBanner", () => {
     expect(sessionStorage.getItem("cerid:recommendation-snoozed:sparse_retrieval")).toBe("1")
   })
 
-  it("Dismiss permanently fires the dismiss endpoint", async () => {
+  it("the X icon dismisses permanently via the dismiss endpoint", async () => {
     mockHealthFetch([SAMPLE_REC])
     const patch = vi.fn()
     render(wrap(<RecommendationBanner patch={patch} />))
-    await screen.findByText("Dismiss permanently")
+    await screen.findByText("SPLADE-v3 sparse retrieval")
 
-    await userEvent.click(screen.getByText("Dismiss permanently"))
+    await userEvent.click(screen.getByLabelText("Dismiss permanently"))
 
     await waitFor(() => {
       const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls

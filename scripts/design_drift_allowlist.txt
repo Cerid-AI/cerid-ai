@@ -47,7 +47,7 @@ src/web/src/components/monitoring/collection-chart.tsx:48
 src/web/src/components/workflows/workflow-canvas.tsx:178
 
 # StorageBar stacked-segment widths (tooltip+legend; doesn't fit single-fill ProgressBar)
-src/web/src/components/settings/StorageBar.tsx:112
+src/web/src/components/settings/categories/system.tsx:206
 
 # --- Section: TooltipContent max-width caps ---------------------------------
 # Pinned widths keep long invariant / claim / metadata strings from sprawling.
@@ -123,3 +123,4 @@ src/web/src/components/workflows/workflow-editor.tsx:250
 src/web/src/components/workflows/workflow-editor.tsx:274
 src/web/src/components/workflows/workflow-editor.tsx:367
 src/web/src/components/workflows/workflow-editor.tsx:401
+

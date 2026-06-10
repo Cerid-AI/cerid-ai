@@ -32,10 +32,6 @@ vi.mock("@/lib/api", () => ({
   pullOllamaModel: vi.fn(),
 }))
 
-vi.mock("@/contexts/ui-mode-context", () => ({
-  useUIMode: () => ({ mode: "simple", setMode: vi.fn() }),
-}))
-
 vi.mock("@/hooks/use-drag-drop", () => ({
   useDragDrop: () => ({ isDragOver: false, dragHandlers: {} }),
 }))

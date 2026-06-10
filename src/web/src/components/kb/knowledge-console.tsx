@@ -280,7 +280,7 @@ function ConsoleConfigBar({
     <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b bg-background/95 backdrop-blur px-3 py-1.5">
       {/* RAG Mode display (read-only — primary control is in chat toolbar) */}
       <span className="rounded bg-muted px-2 py-0.5 text-label-xs font-medium text-muted-foreground">
-        {ragMode === "smart" ? "Smart" : ragMode === "custom_smart" ? "Custom" : "Manual"}
+        {ragMode === "smart" ? "Smart" : ragMode === "always" ? "Always" : "Off"}
       </span>
 
       <div className="flex-1" />

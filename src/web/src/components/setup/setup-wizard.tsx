@@ -23,7 +23,6 @@ import { QuenchforgeInstallStep } from "@/components/setup/quenchforge-install-s
 import { TelemetryConsentStep, type TelemetryConsent } from "@/components/setup/telemetry-consent-step"
 import { StepIndicator, type StepDef } from "@/components/setup/step-indicator"
 import { applySetupConfig, fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
-import { useUIMode } from "@/contexts/ui-mode-context"
 import { assessCapabilities, fromWizardState, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import type { CapabilityAssessment, Warning as ProviderWarning } from "@/lib/provider-capabilities"
 import { cn } from "@/lib/utils"
@@ -325,7 +324,6 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   const [showResumePrompt, setShowResumePrompt] = useState(false)
   const [resumeStep, setResumeStep] = useState(0)
   const healthTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
-  const { setMode } = useUIMode()
 
   // Check for saved progress on mount — but only if backend hasn't been reset
   useEffect(() => {
@@ -475,11 +473,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   }, [])
 
   const handleFinish = useCallback(() => {
-    setMode(state.selectedMode)
     clearProgress()
     localStorage.setItem("cerid-onboarding-complete", "true")
     onComplete()
-  }, [state.selectedMode, setMode, onComplete])
+  }, [onComplete])
 
   const goNext = useCallback(() => {
     dispatch({ type: "SET_STEP", step: Math.min(state.step + 1, TOTAL_STEPS - 1) })

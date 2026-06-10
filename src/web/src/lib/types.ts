@@ -13,7 +13,7 @@ export interface ChatMessage {
   degradedReason?: string
 }
 
-export type RagMode = "manual" | "smart" | "custom_smart"
+export type RagMode = "smart" | "always" | "off"
 
 /** Absolute on/off gates for each context source. Disabled sources skip retrieval entirely. */
 export interface ContextSources {

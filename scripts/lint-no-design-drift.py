@@ -22,6 +22,15 @@ Checks (each independently controllable via flags):
   --check-motion          Imports from non-shadcn motion libraries
                           (framer-motion, gsap, react-spring).
 
+  --check-settings-controls
+                          Settings drift (J-11): under components/settings/,
+                          native ``<select>`` / raw ``<input>`` JSX and
+                          ``scale-[0.6]`` are banned — control semantics must
+                          come from the registry-driven primitives
+                          (``SettingRow`` / ``ToggleRow`` / ``SliderRow`` /
+                          shadcn ``Select`` / ``Input``). settings-primitives.tsx
+                          itself is exempt (it owns the raw elements).
+
 Additional controls:
 
   --root PATH             Directory to scan (default: ``src/web/src``).
@@ -82,6 +91,13 @@ _RE_NON_LUCIDE_ICONS = re.compile(
 _RE_NON_SHADCN_MOTION = re.compile(
     r"""from\s+['"](?:framer-motion|gsap|react-spring|@react-spring/[a-z-]+)['"]"""
 )
+
+# Settings-control drift (J-11): native form elements and the shrunken-switch
+# hack under components/settings/ (settings-primitives.tsx exempt).
+_RE_SETTINGS_NATIVE_CONTROL = re.compile(r"<(?:select|input|textarea)\b")
+_SETTINGS_SCALE_HACK = "scale-[0.6]"
+_SETTINGS_DIR_MARKER = "components/settings/"
+_SETTINGS_PRIMITIVES_FILE = "settings-primitives.tsx"
 
 # Suppression token — trailing comment on the same source line
 _DRIFT_ALLOWED_TOKEN = "drift-allowed:"
@@ -193,6 +209,19 @@ def _scan_motion(path: Path, lines: list[str]) -> list[Violation]:
     return violations
 
 
+def _scan_settings_controls(path: Path, lines: list[str]) -> list[Violation]:
+    posix = path.as_posix()
+    if _SETTINGS_DIR_MARKER not in posix or posix.endswith(_SETTINGS_PRIMITIVES_FILE):
+        return []
+    violations = []
+    for i, raw in enumerate(lines, 1):
+        if _is_comment_line(raw) or _has_suppression(raw):
+            continue
+        if _RE_SETTINGS_NATIVE_CONTROL.search(raw) or _SETTINGS_SCALE_HACK in raw:
+            violations.append(Violation(str(path), i, "settings-control", raw.strip()))
+    return violations
+
+
 # ---------------------------------------------------------------------------
 # File iteration
 # ---------------------------------------------------------------------------
@@ -225,6 +254,7 @@ def check_file(
     check_arbitrary_tailwind: bool,
     check_icons: bool,
     check_motion: bool,
+    check_settings_controls: bool,
 ) -> list[Violation]:
     """Scan a single file and return all violations found."""
     try:
@@ -245,6 +275,8 @@ def check_file(
         violations.extend(_scan_icons(path, lines))
     if check_motion:
         violations.extend(_scan_motion(path, lines))
+    if check_settings_controls and path.suffix == ".tsx":
+        violations.extend(_scan_settings_controls(path, lines))
 
     return violations
 
@@ -347,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — single-entry C
     parser.add_argument("--no-check-icons", dest="check_icons", action="store_false")
     parser.add_argument("--check-motion", action="store_true", default=True, help=argparse.SUPPRESS)
     parser.add_argument("--no-check-motion", dest="check_motion", action="store_false")
+    parser.add_argument("--check-settings-controls", action="store_true", default=True, help=argparse.SUPPRESS)
+    parser.add_argument("--no-check-settings-controls", dest="check_settings_controls", action="store_false")
 
     args = parser.parse_args(argv)
 
@@ -376,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — single-entry C
             check_arbitrary_tailwind=args.check_arbitrary_tailwind,
             check_icons=args.check_icons,
             check_motion=args.check_motion,
+            check_settings_controls=args.check_settings_controls,
         )
         all_violations.extend(filter_allowlisted(raw, allow))
 

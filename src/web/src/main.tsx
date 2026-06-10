@@ -8,7 +8,12 @@ import { Toaster } from "sonner"
 import App from "./App"
 import { queryClient } from "@/lib/query-client"
 import { initSentry } from "@/lib/sentry"
+import { applyPersistedAppearance } from "@/hooks/use-theme"
 import "./index.css"
+
+// FOUC guard — apply persisted theme/density/motion to <html> before the
+// first React render (and therefore before first paint).
+applyPersistedAppearance()
 
 // Fire-and-forget Sentry init (no-ops when VITE_SENTRY_DSN_WEB is unset
 // or we're in DEV mode). Doesn't block render — the rest of the app
