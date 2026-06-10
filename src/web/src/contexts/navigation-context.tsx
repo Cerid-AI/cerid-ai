@@ -67,9 +67,9 @@ function applyRedirect(target: Pane): Pane {
     const paramName = PARAM_BY_PANE[redirect.pane] ?? "mode"
     params.set(paramName, redirect.mode)
     // When redirecting to settings/Diagnostics, also pre-select the
-    // settings tab so the user lands on Diagnostics, not Essentials.
+    // settings category so the user lands on the Diagnostics console entry.
     if (redirect.pane === "settings") {
-      try { localStorage.setItem("cerid-settings-tab", "diagnostics") } catch { /* SSR */ }
+      try { localStorage.setItem("cerid-settings-category", "diagnostics") } catch { /* SSR */ }
     }
     const next = params.toString()
     const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
@@ -99,6 +99,12 @@ export interface NavigationOptions {
   lens?: string
   /** Atlas hop depth (1 | 2 | 3) */
   hops?: number
+  /** Settings pane: registry SettingDef id to reveal (scroll-to + force-open
+      its Advanced expander). Written to `?setting=`. */
+  setting?: string
+  /** Settings pane: category to select (e.g. "plan", "appearance").
+      Written to `?category=`. */
+  category?: string
   /** Whether to add the navigation event to the history stack */
   track?: boolean
 }
@@ -143,6 +149,14 @@ function writeNavigationUrl(options: NavigationOptions) {
   }
   if (hops !== undefined) {
     params.set("hops", String(hops))
+  }
+  if (options.setting !== undefined) {
+    if (options.setting) params.set("setting", options.setting)
+    else params.delete("setting")
+  }
+  if (options.category !== undefined) {
+    if (options.category) params.set("category", options.category)
+    else params.delete("category")
   }
   const next = params.toString()
   const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`

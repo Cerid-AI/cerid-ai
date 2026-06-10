@@ -12,7 +12,6 @@ import { ChatPanel } from "@/components/chat/chat-panel"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
 import { ConversationsProvider } from "@/contexts/conversations-context"
 import { AuthProvider } from "@/contexts/auth-context"
-import { UIModeProvider } from "@/contexts/ui-mode-context"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
@@ -151,16 +150,14 @@ export default function App() {
   // Show setup wizard if backend reports no API keys configured OR first-run onboarding
   if (setupRequired || showOnboarding) {
     return (
-      <UIModeProvider>
-        <SetupWizard
-          open
-          canSkip={!setupRequired && showOnboarding}
-          onComplete={() => {
-            setSetupRequired(false)
-            setShowOnboarding(false)
-          }}
-        />
-      </UIModeProvider>
+      <SetupWizard
+        open
+        canSkip={!setupRequired && showOnboarding}
+        onComplete={() => {
+          setSetupRequired(false)
+          setShowOnboarding(false)
+        }}
+      />
     )
   }
 
@@ -178,7 +175,6 @@ export default function App() {
     <TooltipProvider delayDuration={0}>
     <AuthProvider>
     <ProtectedRoute multiUser={multiUser}>
-    <UIModeProvider>
     <ConversationsProvider>
     <KBInjectionProvider>
     <AppLayout featureTier={featureTier} onCycleTier={cycleTier} onActivePaneChange={setCurrentPane}>
@@ -222,7 +218,6 @@ export default function App() {
     )}
     </KBInjectionProvider>
     </ConversationsProvider>
-    </UIModeProvider>
     </ProtectedRoute>
     </AuthProvider>
     </TooltipProvider>

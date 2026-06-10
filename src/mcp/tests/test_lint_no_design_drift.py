@@ -72,6 +72,7 @@ def scan(drift_module: Any, tmp_path: Path):
         check_arbitrary_tailwind: bool = True,
         check_icons: bool = True,
         check_motion: bool = True,
+        check_settings_controls: bool = True,
     ):
         f = tmp_path / f"comp{suffix}"
         f.write_text(source, encoding="utf-8")
@@ -82,6 +83,7 @@ def scan(drift_module: Any, tmp_path: Path):
             check_arbitrary_tailwind=check_arbitrary_tailwind,
             check_icons=check_icons,
             check_motion=check_motion,
+            check_settings_controls=check_settings_controls,
         )
         return violations
 
@@ -324,6 +326,7 @@ class TestAllowlist:
             check_arbitrary_tailwind=False,
             check_icons=False,
             check_motion=False,
+            check_settings_controls=False,
         )
         assert len(all_viols) == 2
 

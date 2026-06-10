@@ -31,7 +31,6 @@ import { useModelRouter } from "@/hooks/use-model-router"
 import { useModelSwitch } from "@/hooks/use-model-switch"
 import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
 import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrator"
-import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
 import { fetchSetupStatus } from "@/lib/api/settings"
@@ -78,7 +77,6 @@ interface ChatPanelProps {
 
 export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
   const isNarrow = useSyncExternalStore(narrowSubscribe, getIsNarrow)
-  const { isSimple } = useUIMode()
   const {
     active,
     activeId,
@@ -314,11 +312,11 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
   const { injectedContext, clearInjected } = kbContext
 
   // Merge orchestrated results into KB results pool for auto-inject.
-  // In smart/custom_smart modes, orchestrated results are conversation-aware
+  // In smart/always modes, orchestrated results are conversation-aware
   // and higher quality — prefer them over basic KB results.
-  // In manual mode, orchestrated results are ignored (user controls injection).
+  // In off mode, orchestrated results are ignored (user injects via @mentions).
   const effectiveKBResults = useMemo(() => {
-    if (ragMode === "manual") return kbContext.results
+    if (ragMode === "off") return kbContext.results
     const r = orchestratedContext.results
     if (r.length > 0) return r
     // Degraded path (F-2 remediation): if the orchestrator returned no KB
@@ -551,7 +549,6 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       <ChatToolbar
         isNarrow={isNarrow}
         onOpenSidebar={onOpenSidebar}
-        isSimple={isSimple}
         showKB={showKB}
         onToggleKB={() => setShowKB(!showKB)}
         autoInject={autoInject}
@@ -594,8 +591,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       {/* Service degradation banner */}
       <DegradationBanner />
 
-      {/* Dashboard metrics bar (advanced only) */}
-      {!isSimple && showDashboard && (
+      {/* Dashboard metrics bar */}
+      {showDashboard && (
         <ChatDashboard
           model={selectedModel}
           messages={active?.messages ?? []}
@@ -603,8 +600,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         />
       )}
 
-      {/* Model recommendation banner (advanced only, recommend mode) */}
-      {!isSimple && recommendation && routingMode === "recommend" && (
+      {/* Model recommendation banner (recommend mode) */}
+      {recommendation && routingMode === "recommend" && (
         <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-1.5 text-xs">
           <Zap className="h-3.5 w-3.5 text-yellow-500" />
           <span className="flex-1">{recommendation.reasoning}</span>
@@ -625,8 +622,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         </div>
       )}
 
-      {/* V1b: Proactive switch banner (advanced only) */}
-      {!isSimple && verificationRecBanner && (
+      {/* V1b: Proactive switch banner */}
+      {verificationRecBanner && (
         <div className="flex items-center gap-2 border-b bg-blue-500/10 px-4 py-1.5 text-xs">
           <Zap className="h-3.5 w-3.5 text-blue-500" />
           <span className="flex-1">{verificationRecBanner.reason}</span>
@@ -666,7 +663,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       )}
 
       {/* Expert verification cost indicator */}
-      {!isSimple && expertVerification && hallucinationEnabled && verification.phase !== "idle" && verification.phase !== "done" && (
+      {expertVerification && hallucinationEnabled && verification.phase !== "idle" && verification.phase !== "done" && (
         <div className="flex items-center gap-2 px-3 py-1 text-label-sm text-amber-500 bg-amber-500/5 border-b border-amber-500/10">
           <ShieldCheck className="h-3 w-3" />
           Expert verification active — ~15× standard cost
@@ -717,7 +714,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       )}
 
       {/* Ollama recommendation — shown when no local stages and user has chatted */}
-      {!isSimple && !ollamaSetupActive && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
+      {!ollamaSetupActive && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
         ollamaShowSetup ? (
           <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
             <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
@@ -805,8 +802,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         }}
       />
 
-      {/* Smart KB suggestions (advanced only) */}
-      {!isSimple && smartSuggestions.suggestions.length > 0 && !isStreaming && (
+      {/* Smart KB suggestions */}
+      {smartSuggestions.suggestions.length > 0 && !isStreaming && (
         <div className="flex items-center gap-1.5 overflow-x-auto border-t bg-muted/30 px-4 py-1.5">
           <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground" />
           {smartSuggestions.suggestions.map((s) => (
@@ -834,8 +831,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         </div>
       )}
 
-      {/* Verification status bar (advanced only) */}
-      {!isSimple && <VerificationStatusBar
+      {/* Verification status bar */}
+      <VerificationStatusBar
         report={halReport}
         loading={halLoading}
         featureEnabled={hallucinationEnabled}
@@ -855,10 +852,10 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
           retestServices().catch(() => {})
           handleVerifyMessage()
         }}
-      />}
+      />
 
-      {/* Auto-route notice (advanced only) */}
-      {!isSimple && autoRouteNotice && (
+      {/* Auto-route notice */}
+      {autoRouteNotice && (
         <div className="flex items-center gap-1.5 border-t bg-yellow-500/10 px-4 py-1">
           <Zap className="h-3 w-3 shrink-0 text-yellow-500" />
           <span className="text-xs text-muted-foreground">{autoRouteNotice}</span>
@@ -873,8 +870,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         </div>
       )}
 
-      {/* Auto-inject indicator (advanced only) */}
-      {!isSimple && lastAutoInjectCount > 0 && isStreaming && (
+      {/* Auto-inject indicator */}
+      {lastAutoInjectCount > 0 && isStreaming && (
         <div className="flex items-center gap-1.5 border-t bg-primary/5 px-4 py-1">
           <Database className="h-3 w-3 shrink-0 text-primary" />
           <span className="text-xs text-muted-foreground">
@@ -941,7 +938,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       </Panel>
       <PanelSeparator className="h-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />
       <Panel defaultSize={67} minSize={20}>
-        {ragMode === "manual" ? (
+        {ragMode === "off" ? (
           <KBContextPanel
             {...kbContext}
             onClose={() => setShowKB(false)}
@@ -964,9 +961,6 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       </Panel>
     </Group>
   )
-
-  // Simple mode: no right column at all
-  if (isSimple) return chatArea
 
   // On narrow viewports, show KB as a bottom drawer instead of split pane
   if (isNarrow) {
