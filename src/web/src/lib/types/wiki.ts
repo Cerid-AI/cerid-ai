@@ -63,6 +63,11 @@ export interface EntitySummary {
   recent_activity_score: number
   /** ISO-8601 timestamp, or null. */
   last_updated_at: string | null
+  /**
+   * Primary domain derived by the DeriveDomainsJob (e.g. "research", "coding").
+   * Null for orphan entities (no MENTIONS path) or pre-job state.
+   */
+  primary_domain: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -160,4 +165,21 @@ export interface WikiEntityPage {
   community_label?: string | null
   /** Total corpus mentions (for display in the identity header capsule). */
   mention_count?: number
+  /**
+   * Primary domain derived by DeriveDomainsJob (e.g. "research").
+   * Null for orphans or pre-job state.
+   */
+  primary_domain?: string | null
+  /**
+   * Full domain distribution — JSON-parsed dict of domain → mention count,
+   * sorted by count desc. Keys are domain names; values are distinct
+   * artifact mention counts. Null when domain data is not yet derived.
+   * Example: { "research": 5, "coding": 2 }
+   */
+  domain_mix?: Record<string, number> | null
+  /**
+   * Most common sub_category among artifacts in the primary domain.
+   * Null when no signal (all artifacts carry the default subcategory).
+   */
+  primary_subcategory?: string | null
 }

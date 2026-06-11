@@ -162,6 +162,11 @@ SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * 
 #  - Memory archival sweep (safe, no LLM re-abstraction) — weekly, Sunday 05:00.
 SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0")
 SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
+# Entity trust_state derivation — 1 min after compute_umap_3d.
+SCHEDULE_COMPUTE_TRUST_STATE = os.getenv("SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *")
+# Domain backbone derivation — 1 min after compute_trust_state.
+# Independent of umap: runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
+SCHEDULE_DERIVE_DOMAINS = os.getenv("SCHEDULE_DERIVE_DOMAINS", "32 3 * * *")
 SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0")
 # Cap LLM summaries generated per community-refresh run so a first run on a
 # large corpus can't issue an unbounded GPU batch. skip-existing already bounds

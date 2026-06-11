@@ -910,6 +910,50 @@ async def _run_compute_trust_state() -> None:
         logger.error("compute_trust_state scheduled job failed: %s", e)
 
 
+async def _run_derive_domains() -> None:
+    """Nightly Entity.primary_domain derivation from artifact MENTIONS.
+
+    Runs 1 minute after compute_trust_state (default 3:32 AM) so
+    primary_domain is fresh when graph surfaces render. Independent of
+    umap — runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
+    Gated via SCHEDULE_DERIVE_DOMAINS.
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.derive_domains import DeriveDomainsJob  # noqa: PLC0415
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = DeriveDomainsJob()
+        if queue is not None:
+            record = job.new_record()
+            await queue.enqueue(record)
+            _log_execution("derive_domains", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            result = await job.run(_noop)
+            _log_execution(
+                "derive_domains",
+                "success",
+                time.time() - start,
+                f"written={result.metadata.get('written', 0)} "
+                f"orphans_cleared={result.metadata.get('orphans_cleared', 0)}",
+            )
+        # Post-run: bust the emb3d/map serving caches so primary_domain
+        # changes propagate within a pan rather than waiting 24 h.
+        _bust_job_caches("derive_domains")
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("derive_domains", "error", duration, str(e))
+        logger.error("derive_domains scheduled job failed: %s", e)
+
+
 async def _run_memory_consolidation_sweep() -> None:
     """Weekly SAFE memory archival sweep — archival only, no LLM re-abstraction.
 
@@ -1124,6 +1168,9 @@ _JOB_CACHE_PATTERNS: dict[str, list[str]] = {
     "compute_umap_3d": ["cerid:graph:emb3d:*"],
     "community_refresh": ["cerid:graph:emb3d:*"],
     "config_recommender": ["cerid:recommendations*"],
+    # derive_domains writes primary_domain onto entities — the emb3d/map
+    # caches embed those fields, so they must be busted after a run.
+    "derive_domains": ["cerid:graph:emb3d:*"],
 }
 
 # Manual runs in flight, so a double-click can't stack a second pass over a
@@ -1353,6 +1400,21 @@ def start_scheduler() -> AsyncIOScheduler:
             ),
             id="compute_trust_state",
             name="Entity trust_state derivation",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Domain backbone derivation — nightly, 1 min after compute_trust_state.
+    # Gated; empty SCHEDULE_DERIVE_DOMAINS disables. Runs standalone even
+    # when umap is disabled (SCHEDULE_COMPUTE_UMAP_3D empty).
+    if getattr(config, "SCHEDULE_DERIVE_DOMAINS", "32 3 * * *"):
+        _scheduler.add_job(
+            _run_derive_domains,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_DERIVE_DOMAINS", "32 3 * * *"),
+            ),
+            id="derive_domains",
+            name="Entity domain derivation",
             replace_existing=True,
             max_instances=1,
         )

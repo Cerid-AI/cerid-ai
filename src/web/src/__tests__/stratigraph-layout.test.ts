@@ -57,12 +57,14 @@ function makeResponse(overrides: Partial<TimelineStrataResponse> = {}): Timeline
       {
         community_id: "c1",
         entity_type: "PERSON",
+        domain: "research",
         buckets: [30, 40, 30],
         unverified_buckets: [0, 0, 0],
       },
       {
         community_id: "c2",
         entity_type: "ORG",
+        domain: "coding",
         buckets: [20, 15, 15],
         unverified_buckets: [0, 5, 0],
       },

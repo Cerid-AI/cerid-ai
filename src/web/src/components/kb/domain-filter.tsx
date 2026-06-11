@@ -3,7 +3,7 @@
 
 import { Badge } from "@/components/ui/badge"
 import { DOMAINS } from "@/lib/types"
-import { DOMAIN_BADGE_COLORS } from "@/lib/constants"
+import { domainSlot } from "@/lib/graph/identity"
 
 interface DomainFilterProps {
   activeDomains: Set<string>
@@ -15,11 +15,16 @@ export function DomainFilter({ activeDomains, onToggle }: DomainFilterProps) {
     <div className="flex min-w-0 flex-wrap gap-1.5">
       {DOMAINS.map((domain) => {
         const isActive = activeDomains.has(domain)
+        const slot = domainSlot(domain)
         return (
           <Badge
             key={domain}
             variant={isActive ? "default" : "outline"}
-            className={`cursor-pointer text-xs capitalize ${isActive ? "" : DOMAIN_BADGE_COLORS[domain] ?? ""}`}
+            className="cursor-pointer text-xs capitalize"
+            style={isActive ? undefined : {
+              color: `var(--color-domain-${slot})`, // drift-allowed: runtime-derived token slot
+              backgroundColor: `color-mix(in oklab, var(--color-domain-${slot}) 14%, transparent)`, // drift-allowed: runtime-derived token slot
+            }}
             role="button"
             tabIndex={0}
             aria-pressed={isActive}

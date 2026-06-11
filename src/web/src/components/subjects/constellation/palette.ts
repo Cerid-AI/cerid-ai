@@ -5,6 +5,9 @@
 // (instanced-nodes) and links (neural-links) must agree on community
 // color so an edge reads as belonging to its endpoints' clusters.
 
+import type { MapTokens } from "./map/community-layer"
+import { domainColor } from "@/lib/graph/identity"
+
 export const COMMUNITY_PALETTE_RGB = [
   [0.898, 0.518, 0.478], [0.898, 0.659, 0.478], [0.898, 0.784, 0.478], [0.831, 0.686, 0.216],
   [0.784, 0.898, 0.478], [0.659, 0.898, 0.478], [0.478, 0.898, 0.784], [0.478, 0.784, 0.898],
@@ -75,4 +78,24 @@ export function typeRgb(entityType: string): readonly [number, number, number] {
   if (!entityType || entityType === "unknown") return GRAPHITE
   const idx = Math.floor(hash01(entityType) * COMMUNITY_PALETTE_RGB.length)
   return COMMUNITY_PALETTE_RGB[idx % COMMUNITY_PALETTE_RGB.length]
+}
+
+/**
+ * Token-routed domain color for the 3D canvas path.
+ *
+ * Converts the resolved hex token from MapTokens (already oklch→hex via
+ * community-layer's canvas readback) to an [r,g,b] triple in [0,1] for
+ * WebGL instanced rendering. This is the first token-derived color in the
+ * 3D path, setting the Cycle-4 precedent for demoting COMMUNITY_PALETTE_RGB.
+ *
+ * Pre-job / null domain → GRAPHITE (byte-identical to today's untouched scene).
+ */
+export function domainRgb(
+  tokens: MapTokens,
+  domain: string | null | undefined,
+): readonly [number, number, number] {
+  const hex = domainColor(tokens, domain)
+  if (hex === tokens.domainOther || !hex.startsWith("#") || hex.length < 7) return GRAPHITE
+  const n = parseInt(hex.slice(1, 7), 16)
+  return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255]
 }

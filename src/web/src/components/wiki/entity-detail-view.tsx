@@ -4,7 +4,7 @@
 import { useEffect } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { RefreshCw } from "lucide-react"
+import { BookOpen, RefreshCw } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PaneError } from "@/components/ui/pane-error"
 import { Badge } from "@/components/ui/badge"
@@ -12,6 +12,12 @@ import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { DomainBadge } from "@/components/ui/domain-badge"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { TrustBandBadge, type TrustState } from "@/components/ui/trust-band-badge"
 import { ContradictionItem } from "./contradiction-item"
 import { ExternalReferencesSection } from "./external-references-section"
@@ -22,7 +28,6 @@ import { ProvenanceSankey } from "./provenance-sankey"
 import { ContradictionLink } from "./contradiction-link"
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
 import { useNavigation } from "@/contexts/navigation-context"
-import { BookOpen } from "lucide-react"
 import { communitySlot } from "@/components/subjects/timeline/stratigraph/strata-layout"
 import { resolveMapTokens } from "@/components/subjects/constellation/map/community-layer"
 import type { ConfidenceBand } from "@/lib/types/wiki"
@@ -30,6 +35,8 @@ import type { ConfidenceBand } from "@/lib/types/wiki"
 interface EntityDetailViewProps {
   slug: string
   onSelectRelated: (slug: string) => void
+  /** Called when a domain category badge in the footer is clicked. Null = "all". */
+  onSelectDomain?: (domain: string | null) => void
 }
 
 function formatLastUpdated(iso: string | null): string | null {
@@ -68,6 +75,74 @@ function resolveCommunityHue(communityId: string | null | undefined): string {
   return tokens.clusters[slot] ?? tokens.clusterOther
 }
 
+function titleCase(s: string): string {
+  return s
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// ---------------------------------------------------------------------------
+// Categories footer — A1 + A4
+// ---------------------------------------------------------------------------
+
+interface CategoriesFooterProps {
+  primaryDomain: string
+  domainMix: Record<string, number> | null
+  primarySubcategory: string | null
+  onNavigateToDomain: (domain: string | null) => void
+}
+
+function CategoriesFooter({
+  primaryDomain,
+  domainMix,
+  primarySubcategory,
+  onNavigateToDomain,
+}: CategoriesFooterProps) {
+  // Ordered badge list: primary first, then remaining keys by count desc.
+  const orderedDomains: string[] = [primaryDomain]
+  if (domainMix) {
+    const rest = Object.keys(domainMix)
+      .filter((k) => k !== primaryDomain)
+      .sort((a, b) => (domainMix[b] ?? 0) - (domainMix[a] ?? 0))
+    orderedDomains.push(...rest)
+  }
+
+  return (
+    <section aria-labelledby="wiki-categories-footer-heading" className="border-t pt-3">
+      <p
+        id="wiki-categories-footer-heading"
+        className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+      >
+        Categories
+      </p>
+      <div className="flex flex-wrap items-center gap-1">
+        {orderedDomains.map((domain, idx) => (
+          <div key={domain} className="flex items-center gap-1">
+            {idx > 0 && (
+              <span className="text-muted-foreground/50" aria-hidden="true">·</span>
+            )}
+            <button
+              type="button"
+              onClick={() => onNavigateToDomain(domain)}
+              className="transition-opacity hover:opacity-80"
+              aria-label={`Filter wiki to ${titleCase(domain)}`}
+            >
+              <DomainBadge domain={domain} />
+            </button>
+            {/* A4: subcategory segment only for the primary domain, only when non-null */}
+            {idx === 0 && primarySubcategory && (
+              <span className="text-label-xs text-muted-foreground">
+                › {titleCase(primarySubcategory)}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
@@ -101,7 +176,7 @@ function LoadingSkeleton() {
 // Main detail view
 // ---------------------------------------------------------------------------
 
-export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProps) {
+export function EntityDetailView({ slug, onSelectRelated, onSelectDomain }: EntityDetailViewProps) {
   const { data, isLoading, isError, isNotFound, refetch } = useWikiEntity(slug)
   const navigation = useNavigation()
 
@@ -154,7 +229,7 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
   const trustState: TrustState = confidenceBandToTrust(data.confidence_band)
 
   return (
-    <div className="cerid-stagger-fast h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}>
+    <div className="cerid-stagger-fast h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}> {/* drift-allowed: animation stagger index */}
       {/* Liquid-glass sticky header with identity capsule */}
       <div className="liquid-glass sticky top-0 z-10 space-y-1 px-6 pb-3 pt-6">
         {/* 3px community-hue left rail — width pinned to 3px per design spec (between 1px hairline and 4px w-1) */}
@@ -168,7 +243,7 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
         <div className="flex flex-wrap items-center gap-2">
           <h1
             className="text-xl font-semibold text-foreground"
-            style={{ viewTransitionName: "focal-entity" }}
+            style={{ viewTransitionName: "focal-entity" }} // drift-allowed: view-transition runtime binding
           >
             {data.name}
           </h1>
@@ -230,6 +305,35 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
           <Badge variant="outline" className="font-mono text-label-xs uppercase">
             {data.entity_type}
           </Badge>
+
+          {/* Primary domain badge with mix tooltip */}
+          {data.primary_domain && (
+            (() => {
+              const mixKeys = data.domain_mix ? Object.keys(data.domain_mix) : []
+              const isMixed = mixKeys.length > 1
+              const mixLabel = isMixed
+                ? `Mixed: ${mixKeys
+                    .map((k) => `${k} ${data.domain_mix![k]}`)
+                    .join(" · ")}`
+                : undefined
+              return isMixed ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <DomainBadge domain={data.primary_domain} />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="text-xs">{mixLabel}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <DomainBadge domain={data.primary_domain} />
+              )
+            })()
+          )}
 
           {/* Mention count */}
           {typeof data.mention_count === "number" && (
@@ -390,6 +494,31 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
               ))}
             </div>
           </section>
+        )}
+
+        {/* ----------------------------------------------------------------- */}
+        {/* Categories footer — A1: full domain_mix badge list, primary first  */}
+        {/* A4: subcategory segment attached to primary badge (when non-null)  */}
+        {/* ----------------------------------------------------------------- */}
+        {data.primary_domain && (
+          <CategoriesFooter
+            primaryDomain={data.primary_domain}
+            domainMix={data.domain_mix ?? null}
+            primarySubcategory={data.primary_subcategory ?? null}
+            onNavigateToDomain={(domain) => {
+              if (onSelectDomain) {
+                onSelectDomain(domain)
+              } else {
+                // Cross-pane fallback: navigate to wiki mode with ?domain= in URL
+                if (domain && typeof window !== "undefined") {
+                  const params = new URLSearchParams(window.location.search)
+                  params.set("domain", domain)
+                  window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`)
+                }
+                navigation.goTo("subjects", { mode: "wiki" })
+              }
+            }}
+          />
         )}
       </div>
     </div>

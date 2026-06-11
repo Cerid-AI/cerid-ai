@@ -14,6 +14,7 @@ import {
   openQuestionLens,
   provenanceLens,
   qualityLens,
+  domainLens,
   LENS_ORDER,
   LENS_REGISTRY,
 } from "./index"
@@ -244,13 +245,38 @@ describe("composeLenses", () => {
 // Registry shape
 // ---------------------------------------------------------------------------
 
+describe("domainLens (static fallback)", () => {
+  it("has id 'domain' and contract fields", () => {
+    expect(domainLens.id).toBe("domain")
+    expect(typeof domainLens.label).toBe("string")
+    expect(typeof domainLens.legendColor).toBe("string")
+    expect(typeof domainLens.transformNode).toBe("function")
+    expect(typeof domainLens.transformEdge).toBe("function")
+  })
+
+  it("static transformNode passes attrs through (no tokens available)", () => {
+    const g = mkGraph()
+    const attrs = g.getNodeAttributes("a")
+    const out = domainLens.transformNode("a", attrs, g)
+    expect(out).toEqual(attrs)
+  })
+
+  it("static transformEdge passes attrs through (no tokens available)", () => {
+    const g = mkGraph()
+    const before = g.getEdgeAttributes("a-b")
+    const out = domainLens.transformEdge("a-b", before, g)
+    expect(out).toBe(before)
+  })
+})
+
 describe("LENS_REGISTRY", () => {
-  it("contains all 4 named lenses", () => {
-    expect(Object.keys(LENS_REGISTRY)).toHaveLength(4)
+  it("contains all 5 named lenses", () => {
+    expect(Object.keys(LENS_REGISTRY)).toHaveLength(5)
     expect(LENS_REGISTRY["contradiction"]).toBeDefined()
     expect(LENS_REGISTRY["open-question"]).toBeDefined()
     expect(LENS_REGISTRY["provenance"]).toBeDefined()
     expect(LENS_REGISTRY["quality"]).toBeDefined()
+    expect(LENS_REGISTRY["domain"]).toBeDefined()
   })
 
   it("LENS_ORDER matches the registry contents", () => {

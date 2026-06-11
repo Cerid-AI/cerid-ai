@@ -219,7 +219,7 @@ function SankeyNode(props: SankeyNodeProps) {
         y={y + height / 2}
         textAnchor={labelRight ? "start" : "end"}
         dominantBaseline="middle"
-        className="text-[9px] fill-foreground"
+        className="text-label-xxs fill-foreground"
       >
         {label}
       </text>

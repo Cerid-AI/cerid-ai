@@ -101,6 +101,7 @@ function makeGraphMapData(overrides: Partial<GraphMapResponse> = {}): GraphMapRe
         mention_count: 5,
         trust_state: "verified",
         projection: "umap",
+        primary_domain: "research",
       },
       {
         id: "entity:beta",
@@ -113,6 +114,7 @@ function makeGraphMapData(overrides: Partial<GraphMapResponse> = {}): GraphMapRe
         mention_count: 2,
         trust_state: "partial",
         projection: "umap",
+        primary_domain: "coding",
       },
       {
         id: "entity:gamma",
@@ -125,6 +127,7 @@ function makeGraphMapData(overrides: Partial<GraphMapResponse> = {}): GraphMapRe
         mention_count: 1,
         trust_state: "unverified",
         projection: "umap",
+        primary_domain: null,
       },
     ],
     links: [
@@ -298,6 +301,41 @@ describe("CartographerMap — renders with data", () => {
       />,
     )
     expect(screen.getByText(/cached/)).toBeTruthy()
+  })
+
+  it("accepts domain lens without crashing", () => {
+    const data = makeGraphMapData()
+    const { container } = render(
+      <CartographerMap
+        lens="domain"
+        typeFilter={new Set()}
+        config={DEFAULT_CONFIG}
+        data={data}
+        isLoading={false}
+        isError={false}
+        onNodeClick={vi.fn()}
+        onCommunityClick={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('[role="application"]')).not.toBeNull()
+  })
+
+  it("domain lens with null primary_domain falls back gracefully (no crash)", () => {
+    const data = makeGraphMapData()
+    // gamma has primary_domain: null — domain lens should use domainOther
+    const { container } = render(
+      <CartographerMap
+        lens="domain"
+        typeFilter={new Set()}
+        config={DEFAULT_CONFIG}
+        data={data}
+        isLoading={false}
+        isError={false}
+        onNodeClick={vi.fn()}
+        onCommunityClick={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('[role="application"]')).not.toBeNull()
   })
 })
 

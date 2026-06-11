@@ -19,6 +19,7 @@ import config
 from app.concurrency import KB_POOL
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
+from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -32,7 +33,7 @@ def should_fire_external_crag(
 ) -> bool:
     """CRAG gate: decide whether to launch external sources.
 
-    External sources are expensive (5s per-source timeout, network I/O,
+    External sources are expensive (network I/O bounded by EXTERNAL_SOURCE_QUERY_TIMEOUT,
     circuit-breaker pressure).  When KB already has a strong hit we skip
     them entirely — strong KB > any external result for the usual query
     mix, and the 10s /agent/query wall-clock budget is precious.
@@ -381,9 +382,9 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                         registry.query_all(
                             _search_terms,
                             domain=req.domains[0] if req.domains else None,
-                            timeout=5.0,
+                            timeout=EXTERNAL_SOURCE_QUERY_TIMEOUT,
                         ),
-                        timeout=6.0,
+                        timeout=EXTERNAL_SOURCE_QUERY_TIMEOUT + 1.0,
                     )
                 except (Exception, asyncio.TimeoutError):
                     _ext_results = []

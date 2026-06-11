@@ -212,7 +212,7 @@ def test_neighborhood_response_shape_matches_atlas_contract(client):
     for node in body["nodes"]:
         assert set(node.keys()) == {
             "id", "name", "type", "community", "mention_count",
-            "trust_state", "recency_score", "focused",
+            "trust_state", "recency_score", "focused", "primary_domain",
         }
     for edge in body["edges"]:
         assert set(edge.keys()) == {
@@ -288,7 +288,7 @@ def test_neighborhood_response_shape_preserved_after_cypher_change(client):
     for node in body["nodes"]:
         assert set(node.keys()) == {
             "id", "name", "type", "community", "mention_count",
-            "trust_state", "recency_score", "focused",
+            "trust_state", "recency_score", "focused", "primary_domain",
         }
     # Edge fields
     for edge in body["edges"]:

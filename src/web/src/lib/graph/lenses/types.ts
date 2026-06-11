@@ -15,6 +15,7 @@ export type LensId =
   | "open-question"
   | "provenance"
   | "quality"
+  | "domain"
 
 export interface Lens {
   id: LensId

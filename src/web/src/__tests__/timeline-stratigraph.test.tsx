@@ -67,8 +67,8 @@ function makeStrataData(overrides = {}) {
       },
     ],
     series: [
-      { community_id: "c1", entity_type: "PERSON", buckets: [50, 50], unverified_buckets: [0, 0] },
-      { community_id: "c1", entity_type: "ORG", buckets: [20, 30], unverified_buckets: [0, 0] },
+      { community_id: "c1", entity_type: "PERSON", domain: "research", buckets: [50, 50], unverified_buckets: [0, 0] },
+      { community_id: "c1", entity_type: "ORG", domain: "coding", buckets: [20, 30], unverified_buckets: [0, 0] },
     ],
     tracks: [
       {
@@ -194,7 +194,7 @@ describe("Timeline — period tabs", () => {
 // ---------------------------------------------------------------------------
 
 describe("Timeline — lens radiogroup", () => {
-  it("renders Clusters, Trust, and Types lens buttons", async () => {
+  it("renders Clusters, Trust, Types, and Domains lens buttons", async () => {
     mockFetchStrata.mockResolvedValue(makeStrataData())
     render(<Timeline />, { wrapper: createWrapper() })
     await waitFor(() => screen.getByTestId("timeline-mode"))
@@ -202,6 +202,7 @@ describe("Timeline — lens radiogroup", () => {
     expect(screen.getByRole("radio", { name: /clusters/i })).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: /trust/i })).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: /types/i })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /domains/i })).toBeInTheDocument()
   })
 
   it("Clusters is checked by default", async () => {
@@ -219,6 +220,16 @@ describe("Timeline — lens radiogroup", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: /trust/i }))
     expect(screen.getByRole("radio", { name: /trust/i })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByRole("radio", { name: /clusters/i })).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("clicking Domains lens switches aria-checked", async () => {
+    mockFetchStrata.mockResolvedValue(makeStrataData())
+    render(<Timeline />, { wrapper: createWrapper() })
+    await waitFor(() => screen.getByTestId("timeline-mode"))
+
+    fireEvent.click(screen.getByRole("radio", { name: /domains/i }))
+    expect(screen.getByRole("radio", { name: /domains/i })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByRole("radio", { name: /clusters/i })).toHaveAttribute("aria-checked", "false")
   })
 })

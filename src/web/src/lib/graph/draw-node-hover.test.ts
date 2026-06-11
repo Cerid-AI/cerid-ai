@@ -19,6 +19,12 @@ const TOKENS: MapTokens = {
     "#AA00AA", "#00AAAA", "#AA5500", "#5500AA", // drift-allowed: test stub only
   ],
   clusterOther: "#555555", // drift-allowed: test stub only
+  domains: [
+    "#D10000", "#CC4400", "#AA8800", "#558800", // drift-allowed: test stub only (slots 0-3)
+    "#008844", "#007755", "#006688", "#2244AA", // drift-allowed: test stub only (slots 4-7)
+    "#4400AA", "#770088", "#AA0066", "#CC0033", // drift-allowed: test stub only (slots 8-11)
+  ],
+  domainOther:   "#666666", // drift-allowed: test stub only
   edge:          "#CCCCCC", // drift-allowed: test stub only
   dim:           "#888888", // drift-allowed: test stub only
   interaction:   "#00E5D8", // drift-allowed: test stub only

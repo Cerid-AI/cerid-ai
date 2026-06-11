@@ -12,6 +12,7 @@ import type { AtlasEdgeAttributes, AtlasNodeAttributes } from "@/lib/types/graph
 import type { MapTokens } from "@/components/subjects/constellation/map/community-layer"
 import { composeLenses as _composeLenses } from "./types"
 import type { Lens, LensId } from "./types"
+import { domainColor } from "@/lib/graph/identity"
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -133,6 +134,27 @@ export function makeQualityLens(tokens: MapTokens): Lens {
   }
 }
 
+export function makeDomainLens(tokens: MapTokens): Lens {
+  const dimColor = tokens.dim
+  return {
+    id: "domain",
+    label: "Domains",
+    description: "Colors nodes by primary knowledge domain; dims cross-domain edges.",
+    legendColor: tokens.domains[7] ?? tokens.domainOther,  // coding slot as swatch
+    transformNode: (_node, attrs) => {
+      const color = domainColor(tokens, (attrs as AtlasNodeAttributes & { primary_domain?: string | null }).primary_domain)
+      return { ...attrs, color, haloColor: color }
+    },
+    transformEdge: (_edge, attrs, graph) => {
+      const srcDomain = (graph.getNodeAttribute(attrs.source, "primary_domain") as string | null | undefined)
+      const tgtDomain = (graph.getNodeAttribute(attrs.target, "primary_domain") as string | null | undefined)
+      // Dim cross-domain edges so intra-domain structure pops
+      if (srcDomain && tgtDomain && srcDomain === tgtDomain) return attrs
+      return dimEdge(attrs, dimColor)
+    },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Default static instances (tokens-free, for use in tests and lens panel)
 // The legend colors are approximate token approximations; when composeLenses
@@ -143,6 +165,7 @@ const CONTRADICTION_LEGEND = "#E05555" // drift-allowed: legend-only fallback; o
 const QUESTION_LEGEND =      "#C89A35" // drift-allowed: legend-only fallback; overridden by makeOpenQuestionLens(tokens) at runtime
 const PROVENANCE_LEGEND =    "#7A6BB5" // drift-allowed: legend-only fallback; overridden by makeProvenanceLens(tokens) at runtime
 const QUALITY_LEGEND =       "#4488AA" // drift-allowed: legend-only fallback; overridden by makeQualityLens(tokens) at runtime
+const DOMAIN_LEGEND =        "#3E7F6D" // drift-allowed: legend-only fallback; overridden by makeDomainLens(tokens) at runtime
 
 export const contradictionLens: Lens = {
   id: "contradiction",
@@ -212,6 +235,19 @@ export const qualityLens: Lens = {
   transformEdge: (_edge, attrs) => attrs,
 }
 
+export const domainLens: Lens = {
+  id: "domain",
+  label: "Domains",
+  description: "Colors nodes by primary knowledge domain; dims cross-domain edges.",
+  legendColor: DOMAIN_LEGEND,
+  transformNode: (_node, attrs) => {
+    // Static fallback: no tokens available, so colors are unchanged.
+    // The token-resolved makeDomainLens(tokens) is used at runtime.
+    return attrs
+  },
+  transformEdge: (_edge, attrs) => attrs,
+}
+
 // ---------------------------------------------------------------------------
 // Registry — single source of truth for lens lookups + ordered listings.
 // ---------------------------------------------------------------------------
@@ -221,6 +257,7 @@ export const LENS_REGISTRY: Record<string, Lens> = {
   "open-question": openQuestionLens,
   provenance: provenanceLens,
   quality: qualityLens,
+  domain: domainLens,
 }
 
 export const LENS_ORDER: Lens[] = [
@@ -228,6 +265,7 @@ export const LENS_ORDER: Lens[] = [
   openQuestionLens,
   provenanceLens,
   qualityLens,
+  domainLens,
 ]
 
 /**
@@ -245,6 +283,7 @@ export function composeLensesWithTokens(
       case "open-question":  return makeOpenQuestionLens(tokens)
       case "provenance":     return makeProvenanceLens(tokens)
       case "quality":        return makeQualityLens(tokens)
+      case "domain":         return makeDomainLens(tokens)
     }
   })
   return _composeLenses(resolved, graph)

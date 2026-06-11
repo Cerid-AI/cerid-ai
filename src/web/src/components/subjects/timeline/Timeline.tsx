@@ -46,6 +46,7 @@ const LENSES: { id: TimelineLens; label: string; hint: string }[] = [
   { id: "cluster", label: "Clusters", hint: "Color strata by knowledge community" },
   { id: "trust", label: "Trust", hint: "Severity-priority trust bands; unverified dominates" },
   { id: "type", label: "Types", hint: "Re-partition stack by entity type (no refetch)" },
+  { id: "domain", label: "Domains", hint: "Re-partition stack by primary knowledge domain (8 lanes + labeled Other)" },
 ]
 
 const PERIODS = [
@@ -226,6 +227,8 @@ export function Timeline({ onEntityPick }: TimelineProps) {
     return {
       clusters: Array(8).fill("#999"), // drift-allowed: SSR fallback only, never reaches browser
       clusterOther: "#999", // drift-allowed: SSR fallback only, never reaches browser
+      domains: Array(12).fill("#999"), // drift-allowed: SSR fallback only, never reaches browser
+      domainOther: "#666", // drift-allowed: SSR fallback only, never reaches browser
       edge: "#ccc", // drift-allowed: SSR fallback only, never reaches browser
       dim: "#eee", // drift-allowed: SSR fallback only, never reaches browser
       interaction: "#00c8b4", // drift-allowed: SSR fallback only, never reaches browser

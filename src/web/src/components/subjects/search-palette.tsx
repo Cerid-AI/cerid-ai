@@ -1,14 +1,26 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Cmd-K search palette for the Subjects pane. Lightweight Dialog over
-// the Wiki entity list — typing filters by name; Enter selects.
-// Future iterations (Day 11+) can swap the data source to a richer
-// /search endpoint with cross-entity fuzzy matching + provenance previews.
+// Cmd-K search palette for the Subjects pane. Typing filters by name;
+// results are grouped into a pinned "Best Matches" section (first 5 in
+// server relevance order) followed by domain sections.
+//
+// Section-aware keyboard navigation: the highlight integer indexes entity
+// rows only (headers are not focusable); flatItems from organizeWithPinned
+// drives the index space.
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useId } from "react"
 import { Search, X } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
 import { useWikiEntities } from "@/hooks/use-wiki-entities"
+import { fetchDomainCounts } from "@/lib/api/domains"
+import { organizeWithPinned } from "@/lib/graph/organize"
+import {
+  SectionedEntityListPalette,
+  BEST_MATCHES_DOMAIN,
+} from "@/components/shared/sectioned-entity-list"
+import { useNavigation } from "@/contexts/navigation-context"
+import type { DomainSection } from "@/lib/graph/organize"
 
 export interface SubjectsSearchPaletteProps {
   open: boolean
@@ -19,11 +31,23 @@ export interface SubjectsSearchPaletteProps {
 export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSearchPaletteProps) {
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
+  // Section-aware flat highlight index (counts entity rows, not headers).
   const [highlight, setHighlight] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const listboxId = useId()
+  const navigation = useNavigation()
+
   // Server-side search (F5): the query is pushed to /wiki/entities?q= so the
   // match spans the whole corpus, not just the first page the client fetched.
   const { data: entities } = useWikiEntities({ limit: 50, q: debouncedQuery })
+
+  // /graph/domains for section ordering and counts
+  const { data: domainCounts } = useQuery({
+    queryKey: ["graph-domains"],
+    queryFn: fetchDomainCounts,
+    staleTime: 10 * 60_000,
+    retry: 1,
+  })
 
   // Debounce the typed query into the server fetch (200 ms).
   useEffect(() => {
@@ -31,7 +55,7 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
     return () => clearTimeout(t)
   }, [query])
 
-  // Focus on open
+  // Focus on open; reset state.
   useEffect(() => {
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
@@ -41,9 +65,8 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
     }
   }, [open])
 
+  // Client-side narrow while debounce settles; cap at 25 results.
   const filtered = useMemo(() => {
-    // The server already filtered by `debouncedQuery`; the client-side pass
-    // just narrows the in-flight window while the debounce settles.
     const all = entities ?? []
     if (!query.trim()) return all.slice(0, 25)
     const lower = query.toLowerCase()
@@ -52,13 +75,65 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
       .slice(0, 25)
   }, [entities, query])
 
-  // Reset highlight when filtered list changes
+  // Reset highlight when filtered list changes.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setHighlight(0)
   }, [query])
 
+  // Organize into Best Matches + domain sections.
+  // The combined section list: [Best Matches, ...domain sections].
+  const { allSections, flatEntityCount } = useMemo(() => {
+    if (filtered.length === 0) {
+      return { allSections: [] as DomainSection[], flatEntityCount: 0 }
+    }
+
+    const { pinned, rest } = organizeWithPinned(
+      filtered,
+      domainCounts?.domains ?? [],
+      { pinCount: 5, dedupeThreshold: 10, cap: 5 },
+    )
+
+    const sections: DomainSection[] = []
+    if (pinned.entities.length > 0) {
+      sections.push({
+        domain: BEST_MATCHES_DOMAIN,
+        label: "Best Matches",
+        icon: null,
+        count: pinned.entities.length,
+        entities: pinned.entities,
+        overflow: 0,
+      })
+    }
+    sections.push(...rest.sections)
+
+    const total = sections.reduce((n, s) => n + s.entities.length, 0)
+    return { allSections: sections, flatEntityCount: total }
+  }, [filtered, domainCounts])
+
+  // Resolve the entity at a given flat index (for Enter key).
+  function entityAtFlatIndex(idx: number) {
+    let counter = 0
+    for (const section of allSections) {
+      for (const entity of section.entities) {
+        if (counter === idx) return entity
+        counter++
+      }
+    }
+    return null
+  }
+
+  const handleNavigateToDomain = (domain: string | null) => {
+    // Deep-link to wiki pane filtered to domain
+    const params: Record<string, string> = { mode: "wiki" }
+    if (domain) params.domain = domain
+    navigation.goTo("subjects", params)
+    onOpenChange(false)
+  }
+
   if (!open) return null
+
+  const isEmpty = allSections.length === 0
 
   return (
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- modal backdrop; handlers dismiss on outside-click / Escape
@@ -81,6 +156,15 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
+            aria-expanded={!isEmpty}
+            aria-controls={listboxId}
+            aria-activedescendant={
+              !isEmpty && flatEntityCount > 0
+                ? `${listboxId}-option-${highlight}`
+                : undefined
+            }
+            aria-autocomplete="list"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -89,13 +173,13 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
                 onOpenChange(false)
               } else if (e.key === "ArrowDown") {
                 e.preventDefault()
-                setHighlight((h) => Math.min(filtered.length - 1, h + 1))
+                setHighlight((h) => Math.min(flatEntityCount - 1, h + 1))
               } else if (e.key === "ArrowUp") {
                 e.preventDefault()
                 setHighlight((h) => Math.max(0, h - 1))
               } else if (e.key === "Enter") {
                 e.preventDefault()
-                const pick = filtered[highlight]
+                const pick = entityAtFlatIndex(highlight)
                 if (pick) onPick(pick.slug)
               }
             }}
@@ -114,37 +198,24 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
         </div>
 
         {/* Results */}
-        <ul role="listbox" aria-label="Search results" className="max-h-80 overflow-y-auto py-2">
-          {filtered.length === 0 ? (
-            <li className="px-4 py-6 text-center text-sm text-muted-foreground">
+        {isEmpty ? (
+          <div role="listbox" id={listboxId} aria-label="Search results">
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
               {query ? "No entities match" : "Type to search"}
-            </li>
-          ) : (
-            filtered.map((entity, idx) => (
-              <li
-                key={entity.slug}
-                role="option"
-                aria-selected={idx === highlight}
-                style={{ ["--i" as string]: Math.min(idx, 8) }}
-                className="cerid-stagger-fast"
-              >
-                <button
-                  type="button"
-                  onClick={() => onPick(entity.slug)}
-                  onMouseEnter={() => setHighlight(idx)}
-                  className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors ${
-                    idx === highlight ? "bg-accent text-accent-foreground" : "text-foreground/85 hover:bg-accent/40"
-                  }`}
-                >
-                  <span className="truncate">{entity.name}</span>
-                  <span className="ml-2 shrink-0 text-label-xs text-muted-foreground">
-                    {entity.slug}
-                  </span>
-                </button>
-              </li>
-            ))
-          )}
-        </ul>
+            </div>
+          </div>
+        ) : (
+          <SectionedEntityListPalette
+            variant="palette"
+            sections={allSections}
+            highlightIndex={highlight}
+            onHighlight={setHighlight}
+            onPick={onPick}
+            onNavigateToDomain={handleNavigateToDomain}
+            listboxId={listboxId}
+            headerless={allSections.length <= 1}
+          />
+        )}
 
         {/* Footer hints */}
         <div className="flex items-center justify-between border-t px-4 py-2 text-label-xs text-muted-foreground">

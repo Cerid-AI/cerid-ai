@@ -25,6 +25,7 @@ import { LABEL_DENSITY_VALUES } from "./map-config"
 import { useCommunityLayer, resolveMapTokens, type MapTokens } from "./community-layer"
 import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import { useNavigation } from "@/contexts/navigation-context"
+import { domainColor } from "@/lib/graph/identity"
 
 // ---------------------------------------------------------------------------
 // Sizing
@@ -68,7 +69,7 @@ function clusterColor(communityId: string | null, tokens: MapTokens): string {
 // Lens coloring
 // ---------------------------------------------------------------------------
 
-type ColorLens = "cluster" | "trust" | "type"
+export type ColorLens = "cluster" | "trust" | "type" | "domain"
 
 const TYPE_SLOT: Record<string, number> = {
   PERSON: 0, Person: 0,
@@ -79,7 +80,7 @@ const TYPE_SLOT: Record<string, number> = {
 }
 
 function lensColor(
-  entity: { type: string; community: string | null; trust_state: string },
+  entity: { type: string; community: string | null; trust_state: string; primary_domain?: string | null },
   lens: ColorLens,
   tokens: MapTokens,
 ): string {
@@ -99,6 +100,9 @@ function lensColor(
       default:             return tokens.dim
     }
   }
+  if (lens === "domain") {
+    return domainColor(tokens, entity.primary_domain ?? null)
+  }
   // cluster (default)
   return clusterColor(entity.community, tokens)
 }
@@ -116,12 +120,15 @@ function tokensEqual(a: MapTokens, b: MapTokens): boolean {
     a.dim === b.dim &&
     a.interaction === b.interaction &&
     a.clusterOther === b.clusterOther &&
+    a.domainOther === b.domainOther &&
     a.trustVerified === b.trustVerified &&
     a.trustPartial === b.trustPartial &&
     a.trustUnverified === b.trustUnverified &&
     a.fontSans === b.fontSans &&
     a.clusters.length === b.clusters.length &&
-    a.clusters.every((c, i) => c === b.clusters[i])
+    a.clusters.every((c, i) => c === b.clusters[i]) &&
+    a.domains.length === b.domains.length &&
+    a.domains.every((c, i) => c === b.domains[i])
   )
 }
 
@@ -189,6 +196,8 @@ export function CartographerMap({
     return {
       clusters: Array(8).fill("#999"), // drift-allowed: SSR fallback only, never reaches browser
       clusterOther: "#999", // drift-allowed: SSR fallback only, never reaches browser
+      domains: Array(12).fill("#999"), // drift-allowed: SSR fallback only, never reaches browser
+      domainOther: "#666", // drift-allowed: SSR fallback only, never reaches browser
       edge: "#ccc", // drift-allowed: SSR fallback only, never reaches browser
       dim: "#eee", // drift-allowed: SSR fallback only, never reaches browser
       interaction: "#00c8b4", // drift-allowed: SSR fallback only, never reaches browser

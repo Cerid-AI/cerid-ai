@@ -76,7 +76,8 @@ def _find_written_properties() -> set[str]:
     written: set[str] = set()
     # Any `<node_alias>.<prop> =` assignment inside a Cypher block
     # (handles multi-line SET blocks where properties continue on separate lines).
-    cypher_assign_pattern = re.compile(r'\b\w+\.(\w+)\s*=\s*\$', re.IGNORECASE)
+    # RHS may be a $param or an UNWIND-row reference (`SET e.x = r.x`).
+    cypher_assign_pattern = re.compile(r'\b\w+\.(\w+)\s*=\s*(?:\$|\w+\.)', re.IGNORECASE)
     # Inline object assignment (ON CREATE SET a += { key: $val, … })
     object_key_pattern = re.compile(
         r'(?:ON\s+CREATE\s+SET|ON\s+MATCH\s+SET|SET\s+\w+\s*\+=)\s*\{([^}]*)\}',
