@@ -27,6 +27,7 @@ import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
 import type { CommunityHull } from "@/lib/api/graph-map"
 import { useNavigation } from "@/contexts/navigation-context"
 import { resolveMapTokens, type MapTokens } from "./map/community-layer"
+import type { MapLayout } from "@/lib/graph/cycle4-contracts"
 
 // ---------------------------------------------------------------------------
 // View-mode persistence
@@ -194,6 +195,15 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   }, [])
 
   // ---------------------------------------------------------------------------
+  // Layout state — drives per-layout query key + presets
+  // ---------------------------------------------------------------------------
+  const [layout, setLayout] = useState<MapLayout>("force")
+  const handleLayout = useCallback((next: MapLayout) => setLayout(next), [])
+
+  // Ambient toggle — opt-in glow/neon mode, forced off under reduced-motion
+  const [ambientMode, setAmbientMode] = useState(false)
+
+  // ---------------------------------------------------------------------------
   // Cartographer map data (only fetches when in "map" mode to save bandwidth)
   // ---------------------------------------------------------------------------
   const {
@@ -202,7 +212,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     isError: mapError,
     error: mapErrorObj,
     drainNewIds,
-  } = useGraphMap()
+  } = useGraphMap(layout)
 
   // ---------------------------------------------------------------------------
   // Community card state (shown when a hull/community label is clicked)
@@ -363,6 +373,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     [],
   )
 
+  // Ambient mode = opt-in glow/neon; forced off under reduced-motion (Cycle 4 §5).
+  const effectiveAmbient = ambientMode && animate
+
   // Quality tier — Low (flat 2D) → Ultra (AAA bloom). Persisted per machine.
   const [quality, setQuality] = useState<QualityTier>(loadQuality)
   const settings = QUALITY_SETTINGS[quality]
@@ -459,8 +472,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           isError={mapError}
           errorMessage={mapErrorObj instanceof Error ? mapErrorObj.message : undefined}
           newEntityIds={newIds.size > 0 ? newIds : undefined}
-          onNodeClick={onNodeClick}
+          onInspect={onNodeClick}
           onCommunityClick={handleCommunityClick}
+          layoutFallback={mapData?.layout_fallback}
         />
 
         {/* Community card (shown when a hull is clicked) */}
@@ -514,8 +528,39 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           </div>
         )}
 
-        {/* Bottom-right controls: map config + view mode toggle */}
+        {/* Bottom-right controls: layout presets + map config + view mode toggle */}
         <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5">
+          {/* Layout presets — client-side, no Redis rows (free-tier cap respected) */}
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/80 p-0.5 backdrop-blur"
+            role="radiogroup"
+            aria-label="Layout preset"
+          >
+            {(
+              [
+                { id: "force", label: "Default map", hint: "Force-directed layout (default)" },
+                { id: "wells", label: "Tight clusters", hint: "Well-separated cluster layout" },
+                { id: "domain", label: "Domains apart", hint: "Domain-separated layout" },
+              ] as { id: MapLayout; label: string; hint: string }[]
+            ).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                role="radio"
+                aria-checked={layout === preset.id}
+                title={preset.hint}
+                onClick={() => handleLayout(preset.id)}
+                className={`rounded-md px-2 py-1 text-label-xs transition-colors ${
+                  layout === preset.id
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent/40"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
           {/* Map config popover */}
           <MapConfigPanel config={mapConfig} onChange={handleMapConfig} />
 
@@ -585,8 +630,8 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
 
   return (
     <div
-      className="cerid-stagger-fast relative h-full w-full bg-[#0A1F3D]"
-      style={{ ["--i" as string]: 0 }}
+      className="cerid-stagger-fast relative h-full w-full"
+      style={{ ["--i" as string]: 0, background: tokens3D.background }} // drift-allowed: token-routed runtime value
       role="application"
       aria-roledescription="3D knowledge graph"
       aria-label={`Constellation view of ${data.count} entities`}
@@ -606,10 +651,10 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
         gl={{ antialias: settings.antialias, alpha: false }}
         dpr={settings.dpr}
       >
-        <color attach="background" args={["#0A1F3D"]} />
+        <color attach="background" args={[tokens3D.background]} />
         {/* Fog starts past the structure at the default viewing distance —
             it should swallow the starfield's depth, not the graph itself. */}
-        {!settings.flat && <fog attach="fog" args={["#0A1F3D", 34, 95]} />}
+        {!settings.flat && <fog attach="fog" args={[tokens3D.background, 34, 95]} />}
 
         {/* Ambient + key lights for material visibility */}
         <ambientLight intensity={0.35} />
@@ -637,7 +682,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             entities={sceneEntities}
             links={data.links ?? []}
             animate={animate}
-            pulses={settings.pulses}
+            pulses={settings.pulses && effectiveAmbient}
             hoveredIndex={focusIndex}
             colors={nodeColors}
             visibility={visibility}
@@ -645,8 +690,8 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           <InstancedNodes
             entities={sceneEntities}
             animate={animate}
-            glow={settings.glow}
-            pulses={settings.pulses}
+            glow={settings.glow && effectiveAmbient}
+            pulses={settings.pulses && effectiveAmbient}
             hoveredIndex={focusIndex}
             neighbors={neighbors}
             degrees={degrees}
@@ -804,6 +849,28 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             </button>
           ))}
         </div>
+
+        {/* Ambient toggle — opt-in glow/neon; disabled under prefers-reduced-motion */}
+        <button
+          type="button"
+          aria-pressed={effectiveAmbient}
+          disabled={!animate}
+          title={
+            !animate
+              ? "Ambient effects disabled (prefers-reduced-motion)"
+              : effectiveAmbient
+                ? "Ambient on — click to turn off neon/glow"
+                : "Ambient off — click to enable neon/glow"
+          }
+          onClick={() => setAmbientMode((v) => !v)}
+          className={`rounded-lg border border-border/60 bg-card/80 px-2 py-1 text-label-xs backdrop-blur transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            effectiveAmbient
+              ? "text-accent-foreground bg-accent/30 border-accent/60"
+              : "text-muted-foreground hover:bg-accent/40"
+          }`}
+        >
+          Ambient
+        </button>
 
         {/* View mode toggle */}
         <div

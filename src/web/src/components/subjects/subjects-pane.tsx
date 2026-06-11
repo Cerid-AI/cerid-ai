@@ -3,32 +3,36 @@
 //
 // Subjects pane — consolidates the legacy Knowledge / Wiki / Communities /
 // Memories panes into a single surface with a 4-way mode switcher:
-//   Atlas (2D analytic graph, Phase A)
-//   Constellation (3D cinematic, Phase B placeholder)
-//   Timeline (chronological scrubber, Phase B placeholder)
-//   Wiki (text page with provenance, Phase A wraps existing WikiPane)
+//   Atlas (DOM icicle decomposition by default; Neighborhood mode when entity target)
+//   Constellation (3D cinematic, Phase B)
+//   Timeline (chronological scrubber, Phase M)
+//   Wiki (text page with provenance, Phase A)
 //
-// Focal entity is preserved across mode switches and surfaced via the
-// `?entity=<canonical_id>` URL param (existing convention from
-// wiki-pane.tsx). A `?mode=` param remembers the last-used mode for
-// shareable links.
+// Cycle 4 — unified click contract:
+//   onInspect(entityId)     — pin entity card, never mode-switch (graph surfaces)
+//   onFocusEntity(entityId) — explicit refocus/neighborhood fetch, preserves mode
+//   handleEntityPick        — search palette only: sets focal + stays in current surface
+//
+// Focal entity preserved across mode switches via ?entity= URL param.
+// ?mode= remembers the last-used mode for shareable links.
+// ?entity= with mode=atlas lands DIRECTLY in Neighborhood mode (E-17 contract).
 
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Bookmark, Compass, Sparkles, Clock, BookOpen, Loader2 } from "lucide-react"
 import { useNavigation } from "@/contexts/navigation-context"
 import { Atlas } from "./atlas/Atlas"
+import { DecompositionIcicle } from "./atlas/decomposition"
 import { SubjectsSearchPalette } from "./search-palette"
 import { SubjectsViewsSidebar } from "./subjects-views-sidebar"
 import { withViewTransition } from "@/lib/view-transitions"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useQuery } from "@tanstack/react-query"
 import { listAtlasViews, type AtlasView } from "@/lib/api/atlas-views"
+import type { AtlasTierPosition } from "@/lib/graph/cycle4-contracts"
 
 const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
 // Lazy-load Constellation so the three.js bundle (~250KB gzipped)
-// only enters memory when the user actually picks 3D mode. Keeps the
-// initial app load lean — sigma + Atlas alone already adds non-trivial
-// weight; we don't want both 2D + 3D engines loaded on first paint.
+// only enters memory when the user actually picks 3D mode.
 const Constellation = lazy(() => import("./constellation/Constellation"))
 const Timeline = lazy(() => import("./timeline/Timeline"))
 
@@ -46,6 +50,11 @@ const MODE_DEFS: Array<{
   { id: "timeline", label: "Timeline", icon: Clock, description: "Chronological scrubber", available: true },
   { id: "wiki", label: "Wiki", icon: BookOpen, description: "Text page with provenance", available: true },
 ]
+
+// Atlas view sub-state:
+//   "overview" = DecompositionIcicle (default)
+//   "neighborhood" = Atlas sigma ego view for a focal entity
+type AtlasSubMode = "overview" | "neighborhood"
 
 function readQueryParam(name: string): string | null {
   if (typeof window === "undefined") return null
@@ -98,28 +107,6 @@ function ViewsPopoverButton({
   )
 }
 
-function EmptyFocalPrompt({ onPickEntity }: { onPickEntity: () => void }) {
-  return (
-    <div className="flex h-full items-center justify-center p-12">
-      <div className="max-w-md rounded-xl border border-border bg-card/40 p-8 text-center">
-        <h2 className="text-lg font-semibold text-foreground">Pick a starting point</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Atlas renders the neighborhood around a focal entity. Use search
-          (<kbd className="rounded border px-1 text-xs">⌘K</kbd>) to pick one,
-          or open an entity from the Wiki list.
-        </p>
-        <button
-          type="button"
-          onClick={onPickEntity}
-          className="mt-6 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          Open search palette
-        </button>
-      </div>
-    </div>
-  )
-}
-
 export default function SubjectsPane() {
   const [mode, setMode] = useState<SubjectsMode>(() => {
     const m = readQueryParam("mode") as SubjectsMode | null
@@ -130,12 +117,25 @@ export default function SubjectsPane() {
     const h = readQueryParam("hops")
     return h === "1" ? 1 : h === "3" ? 3 : 2
   })
-  // Phase K — ?since=ISO scopes Subjects to artifacts ingested after the
-  // timestamp. Used by the digest notification's "Open" deep-link
-  // ("show me what's new since the digest was generated").
+  // Phase K — ?since=ISO scopes Subjects to artifacts ingested after the timestamp.
   const [sinceFilter, setSinceFilter] = useState<string | null>(() => readQueryParam("since"))
   const [paletteOpen, setPaletteOpen] = useState(false)
   const navigation = useNavigation()
+
+  // Atlas sub-mode: overview (decomposition icicle) or neighborhood (sigma ego view).
+  // When ?entity= is present on mount OR when an explicit neighborhood action fires,
+  // we go directly to neighborhood. Overview is the default when no entity target.
+  const [atlasSubMode, setAtlasSubMode] = useState<AtlasSubMode>(() => {
+    return readQueryParam("entity") ? "neighborhood" : "overview"
+  })
+
+  // atlasTier: saved decomposition ladder position (A2)
+  const [atlasTier, setAtlasTier] = useState<AtlasTierPosition | null>(null)
+
+  // Pinned entity card in Neighborhood mode — for onInspect (pin only, no mode switch)
+  // This is local state: the pane decides whether to show a card overlay or delegate
+  // to the Atlas component's internal card. We delegate to Atlas internals; onInspect
+  // simply avoids mode-switching. No extra state needed here for the card itself.
 
   // Re-read URL-borne state when a goTo carried navigation options. Without
   // this, a same-pane goTo (e.g. Wiki capsule → "Open in Atlas") writes the
@@ -145,7 +145,11 @@ export default function SubjectsPane() {
     const m = readQueryParam("mode") as SubjectsMode | null
     if (m && MODE_DEFS.some((d) => d.id === m)) setMode(m)
     const e = readQueryParam("entity")
-    if (e) setFocalEntity(e)
+    if (e) {
+      setFocalEntity(e)
+      // ?entity= always means Neighborhood mode in Atlas (E-17 contract)
+      if (!m || m === "atlas") setAtlasSubMode("neighborhood")
+    }
     const h = readQueryParam("hops")
     if (h === "1" || h === "2" || h === "3") setAtlasHops(Number(h) as 1 | 2 | 3)
   }, [navigation.navVersion])
@@ -167,26 +171,47 @@ export default function SubjectsPane() {
   const handleModeChange = useCallback((next: SubjectsMode) => {
     const def = MODE_DEFS.find((d) => d.id === next)
     if (!def || !def.available) return
-    // Wrap in a view transition where supported — Chrome 111+ /
-    // Safari 18+ get shared-element morphing for free; everyone else
-    // falls back to the CSS mode-swap keyframes on the container.
     void withViewTransition(() => {
       setMode(next)
     })
   }, [])
 
-  const handleSearchPalette = useCallback(() => setPaletteOpen(true), [])
+  // Search palette pick: sets focal entity. In Atlas mode: switches to Neighborhood
+  // for the picked entity. This is the only site that may mode-switch.
   const handleEntityPick = useCallback((entityId: string) => {
     setFocalEntity(entityId)
     setPaletteOpen(false)
-    if (mode === "wiki") return  // wiki handles entity internally
-    setMode("atlas")
+    if (mode === "wiki") return
+    if (mode === "atlas") setAtlasSubMode("neighborhood")
   }, [mode])
 
-  // Right-click → Cite in chat: build "@Name " seed and switch to chat.
-  // No @-mention parser exists yet (chat composer accepts plain text);
-  // this format reads natural for the user and primes the eventual
-  // parser. See feature note in NavigationProvider's composeChat doc.
+  // Unified click contract — graph surfaces call this to PIN only (no mode switch).
+  // Pin is handled internally by the graph surface (Atlas/Cartographer); this
+  // callback exists for future cross-surface bookkeeping. No-op at pane level.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleInspect = useCallback((_entityId: string) => {
+    // intentional no-op at pane level — pin is internal to the graph surface
+  }, [])
+
+  // Explicit refocus: re-center neighborhood on a different entity (Make focal).
+  // Preserves current mode and atlas sub-mode.
+  const handleFocusEntity = useCallback((entityId: string) => {
+    setFocalEntity(entityId)
+    if (mode === "atlas") setAtlasSubMode("neighborhood")
+  }, [mode])
+
+  // "Open neighborhood" from icicle entity row → enter Neighborhood mode
+  const handleOpenNeighborhood = useCallback((entityId: string) => {
+    setFocalEntity(entityId)
+    setAtlasSubMode("neighborhood")
+  }, [])
+
+  // "Back to overview" from Atlas toolbar → return to decomposition icicle
+  const handleBackToOverview = useCallback(() => {
+    setAtlasSubMode("overview")
+  }, [])
+
+  // Right-click → Cite in chat
   const handleCiteInChat = useCallback((_entityId: string, entityName: string) => {
     navigation.composeChat({ text: `@${entityName} ` })
   }, [navigation])
@@ -270,11 +295,22 @@ export default function SubjectsPane() {
             if (validModes.includes(view.mode as SubjectsMode)) {
               setMode(view.mode as SubjectsMode)
             }
+            // A2: restore atlasTier if present in saved view (v3)
+            if (view.mode === "atlas") {
+              const v3 = view as AtlasView & { atlasTier?: AtlasTierPosition }
+              if (v3.atlasTier) {
+                setAtlasTier(v3.atlasTier)
+                setAtlasSubMode("overview")
+              } else {
+                // No tier saved → neighborhood mode if entity is set
+                setAtlasSubMode(view.entity ? "neighborhood" : "overview")
+              }
+            }
           }}
         />
         <button
           type="button"
-          onClick={handleSearchPalette}
+          onClick={() => setPaletteOpen(true)}
           className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent/40"
           aria-label="Search subjects"
         >
@@ -295,26 +331,23 @@ export default function SubjectsPane() {
           className={`grow overflow-hidden ${mode === "constellation" ? "mode-swap-deep" : "mode-swap"}`}
         >
         {mode === "atlas" && (
-          focalEntity ? (
+          atlasSubMode === "neighborhood" && focalEntity ? (
             <Atlas
               entity={focalEntity}
               hops={atlasHops}
               onHopsChange={setAtlasHops}
-              onSearchPalette={handleSearchPalette}
-              onNodeClick={handleEntityPick}
-              onNodeDoubleClick={(id) => {
-                setFocalEntity(id)
-                setMode("wiki")
-              }}
+              onSearchPalette={() => setPaletteOpen(true)}
+              onInspect={handleInspect}
+              onFocusEntity={handleFocusEntity}
               onCiteInChat={handleCiteInChat}
               onOpenInWiki={handleOpenInWiki}
               onOpenInTimeline={handleOpenInTimeline}
+              onBackToOverview={handleBackToOverview}
               onRestoreView={(view) => {
                 setFocalEntity(view.entity)
                 if (view.mode === "atlas" || view.mode === "wiki") {
                   setMode(view.mode as SubjectsMode)
                 }
-                // Restore hops from saved view if version >= 2
                 if (view.version && view.version >= 2 && view.hops) {
                   const h = view.hops
                   if (h === 1 || h === 2 || h === 3) setAtlasHops(h)
@@ -322,7 +355,13 @@ export default function SubjectsPane() {
               }}
             />
           ) : (
-            <EmptyFocalPrompt onPickEntity={handleSearchPalette} />
+            <DecompositionIcicle
+              onInspect={handleInspect}
+              onFocusEntity={handleFocusEntity}
+              onOpenNeighborhood={handleOpenNeighborhood}
+              restoreTier={atlasTier}
+              onTierChange={setAtlasTier}
+            />
           )
         )}
         {mode === "constellation" && (
@@ -334,9 +373,12 @@ export default function SubjectsPane() {
               </div>
             }
           >
+            {/* onNodeClick → handleInspect: pin only, no mode switch (Cycle 4 contract).
+                CartographerMap already has onFocusEntity reserved; Constellation will
+                thread it through in a follow-up once Agent C's outer props are extended. */}
             <Constellation
               focalEntity={focalEntity ?? undefined}
-              onNodeClick={handleEntityPick}
+              onNodeClick={handleInspect}
             />
           </Suspense>
         )}
