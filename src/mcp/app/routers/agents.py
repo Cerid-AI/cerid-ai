@@ -309,6 +309,12 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         consumer_strict = consumer.get("strict_domains", False)
         strict_domains = req.strict_domains if req.strict_domains else consumer_strict
 
+        # Bind the KB low-confidence signal + threshold before the mode branch.
+        # The smart/custom_smart path skips the manual CRAG block below, so
+        # reading _kb_low_conf at the end would otherwise UnboundLocalError.
+        _threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
+        _kb_low_conf = False
+
         if req.rag_mode in ("smart", "custom_smart"):
             from app.agents.retrieval_orchestrator import orchestrated_query
             result = await orchestrated_query(
@@ -328,6 +334,9 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 strict_domains=strict_domains,
                 model=req.model,
             )
+            # Mirror the manual path's KB-quality signal for the smart path so
+            # the low_confidence field is meaningful (not just a default).
+            _kb_low_conf = _kb_low_confidence(result, _threshold)
         else:
             # Manual mode: KB gate check — if context_sources disables KB, skip retrieval
             _cs = req.context_sources or {}
@@ -367,7 +376,6 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
 
             # CRAG gate: fire external only when KB quality is below threshold.
             # Saves the 5s-per-source hang cost when KB already has strong hits.
-            _threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
             # B2a: capture KB-only confidence before any external augmentation.
             _kb_low_conf = _kb_low_confidence(result, _threshold)
             if should_fire_external_crag(
