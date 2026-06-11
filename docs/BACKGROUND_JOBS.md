@@ -183,7 +183,31 @@ REDIS_URL=redis://redis:6379/0
 PROCESSOR_REDIS_KEY_PREFIX=cerid:proc
 ```
 
-## 10. Status
+## 10. Knowledge-graph nightly jobs
+
+Three scheduled jobs maintain the graph-derived data behind the Subjects
+panes. All are gated (an empty `SCHEDULE_*` disables them), `max_instances=1`,
+and **$0** — pure Cypher / local compute, no LLM spend. They run back-to-back
+in the early-morning window so the Atlas/Constellation/Timeline surfaces wake
+to fresh data.
+
+| Job id | Default cron | Trigger | Writes / produces |
+|---|---|---|---|
+| `compute_trust_state` | `31 3 * * *` | nightly | `Entity.trust_state ∈ {verified, partial, unverified}` from VerificationReport tallies. Thresholds: verified-share ≥ 0.70 → `verified`, ≥ 0.20 → `partial`, else `unverified` (override via `TRUST_STATE_VERIFIED_THRESHOLD` / `TRUST_STATE_PARTIAL_THRESHOLD`). Only entities with covering reports are written. Powers the Atlas/Constellation Trust lens. |
+| `derive_domains` | `32 3 * * *` | nightly **+** `entities_added` event subscriber (debounced) | `Entity.primary_domain`, `Entity.domain_mix` (JSON, sorted desc by count then name), `Entity.primary_subcategory`, `Entity.domains_updated_at`. 4-rung tie-break (count → non-`general` → recency → lexicographic). Orphan entities (no MENTIONS path) get the three domain fields `REMOVE`d. Backs `GET /graph/domains` and the family-wide Domain lens. Busts the `cerid:graph:emb3d:*` cache on completion. |
+| `compute_umap_3d` | (gated) nightly | nightly + manual | Constellation/Atlas positions, community hulls, and the decomposition tree. Now emits **three layout passes** — `force` (default), `wells`, `domain` — feeding `GET /graph/map?layout=`. Z-axis carries recency (`updated_at`); community `short_label` derives from `Community.summary` via a `_first_clause` regex that strips boilerplate lead-ins. Caches under `cerid:graph:emb3d:v3:*`. |
+
+> **Operational gotcha (`compute_umap_3d`):** run it via the scheduler runner
+> — `docker exec … python -c "import asyncio; from app.scheduler import _run_compute_umap_3d; asyncio.run(_run_compute_umap_3d())"`. Directly
+> instantiating `ComputeUmap3DJob()` has **no Neo4j driver bound**, so it
+> silently falls back to hub-name labels instead of summary-derived ones.
+
+All three jobs are registered in `app/scheduler.py` (`_run_derive_domains`,
+`_run_compute_trust_state`, `_run_compute_umap_3d`); the per-job cache-bust
+map (`derive_domains` → `cerid:graph:emb3d:*`, etc.) also lives there. See
+[`docs/ARCHITECTURE.md`](ARCHITECTURE.md) § Domain backbone for the data model.
+
+## 11. Status
 
 **This document is a skeleton.** Sections expand as Phase P ships:
 
