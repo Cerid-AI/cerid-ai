@@ -323,9 +323,15 @@ export function InstancedNodes({
 
   const handleClick = (e: ThreePointerEvent) => {
     e.stopPropagation()
-    const id = e.instanceId
-    if (typeof id === "number" && id >= 0 && id < entities.length) {
+    // Walk intersections: first visible instance wins, skipping dimmed occluders
+    const candidates = e.intersections ?? [e]
+    for (const hit of candidates) {
+      const id = hit.instanceId
+      if (typeof id !== "number" || id < 0 || id >= entities.length) continue
+      const vis = visibility?.[id] ?? 1
+      if (vis < 0.15) continue
       onSelect?.(entities[id].id)
+      return
     }
   }
 
@@ -372,4 +378,6 @@ interface ThreePointerEvent {
   stopPropagation: () => void
   instanceId?: number
   nativeEvent?: { clientX: number; clientY: number }
+  /** All sorted intersections from the raycast (nearest first). */
+  intersections?: Array<{ instanceId?: number }>
 }

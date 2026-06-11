@@ -47,14 +47,6 @@ function formatLastUpdated(iso: string | null): string | null {
   }
 }
 
-function isRefreshOverdue(nextRefreshDue: string | null): boolean {
-  if (!nextRefreshDue) return false
-  try {
-    return Date.parse(nextRefreshDue) < Date.now()
-  } catch {
-    return false
-  }
-}
 
 function confidenceBandToTrust(band: ConfidenceBand): TrustState {
   switch (band) {
@@ -153,13 +145,13 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
   if (!data) return null
 
   const relativeUpdated = formatLastUpdated(data.last_updated_at)
-  const refreshOverdue = isRefreshOverdue(data.next_refresh_due)
+  const refreshStatus = data.refresh_status ?? "idle"
   const communityHue = resolveCommunityHue(data.community_id)
 
   const summaryProvenance: ProvenanceKind = "auto"
   const showLowConfidenceMarker = data.confidence_band === "low"
 
-  const trustState: TrustState = data.trust_state ?? confidenceBandToTrust(data.confidence_band)
+  const trustState: TrustState = confidenceBandToTrust(data.confidence_band)
 
   return (
     <div className="cerid-stagger-fast h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}>
@@ -180,20 +172,27 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
           >
             {data.name}
           </h1>
-          {refreshOverdue ? (
+          <TrustBandBadge
+            trust={trustState}
+            corroboratingCount={data.source_artifacts.length}
+            contradictionCount={data.contradictions.length}
+          />
+          {refreshStatus === "running" && (
             <span
               className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
               aria-label="Updating from new evidence"
             >
               <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
-              Updating from new evidence
+              Updating from new evidence…
             </span>
-          ) : (
-            <TrustBandBadge
-              trust={trustState}
-              corroboratingCount={data.source_artifacts.length}
-              contradictionCount={data.contradictions.length}
-            />
+          )}
+          {refreshStatus === "due" && (
+            <span
+              className="text-xs text-muted-foreground"
+              aria-label="Refresh scheduled"
+            >
+              Refresh due
+            </span>
           )}
           {showLowConfidenceMarker && <ProvenanceMarker kind="uncertain" />}
           {data.contradictions.length > 0 && <ProvenanceMarker kind="contradicted" />}
@@ -217,10 +216,11 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
                   entity: data.slug,
                 })
               }
+              title={data.community_id}
               className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              aria-label={`Open ${data.community_label ?? data.community_id} in Atlas`}
+              aria-label={`Open ${data.community_label ?? "community"} in Atlas`}
             >
-              {data.community_label ?? data.community_id}
+              {data.community_label ?? "Community"}
             </button>
           ) : (
             <span className="text-xs text-muted-foreground">Unassigned</span>
@@ -289,6 +289,7 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
           entitySlug={data.slug}
           entityName={data.name}
           communityId={data.community_id}
+          sourceArtifacts={data.source_artifacts}
           onOpenAtlas={(slugArg) => {
             navigation.goTo("subjects", { mode: "atlas", entity: slugArg, lens: "provenance" })
           }}
@@ -339,29 +340,33 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
               Source Artifacts
             </h2>
             <div className="space-y-2">
-              {data.source_artifacts.map((src) => (
-                <div
-                  key={src.artifact_id}
-                  className="flex items-start justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2"
-                >
-                  <div className="min-w-0 space-y-0.5">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {src.title ?? src.artifact_id}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {src.domain && <DomainBadge domain={src.domain} />}
-                      {src.chunk_hash && (
-                        <Badge variant="outline" className="font-mono text-label-xxs">
-                          {src.chunk_hash.slice(0, 8)}
-                        </Badge>
-                      )}
+              {data.source_artifacts.map((src) => {
+                const displayTitle = src.title ?? src.filename ?? (src.source_type ? `Untitled (${src.source_type})` : null)
+                return (
+                  <button
+                    key={src.artifact_id}
+                    type="button"
+                    title={src.artifact_id}
+                    aria-label={`View source: ${displayTitle ?? src.artifact_id}`}
+                    onClick={() => navigation.goTo("sources")}
+                    className="flex w-full items-start gap-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-left transition-colors hover:border-border/60 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {displayTitle ?? <span className="font-mono text-xs text-muted-foreground">{src.artifact_id.slice(0, 8)}…</span>}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {src.domain && <DomainBadge domain={src.domain} />}
+                        {src.source_type && !src.domain && (
+                          <Badge variant="outline" className="text-label-xxs">
+                            {src.source_type}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  {/* "View source" route not yet implemented (P0.4 from
-                      2026-05-11-ui-audit.md). Render nothing until the route
-                      lands rather than show a permanently-disabled affordance lie. */}
-                </div>
-              ))}
+                  </button>
+                )
+              })}
             </div>
           </section>
         )}

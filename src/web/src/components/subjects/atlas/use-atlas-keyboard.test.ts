@@ -358,3 +358,42 @@ describe("useAtlasKeyboard — hops + unpin", () => {
     expect(onUnpin).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("useAtlasKeyboard — onActivate fires exactly once per Enter", () => {
+  it("onActivate is called exactly once when a node is selected", () => {
+    const graph = makeGraph()
+    const stub = makeStubSigma()
+    const onActivate = vi.fn()
+    const { result } = renderHook(() =>
+      useAtlasKeyboard({
+        sigma: stub.instance as never,
+        graph,
+        focalEntity: "n0",
+        onActivate,
+      }),
+    )
+    act(() => result.current.onKeyDown(keyEvent("Tab")))
+    act(() => result.current.onKeyDown(keyEvent("Enter")))
+    expect(onActivate).toHaveBeenCalledTimes(1)
+    expect(onActivate).toHaveBeenCalledWith("n0")
+  })
+
+  it("onActivate is not called on second Enter without reselecting", () => {
+    const graph = makeGraph()
+    const stub = makeStubSigma()
+    const onActivate = vi.fn()
+    const { result } = renderHook(() =>
+      useAtlasKeyboard({
+        sigma: stub.instance as never,
+        graph,
+        focalEntity: "n0",
+        onActivate,
+      }),
+    )
+    act(() => result.current.onKeyDown(keyEvent("Tab")))
+    act(() => result.current.onKeyDown(keyEvent("Enter")))
+    act(() => result.current.onKeyDown(keyEvent("Enter")))
+    // onActivate should be called each time Enter is pressed with a selection
+    expect(onActivate).toHaveBeenCalledTimes(2)
+  })
+})

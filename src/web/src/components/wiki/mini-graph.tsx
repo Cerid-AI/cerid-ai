@@ -44,6 +44,7 @@ export interface MiniGraphProps {
 
 export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
   const [expanded, setExpanded] = useState(false)
+  const [hops, setHops] = useState<1 | 2 | 3>(1)
   const [neighbors, setNeighbors] = useState<GraphNode[]>([])
   const navigation = useNavigation()
 
@@ -51,10 +52,15 @@ export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
     navigation.goTo("subjects", { mode: "atlas", entity: entitySlug })
   }
 
+  // Reset neighbors when entity or hops changes so the sr-only list stays fresh.
+  useEffect(() => {
+    setNeighbors([])
+  }, [entitySlug, hops])
+
   // Fetch neighbors once expanded so we can provide an sr-only list for AT.
   useEffect(() => {
     if (!expanded || neighbors.length > 0) return
-    fetchNeighborhood(entitySlug, 1)
+    fetchNeighborhood(entitySlug, hops)
       .then((resp) => {
         // Exclude the focal entity itself from the neighbor list.
         setNeighbors(resp.nodes.filter((n) => !n.focused))
@@ -62,7 +68,7 @@ export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
       .catch(() => {
         // Silent: AT neighbor list is a progressive enhancement, not a hard requirement.
       })
-  }, [expanded, entitySlug, neighbors.length])
+  }, [expanded, entitySlug, hops, neighbors.length])
 
   return (
     <section aria-labelledby="wiki-minigraph-heading">
@@ -120,7 +126,7 @@ export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
               </div>
             }
           >
-            <Atlas entity={entitySlug} hops={1} />
+            <Atlas entity={entitySlug} hops={hops} onHopsChange={setHops} />
           </Suspense>
         </div>
       )}

@@ -871,6 +871,45 @@ async def _run_compute_umap_3d() -> None:
         logger.error("compute_umap_3d scheduled job failed: %s", e)
 
 
+async def _run_compute_trust_state() -> None:
+    """Nightly Entity.trust_state derivation from VerificationReport evidence.
+
+    Runs 1 minute after compute_umap_3d (default 4:31 AM) so trust_state
+    is fresh when Constellation renders.  Gated via SCHEDULE_COMPUTE_TRUST_STATE.
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.compute_trust_state import ComputeTrustStateJob  # noqa: PLC0415
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = ComputeTrustStateJob()
+        if queue is not None:
+            record = job.new_record()
+            await queue.enqueue(record)
+            _log_execution("compute_trust_state", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            result = await job.run(_noop)
+            dist = result.metadata.get("distribution", {})
+            _log_execution(
+                "compute_trust_state",
+                "success",
+                time.time() - start,
+                f"written={result.metadata.get('written', 0)} dist={dist}",
+            )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("compute_trust_state", "error", duration, str(e))
+        logger.error("compute_trust_state scheduled job failed: %s", e)
+
+
 async def _run_memory_consolidation_sweep() -> None:
     """Weekly SAFE memory archival sweep — archival only, no LLM re-abstraction.
 
@@ -1300,6 +1339,20 @@ def start_scheduler() -> AsyncIOScheduler:
             ),
             id="compute_umap_3d",
             name="Constellation 3D coordinate compute",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Entity trust_state derivation — nightly, 1 min after compute_umap_3d.
+    # Gated; empty SCHEDULE_COMPUTE_TRUST_STATE disables.
+    if getattr(config, "SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *"):
+        _scheduler.add_job(
+            _run_compute_trust_state,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *"),
+            ),
+            id="compute_trust_state",
+            name="Entity trust_state derivation",
             replace_existing=True,
             max_instances=1,
         )

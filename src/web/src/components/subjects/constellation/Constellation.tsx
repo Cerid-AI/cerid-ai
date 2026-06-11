@@ -25,6 +25,7 @@ import { CartographerMap } from "./map/CartographerMap"
 import { useGraphMap } from "./map/use-graph-map"
 import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
 import type { CommunityHull } from "@/lib/api/graph-map"
+import { useNavigation } from "@/contexts/navigation-context"
 
 // ---------------------------------------------------------------------------
 // View-mode persistence
@@ -167,6 +168,8 @@ function MapConfigPanel({
 // ---------------------------------------------------------------------------
 
 export default function Constellation({ focalEntity, filter, onNodeClick }: ConstellationProps) {
+  const { goTo } = useNavigation()
+
   // ---------------------------------------------------------------------------
   // View mode: "map" (Cartographer 2D) | "3d" (R3F scene)
   // ---------------------------------------------------------------------------
@@ -722,7 +725,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           </div>
           <button
             type="button"
-            onClick={() => onNodeClick?.(pinnedEntity.id)}
+            onClick={() => goTo("subjects", { mode: "wiki", entity: pinnedEntity.id })}
             className="mt-2 w-full rounded-md bg-accent px-2 py-1.5 text-label-xs font-medium text-accent-foreground hover:bg-accent/80"
           >
             Open in Wiki
@@ -804,11 +807,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             <span>·</span>
             <span>{neighbors.get(hover.index)?.size ?? 0} connections</span>
           </div>
-          {(hoveredEntity.community || hoveredEntity.trust_state !== "unknown") && (
+          {hoveredEntity.trust_state !== "unknown" && (
             <div className="mt-0.5 flex items-center gap-2 text-label-xs text-muted-foreground">
-              {hoveredEntity.community && <span>cluster {hoveredEntity.community}</span>}
-              {hoveredEntity.community && hoveredEntity.trust_state !== "unknown" && <span>·</span>}
-              {hoveredEntity.trust_state !== "unknown" && <span>{hoveredEntity.trust_state}</span>}
+              <span>{hoveredEntity.trust_state}</span>
             </div>
           )}
           <div className="mt-1 text-label-xs text-muted-foreground/80">Click to open in Wiki</div>

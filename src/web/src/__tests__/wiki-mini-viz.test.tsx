@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event"
 import { MentionSparkline } from "@/components/wiki/mention-sparkline"
 import { ProvenanceSankey } from "@/components/wiki/provenance-sankey"
 import { ContradictionLink } from "@/components/wiki/contradiction-link"
+import type { SourceCitation } from "@/lib/types/wiki"
 
 // Recharts uses ResizeObserver — jsdom doesn't have it. Stub before render.
 class _RO {
@@ -31,6 +32,19 @@ beforeEach(() => {
   mockFetchTimeline.mockReset()
   mockFetchNeighborhood.mockReset()
 })
+
+function makeSource(overrides: Partial<SourceCitation> = {}): SourceCitation {
+  return {
+    artifact_id: "art-001",
+    title: "Test Document",
+    filename: "test-doc.md",
+    domain: "notes",
+    source_type: "file",
+    confidence: 0.85,
+    updated_at: null,
+    ...overrides,
+  }
+}
 
 
 describe("MentionSparkline", () => {
@@ -93,43 +107,51 @@ describe("MentionSparkline", () => {
 
 
 describe("ProvenanceSankey", () => {
-  it("does not fetch until expanded", async () => {
-    render(<ProvenanceSankey entitySlug="tesla" entityName="Tesla" />)
+  it("does not render body until expanded", async () => {
+    render(
+      <ProvenanceSankey
+        entitySlug="tesla"
+        entityName="Tesla"
+        sourceArtifacts={[]}
+      />,
+    )
+    expect(screen.queryByText(/No sources recorded/i)).toBeNull()
+  })
+
+  it("renders empty-state when no source artifacts", async () => {
+    const user = userEvent.setup()
+    render(
+      <ProvenanceSankey
+        entitySlug="tesla"
+        entityName="Tesla"
+        sourceArtifacts={[]}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: /provenance flow/i }))
+    await screen.findByText(/No sources recorded/i)
+  })
+
+  it("does not call fetchNeighborhood (data comes from sourceArtifacts prop)", async () => {
+    const user = userEvent.setup()
+    render(
+      <ProvenanceSankey
+        entitySlug="tesla"
+        entityName="Tesla"
+        sourceArtifacts={[makeSource()]}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: /provenance flow/i }))
     expect(mockFetchNeighborhood).not.toHaveBeenCalled()
   })
 
-  it("renders empty-state when no attested edges", async () => {
-    mockFetchNeighborhood.mockResolvedValue({
-      focal_entity: "tesla",
-      nodes: [{ id: "tesla", label: "Tesla", entity_type: "ORG" }],
-      edges: [],
-      truncated: false,
-    })
-    const user = userEvent.setup()
-    render(<ProvenanceSankey entitySlug="tesla" entityName="Tesla" />)
-    await user.click(screen.getByRole("button", { name: /provenance flow/i }))
-    await screen.findByText(/no source attestation/i)
-  })
-
   it("opens Atlas deep-link on click", async () => {
-    mockFetchNeighborhood.mockResolvedValue({
-      focal_entity: "tesla",
-      nodes: [
-        { id: "tesla", label: "Tesla", entity_type: "ORG" },
-        { id: "elon", label: "Elon", entity_type: "PER" },
-      ],
-      edges: [
-        { source: "tesla", target: "elon", relation: "FOUNDED_BY", attestation: "attested" },
-        { source: "tesla", target: "elon", relation: "FOUNDED_BY", attestation: "inferred" },
-      ],
-      truncated: false,
-    })
     const onOpen = vi.fn()
     const user = userEvent.setup()
     render(
       <ProvenanceSankey
         entitySlug="tesla"
         entityName="Tesla"
+        sourceArtifacts={[makeSource(), makeSource({ artifact_id: "art-002", source_type: "vault" })]}
         onOpenAtlas={onOpen}
       />,
     )
@@ -137,6 +159,19 @@ describe("ProvenanceSankey", () => {
     const link = await screen.findByTestId("provenance-sankey-open-atlas")
     await user.click(link)
     expect(onOpen).toHaveBeenCalledWith("tesla")
+  })
+
+  it("shows source count in summary line", async () => {
+    const user = userEvent.setup()
+    render(
+      <ProvenanceSankey
+        entitySlug="tesla"
+        entityName="Tesla"
+        sourceArtifacts={[makeSource(), makeSource({ artifact_id: "art-002" })]}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: /provenance flow/i }))
+    await screen.findByText(/2 sources recorded/i)
   })
 })
 

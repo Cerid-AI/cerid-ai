@@ -23,7 +23,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { resolveMapTokens, type MapTokens } from "@/components/subjects/constellation/map/community-layer"
 import { useNavigation } from "@/contexts/navigation-context"
-import { useTimelineStrata } from "./stratigraph/use-timeline-strata"
+import { useTimelineStrata, useTimelineTrack } from "./stratigraph/use-timeline-strata"
 import {
   loadTimelineConfig,
   saveTimelineConfig,
@@ -137,7 +137,6 @@ function TimelineConfigPanel({
 // ---------------------------------------------------------------------------
 
 interface TimelineProps {
-  focalEntity?: string | null
   onEntityPick?: (id: string) => void
 }
 
@@ -198,18 +197,27 @@ export function Timeline({ onEntityPick }: TimelineProps) {
   const [pinnedCommunity, setPinnedCommunity] = useState<PinnedCommunity | null>(null)
   const [pinnedTrack, setPinnedTrack] = useState<PinnedTrack | null>(null)
 
+  // Brush window — pure client viewport state. It must never feed the strata
+  // query (refetching on brush re-creates the brush, which would re-emit and
+  // loop); it drives the re-rank-for-this-window computation and scopes track
+  // detail fetches to the visible window.
+  const [brushWindow, setBrushWindow] = useState<{ from: string; to: string } | null>(null)
+  const handleBrushChange = useCallback((from: string, to: string) => {
+    setBrushWindow({ from, to })
+  }, [])
+
+  // Track detail — lazy-load events when a track is pinned
+  const { data: trackDetail, isLoading: trackLoading } = useTimelineTrack({
+    canonicalId: pinnedTrack?.canonicalId ?? null,
+    from: brushWindow?.from,
+    to: brushWindow?.to,
+    enabled: pinnedTrack !== null,
+  })
+
   // LOD state
   const [lodLevel, setLodLevel] = useState<"era" | "bucket" | "track">("era")
   const handleLODChange = useCallback((level: "era" | "bucket" | "track") => {
     setLodLevel(level)
-  }, [])
-
-  // Brush window — pure client viewport state. It must never feed the query
-  // (refetching on brush re-creates the brush, which would re-emit and loop);
-  // it only drives the re-rank-for-this-window computation below.
-  const [brushWindow, setBrushWindow] = useState<{ from: string; to: string } | null>(null)
-  const handleBrushChange = useCallback((from: string, to: string) => {
-    setBrushWindow({ from, to })
   }, [])
 
   // Tokens
@@ -567,9 +575,9 @@ export function Timeline({ onEntityPick }: TimelineProps) {
           </div>
         )}
 
-        {/* Entity pin card (Open in Wiki) */}
+        {/* Entity pin card with track-detail events */}
         {pinnedTrack && (
-          <div className="absolute bottom-12 right-3 w-72 rounded-lg border border-border/60 bg-card/95 p-3 shadow-xl backdrop-blur">
+          <div className="absolute bottom-12 right-3 w-80 rounded-lg border border-border/60 bg-card/95 p-3 shadow-xl backdrop-blur">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-foreground">
@@ -591,6 +599,46 @@ export function Timeline({ onEntityPick }: TimelineProps) {
                 <X className="h-3 w-3" />
               </button>
             </div>
+
+            {/* Track events (from useTimelineTrack) */}
+            {trackLoading && (
+              <div className="mt-2 flex items-center gap-1.5 text-label-xs text-muted-foreground">
+                <Clock className="h-3 w-3 animate-spin" />
+                Loading events…
+              </div>
+            )}
+            {!trackLoading && trackDetail && trackDetail.events.length > 0 && (
+              <div className="mt-2 max-h-48 overflow-y-auto">
+                <div className="mb-1 text-label-xs font-medium text-muted-foreground">Recent events</div>
+                <ul className="flex flex-col gap-1.5">
+                  {trackDetail.events.slice(0, 8).map((ev, i) => (
+                    <li key={i} className="rounded-md border border-border/40 bg-background/60 px-2 py-1.5 text-label-xs">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="truncate font-medium text-foreground">
+                          {ev.artifact_filename}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground tabular-nums">
+                          {ev.ts.slice(0, 10)}
+                        </span>
+                      </div>
+                      {ev.summary && (
+                        <p className="mt-0.5 line-clamp-2 text-muted-foreground/80">{ev.summary}</p>
+                      )}
+                      {ev.co_mentioned.length > 0 && (
+                        <div className="mt-0.5 truncate text-muted-foreground/60">
+                          with {ev.co_mentioned.slice(0, 3).map((c) => c.name).join(", ")}
+                          {ev.co_mentioned.length > 3 && ` +${ev.co_mentioned.length - 3}`}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!trackLoading && trackDetail && trackDetail.events.length === 0 && (
+              <p className="mt-2 text-label-xs text-muted-foreground">No events in this window.</p>
+            )}
+
             <button
               type="button"
               onClick={() => {

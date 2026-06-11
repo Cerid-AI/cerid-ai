@@ -47,6 +47,9 @@ export interface MapTokens {
   trustUnverified: string
   /** Optional dot-grid underlay color */
   grid: string
+  /** Resolved font-family string for canvas 2D (var() stripped).
+   *  Present after resolveMapTokens(); absent in SSR/test stubs — callers fall back to labelFont. */
+  fontSans?: string
 }
 
 // Normalize any CSS color (oklch, hsl, named…) to #rrggbb via a 1×1
@@ -75,6 +78,9 @@ function normalizeColor(cssColor: string): string {
 export function resolveMapTokens(root: Element): MapTokens {
   const style = getComputedStyle(root)
   const get = (name: string) => normalizeColor(style.getPropertyValue(name).trim())
+  // Resolve font-family as a plain string — canvas ctx.font cannot parse var().
+  const rawFont = style.getPropertyValue("--font-sans").trim()
+  const fontSans = rawFont.replace(/^['"]|['"]$/g, "") || "system-ui, sans-serif"
   return {
     clusters: [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
       get(`--color-map-cluster-${i}`)
@@ -89,6 +95,7 @@ export function resolveMapTokens(root: Element): MapTokens {
     trustPartial: get("--color-map-trust-partial"),
     trustUnverified: get("--color-map-trust-unverified"),
     grid: get("--color-map-grid"),
+    fontSans,
   }
 }
 
@@ -229,7 +236,7 @@ export function useCommunityLayer({
           const vAnchor = s.graphToViewport({ x: community.anchor[0], y: community.anchor[1] })
           const labelText = community.label.toUpperCase()
           const fontSize = Math.max(11, Math.min(20, 11 + Math.sqrt(community.count) * 0.5))
-          ctx.font = `500 ${fontSize}px var(--font-sans, system-ui, sans-serif)`
+          ctx.font = `500 ${fontSize}px ${tokens.fontSans}`
           ctx.letterSpacing = "0.08em"
           ctx.textAlign = "center"
           ctx.textBaseline = "middle"

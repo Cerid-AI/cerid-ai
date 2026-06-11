@@ -46,7 +46,6 @@ const mockUseWikiEntity = useWikiEntity as ReturnType<typeof vi.fn>
 // future next_refresh_due.
 const FUTURE_ISO = new Date(Date.now() + 60 * 60 * 1000).toISOString()
 const PAST_ISO = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // 2h ago
-const OVERDUE_ISO = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() // 25h ago — overdue
 
 function makeEntityPage(overrides: Partial<WikiEntityPage> = {}): WikiEntityPage {
   return {
@@ -62,8 +61,11 @@ function makeEntityPage(overrides: Partial<WikiEntityPage> = {}): WikiEntityPage
       {
         artifact_id: "art-001",
         title: "Forbes Profile",
-        chunk_hash: "test-fixture-chunk-0001",
+        filename: "forbes-profile.md",
         domain: "research",
+        source_type: "file",
+        confidence: 0.9,
+        updated_at: PAST_ISO,
       },
     ],
     contradictions: [
@@ -207,10 +209,11 @@ describe("EntityDetailView — settled state", () => {
     expect(screen.getByText("Forbes Profile")).toBeTruthy()
   })
 
-  it("renders chunk hash chip (first 8 chars)", () => {
+  it("renders source artifact as interactive button", () => {
     mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
     render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
-    expect(screen.getByText("test-fix")).toBeTruthy()
+    const sourceBtn = screen.getByRole("button", { name: /View source: Forbes Profile/ })
+    expect(sourceBtn).toBeTruthy()
   })
 
   it("renders contradictions section when contradictions exist", () => {
@@ -242,10 +245,10 @@ describe("EntityDetailView — contradictions hidden when empty", () => {
 // Updating pill when next_refresh_due is in the past (overdue)
 // ---------------------------------------------------------------------------
 
-describe("EntityDetailView — updating pill", () => {
-  it("shows 'Updating from new evidence' pill when next_refresh_due is in the past", () => {
+describe("EntityDetailView — refresh status pill", () => {
+  it("shows activity pill when refresh_status is 'running'", () => {
     mockUseWikiEntity.mockReturnValue({
-      data: makeEntityPage({ next_refresh_due: OVERDUE_ISO }),
+      data: makeEntityPage({ refresh_status: "running" }),
       isLoading: false,
       isError: false,
       isNotFound: false,
@@ -254,16 +257,53 @@ describe("EntityDetailView — updating pill", () => {
     expect(screen.getByLabelText("Updating from new evidence")).toBeTruthy()
   })
 
-  it("does NOT show updating pill when next_refresh_due is in the future", () => {
-    const futureIso = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  it("shows quiet hint when refresh_status is 'due'", () => {
     mockUseWikiEntity.mockReturnValue({
-      data: makeEntityPage({ next_refresh_due: futureIso }),
+      data: makeEntityPage({ refresh_status: "due" }),
+      isLoading: false,
+      isError: false,
+      isNotFound: false,
+    })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    expect(screen.getByLabelText("Refresh scheduled")).toBeTruthy()
+  })
+
+  it("shows no pill when refresh_status is 'idle'", () => {
+    mockUseWikiEntity.mockReturnValue({
+      data: makeEntityPage({ refresh_status: "idle" }),
       isLoading: false,
       isError: false,
       isNotFound: false,
     })
     render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
     expect(screen.queryByLabelText("Updating from new evidence")).toBeNull()
+    expect(screen.queryByLabelText("Refresh scheduled")).toBeNull()
+  })
+
+  it("shows no pill when refresh_status is absent (treated as idle)", () => {
+    const { refresh_status: _omit, ...pageWithoutStatus } = makeEntityPage() as WikiEntityPage & { refresh_status?: unknown }
+    void _omit
+    mockUseWikiEntity.mockReturnValue({
+      data: pageWithoutStatus,
+      isLoading: false,
+      isError: false,
+      isNotFound: false,
+    })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    expect(screen.queryByLabelText("Updating from new evidence")).toBeNull()
+    expect(screen.queryByLabelText("Refresh scheduled")).toBeNull()
+  })
+
+  it("always shows TrustBandBadge regardless of refresh status", () => {
+    mockUseWikiEntity.mockReturnValue({
+      data: makeEntityPage({ refresh_status: "running" }),
+      isLoading: false,
+      isError: false,
+      isNotFound: false,
+    })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    const badge = document.querySelector('[aria-label^="Trust:"]')
+    expect(badge).not.toBeNull()
   })
 })
 

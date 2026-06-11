@@ -50,12 +50,14 @@ function normalizeRelatedEntity(raw: Record<string, unknown>): RelatedEntity {
 }
 
 function normalizeSourceCitation(raw: Record<string, unknown>): SourceCitation {
-  const chunkIds = Array.isArray(raw.chunk_ids) ? (raw.chunk_ids as string[]) : []
   return {
     artifact_id: String(raw.artifact_id ?? ""),
     title: raw.title != null ? String(raw.title) : null,
-    chunk_hash: chunkIds[0] ?? "",
-    domain: "",
+    filename: raw.filename != null ? String(raw.filename) : null,
+    domain: raw.domain != null ? String(raw.domain) : null,
+    source_type: raw.source_type != null ? String(raw.source_type) : null,
+    confidence: raw.confidence != null ? Number(raw.confidence) : null,
+    updated_at: raw.updated_at != null ? String(raw.updated_at) : null,
   }
 }
 
@@ -105,6 +107,12 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     ? (raw.external_references as Record<string, unknown>[]).map(normalizeExternalReference)
     : []
 
+  const rawRefreshStatus = raw.refresh_status as string | undefined
+  const refresh_status: WikiEntityPage["refresh_status"] =
+    rawRefreshStatus === "running" || rawRefreshStatus === "due" || rawRefreshStatus === "idle"
+      ? rawRefreshStatus
+      : undefined
+
   return {
     slug: String(raw.slug ?? ""),
     name: String(raw.name ?? ""),
@@ -119,6 +127,7 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     external_references: externalRefs,
     last_updated_at: raw.last_updated_at != null ? String(raw.last_updated_at) : null,
     next_refresh_due: raw.next_refresh_due != null ? String(raw.next_refresh_due) : null,
+    refresh_status,
     confidence_band: (raw.confidence_band as WikiEntityPage["confidence_band"]) ?? "unknown",
   }
 }
