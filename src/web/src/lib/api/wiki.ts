@@ -38,6 +38,7 @@ function normalizeEntitySummary(raw: Record<string, unknown>): EntitySummary {
     related_count: Number(raw.mention_count ?? 0),
     recent_activity_score: Number(raw.recent_activity_score ?? 0),
     last_updated_at: raw.summary_updated_at != null ? String(raw.summary_updated_at) : null,
+    primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
   }
 }
 
@@ -113,6 +114,22 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
       ? rawRefreshStatus
       : undefined
 
+  // domain_mix is stored as a JSON string on the backend; the backend service
+  // already parses it to dict before serializing the page payload, but we
+  // guard both shapes here in case an older backend sends the raw string.
+  let domain_mix: Record<string, number> | null = null
+  if (raw.domain_mix != null) {
+    if (typeof raw.domain_mix === "object" && !Array.isArray(raw.domain_mix)) {
+      domain_mix = raw.domain_mix as Record<string, number>
+    } else if (typeof raw.domain_mix === "string") {
+      try {
+        domain_mix = JSON.parse(raw.domain_mix) as Record<string, number>
+      } catch {
+        domain_mix = null
+      }
+    }
+  }
+
   return {
     slug: String(raw.slug ?? ""),
     name: String(raw.name ?? ""),
@@ -129,6 +146,9 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     next_refresh_due: raw.next_refresh_due != null ? String(raw.next_refresh_due) : null,
     refresh_status,
     confidence_band: (raw.confidence_band as WikiEntityPage["confidence_band"]) ?? "unknown",
+    primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
+    domain_mix,
+    primary_subcategory: raw.primary_subcategory != null ? String(raw.primary_subcategory) : null,
   }
 }
 

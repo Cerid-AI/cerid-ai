@@ -17,6 +17,7 @@ import asyncio
 import logging
 from typing import Any
 
+from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
 from config.settings import (
     MEMORY_RECALL_MIN_SCORE,
     MEMORY_RECALL_TIMEOUT_MS,
@@ -269,7 +270,7 @@ def _extract_search_terms(query: str) -> str:
 async def _query_external_sources(
     query: str,
     domain: str | None = None,
-    timeout: float = 5.0,
+    timeout: float = EXTERNAL_SOURCE_QUERY_TIMEOUT,
 ) -> list[dict]:
     """Query all enabled external data sources with a hard timeout.
 

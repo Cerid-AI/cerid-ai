@@ -573,6 +573,8 @@ export function Atlas({
     typeof document !== "undefined" ? resolveMapTokens(document.documentElement) : {
       clusters: Array(8).fill("#888888") as string[], // drift-allowed: SSR fallback only
       clusterOther: "#888888", // drift-allowed: SSR fallback only
+      domains: Array(12).fill("#888888") as string[], // drift-allowed: SSR fallback only
+      domainOther: "#666666",   // drift-allowed: SSR fallback only
       edge: "#888888",          // drift-allowed: SSR fallback only
       dim: "#888888",           // drift-allowed: SSR fallback only
       interaction: "#00C8B4",   // drift-allowed: SSR fallback only
@@ -615,7 +617,7 @@ export function Atlas({
     const hopsParam = params.get("hops")
     if (lensParam) {
       const ids = lensParam.split(",").filter((id): id is LensId =>
-        ["contradiction", "open-question", "provenance", "quality"].includes(id)
+        ["contradiction", "open-question", "provenance", "quality", "domain"].includes(id)
       )
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot URL param read on mount; no subscriptions, no cascading renders
       if (ids.length) setActiveLenses(new Set(ids))

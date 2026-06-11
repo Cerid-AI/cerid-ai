@@ -96,3 +96,10 @@ if _importlib_util.find_spec("app.processor.subscribers.constellation_refresh") 
     _constellation_subscriber.register()
 else:  # pragma: no cover — subscriber package may be absent in stripped builds
     logger.info("event_hooks.constellation_refresh_subscriber_missing — graceful degradation")
+
+if _importlib_util.find_spec("app.processor.subscribers.domain_refresh") is not None:
+    from app.processor.subscribers import domain_refresh as _domain_refresh_subscriber
+
+    _domain_refresh_subscriber.register()
+else:  # pragma: no cover — subscriber package may be absent in stripped builds
+    logger.info("event_hooks.domain_refresh_subscriber_missing — graceful degradation")

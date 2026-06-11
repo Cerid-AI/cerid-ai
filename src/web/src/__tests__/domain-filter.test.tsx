@@ -49,6 +49,20 @@ describe("DomainFilter", () => {
       expect(screen.getByText(domain).className).toContain("capitalize")
     }
   })
+
+  it("inactive chips have inline domain CSS var color style", () => {
+    render(<DomainFilter activeDomains={new Set()} onToggle={vi.fn()} />)
+    // Any inactive chip should carry a style with var(--color-domain-*)
+    const badge = screen.getByText("coding")
+    expect(badge.style.color).toMatch(/var\(--color-domain-/)
+  })
+
+  it("active chips do not have the domain color inline style", () => {
+    render(<DomainFilter activeDomains={new Set(["coding"])} onToggle={vi.fn()} />)
+    const activeBadge = screen.getByText("coding")
+    // Active chips use the default Badge "default" variant styling, no inline color
+    expect(activeBadge.style.color).toBe("")
+  })
 })
 
 describe("DomainBadge", () => {
@@ -63,5 +77,19 @@ describe("DomainBadge", () => {
     render(<DomainBadge domain="coding" />)
     const badge = screen.getByText("coding")
     expect(badge).toHaveAttribute("data-variant", "outline")
+  })
+
+  it("uses token-routed inline style color (no hardcoded hex)", () => {
+    render(<DomainBadge domain="research" />)
+    const badge = screen.getByText("research")
+    // Must use CSS var, not a hardcoded class or hex
+    expect(badge.style.color).toMatch(/var\(--color-domain-/)
+  })
+
+  it("unknown runtime-minted domain gets a consistent slot color", () => {
+    render(<DomainBadge domain="canary_client_domain" />)
+    const badge = screen.getByText("canary_client_domain")
+    // Should still render with domain CSS var (hash slot)
+    expect(badge.style.color).toMatch(/var\(--color-domain-/)
   })
 })

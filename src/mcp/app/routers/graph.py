@@ -73,6 +73,7 @@ class GraphNode(BaseModel):
     trust_state: str = "unknown"  # verified / partial / unverified / contradicted / unknown
     recency_score: float = 0.0    # 0..1, recent mentions push toward 1
     focused: bool = False
+    primary_domain: str | None = None
 
 
 class GraphEdge(BaseModel):
@@ -240,6 +241,7 @@ async def _query_neighborhood(
             node.mention_count AS mention_count,
             node.trust_state AS trust_state,
             node.recency_score AS recency_score,
+            node.primary_domain AS primary_domain,
             edges_for_node AS edges
     """
 
@@ -271,6 +273,7 @@ async def _query_neighborhood(
             mention_count=_safe_int_props(row, "mention_count"),
             trust_state=row.get("trust_state") or "unknown",
             recency_score=_safe_float_props(row, "recency_score"),
+            primary_domain=row.get("primary_domain"),
         ))
         for e in row.get("edges") or []:
             src = e.get("from")
@@ -636,6 +639,7 @@ class EntityEmbedding3D(BaseModel):
     mention_count: int = 0
     trust_state: str = "unknown"
     projection: str = "fallback"  # "umap" or "fallback" (pre-backfill)
+    primary_domain: str | None = None
 
 
 class Embeddings3DResponse(BaseModel):
@@ -651,16 +655,16 @@ class Embeddings3DResponse(BaseModel):
 
 
 def _embeddings_3d_cache_key(filter_str: str, entities_csv: str) -> str:
-    # v2 suffix: payload gained `links` — versioning the key prevents serving
-    # a cached pre-links payload. The shared bust pattern cerid:graph:emb3d:*
-    # still matches.
+    # v3 suffix: payload gained `primary_domain` (Cycle 1 domain backbone) —
+    # versioning prevents a Domain lens showing all-"other" silently for 24 h.
+    # The shared bust pattern cerid:graph:emb3d:* still matches.
     if filter_str or entities_csv:
         h = hashlib.sha1(  # noqa: S324
             f"{filter_str}|{entities_csv}".encode("utf-8"),
             usedforsecurity=False,
         ).hexdigest()[:12]
-        return f"cerid:graph:emb3d:v2:{h}"
-    return "cerid:graph:emb3d:v2:all"
+        return f"cerid:graph:emb3d:v3:{h}"
+    return "cerid:graph:emb3d:v3:all"
 
 
 @router.get("/embeddings/3d", response_model=Embeddings3DResponse)
@@ -721,6 +725,7 @@ async def get_embeddings_3d(
             mention_count=int(r.get("mention_count") or 0),
             trust_state=r.get("trust_state") or "unknown",
             projection=r.get("method") or "fallback",
+            primary_domain=r.get("primary_domain"),
         )
         for r in rows
     ]
@@ -837,7 +842,8 @@ async def _query_embeddings_3d(
             e.umap_y AS y,
             e.umap_z AS z,
             coalesce(e.umap_method, 'fallback') AS method,
-            e.umap_computed_at AS computed_at
+            e.umap_computed_at AS computed_at,
+            e.primary_domain AS primary_domain
         LIMIT $max_entities
     """
 
@@ -861,7 +867,7 @@ async def _query_embeddings_3d(
 # ---------------------------------------------------------------------------
 
 _COMMUNITY_MAP_REDIS_KEY = "cerid:graph:map:communities"
-_GRAPH_MAP_CACHE_KEY = "cerid:graph:emb3d:v2:map"
+_GRAPH_MAP_CACHE_KEY = "cerid:graph:emb3d:v3:map"
 
 
 class MapCommunity(BaseModel):
@@ -943,6 +949,7 @@ async def get_graph_map() -> GraphMapResponse:
             mention_count=int(r.get("mention_count") or 0),
             trust_state=r.get("trust_state") or "unknown",
             projection=r.get("method") or "fallback",
+            primary_domain=r.get("primary_domain"),
         )
         for r in rows
     ]
@@ -1022,9 +1029,10 @@ class StrataCommunity(BaseModel):
 
 
 class StrataSeriesRow(BaseModel):
-    """Per-(community, entity_type) mention buckets aligned to bucket_dates."""
+    """Per-(community, entity_type, domain) mention buckets aligned to bucket_dates."""
     community_id: str
     entity_type: str
+    domain: str
     buckets: list[int]
     unverified_buckets: list[int]
 
@@ -1040,6 +1048,7 @@ class StrataTrack(BaseModel):
     rank: int
     total_mentions: int
     buckets: list[int]
+    primary_domain: str | None = None
 
 
 class StrataMarker(BaseModel):
@@ -1287,12 +1296,14 @@ async def get_timeline_strata(
         RETURN
             coalesce(e.community_id, '__null__') AS community_id,
             coalesce(e.entity_type, e.type, 'unknown') AS entity_type,
+            coalesce(e.primary_domain, 'other') AS domain,
             m.created_at AS ts,
             coalesce(e.trust_state, 'unknown') AS trust_state,
             e.canonical_id AS canonical_id,
             coalesce(e.name, e.canonical_id) AS name,
             coalesce(e.mention_count, 0) AS mention_count,
-            e.created_at AS entity_created_at
+            e.created_at AS entity_created_at,
+            e.primary_domain AS primary_domain
     """
     try:
         rows = await asyncio.to_thread(
@@ -1313,9 +1324,9 @@ async def get_timeline_strata(
     bucket_index: dict[str, int] = {d: i for i, d in enumerate(bucket_dates)}
     n_buckets = len(bucket_dates)
 
-    # Accumulate per-(community, entity_type) buckets
+    # Accumulate per-(community, entity_type, domain) buckets
     # key → {"buckets": [int], "unverified_buckets": [int]}
-    series_acc: dict[tuple[str, str], dict[str, list[int]]] = {}
+    series_acc: dict[tuple[str, str, str], dict[str, list[int]]] = {}
     # per-community total mentions (for top-8 selection)
     community_total: dict[str, int] = {}
     # per-entity accumulation for DOI + track buckets
@@ -1331,19 +1342,21 @@ async def get_timeline_strata(
         cid_raw = str(row.get("community_id") or "__null__")
         cid = cid_raw if cid_raw != "__null__" else "other"
         etype = str(row.get("entity_type") or "unknown")
+        domain = str(row.get("domain") or "other")
         ts = str(row.get("ts") or "")
         trust = str(row.get("trust_state") or "unknown")
         canon = str(row.get("canonical_id") or "")
         name = str(row.get("name") or canon)
         entity_created_at = str(row.get("entity_created_at") or "")
+        primary_domain_val = row.get("primary_domain")
 
         bkey = _bucket_key(ts, gran)
         bidx = bucket_index.get(bkey, -1)
         if bidx < 0:
             continue
 
-        # Series accumulation
-        sk = (cid, etype)
+        # Series accumulation — key now includes domain
+        sk = (cid, etype, domain)
         if sk not in series_acc:
             series_acc[sk] = {
                 "buckets": [0] * n_buckets,
@@ -1368,6 +1381,7 @@ async def get_timeline_strata(
                     "community_id": cid,
                     "trust_state": trust,
                     "first_seen": entity_created_at,
+                    "primary_domain": primary_domain_val,
                     "buckets": [0] * n_buckets,
                     "total": 0,
                     "last_bucket_idx": 0,
@@ -1397,10 +1411,10 @@ async def get_timeline_strata(
         top_comm_set.add("other")
 
     # Remap series rows for communities outside top-8 → "other"
-    remapped_series: dict[tuple[str, str], dict[str, list[int]]] = {}
-    for (cid, etype), acc in series_acc.items():
+    remapped_series: dict[tuple[str, str, str], dict[str, list[int]]] = {}
+    for (cid, etype, domain), acc in series_acc.items():
         target_cid = cid if cid in top_comm_set else "other"
-        sk = (target_cid, etype)
+        sk = (target_cid, etype, domain)
         if sk not in remapped_series:
             remapped_series[sk] = {
                 "buckets": [0] * n_buckets,
@@ -1449,10 +1463,11 @@ async def get_timeline_strata(
         StrataSeriesRow(
             community_id=cid,
             entity_type=etype,
+            domain=domain,
             buckets=acc["buckets"],
             unverified_buckets=acc["unverified_buckets"],
         )
-        for (cid, etype), acc in remapped_series.items()
+        for (cid, etype, domain), acc in remapped_series.items()
         if cid in top_comm_set
     ]
 
@@ -1481,6 +1496,7 @@ async def get_timeline_strata(
             rank=rank,
             total_mentions=ea["total"],
             buckets=ea["buckets"],
+            primary_domain=ea.get("primary_domain"),
         ))
 
     # ── Markers ───────────────────────────────────────────────────────────────
@@ -1675,3 +1691,94 @@ async def get_timeline_track(
             )
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# Domain aggregate endpoint (Cycle 1 domain backbone)
+# ---------------------------------------------------------------------------
+
+
+class DomainSubCategory(BaseModel):
+    """One sub-category row in the /graph/domains response."""
+    name: str
+    artifact_count: int
+    entity_count: int
+
+
+class DomainSummary(BaseModel):
+    """Per-domain aggregate for /graph/domains."""
+    name: str
+    icon: str | None = None
+    description: str | None = None
+    in_taxonomy: bool = False
+    artifact_count: int = 0
+    entity_count: int = 0
+    sub_categories: list[DomainSubCategory] = []
+
+
+class DomainsResponse(BaseModel):
+    """Shape returned by GET /graph/domains.
+
+    ``derived_at: null`` means DeriveDomainsJob has never run — every
+    frontend surface keys its degraded state on this signal.
+    """
+    domains: list[DomainSummary]
+    uncategorized_entities: int
+    derived_at: str | None
+
+
+@router.get("/domains", response_model=DomainsResponse)
+async def get_domains() -> DomainsResponse:
+    """Per-domain entity/artifact counts — the taxonomy-aware spine endpoint.
+
+    Sorted by entity_count desc. ``derived_at: null`` signals that the
+    DeriveDomainsJob has never run; frontend surfaces use this to render
+    byte-identical degraded states rather than erroring.
+
+    No Redis cache in v1 — two indexed aggregates run in single-digit ms
+    at live scale.  Add one if it ever shows in traces.
+    """
+    _empty = DomainsResponse(domains=[], uncategorized_entities=0, derived_at=None)
+
+    try:
+        driver = get_neo4j()
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.domains_neo4j_unavailable", exc)
+        return _empty
+
+    if driver is None:
+        return _empty
+
+    from app.db.neo4j.taxonomy import get_domain_counts  # noqa: PLC0415
+
+    try:
+        raw = await asyncio.to_thread(get_domain_counts, driver)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.domains_query", exc)
+        return _empty
+
+    domains_out: list[DomainSummary] = []
+    for d in raw.get("domains") or []:
+        sub_cats = [
+            DomainSubCategory(
+                name=sc["name"],
+                artifact_count=int(sc.get("artifact_count") or 0),
+                entity_count=int(sc.get("entity_count") or 0),
+            )
+            for sc in (d.get("sub_categories") or [])
+        ]
+        domains_out.append(DomainSummary(
+            name=d["name"],
+            icon=d.get("icon"),
+            description=d.get("description"),
+            in_taxonomy=bool(d.get("in_taxonomy")),
+            artifact_count=int(d.get("artifact_count") or 0),
+            entity_count=int(d.get("entity_count") or 0),
+            sub_categories=sub_cats,
+        ))
+
+    return DomainsResponse(
+        domains=domains_out,
+        uncategorized_entities=int(raw.get("uncategorized_entities") or 0),
+        derived_at=raw.get("derived_at"),
+    )

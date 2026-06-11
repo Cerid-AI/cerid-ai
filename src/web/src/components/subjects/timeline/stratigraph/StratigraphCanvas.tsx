@@ -28,12 +28,15 @@ import { timeDay, timeWeek, timeMonth } from "d3-time"
 import { timeFormat } from "d3-time-format"
 
 import type { MapTokens } from "@/components/subjects/constellation/map/community-layer"
+import { domainIcon } from "@/lib/graph/domain-icons"
+import { titleCase } from "@/lib/graph/domain-icons"
 import {
   computeStrata,
   computeLOD,
   clusterMarkers,
   bucketTrustSuffix,
   computeTypeLensStrata,
+  computeDomainLensStrata,
   type StratumLayout,
   type LODLevel,
 } from "./strata-layout"
@@ -43,7 +46,7 @@ import type { TimelineStrataResponse, TrackEvent } from "@/lib/api/graph"
 // Types
 // ---------------------------------------------------------------------------
 
-export type TimelineLens = "cluster" | "trust" | "type"
+export type TimelineLens = "cluster" | "trust" | "type" | "domain"
 
 export interface PinnedTrack {
   canonicalId: string
@@ -167,6 +170,7 @@ export function StratigraphCanvas({
 
   // Hover/tooltip state
   const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string } | null>(null)
+  const [legendStrata, setLegendStrata] = useState<StratumLayout[]>([])
 
   // Aria live region for bucket announcements
   const ariaLiveRef = useRef<HTMLSpanElement>(null)
@@ -232,6 +236,8 @@ export function StratigraphCanvas({
 
     if (lens === "type") {
       strataRef.current = computeTypeLensStrata(data, canvasH, trackBudget, pinnedIds)
+    } else if (lens === "domain") {
+      strataRef.current = computeDomainLensStrata(data, canvasH, trackBudget, pinnedIds)
     } else {
       const result = computeStrata({
         response: data,
@@ -246,6 +252,7 @@ export function StratigraphCanvas({
     markersRef.current = clusterMarkers(data.markers, data.from_date, data.to_date)
     dirtyRef.current = true
     qtRef.current = null // force quadtree rebuild
+    setLegendStrata(lens === "domain" ? strataRef.current : [])
   }, [data, lens, typeFilter, pinnedIds, frozenOrder, trackBudget, dims.h])
 
   // LOD crossfade trigger
@@ -425,10 +432,11 @@ export function StratigraphCanvas({
       const topY = AXIS_H + st.topPx
       const botY = topY + st.heightPx
 
-      // Base stratum color
-      const clusterColor = st.colorSlot < 0
-        ? tokens.clusterOther
-        : (tokens.clusters[st.colorSlot] ?? tokens.clusterOther)
+      // Base stratum color — colorFamily discriminator routes to domains or clusters palette.
+      // colorSlot === -1 sentinel maps to the respective *Other token.
+      const clusterColor = st.colorFamily === "domain"
+        ? (st.colorSlot < 0 ? tokens.domainOther : (tokens.domains[st.colorSlot] ?? tokens.domainOther))
+        : (st.colorSlot < 0 ? tokens.clusterOther : (tokens.clusters[st.colorSlot] ?? tokens.clusterOther))
 
       // Smoothed deposition band — one continuous filled path per stratum
       // (geological continuity: a centered moving average softens bucket
@@ -1048,6 +1056,36 @@ export function StratigraphCanvas({
           aria-hidden="true"
         />
       </div>
+
+      {/* Domain lens legend strip — icon + Title-cased label + hue chip; shown only when domain lens is active */}
+      {lens === "domain" && legendStrata.length > 0 && (
+        <div
+          className="pointer-events-none absolute right-2 top-2 z-20 flex flex-col gap-0.5 rounded-md border border-border/40 bg-card/90 px-2 py-1.5 backdrop-blur"
+          aria-label="Domain lens legend"
+          role="list"
+        >
+          {legendStrata.map((st, idx) => {
+            const color = st.colorFamily === "domain"
+              ? (st.colorSlot < 0 ? tokens.domainOther : (tokens.domains[st.colorSlot] ?? tokens.domainOther))
+              : (st.colorSlot < 0 ? tokens.clusterOther : (tokens.clusters[st.colorSlot] ?? tokens.clusterOther))
+            const DomainIconComponent = domainIcon(null) // File fallback — icon names come from /graph/domains, not available here
+            const displayLabel = st.isOther
+              ? st.label  // "Other (N domains)" — already labeled by computeDomainLensStrata
+              : titleCase(st.label)
+            return (
+              <div key={idx} className="flex items-center gap-1.5" role="listitem">
+                <DomainIconComponent className="h-2.5 w-2.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="text-label-xxs text-muted-foreground">{displayLabel}</span>
+                <span
+                  className="ml-auto h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: color }} // drift-allowed: runtime-resolved token hex
+                  aria-hidden="true"
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Tooltip */}
       {tooltip && (

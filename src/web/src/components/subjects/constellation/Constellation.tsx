@@ -8,7 +8,7 @@
 // View mode persists in localStorage "cerid-constellation-mode", default "map".
 // Both modes share the same server x/y layout so the mental map is stable.
 
-import { Suspense, lazy, useCallback, useMemo, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrbitControls, Stars } from "@react-three/drei"
 import { useQuery } from "@tanstack/react-query"
@@ -20,12 +20,13 @@ import { HubLabels } from "./hub-labels"
 import { AmbientParticles } from "./ambient-particles"
 import { TourCameraAnimator, TourControlPanel, useTourState } from "./tour-controller"
 import { QUALITY_SETTINGS, QUALITY_TIERS, loadQuality, saveQuality, type QualityTier } from "./quality"
-import { communityRgb, trustRgb, typeRgb } from "./palette"
+import { communityRgb, trustRgb, typeRgb, domainRgb } from "./palette"
 import { CartographerMap } from "./map/CartographerMap"
 import { useGraphMap } from "./map/use-graph-map"
 import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
 import type { CommunityHull } from "@/lib/api/graph-map"
 import { useNavigation } from "@/contexts/navigation-context"
+import { resolveMapTokens, type MapTokens } from "./map/community-layer"
 
 // ---------------------------------------------------------------------------
 // View-mode persistence
@@ -52,11 +53,12 @@ function saveViewMode(mode: ViewMode): void {
   }
 }
 
-type ColorLens = "cluster" | "trust" | "type"
+type ColorLens = "cluster" | "trust" | "type" | "domain"
 const COLOR_LENSES: { id: ColorLens; label: string; hint: string }[] = [
   { id: "cluster", label: "Clusters", hint: "Color by knowledge community" },
   { id: "trust", label: "Trust", hint: "Verification bands: green verified · amber partial · red unverified" },
   { id: "type", label: "Types", hint: "Color by entity type" },
+  { id: "domain", label: "Domains", hint: "Color by primary knowledge domain (hash-stable; icon + label identify collisions)" },
 ]
 
 // Postprocessing only loads for Ultra — nobody else pays for the bundle.
@@ -260,6 +262,37 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     return arr
   }, [neighbors, data?.entities.length])
 
+  // Resolved tokens for the domain lens 3D path (domainRgb needs hex resolved from CSS vars).
+  // Lazy-init from DOM; re-resolves on theme change (same pattern as CartographerMap/Atlas).
+  const [tokens3D, setTokens3D] = useState<MapTokens>(() =>
+    typeof document !== "undefined" ? resolveMapTokens(document.documentElement) : {
+      clusters: Array(8).fill("#888888") as string[], // drift-allowed: SSR fallback only
+      clusterOther: "#888888", // drift-allowed: SSR fallback only
+      domains: Array(12).fill("#888888") as string[], // drift-allowed: SSR fallback only
+      domainOther: "#666666", // drift-allowed: SSR fallback only
+      edge: "#888888", // drift-allowed: SSR fallback only
+      dim: "#888888", // drift-allowed: SSR fallback only
+      interaction: "#00C8B4", // drift-allowed: SSR fallback only
+      foreground: "#111111", // drift-allowed: SSR fallback only
+      background: "#f5f5f5", // drift-allowed: SSR fallback only
+      trustVerified: "#555555", // drift-allowed: SSR fallback only
+      trustPartial: "#777777", // drift-allowed: SSR fallback only
+      trustUnverified: "#999999", // drift-allowed: SSR fallback only
+      grid: "#eeeeee", // drift-allowed: SSR fallback only
+    }
+  )
+
+  // Re-resolve domain tokens when theme changes (3D mode only — map mode
+  // has its own token observer inside CartographerMap/Atlas).
+  useEffect(() => {
+    if (viewMode !== "3d") return
+    const observer = new MutationObserver(() => {
+      setTokens3D(resolveMapTokens(document.documentElement))
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    return () => observer.disconnect()
+  }, [viewMode])
+
   // --- Exploration tools: lens recoloring, type filter, pin-to-focus ---
   const [lens, setLens] = useState<ColorLens>("cluster")
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
@@ -277,7 +310,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   }, [viewMode, mapData?.entities, data?.entities])
 
   // Lens colors: cluster = community palette, trust = verification bands,
-  // type = per-type hue. One Float32Array upload, GPU does the rest.
+  // type = per-type hue, domain = token-routed domain hue (first token-derived
+  // 3D color — sets the Cycle-4 precedent for demoting COMMUNITY_PALETTE_RGB).
+  // One Float32Array upload, GPU does the rest.
   const nodeColors = useMemo(() => {
     const ents = data?.entities ?? []
     const arr = new Float32Array(ents.length * 3)
@@ -286,11 +321,15 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
         ? trustRgb(ents[i].trust_state)
         : lens === "type"
           ? typeRgb(ents[i].type)
-          : communityRgb(ents[i].community)
+          : lens === "domain"
+            ? domainRgb(tokens3D, ents[i].primary_domain ?? null)
+            : communityRgb(ents[i].community)
       arr[i * 3] = rgb[0]; arr[i * 3 + 1] = rgb[1]; arr[i * 3 + 2] = rgb[2]
     }
     return arr
-  }, [data?.entities, lens])
+  // tokens3D is included so theme swaps re-derive colors for the domain lens.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.entities, lens, tokens3D])
 
   // Type filter fades (not hides) non-matching nodes — fade keeps the
   // structural context visible (yWorks KG-demo pattern).

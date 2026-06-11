@@ -35,6 +35,11 @@ export interface MapTokens {
   /** CSS color string for cluster hue 0..7 + "other" */
   clusters: string[]
   clusterOther: string
+  /** CSS color strings for domain hue 0..11 (resolved OKLCH→hex via canvas readback).
+   *  DOM surfaces use var(--color-domain-N) directly; only sigma/canvas/WebGL paths
+   *  go through resolveMapTokens(). Non-optional: TS structural typing guards stubs. */
+  domains: string[]
+  domainOther: string
   edge: string
   dim: string
   interaction: string
@@ -86,6 +91,10 @@ export function resolveMapTokens(root: Element): MapTokens {
       get(`--color-map-cluster-${i}`)
     ),
     clusterOther: get("--color-map-cluster-other"),
+    domains: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) =>
+      get(`--color-domain-${i}`)
+    ),
+    domainOther: get("--color-domain-other"),
     edge: get("--color-map-edge"),
     dim: get("--color-map-dim"),
     interaction: get("--color-map-interaction"),

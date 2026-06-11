@@ -2,11 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge } from "@/components/ui/badge"
-import { DOMAIN_BADGE_COLORS } from "@/lib/constants"
+import { domainSlot } from "@/lib/graph/identity"
 
 export function DomainBadge({ domain }: { domain: string }) {
+  const slot = domainSlot(domain)
   return (
-    <Badge variant="outline" className={`text-xs capitalize ${DOMAIN_BADGE_COLORS[domain] ?? "bg-zinc-500/20 text-zinc-400"}`}>
+    <Badge
+      variant="outline"
+      className="text-xs capitalize"
+      style={{
+        color: `var(--color-domain-${slot})`, // drift-allowed: runtime-derived token slot; cannot be a static Tailwind class
+        backgroundColor: `color-mix(in oklab, var(--color-domain-${slot}) 14%, transparent)`, // drift-allowed: runtime-derived token slot
+      }}
+    >
       {domain}
     </Badge>
   )

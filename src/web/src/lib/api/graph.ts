@@ -99,6 +99,8 @@ export interface StrataCommunity {
 export interface StrataSeries {
   community_id: string
   entity_type: string
+  /** Primary domain of the entity — coalesced to "other" server-side when null */
+  domain: string
   buckets: number[]
   /** Per-bucket count of unverified-trust entity mentions (amendment 1) */
   unverified_buckets?: number[]
@@ -114,6 +116,8 @@ export interface StrataTrack {
   rank: number
   total_mentions: number
   buckets: number[]
+  /** Primary domain of the entity; null when derivation has not yet run */
+  primary_domain?: string | null
 }
 
 export interface StrataMarker {

@@ -14,6 +14,146 @@ from core.utils.time import utcnow_iso
 logger = logging.getLogger("ai-companion.graph")
 
 
+def get_domain_counts(driver) -> dict[str, Any]:
+    """Aggregate per-domain entity/artifact counts for GET /graph/domains.
+
+    Returns a dict with:
+        domains: list[{name, icon, description, in_taxonomy,
+                        artifact_count, entity_count, sub_categories}]
+            sub_categories: list[{name, artifact_count, entity_count}]
+        uncategorized_entities: int  (orphans — no primary_domain set)
+        derived_at: str | None       (max(e.domains_updated_at); None = job never ran)
+
+    Domains with 0 entity_count are still included (artifacts exist but
+    derivation hasn't run yet or all entities are orphans).
+    Sorted by entity_count desc.
+    """
+    domains: dict[str, dict[str, Any]] = {}
+    sub_entity_counts: dict[str, dict[str, int]] = {}
+
+    with driver.session() as session:
+        # 1. All Domain nodes with their artifact counts + taxonomy presence
+        result = session.run(
+            "MATCH (d:Domain) "
+            "OPTIONAL MATCH (a:Artifact)-[:BELONGS_TO]->(d) "
+            "RETURN d.name AS name, d.description AS description, "
+            "d.icon AS icon, count(a) AS artifact_count "
+            "ORDER BY d.name"
+        )
+        for record in result:
+            name = record["name"]
+            domains[name] = {
+                "name": name,
+                "icon": record["icon"],
+                "description": record["description"],
+                "in_taxonomy": False,  # set below via TAXONOMY config
+                "artifact_count": record["artifact_count"],
+                "entity_count": 0,
+                "sub_categories": [],
+            }
+
+        # 2. Mark taxonomy membership
+        try:
+            from config.taxonomy import TAXONOMY  # noqa: PLC0415
+
+            for d_name in domains:
+                if d_name in TAXONOMY:
+                    domains[d_name]["in_taxonomy"] = True
+        except Exception:  # noqa: BLE001 — degradable
+            pass
+
+        # 3. Entity counts per primary_domain (uses entity_primary_domain_idx)
+        result = session.run(
+            "MATCH (e:Entity) "
+            "WHERE e.primary_domain IS NOT NULL "
+            "RETURN e.primary_domain AS domain, count(e) AS entity_count"
+        )
+        for record in result:
+            d_name = record["domain"]
+            if d_name not in domains:
+                # Runtime-minted domain not in Domain nodes yet; create a stub
+                domains[d_name] = {
+                    "name": d_name,
+                    "icon": None,
+                    "description": None,
+                    "in_taxonomy": False,
+                    "artifact_count": 0,
+                    "entity_count": 0,
+                    "sub_categories": [],
+                }
+            domains[d_name]["entity_count"] = record["entity_count"]
+
+        # 4. Uncategorized entities (orphans)
+        result = session.run(
+            "MATCH (e:Entity) WHERE e.primary_domain IS NULL RETURN count(e) AS cnt"
+        )
+        row = result.single()
+        uncategorized_entities = int(row["cnt"]) if row else 0
+
+        # 5. derived_at: max of all domains_updated_at
+        result = session.run(
+            "MATCH (e:Entity) WHERE e.domains_updated_at IS NOT NULL "
+            "RETURN max(e.domains_updated_at) AS derived_at"
+        )
+        row = result.single()
+        derived_at_raw = row["derived_at"] if row else None
+        derived_at = str(derived_at_raw) if derived_at_raw is not None else None
+
+        # 6. SubCategory artifact + entity counts
+        result = session.run(
+            "MATCH (sc:SubCategory)-[:BELONGS_TO]->(d:Domain) "
+            "OPTIONAL MATCH (a:Artifact)-[:CATEGORIZED_AS]->(sc) "
+            "RETURN sc.label AS label, d.name AS domain, count(a) AS artifact_count "
+            "ORDER BY d.name, sc.label"
+        )
+        sub_artifact_counts: dict[str, dict[str, int]] = {}
+        for record in result:
+            d_name = record["domain"]
+            sub_name = record["label"]
+            if d_name not in sub_artifact_counts:
+                sub_artifact_counts[d_name] = {}
+            sub_artifact_counts[d_name][sub_name] = record["artifact_count"]
+
+        # Entity counts per (primary_domain, primary_subcategory)
+        result = session.run(
+            "MATCH (e:Entity) "
+            "WHERE e.primary_domain IS NOT NULL AND e.primary_subcategory IS NOT NULL "
+            "RETURN e.primary_domain AS domain, e.primary_subcategory AS sub, "
+            "count(e) AS entity_count"
+        )
+        for record in result:
+            d_name = record["domain"]
+            sub_name = record["sub"]
+            if d_name not in sub_entity_counts:
+                sub_entity_counts[d_name] = {}
+            sub_entity_counts[d_name][sub_name] = record["entity_count"]
+
+        # Assemble sub_categories
+        for d_name, d_data in domains.items():
+            subs = sub_artifact_counts.get(d_name, {})
+            e_subs = sub_entity_counts.get(d_name, {})
+            d_data["sub_categories"] = [
+                {
+                    "name": sub,
+                    "artifact_count": a_cnt,
+                    "entity_count": e_subs.get(sub, 0),
+                }
+                for sub, a_cnt in sorted(subs.items())
+            ]
+
+    # Sort by entity_count desc
+    sorted_domains = sorted(
+        domains.values(),
+        key=lambda d: (-d["entity_count"], d["name"]),
+    )
+
+    return {
+        "domains": sorted_domains,
+        "uncategorized_entities": uncategorized_entities,
+        "derived_at": derived_at,
+    }
+
+
 def get_taxonomy(driver) -> dict[str, Any]:
     """Return the full taxonomy tree from Neo4j (domains, sub-categories, tags)."""
     domains: dict[str, Any] = {}

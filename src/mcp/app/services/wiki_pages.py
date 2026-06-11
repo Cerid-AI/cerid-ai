@@ -125,6 +125,7 @@ class EntitySummary(BaseModel):
     recent_activity_score: int
     summary: str | None = None
     summary_updated_at: str | None = None
+    primary_domain: str | None = None
 
 
 class EpisodicMemoryItem(BaseModel):
@@ -172,6 +173,10 @@ class WikiEntityPage(BaseModel):
     community_id: str | None = None
     community_label: str | None = None
     mention_count: int = 0
+    # Domain backbone fields (Cycle 1)
+    primary_domain: str | None = None
+    domain_mix: dict[str, int] | None = None
+    primary_subcategory: str | None = None
     summary: str | None = None
     related_entities: list[RelatedEntity] = []
     source_artifacts: list[SourceCitation] = []
@@ -221,6 +226,7 @@ async def list_entities(
                     recent_activity_score=int(r.get("recent_activity_score", 0)),
                     summary=r.get("summary"),
                     summary_updated_at=r.get("summary_updated_at"),
+                    primary_domain=r.get("primary_domain"),
                 )
             )
         except Exception as exc:
@@ -353,6 +359,19 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         _resolve_community_label, neo4j_driver, raw.get("community_id")
     )
 
+    # Domain backbone fields — parse domain_mix JSON string → dict
+    primary_domain: str | None = raw.get("primary_domain")
+    raw_domain_mix = raw.get("domain_mix")
+    domain_mix: dict[str, int] | None = None
+    if raw_domain_mix:
+        try:
+            parsed = json.loads(raw_domain_mix) if isinstance(raw_domain_mix, str) else raw_domain_mix
+            if isinstance(parsed, dict):
+                domain_mix = {str(k): int(v) for k, v in parsed.items()}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            domain_mix = None
+    primary_subcategory: str | None = raw.get("primary_subcategory")
+
     return WikiEntityPage(
         slug=slug,
         name=raw.get("name", ""),
@@ -360,6 +379,9 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         community_id=raw.get("community_id"),
         community_label=community_label,
         mention_count=int(raw.get("mention_count") or 0),
+        primary_domain=primary_domain,
+        domain_mix=domain_mix,
+        primary_subcategory=primary_subcategory,
         summary=raw.get("summary"),
         related_entities=related,
         source_artifacts=source_artifacts,

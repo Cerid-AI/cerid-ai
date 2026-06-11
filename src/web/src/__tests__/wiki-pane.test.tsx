@@ -49,6 +49,7 @@ function makeEntitySummary(overrides: Partial<EntitySummary> = {}): EntitySummar
     related_count: 12,
     recent_activity_score: 90,
     last_updated_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+    primary_domain: null,
     ...overrides,
   }
 }

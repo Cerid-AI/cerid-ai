@@ -167,7 +167,8 @@ def list_top_entities(
                     coalesce(e.mention_count, 0) AS mention_count,
                     recent_activity_score,
                     e.summary             AS summary,
-                    e.summary_updated_at  AS summary_updated_at
+                    e.summary_updated_at  AS summary_updated_at,
+                    e.primary_domain      AS primary_domain
                 ORDER BY recent_activity_score DESC, mention_count DESC
                 LIMIT $limit
                 """,
@@ -212,7 +213,10 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                     e.community_id        AS community_id,
                     e.summary             AS summary,
                     e.summary_updated_at  AS summary_updated_at,
-                    e.updated_at          AS updated_at
+                    e.updated_at          AS updated_at,
+                    e.primary_domain      AS primary_domain,
+                    e.domain_mix          AS domain_mix,
+                    e.primary_subcategory AS primary_subcategory
                 LIMIT 1
                 """,
                 slug=slug,

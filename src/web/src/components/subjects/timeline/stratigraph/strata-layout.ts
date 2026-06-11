@@ -11,6 +11,7 @@ import type {
   StrataSeries,
   StrataMarker,
 } from "@/lib/api/graph"
+import { domainSlot } from "@/lib/graph/identity"
 
 // ---------------------------------------------------------------------------
 // Types the canvas layer consumes
@@ -28,6 +29,11 @@ export interface StratumLayout {
   communityId: string
   label: string
   colorSlot: number
+  /** Which token palette the colorSlot indexes into.
+   *  "cluster" → tokens.clusters / tokens.clusterOther  (default, -1 sentinel)
+   *  "domain"  → tokens.domains  / tokens.domainOther   (-1 sentinel)
+   */
+  colorFamily: "cluster" | "domain"
   /** Stacked height in pixels from the assigned baseline */
   heightPx: number
   /** Y offset of the top edge in canvas pixels */
@@ -213,6 +219,7 @@ export function computeTypeLensStrata(
       communityId: `__type__${type}`,
       label: type,
       colorSlot: idx % 8,
+      colorFamily: "cluster",
       heightPx,
       topPx: cursor,
       trustMix: { verified: 0, partial: 0, unverified: 0 },
@@ -238,6 +245,142 @@ function allocateTracksForType(
   const candidates = tracks.filter((t) => t.entity_type === entityType)
   candidates.sort((a, b) => trackDOI(b, bucketDates, pinnedIds) - trackDOI(a, bucketDates, pinnedIds))
   return candidates.slice(0, budget).map((t) => t.canonical_id)
+}
+
+export function allocateTracksForDomain(
+  tracks: StrataTrack[],
+  domain: string,
+  budget: number,
+  bucketDates: string[],
+  pinnedIds: Set<string>,
+): string[] {
+  const candidates = tracks.filter((t) => (t.primary_domain ?? "other") === domain)
+  candidates.sort((a, b) => trackDOI(b, bucketDates, pinnedIds) - trackDOI(a, bucketDates, pinnedIds))
+  return candidates.slice(0, budget).map((t) => t.canonical_id)
+}
+
+/**
+ * Re-partition strata by primary domain instead of community.
+ *
+ * Lane cap: 8 named domains by mention volume + 1 labeled "Other (N domains)"
+ * overflow lane. colorSlot = domainSlot(name) — never positional index.
+ * colorFamily = "domain" so StratigraphCanvas routes to tokens.domains.
+ *
+ * Pre-job degraded state: series.domain is "other" for all rows (server
+ * coalesces null → "other") → single "Other" lane renders headerless on the
+ * canvas, identical to today's appearance.
+ */
+export function computeDomainLensStrata(
+  response: TimelineStrataResponse,
+  canvasHeight: number,
+  trackBudget: number,
+  pinnedIds: Set<string>,
+): StratumLayout[] {
+  const bucketCount = response.bucket_dates.length
+  const domainMap = new Map<string, { buckets: number[]; unverifiedBuckets: Set<number>; mentions: number }>()
+
+  for (const s of response.series) {
+    const domain = s.domain ?? "other"
+    if (!domainMap.has(domain)) {
+      domainMap.set(domain, { buckets: new Array(bucketCount).fill(0), unverifiedBuckets: new Set(), mentions: 0 })
+    }
+    const entry = domainMap.get(domain)!
+    for (let i = 0; i < bucketCount; i++) {
+      entry.buckets[i] += s.buckets[i] ?? 0
+      if (s.unverified_buckets?.[i]) entry.unverifiedBuckets.add(i)
+    }
+    entry.mentions += s.buckets.reduce((a, b) => a + b, 0)
+  }
+
+  if (domainMap.size === 0) return []
+
+  const allDomains = [...domainMap.entries()]
+    .sort((a, b) => b[1].mentions - a[1].mentions)
+
+  // Cap at 8 named lanes; remainder folds into labeled Other overflow lane
+  const DOMAIN_LANE_CAP = 8
+  const named = allDomains.filter(([d]) => d !== "other")
+  const other = domainMap.get("other")
+
+  const topNamed = named.slice(0, DOMAIN_LANE_CAP)
+  const overflowNamed = named.slice(DOMAIN_LANE_CAP)
+
+  // Build the overflow "Other (N domains)" lane by merging overflowNamed + server "other"
+  const overflowCount = overflowNamed.length + (other ? 1 : 0)
+  const overflowBuckets: number[] = new Array(bucketCount).fill(0)
+  const overflowUnverified = new Set<number>()
+  let overflowMentions = 0
+
+  for (const [, data] of overflowNamed) {
+    for (let i = 0; i < bucketCount; i++) overflowBuckets[i] += data.buckets[i] ?? 0
+    for (const bi of data.unverifiedBuckets) overflowUnverified.add(bi)
+    overflowMentions += data.mentions
+  }
+  if (other) {
+    for (let i = 0; i < bucketCount; i++) overflowBuckets[i] += other.buckets[i] ?? 0
+    for (const bi of other.unverifiedBuckets) overflowUnverified.add(bi)
+    overflowMentions += other.mentions
+  }
+
+  const laneCount = topNamed.length + (overflowMentions > 0 ? 1 : 0)
+  if (laneCount === 0) return []
+
+  const totalMentions = topNamed.reduce((s, [, v]) => s + v.mentions, 0) + overflowMentions
+  const MAX_STRATUM_PX = Math.floor(canvasHeight * 0.9)
+  const sqrtMax = Math.sqrt(Math.max(1, totalMentions))
+
+  let cursor = 0
+  const strata: StratumLayout[] = []
+
+  for (const [domain, data] of topNamed) {
+    const sqrt = Math.sqrt(Math.max(1, data.mentions))
+    const heightPx = Math.max(2, Math.round((sqrt / sqrtMax) * (MAX_STRATUM_PX / laneCount) * 3))
+
+    strata.push({
+      communityId: `__domain__${domain}`,
+      label: domain,
+      // colorSlot = domain hash — stable, never positional
+      colorSlot: domainSlot(domain),
+      colorFamily: "domain",
+      heightPx,
+      topPx: cursor,
+      trustMix: { verified: 0, partial: 0, unverified: 0 },
+      totalMentions: data.mentions,
+      isOther: false,
+      bucketHeights: computeBucketHeights(data.buckets, heightPx),
+      bucketCounts: data.buckets,
+      unverifiedBuckets: data.unverifiedBuckets,
+      trackIds: allocateTracksForDomain(response.tracks, domain, trackBudget, response.bucket_dates, pinnedIds),
+    })
+    cursor += heightPx + 1
+  }
+
+  // Labeled overflow lane — never silent
+  if (overflowMentions > 0) {
+    const overflowLabel = overflowCount > 0
+      ? `Other (${overflowCount} domain${overflowCount === 1 ? "" : "s"})`
+      : "Other"
+    const sqrt = Math.sqrt(Math.max(1, overflowMentions))
+    const heightPx = Math.max(2, Math.round((sqrt / sqrtMax) * (MAX_STRATUM_PX / laneCount) * 3))
+
+    strata.push({
+      communityId: "__domain__other",
+      label: overflowLabel,
+      colorSlot: -1, // → domainOther
+      colorFamily: "domain",
+      heightPx,
+      topPx: cursor,
+      trustMix: { verified: 0, partial: 0, unverified: 0 },
+      totalMentions: overflowMentions,
+      isOther: true,
+      bucketHeights: computeBucketHeights(overflowBuckets, heightPx),
+      bucketCounts: overflowBuckets,
+      unverifiedBuckets: overflowUnverified,
+      trackIds: allocateTracksForDomain(response.tracks, "other", trackBudget, response.bucket_dates, pinnedIds),
+    })
+  }
+
+  return strata
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +487,7 @@ export function computeStrata(opts: ComputeStrataOptions): ComputeStrataResult {
       // Always the client hash — the server's color_slot is informative only
       // (sha1-based) and would diverge from the Cartographer hulls' hues.
       colorSlot: communitySlot(community.community_id),
+      colorFamily: "cluster",
       heightPx,
       topPx: cursor,
       trustMix,
@@ -368,6 +512,7 @@ export function computeStrata(opts: ComputeStrataOptions): ComputeStrataResult {
       communityId: other.community_id,
       label: other.label || "Other",
       colorSlot: -1, // signals "use clusterOther color"
+      colorFamily: "cluster",
       heightPx,
       topPx: cursor,
       trustMix: {
