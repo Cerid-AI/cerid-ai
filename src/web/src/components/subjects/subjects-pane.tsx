@@ -14,12 +14,15 @@
 // shareable links.
 
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
-import { Compass, Sparkles, Clock, BookOpen, Loader2 } from "lucide-react"
+import { Bookmark, Compass, Sparkles, Clock, BookOpen, Loader2 } from "lucide-react"
 import { useNavigation } from "@/contexts/navigation-context"
 import { Atlas } from "./atlas/Atlas"
 import { SubjectsSearchPalette } from "./search-palette"
 import { SubjectsViewsSidebar } from "./subjects-views-sidebar"
 import { withViewTransition } from "@/lib/view-transitions"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useQuery } from "@tanstack/react-query"
+import { listAtlasViews, type AtlasView } from "@/lib/api/atlas-views"
 
 const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
 // Lazy-load Constellation so the three.js bundle (~250KB gzipped)
@@ -57,6 +60,42 @@ function writeQueryParam(name: string, value: string | null) {
   const next = params.toString()
   const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
   window.history.replaceState({}, "", url)
+}
+
+function ViewsPopoverButton({
+  mode,
+  onRestore,
+}: {
+  mode: SubjectsMode
+  onRestore: (view: AtlasView) => void
+}) {
+  const { data: views } = useQuery({
+    queryKey: ["subjects-views", mode],
+    queryFn: () => listAtlasViews({ mode }),
+    staleTime: 30_000,
+  })
+  const count = views?.length ?? 0
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="relative flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/40"
+          aria-label={`Saved views (${count})`}
+        >
+          <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />
+          {count > 0 && (
+            <span className="min-w-[1rem] rounded-full bg-accent px-1 text-center text-[10px] font-medium leading-4 text-accent-foreground tabular-nums">
+              {count}
+            </span>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0" align="end">
+        <SubjectsViewsSidebar mode={mode} onRestore={onRestore} className="h-80" />
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 function EmptyFocalPrompt({ onPickEntity }: { onPickEntity: () => void }) {
@@ -204,9 +243,10 @@ export default function SubjectsPane() {
             className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-0.5 text-label-xs font-medium text-foreground"
             style={{ viewTransitionName: "focal-entity" }}
             aria-label={`Focal entity: ${focalEntity}`}
+            title={focalEntity}
             data-testid="subjects-focal-entity-chip"
           >
-            {focalEntity}
+            {focalEntity.replace(/-/g, " ")}
           </span>
         )}
         <div className="grow" />
@@ -222,6 +262,16 @@ export default function SubjectsPane() {
             <span aria-hidden="true">×</span>
           </button>
         )}
+        <ViewsPopoverButton
+          mode={mode}
+          onRestore={(view) => {
+            setFocalEntity(view.entity)
+            const validModes: SubjectsMode[] = ["atlas", "constellation", "timeline", "wiki"]
+            if (validModes.includes(view.mode as SubjectsMode)) {
+              setMode(view.mode as SubjectsMode)
+            }
+          }}
+        />
         <button
           type="button"
           onClick={handleSearchPalette}
@@ -240,24 +290,6 @@ export default function SubjectsPane() {
         aria-labelledby={`subjects-tab-${mode}`}
         className="grow overflow-hidden flex"
       >
-        {/* Mode-aware saved views sidebar (Phase M Day 6).
-            Hidden for Atlas, which keeps its existing floating
-            saved-views panel adjacent to the lens chips. */}
-        {mode !== "atlas" && (
-          <div className="hidden lg:flex w-56 shrink-0 border-r border-border bg-card/30 p-2">
-            <SubjectsViewsSidebar
-              mode={mode}
-              onRestore={(view) => {
-                setFocalEntity(view.entity)
-                const validModes: SubjectsMode[] = ["atlas", "constellation", "timeline", "wiki"]
-                if (validModes.includes(view.mode as SubjectsMode)) {
-                  setMode(view.mode as SubjectsMode)
-                }
-              }}
-              className="w-full"
-            />
-          </div>
-        )}
         <div
           key={mode}
           className={`grow overflow-hidden ${mode === "constellation" ? "mode-swap-deep" : "mode-swap"}`}
@@ -318,7 +350,6 @@ export default function SubjectsPane() {
             }
           >
             <Timeline
-              focalEntity={focalEntity}
               onEntityPick={handleEntityPick}
             />
           </Suspense>

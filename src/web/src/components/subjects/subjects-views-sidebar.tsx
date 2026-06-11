@@ -113,8 +113,8 @@ export function SubjectsViewsSidebar({
         )}
         {!isLoading && !isError && list.length === 0 && (
           <p className="px-3 py-4 text-xs text-muted-foreground" data-testid="subjects-views-empty">
-            No saved {mode} views yet. Tune the view to your liking and pin it
-            from the {mode} controls.
+            No saved {mode} views yet. Use the Atlas save-view control to pin the
+            current configuration.
           </p>
         )}
         <ul className="divide-y divide-border/50">
@@ -128,11 +128,11 @@ export function SubjectsViewsSidebar({
                 type="button"
                 onClick={() => onRestore(view)}
                 className="grow text-left text-xs hover:underline truncate"
-                title={view.name}
+                title={`${view.name} (${view.entity})`}
               >
                 <div className="font-medium truncate">{view.name}</div>
                 <div className="text-[10px] text-muted-foreground truncate">
-                  {view.entity} · {view.hops}-hop
+                  {view.hops}-hop
                   {(view.lenses?.length ?? 0) > 0 && ` · ${view.lenses?.join(", ")}`}
                 </div>
               </button>

@@ -202,20 +202,23 @@ async def _query_neighborhood(
     if driver is None:
         raise HTTPException(status_code=503, detail="Neo4j unavailable")
 
-    # Cypher: native variable-length expansion (Neo4j 5.x). Degree cap uses the
-    # COUNT {} subquery form — size() over a relationship pattern was removed in
-    # Neo4j 5.x. Filter narrows by entity type if specified. We also pull
-    # edge attestation + contradiction flags for the visual encoding.
+    # Cypher: typed CO_MENTIONED traversal (Neo4j 5.x). Restricting to
+    # [:CO_MENTIONED] prevents paths routing through Community/Artifact hub
+    # nodes which inflate hop-2/3 result sets to O(community size). Degree
+    # cap uses COUNT {} subquery — size() over a pattern was removed in 5.x.
+    # Per-hop intermediate cap ($hop_degree) limits expansion through hubs
+    # that have high CO_MENTIONED degree without fully excluding them.
+    # Filter narrows by entity_type if specified.
     type_filter = ""
     if filter:
-        type_filter = "AND (e.type = $filter OR n.type = $filter)"
+        type_filter = "AND (e.entity_type = $filter OR n.entity_type = $filter)"
 
     cypher = f"""
         MATCH (n:Entity {{canonical_id: $entity}})
-        OPTIONAL MATCH path = (n)-[*1..{hops}]-(e:Entity)
+        OPTIONAL MATCH path = (n)-[:CO_MENTIONED*1..{hops}]-(e:Entity)
         WHERE e.canonical_id IS NOT NULL {type_filter}
-          AND COUNT {{ (e)--() }} < $max_degree
-        WITH n, collect(DISTINCT e) AS related, collect(DISTINCT relationships(path)) AS rel_lists
+          AND COUNT {{ (e)-[:CO_MENTIONED]-() }} < $max_degree
+        WITH n, collect(DISTINCT e) AS related
         UNWIND ([n] + related) AS node
         OPTIONAL MATCH (node)-[r]-(other:Entity)
         WHERE other IN ([n] + related)

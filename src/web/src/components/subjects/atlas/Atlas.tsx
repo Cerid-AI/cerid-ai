@@ -9,13 +9,14 @@
 // in the original) is structurally preserved. We re-theme and re-chrome
 // only; the F2 callback-ref pattern is intact.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import Sigma from "sigma"
 import type Graph from "graphology"
-import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight } from "lucide-react"
+import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight, Bookmark } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { fetchNeighborhood } from "@/lib/api/graph"
 import { adaptNeighborhood, recolorGraph } from "@/lib/graph/graphology-adapter"
 import { applyLayout } from "@/lib/graph/apply-layout"
@@ -31,6 +32,7 @@ import {
   applyParallelEdgeCurvature,
   type MapTokens,
 } from "@/lib/graph/identity"
+import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import type { AtlasEdgeAttributes, AtlasNodeAttributes } from "@/lib/types/graph"
 import { useAtlasKeyboard } from "./use-atlas-keyboard"
 import { AtlasA11yTree } from "./atlas-a11y-tree"
@@ -331,6 +333,7 @@ interface PillToolbarProps {
   totalEdges: number
   config: AtlasConfig
   onConfigChange: (patch: Partial<AtlasConfig>) => void
+  savedViewsSlot?: ReactNode
 }
 
 function PillToolbar({
@@ -345,9 +348,8 @@ function PillToolbar({
   totalEdges,
   config,
   onConfigChange,
+  savedViewsSlot,
 }: PillToolbarProps) {
-  const [configOpen, setConfigOpen] = useState(false)
-
   return (
     <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-1.5 border-b border-border/40 bg-card/80 px-3 py-1.5 backdrop-blur">
       {/* Lens radiogroup */}
@@ -436,54 +438,55 @@ function PillToolbar({
         </span>
       )}
 
+      {/* Saved-views trigger (rendered from Atlas so the Popover root wraps both) */}
+      {savedViewsSlot}
+
       {/* Config popover */}
-      <div className="relative">
-        <button
-          type="button"
-          onClick={() => setConfigOpen((v) => !v)}
-          aria-label="Atlas settings"
-          aria-expanded={configOpen}
-          className="rounded border border-border/60 p-1 text-muted-foreground hover:bg-accent/30"
-        >
-          <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        {configOpen && (
-          <div className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-border/60 bg-card/95 p-3 shadow-xl backdrop-blur">
-            <div className="flex flex-col gap-2">
-              <div>
-                <div className="mb-1 text-label-xs font-medium text-muted-foreground">Label density</div>
-                <div className="flex gap-0.5" role="radiogroup" aria-label="Label density">
-                  {(["sparse", "normal", "dense"] as const).map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      role="radio"
-                      aria-checked={config.labelDensity === v}
-                      onClick={() => { onConfigChange({ labelDensity: v }); setConfigOpen(false) }}
-                      className={`rounded px-1.5 py-0.5 text-label-xs capitalize transition-colors ${
-                        config.labelDensity === v
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/30"
-                      }`}
-                    >
-                      {v}
-                    </button>
-                  ))}
-                </div>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label="Atlas settings"
+            className="rounded border border-border/60 p-1 text-muted-foreground hover:bg-accent/30"
+          >
+            <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-52 p-3">
+          <div className="flex flex-col gap-2">
+            <div>
+              <div className="mb-1 text-label-xs font-medium text-muted-foreground">Label density</div>
+              <div className="flex gap-0.5" role="radiogroup" aria-label="Label density">
+                {(["sparse", "normal", "dense"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={config.labelDensity === v}
+                    onClick={() => onConfigChange({ labelDensity: v })}
+                    className={`rounded px-1.5 py-0.5 text-label-xs capitalize transition-colors ${
+                      config.labelDensity === v
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/30"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
               </div>
-              <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={config.edgeLabels}
-                  onChange={(e) => onConfigChange({ edgeLabels: e.target.checked })}
-                  className="rounded border-border/60"
-                />
-                Edge labels
-              </label>
             </div>
+            <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={config.edgeLabels}
+                onChange={(e) => onConfigChange({ edgeLabels: e.target.checked })}
+                className="rounded border-border/60"
+              />
+              Edge labels
+            </label>
           </div>
-        )}
-      </div>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
@@ -551,6 +554,7 @@ export function Atlas({
   }, [onNodeClick, onNodeDoubleClick])
 
   const [status, setStatus] = useState<LayoutStatus>({ state: "idle" })
+  const prevQueryKeyRef = useRef<string>("")
   const [sigmaInstance, setSigmaInstance] = useState<AtlasSigma | null>(null)
   const [graphInstance, setGraphInstance] = useState<AtlasGraph | null>(null)
   const [activeLenses, setActiveLenses] = useState<Set<LensId>>(new Set())
@@ -578,6 +582,7 @@ export function Atlas({
       trustPartial: "#777777",  // drift-allowed: SSR fallback only
       trustUnverified: "#999999", // drift-allowed: SSR fallback only
       grid: "#eeeeee",          // drift-allowed: SSR fallback only
+      fontSans: "system-ui, sans-serif", // drift-allowed: SSR fallback only
     }
   )
 
@@ -593,6 +598,7 @@ export function Atlas({
         s.setSetting("labelColor", { color: fresh.foreground })
         s.setSetting("defaultEdgeColor", fresh.edge)
         s.setSetting("defaultNodeColor", fresh.clusterOther)
+        s.setSetting("defaultDrawNodeHover", makeDrawNodeHover(fresh))
         s.refresh()
       }
     })
@@ -623,25 +629,35 @@ export function Atlas({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot on mount
   }, [])
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ["graph-neighborhood", entity, hops, filter ?? null],
     queryFn: ({ signal }) => fetchNeighborhood(entity, hops, filter, { signal }),
     staleTime: 30_000,
     enabled: Boolean(entity),
+    placeholderData: keepPreviousData,
   })
 
-  const fetchingStatus: LayoutStatus | null = useMemo(() => {
-    if (isLoading) return { state: "fetching" }
+  // Reset layout status when query key changes so refocus always shows loading/error correctly.
+  const queryKey = `${entity}:${hops}:${filter ?? ""}`
+  useEffect(() => {
+    if (prevQueryKeyRef.current && prevQueryKeyRef.current !== queryKey) {
+      setStatus({ state: "idle" })
+    }
+    prevQueryKeyRef.current = queryKey
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- queryKey is a stable derived string; setStatus is stable
+  }, [queryKey])
+
+  // Precedence: error > fetching/loading > layout-status.
+  // keepPreviousData means isFetching can be true while previous data is still shown.
+  const renderedStatus: LayoutStatus = useMemo(() => {
     if (isError) {
       return { state: "error", message: error instanceof Error ? error.message : "Graph fetch failed" }
     }
-    return null
-  }, [isLoading, isError, error])
-
-  const renderedStatus: LayoutStatus =
-    fetchingStatus && status.state !== "laying-out" && status.state !== "ready" && status.state !== "error"
-      ? fetchingStatus
-      : status
+    if (isLoading || (isFetching && status.state === "idle")) {
+      return { state: "fetching" }
+    }
+    return status
+  }, [isError, isLoading, isFetching, status, error])
 
   // Entity type counts for chip toolbar
   const typeCounts = useMemo((): Map<string, number> => {
@@ -686,6 +702,7 @@ export function Atlas({
       defaultNodeColor: currentTokens.clusterOther,
       defaultEdgeColor: currentTokens.edge,
       labelColor: { color: currentTokens.foreground },
+      defaultDrawNodeHover: makeDrawNodeHover(currentTokens),
       nodeProgramClasses: ATLAS_NODE_PROGRAM_CLASSES,
       edgeProgramClasses: ATLAS_EDGE_PROGRAM_CLASSES,
       defaultNodeType: ATLAS_DEFAULT_NODE_TYPE,
@@ -897,7 +914,7 @@ export function Atlas({
     sigma: sigmaInstance,
     graph: graphInstance,
     focalEntity: entity,
-    onActivate: (id) => onNodeDoubleClick?.(id) ?? onNodeClick?.(id),
+    onActivate: (id) => { if (onNodeDoubleClick) onNodeDoubleClick(id); else onNodeClick?.(id) },
     onToggleLensMenu: handleToggleLensMenu,
     onSearchPalette,
     onHopsChange: handleHopsChange,
@@ -925,7 +942,7 @@ export function Atlas({
       aria-activedescendant={selectedNodeId ?? undefined}
       onKeyDown={onKeyDown}
     >
-      {/* Pill toolbar (lens + hops + type chips + stats + config) */}
+      {/* Pill toolbar (lens + hops + type chips + stats + saved-views + config) */}
       {lensPanelVisible && renderedStatus.state !== "error" && (
         <PillToolbar
           activeLenses={activeLenses}
@@ -939,6 +956,39 @@ export function Atlas({
           totalEdges={graphInstance?.size ?? 0}
           config={config}
           onConfigChange={handleConfigChange}
+          savedViewsSlot={
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Saved views"
+                  className="rounded border border-border/60 p-1 text-muted-foreground hover:bg-accent/30"
+                >
+                  <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 p-0">
+                <AtlasSavedViews
+                  focalEntity={entity}
+                  hops={hops}
+                  filter={filter}
+                  activeLenses={activeLenses}
+                  activeChips={activeTypeChips}
+                  getCameraState={() => {
+                    const sigma = sigmaInstance
+                    if (!sigma) return null
+                    const cam = sigma.getCamera().getState()
+                    return { x: cam.x, y: cam.y, ratio: cam.ratio, angle: cam.angle }
+                  }}
+                  onRestore={(view) => {
+                    setActiveLenses(new Set(view.lenses as LensId[]))
+                    if (view.chips?.length) setActiveTypeChips(new Set(view.chips))
+                    onRestoreView?.(view)
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+          }
         />
       )}
 
@@ -961,25 +1011,6 @@ export function Atlas({
         onClose={() => setContextMenuTarget(null)}
         onCite={(id, name) => onCiteInChat?.(id, name)}
         onOpenWiki={(id) => onOpenInWiki?.(id)}
-      />
-
-      <AtlasSavedViews
-        focalEntity={entity}
-        hops={hops}
-        filter={filter}
-        activeLenses={activeLenses}
-        activeChips={activeTypeChips}
-        getCameraState={() => {
-          const sigma = sigmaInstance
-          if (!sigma) return null
-          const cam = sigma.getCamera().getState()
-          return { x: cam.x, y: cam.y, ratio: cam.ratio, angle: cam.angle }
-        }}
-        onRestore={(view) => {
-          setActiveLenses(new Set(view.lenses as LensId[]))
-          if (view.chips?.length) setActiveTypeChips(new Set(view.chips))
-          onRestoreView?.(view)
-        }}
       />
 
       {/* Hover tooltip / pinned entity card */}

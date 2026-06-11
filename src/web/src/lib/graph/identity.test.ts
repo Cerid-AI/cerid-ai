@@ -19,8 +19,8 @@ import {
 
 const TOKENS: MapTokens = {
   clusters: [
-    "#AA0000", "#00AA00", "#0000AA", "#AAAA00",
-    "#AA00AA", "#00AAAA", "#AA5500", "#5500AA",
+    "#AA0000", "#00AA00", "#0000AA", "#AAAA00", // drift-allowed: test stub only
+    "#AA00AA", "#00AAAA", "#AA5500", "#5500AA", // drift-allowed: test stub only
   ],
   clusterOther: "#555555", // drift-allowed: test stub only
   edge:          "#CCCCCC", // drift-allowed: test stub only
@@ -32,6 +32,7 @@ const TOKENS: MapTokens = {
   trustPartial:    "#884400", // drift-allowed: test stub only
   trustUnverified: "#880000", // drift-allowed: test stub only
   grid:          "#EEEEEE", // drift-allowed: test stub only
+  fontSans:      "system-ui, sans-serif", // drift-allowed: test stub only
 }
 
 // ---------------------------------------------------------------------------

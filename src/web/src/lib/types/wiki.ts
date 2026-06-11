@@ -83,11 +83,21 @@ export interface RelatedEntity {
 
 export interface SourceCitation {
   artifact_id: string
+  /**
+   * Display title: coalesce(a.title, a.filename) from the backend.
+   * Non-null whenever the artifact has a filename.
+   */
   title: string | null
-  /** chunk_ids from the backend; used as a chunk-hash chip. */
-  chunk_hash: string
-  /** Domain derived from artifact metadata (may be empty string). */
-  domain: string
+  /** Filename from the artifact node — used as fallback display label. */
+  filename: string | null
+  /** Domain derived from artifact metadata (e.g. "notes", "finance"). */
+  domain: string | null
+  /** Artifact source type (e.g. "file", "vault", "url"). */
+  source_type: string | null
+  /** Confidence of the MENTIONS edge (0..1). */
+  confidence: number | null
+  /** ISO-8601 — when this artifact was last updated. */
+  updated_at: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +145,14 @@ export interface WikiEntityPage {
   external_references: ExternalReference[]
   last_updated_at: string | null
   next_refresh_due: string | null
+  /**
+   * Actual refresh-job state from the backend scheduler.
+   *   "idle"    — no refresh scheduled or needed.
+   *   "due"     — a refresh is scheduled but not yet started.
+   *   "running" — a wiki-refresh job is actively in flight for this entity.
+   * Absent when the backend has not yet shipped this field (treated as "idle").
+   */
+  refresh_status?: "idle" | "due" | "running"
   confidence_band: ConfidenceBand
   /** Leiden community ID this entity belongs to, or null if unassigned. */
   community_id?: string | null
@@ -142,6 +160,4 @@ export interface WikiEntityPage {
   community_label?: string | null
   /** Total corpus mentions (for display in the identity header capsule). */
   mention_count?: number
-  /** Trust state from the graph layer, aligned with GraphNode.trust_state. */
-  trust_state?: "verified" | "partial" | "unverified" | "unknown"
 }

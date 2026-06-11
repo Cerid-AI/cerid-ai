@@ -131,8 +131,7 @@ export function StratigraphCanvas({
   onLODChange,
   tokens,
   onCommunityClick,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onTrackClick: _onTrackClick,
+  onTrackClick,
   onBrushChange,
   reducedMotion,
 }: StratigraphCanvasProps) {
@@ -684,6 +683,17 @@ export function StratigraphCanvas({
         const bx = xScale2(bDate)
         entries.push({ x: bx, y: midY, type: "bucket", bucketIdx: bi, stratumIdx: si })
       }
+
+      // Track-row hit zones: one hit-entry per track row positioned at the
+      // track's y-centre spanning the full time range. LOD >= bucket only.
+      if (st.trackIds.length > 0) {
+        const trackH = st.heightPx / Math.max(1, st.trackIds.length + 1)
+        const midX = xScale2(new Date(data.from_date)) + (xScale2(new Date(data.to_date)) - xScale2(new Date(data.from_date))) / 2
+        st.trackIds.forEach((tid, tidx) => {
+          const fy = topY + trackH * (tidx + 1)
+          entries.push({ x: midX, y: fy, type: "track-tick", trackId: tid, stratumIdx: si })
+        })
+      }
     }
 
     qtRef.current = quadtree<HitEntry>()
@@ -787,6 +797,18 @@ export function StratigraphCanvas({
     const hit = qt.find(mx, my, 24)
     if (!hit) return
 
+    if (hit.type === "track-tick" && hit.trackId) {
+      const track = data.tracks.find((t) => t.canonical_id === hit.trackId)
+      if (!track) return
+      onTrackClick({
+        canonicalId: track.canonical_id,
+        name: track.name,
+        communityId: track.community_id,
+        trustState: track.trust_state,
+      })
+      return
+    }
+
     if (hit.type === "bucket" && hit.stratumIdx !== undefined) {
       const st = strataRef.current[hit.stratumIdx]
       if (!st) return
@@ -801,7 +823,7 @@ export function StratigraphCanvas({
         totalMentions: st.totalMentions,
       })
     }
-  }, [data, onCommunityClick])
+  }, [data, onCommunityClick, onTrackClick])
 
   // Escape collapses any expanded stratum
   useEffect(() => {

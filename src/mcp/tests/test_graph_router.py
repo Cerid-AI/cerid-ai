@@ -231,3 +231,80 @@ def test_neighborhood_corrupt_cache_falls_through_to_neo4j(client):
     assert res.status_code == 200
     # Should have fallen through to Neo4j (not served the garbage)
     fake_session.run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Typed Cypher traversal (fix/subjects-eval-round2 hardening)
+# ---------------------------------------------------------------------------
+
+
+def test_neighborhood_cypher_uses_co_mentioned_type(client):
+    """Expansion Cypher must restrict to CO_MENTIONED — prevents hub-node blowup.
+
+    Verifies that the Cypher sent to Neo4j contains [:CO_MENTIONED*1..
+    and NOT the untyped -[*1..- pattern that routes through Community/Artifact
+    hubs and inflates hop-2/3 result sets to O(community size).
+    """
+    tc, _, fake_session = client
+    fake_session.run.return_value.data.return_value = _stub_rows()
+    tc.get("/graph/neighborhood?entity=alex&hops=2")
+    fake_session.run.assert_called_once()
+    cypher_text = fake_session.run.call_args[0][0]
+    assert "[:CO_MENTIONED*1.." in cypher_text, (
+        "Neighborhood Cypher must use typed [:CO_MENTIONED*1..N] traversal"
+    )
+    # The old untyped form must not appear.
+    assert "-[*1.." not in cypher_text, (
+        "Neighborhood Cypher must not use untyped -[*1..N]- (hub traversal)"
+    )
+
+
+def test_neighborhood_cypher_drops_rel_lists(client):
+    """The unused rel_lists collect must not appear in the Cypher — it materialises
+    all paths combinatorially at hops=3 over hub nodes."""
+    tc, _, fake_session = client
+    fake_session.run.return_value.data.return_value = _stub_rows()
+    tc.get("/graph/neighborhood?entity=alex&hops=3")
+    cypher_text = fake_session.run.call_args[0][0]
+    assert "rel_lists" not in cypher_text, (
+        "rel_lists collect is never used and must be removed from the Cypher"
+    )
+
+
+def test_neighborhood_response_shape_preserved_after_cypher_change(client):
+    """Response shape must remain identical after the typed-traversal refactor.
+
+    Guards the frontend contract: sigma.js + graphology adapter consume
+    exactly these fields.
+    """
+    tc, _, fake_session = client
+    fake_session.run.return_value.data.return_value = _stub_rows()
+    res = tc.get("/graph/neighborhood?entity=alex&hops=2")
+    assert res.status_code == 200
+    body = res.json()
+    # Top-level keys
+    assert set(body.keys()) >= {"focal_entity", "nodes", "edges", "truncated", "cached"}
+    # Node fields
+    for node in body["nodes"]:
+        assert set(node.keys()) == {
+            "id", "name", "type", "community", "mention_count",
+            "trust_state", "recency_score", "focused",
+        }
+    # Edge fields
+    for edge in body["edges"]:
+        assert set(edge.keys()) == {
+            "source", "target", "type", "weight",
+            "attestation", "contradiction",
+        }
+    assert body["focal_entity"] == "alex"
+
+
+def test_neighborhood_type_filter_uses_entity_type_field(client):
+    """When filter= is provided the Cypher must reference entity_type not type."""
+    tc, _, fake_session = client
+    fake_session.run.return_value.data.return_value = _stub_rows()
+    tc.get("/graph/neighborhood?entity=alex&hops=1&filter=Person")
+    cypher_text = fake_session.run.call_args[0][0]
+    assert "entity_type" in cypher_text, (
+        "Type filter must reference e.entity_type, not the old e.type field"
+    )

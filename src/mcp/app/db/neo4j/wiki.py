@@ -247,11 +247,15 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                 """
                 MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity {canonical_id: $slug})
                 RETURN
-                    a.id          AS artifact_id,
-                    a.title       AS title,
-                    m.chunk_ids   AS chunk_ids_json,
-                    m.confidence  AS confidence,
-                    a.updated_at  AS updated_at
+                    a.id                              AS artifact_id,
+                    a.title                           AS title,
+                    coalesce(a.title, a.filename)     AS display_title,
+                    a.filename                        AS filename,
+                    a.domain                          AS domain,
+                    a.source_type                     AS source_type,
+                    m.chunk_ids                       AS chunk_ids_json,
+                    m.confidence                      AS confidence,
+                    a.updated_at                      AS updated_at
                 ORDER BY a.updated_at DESC
                 LIMIT 50
                 """,
