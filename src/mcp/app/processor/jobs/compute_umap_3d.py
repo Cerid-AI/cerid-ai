@@ -158,7 +158,7 @@ class ComputeUmap3DJob(BaseJob):
         for e_row in entities:
             degree_map[e_row["id"]] = float(e_row.get("_degree") or 0.0)
 
-        self._store_community_artifacts(entities, pos2d, degree_map)
+        self._store_community_artifacts(entities, pos2d, degree_map, driver=driver)
 
         await asyncio.to_thread(self._write_coords, driver, coords)
         self._bust_serving_cache()
@@ -625,16 +625,84 @@ class ComputeUmap3DJob(BaseJob):
     # Community map artifacts
     # -----------------------------------------------------------------
 
+    @staticmethod
+    def _first_clause(text: str, max_chars: int = 32) -> str:
+        """Extract the first sentence clause from a summary for short lane labels.
+
+        Splits on the first '. ', ': ', ', ', or newline — whichever comes
+        first — and truncates to max_chars.  Returns the stripped result or
+        an empty string if the input is empty.
+        """
+        if not text:
+            return ""
+        import re as _re  # noqa: PLC0415
+        # LLM community summaries open with boilerplate ("The theme revolves
+        # around X", "This community centers on Y") — strip the lead-in so the
+        # label carries the subject, not the filler.
+        stripped = _re.sub(
+            r"^(?:the|this|a)?\s*"
+            r"(?:theme|community|cluster|topic|content|summary)?\s*"
+            r"(?:revolves?\s+around|centers?\s+(?:on|around)|focuses?\s+on|"
+            r"is\s+(?:about|centered\s+(?:on|around))|covers|concerns|relates\s+to)\s+",
+            "",
+            text.strip(),
+            flags=_re.IGNORECASE,
+        )
+        # Split on first sentence-ending delimiter
+        parts = _re.split(r"[.:\n,]", stripped, maxsplit=1)
+        first = parts[0].strip()
+        if not first:
+            return ""
+        first = first[0].upper() + first[1:]
+        return first[:max_chars]
+
     def _community_artifacts(
         self,
         entities: list[dict[str, Any]],
         pos2d: Any,  # np.ndarray (n, 2)
         degree_map: dict[str, float],
+        *,
+        driver: Any = None,
     ) -> dict[str, Any]:
         """Compute community-level map artifacts.
 
         Returns a dict matching the cerid:graph:map:communities schema.
+
+        Tephra Cycle-2: queries ``Community.summary`` from Neo4j and derives
+        a ``short_label`` (≤32 chars, first-clause of summary) for Timeline
+        gutter, Atlas hull labels, and /graph/map.  Falls back to
+        ``top_hubs[0].name`` when the summary is absent.
+
+        Id-join normalization: ``Entity.community_id`` in Neo4j carries the
+        scalar GDS int assigned by the Leiden algorithm.  ``Community.id``
+        is stored as ``"{level}:{native_id}"`` (e.g. ``"0:1592"``).  We
+        index by both forms so lookups succeed regardless of which form
+        the entities list carries.
         """
+        # Tephra Cycle-2: fetch Community.summary from Neo4j indexed by both
+        # "{level}:{native_id}" and the scalar native_id.
+        summary_map: dict[str, str] = {}  # both key forms → summary text
+        if driver is not None:
+            try:
+                with driver.session() as _s:
+                    result = _s.run(
+                        "MATCH (c:Community) WHERE c.summary IS NOT NULL "
+                        "RETURN c.id AS cid, c.summary AS summary"
+                    )
+                    for row in result:
+                        cid_val = str(row["cid"] or "")
+                        summary_text = str(row["summary"] or "")
+                        if cid_val and summary_text:
+                            summary_map[cid_val] = summary_text
+                            # Also index by the native_id scalar if the format is "level:id"
+                            parts = cid_val.split(":", 1)
+                            if len(parts) == 2 and parts[1].isdigit():
+                                summary_map[parts[1]] = summary_text
+            except Exception as exc:  # noqa: BLE001 — summary lookup is best-effort
+                log_swallowed_error(
+                    "processor.compute_umap_3d.community_summary_fetch", exc
+                )
+
         # Group entities by community.
         by_community: dict[str, list[int]] = {}
         for i, ent in enumerate(entities):
@@ -667,7 +735,18 @@ class ComputeUmap3DJob(BaseJob):
                 {"id": e["id"], "name": e.get("name") or e["id"], "degree": int(d)}
                 for e, d in sorted_pairs[:5]
             ]
-            label = top_hubs[0]["name"] if top_hubs else comm_id
+            hub_name = top_hubs[0]["name"] if top_hubs else comm_id
+
+            # Tephra Cycle-2: derive short_label from Community.summary.
+            # Lookup tries both the raw comm_id and the scalar native_id.
+            summary_text = summary_map.get(comm_id, "")
+            if not summary_text:
+                # Try "{level}:{native_id}" form (comm_id may be a bare scalar)
+                parts = comm_id.split(":", 1)
+                if len(parts) == 2:
+                    summary_text = summary_map.get(parts[1], "")
+            short_label = self._first_clause(summary_text, max_chars=32) or hub_name
+            label = short_label  # backwards-compat field name
 
             # Trust mix.
             trust_mix: dict[str, int] = {
@@ -686,6 +765,7 @@ class ComputeUmap3DJob(BaseJob):
                 "hull": hull_list,
                 "anchor": [round(float(anchor[0]), 3), round(float(anchor[1]), 3)],
                 "label": label,
+                "short_label": short_label,
                 "top_hubs": top_hubs,
                 "trust_mix": trust_mix,
             })
@@ -709,6 +789,8 @@ class ComputeUmap3DJob(BaseJob):
         entities: list[dict[str, Any]],
         pos2d: Any,  # np.ndarray (n, 2)
         degree_map: dict[str, float],
+        *,
+        driver: Any = None,
     ) -> None:
         """Compute community artifacts and store in Redis."""
         try:
@@ -717,7 +799,7 @@ class ComputeUmap3DJob(BaseJob):
             redis = get_redis()
             if redis is None:
                 return
-            artifacts = self._community_artifacts(entities, pos2d, degree_map)
+            artifacts = self._community_artifacts(entities, pos2d, degree_map, driver=driver)
             redis.set(_COMMUNITY_MAP_REDIS_KEY, json.dumps(artifacts))
         except Exception as exc:  # noqa: BLE001 — artifact storage is best-effort
             log_swallowed_error("processor.compute_umap_3d.community_artifacts", exc)
