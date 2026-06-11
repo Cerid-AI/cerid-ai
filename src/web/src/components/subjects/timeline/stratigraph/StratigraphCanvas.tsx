@@ -37,10 +37,21 @@ import {
   bucketTrustSuffix,
   computeTypeLensStrata,
   computeDomainLensStrata,
+  computeEventHorizonGlyphs,
+  EVENT_HORIZON_PX,
   type StratumLayout,
   type LODLevel,
+  type EventGlyphLayout,
 } from "./strata-layout"
 import type { TimelineStrataResponse, TrackEvent } from "@/lib/api/graph"
+import type {
+  StrataEvent,
+  LaneMeta,
+  SinceMarker,
+  OnEventClickFn,
+  StrataExtension,
+} from "./strata-types"
+import { MARKER_KIND_META } from "./strata-types"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,11 +77,13 @@ export interface PinnedCommunity {
 interface HitEntry {
   x: number
   y: number
-  type: "bucket" | "track-tick" | "marker" | "entity-birth"
+  type: "bucket" | "track-tick" | "marker" | "entity-birth" | "event-glyph"
   bucketIdx?: number
   trackId?: string
   markerIdx?: number
   stratumIdx?: number
+  /** For event-glyph hits: the event payload for the tooltip/callback */
+  eventGlyph?: EventGlyphLayout
 }
 
 export interface StratigraphCanvasProps {
@@ -89,6 +102,22 @@ export interface StratigraphCanvasProps {
   onTrackClick: (track: PinnedTrack) => void
   onBrushChange: (from: string, to: string) => void
   reducedMotion: boolean
+  /** Tephra: event click callback — Agent C wires this to open the event detail card.
+   *  Signature: onEventClick(event: StrataEvent) => void */
+  onEventClick?: OnEventClickFn
+  /** Tephra: since-you-last-looked band data (from Agent C's lastViewedAt persistence).
+   *  null = never viewed → no band rendered. */
+  sinceMarker?: SinceMarker | null
+  /** Tephra: extended payload from Agent A's strata response extension.
+   *  undefined = old payload shape (graceful degradation). */
+  strataExtension?: StrataExtension | null
+  /** Tephra: pre-ledger hairline date (ISO-8601; from strataExtension.ledger_start_date).
+   *  Passed separately for convenience; canvas renders the hairline at this date. */
+  ledgerStartDate?: string | null
+  /** Programmatic brush window (nearest-activity jump). `nonce` retriggers
+   *  repeated jumps to the same window. The move is silent (sourceEvent
+   *  guard) — the owner updates its own window state alongside. */
+  brushTarget?: { from: string; to: string; nonce: number } | null
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +166,11 @@ export function StratigraphCanvas({
   onTrackClick,
   onBrushChange,
   reducedMotion,
+  onEventClick,
+  sinceMarker,
+  strataExtension,
+  ledgerStartDate,
+  brushTarget,
 }: StratigraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -159,6 +193,8 @@ export function StratigraphCanvas({
   // Layout cache
   const strataRef = useRef<StratumLayout[]>([])
   const markersRef = useRef<ReturnType<typeof clusterMarkers>>([])
+  /** Cached event glyphs per lane_id for event-horizon strip rendering */
+  const eventGlyphsRef = useRef<Map<string, EventGlyphLayout[]>>(new Map())
 
   // Quadtree for hit-testing (rebuilt on zoom settle)
   const qtRef = useRef<Quadtree<HitEntry> | null>(null)
@@ -250,10 +286,27 @@ export function StratigraphCanvas({
     }
 
     markersRef.current = clusterMarkers(data.markers, data.from_date, data.to_date)
+
+    // Build event-horizon glyph map per lane
+    const glyphMap = new Map<string, EventGlyphLayout[]>()
+    if (strataExtension?.events_by_lane_bucket) {
+      // Collect all events across all buckets, keyed by lane
+      const allEvents: StrataEvent[] = []
+      for (const block of Object.values(strataExtension.events_by_lane_bucket)) {
+        allEvents.push(...block.events)
+      }
+      for (const st of strataRef.current) {
+        const glyphs = computeEventHorizonGlyphs(allEvents, st.communityId, data.from_date, data.to_date)
+        if (glyphs.length > 0) glyphMap.set(st.communityId, glyphs)
+      }
+    }
+    eventGlyphsRef.current = glyphMap
+
     dirtyRef.current = true
     qtRef.current = null // force quadtree rebuild
-    setLegendStrata(lens === "domain" ? strataRef.current : [])
-  }, [data, lens, typeFilter, pinnedIds, frozenOrder, trackBudget, dims.h])
+    // Show legend for domain and cluster lenses
+    setLegendStrata((lens === "domain" || lens === "cluster") ? strataRef.current : [])
+  }, [data, lens, typeFilter, pinnedIds, frozenOrder, trackBudget, dims.h, strataExtension])
 
   // LOD crossfade trigger
   useEffect(() => {
@@ -393,6 +446,33 @@ export function StratigraphCanvas({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, dims])
+
+  // Programmatic brush window (nearest-activity jump). The move is silent —
+  // the brush handler's sourceEvent guard swallows it — so the owner keeps
+  // its own window state in sync; here we also sync the zoom transform.
+  useEffect(() => {
+    if (!brushTarget) return
+    const brushSvg = brushSvgRef.current
+    if (!brushSvg || !brushRef.current) return
+    const GUTTER_W = 80
+    const brushWidth = dims.w - GUTTER_W
+    const fullScale = baseScaleRef.current
+    const x0 = Math.max(0, Math.min(brushWidth, fullScale(new Date(brushTarget.from)) - GUTTER_W))
+    const x1 = Math.max(x0 + 4, Math.min(brushWidth, fullScale(new Date(brushTarget.to)) - GUTTER_W))
+    const brushG = brushSvg.querySelector("g")
+    if (!brushG) return
+    brushBlockRef.current = true
+    select(brushG).call(brushRef.current.move, [x0, x1])
+    if (zoomRef.current && canvasRef.current) {
+      const k = brushWidth / Math.max(1, x1 - x0)
+      const newTransform = zoomIdentity.scale(k).translate(-x0, 0)
+      select(canvasRef.current).call(zoomRef.current.transform, newTransform)
+    }
+    brushBlockRef.current = false
+    qtRef.current = null
+    dirtyRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brushTarget?.nonce])
 
   // ---------------------------------------------------------------------------
   // Draw
@@ -627,8 +707,143 @@ export function StratigraphCanvas({
       ctx.globalAlpha = 1
     }
 
+    // ---------------------------------------------------------------------------
+    // Event-horizon strip — 12px per lane above stratum top edge
+    // ---------------------------------------------------------------------------
+
+    const glyphMap = eventGlyphsRef.current
+    if (glyphMap.size > 0) {
+      for (const st of strata) {
+        const glyphs = glyphMap.get(st.communityId)
+        if (!glyphs || glyphs.length === 0) continue
+
+        const stripTopY = AXIS_H + st.topPx
+        const stripBotY = stripTopY + EVENT_HORIZON_PX
+        const stripMidY = (stripTopY + stripBotY) / 2
+
+        for (const g of glyphs) {
+          const gx = GUTTER_W + g.xFrac * (W - GUTTER_W)
+          if (gx < GUTTER_W || gx > W) continue
+
+          const meta = MARKER_KIND_META[g.kind]
+          const colorKey = meta?.colorTokenKey ?? "interaction"
+          const color = tokens[colorKey as keyof typeof tokens] as string ?? tokens.interaction
+
+          if (g.kind === "contradiction_finding" || g.kind === "contradict") {
+            // Diamond glyph — 1.5× size, severity-colored, never clustered
+            const sev = g.event.severity
+            const diamondColor = sev === "high" ? tokens.trustUnverified
+              : sev === "medium" ? tokens.trustPartial
+              : tokens.trustPartial
+            const sz = 6 // 1.5× base 4px → 6px radius
+            ctx.globalAlpha = 0.95 * alpha
+            ctx.fillStyle = diamondColor
+            ctx.beginPath()
+            ctx.moveTo(gx, stripMidY - sz)
+            ctx.lineTo(gx + sz, stripMidY)
+            ctx.lineTo(gx, stripMidY + sz)
+            ctx.lineTo(gx - sz, stripMidY)
+            ctx.closePath()
+            ctx.fill()
+          } else if (g.kind === "verification_report") {
+            // Aggregate tick (caret) — only if report_count >= 3 (amendment #2)
+            ctx.globalAlpha = 0.65 * alpha
+            ctx.strokeStyle = color
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.moveTo(gx, stripBotY)
+            ctx.lineTo(gx, stripTopY + 2)
+            ctx.stroke()
+            if (g.event.is_spike) {
+              // Spike caret — amber
+              ctx.globalAlpha = 0.85 * alpha
+              ctx.strokeStyle = tokens.trustPartial
+              ctx.lineWidth = 1.5
+              ctx.beginPath()
+              ctx.moveTo(gx - 3, stripTopY + 5)
+              ctx.lineTo(gx, stripTopY + 2)
+              ctx.lineTo(gx + 3, stripTopY + 5)
+              ctx.stroke()
+            }
+          } else if (g.isCluster) {
+            // Cluster badge — filled rect + overflow count styling
+            ctx.globalAlpha = 0.55 * alpha
+            ctx.fillStyle = color
+            ctx.fillRect(gx - 4, stripMidY - 3, 8, 6)
+          } else if (g.kind === "enrich") {
+            // Filled circle
+            ctx.globalAlpha = 0.75 * alpha
+            ctx.fillStyle = color
+            ctx.beginPath()
+            ctx.arc(gx, stripMidY, 4, 0, Math.PI * 2)
+            ctx.fill()
+          } else {
+            // Open circle (refresh and other KnowledgeLog kinds)
+            ctx.globalAlpha = 0.65 * alpha
+            ctx.strokeStyle = color
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.arc(gx, stripMidY, 4, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+
+          ctx.globalAlpha = 1
+        }
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Since-you-last-looked band — vertical hairline at lastViewedAt
+    // ---------------------------------------------------------------------------
+
+    if (sinceMarker?.lastViewedAt && !reducedMotion) {
+      const lastDate = new Date(sinceMarker.lastViewedAt)
+      const lx = xScale(lastDate)
+      if (lx >= GUTTER_W && lx <= W) {
+        // Faint wash over the "since" region (right of hairline)
+        ctx.globalAlpha = 0.04
+        ctx.fillStyle = tokens.interaction
+        ctx.fillRect(lx, AXIS_H, W - lx, H - AXIS_H - BRUSH_H - 4)
+
+        // Hairline
+        ctx.globalAlpha = 0.5
+        ctx.strokeStyle = tokens.interaction
+        ctx.lineWidth = 1
+        ctx.setLineDash([2, 4])
+        ctx.beginPath()
+        ctx.moveTo(lx, AXIS_H)
+        ctx.lineTo(lx, H - BRUSH_H - 4)
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.globalAlpha = 1
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Pre-ledger hairline — "event ledger begins <date>"
+    // Dashed hairline at ledgerStartDate; events before this date are absent.
+    // ---------------------------------------------------------------------------
+
+    if (ledgerStartDate) {
+      const ledgerDate = new Date(ledgerStartDate)
+      const lx = xScale(ledgerDate)
+      if (lx >= GUTTER_W && lx <= W) {
+        ctx.globalAlpha = 0.4
+        ctx.strokeStyle = tokens.edge
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 4])
+        ctx.beginPath()
+        ctx.moveTo(lx, AXIS_H)
+        ctx.lineTo(lx, H - BRUSH_H - 4)
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.globalAlpha = 1
+      }
+    }
+
     ctx.restore()
-  }, [data, dims, lens, tokens, markersVisible, ingestHatch, lodLevel, pinnedIds])
+  }, [data, dims, lens, tokens, markersVisible, ingestHatch, lodLevel, pinnedIds,
+    sinceMarker, ledgerStartDate, strataExtension, reducedMotion])
 
   // ---------------------------------------------------------------------------
   // rAF-coalesced render loop
@@ -702,6 +917,18 @@ export function StratigraphCanvas({
           entries.push({ x: midX, y: fy, type: "track-tick", trackId: tid, stratumIdx: si })
         })
       }
+
+      // Event-glyph hit entries (4px minimum hit target per canvas rules)
+      const glyphs = eventGlyphsRef.current.get(st.communityId)
+      if (glyphs && glyphs.length > 0) {
+        const W2 = dims.w
+        const stripMidY = topY + EVENT_HORIZON_PX / 2
+        for (const g of glyphs) {
+          const gx = 80 + g.xFrac * (W2 - 80)
+          if (gx < 80 || gx > W2) continue
+          entries.push({ x: gx, y: stripMidY, type: "event-glyph", stratumIdx: si, eventGlyph: g })
+        }
+      }
     }
 
     qtRef.current = quadtree<HitEntry>()
@@ -736,6 +963,19 @@ export function StratigraphCanvas({
       // Aria-live announcement
       if (ariaLiveRef.current) {
         ariaLiveRef.current.textContent = `${st?.label ?? "stratum"} on ${date}: ${count} mentions`
+      }
+    } else if (hit.type === "event-glyph" && hit.eventGlyph) {
+      const g = hit.eventGlyph
+      const ev = g.event
+      const kindLabel = MARKER_KIND_META[g.kind]?.label ?? g.kind
+      const entityPart = ev.entity_name ? ` · ${ev.entity_name}` : ""
+      const excerptPart = ev.summary ? ` — "${ev.summary.slice(0, 100)}"` : ""
+      const clusterPart = g.isCluster ? ` (+${g.clusterCount - 1} more)` : ""
+      const label = `${kindLabel}${entityPart} · ${ev.ts.slice(0, 10)}${excerptPart}${clusterPart}`
+      setTooltip({ x: e.clientX - rect.left + 12, y: e.clientY - rect.top + 12, label })
+
+      if (ariaLiveRef.current) {
+        ariaLiveRef.current.textContent = label
       }
     }
   }, [data])
@@ -805,6 +1045,12 @@ export function StratigraphCanvas({
     const hit = qt.find(mx, my, 24)
     if (!hit) return
 
+    // Event-glyph click — defer to Agent C's panel via onEventClick
+    if (hit.type === "event-glyph" && hit.eventGlyph && onEventClick) {
+      onEventClick(hit.eventGlyph.event)
+      return
+    }
+
     if (hit.type === "track-tick" && hit.trackId) {
       const track = data.tracks.find((t) => t.canonical_id === hit.trackId)
       if (!track) return
@@ -820,10 +1066,32 @@ export function StratigraphCanvas({
     if (hit.type === "bucket" && hit.stratumIdx !== undefined) {
       const st = strataRef.current[hit.stratumIdx]
       if (!st) return
-      const topHubs = data.tracks
-        .filter((t) => t.community_id === st.communityId)
-        .slice(0, 5)
-        .map((t) => ({ canonical_id: t.canonical_id, name: t.name }))
+
+      // Lens-aware top-hubs filter (triage-verified defect fix):
+      // __domain__X / __type__X synthetic IDs never match t.community_id.
+      // Route the filter through the active lens key instead.
+      let topHubs: Array<{ canonical_id: string; name: string }>
+      if (lens === "domain") {
+        // st.communityId = "__domain__research"; extract domain name
+        const domainName = st.communityId.replace(/^__domain__/, "")
+        topHubs = data.tracks
+          .filter((t) => (t.primary_domain ?? "other") === domainName)
+          .slice(0, 5)
+          .map((t) => ({ canonical_id: t.canonical_id, name: t.name }))
+      } else if (lens === "type") {
+        const typeName = st.communityId.replace(/^__type__/, "")
+        topHubs = data.tracks
+          .filter((t) => (t.entity_type ?? "OTHER") === typeName)
+          .slice(0, 5)
+          .map((t) => ({ canonical_id: t.canonical_id, name: t.name }))
+      } else {
+        // cluster / trust lenses — community_id is valid
+        topHubs = data.tracks
+          .filter((t) => t.community_id === st.communityId)
+          .slice(0, 5)
+          .map((t) => ({ canonical_id: t.canonical_id, name: t.name }))
+      }
+
       onCommunityClick({
         communityId: st.communityId,
         label: st.label,
@@ -831,7 +1099,7 @@ export function StratigraphCanvas({
         totalMentions: st.totalMentions,
       })
     }
-  }, [data, onCommunityClick, onTrackClick])
+  }, [data, lens, onCommunityClick, onTrackClick, onEventClick])
 
   // Escape collapses any expanded stratum
   useEffect(() => {
@@ -960,18 +1228,64 @@ export function StratigraphCanvas({
         aria-hidden="true"
       />
 
-      {/* Marker labels (DOM, above canvas) */}
+      {/* Marker labels (DOM, above canvas) — MARKER_KIND_META registry replaces hardcoded kinds */}
       {markersVisible && markersRef.current.map((m, i) => {
         const mDate = new Date(m.date)
         const mx = xScale(mDate)
         if (mx < GUTTER_W || mx > dims.w) return null
+        const meta = MARKER_KIND_META[m.kind]
+        const shortLabel = m.shortLabel ?? (meta?.shortLabel ?? m.kind)
         return (
           <div
             key={i}
             className="pointer-events-none absolute text-label-xxs font-medium uppercase tracking-wider text-muted-foreground"
             style={{ left: mx + 2, top: AXIS_H + 2 }} // drift-allowed: runtime marker position
           >
-            {m.kind === "ingest_burst" ? "ingest" : "birth"}
+            {shortLabel}
+          </div>
+        )
+      })}
+
+      {/* Pre-ledger hairline tooltip — DOM label only; the canvas hairline is above */}
+      {ledgerStartDate && (() => {
+        const lDate = new Date(ledgerStartDate)
+        const lx = xScale(lDate)
+        if (lx < GUTTER_W || lx > dims.w) return null
+        return (
+          <div
+            key="pre-ledger-label"
+            className="pointer-events-none absolute text-label-xxs text-muted-foreground/60"
+            style={{ left: lx + 3, top: AXIS_H + 14 }} // drift-allowed: runtime marker position
+            title={`Event ledger begins ${ledgerStartDate} — earlier strata show density only`}
+          >
+            ledger start
+          </div>
+        )
+      })()}
+
+      {/* Since-you-last-looked delta chips — per-lane, shown when sinceMarker is present */}
+      {sinceMarker?.lastViewedAt && strataRef.current.map((st, idx) => {
+        const delta = sinceMarker.deltaByLane[st.communityId]
+        if (!delta || (delta.mentions === 0 && delta.refreshes === 0 && delta.contradictions === 0)) return null
+        const parts: string[] = []
+        if (delta.mentions > 0) parts.push(`+${delta.mentions}`)
+        if (delta.refreshes > 0) parts.push(`${delta.refreshes} refr`)
+        if (delta.contradictions > 0) parts.push(`${delta.contradictions} ⚠`)
+        const chipLabel = parts.join(" · ")
+        const sinceDate = new Date(sinceMarker.lastViewedAt!)
+        const sinceX = xScale(sinceDate)
+        const chipX = Math.max(GUTTER_W + 4, sinceX + 4)
+        if (chipX > dims.w - 40) return null
+        return (
+          <div
+            key={`since-chip-${idx}`}
+            className="pointer-events-none absolute rounded bg-brand/10 px-1 py-0.5 text-label-xxs text-brand"
+            style={{ // drift-allowed: runtime lane position
+              left: chipX,
+              top: AXIS_H + st.topPx + st.heightPx / 2 - 8,
+            }}
+          >
+            {chipLabel}
           </div>
         )
       })}
@@ -1057,25 +1371,44 @@ export function StratigraphCanvas({
         />
       </div>
 
-      {/* Domain lens legend strip — icon + Title-cased label + hue chip; shown only when domain lens is active */}
-      {lens === "domain" && legendStrata.length > 0 && (
+      {/* Domain/community lens legend strip — icon + label + hue chip
+          Icons from payload lanes[] meta (kills File fallback per amendment #8).
+          Unsummarized community lanes show auto-label badge (amendment #6). */}
+      {(lens === "domain" || lens === "cluster") && legendStrata.length > 0 && (
         <div
           className="pointer-events-none absolute right-2 top-2 z-20 flex flex-col gap-0.5 rounded-md border border-border/40 bg-card/90 px-2 py-1.5 backdrop-blur"
-          aria-label="Domain lens legend"
+          aria-label={lens === "domain" ? "Domain lens legend" : "Community lens legend"}
           role="list"
         >
           {legendStrata.map((st, idx) => {
             const color = st.colorFamily === "domain"
               ? (st.colorSlot < 0 ? tokens.domainOther : (tokens.domains[st.colorSlot] ?? tokens.domainOther))
               : (st.colorSlot < 0 ? tokens.clusterOther : (tokens.clusters[st.colorSlot] ?? tokens.clusterOther))
-            const DomainIconComponent = domainIcon(null) // File fallback — icon names come from /graph/domains, not available here
-            const displayLabel = st.isOther
-              ? st.label  // "Other (N domains)" — already labeled by computeDomainLensStrata
-              : titleCase(st.label)
+
+            // Look up lane meta from payload (amendment #8 / #6)
+            const laneMeta: LaneMeta | undefined = strataExtension?.lanes.find(
+              (l) => l.lane_id === st.communityId
+            )
+            // icon: payload icon name OR domain-icon fallback for domain lens
+            const iconName = laneMeta?.icon ?? (lens === "domain" ? st.label : null)
+            const DomainIconComponent = domainIcon(iconName)
+            const isAutoLabel = laneMeta?.is_auto_label ?? false
+
+            const displayLabel = laneMeta?.label
+              ?? (st.isOther ? st.label : titleCase(st.label))
+
             return (
               <div key={idx} className="flex items-center gap-1.5" role="listitem">
                 <DomainIconComponent className="h-2.5 w-2.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="text-label-xxs text-muted-foreground">{displayLabel}</span>
+                {/* Auto-label badge: CircleDashed indicator for unsummarized community lanes (amendment #6) */}
+                {isAutoLabel && (
+                  <span
+                    className="ml-0.5 inline-block h-2 w-2 shrink-0 rounded-full border border-dashed border-muted-foreground/40"
+                    aria-label="auto-labeled lane"
+                    title="Lane label derived from hub name — summary pending weekly run"
+                  />
+                )}
                 <span
                   className="ml-auto h-2 w-2 shrink-0 rounded-full"
                   style={{ backgroundColor: color }} // drift-allowed: runtime-resolved token hex
@@ -1105,6 +1438,24 @@ export function StratigraphCanvas({
           </li>
         ))}
       </ul>
+
+      {/* Visually-hidden DOM list of visible events for AT */}
+      {strataExtension && (
+        <ul className="sr-only" aria-label="Knowledge events in view">
+          {Object.values(strataExtension.events_by_lane_bucket)
+            .flatMap((b) => b.events)
+            .slice(0, 40)
+            .map((ev, i) => {
+              const kindLabel = MARKER_KIND_META[ev.kind]?.label ?? ev.kind
+              return (
+                <li key={i}>
+                  {kindLabel}{ev.entity_name ? ` for ${ev.entity_name}` : ""} on {ev.ts.slice(0, 10)}
+                  {ev.summary ? ` — ${ev.summary.slice(0, 80)}` : ""}
+                </li>
+              )
+            })}
+        </ul>
+      )}
     </div>
   )
 }

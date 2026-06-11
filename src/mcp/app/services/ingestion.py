@@ -1023,6 +1023,33 @@ def ingest_content(
                         "app.services.ingestion.frontmatter_props", e,
                     )
 
+        # Tephra Cycle-2 — authored_at coalesce writer.
+        # Persist the best available authored timestamp so the Timeline axis
+        # toggle can surface content-time vs ingest-time once coverage
+        # exceeds the deferred toggle threshold (>15% of windowed artifacts).
+        # Priority: frontmatter 'created' > email_date > published_date >
+        # date_added > null.  No axis toggle shipped in v1 — this is write-
+        # only so coverage compounds from first ingest forward.
+        _authored_at = (
+            base_meta.get("created_at")          # frontmatter override (already coerced)
+            or base_meta.get("email_date")        # email IMAP source
+            or base_meta.get("published_date")    # RSS feed source
+            or base_meta.get("date_added")        # bookmark source
+            or None
+        )
+        if _authored_at:
+            try:
+                graph.set_artifact_properties(
+                    driver=driver,
+                    artifact_id=artifact_id,
+                    properties={"authored_at": str(_authored_at)},
+                )
+            except Exception as e:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "app.services.ingestion.authored_at_write", e,
+                    context={"artifact_id": artifact_id},
+                )
+
         # Phase R.3 — HyPE: enqueue background indexing job per chunk.
         # Only fires when RETRIEVAL_HYPE_ENABLED=true (off by default until
         # eval gate is cleared).  Non-blocking — HyPE runs asynchronously

@@ -173,6 +173,20 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     short:
       "Caches query results by embedding similarity, not exact text. A paraphrased question hits the same cache entry.",
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Timeline / Stratigraph
+  // ──────────────────────────────────────────────────────────────────────
+  "event-ledger": {
+    label: "Event ledger",
+    short:
+      "Knowledge events (refreshes, enrichments, verification reports) have been recorded since this date. Earlier strata show mention density only — no event-level detail is available before this date.",
+  },
+  "lane-labels-degraded": {
+    label: "Lane labels degraded",
+    short:
+      "The weekly artifact that derives lane labels from community summaries is unavailable. Labels fall back to hub-entity names until the next weekly refresh runs.",
+  },
 }
 
 export type GlossaryKey = keyof typeof GLOSSARY

@@ -1016,6 +1016,51 @@ _STRATA_WINDOW_CAP = 730
 _TRACK_MAX_EVENTS = 500
 _TRACK_CO_MENTIONED_CAP = 20
 _TRUST_STATES = frozenset({"verified", "partial", "unverified", "unknown"})
+# Tephra Cycle-2: event payload caps per spec (<=200/window, <=8/bucket)
+_STRATA_MAX_EVENTS_PER_WINDOW = 200
+_STRATA_MAX_EVENTS_PER_BUCKET = 8
+# Cache key version — bump when the cached payload shape breaks consumers.
+# v1 (original) → v2 (Tephra Cycle-2: lanes[], events[], top_entities, data_extent)
+_STRATA_CACHE_VERSION = "v2"
+
+
+class StrataTopEntity(BaseModel):
+    """One top entity in a per-(lane, bucket) slot."""
+    name: str
+    slug: str
+
+
+class StrataEventItem(BaseModel):
+    """One event entry in the strata events[] list (Tephra Cycle-2)."""
+    kind: str        # "refresh" | "enrich" | "contradict" | "contradiction_finding"
+    ts: str          # ISO-8601
+    lane_id: str     # domain name or community_id
+    bucket: str      # bucket key (same format as bucket_dates)
+    entity_slug: str = ""
+    entity_name: str = ""
+    summary: str = ""  # ≤140 chars
+    severity: str = ""  # for contradiction_finding: "low" | "medium" | "high"
+    source_artifact_id: str = ""
+
+
+class StrataVerificationAgg(BaseModel):
+    """Aggregated verification-report counts per (lane, bucket) (Tephra Cycle-2)."""
+    lane_id: str
+    bucket: str
+    count: int
+    verified: int
+    unverified: int
+    uncertain: int
+    overall_score_avg: float
+
+
+class StrataLaneMeta(BaseModel):
+    """Server-side lane metadata for Timeline canvas labels (amendment #8)."""
+    lane_id: str
+    label: str
+    icon: str = "file"   # lucide kebab-name from taxonomy; "file" fallback
+    summary_short: str = ""
+    summary_full: str = ""
 
 
 class StrataCommunity(BaseModel):
@@ -1055,6 +1100,7 @@ class StrataMarker(BaseModel):
     date: str
     kind: str       # "ingest_burst" | "birth_surge"
     count: int
+    lane_id: str = ""  # Tephra Cycle-2: per-lane attribution ("" = global)
 
 
 class StrataTotals(BaseModel):
@@ -1063,7 +1109,7 @@ class StrataTotals(BaseModel):
 
 
 class StrataResponse(BaseModel):
-    """Shape returned by GET /graph/timeline/strata."""
+    """Shape returned by GET /graph/timeline/strata (Tephra Cycle-2 extended)."""
     from_date: str
     to_date: str
     granularity: str
@@ -1074,6 +1120,18 @@ class StrataResponse(BaseModel):
     markers: list[StrataMarker]
     totals: StrataTotals
     cached: bool = False
+    # Tephra Cycle-2 additive fields — all optional so old cached payloads still parse
+    lanes: list[StrataLaneMeta] = []
+    events: list[StrataEventItem] = []
+    verification_aggs: list[StrataVerificationAgg] = []
+    # Per-(lane, bucket) top entities for the hover tooltip (≤3 per slot)
+    top_entities: dict[str, list[StrataTopEntity]] = {}  # key: "{lane_id}:{bucket}"
+    # Earliest data timestamp across the window — lets the frontend implement
+    # data-extent clamping for the 180d default window (amendment #7)
+    data_extent_from: str | None = None
+    # Earliest KnowledgeLog entry — events before this date were never
+    # recorded; drives the pre-ledger hairline (honesty load-bearing)
+    ledger_start_date: str | None = None
 
 
 class TrackEvent(BaseModel):
@@ -1085,23 +1143,57 @@ class TrackEvent(BaseModel):
     co_mentioned: list[dict[str, str]]
 
 
+class TrackKnowledgeEvent(BaseModel):
+    """A KnowledgeLog event surfaced in the track detail (Tephra Cycle-2)."""
+    kind: str        # "refresh" | "enrich" | "contradict"
+    ts: str
+    entity_slug: str = ""
+    summary: str = ""
+    source_artifact_id: str = ""
+
+
+class TrackNewEntity(BaseModel):
+    """An entity born in this bucket window (Tephra Cycle-2)."""
+    name: str
+    slug: str
+    created_at: str
+
+
+class TrackVerification(BaseModel):
+    """Aggregated VerificationReport counts for this entity track (Tephra Cycle-2)."""
+    reports: int = 0
+    verified: int = 0
+    unverified: int = 0
+    uncertain: int = 0
+    overall_score_avg: float = 0.0
+
+
 class TrackDetailResponse(BaseModel):
-    """Shape returned by GET /graph/timeline/track/{canonical_id}."""
+    """Shape returned by GET /graph/timeline/track/{canonical_id} (Tephra Cycle-2)."""
     canonical_id: str
     name: str
     events: list[TrackEvent]
     cached: bool = False
+    # Tephra Cycle-2 additive fields — all optional for backward compat
+    knowledge_events: list[TrackKnowledgeEvent] = []
+    new_entities: list[TrackNewEntity] = []
+    verification: TrackVerification = TrackVerification()
+    community_summary: str = ""  # populated under community lens
 
 
 def _strata_cache_key(start: str, end: str, gran: str) -> str:
-    return f"cerid:graph:timeline:strata:{start}:{end}:{gran}"
+    # Version bump v1→v2: Tephra Cycle-2 extended payload (lanes, events,
+    # top_entities, verification_aggs) would break old-shape consumers if
+    # they read an unversioned cache entry from before this deploy.
+    return f"cerid:graph:timeline:strata:{_STRATA_CACHE_VERSION}:{start}:{end}:{gran}"
 
 
-def _track_cache_key(canonical_id: str, start: str, end: str) -> str:
-    return f"cerid:graph:timeline:track:{canonical_id}:{start}:{end}"
+def _track_cache_key(canonical_id: str, start: str, end: str, bucket: str = "") -> str:
+    suffix = f":{bucket}" if bucket else ""
+    return f"cerid:graph:timeline:track:{canonical_id}:{start}:{end}{suffix}"
 
 
-def _color_slot(community_id: str) -> int:
+def _color_slot_from_id(community_id: str) -> int:
     """Deterministic community→slot (0-7) compatible with communitySlot() on client."""
     h = hashlib.sha1(  # noqa: S324
         community_id.encode("utf-8"),
@@ -1114,10 +1206,17 @@ def _derive_markers(
     bucket_dates: list[str],
     mention_counts: list[int],
     birth_counts: list[int],
+    *,
+    lane_id: str = "",
 ) -> list[StrataMarker]:
     """Derive ingest_burst and birth_surge markers per spec.
 
     Rule: count > max(20, 3 × median of non-zero buckets).
+
+    When ``lane_id`` is non-empty the returned markers carry it so the
+    frontend can attribute the burst to a specific domain lane (Tephra
+    Cycle-2, amendment #1 per-lane attribution).  Global markers have
+    ``lane_id=""`` and are retained only for the community lens code path.
     """
     def _threshold(counts: list[int]) -> float:
         nonzero = [c for c in counts if c > 0]
@@ -1130,9 +1229,9 @@ def _derive_markers(
     markers: list[StrataMarker] = []
     for date, m_count, b_count in zip(bucket_dates, mention_counts, birth_counts):
         if m_count > mention_thresh:
-            markers.append(StrataMarker(date=date, kind="ingest_burst", count=m_count))
+            markers.append(StrataMarker(date=date, kind="ingest_burst", count=m_count, lane_id=lane_id))
         if b_count > birth_thresh:
-            markers.append(StrataMarker(date=date, kind="birth_surge", count=b_count))
+            markers.append(StrataMarker(date=date, kind="birth_surge", count=b_count, lane_id=lane_id))
     return markers
 
 
@@ -1327,13 +1426,20 @@ async def get_timeline_strata(
     # Accumulate per-(community, entity_type, domain) buckets
     # key → {"buckets": [int], "unverified_buckets": [int]}
     series_acc: dict[tuple[str, str, str], dict[str, list[int]]] = {}
-    # per-community total mentions (for top-8 selection)
+    # per-community total mentions (for top-8 selection — community lens; amendment #1)
     community_total: dict[str, int] = {}
     # per-entity accumulation for DOI + track buckets
     entity_acc: dict[str, dict[str, Any]] = {}
-    # global bucket totals for markers
+    # global bucket totals for markers (community lens rollup; stays per amendment #1)
     global_bucket_mentions: list[int] = [0] * n_buckets
     global_bucket_births: list[int] = [0] * n_buckets
+    # Tephra Cycle-2: per-domain bucket totals for per-lane markers
+    domain_bucket_mentions: dict[str, list[int]] = {}
+    domain_bucket_births: dict[str, list[int]] = {}
+    # Per-(lane, bucket) top-entity accumulation {(lane_id, bkey): {slug: name}}
+    lane_bucket_entities: dict[tuple[str, str], dict[str, str]] = {}
+    # Earliest mention ts for data_extent_from
+    earliest_ts: str | None = None
 
     # Track first-seen per entity within the query (to count births)
     entity_first_bucket: dict[str, int] = {}
@@ -1355,6 +1461,10 @@ async def get_timeline_strata(
         if bidx < 0:
             continue
 
+        # Track earliest ts for data_extent_from hint
+        if ts and (earliest_ts is None or ts < earliest_ts):
+            earliest_ts = ts
+
         # Series accumulation — key now includes domain
         sk = (cid, etype, domain)
         if sk not in series_acc:
@@ -1366,11 +1476,23 @@ async def get_timeline_strata(
         if trust == "unverified":
             series_acc[sk]["unverified_buckets"][bidx] += 1
 
-        # Community total
+        # Community total (community lens rollup; amendment #1: keep for community lens)
         community_total[cid] = community_total.get(cid, 0) + 1
 
         # Global bucket mentions for ingest_burst marker
         global_bucket_mentions[bidx] += 1
+
+        # Per-domain bucket mentions for per-lane marker attribution
+        if domain not in domain_bucket_mentions:
+            domain_bucket_mentions[domain] = [0] * n_buckets
+        domain_bucket_mentions[domain][bidx] += 1
+
+        # Per-(lane, bucket) entity accumulation for top_entities
+        lb_key = (domain, bkey)
+        if lb_key not in lane_bucket_entities:
+            lane_bucket_entities[lb_key] = {}
+        if canon:
+            lane_bucket_entities[lb_key][canon] = name
 
         # Entity accumulation for tracks
         if canon:
@@ -1398,6 +1520,10 @@ async def get_timeline_strata(
             entity_first_bucket[canon] = birth_bidx
             if birth_bidx >= 0:
                 global_bucket_births[birth_bidx] += 1
+                # Also track per-domain births
+                if domain not in domain_bucket_births:
+                    domain_bucket_births[domain] = [0] * n_buckets
+                domain_bucket_births[domain][birth_bidx] += 1
 
     # ── Top-8 communities (+ "other" rollup) ─────────────────────────────────
     sorted_comms = sorted(community_total.items(), key=lambda kv: kv[1], reverse=True)
@@ -1452,7 +1578,7 @@ async def get_timeline_strata(
         communities_out.append(StrataCommunity(
             community_id=cid,
             label=label,
-            color_slot=_color_slot(cid),
+            color_slot=_color_slot_from_id(cid),
             trust_mix=trust_mix,
             total_mentions=c_total,
             is_other=is_other,
@@ -1499,11 +1625,174 @@ async def get_timeline_strata(
             primary_domain=ea.get("primary_domain"),
         ))
 
-    # ── Markers ───────────────────────────────────────────────────────────────
+    # ── Markers (global + per-lane) ───────────────────────────────────────────
+    # Community lens: global top-8 rollup stays (amendment #1).
     markers_out = _derive_markers(bucket_dates, global_bucket_mentions, global_bucket_births)
+
+    # Per-lane markers for domain lanes (amendment #1: bypassed on community lens;
+    # all domain-lens users see lane_id-attributed markers instead of the global rail).
+    for d_name, d_mentions in domain_bucket_mentions.items():
+        d_births = domain_bucket_births.get(d_name, [0] * n_buckets)
+        lane_markers = _derive_markers(bucket_dates, d_mentions, d_births, lane_id=d_name)
+        markers_out.extend(lane_markers)
 
     total_mentions = sum(global_bucket_mentions)
     total_entities = len(entity_acc)
+
+    # ── Tephra Cycle-2: domain taxonomy for lanes[] meta block ────────────────
+    lanes_out: list[StrataLaneMeta] = []
+    try:
+        from app.db.neo4j.taxonomy import get_domain_counts  # noqa: PLC0415
+
+        raw_domains = await asyncio.to_thread(get_domain_counts, driver)
+        for d in (raw_domains.get("domains") or []):
+            d_name_raw = d.get("name") or ""
+            lanes_out.append(StrataLaneMeta(
+                lane_id=d_name_raw,
+                label=d_name_raw.replace("_", " ").title(),
+                icon=str(d.get("icon") or "file"),
+                summary_short="",
+                summary_full="",
+            ))
+    except Exception as exc:  # noqa: BLE001 — lanes meta is non-fatal
+        log_swallowed_error(
+            "app.routers.graph.strata_lanes_meta",
+            exc,
+        )
+
+    # ── Tephra Cycle-2: KnowledgeLog events ──────────────────────────────────
+    events_out: list[StrataEventItem] = []
+    ledger_start: str | None = None
+    try:
+        from app.db.neo4j.knowledge_log import list_log_entries  # noqa: PLC0415
+
+        def _ledger_min_ts() -> str | None:
+            with driver.session() as s:
+                rec = s.run("MATCH (k:KnowledgeLog) RETURN min(k.ts) AS ts").single()
+                return str(rec["ts"]) if rec and rec["ts"] else None
+
+        ledger_start = await asyncio.to_thread(_ledger_min_ts)
+
+        log_rows = await asyncio.to_thread(
+            list_log_entries,
+            driver,
+            since=start_iso,
+            limit=_STRATA_MAX_EVENTS_PER_WINDOW,
+        )
+        # Per-bucket cap: track counts per (lane, bucket)
+        per_bucket_event_count: dict[tuple[str, str], int] = {}
+        for entry in log_rows:
+            slug = str(entry.get("entity_slug") or "")
+            # Join to domain via entity's primary_domain — available in entity_acc
+            lane_id = ""
+            if slug:
+                for ea in entity_acc.values():
+                    # entity_acc is keyed by canonical_id; slug may match name or id
+                    if ea.get("name") == slug or str(ea.get("primary_domain") or "") == slug:
+                        lane_id = str(ea.get("primary_domain") or "")
+                        break
+                # Fallback: try entity_acc directly by canonical_id == slug
+                if not lane_id and slug in entity_acc:
+                    lane_id = str(entity_acc[slug].get("primary_domain") or "")
+            if not lane_id:
+                continue  # can't place in a lane; skip
+
+            ts_val = str(entry.get("ts") or "")
+            bkey = _bucket_key(ts_val, gran)
+            if bkey not in bucket_index:
+                continue
+
+            bucket_key_pair = (lane_id, bkey)
+            cur = per_bucket_event_count.get(bucket_key_pair, 0)
+            if cur >= _STRATA_MAX_EVENTS_PER_BUCKET:
+                continue
+            per_bucket_event_count[bucket_key_pair] = cur + 1
+
+            summary_raw = str(entry.get("summary") or "")
+            events_out.append(StrataEventItem(
+                kind=str(entry.get("action") or "refresh"),
+                ts=ts_val,
+                lane_id=lane_id,
+                bucket=bkey,
+                entity_slug=slug,
+                entity_name=slug,
+                summary=summary_raw[:140],
+                source_artifact_id=str(entry.get("source_artifact_id") or ""),
+            ))
+    except Exception as exc:  # noqa: BLE001 — events are non-fatal
+        log_swallowed_error(
+            "app.routers.graph.strata_knowledge_events",
+            exc,
+        )
+
+    # ── Tephra Cycle-2: VerificationReport aggregates per (lane, bucket) ─────
+    verification_aggs_out: list[StrataVerificationAgg] = []
+    try:
+        verif_cypher = """
+            MATCH (vr:VerificationReport)
+            WHERE vr.created_at >= $start AND vr.created_at <= $end
+            RETURN
+                vr.created_at AS ts,
+                coalesce(vr.verified, 0) AS verified,
+                coalesce(vr.unverified, 0) AS unverified,
+                coalesce(vr.uncertain, 0) AS uncertain,
+                coalesce(vr.overall_score, 0.0) AS overall_score
+        """
+        verif_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            verif_cypher,
+            {"start": start_iso, "end": end_iso},
+        )
+        # Aggregate per (global bucket) — we don't have lane join on VerificationReport
+        # so we attribute to a synthetic "verification" lane in the aggs.
+        # Amendment #2: suppress sparse buckets below 3 reports.
+        verif_bucket_acc: dict[str, dict[str, Any]] = {}
+        for vrow in verif_rows:
+            vts = str(vrow.get("ts") or "")
+            vbkey = _bucket_key(vts, gran)
+            if vbkey not in bucket_index:
+                continue
+            if vbkey not in verif_bucket_acc:
+                verif_bucket_acc[vbkey] = {
+                    "count": 0, "verified": 0,
+                    "unverified": 0, "uncertain": 0, "score_sum": 0.0,
+                }
+            acc_v = verif_bucket_acc[vbkey]
+            acc_v["count"] += 1
+            acc_v["verified"] += int(vrow.get("verified") or 0)
+            acc_v["unverified"] += int(vrow.get("unverified") or 0)
+            acc_v["uncertain"] += int(vrow.get("uncertain") or 0)
+            acc_v["score_sum"] += float(vrow.get("overall_score") or 0.0)
+
+        for vbkey, vacc in verif_bucket_acc.items():
+            cnt = vacc["count"]
+            if cnt < 3:  # amendment #2: suppress sparse — never render 1-sample signal
+                continue
+            verification_aggs_out.append(StrataVerificationAgg(
+                lane_id="__verification__",
+                bucket=vbkey,
+                count=cnt,
+                verified=vacc["verified"],
+                unverified=vacc["unverified"],
+                uncertain=vacc["uncertain"],
+                overall_score_avg=round(vacc["score_sum"] / cnt, 4) if cnt else 0.0,
+            ))
+    except Exception as exc:  # noqa: BLE001 — verification aggs are non-fatal
+        log_swallowed_error(
+            "app.routers.graph.strata_verification_aggs",
+            exc,
+        )
+
+    # ── Tephra Cycle-2: per-(lane, bucket) top entities (≤3) ─────────────────
+    top_entities_out: dict[str, list[StrataTopEntity]] = {}
+    for (lb_lane, lb_bkey), ent_map in lane_bucket_entities.items():
+        # Take up to 3 entities by insertion order (they're already ordered by mention)
+        top3 = [
+            StrataTopEntity(name=n, slug=s)
+            for s, n in list(ent_map.items())[:3]
+        ]
+        top_entities_out[f"{lb_lane}:{lb_bkey}"] = top3
 
     response = StrataResponse(
         from_date=start_dt.isoformat(),
@@ -1516,6 +1805,12 @@ async def get_timeline_strata(
         markers=markers_out,
         totals=StrataTotals(mentions=total_mentions, entities_introduced=total_entities),
         cached=False,
+        lanes=lanes_out,
+        events=events_out,
+        verification_aggs=verification_aggs_out,
+        top_entities=top_entities_out,
+        data_extent_from=earliest_ts,
+        ledger_start_date=ledger_start,
     )
 
     # Cache 60s
@@ -1541,11 +1836,14 @@ async def get_timeline_track(
     canonical_id: str,
     from_date: str | None = Query(None, alias="from", description="ISO-8601 lower bound"),
     to_date: str | None = Query(None, alias="to", description="ISO-8601 upper bound"),
+    bucket: str | None = Query(None, description="Tephra Cycle-2: scope results to a single bucket key"),
 ) -> TrackDetailResponse:
     """Event-level detail for one entity track (lazy, zoom-triggered).
 
     Returns up to 500 mention events with per-event co-mentions (cap 20)
-    via shared-artifact cypher.
+    via shared-artifact cypher.  The optional ``bucket=`` param (Tephra
+    Cycle-2) scopes results to a single bucket and adds additive fields:
+    knowledge_events, new_entities, verification, community_summary.
 
     Cache: Redis 60s TTL.
     """
@@ -1557,7 +1855,7 @@ async def get_timeline_track(
 
     start_iso = start_dt.isoformat()
     end_iso = end_dt.isoformat()
-    cache_key = _track_cache_key(canonical_id, start_iso, end_iso)
+    cache_key = _track_cache_key(canonical_id, start_iso, end_iso, bucket or "")
     redis = get_redis()
 
     # Cache fast-path
@@ -1669,11 +1967,138 @@ async def get_timeline_track(
             co_mentioned=co_list,
         ))
 
+    # ── Tephra Cycle-2 additive fields ────────────────────────────────────────
+    knowledge_events_out: list[TrackKnowledgeEvent] = []
+    new_entities_out: list[TrackNewEntity] = []
+    verification_out = TrackVerification()
+    community_summary_out = ""
+
+    # KnowledgeLog events for this entity
+    try:
+        from app.db.neo4j.knowledge_log import list_log_entries  # noqa: PLC0415
+
+        ke_rows = await asyncio.to_thread(
+            list_log_entries,
+            driver,
+            entity_slug=canonical_id,
+            since=start_iso,
+            limit=100,
+        )
+        for ke in ke_rows:
+            knowledge_events_out.append(TrackKnowledgeEvent(
+                kind=str(ke.get("action") or "refresh"),
+                ts=str(ke.get("ts") or ""),
+                entity_slug=str(ke.get("entity_slug") or ""),
+                summary=str(ke.get("summary") or "")[:140],
+                source_artifact_id=str(ke.get("source_artifact_id") or ""),
+            ))
+    except Exception as exc:  # noqa: BLE001 — knowledge events non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_knowledge_events",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
+    # New entities born in the window (co-domain births)
+    try:
+        birth_cypher = """
+            MATCH (e:Entity)
+            WHERE e.created_at >= $start AND e.created_at <= $end
+            MATCH (a:Artifact)-[:MENTIONS]->(focal:Entity {canonical_id: $canonical_id})
+            WHERE (a)-[:MENTIONS]->(e)
+            RETURN DISTINCT
+                coalesce(e.name, e.canonical_id) AS name,
+                e.canonical_id AS slug,
+                e.created_at AS created_at
+            ORDER BY e.created_at DESC
+            LIMIT 20
+        """
+        birth_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            birth_cypher,
+            {"canonical_id": canonical_id, "start": start_iso, "end": end_iso},
+        )
+        for br in birth_rows:
+            new_entities_out.append(TrackNewEntity(
+                name=str(br.get("name") or ""),
+                slug=str(br.get("slug") or ""),
+                created_at=str(br.get("created_at") or ""),
+            ))
+    except Exception as exc:  # noqa: BLE001 — new_entities non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_new_entities",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
+    # VerificationReport aggregates for this entity's artifacts
+    try:
+        verif_track_cypher = """
+            MATCH (e:Entity {canonical_id: $canonical_id})<-[:MENTIONS]-(a:Artifact)
+            MATCH (vr:VerificationReport)-[:EXTRACTED_FROM]->(a)
+            WHERE vr.created_at >= $start AND vr.created_at <= $end
+            RETURN
+                count(vr) AS reports,
+                sum(coalesce(vr.verified, 0)) AS verified,
+                sum(coalesce(vr.unverified, 0)) AS unverified,
+                sum(coalesce(vr.uncertain, 0)) AS uncertain,
+                avg(coalesce(vr.overall_score, 0.0)) AS score_avg
+        """
+        vt_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            verif_track_cypher,
+            {"canonical_id": canonical_id, "start": start_iso, "end": end_iso},
+        )
+        if vt_rows:
+            vtr = vt_rows[0]
+            verification_out = TrackVerification(
+                reports=int(vtr.get("reports") or 0),
+                verified=int(vtr.get("verified") or 0),
+                unverified=int(vtr.get("unverified") or 0),
+                uncertain=int(vtr.get("uncertain") or 0),
+                overall_score_avg=round(float(vtr.get("score_avg") or 0.0), 4),
+            )
+    except Exception as exc:  # noqa: BLE001 — verification non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_verification",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
+    # Community summary for community lens
+    try:
+        comm_cypher = """
+            MATCH (e:Entity {canonical_id: $canonical_id})
+            MATCH (c:Community {id: toString(e.community_id)})
+            WHERE c.summary IS NOT NULL
+            RETURN c.summary AS summary LIMIT 1
+        """
+        comm_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            comm_cypher,
+            {"canonical_id": canonical_id},
+        )
+        if comm_rows:
+            community_summary_out = str(comm_rows[0].get("summary") or "")
+    except Exception as exc:  # noqa: BLE001 — community summary non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_community_summary",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
     response = TrackDetailResponse(
         canonical_id=canonical_id,
         name=entity_name,
         events=events,
         cached=False,
+        knowledge_events=knowledge_events_out,
+        new_entities=new_entities_out,
+        verification=verification_out,
+        community_summary=community_summary_out,
     )
 
     if redis is not None:
