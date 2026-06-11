@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { BookOpen, RefreshCw } from "lucide-react"
@@ -12,20 +12,18 @@ import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { DomainBadge } from "@/components/ui/domain-badge"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { TrustBandBadge, type TrustState } from "@/components/ui/trust-band-badge"
 import { ContradictionItem } from "./contradiction-item"
 import { ExternalReferencesSection } from "./external-references-section"
-import { ProvenanceMarker, type ProvenanceKind } from "./provenance-marker"
+import { ProvenanceMarker } from "./provenance-marker"
 import { MiniGraph } from "./mini-graph"
 import { MentionSparkline } from "./mention-sparkline"
 import { ProvenanceSankey } from "./provenance-sankey"
 import { ContradictionLink } from "./contradiction-link"
+import { ArticleInfobox } from "./article-infobox"
+import { ArticleToc, type TocEntry } from "./article-toc"
+import { PageHistory } from "./page-history"
+import { buildLinkifyComponents } from "./linkify"
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
 import { useNavigation } from "@/contexts/navigation-context"
 import { communitySlot } from "@/components/subjects/timeline/stratigraph/strata-layout"
@@ -35,8 +33,10 @@ import type { ConfidenceBand } from "@/lib/types/wiki"
 interface EntityDetailViewProps {
   slug: string
   onSelectRelated: (slug: string) => void
-  /** Called when a domain category badge in the footer is clicked. Null = "all". */
+  /** Called when a domain category badge is clicked. Null = "all". */
   onSelectDomain?: (domain: string | null) => void
+  /** Called when the community row / infobox button is clicked. */
+  onSelectConcept?: (communityId: string) => void
 }
 
 function formatLastUpdated(iso: string | null): string | null {
@@ -54,7 +54,6 @@ function formatLastUpdated(iso: string | null): string | null {
   }
 }
 
-
 function confidenceBandToTrust(band: ConfidenceBand): TrustState {
   switch (band) {
     case "high": return "verified"
@@ -64,8 +63,6 @@ function confidenceBandToTrust(band: ConfidenceBand): TrustState {
   }
 }
 
-// Resolve community hue color for the identity rail + swatch.
-// Falls back to clusterOther when communityId is null/undefined.
 function resolveCommunityHue(communityId: string | null | undefined): string {
   // drift-allowed: runtime token resolution — community color resolved from CSS tokens
   if (typeof document === "undefined") return "var(--color-map-cluster-other)"
@@ -83,7 +80,7 @@ function titleCase(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Categories footer — A1 + A4
+// Categories footer — unchanged from pre-rebuild (Cycle 1 work)
 // ---------------------------------------------------------------------------
 
 interface CategoriesFooterProps {
@@ -99,7 +96,6 @@ function CategoriesFooter({
   primarySubcategory,
   onNavigateToDomain,
 }: CategoriesFooterProps) {
-  // Ordered badge list: primary first, then remaining keys by count desc.
   const orderedDomains: string[] = [primaryDomain]
   if (domainMix) {
     const rest = Object.keys(domainMix)
@@ -130,7 +126,6 @@ function CategoriesFooter({
             >
               <DomainBadge domain={domain} />
             </button>
-            {/* A4: subcategory segment only for the primary domain, only when non-null */}
             {idx === 0 && primarySubcategory && (
               <span className="text-label-xs text-muted-foreground">
                 › {titleCase(primarySubcategory)}
@@ -144,28 +139,37 @@ function CategoriesFooter({
 }
 
 // ---------------------------------------------------------------------------
-// Loading skeleton
+// Loading skeleton — article-shaped
 // ---------------------------------------------------------------------------
 
 function LoadingSkeleton() {
   return (
-    <div role="status" aria-busy="true" aria-label="Loading entity page" className="space-y-6 p-6">
-      <div className="space-y-2">
-        <Skeleton className="h-7 w-48" />
-        <Skeleton className="h-4 w-32" />
+    <div role="status" aria-busy="true" aria-label="Loading article" className="h-full overflow-y-auto">
+      {/* Slim header skeleton */}
+      <div className="sticky top-0 z-10 flex items-center gap-3 border-b px-6 py-3">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-5 w-16 rounded-full" />
       </div>
-      <Separator />
-      <div className="space-y-2">
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-3/4" />
-      </div>
-      <div className="space-y-2">
-        <Skeleton className="h-4 w-24" />
-        <div className="flex flex-wrap gap-2">
-          <Skeleton className="h-7 w-20 rounded-full" />
-          <Skeleton className="h-7 w-24 rounded-full" />
-          <Skeleton className="h-7 w-16 rounded-full" />
+      {/* Article body skeleton */}
+      <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-[200px_minmax(0,1fr)_280px]">
+        <div className="hidden lg:block">
+          <Skeleton className="h-4 w-20 mb-2" />
+          <Skeleton className="h-3 w-full mb-1" />
+          <Skeleton className="h-3 w-full mb-1" />
+          <Skeleton className="h-3 w-3/4" />
+        </div>
+        <div className="space-y-4">
+          <Skeleton className="h-3 w-24" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+          </div>
+        </div>
+        <div className="hidden lg:block">
+          <Skeleton className="h-36 w-full rounded-xl mb-2" />
+          <Skeleton className="h-3 w-full mb-1" />
+          <Skeleton className="h-3 w-3/4" />
         </div>
       </div>
     </div>
@@ -176,11 +180,34 @@ function LoadingSkeleton() {
 // Main detail view
 // ---------------------------------------------------------------------------
 
-export function EntityDetailView({ slug, onSelectRelated, onSelectDomain }: EntityDetailViewProps) {
+export function EntityDetailView({
+  slug,
+  onSelectRelated,
+  onSelectDomain,
+  onSelectConcept,
+}: EntityDetailViewProps) {
   const { data, isLoading, isError, isNotFound, refetch } = useWikiEntity(slug)
   const navigation = useNavigation()
 
-  // Strip ?entity= deep-link param so back-navigation doesn't re-select.
+  // These useMemo calls must be above all early returns (Rules of Hooks).
+  const linkifyEntities = useMemo(
+    () =>
+      data?.related_entities.map((rel) => ({
+        slug: rel.slug,
+        name: rel.name,
+        entity_type: rel.entity_type,
+        has_summary: rel.has_summary,
+        one_liner: rel.one_liner,
+      })) ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data?.slug],
+  )
+
+  const linkifyComponents = useMemo(
+    () => buildLinkifyComponents({ entities: linkifyEntities, onSelect: onSelectRelated }),
+    [linkifyEntities, onSelectRelated],
+  )
+
   useEffect(() => {
     if (typeof window === "undefined") return
     const params = new URLSearchParams(window.location.search)
@@ -197,7 +224,7 @@ export function EntityDetailView({ slug, onSelectRelated, onSelectDomain }: Enti
     return (
       <div className="p-6">
         <PaneError
-          title="Failed to load entity page"
+          title="Failed to load article"
           description="Try selecting this entity again."
           onRetry={() => void refetch()}
         />
@@ -222,27 +249,74 @@ export function EntityDetailView({ slug, onSelectRelated, onSelectDomain }: Enti
   const relativeUpdated = formatLastUpdated(data.last_updated_at)
   const refreshStatus = data.refresh_status ?? "idle"
   const communityHue = resolveCommunityHue(data.community_id)
-
-  const summaryProvenance: ProvenanceKind = "auto"
-  const showLowConfidenceMarker = data.confidence_band === "low"
-
   const trustState: TrustState = confidenceBandToTrust(data.confidence_band)
+
+  // Split summary into lead paragraph and body paragraphs.
+  const summaryParts = data.summary?.split(/\n\n+/) ?? []
+  const leadParagraph = summaryParts[0] ?? null
+  const bodyParagraphs = summaryParts.slice(1).join("\n\n") || null
+
+  // Build TOC entries — only for sections that have data.
+  const tocEntries: TocEntry[] = []
+  if (bodyParagraphs) tocEntries.push({ id: "wiki-section-body", label: "Summary" })
+  tocEntries.push({ id: "wiki-section-activity", label: "Activity & graph" })
+  if (data.related_entities.length > 0) {
+    tocEntries.push({ id: "wiki-section-related", label: "Mentioned together" })
+  }
+  if (data.source_artifacts.length > 0) {
+    tocEntries.push({ id: "references", label: "References" })
+  }
+  if (data.external_references.length > 0) {
+    tocEntries.push({ id: "wiki-section-external", label: "External links" })
+  }
+  if (data.contradictions.length > 0) {
+    tocEntries.push({ id: "wiki-section-contradictions", label: "Contradictions" })
+  }
+  tocEntries.push({ id: "wiki-section-history", label: "Page history" })
+
+  function handleNavigateToDomain(domain: string) {
+    if (onSelectDomain) {
+      onSelectDomain(domain)
+    } else {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search)
+        params.set("domain", domain)
+        window.history.replaceState(
+          {},
+          "",
+          `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+        )
+      }
+      navigation.goTo("subjects", { mode: "wiki" })
+    }
+  }
+
+  function handleNavigateToConcept(communityId: string) {
+    if (onSelectConcept) {
+      onSelectConcept(communityId)
+    } else {
+      navigation.goTo("subjects", { mode: "wiki", concept: communityId })
+    }
+  }
 
   return (
     <div className="cerid-stagger-fast h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}> {/* drift-allowed: animation stagger index */}
-      {/* Liquid-glass sticky header with identity capsule */}
-      <div className="liquid-glass sticky top-0 z-10 space-y-1 px-6 pb-3 pt-6">
-        {/* 3px community-hue left rail — width pinned to 3px per design spec (between 1px hairline and 4px w-1) */}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Slim sticky header — title + TrustBandBadge + refresh pill        */}
+      {/* The ONLY glass in the pane (amendment #6).                        */}
+      {/* ----------------------------------------------------------------- */}
+      <div className="liquid-glass sticky top-0 z-10 px-6 pb-2 pt-4">
+        {/* Community-hue left rail */}
         <div
           className="absolute left-0 top-0 h-full rounded-l"
           style={{ width: "3px", backgroundColor: communityHue }} // drift-allowed: design-spec geometry + runtime token resolution
           aria-hidden="true"
         />
 
-        {/* Identity row: name + trust badge */}
         <div className="flex flex-wrap items-center gap-2">
           <h1
-            className="text-xl font-semibold text-foreground"
+            className="text-lg font-semibold text-foreground"
             style={{ viewTransitionName: "focal-entity" }} // drift-allowed: view-transition runtime binding
           >
             {data.name}
@@ -258,268 +332,374 @@ export function EntityDetailView({ slug, onSelectRelated, onSelectDomain }: Enti
               aria-label="Updating from new evidence"
             >
               <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
-              Updating from new evidence…
+              Updating…
             </span>
           )}
           {refreshStatus === "due" && (
-            <span
-              className="text-xs text-muted-foreground"
-              aria-label="Refresh scheduled"
-            >
+            <span className="text-xs text-muted-foreground" aria-label="Refresh scheduled">
               Refresh due
             </span>
           )}
-          {showLowConfidenceMarker && <ProvenanceMarker kind="uncertain" />}
-          {data.contradictions.length > 0 && <ProvenanceMarker kind="contradicted" />}
         </div>
-
-        {/* Metadata row: community swatch + label + type chip + mention count */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* 10–14px community swatch */}
-          <span
-            className="inline-block h-3 w-3 shrink-0 rounded-sm"
-            style={{ backgroundColor: communityHue }} // drift-allowed: runtime token resolution
-            aria-hidden="true"
-          />
-          {/* Community label linked via "Open in Atlas" */}
-          {data.community_id ? (
-            <button
-              type="button"
-              onClick={() =>
-                navigation.goTo("subjects", {
-                  mode: "atlas",
-                  entity: data.slug,
-                })
-              }
-              title={data.community_id}
-              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              aria-label={`Open ${data.community_label ?? "community"} in Atlas`}
-            >
-              {data.community_label ?? "Community"}
-            </button>
-          ) : (
-            <span className="text-xs text-muted-foreground">Unassigned</span>
-          )}
-
-          {/* Entity TYPE chip */}
-          <Badge variant="outline" className="font-mono text-label-xs uppercase">
-            {data.entity_type}
-          </Badge>
-
-          {/* Primary domain badge with mix tooltip */}
-          {data.primary_domain && (
-            (() => {
-              const mixKeys = data.domain_mix ? Object.keys(data.domain_mix) : []
-              const isMixed = mixKeys.length > 1
-              const mixLabel = isMixed
-                ? `Mixed: ${mixKeys
-                    .map((k) => `${k} ${data.domain_mix![k]}`)
-                    .join(" · ")}`
-                : undefined
-              return isMixed ? (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <DomainBadge domain={data.primary_domain} />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p className="text-xs">{mixLabel}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : (
-                <DomainBadge domain={data.primary_domain} />
-              )
-            })()
-          )}
-
-          {/* Mention count */}
-          {typeof data.mention_count === "number" && (
-            <span className="text-xs text-muted-foreground">
-              {data.mention_count.toLocaleString()} mentions
-            </span>
-          )}
-        </div>
-
-        {relativeUpdated && (
-          <p className="text-xs text-muted-foreground">Updated {relativeUpdated}</p>
-        )}
       </div>
 
-      <div className="space-y-6 px-6 pb-6 pt-3">
-        <Separator />
+      {/* ----------------------------------------------------------------- */}
+      {/* Article body — Vector-2022 three-column grid at lg+               */}
+      {/* lg+: [200px TOC | prose | 280px infobox]                         */}
+      {/* <lg: single column (infobox after lead)                          */}
+      {/* Cramped-measure guard: TOC column collapses first at marginal lg  */}
+      {/* ----------------------------------------------------------------- */}
+      <div className="grid grid-cols-1 gap-x-6 gap-y-0 px-6 pb-8 pt-4 lg:grid-cols-[200px_minmax(0,1fr)_280px]">
 
-        {/* ----------------------------------------------------------------- */}
-        {/* Summary                                                           */}
-        {/* ----------------------------------------------------------------- */}
-        {data.summary && (
-          <section aria-labelledby="wiki-summary-heading">
-            <div className="mb-2 flex items-center gap-2">
-              <h2 id="wiki-summary-heading" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Summary
-              </h2>
-              <ProvenanceMarker kind={summaryProvenance} />
+        {/* ------ Left: sticky TOC (lg+) ------ */}
+        <aside aria-label="Article contents" className="hidden pt-2 lg:block">
+          <div className="sticky top-16">
+            <ArticleToc entries={tocEntries} />
+          </div>
+        </aside>
+
+        {/* ------ Center: article prose ------ */}
+        <article className="min-w-0">
+
+          {/* Mobile TOC disclosure (below lg) */}
+          <div className="mb-4 lg:hidden">
+            <ArticleToc entries={tocEntries} ariaLabel="Contents (mobile)" />
+          </div>
+
+          {/* Lead paragraph — heading-less, max-w-prose */}
+          {leadParagraph ? (
+            <section aria-labelledby="wiki-article-title">
+              {/* In-flow byline — "Generated from N sources · updated X · band" */}
+              {data.source_artifacts.length > 0 && (
+                <p className="mb-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <ProvenanceMarker kind="auto" />
+                  <span>
+                    Generated from {data.source_artifacts.length}{" "}
+                    {data.source_artifacts.length === 1 ? "source" : "sources"}
+                  </span>
+                  {relativeUpdated && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span>updated {relativeUpdated}</span>
+                    </>
+                  )}
+                  <span aria-hidden="true">·</span>
+                  <span className="capitalize">{data.confidence_band}</span>
+                </p>
+              )}
+              <div className="prose prose-sm dark:prose-invert max-w-prose">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={linkifyComponents}
+                >
+                  {leadParagraph}
+                </ReactMarkdown>
+              </div>
+            </section>
+          ) : (
+            /* Stub article state — entity exists, summary not yet generated */
+            <section
+              aria-labelledby="wiki-stub-heading"
+              className="rounded-lg border border-border/50 bg-muted/20 px-4 py-4"
+            >
+              <p id="wiki-stub-heading" className="font-medium text-foreground">
+                No summary yet
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                This entity has{" "}
+                {typeof data.mention_count === "number"
+                  ? `${data.mention_count.toLocaleString()} mentions`
+                  : "mentions"}{" "}
+                across {data.source_artifacts.length}{" "}
+                {data.source_artifacts.length === 1 ? "source" : "sources"}. The nightly
+                refresh writes summaries in activity order.
+                {refreshStatus === "due" && data.next_refresh_due && (
+                  <span> Next sweep {formatLastUpdated(data.next_refresh_due)}.</span>
+                )}
+              </p>
+            </section>
+          )}
+
+          {/* Mobile-only: infobox renders after lead on small screens */}
+          {data.primary_domain && (
+            <div className="my-4 lg:hidden">
+              <ArticleInfobox
+                page={data}
+                onNavigateToDomain={handleNavigateToDomain}
+                onNavigateToConcept={handleNavigateToConcept}
+                onOpenAtlas={() => navigation.goTo("subjects", { mode: "atlas", entity: data.slug })}
+              />
             </div>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {data.summary}
+          )}
+
+          {/* Body paragraphs (remainder of summary after lead) */}
+          {bodyParagraphs && (
+            <div
+              id="wiki-section-body"
+              className="prose prose-sm dark:prose-invert mt-4 max-w-prose"
+            >
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={linkifyComponents}
+              >
+                {bodyParagraphs}
               </ReactMarkdown>
             </div>
-          </section>
-        )}
+          )}
 
-        {/* --------------------------------------------------------------- */}
-        {/* Graph context — inline mini-graph (1-hop neighborhood)         */}
-        {/* --------------------------------------------------------------- */}
-        <MiniGraph entitySlug={data.slug} entityName={data.name} />
+          <Separator className="my-6" />
 
-        {/* --------------------------------------------------------------- */}
-        {/* Mention sparkline                                               */}
-        {/* --------------------------------------------------------------- */}
-        <MentionSparkline
-          entitySlug={data.slug}
-          entityName={data.name}
-          onOpenTimeline={(slugArg) => {
-            navigation.goTo("subjects", { mode: "timeline", entity: slugArg })
-          }}
-        />
-
-        {/* --------------------------------------------------------------- */}
-        {/* Provenance Sankey                                               */}
-        {/* --------------------------------------------------------------- */}
-        <ProvenanceSankey
-          entitySlug={data.slug}
-          entityName={data.name}
-          communityId={data.community_id}
-          sourceArtifacts={data.source_artifacts}
-          onOpenAtlas={(slugArg) => {
-            navigation.goTo("subjects", { mode: "atlas", entity: slugArg, lens: "provenance" })
-          }}
-        />
-
-        {/* Contradiction lens jump-off */}
-        {data.contradictions.length > 0 && (
-          <ContradictionLink
-            entitySlug={data.slug}
-            contradictionCount={data.contradictions.length}
-            onOpenAtlas={(slugArg) => {
-              navigation.goTo("subjects", { mode: "atlas", entity: slugArg, lens: "contradiction" })
-            }}
-          />
-        )}
-
-        {/* ----------------------------------------------------------------- */}
-        {/* Related entities                                                  */}
-        {/* ----------------------------------------------------------------- */}
-        {data.related_entities.length > 0 && (
-          <section aria-labelledby="wiki-related-heading">
-            <h2 id="wiki-related-heading" className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Related Entities
+          {/* --------------------------------------------------------------- */}
+          {/* Activity & graph (anchored section)                              */}
+          {/* --------------------------------------------------------------- */}
+          <section id="wiki-section-activity" aria-labelledby="wiki-activity-heading">
+            <h2
+              id="wiki-activity-heading"
+              className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              Activity &amp; graph
             </h2>
-            <div className="flex flex-wrap gap-2">
-              {data.related_entities.map((rel) => (
-                <Button
-                  key={rel.slug}
-                  variant="outline"
-                  size="sm"
-                  className="h-auto rounded-full px-3 py-1 text-xs"
-                  onClick={() => onSelectRelated(rel.slug)}
-                  aria-label={`View entity: ${rel.name}`}
-                >
-                  {rel.name}
-                </Button>
-              ))}
-            </div>
+            <MiniGraph entitySlug={data.slug} entityName={data.name} />
+            <MentionSparkline
+              entitySlug={data.slug}
+              entityName={data.name}
+              onOpenTimeline={(slugArg) => {
+                navigation.goTo("subjects", { mode: "timeline", entity: slugArg })
+              }}
+            />
+            <ProvenanceSankey
+              entitySlug={data.slug}
+              entityName={data.name}
+              communityId={data.community_id}
+              sourceArtifacts={data.source_artifacts}
+              onOpenAtlas={(slugArg) => {
+                navigation.goTo("subjects", { mode: "atlas", entity: slugArg, lens: "provenance" })
+              }}
+            />
+            {data.contradictions.length > 0 && (
+              <ContradictionLink
+                entitySlug={data.slug}
+                contradictionCount={data.contradictions.length}
+                onOpenAtlas={(slugArg) => {
+                  navigation.goTo("subjects", {
+                    mode: "atlas",
+                    entity: slugArg,
+                    lens: "contradiction",
+                  })
+                }}
+              />
+            )}
           </section>
-        )}
 
-        {/* ----------------------------------------------------------------- */}
-        {/* Source artifacts                                                  */}
-        {/* ----------------------------------------------------------------- */}
-        {data.source_artifacts.length > 0 && (
-          <section aria-labelledby="wiki-sources-heading">
-            <h2 id="wiki-sources-heading" className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Source Artifacts
-            </h2>
-            <div className="space-y-2">
-              {data.source_artifacts.map((src) => {
-                const displayTitle = src.title ?? src.filename ?? (src.source_type ? `Untitled (${src.source_type})` : null)
-                return (
-                  <button
-                    key={src.artifact_id}
-                    type="button"
-                    title={src.artifact_id}
-                    aria-label={`View source: ${displayTitle ?? src.artifact_id}`}
-                    onClick={() => navigation.goTo("sources")}
-                    className="flex w-full items-start gap-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-left transition-colors hover:border-border/60 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <div className="min-w-0 flex-1 space-y-0.5">
-                      <p className="truncate text-sm font-medium text-foreground">
-                        {displayTitle ?? <span className="font-mono text-xs text-muted-foreground">{src.artifact_id.slice(0, 8)}…</span>}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {src.domain && <DomainBadge domain={src.domain} />}
-                        {src.source_type && !src.domain && (
-                          <Badge variant="outline" className="text-label-xxs">
-                            {src.source_type}
-                          </Badge>
+          <Separator className="my-6" />
+
+          {/* --------------------------------------------------------------- */}
+          {/* Mentioned together (Related entities / See also)                */}
+          {/* --------------------------------------------------------------- */}
+          {data.related_entities.length > 0 && (
+            <section id="wiki-section-related" aria-labelledby="wiki-related-heading">
+              <h2
+                id="wiki-related-heading"
+                className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Mentioned together
+              </h2>
+              <p className="mb-3 text-label-xs text-muted-foreground/70">
+                Co-mentioned in the same sources — ordered by co-mention strength.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {data.related_entities
+                  .slice()
+                  .sort((a, b) => b.co_mention_strength - a.co_mention_strength)
+                  .map((rel) => {
+                    const isStub = !rel.has_summary
+                    return (
+                      <Button
+                        key={rel.slug}
+                        variant="outline"
+                        size="sm"
+                        className={
+                          isStub
+                            ? "h-auto rounded-full px-3 py-1 text-xs text-muted-foreground border-dashed"
+                            : "h-auto rounded-full px-3 py-1 text-xs"
+                        }
+                        onClick={() => onSelectRelated(rel.slug)}
+                        aria-label={
+                          isStub
+                            ? `View ${rel.name} — summary pending`
+                            : `View entity: ${rel.name}`
+                        }
+                        title={rel.entity_type ? titleCase(rel.entity_type) : undefined}
+                      >
+                        {rel.name}
+                        {rel.entity_type && rel.entity_type !== "OTHER" && (
+                          <span className="ml-1 font-mono text-label-xxs opacity-60 uppercase">
+                            {rel.entity_type.slice(0, 3)}
+                          </span>
                         )}
-                      </div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </section>
-        )}
+                      </Button>
+                    )
+                  })}
+              </div>
+              <Separator className="mt-6 mb-0" />
+            </section>
+          )}
 
-        {/* ----------------------------------------------------------------- */}
-        {/* External references (Phase API.3) — hidden when empty           */}
-        {/* ----------------------------------------------------------------- */}
-        <ExternalReferencesSection refs={data.external_references ?? []} />
+          {/* --------------------------------------------------------------- */}
+          {/* References (Source artifacts — anchored)                        */}
+          {/* --------------------------------------------------------------- */}
+          {data.source_artifacts.length > 0 && (
+            <section id="references" aria-labelledby="wiki-references-heading" className="mt-6">
+              <h2
+                id="wiki-references-heading"
+                className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                References
+              </h2>
+              <ol className="space-y-2" aria-label="Source references">
+                {data.source_artifacts.map((src, idx) => {
+                  const displayTitle =
+                    src.title ??
+                    src.filename ??
+                    (src.source_type ? `Untitled (${src.source_type})` : null)
+                  return (
+                    <li key={src.artifact_id} className="flex items-start gap-3">
+                      <span
+                        className="mt-0.5 shrink-0 font-mono text-label-xxs text-muted-foreground/60"
+                        aria-hidden="true"
+                      >
+                        [{idx + 1}]
+                      </span>
+                      <button
+                        type="button"
+                        title={src.artifact_id}
+                        aria-label={`View source: ${displayTitle ?? src.artifact_id}`}
+                        onClick={() => navigation.goTo("sources")}
+                        className="flex min-w-0 flex-1 items-start gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-left transition-colors hover:border-border/60 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {displayTitle ?? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {src.artifact_id.slice(0, 8)}…
+                              </span>
+                            )}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 text-label-xs text-muted-foreground">
+                            {src.domain && <DomainBadge domain={src.domain} />}
+                            {src.confidence != null && (
+                              <span>
+                                {Math.round(src.confidence * 100)}% confidence
+                              </span>
+                            )}
+                            {src.updated_at && (
+                              <span>{formatLastUpdated(src.updated_at)}</span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ol>
+              <Separator className="mt-6 mb-0" />
+            </section>
+          )}
 
-        {/* ----------------------------------------------------------------- */}
-        {/* Contradictions — hidden when empty                               */}
-        {/* ----------------------------------------------------------------- */}
-        {data.contradictions.length > 0 && (
-          <section aria-labelledby="wiki-contradictions-heading">
-            <h2 id="wiki-contradictions-heading" className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Contradictions ({data.contradictions.length})
+          {/* --------------------------------------------------------------- */}
+          {/* External links                                                   */}
+          {/* --------------------------------------------------------------- */}
+          {data.external_references.length > 0 && (
+            <section id="wiki-section-external" aria-labelledby="wiki-external-heading" className="mt-6">
+              <h2
+                id="wiki-external-heading"
+                className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                External links
+              </h2>
+              <ExternalReferencesSection refs={data.external_references} />
+              <Separator className="mt-6 mb-0" />
+            </section>
+          )}
+
+          {/* --------------------------------------------------------------- */}
+          {/* Contradictions                                                   */}
+          {/* --------------------------------------------------------------- */}
+          {data.contradictions.length > 0 && (
+            <section id="wiki-section-contradictions" aria-labelledby="wiki-contradictions-heading" className="mt-6">
+              <h2
+                id="wiki-contradictions-heading"
+                className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Contradictions ({data.contradictions.length})
+              </h2>
+              <div className="space-y-3">
+                {data.contradictions.map((finding) => (
+                  <ContradictionItem key={finding.finding_id} finding={finding} />
+                ))}
+              </div>
+              <Separator className="mt-6 mb-0" />
+            </section>
+          )}
+
+          {/* --------------------------------------------------------------- */}
+          {/* Page history                                                     */}
+          {/* --------------------------------------------------------------- */}
+          <section id="wiki-section-history" aria-labelledby="wiki-history-heading" className="mt-6">
+            <h2
+              id="wiki-history-heading"
+              className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              Page history
             </h2>
-            <div className="space-y-3">
-              {data.contradictions.map((finding) => (
-                <ContradictionItem key={finding.finding_id} finding={finding} />
-              ))}
-            </div>
+            <PageHistory entitySlug={data.slug} />
           </section>
-        )}
 
-        {/* ----------------------------------------------------------------- */}
-        {/* Categories footer — A1: full domain_mix badge list, primary first  */}
-        {/* A4: subcategory segment attached to primary badge (when non-null)  */}
-        {/* ----------------------------------------------------------------- */}
-        {data.primary_domain && (
-          <CategoriesFooter
-            primaryDomain={data.primary_domain}
-            domainMix={data.domain_mix ?? null}
-            primarySubcategory={data.primary_subcategory ?? null}
-            onNavigateToDomain={(domain) => {
-              if (onSelectDomain) {
-                onSelectDomain(domain)
-              } else {
-                // Cross-pane fallback: navigate to wiki mode with ?domain= in URL
-                if (domain && typeof window !== "undefined") {
-                  const params = new URLSearchParams(window.location.search)
-                  params.set("domain", domain)
-                  window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`)
-                }
-                navigation.goTo("subjects", { mode: "wiki" })
-              }
-            }}
-          />
-        )}
+          {/* --------------------------------------------------------------- */}
+          {/* Categories footer                                                */}
+          {/* --------------------------------------------------------------- */}
+          {data.primary_domain && (
+            <div className="mt-6">
+              <CategoriesFooter
+                primaryDomain={data.primary_domain}
+                domainMix={data.domain_mix ?? null}
+                primarySubcategory={data.primary_subcategory ?? null}
+                onNavigateToDomain={(domain) => handleNavigateToDomain(domain ?? data.primary_domain!)}
+              />
+            </div>
+          )}
+        </article>
+
+        {/* ------ Right: infobox (lg+ only — mobile version rendered above) ------ */}
+        <aside aria-label="Article infobox" className="hidden pt-2 lg:block">
+          <div className="sticky top-16">
+            {data.primary_domain ? (
+              <ArticleInfobox
+                page={data}
+                onNavigateToDomain={handleNavigateToDomain}
+                onNavigateToConcept={handleNavigateToConcept}
+                onOpenAtlas={() => navigation.goTo("subjects", { mode: "atlas", entity: data.slug })}
+              />
+            ) : (
+              /* Minimal infobox when domain not yet derived */
+              <div className="rounded-xl border bg-card p-3 text-xs text-muted-foreground">
+                <p className="font-semibold text-foreground">{data.name}</p>
+                <p className="mt-1">
+                  <Badge variant="outline" className="font-mono text-label-xxs uppercase">
+                    {data.entity_type}
+                  </Badge>
+                </p>
+                <div className="mt-2">
+                  <TrustBandBadge
+                    trust={confidenceBandToTrust(data.confidence_band)}
+                    corroboratingCount={data.source_artifacts.length}
+                    contradictionCount={data.contradictions.length}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   )

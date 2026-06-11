@@ -82,7 +82,7 @@ describe("normalizeEntitySummary — allowlist contract", () => {
     expect(entity.slug).toBe("tesla")
     expect(entity.name).toBe("Tesla")
     expect(entity.entity_type).toBe("ORG")
-    expect(entity.related_count).toBe(42)
+    expect(entity.mention_count).toBe(42)
     expect(entity.last_updated_at).toBe("2026-06-01T00:00:00Z")
   })
 })
@@ -196,5 +196,177 @@ describe("normalizeEntityPage — allowlist contract", () => {
     expect(page?.primary_domain).toBe("research")
     expect(page?.domain_mix).toBeDefined()
     expect(page?.primary_subcategory).toBe("papers")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// normalizeRelatedEntity — new fields: entity_type, display_title, has_summary, one_liner
+// ---------------------------------------------------------------------------
+
+describe("normalizeRelatedEntity — amendment fields", () => {
+  function makeRawPageWithRelated(related: Record<string, unknown>[]) {
+    return {
+      slug: "tesla",
+      name: "Tesla",
+      entity_type: "ORG",
+      summary: null,
+      related_entities: related,
+      source_artifacts: [],
+      contradictions: [],
+      external_references: [],
+      last_updated_at: null,
+      next_refresh_due: null,
+      confidence_band: "medium",
+      mention_count: 1,
+      primary_domain: null,
+      domain_mix: null,
+      primary_subcategory: null,
+    }
+  }
+
+  it("preserves entity_type (was dropped by old normalizer)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPageWithRelated([
+        { canonical_id: "python", name: "Python", co_mention_count: 5, entity_type: "OTHER", has_summary: true, one_liner: "A language." },
+      ]),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.related_entities[0].entity_type).toBe("OTHER")
+  })
+
+  it("maps has_summary to boolean", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPageWithRelated([
+        { canonical_id: "python", name: "Python", co_mention_count: 5, entity_type: "OTHER", has_summary: true, one_liner: "A language." },
+      ]),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.related_entities[0].has_summary).toBe(true)
+  })
+
+  it("defaults has_summary to false when absent", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPageWithRelated([
+        { canonical_id: "python", name: "Python", co_mention_count: 5, entity_type: "OTHER" },
+      ]),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.related_entities[0].has_summary).toBe(false)
+  })
+
+  it("maps one_liner when present", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPageWithRelated([
+        { canonical_id: "python", name: "Python", co_mention_count: 5, entity_type: "OTHER", has_summary: true, one_liner: "A language." },
+      ]),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.related_entities[0].one_liner).toBe("A language.")
+  })
+
+  it("maps one_liner to null when absent", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPageWithRelated([
+        { canonical_id: "python", name: "Python", co_mention_count: 5, entity_type: "OTHER", has_summary: false },
+      ]),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.related_entities[0].one_liner).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// normalizeEntitySummary — match_rank passthrough
+// ---------------------------------------------------------------------------
+
+describe("normalizeEntitySummary — match_rank passthrough", () => {
+  function makeRawSummaryWithRank(rank: unknown) {
+    return {
+      canonical_id: "python",
+      name: "Python",
+      entity_type: "OTHER",
+      summary: "A language.",
+      mention_count: 5,
+      recent_activity_score: 0.9,
+      summary_updated_at: "2026-06-01T00:00:00Z",
+      primary_domain: "coding",
+      match_rank: rank,
+    }
+  }
+
+  it("threads match_rank as number when present", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawSummaryWithRank(0)],
+    })
+    const [entity] = await fetchWikiEntities()
+    expect(entity.match_rank).toBe(0)
+  })
+
+  it("match_rank is null when absent (browse results)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawSummaryWithRank(undefined)],
+    })
+    const [entity] = await fetchWikiEntities()
+    expect(entity.match_rank).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// fetchWikiLog — normalizer contract
+// ---------------------------------------------------------------------------
+
+import { fetchWikiLog } from "../wiki"
+
+describe("fetchWikiLog — normalizer contract", () => {
+  function makeRawLogEntry(extra: Record<string, unknown> = {}) {
+    return {
+      log_id: "log-001",
+      ts: "2026-06-11T03:39:53Z",
+      action: "refresh",
+      entity_slug: "other:python",
+      summary: "Python is a language.",
+      source_artifact_id: null,
+      ...extra,
+    }
+  }
+
+  it("maps log_id and ts", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawLogEntry()],
+    })
+    const [entry] = await fetchWikiLog({ entity_slug: "other:python" })
+    expect(entry.log_id).toBe("log-001")
+    expect(entry.ts).toBe("2026-06-11T03:39:53Z")
+  })
+
+  it("maps action verb", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawLogEntry({ action: "enrich" })],
+    })
+    const [entry] = await fetchWikiLog({ entity_slug: "other:python" })
+    expect(entry.action).toBe("enrich")
+  })
+
+  it("source_artifact_id is null when absent", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawLogEntry({ source_artifact_id: null })],
+    })
+    const [entry] = await fetchWikiLog({ entity_slug: "other:python" })
+    expect(entry.source_artifact_id).toBeNull()
+  })
+
+  it("throws on non-ok response", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+    await expect(fetchWikiLog({ entity_slug: "other:python" })).rejects.toThrow("500")
   })
 })

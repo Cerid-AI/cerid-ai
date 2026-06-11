@@ -173,6 +173,15 @@ _PHANTOM_ALLOWLIST: dict[str, str] = {
     # filename / domain are written at ingest time in create_artifact's ON CREATE SET block.
     "filename": "a.filename written in create_artifact ON CREATE SET block",
     "domain": "a.domain written in create_artifact ON CREATE SET block",
+    # has_summary is a boolean projection (other.summary IS NOT NULL) — not a
+    # stored property; evaluated inline in the RETURN clause.
+    "has_summary": "Cypher boolean projection: other.summary IS NOT NULL — not a stored property",
+    # one_liner is a string projection (left(other.summary, 160)) — not a stored
+    # property; evaluated inline in the RETURN clause.
+    "one_liner": "Cypher string projection: left(other.summary, 160) — not a stored property",
+    # match_rank is a Cypher CASE expression (conditional rank for search results)
+    # — not a stored property; evaluated in the WITH-stage CASE block.
+    "match_rank": "Cypher CASE expression for search relevance ranking — not a stored property",
 }
 
 

@@ -16,7 +16,7 @@ function makeEntity(slug: string, domain: string | null = null): EntitySummary {
     name: slug.charAt(0).toUpperCase() + slug.slice(1),
     entity_type: "ORG",
     summary_preview: null,
-    related_count: 0,
+    mention_count: 0,
     recent_activity_score: 0,
     last_updated_at: null,
     primary_domain: domain,

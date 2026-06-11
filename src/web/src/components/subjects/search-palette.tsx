@@ -66,13 +66,25 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
   }, [open])
 
   // Client-side narrow while debounce settles; cap at 25 results.
+  // When match_rank is present on any result, prefer it for the Best Matches
+  // ordering (server relevance trumps client-side substring position).
   const filtered = useMemo(() => {
     const all = entities ?? []
     if (!query.trim()) return all.slice(0, 25)
     const lower = query.toLowerCase()
-    return all
-      .filter((e) => e.name.toLowerCase().includes(lower) || e.slug.toLowerCase().includes(lower))
-      .slice(0, 25)
+    const matches = all.filter(
+      (e) => e.name.toLowerCase().includes(lower) || e.slug.toLowerCase().includes(lower),
+    )
+    const hasRank = matches.some((e) => e.match_rank != null)
+    if (hasRank) {
+      matches.sort((a, b) => {
+        const ra = a.match_rank ?? 99
+        const rb = b.match_rank ?? 99
+        if (ra !== rb) return ra - rb
+        return b.recent_activity_score - a.recent_activity_score
+      })
+    }
+    return matches.slice(0, 25)
   }, [entities, query])
 
   // Reset highlight when filtered list changes.

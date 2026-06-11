@@ -54,8 +54,8 @@ function makeEntityPage(overrides: Partial<WikiEntityPage> = {}): WikiEntityPage
     entity_type: "PERSON",
     summary: "**Elon Musk** is a technology entrepreneur.",
     related_entities: [
-      { slug: "tesla", name: "Tesla", co_mention_strength: 42 },
-      { slug: "spacex", name: "SpaceX", co_mention_strength: 38 },
+      { slug: "tesla", name: "Tesla", co_mention_strength: 42, entity_type: "ORG", display_title: null, has_summary: true, one_liner: "Electric vehicle company." },
+      { slug: "spacex", name: "SpaceX", co_mention_strength: 38, entity_type: "ORG", display_title: null, has_summary: true, one_liner: "Aerospace company." },
     ],
     source_artifacts: [
       {
@@ -140,7 +140,7 @@ describe("EntityDetailView — error state", () => {
       { wrapper: createWrapper() },
     )
     expect(screen.getByRole("alert")).toBeTruthy()
-    expect(screen.getByText(/Failed to load entity page/)).toBeTruthy()
+    expect(screen.getByText(/Failed to load article/)).toBeTruthy()
   })
 })
 
@@ -219,7 +219,7 @@ describe("EntityDetailView — settled state", () => {
   it("renders contradictions section when contradictions exist", () => {
     mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
     render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
-    expect(screen.getByText(/Contradictions/)).toBeTruthy()
+    expect(screen.getAllByText(/Contradictions/).length).toBeGreaterThan(0)
     expect(screen.getByText("Elon Musk founded Tesla.")).toBeTruthy()
   })
 })

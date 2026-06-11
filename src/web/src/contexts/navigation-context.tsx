@@ -105,6 +105,9 @@ export interface NavigationOptions {
   /** Settings pane: category to select (e.g. "plan", "appearance").
       Written to `?category=`. */
   category?: string
+  /** Wiki pane: community id to open as a concept page.
+      Written to `?concept=`. Consumed by wiki-pane at mount. */
+  concept?: string
   /** Whether to add the navigation event to the history stack */
   track?: boolean
 }
@@ -157,6 +160,10 @@ function writeNavigationUrl(options: NavigationOptions) {
   if (options.category !== undefined) {
     if (options.category) params.set("category", options.category)
     else params.delete("category")
+  }
+  if (options.concept !== undefined) {
+    if (options.concept) params.set("concept", options.concept)
+    else params.delete("concept")
   }
   const next = params.toString()
   const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
