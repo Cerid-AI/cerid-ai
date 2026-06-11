@@ -9,6 +9,7 @@ import json
 import logging
 from typing import Any
 
+from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
@@ -59,8 +60,8 @@ def get_domain_counts(driver) -> dict[str, Any]:
             for d_name in domains:
                 if d_name in TAXONOMY:
                     domains[d_name]["in_taxonomy"] = True
-        except Exception:  # noqa: BLE001 — degradable
-            pass
+        except Exception as exc:  # noqa: BLE001 — degradable
+            log_swallowed_error("db.neo4j.taxonomy", exc)
 
         # 3. Entity counts per primary_domain (uses entity_primary_domain_idx)
         result = session.run(
