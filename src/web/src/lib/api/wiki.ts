@@ -23,6 +23,8 @@ import type {
   ContradictionFinding,
   RelatedEntity,
   SourceCitation,
+  WikiLogEntry,
+  EpisodicMemory,
 } from "@/lib/types/wiki"
 
 // ---------------------------------------------------------------------------
@@ -35,10 +37,11 @@ function normalizeEntitySummary(raw: Record<string, unknown>): EntitySummary {
     name: String(raw.name ?? ""),
     entity_type: String(raw.entity_type ?? "OTHER"),
     summary_preview: raw.summary != null ? String(raw.summary) : null,
-    related_count: Number(raw.mention_count ?? 0),
+    mention_count: Number(raw.mention_count ?? 0),
     recent_activity_score: Number(raw.recent_activity_score ?? 0),
     last_updated_at: raw.summary_updated_at != null ? String(raw.summary_updated_at) : null,
     primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
+    match_rank: raw.match_rank != null ? Number(raw.match_rank) : null,
   }
 }
 
@@ -47,13 +50,32 @@ function normalizeRelatedEntity(raw: Record<string, unknown>): RelatedEntity {
     slug: String(raw.canonical_id ?? ""),
     name: String(raw.name ?? ""),
     co_mention_strength: Number(raw.co_mention_count ?? 0),
+    entity_type: String(raw.entity_type ?? "OTHER"),
+    display_title: raw.display_title != null ? String(raw.display_title) : null,
+    has_summary: Boolean(raw.has_summary ?? false),
+    one_liner: raw.one_liner != null ? String(raw.one_liner) : null,
+  }
+}
+
+function normalizeEpisodicMemory(raw: Record<string, unknown>): EpisodicMemory {
+  return {
+    memory_type: String(raw.memory_type ?? ""),
+    valid_from: raw.valid_from != null ? String(raw.valid_from) : null,
+    access_count: Number(raw.access_count ?? 0),
+    content: raw.content != null ? String(raw.content) : null,
   }
 }
 
 function normalizeSourceCitation(raw: Record<string, unknown>): SourceCitation {
   return {
     artifact_id: String(raw.artifact_id ?? ""),
-    title: raw.title != null ? String(raw.title) : null,
+    // Prefer backend display_title (already coalesced: a.title ?? a.filename). Fall back
+    // through title → filename so old backend responses still display something.
+    title: raw.display_title != null
+      ? String(raw.display_title)
+      : raw.title != null
+        ? String(raw.title)
+        : null,
     filename: raw.filename != null ? String(raw.filename) : null,
     domain: raw.domain != null ? String(raw.domain) : null,
     source_type: raw.source_type != null ? String(raw.source_type) : null,
@@ -107,6 +129,9 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
   const externalRefs = Array.isArray(raw.external_references)
     ? (raw.external_references as Record<string, unknown>[]).map(normalizeExternalReference)
     : []
+  const episodicMemories = Array.isArray(raw.episodic_memories)
+    ? (raw.episodic_memories as Record<string, unknown>[]).map(normalizeEpisodicMemory)
+    : []
 
   const rawRefreshStatus = raw.refresh_status as string | undefined
   const refresh_status: WikiEntityPage["refresh_status"] =
@@ -149,6 +174,7 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
     domain_mix,
     primary_subcategory: raw.primary_subcategory != null ? String(raw.primary_subcategory) : null,
+    episodic_memories: episodicMemories.length > 0 ? episodicMemories : undefined,
   }
 }
 
@@ -279,4 +305,37 @@ export async function fetchContradictions({
   }
   const rows = (await res.json()) as Record<string, unknown>[]
   return rows.map(normalizeContradiction)
+}
+
+function normalizeWikiLogEntry(raw: Record<string, unknown>): WikiLogEntry {
+  return {
+    log_id: String(raw.log_id ?? ""),
+    ts: String(raw.ts ?? ""),
+    action: String(raw.action ?? ""),
+    entity_slug: String(raw.entity_slug ?? ""),
+    summary: raw.summary != null ? String(raw.summary) : null,
+    source_artifact_id: raw.source_artifact_id != null ? String(raw.source_artifact_id) : null,
+  }
+}
+
+/**
+ * GET /wiki/log?entity_slug={slug}
+ *
+ * Per-entity revision ledger (newest-first). Rows carry the snapshot
+ * summary text so the history pane can show a collapsed diff per entry.
+ */
+export async function fetchWikiLog({
+  entity_slug,
+  limit = 50,
+}: {
+  entity_slug: string
+  limit?: number
+}): Promise<WikiLogEntry[]> {
+  const url = mcpUrl("/wiki/log", { entity_slug, limit })
+  const res = await fetch(url.toString(), { headers: mcpHeaders() })
+  if (!res.ok) {
+    throw new Error(`Wiki log fetch failed (${res.status})`)
+  }
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return rows.map(normalizeWikiLogEntry)
 }

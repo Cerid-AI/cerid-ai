@@ -85,12 +85,23 @@ class ExternalReference(BaseModel):
 
 
 class RelatedEntity(BaseModel):
-    """A co-mentioned entity with its co-mention count."""
+    """A co-mentioned entity with its co-mention count.
+
+    Amendment #1+#2: ``has_summary`` and ``one_liner`` are projected
+    directly from the related entity node so the frontend can render
+    three-state wikilinks (normal / stub / no-link) and HoverCard
+    previews without an extra fetch.
+    """
 
     canonical_id: str
     name: str
     entity_type: str
     co_mention_count: int
+    # Amendment #1: does the related entity have a summary?
+    has_summary: bool = False
+    # Amendment #2: first 160 chars of the related entity's summary (None
+    # when has_summary is False).  Same derivation as /wiki/index one_liner.
+    one_liner: str | None = None
 
 
 class SourceCitation(BaseModel):
@@ -126,6 +137,9 @@ class EntitySummary(BaseModel):
     summary: str | None = None
     summary_updated_at: str | None = None
     primary_domain: str | None = None
+    # Present only when a search term was supplied (list_top_entities
+    # conditional CASE); absent on the no-q browse path.
+    match_rank: int | None = None
 
 
 class EpisodicMemoryItem(BaseModel):
@@ -217,6 +231,9 @@ async def list_entities(
     result = []
     for r in rows:
         try:
+            # match_rank is only present when a search term was given;
+            # the no-q browse path returns rows without this key.
+            raw_rank = r.get("match_rank")
             result.append(
                 EntitySummary(
                     canonical_id=r.get("canonical_id", ""),
@@ -227,6 +244,7 @@ async def list_entities(
                     summary=r.get("summary"),
                     summary_updated_at=r.get("summary_updated_at"),
                     primary_domain=r.get("primary_domain"),
+                    match_rank=int(raw_rank) if raw_rank is not None else None,
                 )
             )
         except Exception as exc:
@@ -336,6 +354,8 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
             name=r.get("name", ""),
             entity_type=r.get("entity_type", "OTHER"),
             co_mention_count=int(r.get("co_mention_count", 0)),
+            has_summary=bool(r.get("has_summary", False)),
+            one_liner=r.get("one_liner") or None,
         )
         for r in raw.get("related", [])
     ]

@@ -57,8 +57,8 @@ export interface EntitySummary {
   entity_type: string
   /** Truncated summary text for list preview (may be null if not yet computed). */
   summary_preview: string | null
-  /** Number of entities co-mentioned with this one (approximated from mention_count). */
-  related_count: number
+  /** Corpus mention count (backend field ``mention_count`` — was incorrectly labeled ``related_count``). */
+  mention_count: number
   /** Backend recent_activity_score — higher = more recently active. */
   recent_activity_score: number
   /** ISO-8601 timestamp, or null. */
@@ -68,6 +68,39 @@ export interface EntitySummary {
    * Null for orphan entities (no MENTIONS path) or pre-job state.
    */
   primary_domain: string | null
+  /**
+   * Search relevance rank from the backend (0=exact, 1=prefix, 2=substring, 3=canonical-only).
+   * Present only in search results (q non-empty); absent in browse results.
+   */
+  match_rank?: number | null
+}
+
+// ---------------------------------------------------------------------------
+// Wiki log entry (GET /wiki/log)
+// ---------------------------------------------------------------------------
+
+export interface WikiLogEntry {
+  log_id: string
+  /** ISO-8601 timestamp. */
+  ts: string
+  /** Action verb: "refresh" | "enrich" | "contradict" | string */
+  action: string
+  entity_slug: string
+  /** Summary snapshot at the time of the log entry. */
+  summary: string | null
+  /** Source artifact that triggered the entry, if present. */
+  source_artifact_id: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Episodic memory (assembled by wiki_pages.py — render deferred to v1.1)
+// ---------------------------------------------------------------------------
+
+export interface EpisodicMemory {
+  memory_type: string
+  valid_from: string | null
+  access_count: number
+  content: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +113,14 @@ export interface RelatedEntity {
   name: string
   /** Co-mention count — strength of the relationship. */
   co_mention_strength: number
+  /** Entity type (e.g. "ORG", "OTHER"). Dropped by the old normalizer; now preserved. */
+  entity_type: string
+  /** Backend coalesced display title. Preserved from normalizer for wikilink hover cards. */
+  display_title: string | null
+  /** True when the related entity already has a generated summary. Enables three-state wikilink styling. */
+  has_summary: boolean
+  /** First 160 chars of the related entity's summary, for HoverCard previews. Null when has_summary is false. */
+  one_liner: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -182,4 +223,9 @@ export interface WikiEntityPage {
    * Null when no signal (all artifacts carry the default subcategory).
    */
   primary_subcategory?: string | null
+  /**
+   * Episodic memories assembled by wiki_pages.py (≤5 rows).
+   * Normalized in v1; section render deferred to v1.1 pending non-empty live data.
+   */
+  episodic_memories?: EpisodicMemory[]
 }
