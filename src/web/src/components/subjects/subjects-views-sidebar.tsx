@@ -24,13 +24,29 @@ import {
   type AtlasView,
 } from "@/lib/api/atlas-views"
 import { mcpUrl, mcpHeaders } from "@/lib/api/common"
+import type { MapLayout } from "@/lib/graph/cycle4-contracts"
 
 export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki"
+
+// Static layout presets for constellation mode — client-side only,
+// not persisted to Redis (free-tier cap of 3 user views is untouched).
+const LAYOUT_PRESETS: { id: MapLayout; label: string; hint: string }[] = [
+  { id: "force", label: "Default map", hint: "Force-directed layout (default)" },
+  { id: "wells", label: "Tight clusters", hint: "Well-separated cluster layout" },
+  { id: "domain", label: "Domains apart", hint: "Domain-separated layout" },
+]
 
 interface SubjectsViewsSidebarProps {
   mode: SubjectsMode
   /** Click a view → restore it in the current mode. */
   onRestore: (view: AtlasView) => void
+  /**
+   * Constellation mode only: active layout preset. When provided,
+   * the preset chips render above the saved-views list.
+   */
+  activeLayout?: MapLayout
+  /** Called when the user picks a layout preset chip. */
+  onLayoutChange?: (layout: MapLayout) => void
   className?: string
 }
 
@@ -54,6 +70,8 @@ const HEALTH_KEY = ["subjects-views-health"] as const
 export function SubjectsViewsSidebar({
   mode,
   onRestore,
+  activeLayout,
+  onLayoutChange,
   className,
 }: SubjectsViewsSidebarProps) {
   const qc = useQueryClient()
@@ -100,6 +118,35 @@ export function SubjectsViewsSidebar({
       </header>
 
       <ScrollArea className="grow">
+        {/* Layout presets — constellation mode only, client-side (no Redis rows). */}
+        {mode === "constellation" && onLayoutChange && (
+          <div className="border-b border-border/50 px-3 py-2">
+            <div className="mb-1.5 text-label-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Layout
+            </div>
+            <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Layout preset">
+              {LAYOUT_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={activeLayout === preset.id}
+                  title={preset.hint}
+                  onClick={() => onLayoutChange(preset.id)}
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-label-xs transition-colors",
+                    activeLayout === preset.id
+                      ? "border-accent bg-accent/30 text-accent-foreground"
+                      : "border-border/60 bg-card/70 text-muted-foreground hover:bg-accent/20",
+                  )}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isLoading && (
           <div className="flex items-center justify-center py-6 text-muted-foreground text-xs">
             <Loader2 className="h-3 w-3 animate-spin mr-1.5" />

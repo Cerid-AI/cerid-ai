@@ -896,30 +896,76 @@ class GraphMapResponse(BaseModel):
     silhouette: float | None = None
     computed_at: str | None = None
     cached: bool = False
+    layout_fallback: bool = False
+
+
+# Per-layout cache keys — keyed under the emb3d wildcard bust pattern
+# cerid:graph:emb3d:* so the nightly job invalidates all of them.
+# Omitting the ?layout param is byte-identical to ?layout=force.
+_VALID_LAYOUTS = frozenset({"force", "wells", "domain"})
+_LAYOUT_MAP_CACHE_KEY_TMPL = "cerid:graph:emb3d:v3:map:{layout}"
+_LAYOUT_COMMUNITY_REDIS_KEY_TMPL = "cerid:graph:map:communities:{layout}"
 
 
 @router.get("/map", response_model=GraphMapResponse)
-async def get_graph_map() -> GraphMapResponse:
+async def get_graph_map(
+    layout: str | None = Query(
+        default=None,
+        description="Layout basis: force (default), wells, or domain. "
+                    "Omitting is byte-identical to force. Unknown value → 422.",
+    ),
+) -> GraphMapResponse:
     """Full cartographic map payload for Constellation.
 
     Bundles the 2D-projected entity positions, CO_MENTIONED edge links, and
     the precomputed community hull/anchor/trust-mix artifacts from the
     compute_umap_3d nightly job into one cached response.
 
+    Supports ``?layout=force|wells|domain``.  Omitting the parameter is
+    byte-identical to ``?layout=force``.  Unknown values return 422.
+
     Cache: Redis SETEX ``GRAPH_EMBEDDINGS_3D_CACHE_TTL`` (default 24h).
-    The key ``cerid:graph:emb3d:v2:map`` matches the ``cerid:graph:emb3d:*``
-    bust pattern so a job recompute invalidates this endpoint automatically.
+    Per-layout cache keys ``cerid:graph:emb3d:v3:map:{layout}`` match the
+    ``cerid:graph:emb3d:*`` bust pattern so a job recompute invalidates all
+    of them automatically.
+
+    ``layout_fallback: true`` is returned when the requested non-default
+    layout artifact is missing — the response falls back to the force layout.
 
     Community artifacts degrade to ``communities=[]`` when the nightly job
     has not yet written the Redis artifact — the entity+link payload is
     always returned.
+
+    Use when: the Constellation renderer needs entity positions + community
+    hulls for the full cartographic map view.
+
+    Returns: count, entities (id/name/x/y/z/type/community/mention_count/
+    trust_state/projection/primary_domain), links (index triples), communities
+    (id/count/hull/anchor/label/top_hubs/trust_mix), silhouette, computed_at,
+    cached, layout_fallback.
     """
+    # Validate layout parameter
+    if layout is not None and layout not in _VALID_LAYOUTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown layout '{layout}'. Valid values: {sorted(_VALID_LAYOUTS)}.",
+        )
+
+    effective_layout = layout or "force"
+    is_non_default = effective_layout != "force"
+    layout_fallback = False
+
+    cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout=effective_layout)
+    community_redis_key = _LAYOUT_COMMUNITY_REDIS_KEY_TMPL.format(
+        layout=effective_layout
+    )
+
     redis = get_redis()
 
-    # Cache fast-path.
+    # Cache fast-path — per-layout key.
     if redis:
         try:
-            cached_raw = redis.get(_GRAPH_MAP_CACHE_KEY)
+            cached_raw = redis.get(cache_key)
             if cached_raw:
                 payload = json.loads(
                     cached_raw if isinstance(cached_raw, str)
@@ -929,7 +975,36 @@ async def get_graph_map() -> GraphMapResponse:
                 return GraphMapResponse(**payload)
         except (json.JSONDecodeError, ValueError, OSError) as exc:
             # silent-catch-allowed: cache miss is non-fatal — re-fetch.
-            logger.info("graph.map.cache_read_miss: %s", exc)
+            logger.info("graph.map.cache_read_miss layout=%s: %s", effective_layout, exc)
+
+    # For non-default layouts: check if per-layout position artifact exists in
+    # Redis. If missing, fall back to the force layout with layout_fallback=True.
+    if is_non_default and redis:
+        layout_pos_key = f"cerid:graph:emb3d:v3:layout_positions:{effective_layout}"
+        try:
+            has_layout_pos = redis.exists(layout_pos_key)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("app.routers.graph.map_layout_check", exc)
+            has_layout_pos = False
+        if not has_layout_pos:
+            layout_fallback = True
+            # Fall through to force layout positions
+            cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout="force")
+            community_redis_key = _LAYOUT_COMMUNITY_REDIS_KEY_TMPL.format(layout="force")
+            # Try the force cache first
+            if redis:
+                try:
+                    cached_raw = redis.get(cache_key)
+                    if cached_raw:
+                        payload = json.loads(
+                            cached_raw if isinstance(cached_raw, str)
+                            else cached_raw.decode("utf-8"),
+                        )
+                        payload["cached"] = True
+                        payload["layout_fallback"] = True
+                        return GraphMapResponse(**payload)
+                except (json.JSONDecodeError, ValueError, OSError) as exc:
+                    logger.info("graph.map.fallback_cache_read_miss: %s", exc)
 
     # Entity positions and links.
     rows = await _query_embeddings_3d(None, None)
@@ -937,13 +1012,25 @@ async def get_graph_map() -> GraphMapResponse:
     computed_at_values = [str(r["computed_at"]) for r in rows if r.get("computed_at")]
     computed_at: str | None = max(computed_at_values) if computed_at_values else None
 
+    # For non-force layouts, load per-layout positions and override x/y/z.
+    layout_pos_override: dict[str, list[float]] = {}
+    if is_non_default and not layout_fallback and redis:
+        try:
+            pos_raw = redis.get(f"cerid:graph:emb3d:v3:layout_positions:{effective_layout}")
+            if pos_raw:
+                layout_pos_override = json.loads(
+                    pos_raw if isinstance(pos_raw, str) else pos_raw.decode("utf-8")
+                )
+        except Exception as exc:  # noqa: BLE001 — position override is best-effort
+            log_swallowed_error("app.routers.graph.map_layout_positions", exc)
+
     payload_entities = [
         EntityEmbedding3D(
             id=r["id"],
             name=r.get("name") or r["id"],
-            x=float(r.get("x") or 0.0),
-            y=float(r.get("y") or 0.0),
-            z=float(r.get("z") or 0.0),
+            x=float(layout_pos_override[r["id"]][0] if r["id"] in layout_pos_override else (r.get("x") or 0.0)),
+            y=float(layout_pos_override[r["id"]][1] if r["id"] in layout_pos_override else (r.get("y") or 0.0)),
+            z=float(layout_pos_override[r["id"]][2] if r["id"] in layout_pos_override else (r.get("z") or 0.0)),
             type=r.get("type") or "unknown",
             community=r.get("community"),
             mention_count=int(r.get("mention_count") or 0),
@@ -957,11 +1044,12 @@ async def get_graph_map() -> GraphMapResponse:
     links = await _query_embeddings_3d_links([r["id"] for r in rows])
 
     # Community artifacts — degrade gracefully if missing.
+    # Try per-layout key first, fall back to the legacy key.
     communities: list[MapCommunity] = []
     silhouette: float | None = None
     if redis:
         try:
-            raw = redis.get(_COMMUNITY_MAP_REDIS_KEY)
+            raw = redis.get(community_redis_key) or redis.get(_COMMUNITY_MAP_REDIS_KEY)
             if raw:
                 artifact = json.loads(
                     raw if isinstance(raw, str) else raw.decode("utf-8"),
@@ -988,18 +1076,19 @@ async def get_graph_map() -> GraphMapResponse:
         silhouette=silhouette,
         computed_at=computed_at,
         cached=False,
+        layout_fallback=layout_fallback,
     )
 
     if redis:
         try:
             redis.set(
-                _GRAPH_MAP_CACHE_KEY,
+                cache_key,
                 response.model_dump_json(),
                 ex=_EMBEDDINGS_3D_TTL_SECONDS,
             )
         except (OSError, ValueError) as exc:
             # silent-catch-allowed: cache-write failure non-fatal.
-            logger.info("graph.map.cache_write_failed: %s", exc)
+            logger.info("graph.map.cache_write_failed layout=%s: %s", effective_layout, exc)
 
     return response
 
@@ -2207,3 +2296,334 @@ async def get_domains() -> DomainsResponse:
         uncategorized_entities=int(raw.get("uncategorized_entities") or 0),
         derived_at=raw.get("derived_at"),
     )
+
+
+# ---------------------------------------------------------------------------
+# STRATA Decomposition endpoint (Cycle 4)
+# ---------------------------------------------------------------------------
+
+_DECOMPOSITION_CACHE_KEY = "cerid:graph:emb3d:v3:decomposition"
+_DECOMPOSITION_TTL_SECONDS = int(
+    os.getenv("GRAPH_DECOMPOSITION_CACHE_TTL", str(86400))
+)
+
+
+class CommunityHub(BaseModel):
+    """Top-degree entity within a community, ordered by degree descending."""
+
+    id: str
+    name: str
+    degree: int
+
+
+class DecompositionL0Community(BaseModel):
+    """L0 community node in the decomposition tree (contract: L0Community)."""
+
+    id: str
+    mode_domain: str
+    purity: float
+    size: int
+    label: str | None = None
+    top_hubs: list[CommunityHub] = []
+
+
+class DecompositionL0RollupBucket(BaseModel):
+    """Rollup bucket for L0 communities of size < 4 (contract: L0RollupBucket)."""
+
+    kind: str = "rollup"
+    community_count: int
+    entity_count: int
+
+
+class DecompositionL1Community(BaseModel):
+    """L1 community node in the decomposition tree (contract: L1Community)."""
+
+    id: str
+    mode_domain: str
+    purity: float
+    size: int
+    label: str | None = None
+    top_hubs: list[CommunityHub] = []
+    children: list[DecompositionL0Community | DecompositionL0RollupBucket] = []
+
+
+class DecompositionSubcategory(BaseModel):
+    """Subcategory tier node (contract: SubCategoryNode)."""
+
+    id: str
+    label: str
+    entity_count: int
+    children: list[DecompositionL1Community] = []
+
+
+class DecompositionUnclustered(BaseModel):
+    """Per-domain unclustered bucket (contract: UnclusteredBucket)."""
+
+    count: int
+
+
+class DecompositionDomain(BaseModel):
+    """Domain node in the decomposition tree (contract: DomainNode)."""
+
+    id: str
+    label: str
+    entity_count: int
+    unclustered: DecompositionUnclustered
+    subcategories: list[DecompositionSubcategory] | None = None
+    communities: list[DecompositionL1Community] | None = None
+
+
+class DecompositionEntityLeaf(BaseModel):
+    """Entity leaf returned by ?community= param (contract: EntityLeaf)."""
+
+    id: str
+    name: str
+    type: str
+    trust_state: str
+    path: list[str]  # [domain, sub?, l1, l0]
+
+
+class DecompositionResponse(BaseModel):
+    """Shape returned by GET /graph/decomposition (contract: DecompositionPayload).
+
+    ``no_communities_computed: true`` means Leiden has never run — the
+    icicle should degrade to an honest Domain→Entity two-tier (A3).
+    """
+
+    domains: list[DecompositionDomain]
+    parent_map: dict[str, str]
+    uncategorized_count: int
+    no_communities_computed: bool
+    computed_at: str | None
+    cached: bool = False
+
+
+class DecompositionCommunityLeafResponse(BaseModel):
+    """Shape returned by GET /graph/decomposition?community=<id>."""
+
+    community_id: str
+    entities: list[DecompositionEntityLeaf]
+    cached: bool = False
+
+
+def _assemble_l1(l1: dict[str, Any]) -> DecompositionL1Community:
+    """Build a DecompositionL1Community from a raw decomposition dict."""
+    children: list[DecompositionL0Community | DecompositionL0RollupBucket] = []
+    for child in l1.get("children") or []:
+        if child.get("kind") == "rollup":
+            children.append(DecompositionL0RollupBucket(
+                kind="rollup",
+                community_count=int(child.get("community_count") or 0),
+                entity_count=int(child.get("entity_count") or 0),
+            ))
+        else:
+            children.append(DecompositionL0Community(
+                id=child["id"],
+                size=int(child.get("size") or 0),
+                label=child.get("label") or None,
+                mode_domain=child.get("mode_domain") or "",
+                purity=float(child.get("purity") or 1.0),
+                top_hubs=[CommunityHub(**h) for h in (child.get("top_hubs") or [])],
+            ))
+    return DecompositionL1Community(
+        id=l1["id"],
+        size=int(l1.get("size") or 0),
+        label=l1.get("label") or None,
+        mode_domain=l1.get("mode_domain") or "",
+        purity=float(l1.get("purity") or 1.0),
+        top_hubs=[CommunityHub(**h) for h in (l1.get("top_hubs") or [])],
+        children=children,
+    )
+
+
+@router.get("/decomposition", response_model=DecompositionResponse | DecompositionCommunityLeafResponse)
+async def get_graph_decomposition(
+    community: str | None = Query(
+        default=None,
+        description="When provided, return entity leaves for this L0 community "
+                    "each carrying path:[domain, sub?, l1, l0]. Omit for the full tree.",
+    ),
+) -> DecompositionResponse | DecompositionCommunityLeafResponse:
+    """STRATA decomposition tree — the Atlas icicle data source.
+
+    Without ?community=: returns the full tier tree (11 domains, conditional
+    subcategory groups from e.primary_subcategory, 262 L1 + 503 L0 communities
+    with sizes/labels/mode-domain/purity, derived L0→L1 parent map, per-domain
+    unclustered counts, size<4 rollup buckets, no_communities_computed flag).
+
+    With ?community=<id>: returns entity leaves for that L0 community, each
+    carrying path:[domain, sub?, l1, l0] for the search-palette path walk.
+
+    Cache: Redis SETEX 24h under ``cerid:graph:emb3d:v3:decomposition``
+    which matches the ``cerid:graph:emb3d:*`` bust pattern, so the nightly
+    compute_umap_3d run invalidates it automatically.
+
+    no_communities_computed=true means Leiden has never run — the client
+    should degrade to an honest Domain→Entity two-tier with the notice
+    "Clusters appear after the nightly analysis runs" (A3).
+
+    Use when: the Atlas icicle panel needs to render the knowledge-base
+    hierarchy for exploration.
+
+    Returns (tree): no_communities_computed, domains (with l1/l0 community
+    trees + rollup buckets + unclustered counts), l0_to_l1 parent map,
+    unclustered_by_domain, derived_at, cached.
+
+    Returns (leaf): community_id, entities (id/name/entity_type/trust_state/
+    mention_count/primary_domain/path), cached.
+    """
+    redis = get_redis()
+
+    _empty_tree = DecompositionResponse(
+        no_communities_computed=True,
+        domains=[],
+        parent_map={},
+        uncategorized_count=0,
+        computed_at=None,
+    )
+
+    try:
+        driver = get_neo4j()
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.graph.decomposition_neo4j_unavailable", exc)
+        return _empty_tree
+
+    if driver is None:
+        return _empty_tree
+
+    from app.db.neo4j.decomposition import (  # noqa: PLC0415
+        get_community_entities,
+        get_decomposition_tree,
+    )
+
+    # --- ?community= leaf path -------------------------------------------------
+    if community is not None:
+        leaf_cache_key = (
+            f"cerid:graph:emb3d:v3:decomposition:leaf:{community}"
+        )
+        if redis:
+            try:
+                cached_raw = redis.get(leaf_cache_key)
+                if cached_raw:
+                    payload = json.loads(
+                        cached_raw if isinstance(cached_raw, str)
+                        else cached_raw.decode("utf-8"),
+                    )
+                    payload["cached"] = True
+                    return DecompositionCommunityLeafResponse(**payload)
+            except (json.JSONDecodeError, ValueError, OSError) as exc:
+                logger.info("graph.decomposition.leaf_cache_miss community=%s: %s", community, exc)
+
+        try:
+            entities_raw = await asyncio.to_thread(get_community_entities, driver, community)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error(
+                "app.routers.graph.decomposition_leaf_query",
+                exc,
+                context={"community": community},
+            )
+            raise HTTPException(status_code=500, detail="Decomposition leaf query failed.")
+
+        if entities_raw is None:
+            raise HTTPException(status_code=404, detail=f"Community '{community}' not found.")
+
+        entity_leaves = [
+            DecompositionEntityLeaf(
+                id=e["id"],
+                name=e.get("name") or e["id"],
+                type=e.get("type") or "OTHER",
+                trust_state=e.get("trust_state") or "unknown",
+                path=e.get("path") or [],
+            )
+            for e in entities_raw
+        ]
+        leaf_response = DecompositionCommunityLeafResponse(
+            community_id=community,
+            entities=entity_leaves,
+            cached=False,
+        )
+
+        if redis:
+            try:
+                redis.set(
+                    leaf_cache_key,
+                    leaf_response.model_dump_json(),
+                    ex=_DECOMPOSITION_TTL_SECONDS,
+                )
+            except (OSError, ValueError) as exc:
+                logger.info("graph.decomposition.leaf_cache_write_failed: %s", exc)
+
+        return leaf_response
+
+    # --- Full tree path --------------------------------------------------------
+    if redis:
+        try:
+            cached_raw = redis.get(_DECOMPOSITION_CACHE_KEY)
+            if cached_raw:
+                payload = json.loads(
+                    cached_raw if isinstance(cached_raw, str)
+                    else cached_raw.decode("utf-8"),
+                )
+                payload["cached"] = True
+                return DecompositionResponse(**payload)
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
+            logger.info("graph.decomposition.cache_read_miss: %s", exc)
+
+    try:
+        raw = await asyncio.to_thread(get_decomposition_tree, driver)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.graph.decomposition_tree_query", exc)
+        return _empty_tree
+
+    # Assemble Pydantic models from raw dict (field names mirror the TS contract)
+    domain_nodes: list[DecompositionDomain] = []
+    for d in raw.get("domains") or []:
+        sub_nodes: list[DecompositionSubcategory] | None = None
+        if d.get("subcategories") is not None:
+            sub_nodes = [
+                DecompositionSubcategory(
+                    id=sc["id"],
+                    label=sc.get("label") or sc["id"],
+                    entity_count=int(sc.get("entity_count") or 0),
+                    children=[
+                        _assemble_l1(l1) for l1 in (sc.get("children") or [])
+                    ],
+                )
+                for sc in d["subcategories"]
+            ]
+
+        l1_list: list[DecompositionL1Community] = [
+            _assemble_l1(l1) for l1 in (d.get("communities") or [])
+        ]
+
+        domain_nodes.append(DecompositionDomain(
+            id=d["id"],
+            label=d.get("label") or d["id"],
+            entity_count=int(d.get("entity_count") or 0),
+            unclustered=DecompositionUnclustered(
+                count=int((d.get("unclustered") or {}).get("count") or 0),
+            ),
+            subcategories=sub_nodes,
+            communities=l1_list if sub_nodes is None else None,
+        ))
+
+    response = DecompositionResponse(
+        no_communities_computed=bool(raw.get("no_communities_computed", False)),
+        domains=domain_nodes,
+        parent_map=raw.get("parent_map") or {},
+        uncategorized_count=int(raw.get("uncategorized_count") or 0),
+        computed_at=raw.get("computed_at"),
+        cached=False,
+    )
+
+    if redis:
+        try:
+            redis.set(
+                _DECOMPOSITION_CACHE_KEY,
+                response.model_dump_json(),
+                ex=_DECOMPOSITION_TTL_SECONDS,
+            )
+        except (OSError, ValueError) as exc:
+            logger.info("graph.decomposition.cache_write_failed: %s", exc)
+
+    return response

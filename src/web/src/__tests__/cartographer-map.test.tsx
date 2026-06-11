@@ -17,12 +17,17 @@ import type { GraphMapResponse } from "@/lib/api/graph-map"
 // ---------------------------------------------------------------------------
 
 vi.mock("sigma", () => {
+  class MockCaptor {
+    on = vi.fn()
+    off = vi.fn()
+  }
   class MockSigma {
     kill = vi.fn()
     refresh = vi.fn()
     on = vi.fn()
     off = vi.fn()
     setSetting = vi.fn()
+    getMouseCaptor = vi.fn(() => new MockCaptor())
     getGraph = vi.fn(() => ({
       hasNode: vi.fn(() => false),
       forEachNeighbor: vi.fn(),
@@ -189,7 +194,7 @@ describe("CartographerMap — loading state", () => {
         data={undefined}
         isLoading={true}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -206,7 +211,7 @@ describe("CartographerMap — loading state", () => {
         isLoading={false}
         isError={true}
         errorMessage="Graph map fetch failed: 503"
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -222,7 +227,7 @@ describe("CartographerMap — loading state", () => {
         data={{ ...makeGraphMapData(), entities: [], count: 0, links: [], communities: [] }}
         isLoading={false}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -245,7 +250,7 @@ describe("CartographerMap — renders with data", () => {
         data={data}
         isLoading={false}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -262,7 +267,7 @@ describe("CartographerMap — renders with data", () => {
         data={data}
         isLoading={false}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -279,7 +284,7 @@ describe("CartographerMap — renders with data", () => {
         data={data}
         isLoading={false}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -296,7 +301,7 @@ describe("CartographerMap — renders with data", () => {
         data={data}
         isLoading={false}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -313,7 +318,7 @@ describe("CartographerMap — renders with data", () => {
         data={data}
         isLoading={false}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )
@@ -331,7 +336,7 @@ describe("CartographerMap — renders with data", () => {
         data={data}
         isLoading={false}
         isError={false}
-        onNodeClick={vi.fn()}
+        onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
     )

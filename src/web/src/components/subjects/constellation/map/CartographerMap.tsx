@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Sigma from "sigma"
 import Graph from "graphology"
-import { Loader2 } from "lucide-react"
+import { Loader2, X } from "lucide-react"
 import type { GraphMapResponse, CommunityHull } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
@@ -26,6 +26,16 @@ import { useCommunityLayer, resolveMapTokens, type MapTokens } from "./community
 import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import { useNavigation } from "@/contexts/navigation-context"
 import { domainColor } from "@/lib/graph/identity"
+import { createHealController } from "@/lib/graph/interactions/drag-heal"
+import type { OnInspect, OnFocusEntity } from "@/lib/graph/cycle4-contracts"
+// sigma's MouseCoords — local interface matching the vendored type
+interface SigmaMouseCoords {
+  x: number
+  y: number
+  original: MouseEvent | TouchEvent
+  preventSigmaDefault: () => void
+  sigmaDefaultPrevented: boolean
+}
 
 // ---------------------------------------------------------------------------
 // Sizing
@@ -144,6 +154,18 @@ interface PulseEntry {
 
 const PULSE_DURATION_MS = 600
 
+// Drag state refs — managed separately from React state to avoid reducer
+// reinstalls on every pointer event.
+interface DragRef {
+  nodeId: string | null
+  startX: number
+  startY: number
+  didDrag: boolean
+}
+
+// Click-vs-drag threshold: 4px displacement classifies as drag.
+const DRAG_THRESHOLD_PX = 4
+
 // ---------------------------------------------------------------------------
 // Component props
 // ---------------------------------------------------------------------------
@@ -159,8 +181,24 @@ export interface CartographerMapProps {
   isError: boolean
   errorMessage?: string
   newEntityIds?: Set<string>
-  onNodeClick?: (entityId: string) => void
+  /**
+   * Unified click contract (Cycle 4): pin/inspect only — never mode-switch.
+   * Replaces the old onNodeClick that conflated inspection with navigation.
+   */
+  onInspect?: OnInspect
+  /**
+   * Explicit refocus: re-centers the graph on this entity.
+   * Called by hull-card hub buttons only; node clicks use onInspect.
+   */
+  onFocusEntity?: OnFocusEntity
   onCommunityClick?: (community: CommunityHull) => void
+  /** layout_fallback: true → show inline "wells layout not computed yet" notice */
+  layoutFallback?: boolean
+  /**
+   * Called when the user Shift-drops a node to permanently pin it.
+   * Parent can persist this into the saved view's pinnedNodes field.
+   */
+  onPinnedNodesChange?: (pinnedNodes: Record<string, { x: number; y: number }>) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -177,13 +215,16 @@ export function CartographerMap({
   isError,
   errorMessage,
   newEntityIds,
-  onNodeClick,
+  onInspect,
+  onFocusEntity: _onFocusEntity, // eslint-disable-line @typescript-eslint/no-unused-vars
   onCommunityClick,
+  layoutFallback,
+  onPinnedNodesChange,
 }: CartographerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
-  const onNodeClickRef = useRef(onNodeClick)
-  onNodeClickRef.current = onNodeClick
+  const onInspectRef = useRef(onInspect)
+  onInspectRef.current = onInspect
 
   const { goTo } = useNavigation()
 
@@ -213,12 +254,28 @@ export function CartographerMap({
 
   // Pinned entity card state
   const [pinnedId, setPinnedId] = useState<string | null>(null)
+  // Pinned node position overrides (Shift-drop drag-pins)
+  const [pinnedNodes, setPinnedNodes] = useState<Record<string, { x: number; y: number }>>({})
+  const pinnedNodesRef = useRef(pinnedNodes)
+  pinnedNodesRef.current = pinnedNodes
+  const onPinnedNodesChangeRef = useRef(onPinnedNodesChange)
+  onPinnedNodesChangeRef.current = onPinnedNodesChange
 
   // Hover state lives in a ref — sigma events update it without triggering
   // React re-renders that would reinstall reducers on every mousemove.
   const hoverIdRef = useRef<string | null>(null)
   // DOM tooltip state for the HTML overlay (separate from sigma hover plate)
   const [tooltipState, setTooltipState] = useState<{ id: string; x: number; y: number } | null>(null)
+
+  // Drag state ref — no React state; updates don't trigger re-renders.
+  const dragRef = useRef<DragRef>({ nodeId: null, startX: 0, startY: 0, didDrag: false })
+  // Grab cursor state for the container
+  const [isDragging, setIsDragging] = useState(false)
+  // Reduced motion detection — optional chaining guards jsdom test env
+  const reducedMotion =
+    typeof window !== "undefined"
+      ? (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false)
+      : false
 
   // Pulse ring state: map from nodeId → start timestamp
   const [pulseMap, setPulseMap] = useState<Map<string, number>>(new Map())
@@ -324,14 +381,125 @@ export function CartographerMap({
     sigmaRef.current = sigma
     setSigmaInstance(sigma)
 
+    // Build entity lookup for home positions (used by heal controller)
+    const entityById = new Map(data.entities.map((e) => [e.id, e]))
+
+    // Heal controller — one per sigma instance, disposed on teardown.
+    const healCtrl = createHealController({
+      getHome: (id) => {
+        const e = entityById.get(id)
+        return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }
+      },
+      getPos: (id) => {
+        if (!sigma.getGraph().hasNode(id)) return { x: 0, y: 0 }
+        const attrs = sigma.getGraph().getNodeAttributes(id)
+        return { x: attrs.x as number, y: attrs.y as number }
+      },
+      setPos: (id, pos) => {
+        if (!sigma.getGraph().hasNode(id)) return
+        sigma.getGraph().setNodeAttribute(id, "x", pos.x)
+        sigma.getGraph().setNodeAttribute(id, "y", pos.y)
+      },
+      neighbors: (id) => {
+        const g = sigma.getGraph()
+        if (!g.hasNode(id)) return []
+        const nbIds: string[] = []
+        g.forEachNeighbor(id, (n) => nbIds.push(n))
+        return nbIds
+      },
+      onSettle: () => {
+        // Full refresh on settle to rebuild quadtree for hit-testing.
+        sigma.refresh()
+      },
+      reducedMotion,
+    })
+
+    // ---------------------------------------------------------------------------
+    // downNode — begin drag (beside clickNode per sigma grounding doc)
+    // ---------------------------------------------------------------------------
+    sigma.on("downNode", ({ node, event, preventSigmaDefault }) => {
+      const orig = event.original as MouseEvent | TouchEvent
+      const clientX = "clientX" in orig ? (orig as MouseEvent).clientX : 0
+      const clientY = "clientY" in orig ? (orig as MouseEvent).clientY : 0
+
+      dragRef.current = { nodeId: node, startX: clientX, startY: clientY, didDrag: false }
+      preventSigmaDefault()
+
+      setIsDragging(true)
+      healCtrl.startDrag(node)
+    })
+
+    // ---------------------------------------------------------------------------
+    // mousemovebody — drag move (MouseCoords per sigma captor contract)
+    // ---------------------------------------------------------------------------
+    const mouseCaptor = sigma.getMouseCaptor()
+    const handleMouseMove = (coords: SigmaMouseCoords) => {
+      const drag = dragRef.current
+      if (!drag.nodeId) return
+
+      const orig = coords.original as MouseEvent
+      const clientX = orig.clientX ?? 0
+      const clientY = orig.clientY ?? 0
+
+      const dx = clientX - drag.startX
+      const dy = clientY - drag.startY
+      if (!drag.didDrag && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+
+      dragRef.current.didDrag = true
+
+      const graphPos = sigma.viewportToGraph({ x: coords.x, y: coords.y })
+      healCtrl.moveDrag(drag.nodeId, graphPos)
+      sigma.refresh({ skipIndexation: true })
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mouseCaptor.on("mousemovebody", handleMouseMove as any)
+
+    // ---------------------------------------------------------------------------
+    // mouseup — end drag or fire click (MouseCoords)
+    // ---------------------------------------------------------------------------
+    const handleMouseUp = (coords: SigmaMouseCoords) => {
+      const drag = dragRef.current
+      if (!drag.nodeId) return
+
+      const node = drag.nodeId
+      const didDrag = drag.didDrag
+      dragRef.current = { nodeId: null, startX: 0, startY: 0, didDrag: false }
+      setIsDragging(false)
+
+      if (didDrag) {
+        const orig = coords.original as MouseEvent
+        const isShift = orig.shiftKey ?? false
+        healCtrl.endDrag(node, { pin: isShift })
+        if (isShift) {
+          const attrs = sigma.getGraph().getNodeAttributes(node)
+          setPinnedNodes((prev) => {
+            const next = { ...prev, [node]: { x: attrs.x as number, y: attrs.y as number } }
+            onPinnedNodesChangeRef.current?.(next)
+            return next
+          })
+        }
+      } else {
+        // Click: pin/inspect only per unified click contract.
+        setPinnedId((prev) => (prev === node ? null : node))
+        onInspectRef.current?.(node)
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mouseCaptor.on("mouseup", handleMouseUp as any)
+
+    // ---------------------------------------------------------------------------
+    // clickNode — consumed by downNode path above; listen for non-drag clicks
+    // that sigma still emits when preventSigmaDefault was NOT called.
+    // (downNode always calls it, so this is a safety net for accessibility.)
+    // ---------------------------------------------------------------------------
     sigma.on("clickNode", ({ node }) => {
+      if (dragRef.current.nodeId !== null) return // already handled by mouseup
       setPinnedId((prev) => (prev === node ? null : node))
-      onNodeClickRef.current?.(node)
+      onInspectRef.current?.(node)
     })
 
     sigma.on("enterNode", ({ node, event }) => {
       hoverIdRef.current = node
-      // sigma.refresh() uses skipIndexation so it's cheap
       sigma.refresh({ skipIndexation: true })
       const orig = event.original
       const clientX = "clientX" in orig ? (orig as MouseEvent).clientX : 0
@@ -343,10 +511,13 @@ export function CartographerMap({
       sigma.refresh({ skipIndexation: true })
       setTooltipState(null)
     })
-    // moveBody fires on every mousemove — do NOT clear hover here.
-    // Hover is cleared only on leaveNode (the correct counterpart to enterNode).
 
     return () => {
+      healCtrl.dispose()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mouseCaptor.off("mousemovebody", handleMouseMove as any)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mouseCaptor.off("mouseup", handleMouseUp as any)
       sigmaRef.current?.kill()
       sigmaRef.current = null
     }
@@ -403,6 +574,8 @@ export function CartographerMap({
       const currentPinnedId = pinnedIdRef.current
       const hoverId = hoverIdRef.current
       const currentPulseMap = pulseMapRef.current
+      const currentDragId = dragRef.current.nodeId
+      const isPermanentPin = node in pinnedNodesRef.current
 
       // Build neighbor sets for focus dimming
       const graph = sigma.getGraph()
@@ -448,14 +621,18 @@ export function CartographerMap({
         extraSize = t * 4  // expands up to 4px at peak
       }
 
+      // Drag lift: +15% size on the actively-dragged node (visible affordance).
+      const isDragged = node === currentDragId && currentDragId !== null
+      const nodeSize = isDragged ? attrs.size * 1.15 : attrs.size + extraSize
+
       return {
         ...attrs,
         color,
-        size: attrs.size + extraSize,
+        size: nodeSize,
         // highlighted only on the hovered/pinned center — not all neighbors
         highlighted: isCenter,
-        zIndex: isCenter ? 2 : hasFocus && focusNeighbors!.has(node) ? 1 : 0,
-        forceLabel: isCenter || (hasFocus && focusNeighbors!.has(node)),
+        zIndex: isDragged ? 3 : isPermanentPin ? 2 : isCenter ? 2 : hasFocus && focusNeighbors!.has(node) ? 1 : 0,
+        forceLabel: isCenter || isPermanentPin || (hasFocus && focusNeighbors!.has(node)),
       }
     })
 
@@ -485,12 +662,12 @@ export function CartographerMap({
     sigma.refresh()
   }, [sigmaInstance, data])
 
-  // Trigger a cheap refresh whenever lens/filter/tokens/pinnedId changes
+  // Trigger a cheap refresh whenever lens/filter/tokens/pinnedId/drag changes
   // without reinstalling reducers.
   useEffect(() => {
     if (!sigmaInstance) return
     sigmaInstance.refresh({ skipIndexation: true })
-  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, pulseMap])
+  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, pulseMap, isDragging])
 
   // ---------------------------------------------------------------------------
   // Ingest pulse: fire when newEntityIds changes
@@ -623,12 +800,20 @@ export function CartographerMap({
   return (
     <div
       className="relative h-full w-full bg-background"
+      style={{ cursor: isDragging ? "grabbing" : undefined }} // drift-allowed: runtime interaction state
       role="application"
       aria-roledescription="2D knowledge map"
       aria-label={`Cartographer map of ${data.count} entities`}
     >
       {/* Sigma canvas container */}
       <div ref={containerRef} className="h-full w-full" aria-hidden="true" />
+
+      {/* Layout fallback notice — shown when requested layout not yet computed */}
+      {layoutFallback && (
+        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-amber-500/10 px-3 py-1.5 text-label-xs text-amber-700 dark:text-amber-400 backdrop-blur">
+          Wells layout not computed yet — showing force
+        </div>
+      )}
 
       {/* Hover tooltip */}
       {tooltipState && hoveredEntity && (
@@ -651,7 +836,7 @@ export function CartographerMap({
               </>
             )}
           </div>
-          <div className="mt-1 text-label-xs text-muted-foreground/70">Click to pin</div>
+          <div className="mt-1 text-label-xs text-muted-foreground/70">Click to inspect</div>
         </div>
       )}
 
@@ -677,7 +862,7 @@ export function CartographerMap({
               aria-label="Clear focus"
               className="rounded p-1 text-muted-foreground hover:bg-accent/40"
             >
-              ✕
+              <X className="h-3 w-3" aria-hidden="true" />
             </button>
           </div>
           <button

@@ -13,7 +13,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import Sigma from "sigma"
 import type Graph from "graphology"
-import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight, Bookmark } from "lucide-react"
+import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight, Bookmark, ArrowLeft } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -39,6 +39,11 @@ import { AtlasA11yTree } from "./atlas-a11y-tree"
 import { AtlasContextMenu, type AtlasContextMenuTarget } from "./atlas-context-menu"
 import { AtlasSavedViews } from "./atlas-saved-views"
 import type { AtlasView } from "@/lib/api/atlas-views"
+import {
+  NEIGHBORHOOD_HOPS_MAX_PROMOTED,
+  type OnInspect,
+  type OnFocusEntity,
+} from "@/lib/graph/cycle4-contracts"
 
 type AtlasSigma = Sigma<AtlasNodeAttributes, AtlasEdgeAttributes>
 type AtlasGraph = Graph<AtlasNodeAttributes, AtlasEdgeAttributes>
@@ -334,6 +339,7 @@ interface PillToolbarProps {
   config: AtlasConfig
   onConfigChange: (patch: Partial<AtlasConfig>) => void
   savedViewsSlot?: ReactNode
+  onBackToOverview?: () => void
 }
 
 function PillToolbar({
@@ -349,9 +355,25 @@ function PillToolbar({
   config,
   onConfigChange,
   savedViewsSlot,
+  onBackToOverview,
 }: PillToolbarProps) {
   return (
     <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-1.5 border-b border-border/40 bg-card/80 px-3 py-1.5 backdrop-blur">
+      {/* Back to overview */}
+      {onBackToOverview && (
+        <>
+          <button
+            type="button"
+            onClick={onBackToOverview}
+            aria-label="Back to overview"
+            className="flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-label-xs text-muted-foreground hover:bg-accent/30"
+          >
+            <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+            Overview
+          </button>
+          <div className="h-4 w-px bg-border/40" aria-hidden="true" />
+        </>
+      )}
       {/* Lens radiogroup */}
       <div role="radiogroup" aria-label="Analysis lens" className="flex items-center gap-0.5">
         {LENS_ORDER.map((lens) => {
@@ -383,10 +405,10 @@ function PillToolbar({
 
       <div className="h-4 w-px bg-border/40" aria-hidden="true" />
 
-      {/* Hop stepper 1|2|3 */}
+      {/* Hop stepper 1|NEIGHBORHOOD_HOPS_MAX_PROMOTED (A4: hops=3 URL-reachable not promoted) */}
       <div role="group" aria-label="Hop depth" className="flex items-center gap-0.5">
         <span className="text-label-xs text-muted-foreground">Hops</span>
-        {([1, 2, 3] as const).map((h) => (
+        {(Array.from({ length: NEIGHBORHOOD_HOPS_MAX_PROMOTED }, (_, i) => (i + 1) as 1 | 2 | 3)).map((h) => (
           <button
             key={h}
             type="button"
@@ -499,8 +521,16 @@ export interface AtlasProps {
   entity: string
   hops?: 1 | 2 | 3
   filter?: string
-  onNodeClick?: (entityId: string) => void
-  onNodeDoubleClick?: (entityId: string) => void
+  /**
+   * Unified click contract (Cycle 4): pin/inspect only — never mode-switch.
+   * Replaces old onNodeClick. Called on node click to pin the entity card.
+   */
+  onInspect?: OnInspect
+  /**
+   * Explicit refocus: re-centers the neighborhood on a different entity.
+   * Called by "Make focal" card action only.
+   */
+  onFocusEntity?: OnFocusEntity
   /** Callback when user changes hop depth (from stepper or 1/2/3 keys) */
   onHopsChange?: (hops: 1 | 2 | 3) => void
   onToggleLensMenu?: () => void
@@ -510,6 +540,8 @@ export interface AtlasProps {
   /** Open entity in Timeline (new in Meridian) */
   onOpenInTimeline?: (entityId: string) => void
   onRestoreView?: (view: AtlasView) => void
+  /** Called when user clicks "Back to overview" in the toolbar */
+  onBackToOverview?: () => void
 }
 
 interface LayoutStatus {
@@ -529,8 +561,8 @@ export function Atlas({
   entity,
   hops = 2,
   filter,
-  onNodeClick,
-  onNodeDoubleClick,
+  onInspect,
+  onFocusEntity,
   onHopsChange,
   onToggleLensMenu,
   onSearchPalette,
@@ -538,6 +570,7 @@ export function Atlas({
   onOpenInWiki,
   onOpenInTimeline,
   onRestoreView,
+  onBackToOverview,
 }: AtlasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
@@ -546,12 +579,12 @@ export function Atlas({
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Callback refs — F2 fix preserved from v1
-  const onNodeClickRef = useRef(onNodeClick)
-  const onNodeDoubleClickRef = useRef(onNodeDoubleClick)
+  const onInspectRef = useRef(onInspect)
+  const onFocusEntityRef = useRef(onFocusEntity)
   useEffect(() => {
-    onNodeClickRef.current = onNodeClick
-    onNodeDoubleClickRef.current = onNodeDoubleClick
-  }, [onNodeClick, onNodeDoubleClick])
+    onInspectRef.current = onInspect
+    onFocusEntityRef.current = onFocusEntity
+  }, [onInspect, onFocusEntity])
 
   const [status, setStatus] = useState<LayoutStatus>({ state: "idle" })
   const prevQueryKeyRef = useRef<string>("")
@@ -729,13 +762,14 @@ export function Atlas({
       if (nd) {
         sigma.getCamera().animate({ x: nd.x, y: nd.y }, { duration: 500 })
       }
-      onNodeClickRef.current?.(node)
+      // Unified click contract (Cycle 4): pin only — no mode switch.
+      onInspectRef.current?.(node)
     })
 
-    sigma.on("doubleClickNode", ({ node, event }) => {
-      // Prevent sigma's default double-click zoom
+    // Double-click removed (Cycle 4 click contract: Enter = inspect, not navigate).
+    sigma.on("doubleClickNode", ({ event }) => {
+      // Suppress sigma's default double-click zoom — no action.
       try { (event.original as MouseEvent | undefined)?.preventDefault?.() } catch { /* ok */ }
-      onNodeDoubleClickRef.current?.(node)
     })
 
     sigma.on("enterNode", ({ node, event }) => {
@@ -895,16 +929,16 @@ export function Atlas({
     setPinnedNode(null)
   }, [])
 
-  // Make focal: animate camera then trigger parent refocus
+  // Make focal: animate camera then trigger parent explicit refocus (A4 contract)
   const handleMakeFocal = useCallback((nodeId: string) => {
     const s = sigmaRef.current
     if (s) {
       const nd = s.getNodeDisplayData(nodeId)
       if (nd) s.getCamera().animate({ x: nd.x, y: nd.y }, { duration: 500 })
     }
-    onNodeClick?.(nodeId)
+    onFocusEntity?.(nodeId)
     setArrivalPingKey((k) => k + 1)
-  }, [onNodeClick])
+  }, [onFocusEntity])
 
   // Hop-ring graticule overlay
   useHopRingLayer(sigmaInstance, graphInstance, entity, hops, tokens)
@@ -916,7 +950,8 @@ export function Atlas({
     sigma: sigmaInstance,
     graph: graphInstance,
     focalEntity: entity,
-    onActivate: (id) => { if (onNodeDoubleClick) onNodeDoubleClick(id); else onNodeClick?.(id) },
+    // Cycle 4: Enter = inspect (pin card), not navigate. A5 keyboard contract.
+    onActivate: (id) => { onInspect?.(id) },
     onToggleLensMenu: handleToggleLensMenu,
     onSearchPalette,
     onHopsChange: handleHopsChange,
@@ -958,6 +993,7 @@ export function Atlas({
           totalEdges={graphInstance?.size ?? 0}
           config={config}
           onConfigChange={handleConfigChange}
+          onBackToOverview={onBackToOverview}
           savedViewsSlot={
             <Popover>
               <PopoverTrigger asChild>

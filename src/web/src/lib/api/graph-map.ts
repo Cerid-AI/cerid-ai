@@ -7,9 +7,11 @@
 
 import { mcpUrl, mcpHeaders, extractError } from "./common"
 import type { EntityEmbedding3D } from "./embeddings-3d"
+import type { MapLayout } from "@/lib/graph/cycle4-contracts"
 
 // Re-export the entity type so map consumers don't have to import two modules.
 export type { EntityEmbedding3D }
+export type { MapLayout }
 
 export interface CommunityHull {
   /** Leiden community id */
@@ -40,13 +42,39 @@ export interface GraphMapResponse {
   /** ISO timestamp of last compute run */
   computed_at: string | null
   cached: boolean
+  /**
+   * Layout that was actually served. Present when ?layout= was passed.
+   * Absent (undefined) on responses from the legacy no-param endpoint.
+   */
+  layout?: MapLayout
+  /**
+   * True when the requested non-default layout artifact was not yet computed
+   * and the server fell back to "force". Absent/undefined when not applicable.
+   */
+  layout_fallback?: boolean
 }
 
-export async function fetchGraphMap(signal?: AbortSignal): Promise<GraphMapResponse> {
-  const url = mcpUrl("/graph/map")
+export async function fetchGraphMap(
+  layoutOrSignal?: MapLayout | AbortSignal,
+  signal?: AbortSignal,
+): Promise<GraphMapResponse> {
+  let layout: MapLayout | undefined
+  let abortSignal: AbortSignal | undefined
+
+  if (typeof layoutOrSignal === "string") {
+    layout = layoutOrSignal
+    abortSignal = signal
+  } else {
+    abortSignal = layoutOrSignal
+  }
+
+  const params: Record<string, string> = {}
+  if (layout && layout !== "force") params.layout = layout
+
+  const url = mcpUrl("/graph/map", params)
   const res = await fetch(url.toString(), {
     headers: mcpHeaders(),
-    signal,
+    signal: abortSignal,
   })
   if (!res.ok) {
     throw new Error(await extractError(res, `Graph map fetch failed: ${res.status}`))

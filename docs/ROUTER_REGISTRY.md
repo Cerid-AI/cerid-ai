@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 348
+**Total routes:** 349
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -122,6 +122,7 @@ not documented here; see the internal repo for the full registry.
 | POST | `/{slug}/enabled` | `set_adapter_enabled` | `src/mcp/app/routers/external_apis.py` | external-apis |  |
 | GET | `/{slug}/health` | `adapter_health` | `src/mcp/app/routers/external_apis.py` | external-apis |  |
 | POST | `/feedback` | `submit_claim_feedback` | `src/mcp/app/routers/feedback.py` | feedback |  |
+| GET | `/decomposition` | `get_graph_decomposition` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/domains` | `get_domains` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/embeddings/3d` | `get_embeddings_3d` | `src/mcp/app/routers/graph.py` | graph |  |
 | GET | `/health` | `graph_health` | `src/mcp/app/routers/graph.py` | graph |  |

@@ -101,6 +101,23 @@ src/web/src/components/kb/kb-context-panel.tsx:467
 src/web/src/components/kb/kb-context-panel.tsx:472
 src/web/src/components/kb/kb-context-panel.tsx:477
 
+# --- Section: Cycle 4 Atlas decomposition icicle (Agent B) ------------------
+# shadcn focus-ring convention (focus-visible:ring-ring/50 focus-visible:ring-[3px])
+# applied to interactive tier rows, filter inputs, and breadcrumb buttons.
+# Design context specifies this as the canonical shadcn focus pattern.
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:203
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:222
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:288
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:335
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:731
+
+# --- Section: Subjects pane inline styles (shifted line numbers) ---------------
+# These are pre-existing allowlisted patterns from the original subjects-pane.tsx;
+# line numbers shifted after Cycle 4 rewrite. viewTransitionName is a View
+# Transition API attribute required at runtime; min-w-[1rem] is badge centering.
+src/web/src/components/subjects/subjects-pane.tsx:269
+src/web/src/components/subjects/subjects-pane.tsx:97
+
 # --- Section: Brand / sidebar layout chrome ----------------------------------
 # CERID wordmark + tier pill use brand-pinned type sizes.
 # Bumped after Phase 9 (M-A.5 View Transition wrapper) — +15 lines for

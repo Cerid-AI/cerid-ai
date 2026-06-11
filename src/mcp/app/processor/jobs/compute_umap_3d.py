@@ -81,12 +81,31 @@ _NOVERLAP_ITERATIONS = 25
 # Minimum anchor count to run Procrustes (fewer = numerically unstable)
 _PROCRUSTES_MIN_ANCHORS = 10
 
-# Community z-relief amplitude (layout units)
+# Community z-relief amplitude (layout units) — kept for _enrich_z fallback.
+# Primary z encoding is now recency (updated_at) with amplitude ≤ 0.3×map radius.
 _Z_RELIEF_AMPLITUDE = 3.0
 
-# Community artifacts
+# Recency-z: amplitude as a fraction of the map radius (_FALLBACK_SCALE).
+# Must be ≤ 0.3 so the 2D mental map stays dominant.
+_Z_RECENCY_FRACTION = 0.3  # z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
+
+# Community artifacts — base key (force layout).
+# Per-layout keys: "cerid:graph:map:communities:{layout}"
 _COMMUNITY_MAP_REDIS_KEY = "cerid:graph:map:communities"
+_COMMUNITY_MAP_REDIS_KEY_TMPL = "cerid:graph:map:communities:{layout}"
+
+# Per-layout position artifact key (non-default layouts only).
+# "cerid:graph:emb3d:v3:layout_positions:{layout}"
+_LAYOUT_POSITIONS_REDIS_KEY_TMPL = "cerid:graph:emb3d:v3:layout_positions:{layout}"
+
 _SILHOUETTE_SAMPLE = 800  # max nodes sampled for silhouette score
+
+# Wells layout: boosted community-cohesion pull + inter-centroid repulsion.
+# UMAP_FORCE_COMMUNITY_PULL raised from 1.5 to ~5 for hard community separation.
+_WELLS_COMMUNITY_PULL = float(os.getenv("UMAP_WELLS_COMMUNITY_PULL", "5.0"))
+# Domain layout: per-domain anchor springs.
+# Uses the golden-ratio circle from _fallback_layout, area-proportional.
+_DOMAIN_SPRING_K = float(os.getenv("UMAP_DOMAIN_SPRING_K", "0.3"))
 
 
 class ComputeUmap3DJob(BaseJob):
@@ -158,9 +177,53 @@ class ComputeUmap3DJob(BaseJob):
         for e_row in entities:
             degree_map[e_row["id"]] = float(e_row.get("_degree") or 0.0)
 
-        self._store_community_artifacts(entities, pos2d, degree_map, driver=driver)
+        # Force layout: store community artifacts + positions.
+        self._store_community_artifacts(
+            entities, pos2d, degree_map, driver=driver, layout="force"
+        )
 
         await asyncio.to_thread(self._write_coords, driver, coords)
+
+        # Wells layout pass: boosted community pull + inter-centroid repulsion.
+        try:
+            wells_coords = await asyncio.to_thread(
+                self._wells_layout, entities, edges
+            )
+            wells_pos2d = np.array(
+                [[c["x"], c["y"]] for c in wells_coords], dtype=np.float64
+            )
+            self._store_community_artifacts(
+                entities, wells_pos2d, degree_map, driver=driver, layout="wells"
+            )
+            self._store_layout_positions(wells_coords, layout="wells")
+            logger.info("compute_umap_3d.wells_layout wrote count=%d", len(wells_coords))
+        except Exception as exc:  # noqa: BLE001 — non-default layout is best-effort
+            log_swallowed_error("processor.compute_umap_3d.wells_layout", exc)
+
+        # Domain layout pass: area-proportional per-domain anchor springs.
+        try:
+            domain_coords = await asyncio.to_thread(
+                self._domain_layout, entities, edges
+            )
+            domain_pos2d = np.array(
+                [[c["x"], c["y"]] for c in domain_coords], dtype=np.float64
+            )
+            self._store_community_artifacts(
+                entities, domain_pos2d, degree_map, driver=driver, layout="domain"
+            )
+            self._store_layout_positions(domain_coords, layout="domain")
+            logger.info("compute_umap_3d.domain_layout wrote count=%d", len(domain_coords))
+        except Exception as exc:  # noqa: BLE001 — non-default layout is best-effort
+            log_swallowed_error("processor.compute_umap_3d.domain_layout", exc)
+
+        # L1 community summary batch — generate summaries for the 262 L1
+        # communities that currently have none (level=1, skip_with_existing=True).
+        # Runs best-effort after all layout passes; does not block cache bust.
+        try:
+            await self._run_l1_summary_batch(driver)
+        except Exception as exc:  # noqa: BLE001 — best-effort, never blocks
+            log_swallowed_error("processor.compute_umap_3d.l1_summary_batch", exc)
+
         self._bust_serving_cache()
         await progress_cb(1.0)
         method = coords[0]["method"] if coords else "none"
@@ -171,6 +234,47 @@ class ComputeUmap3DJob(BaseJob):
             actual_tokens_out=0,
             metadata={"count": len(coords), "method": method},
         )
+
+    async def _run_l1_summary_batch(self, driver: Any) -> None:
+        """Trigger L1 community summary generation via community_summaries.py.
+
+        Generates summaries for level-1 communities (262 total, currently
+        none have summaries) using the same machinery as the level-0 batch.
+        Skips communities that already have summaries (skip_with_existing=True).
+        Requires the Chroma vector store and LLM to be available.
+        """
+        try:
+            from app.db.neo4j.community_summaries import summarize_communities  # noqa: PLC0415
+            from app.deps import get_chroma  # noqa: PLC0415
+        except ImportError as exc:
+            log_swallowed_error("compute_umap_3d.l1_summary_batch.import", exc)
+            return
+
+        try:
+            chroma_client = get_chroma()
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("compute_umap_3d.l1_summary_batch.chroma", exc)
+            return
+
+        if chroma_client is None:
+            logger.info("compute_umap_3d.l1_summary_batch: chroma unavailable, skipping")
+            return
+
+        logger.info("compute_umap_3d.l1_summary_batch: starting L1 community summarisation")
+        try:
+            result = await summarize_communities(
+                driver,
+                chroma_client,
+                level=1,
+                skip_with_existing_summary=True,
+            )
+            logger.info(
+                "compute_umap_3d.l1_summary_batch: done summarised=%d skipped_existing=%d",
+                result.get("summarised", 0),
+                result.get("skipped_existing", 0),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("compute_umap_3d.l1_summary_batch.run", exc)
 
     def _bust_serving_cache(self) -> None:
         """Drop the /graph/embeddings/3d Redis cache after writing coords.
@@ -213,6 +317,8 @@ class ComputeUmap3DJob(BaseJob):
                 coalesce(e.trust_state, 'unknown') AS trust_state,
                 e.umap_x AS old_x,
                 e.umap_y AS old_y,
+                e.updated_at AS updated_at,
+                e.primary_domain AS primary_domain,
                 deg AS _degree
             LIMIT {_MAX_ENTITIES}
         """
@@ -279,6 +385,7 @@ class ComputeUmap3DJob(BaseJob):
             cy = math.sin(theta) * _FALLBACK_SCALE
             centroids_2d[key] = (cx, cy)
 
+        z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
         out: list[dict[str, Any]] = []
         for key, members in by_community.items():
             cx, cy = centroids_2d[key]
@@ -292,8 +399,7 @@ class ComputeUmap3DJob(BaseJob):
                 u2 = int.from_bytes(h[2:4], "big") / 65535
                 z1 = math.sqrt(-2 * math.log(max(1e-9, u1))) * math.cos(2 * math.pi * u2)
                 z2 = math.sqrt(-2 * math.log(max(1e-9, u1))) * math.sin(2 * math.pi * u2)
-                comm_key = str(ent.get("community") or ent["id"])
-                z_val = (self._hash01(comm_key) - 0.5) * _Z_RELIEF_AMPLITUDE
+                z_val = self._compute_z_recency(ent, z_amplitude)
                 out.append({
                     "id": ent["id"],
                     "x": cx + z1 * spread,
@@ -473,11 +579,12 @@ class ComputeUmap3DJob(BaseJob):
         old_y = np.array([e.get("old_y") for e in entities], dtype=object)
         pos_all = self._procrustes_align(pos_all, old_x, old_y)
 
-        # Build output with z community relief.
+        # Build output with z-recency encoding.
+        # z=0 plane = now; older entities sink. Amplitude ≤ 0.3×map radius.
+        z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
         result: list[dict[str, Any]] = []
         for i in range(n):
-            comm_key = str(entities[i].get("community") or entities[i]["id"])
-            z_val = (self._hash01(comm_key) - 0.5) * _Z_RELIEF_AMPLITUDE
+            z_val = self._compute_z_recency(entities[i], z_amplitude)
             result.append({
                 "id": entities[i]["id"],
                 "x": float(pos_all[i, 0]),
@@ -608,23 +715,350 @@ class ComputeUmap3DJob(BaseJob):
         aligned = s * (centred @ R.T) + c_old
         return aligned
 
+    @staticmethod
+    def _compute_z_recency(entity: dict[str, Any], z_amplitude: float) -> float:
+        """Derive z from entity recency.
+
+        z=0 plane = now (most recent).  Older entities sink (negative z).
+        Amplitude capped at ±z_amplitude.  Falls back to 0.0 if updated_at
+        is absent or unparseable.
+
+        Semantics: ``z = -(age_days / max_age_days) * z_amplitude``
+        where max_age_days normalises the range to [-z_amplitude, 0].
+        The max-age baseline is 3 years (1095 days) — entities older than
+        that all sit at the floor.
+        """
+        MAX_AGE_DAYS = 1095.0  # noqa: N806 — local constant
+        updated_at_raw = entity.get("updated_at")
+        if not updated_at_raw:
+            return 0.0
+        try:
+            from datetime import datetime, timezone  # noqa: PLC0415
+            ts_str = str(updated_at_raw)
+            # Handle ISO strings with or without timezone offset.
+            if ts_str.endswith("Z"):
+                ts_str = ts_str[:-1] + "+00:00"
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            age_days = max(0.0, (now - dt).total_seconds() / 86400.0)
+            fraction = min(1.0, age_days / MAX_AGE_DAYS)
+            return -fraction * z_amplitude
+        except (ValueError, TypeError, OSError):
+            return 0.0
+
     def _enrich_z(
         self,
         coords: list[dict[str, Any]],
         entities: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Add z community relief to fallback coords (no-edge path)."""
+        """Add z-recency encoding to fallback coords (no-edge path)."""
         ent_by_id = {e["id"]: e for e in entities}
+        z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
         for c in coords:
             ent = ent_by_id.get(c["id"], {})
-            comm_key = str(ent.get("community") or c["id"])
-            c["z"] = (self._hash01(comm_key) - 0.5) * _Z_RELIEF_AMPLITUDE
+            c["z"] = self._compute_z_recency(ent, z_amplitude)
         return coords
+
+    def _wells_layout(
+        self,
+        entities: list[dict[str, Any]],
+        edges: list[tuple[str, str, float]],
+    ) -> list[dict[str, Any]]:
+        """Wells layout: boosted community pull + inter-centroid repulsion.
+
+        Raises UMAP_FORCE_COMMUNITY_PULL from 1.5 to ~5 so communities
+        become hard-separated wells.  After the force pass, applies
+        inter-centroid repulsion to push community centroids apart.
+        Silhouette gate provides a built-in quality metric.
+        """
+        import numpy as np  # noqa: PLC0415
+
+        # Run force layout with boosted community pull.
+        n = len(entities)
+        index_of = {e["id"]: i for i, e in enumerate(entities)}
+
+        seed = self._fallback_layout(entities)
+        pos_all = np.array([[r["x"], r["y"]] for r in seed], dtype=np.float64)
+
+        src, dst, wgt = [], [], []
+        max_w = 1.0
+        for s, t, w in edges:
+            si, ti = index_of.get(s), index_of.get(t)
+            if si is None or ti is None or si == ti:
+                continue
+            src.append(si)
+            dst.append(ti)
+            wgt.append(w)
+            max_w = max(max_w, w)
+
+        if not src:
+            return self._enrich_z(seed, entities)
+
+        src_all = np.array(src, dtype=np.int64)
+        dst_all = np.array(dst, dtype=np.int64)
+        w_all = np.log1p(np.array(wgt)) / math.log1p(max_w)
+
+        degree = np.zeros(n)
+        np.add.at(degree, src_all, 1)
+        np.add.at(degree, dst_all, 1)
+
+        connected = np.where(degree > 0)[0]
+        isolated = np.where(degree == 0)[0]
+        remap = -np.ones(n, dtype=np.int64)
+        remap[connected] = np.arange(connected.size)
+
+        pos = pos_all[connected].copy()
+        mass = 1.0 + np.sqrt(degree[connected])
+        src_a = remap[src_all]
+        dst_a = remap[dst_all]
+        w_a = w_all
+        m = connected.size
+
+        # Community index per connected node.
+        comm_of: dict[str, int] = {}
+        comm_idx = np.zeros(m, dtype=np.int64)
+        for local_i, global_i in enumerate(connected):
+            key = str(entities[int(global_i)].get("community") or f"__solo:{global_i}")
+            if key not in comm_of:
+                comm_of[key] = len(comm_of)
+            comm_idx[local_i] = comm_of[key]
+        n_comms = len(comm_of)
+        comm_counts = np.bincount(comm_idx, minlength=n_comms).astype(np.float64)
+
+        kr = _FORCE_REPULSION
+        kg = _FORCE_GRAVITY
+        kp = _WELLS_COMMUNITY_PULL  # boosted vs force layout
+        extent = float(np.sqrt((pos * pos).sum(axis=1)).max()) or _FALLBACK_SCALE
+        temperature = extent / 5.0
+        cooling = (0.015 / temperature) ** (1.0 / _FORCE_ITERATIONS)
+        chunk = 512
+
+        for _ in range(_FORCE_ITERATIONS):
+            disp = np.zeros_like(pos)
+
+            for start in range(0, m, chunk):
+                end = min(start + chunk, m)
+                delta = pos[start:end, None, :] - pos[None, :, :]
+                dist2 = (delta * delta).sum(axis=2)
+                np.clip(dist2, 1e-4, None, out=dist2)
+                f = kr * (mass[start:end, None] * mass[None, :]) / dist2
+                disp[start:end] += (f[:, :, None] * delta).sum(axis=1)
+
+            delta_e = pos[src_a] - pos[dst_a]
+            dist_e = np.sqrt((delta_e * delta_e).sum(axis=1)) + 1e-9
+            pull = (w_a * np.log1p(dist_e) / dist_e)[:, None] * delta_e
+            np.subtract.at(disp, src_a, pull)
+            np.add.at(disp, dst_a, pull)
+
+            r = np.sqrt((pos * pos).sum(axis=1)) + 1e-9
+            disp -= (kg * mass / r)[:, None] * pos
+
+            if kp > 0:
+                centroids = np.zeros((n_comms, 2))
+                np.add.at(centroids, comm_idx, pos)
+                centroids /= comm_counts[:, None]
+                disp += kp * (centroids[comm_idx] - pos)
+
+            length = np.sqrt((disp * disp).sum(axis=1)) + 1e-9
+            step = np.minimum(length, temperature)
+            pos += disp / length[:, None] * step[:, None]
+            temperature *= cooling
+
+        pos = self._noverlap(pos, degree[connected])
+
+        # Inter-centroid repulsion pass.
+        centroids = np.zeros((n_comms, 2))
+        np.add.at(centroids, comm_idx, pos)
+        centroids /= comm_counts[:, None]
+        for _ in range(20):
+            c_disp = np.zeros_like(centroids)
+            for ci in range(n_comms):
+                for cj in range(n_comms):
+                    if ci == cj:
+                        continue
+                    delta_c = centroids[ci] - centroids[cj]
+                    dist_c = float(np.sqrt((delta_c * delta_c).sum())) + 1e-9
+                    repulse = kr * 10.0 / (dist_c * dist_c)
+                    c_disp[ci] += (delta_c / dist_c) * repulse
+            centroids += c_disp * 0.1
+        # Snap nodes to follow their centroid shift.
+        old_centroids = np.zeros((n_comms, 2))
+        np.add.at(old_centroids, comm_idx, pos)
+        old_centroids /= comm_counts[:, None]
+        delta_centroids = centroids - old_centroids
+        pos += delta_centroids[comm_idx]
+
+        radius = float(np.sqrt((pos * pos).sum(axis=1)).max())
+        if radius > 1e-9:
+            pos *= _FALLBACK_SCALE / radius
+        pos_all[connected] = pos
+
+        if isolated.size:
+            iso = pos_all[isolated]
+            iso_r = np.sqrt((iso * iso).sum(axis=1)) + 1e-9
+            pos_all[isolated] = iso / iso_r[:, None] * (_FALLBACK_SCALE * 1.45)
+
+        z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
+        result: list[dict[str, Any]] = []
+        for i in range(n):
+            z_val = self._compute_z_recency(entities[i], z_amplitude)
+            result.append({
+                "id": entities[i]["id"],
+                "x": float(pos_all[i, 0]),
+                "y": float(pos_all[i, 1]),
+                "z": z_val,
+                "method": "wells",
+            })
+        return result
+
+    def _domain_layout(
+        self,
+        entities: list[dict[str, Any]],
+        edges: list[tuple[str, str, float]],
+    ) -> list[dict[str, Any]]:
+        """Domain layout: area-proportional per-domain anchor springs.
+
+        Entities are attracted toward their domain's fixed anchor position.
+        Anchors are placed on a golden-ratio circle with radii proportional
+        to the square root of each domain's entity count (area-proportional).
+        The two largest domains (research/general at ~1529/849) land on
+        opposite hemispheres; the thin tail runs on an arc.
+        """
+        import numpy as np  # noqa: PLC0415
+
+        n = len(entities)
+
+        # Compute domain entity counts.
+        domain_counts: dict[str, int] = {}
+        for e in entities:
+            d = str(e.get("primary_domain") or "")
+            if d:
+                domain_counts[d] = domain_counts.get(d, 0) + 1
+
+        # Sort domains by size (largest first) for anchor placement.
+        sorted_domains = sorted(domain_counts.keys(), key=lambda d: -domain_counts[d])
+
+        # Area-proportional anchors: radius proportional to sqrt(count).
+        total_count = max(sum(domain_counts.values()), 1)
+        golden = math.pi * (3 - math.sqrt(5))
+        domain_anchors: dict[str, tuple[float, float]] = {}
+        for idx, domain in enumerate(sorted_domains):
+            count = domain_counts[domain]
+            # Radius: scale by sqrt(count/total_count) * _FALLBACK_SCALE.
+            radius_scale = math.sqrt(count / total_count) * _FALLBACK_SCALE * 1.2
+            theta = golden * idx
+            ax = math.cos(theta) * radius_scale
+            ay = math.sin(theta) * radius_scale
+            domain_anchors[domain] = (ax, ay)
+
+        # Start from the fallback layout positions.
+        seed = self._fallback_layout(entities)
+        pos_all = np.array([[r["x"], r["y"]] for r in seed], dtype=np.float64)
+
+        index_of = {e["id"]: i for i, e in enumerate(entities)}
+
+        # Edge arrays.
+        src, dst, wgt = [], [], []
+        max_w = 1.0
+        for s, t, w in edges:
+            si, ti = index_of.get(s), index_of.get(t)
+            if si is None or ti is None or si == ti:
+                continue
+            src.append(si)
+            dst.append(ti)
+            wgt.append(w)
+            max_w = max(max_w, w)
+
+        if src:
+            src_all = np.array(src, dtype=np.int64)
+            dst_all = np.array(dst, dtype=np.int64)
+            w_all = np.log1p(np.array(wgt)) / math.log1p(max_w)
+        else:
+            src_all = dst_all = w_all = np.array([], dtype=np.float64)
+
+        degree = np.zeros(n)
+        if src:
+            np.add.at(degree, src_all, 1)
+            np.add.at(degree, dst_all, 1)
+
+        mass = 1.0 + np.sqrt(degree)
+
+        # Domain anchor array per entity.
+        anchor_pos = np.zeros((n, 2))
+        has_anchor = np.zeros(n, dtype=bool)
+        for i, e in enumerate(entities):
+            d = str(e.get("primary_domain") or "")
+            if d in domain_anchors:
+                anchor_pos[i] = domain_anchors[d]
+                has_anchor[i] = True
+
+        kr = _FORCE_REPULSION
+        kg = _FORCE_GRAVITY * 0.5
+        ks = _DOMAIN_SPRING_K  # domain-anchor spring constant
+        extent = float(np.sqrt((pos_all * pos_all).sum(axis=1)).max()) or _FALLBACK_SCALE
+        temperature = extent / 5.0
+        cooling = (0.015 / temperature) ** (1.0 / _FORCE_ITERATIONS)
+        chunk = 512
+
+        for _ in range(_FORCE_ITERATIONS):
+            disp = np.zeros_like(pos_all)
+
+            # Repulsion.
+            for start in range(0, n, chunk):
+                end = min(start + chunk, n)
+                delta = pos_all[start:end, None, :] - pos_all[None, :, :]
+                dist2 = (delta * delta).sum(axis=2)
+                np.clip(dist2, 1e-4, None, out=dist2)
+                f = kr * (mass[start:end, None] * mass[None, :]) / dist2
+                disp[start:end] += (f[:, :, None] * delta).sum(axis=1)
+
+            # Attraction along edges.
+            if len(src_all) > 0:
+                delta_e = pos_all[src_all.astype(int)] - pos_all[dst_all.astype(int)]
+                dist_e = np.sqrt((delta_e * delta_e).sum(axis=1)) + 1e-9
+                pull = (w_all * np.log1p(dist_e) / dist_e)[:, None] * delta_e
+                np.subtract.at(disp, src_all.astype(int), pull)
+                np.add.at(disp, dst_all.astype(int), pull)
+
+            # Gravity.
+            r = np.sqrt((pos_all * pos_all).sum(axis=1)) + 1e-9
+            disp -= (kg * mass / r)[:, None] * pos_all
+
+            # Domain-anchor spring.
+            if has_anchor.any():
+                disp[has_anchor] += ks * (anchor_pos[has_anchor] - pos_all[has_anchor])
+
+            length = np.sqrt((disp * disp).sum(axis=1)) + 1e-9
+            step = np.minimum(length, temperature)
+            pos_all += disp / length[:, None] * step[:, None]
+            temperature *= cooling
+
+        pos_all = self._noverlap(pos_all, degree)
+
+        radius = float(np.sqrt((pos_all * pos_all).sum(axis=1)).max())
+        if radius > 1e-9:
+            pos_all *= _FALLBACK_SCALE / radius
+
+        z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
+        result: list[dict[str, Any]] = []
+        for i in range(n):
+            z_val = self._compute_z_recency(entities[i], z_amplitude)
+            result.append({
+                "id": entities[i]["id"],
+                "x": float(pos_all[i, 0]),
+                "y": float(pos_all[i, 1]),
+                "z": z_val,
+                "method": "domain",
+            })
+        return result
 
     # -----------------------------------------------------------------
     # Community map artifacts
     # -----------------------------------------------------------------
 
+    @staticmethod
     @staticmethod
     def _first_clause(text: str, max_chars: int = 32) -> str:
         """Extract the first sentence clause from a summary for short lane labels.
@@ -632,6 +1066,10 @@ class ComputeUmap3DJob(BaseJob):
         Splits on the first '. ', ': ', ', ', or newline — whichever comes
         first — and truncates to max_chars.  Returns the stripped result or
         an empty string if the input is empty.
+
+        Numeric-garbage guard (A6): if the extracted first clause is a bare
+        number (e.g. "0.7143" — caused by a numeric top-hub name becoming the
+        fallback label), returns "" so the caller falls back to the A6 format.
         """
         if not text:
             return ""
@@ -652,6 +1090,10 @@ class ComputeUmap3DJob(BaseJob):
         parts = _re.split(r"[.:\n,]", stripped, maxsplit=1)
         first = parts[0].strip()
         if not first:
+            return ""
+        # Numeric-garbage guard: reject labels that are purely numeric
+        # (e.g. "0.7143" from a numeric entity name as first hub).
+        if _re.match(r"^\d+(\.\d+)?$", first):
             return ""
         first = first[0].upper() + first[1:]
         return first[:max_chars]
@@ -791,8 +1233,13 @@ class ComputeUmap3DJob(BaseJob):
         degree_map: dict[str, float],
         *,
         driver: Any = None,
+        layout: str = "force",
     ) -> None:
-        """Compute community artifacts and store in Redis."""
+        """Compute community artifacts and store in Redis.
+
+        Stores under the per-layout key ``cerid:graph:map:communities:{layout}``
+        as well as the legacy key (``force`` layout only, for backwards compat).
+        """
         try:
             from app.deps import get_redis  # noqa: PLC0415
 
@@ -800,9 +1247,39 @@ class ComputeUmap3DJob(BaseJob):
             if redis is None:
                 return
             artifacts = self._community_artifacts(entities, pos2d, degree_map, driver=driver)
-            redis.set(_COMMUNITY_MAP_REDIS_KEY, json.dumps(artifacts))
+            per_layout_key = _COMMUNITY_MAP_REDIS_KEY_TMPL.format(layout=layout)
+            redis.set(per_layout_key, json.dumps(artifacts))
+            # Backwards compat: force layout also updates the unversioned key.
+            if layout == "force":
+                redis.set(_COMMUNITY_MAP_REDIS_KEY, json.dumps(artifacts))
         except Exception as exc:  # noqa: BLE001 — artifact storage is best-effort
             log_swallowed_error("processor.compute_umap_3d.community_artifacts", exc)
+
+    def _store_layout_positions(
+        self,
+        coords: list[dict[str, Any]],
+        *,
+        layout: str,
+    ) -> None:
+        """Store per-layout position artifact for non-default layouts.
+
+        Stores a compact JSON dict {entity_id: [x, y, z]} under
+        ``cerid:graph:emb3d:v3:layout_positions:{layout}`` so the /graph/map
+        endpoint can detect whether a layout pass has been computed.
+        """
+        try:
+            from app.deps import get_redis  # noqa: PLC0415
+
+            redis = get_redis()
+            if redis is None:
+                return
+            positions = {c["id"]: [c["x"], c["y"], c.get("z", 0.0)] for c in coords}
+            redis.set(
+                _LAYOUT_POSITIONS_REDIS_KEY_TMPL.format(layout=layout),
+                json.dumps(positions),
+            )
+        except Exception as exc:  # noqa: BLE001 — non-fatal best-effort
+            log_swallowed_error("processor.compute_umap_3d.store_layout_positions", exc)
 
 
 # -----------------------------------------------------------------

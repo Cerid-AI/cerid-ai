@@ -228,7 +228,7 @@ export function NeuralLinks({
       uniforms: {
         uTime: { value: animate ? 0 : 1000 },
         uPulseAmp: { value: animate ? 1.0 : 0.0 },
-        uBaseAlpha: { value: 0.34 },
+        uBaseAlpha: { value: 0.12 },
       },
       transparent: true,
       depthWrite: false,
