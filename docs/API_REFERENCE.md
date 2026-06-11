@@ -747,3 +747,29 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 
 ### Memory Recall
 - Tool: `pkb_memory_recall` — Context-aware memory retrieval with salience-aware decay scoring (6 memory types: empirical, decision, preference, project_context, temporal, conversational)
+
+### Knowledge Graph (Subjects panes)
+
+Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. See [`docs/ROUTER_REGISTRY.md`](ROUTER_REGISTRY.md) for the generated parameter/response detail.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/graph/map` | Cartographic map payload for Constellation (2D-projected positions, CO_MENTIONED links, community hulls). `?layout=force\|wells\|domain` — omitting is byte-identical to `force`; unknown value → 422. Per-layout Redis cache keys `cerid:graph:emb3d:v3:map:{layout}`; `layout_fallback: true` when a non-default layout artifact is missing (falls back to force). Communities degrade to `[]` until the nightly `compute_umap_3d` job writes them. |
+| `GET` | `/graph/domains` | Per-domain entity/artifact counts — the taxonomy-aware spine for the Domain lens. Sorted by `entity_count` desc. `derived_at: null` signals the `DeriveDomainsJob` has never run (frontends render a degraded state, not an error). No cache in v1. |
+| `GET` | `/graph/decomposition` | STRATA Atlas icicle source. Without `?community=`: the full tier tree (domains → conditional subcategory groups → L1 → L0 communities, with sizes/labels/purity, L0→L1 parent map, per-domain unclustered counts, size<4 rollup buckets, `no_communities_computed` flag). With `?community=<id>`: entity leaves for that L0 community, each carrying `path:[domain, sub?, l1, l0]`. Redis 24h cache under the `cerid:graph:emb3d:*` bust pattern. `no_communities_computed: true` ⇒ Leiden never ran; client degrades to a Domain→Entity two-tier. |
+| `GET` | `/graph/timeline` | Aggregated entity-activity timeline (legacy summary shape). |
+| `GET` | `/graph/timeline/strata` | Tephra Cycle-2 stratigraphic timeline payload. Additive optional fields over the base shape: `lanes[]` (lane meta), `events[]` (event-horizon items), `verification_aggs[]` (sparse-suppressed when <3), `top_entities` (per `{lane}:{bucket}`, ≤3), `data_extent_from` (earliest data ts, for 180d-window clamping), `ledger_start_date` (earliest KnowledgeLog ts — drives the pre-ledger hairline). All optional so old cached payloads still parse. |
+| `GET` | `/graph/timeline/track/{canonical_id}` | Lazy zoom-triggered event detail for one entity track (≤500 mention events, co-mentions cap 20). `?from`/`?to` ISO bounds; `?bucket=` scopes to a single bucket and adds `knowledge_events`, `new_entities`, `verification`, `community_summary`. Redis 60s cache. |
+
+### Wiki (Knowledge Pages)
+
+Karpathy LLM-Wiki surface. All under the `/wiki` prefix.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/wiki/entities` | List entity wiki pages (`limit` 1–200, default 30). `?q=` searches name/canonical_id server-side before the limit (spans the whole set). When `q` is supplied, results carry a `match_rank` ordering (exact > prefix > substring); the no-`q` path is byte-identical to before. |
+| `GET` | `/wiki/entities/{slug}` | Full entity page (summary, related entities, source-artifact citations, contradictions, confidence band). Related entities now carry `has_summary` + `one_liner` (drives three-state wikilinks + hovercards). 404 if absent. |
+| `GET` | `/wiki/concepts/{community_id}` | Concept (Leiden community) page: prose summary + member list. Accepts `concept:{level}:{native_id}` and bare `{level}:{native_id}`. `confidence_band` is intentionally omitted — CONCEPT pages have no claim-based confidence; absence means not-applicable (a phantom `unknown` band was removed). |
+| `GET` | `/wiki/log` | Karpathy-style chronological ledger of wiki refreshes/enrichments/contradiction updates. Filter by `entity_slug`, `since`; paginated newest-first (`limit` default 50). Backs the page-history view. |
+| `GET` | `/wiki/index` | LLM-readable catalog (one row per entity: slug, name, one-liner, last-updated, activity score, `has_summary`). `?q=` filters server-side pre-limit; `?order=name` sorts A-Z (default: activity desc). |
+| `POST` | `/wiki/write_note` | Two-way vault write (see SDK section above). |

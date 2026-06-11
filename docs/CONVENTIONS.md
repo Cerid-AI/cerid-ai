@@ -227,9 +227,42 @@ See [`docs/SYNC_PROTOCOL.md`](SYNC_PROTOCOL.md) for the full bidirectional sync 
 - **`@internal` JSDoc beats un-exporting for test-accessed internals.** Un-exporting a function that has 10+ direct test cases forces rewriting every test to go through the public API — losing granular coverage and risking subtle behavioural drift. Keep the function exported, annotate with `@internal`, and let TypeScript surface the constraint at consumer sites. Reference: `model-router.ts` (4 functions, 45 test cases).
 - **Chrome aggressively caches localhost.** `no-store` headers don't prevent disk cache on localhost; old JS bundles served even after a rebuild. Two defences: nginx `/assets/` returns 404 on miss instead of `index.html` fallback so cache-broken requests fail loudly; and dynamic API calls append `?_t=${Date.now()}` cache busters.
 
+### Frontend UI contracts (SEXTANT settings + Subjects, 2026-06)
+
+- **Primitive ladder.** Before hand-rolling JSX, climb: shadcn primitive
+  (`components/ui/`) → Cerid primitive (`EmptyState`, `DomainBadge`,
+  `ProgressBar`, …, also under `components/ui/`) → feature-area composite →
+  hand-rolled (last resort). Two copies of the same `flex … rounded-md border`
+  means extract a primitive. The drift gate guards the bottom of the ladder.
+- **4-state UX matrix.** Every data-backed pane handles Loading (`Skeleton`
+  shaped like the content), Error (`Alert variant="destructive"` + retry),
+  Empty (`EmptyState`), and Success explicitly — never a bare `<div>` or muted
+  string for empty. Pane tests assert all four render and are axe-clean.
+- **Settings registry is the single source of truth.** Every control is one
+  `SettingDef` in `lib/settings-registry/`; never hard-code a settings row.
+  `writer` is a discriminated union
+  (`settings-patch | preferences | endpoint | local | env | readonly`) so
+  storage dispatch is type-checked. `keywords` must retain old tab names so
+  search still finds moved settings. See
+  [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) § Settings registry.
+- **`AdvancedDisclosure` consumption discipline.** The Simple|Advanced "detail
+  level" (localStorage `cerid-settings-mode`) is read **only** by
+  `AdvancedDisclosure` to pick a default-open state. It is not an app-wide UI
+  mode — no other component branches on it. Search hits and `?setting=` deep
+  links force-open the containing expander in either mode.
+- **Entitlement gating goes through `useEntitlements()`.** One consolidated
+  treatment returning `{available | locked | flag-off | degraded}` per setting,
+  plus one Recommendations card per surface — don't scatter ad-hoc
+  tier/flag checks.
+- **Cross-pane navigation goes through `useNavigation()`.** Use `goTo(pane,
+  {mode, entity, …})` / `composeChat(...)` — never `window.location` or a
+  router (there is none). Wiki↔Atlas, Atlas→Wiki, etc. all route through this
+  contract; the legacy redirect map in `navigation-context.tsx` keeps old pane
+  names working.
+
 ## Design tokens (D.1)
 
-> **Last refresh:** 2026-05-10 (Phase D.1 audit + drift gate)
+> **Last refresh:** 2026-06-11 (added `--color-domain-*` lens tokens + Frontend UI contracts above)
 > **Drift gate:** `scripts/lint-no-design-drift.py` (CI job `lint / no-design-drift`)
 
 ### Canonical design tokens
@@ -259,6 +292,12 @@ names — not raw hex values.
 | `--brand-foreground` / `text-brand-foreground` | Text on brand-coloured surfaces |
 
 **Chart tokens:** `--chart-1` … `--chart-5` — use via `fill-chart-1` etc.
+
+**Domain lens tokens:** `--color-domain-0` … `--color-domain-11` plus an
+`other` token — the family-wide Domain colour lens. Never hard-code a
+per-domain colour; map through `domainSlot(domain)` in `lib/graph/identity.ts`
+(salt 796, collision-free for the canonical 12). The old `DOMAIN_BADGE_COLORS`
+map was deleted.
 
 **Sidebar tokens:** `--sidebar`, `--sidebar-foreground`, `--sidebar-primary`,
 `--sidebar-accent`, `--sidebar-border`, `--sidebar-ring`.

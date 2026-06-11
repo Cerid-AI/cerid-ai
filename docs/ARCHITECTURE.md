@@ -211,6 +211,14 @@ configured:
 * **`:online` web-search claim verification** — OpenRouter-specific
   feature.  Quenchforge has no web-search proxy.
 
+**External-source latency budget.** `/agent/query` may consult external
+knowledge sources (e.g. DuckDuckGo) on the hot path. Each such call is bounded
+by `EXTERNAL_SOURCE_QUERY_TIMEOUT = 2.0` (`src/mcp/config/constants.py`) so a
+hung source can't blow the cold-start SLO — before this cap a single slow
+source serialized a ~5 s wait into the first-touch response until its circuit
+opened. The orchestrator adds a small outer margin on top of the per-source
+budget.
+
 ## Observability contract
 
 The canonical endpoint is `GET /health`. Every observability signal must appear in `/health.invariants`:
@@ -243,30 +251,67 @@ Served by `/`, `/health`, and `/openapi.json`. Single source of truth: `pyprojec
 | Current sprint work? | `tasks/todo.md` |
 | Sidebar pane shape + redirect map? | [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) |
 | Atlas + Constellation perf budgets? | [`docs/PERF_BUDGETS.md`](PERF_BUDGETS.md) |
-| Visualization endpoints? | `/graph/neighborhood`, `/graph/embeddings/3d`, `/graph/tour/generate`, `/atlas/views/*` |
+| Visualization endpoints? | `/graph/decomposition`, `/graph/map` (`?layout=`), `/graph/domains`, `/graph/neighborhood`, `/graph/timeline/strata`, `/graph/tour/generate`, `/atlas/views/*` |
+| How are entity domains assigned? | § Domain backbone (below); `DeriveDomainsJob`, `GET /graph/domains` |
 | How do connectors work? | `core/ingest/sources/base.py` + `core/ingest/sources/registry.py`; one connector module per `kind` under `core/ingest/sources/connectors/` |
 | How does the webhook receiver dispatch by provider? | `core/ingest/adapters/` recipes; `(kind, provider)` index resolves `kind=webhook + config.provider=slack` → `chat_capture/slack` recipe |
 | Where's the Source-management REST surface? | `src/mcp/app/routers/sources.py` (list / kinds / create / test / policy / webhook-url / delete) |
 
 ## Visualization tier (Cerid v1.0)
 
-Sidebar consolidates to 4 panes (Chat / Subjects / Sources / Settings).
-Subjects pane hosts the 2D and 3D graph experiences:
+Sidebar consolidates to 4 panes (Chat / Subjects / Sources / Settings). The
+Subjects pane hosts four visualization modes (Atlas / Constellation / Timeline
+/ Wiki), reworked across the 2026-06 eval cycles (TRELLIS / Tephra / FOLIO /
+STRATA):
 
-- **Atlas (2D, sigma.js v3 + custom halo NodeProgram)** — everyday analytic
-  view. `core/graphology-adapter` + `lib/graph/programs/` + Web Worker for
-  force-atlas2 layout. Backed by `GET /graph/neighborhood` (APOC byhop +
-  Redis 60s LRU).
-- **Constellation (3D, R3F + drei + InstancedMesh)** — cinematic view with
-  ambient particles + tour mode (LLM-narrated camera waypoints, Pro-gated).
-  Backed by `GET /graph/embeddings/3d` (UMAP-or-fallback coords) and
-  `POST /graph/tour/generate`.
-- **Lenses + saved views** — 4 toggleable lens transforms (contradiction,
-  open-question, provenance, quality) compose via sigma's
-  nodeReducer/edgeReducer. Per-user named view CRUD via `/atlas/views/*`.
+- **Atlas (STRATA, Cycle 4)** — default mode is now a DOM **decomposition
+  icicle**: domains → conditional subcategory groups → L1 → L0 communities →
+  entities, backed by `GET /graph/decomposition` (with `?community=<id>` for
+  the leaf walk). The old ego-network view is demoted to an explicit
+  **Neighborhood** leaf mode (hops promoted to ≤2), backed by
+  `GET /graph/neighborhood`. Fresh installs degrade to a Domain→Entity two-tier
+  via the `no_communities_computed` flag.
+- **Constellation (Cycle 4)** — 2D-in-3D cartographic map backed by
+  `GET /graph/map?layout=force|wells|domain` (per-layout cache keys,
+  `layout_fallback`, 422 on invalid). Adds **drag-heal** interactivity
+  (`lib/graph/interactions/drag-heal.ts` — critically-damped lerp-home,
+  neighbor falloff, interruptible, `reduced-motion` snap), a layout switcher,
+  3D token restyle (neon → opt-in Ambient), z-axis recency, and tour mode
+  (`POST /graph/tour/generate`, Pro-gated).
+- **Timeline (Tephra, Cycle 2)** — stratigraphic timeline backed by
+  `GET /graph/timeline/strata` (+ lazy `…/track/{id}?bucket=`): event-horizon
+  strip, since-you-last-looked band, domain lanes with summary-derived labels,
+  pre-ledger hairline (`ledger_start_date`).
+- **Wiki (FOLIO, Cycle 3)** — Vector-2022 encyclopedia anatomy; see § Knowledge
+  architecture and `GET /wiki/{entities,entities/{slug},concepts,log,index}`.
+- **Lenses + saved views** — lens transforms (contradiction, open-question,
+  provenance, quality, **Domain**, **Trust**) compose via sigma's
+  nodeReducer/edgeReducer. The Trust lens reads `Entity.trust_state` from the
+  nightly `compute_trust_state` job. Per-user named view CRUD via
+  `/atlas/views/*`; saved-view schema is **v3** (adds `atlasTier`).
 
 See [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) for the full pane shape,
-NavigationProvider redirect map, and component layout reference.
+NavigationProvider redirect map, and component layout reference, and
+[`docs/BACKGROUND_JOBS.md`](BACKGROUND_JOBS.md) § Knowledge-graph nightly jobs
+for the jobs that feed these surfaces.
+
+## Domain backbone (TRELLIS, Cycle 1)
+
+Entities carry a derived domain spine so every Subjects surface can group,
+colour, and filter by domain consistently:
+
+- **Per-entity fields** (written by `DeriveDomainsJob`): `primary_domain`,
+  `domain_mix` (JSON, sorted desc by count then name), `primary_subcategory`,
+  `domains_updated_at`. Primary selection uses a 4-rung tie-break
+  (count → non-`general` → recency → lexicographic). Orphan entities have the
+  domain fields `REMOVE`d. See [`docs/BACKGROUND_JOBS.md`](BACKGROUND_JOBS.md)
+  § Knowledge-graph nightly jobs.
+- **Rollup endpoint:** `GET /graph/domains` — per-domain entity/artifact
+  counts; `derived_at: null` means the job has never run.
+- **Frontend colour:** a stable `domainSlot(domain)` hash (salt 796,
+  collision-free for the canonical 12) in `lib/graph/identity.ts` maps each
+  domain to a `--color-domain-0..11` CSS token (plus an `other` token). The old
+  hard-coded `DOMAIN_BADGE_COLORS` map was deleted.
 
 ## Ingestion architecture (Cerid v1.0 RC2)
 

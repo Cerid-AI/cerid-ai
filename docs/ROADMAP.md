@@ -5,12 +5,14 @@
 > **Current candidate:** `v1.0.0-rc2.1`. The release-candidate captures Phases A–N of the
 > master plan + the K-program (K1–K6) + visualization polish (L, M). The `-rc` suffix
 > drops when the Commercial-GA program below closes.
-> **Currently shipped:** Atlas 2D + Constellation 3D, Subjects/Sources/Settings
-> consolidation (4-pane), Apple ecosystem baseline, meeting-capture runtime, cloud
+> **Currently shipped:** Atlas (decomposition icicle) + Constellation cartographic map,
+> Subjects/Sources/Settings consolidation (4-pane), the registry-driven Settings redesign
+> (SEXTANT) and the Subjects UX cycles (TRELLIS domain backbone / Tephra timeline / FOLIO
+> wiki / STRATA atlas), Apple ecosystem baseline, meeting-capture runtime, cloud
 > connectors, Swift CLI helpers, metamorphic verification, Custom Smart RAG, AI inbox
-> triage, daily digest, advanced analytics, Timeline + Tour + Wiki mini-viz, the Knowledge
-> Architecture program, Pro billing/checkout + license activation. 60 MCP tools, 5,910
-> Python tests, 1,411 frontend cases, 113 preservation tests. Full ledger:
+> triage, daily digest, advanced analytics, Tour, the Knowledge
+> Architecture program, Pro billing/checkout + license activation. 60 MCP tools, 5,910+
+> Python tests, 1,411+ frontend cases, 113 preservation tests. Full ledger:
 > [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md).
 > **Shipped releases:** [CHANGELOG.md](../CHANGELOG.md) and the
 > [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
