@@ -1111,7 +1111,8 @@ async def rerank_results(
         return await _rerank_cross_encoder(results, query)
     if mode == "llm":
         return await _rerank_llm(results, query)
-    # mode == "none" or unknown
+    # mode == "none" or unknown — preserve vector order. Absence of a
+    # reranker_status field means "no degradation"; only failure paths tag.
     return results
 
 
@@ -1161,6 +1162,14 @@ async def _rerank_cross_encoder(
         return results
 
 
+# Quenchforge serves a single rerank slot per machine; firing N concurrent
+# rerank calls at it causes 500-storms that trip the circuit breaker (OPT-5).
+# Serialize at the client so production never overwhelms the daemon — eval
+# harnesses still need their own PACE_S because the semaphore protects the
+# daemon, not batch etiquette.
+_RERANK_QUENCHFORGE_SEM = asyncio.Semaphore(1)
+
+
 async def _maybe_rerank_via_quenchforge(
     results: list[dict[str, Any]],
     query: str,
@@ -1184,7 +1193,8 @@ async def _maybe_rerank_via_quenchforge(
         from utils.quenchforge_client import quenchforge_rerank
         documents = [r.get("content", "") for r in results]
         with span("retrieval.rerank", "quenchforge", k=len(results)):
-            scores = await quenchforge_rerank(query, documents)
+            async with _RERANK_QUENCHFORGE_SEM:
+                scores = await quenchforge_rerank(query, documents)
         for r, s in zip(results, scores, strict=False):
             r["relevance"] = float(s)
             r["reranker_status"] = "quenchforge"
@@ -1242,6 +1252,8 @@ async def _rerank_llm(
     remainder = results[config.QUERY_RERANK_CANDIDATES:]
 
     if len(candidates) <= 1:
+        for r in results:
+            r.setdefault("reranker_status", "llm_too_few_candidates")
         return results
 
     snippets = []
@@ -1295,10 +1307,16 @@ async def _rerank_llm(
 
     except CircuitOpenError:
         logger.warning("Bifrost rerank circuit open, falling back to embedding sort")
-        return sorted(results, key=lambda x: x["relevance"], reverse=True)
+        fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
+        for r in fallback:
+            r.setdefault("reranker_status", "llm_circuit_open")
+        return fallback
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError, ValueError) as e:
         logger.warning("LLM reranking failed, falling back to embedding sort: %s", e)
-        return sorted(results, key=lambda x: x["relevance"], reverse=True)
+        fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
+        for r in fallback:
+            r.setdefault("reranker_status", "llm_failed")
+        return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -2468,6 +2486,15 @@ async def _agent_query_impl(
         except Exception as e:
             logger.warning(f"Failed to log query: {e}")
 
+    # Reranker status — first non-empty value across `results` so callers can
+    # surface degradation (`onnx_failed_no_fallback`, `llm_circuit_open`,
+    # `disabled`, etc.). Set per-result by `rerank_results`; aggregated here so
+    # the envelope carries the signal without consumers having to iterate.
+    reranker_status = next(
+        (r.get("reranker_status") for r in results if r.get("reranker_status")),
+        None,
+    )
+
     result_dict: dict[str, Any] = {
         "context": context,
         "sources": sources,
@@ -2478,6 +2505,7 @@ async def _agent_query_impl(
         "graph_results": graph_results_added,
         "results": results,
         "surface_route": _surface_route,
+        "reranker_status": reranker_status,
         "domains_no_results": _domains_no_results(
             list(effective_domains) if effective_domains else list(DOMAINS), results
         ),

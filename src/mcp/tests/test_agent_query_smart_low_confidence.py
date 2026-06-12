@@ -35,6 +35,7 @@ def client():
     with (
         patch.object(agents, "get_chroma", return_value=MagicMock()),
         patch.object(agents, "get_neo4j", return_value=MagicMock()),
+        patch.object(agents, "get_graph_store", return_value=MagicMock()),
         patch.object(agents, "get_redis", return_value=MagicMock()),
     ):
         # raise_server_exceptions=False so a 500 surfaces as a response, not an

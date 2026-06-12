@@ -47,6 +47,7 @@ async def orchestrated_query(
     chroma_client: Any = None,
     redis_client: Any = None,
     neo4j_driver: Any = None,
+    graph_store: Any = None,
     memory_top_k: int | None = None,
     memory_min_score: float | None = None,
     source_config: dict | None = None,
@@ -95,6 +96,7 @@ async def orchestrated_query(
             chroma_client=chroma_client,
             redis_client=redis_client,
             neo4j_driver=neo4j_driver,
+            graph_store=graph_store,
             **kwargs,
         )
         return result
@@ -121,6 +123,7 @@ async def orchestrated_query(
         chroma_client=chroma_client,
         redis_client=redis_client,
         neo4j_driver=neo4j_driver,
+        graph_store=graph_store,
         **kwargs,
     )) if _kb_on else None
 
