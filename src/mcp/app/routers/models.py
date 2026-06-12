@@ -48,7 +48,7 @@ DEFAULT_ASSIGNMENTS: dict[str, str] = {
     "coding": "anthropic/claude-sonnet-4.6",
     "research": "x-ai/grok-4.3",
     "simple": "google/gemini-2.5-flash",
-    "general": "openai/gpt-4o-mini",
+    "general": "anthropic/claude-sonnet-4.6",
     "classifier": "meta-llama/llama-3.3-70b-instruct",
     "verification": "x-ai/grok-4.3",
     "categorization": "meta-llama/llama-3.3-70b-instruct:free",

@@ -28,7 +28,6 @@ PROVIDER_REGISTRY: dict[str, dict] = {
         "test_endpoint": "/models",
         "requires_api_key": True,
         "models": [
-            "openrouter/openai/gpt-5-nano",
             "openrouter/openai/gpt-4o-mini",
             "openrouter/anthropic/claude-sonnet-4.6",
             "openrouter/google/gemini-3.1-flash-lite",

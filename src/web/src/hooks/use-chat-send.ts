@@ -8,6 +8,7 @@ import { recommendModel } from "@/lib/model-router"
 import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
 import { compressConversation, queryKB, recallMemories } from "@/lib/api"
+import { RAG_SYSTEM_PREAMBLE } from "@/lib/rag-prompt"
 
 /** How many user+assistant pairs to keep in client-side sliding window fallback. */
 const FALLBACK_KEEP_PAIRS = 3
@@ -273,7 +274,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
         allMessages.push({
           role: "system",
-          content: `The user has a personal knowledge base. Below are documents that may be relevant to this conversation. When these documents contain the answer, cite specific details and facts from them. When they do NOT contain the answer, use your general knowledge — never say "there is no information in your knowledge base" or refuse to answer. The user expects a helpful answer regardless of what the documents contain.${priorContextNote}\n\n${contextParts.join("\n\n")}`,
+          content: `${RAG_SYSTEM_PREAMBLE}${priorContextNote}\n\n${contextParts.join("\n\n")}`,
         })
 
         // Record injected chunks for session dedup on subsequent turns

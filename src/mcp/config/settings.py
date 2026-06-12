@@ -539,11 +539,12 @@ SYNOPSIS_MAX_TOKENS = 100
 
 # Synopsis model options — user-selectable, with cost and throttle info.
 # Catalog-refreshed 2026-05-20 against OpenRouter live pricing.
-# Cheap-tier options refreshed: gpt-4o-mini → gpt-5-nano (3× cheaper input,
-# 67% cheaper output), gemini-2.5-flash → gemini-3.1-flash-lite (newer +
-# cheaper). Old IDs kept as legacy entries because operators may have them
-# pinned in their persisted Settings doc and a sudden removal would break
-# their synopsis route on next regenerate.
+# gemini-2.5-flash → gemini-3.1-flash-lite (newer + cheaper).
+# gpt-5-nano removed: reasoning model — max_tokens consumed as reasoning
+# budget, yielding 0 output chars (OPT-14). Old non-broken IDs kept as
+# legacy entries because operators may have them pinned in their persisted
+# Settings doc and a sudden removal would break their synopsis route on
+# next regenerate.
 SYNOPSIS_MODEL_OPTIONS = {
     "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
         "label": "Llama 3.3 (Free)",
@@ -551,13 +552,6 @@ SYNOPSIS_MODEL_OPTIONS = {
         "output_per_1m": 0.0,
         "rpm": 8,
         "throttle": 8.0,
-    },
-    "openrouter/openai/gpt-5-nano": {
-        "label": "GPT-5 Nano",
-        "input_per_1m": 0.05,
-        "output_per_1m": 0.40,
-        "rpm": 1000,
-        "throttle": 0.5,
     },
     "openrouter/openai/gpt-4o-mini": {
         "label": "GPT-4o Mini (legacy)",

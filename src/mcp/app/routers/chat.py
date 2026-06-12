@@ -24,6 +24,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import config
+from app.routers.models import DEFAULT_ASSIGNMENTS, _current_assignments
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.chat")
@@ -373,7 +374,7 @@ async def _proxy_stream(
                 )
             except Exception as exc:
                 logger.warning("Smart routing failed (%s), using fallback", exc)
-                req.model = "openai/gpt-4o-mini"
+                req.model = _current_assignments().get("general", DEFAULT_ASSIGNMENTS["general"])
 
         bare_model = _strip_prefix(req.model)
 
