@@ -21,6 +21,7 @@ from datetime import datetime
 import httpx
 
 import config
+from core.utils.swallowed import log_swallowed_error
 from core.agents.hallucination.patterns import (
     CITATION_PATTERNS,
     CONCRETE_DATA_RE,
@@ -485,6 +486,7 @@ async def _extract_claims_llm(
                 logger.info("Internal LLM claim extraction succeeded (%d claims)", len(claims_internal))
                 return claims_internal
     except Exception as e:
+        log_swallowed_error("core.agents.hallucination.extraction.internal_claims", e)
         logger.debug("Internal LLM claim extraction failed (%s), trying external models", e)
 
     for model in models:
