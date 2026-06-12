@@ -401,6 +401,50 @@ describe("useChatSend — KB injection payload assembly", () => {
     })
   })
 
+  it("applies per-model-family char budget — drops docs that exceed the budget (Phase 2.4)", async () => {
+    // GPT-4o-mini budget is 20_000 chars. Create a doc that uses 15k,
+    // and a second doc that would push total over 20k.
+    const first = makeKBResult({
+      artifact_id: "budget-a",
+      filename: "first.py",
+      relevance: 0.95,
+      content: "a".repeat(15_000),
+    })
+    const second = makeKBResult({
+      artifact_id: "budget-b",
+      filename: "second.py",
+      relevance: 0.90,
+      content: "b".repeat(8_000),
+    })
+    mockQueryKB.mockResolvedValue({ results: [first, second] })
+
+    const gptMiniModel = "openrouter/openai/gpt-4o-mini"
+    // Override the model-router mock to return gpt-4o-mini
+    const { recommendModel } = await import("@/lib/model-router")
+    ;(recommendModel as ReturnType<typeof vi.fn>).mockReturnValue({
+      model: { id: gptMiniModel, effectiveContextWindow: 102_400 },
+      estimatedCost: 0, reasoning: "", savingsVsCurrent: 0,
+    })
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      selectedModel: gptMiniModel,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("query triggering budget check")
+    })
+
+    const msgs = sentMessages(opts._sendSpy)
+    const sysMsg = msgs.find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    // first.py (15k) fits; second.py (15k+8k=23k) exceeds 20k budget → dropped
+    expect(sysMsg!.content).toContain("first.py")
+    expect(sysMsg!.content).not.toContain("second.py")
+  })
+
   it("creates a new conversation when activeId is null", async () => {
     const opts = makeOptions({ activeId: null })
     const { result } = renderHook(() => useChatSend(opts))

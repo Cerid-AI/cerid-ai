@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
-import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult } from "@/lib/kb-utils"
+import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult, selectDocsWithinBudget } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
 import { compressConversation, queryKB, recallMemories } from "@/lib/api"
 import { RAG_SYSTEM_PREAMBLE } from "@/lib/rag-prompt"
@@ -245,7 +245,11 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         // Separate documents from memories for distinct formatting
         const docSources = dedupedSources.filter((s) => s.source_type !== "memory")
         const memorySources = dedupedSources.filter((s) => s.source_type === "memory")
-        const contextParts = docSources.map(formatChunkWithHeader)
+        // Phase 2.4: apply per-model-family char budget at document granularity.
+        // Documents are already sorted by descending relevance; whole docs are kept
+        // or dropped — never truncated mid-document.
+        const { selected: budgetedDocs } = selectDocsWithinBudget(docSources, modelToUse)
+        const contextParts = budgetedDocs.map(formatChunkWithHeader)
         if (memorySources.length > 0) {
           const memParts = memorySources.map((m) => {
             const type = m.filename?.replace("memory:", "") ?? "fact"

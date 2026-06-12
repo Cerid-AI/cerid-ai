@@ -752,6 +752,7 @@ async def _query_memories(
                     "content": results["documents"][0][i] if results["documents"] else "",
                     "memory_type": metadata.get("memory_type", ""),
                     "memory_source": True,
+                    "created_at": metadata.get("created_at") or metadata.get("ingested_at") or None,
                 })
         return formatted
     except Exception as e:
