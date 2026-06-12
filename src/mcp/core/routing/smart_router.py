@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import config
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.smart_router")
 
@@ -495,6 +496,7 @@ async def _classify_with_best_available(query: str) -> Complexity:
                 return level
 
     except Exception as e:
+        log_swallowed_error("core.routing.smart_router.ollama_classify", e)
         logger.debug("Ollama classification failed (%s), using heuristic", e)
 
     return heuristic_result
