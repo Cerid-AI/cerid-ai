@@ -16,6 +16,7 @@ from chromadb.config import Settings as ChromaSettings
 from neo4j import GraphDatabase
 
 import config
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion")
 
@@ -52,9 +53,11 @@ def _retry(fn, label: str, attempts: int = 3, base_delay: float = 1.0, max_delay
 _chroma = None
 _redis = None
 _neo4j = None
+_graph_store: Any = None
 _chroma_lock = threading.Lock()
 _redis_lock = threading.Lock()
 _neo4j_lock = threading.Lock()
+_graph_store_lock = threading.Lock()
 
 
 class _EmbeddingAwareClient:
@@ -174,11 +177,29 @@ def get_neo4j():
 
 def close_neo4j():
     """Called from main.py lifespan on shutdown."""
-    global _neo4j
+    global _neo4j, _graph_store
     if _neo4j:
         _neo4j.close()
         _neo4j = None
+        _graph_store = None
         logger.info("Neo4j connection closed")
+
+
+def get_graph_store() -> Any:
+    """Return the lazy ``Neo4jGraphStore`` wrapper around the shared driver.
+
+    Wraps the same singleton driver returned by :func:`get_neo4j` so the
+    contract-typed graph operations (:class:`GraphStore`) used by
+    ``core/agents/query_agent.py`` resolve against the live Neo4j when
+    callers thread ``graph_store=`` alongside ``neo4j_driver=``.
+    """
+    global _graph_store
+    if _graph_store is None:
+        with _graph_store_lock:
+            if _graph_store is None:
+                from app.stores.neo4j_store import Neo4jGraphStore
+                _graph_store = Neo4jGraphStore(get_neo4j())
+    return _graph_store
 
 
 def close_chroma():
@@ -197,6 +218,7 @@ def close_redis():
         try:
             _redis.close()
         except Exception as e:
+            log_swallowed_error("app.deps.close_redis", e)
             logger.debug(f"Redis close error (ignored): {e}")
         _redis = None
         logger.info("Redis connection closed")

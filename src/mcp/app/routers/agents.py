@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 import config
 from app.concurrency import KB_POOL
-from app.deps import get_chroma, get_neo4j, get_redis
+from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
 from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
 
@@ -25,11 +25,48 @@ router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
 
+def _freshest_kb_age_days(kb_result: dict) -> float | None:
+    """Return the age in days of the most recent KB result, or None.
+
+    Reads ``created_at`` / ``ingested_at`` from each result (Slice 2 Phase 1.1
+    threads these through ``_format_chroma_result``). Returns ``None`` when no
+    result carries a parseable date — caller treats that as "unknown, do not
+    apply the staleness rule".
+    """
+    from datetime import datetime
+
+    from core.utils.time import utcnow
+
+    results = kb_result.get("results") if isinstance(kb_result, dict) else None
+    if not results:
+        return None
+    youngest_age: float | None = None
+    now = utcnow().replace(tzinfo=None)
+    for r in results:
+        date_str = r.get("created_at") or r.get("ingested_at")
+        if not date_str:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+            dt_naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
+            age = (now - dt_naive).total_seconds() / 86400.0
+        except (ValueError, TypeError):
+            continue
+        if age < 0:
+            age = 0.0
+        if youngest_age is None or age < youngest_age:
+            youngest_age = age
+    return youngest_age
+
+
 def should_fire_external_crag(
     *,
     ext_on: bool,
     kb_result: dict,
     threshold: float,
+    temporal_intent_days: int | None = None,
+    freshest_kb_age_days: float | None = None,
+    staleness_window_days: int | None = None,
 ) -> bool:
     """CRAG gate: decide whether to launch external sources.
 
@@ -38,21 +75,33 @@ def should_fire_external_crag(
     them entirely — strong KB > any external result for the usual query
     mix, and the 10s /agent/query wall-clock budget is precious.
 
-    Fires only when:
-      - the client allowed external (`ext_on`), AND
-      - the best KB relevance is strictly below `threshold`.
+    Fires when ANY is true:
+      - the best KB relevance is strictly below `threshold`, OR
+      - the query has temporal intent (``temporal_intent_days`` not None) AND
+        the freshest KB result is older than ``staleness_window_days`` — a
+        high-relevance stale memory must not suppress a "current X" lookup.
 
-    A result set with no `results` key (or empty list) yields max=0.0,
-    which is always < threshold — so unknown-KB correctly falls through
-    to external.
+    Always returns False when `ext_on=False`. A result set with no `results`
+    key (or empty list) yields max=0.0, which is always < threshold — so
+    unknown-KB correctly falls through to external.
     """
     if not ext_on:
         return False
     results = kb_result.get("results") if isinstance(kb_result, dict) else None
     if not results:
         return True
+
     max_rel = max((r.get("relevance", 0.0) for r in results), default=0.0)
-    return max_rel < threshold
+    if max_rel < threshold:
+        return True
+
+    if temporal_intent_days is not None:
+        if staleness_window_days is None:
+            staleness_window_days = getattr(config, "CRAG_STALENESS_WINDOW_DAYS", 7)
+        if freshest_kb_age_days is None or freshest_kb_age_days > staleness_window_days:
+            return True
+
+    return False
 
 
 def _kb_low_confidence(kb_result: dict, threshold: float) -> bool:
@@ -327,6 +376,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 chroma_client=get_chroma(),
                 redis_client=get_redis(),
                 neo4j_driver=get_neo4j(),
+                graph_store=get_graph_store(),
                 source_config=req.source_config,
                 context_sources=req.context_sources,
                 debug_timing=debug_timing,
@@ -366,6 +416,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                     chroma_client=get_chroma(),
                     redis_client=get_redis(),
                     neo4j_driver=get_neo4j(),
+                    graph_store=get_graph_store(),
                     debug_timing=debug_timing,
                     allowed_domains=allowed_domains,
                     strict_domains=strict_domains,
@@ -374,12 +425,20 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                     metadata_filter=req.metadata_filter,
                 )
 
-            # CRAG gate: fire external only when KB quality is below threshold.
+            # CRAG gate: fire external when KB quality is below threshold OR
+            # the query has temporal intent and the freshest KB hit is stale.
             # Saves the 5s-per-source hang cost when KB already has strong hits.
             # B2a: capture KB-only confidence before any external augmentation.
             _kb_low_conf = _kb_low_confidence(result, _threshold)
+            from core.utils.temporal import parse_temporal_intent
+            _temporal_days = parse_temporal_intent(req.query)
+            _freshest_age = _freshest_kb_age_days(result) if _temporal_days is not None else None
             if should_fire_external_crag(
-                ext_on=_ext_on, kb_result=result, threshold=_threshold,
+                ext_on=_ext_on,
+                kb_result=result,
+                threshold=_threshold,
+                temporal_intent_days=_temporal_days,
+                freshest_kb_age_days=_freshest_age,
             ):
                 _ext_results: list = []
                 try:

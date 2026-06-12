@@ -40,6 +40,7 @@ def client():
     with (
         patch.object(agents, "get_chroma", return_value=fake_chroma),
         patch.object(agents, "get_neo4j", return_value=fake_neo4j),
+        patch.object(agents, "get_graph_store", return_value=MagicMock()),
         patch.object(agents, "get_redis", return_value=fake_redis),
     ):
         yield TestClient(app, raise_server_exceptions=False)

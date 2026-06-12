@@ -200,6 +200,12 @@ CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH = float(
 # proceeding to expensive reranking/generation.
 RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
 
+# Staleness window for current/recency-intent queries — when the query asks
+# about "current/now/today" and the freshest KB result is older than this,
+# fire external regardless of relevance score (Phase 3.2 — answerability over
+# relevance for time-scoped queries).
+CRAG_STALENESS_WINDOW_DAYS = int(os.getenv("CRAG_STALENESS_WINDOW_DAYS", "7"))
+
 # Wall-clock ceiling for a single agent_query() call. Two competing
 # constraints pick this value:
 #
