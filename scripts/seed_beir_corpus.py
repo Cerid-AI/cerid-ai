@@ -48,6 +48,7 @@ import sys
 import urllib.request
 import zipfile
 from collections import defaultdict
+from collections.abc import Mapping
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -75,6 +76,15 @@ DATASETS: dict[str, dict[str, object]] = {
         "include_title": True,
     },
 }
+
+
+def _eval_seed_allowed(env: Mapping[str, str]) -> bool:
+    """Return True only when the operator has explicitly opted in.
+
+    Pure function — takes a Mapping so it is testable without an OS
+    environment side-effect.
+    """
+    return env.get("CERID_ALLOW_EVAL_SEED", "").strip() == "1"
 
 
 def _download(url: str, dest: Path) -> None:
@@ -273,6 +283,24 @@ def _write_dataset_jsonl(
 
 
 def main() -> int:
+    if not _eval_seed_allowed(os.environ):
+        import config as _cfg
+        requested_names = (
+            os.getenv("CERID_BEIR_DATASETS", "scifact,nfcorpus").strip().split(",")
+        )
+        requested_names = [n.strip() for n in requested_names if n.strip()]
+        domains = sorted(
+            {str(DATASETS[n]["domain"]) for n in requested_names if n in DATASETS}
+        )
+        collections = [_cfg.collection_name(d) for d in domains]
+        log.error(
+            "Refusing to seed eval data into the live KB.\n"
+            "  Would write to Chroma collections: %s\n"
+            "  Set CERID_ALLOW_EVAL_SEED=1 to proceed.",
+            collections,
+        )
+        return 1
+
     requested = (
         os.getenv("CERID_BEIR_DATASETS", "scifact,nfcorpus").strip().split(",")
     )

@@ -135,13 +135,12 @@ FREE_MODELS = {
 # Cheap tier: catalog-refreshed 2026-05-20 against OpenRouter live models.
 # Dict keys are stable identifiers used at call sites — only the underlying
 # model ID + cost change with each catalog refresh.
-# - "gpt-4o-mini" slot: gpt-5-nano is 3× cheaper input than gpt-4o-mini for
-#   the same context window class. Quality regression risk is low — gpt-5-nano
-#   is the explicit "cheap workhorse" successor in the gpt-5 family.
+# - "gpt-4o-mini" slot: gpt-4o-mini. gpt-5-nano was removed (reasoning model:
+#   max_tokens consumed as reasoning budget → 0 output chars).
 # - "gemini-flash" slot: gemini-3.1-flash-lite is cheaper + newer + larger
 #   context than gemini-2.5-flash.
 CHEAP_MODELS: dict[str, dict[str, str | float]] = {
-    "gpt-4o-mini": {"id": "openrouter/openai/gpt-5-nano", "cost": 0.00005},
+    "gpt-4o-mini": {"id": "openrouter/openai/gpt-4o-mini", "cost": 0.00015},
     "gemini-flash": {"id": "openrouter/google/gemini-3.1-flash-lite", "cost": 0.00025},
 }
 
