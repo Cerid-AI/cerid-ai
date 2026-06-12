@@ -21,7 +21,6 @@ from datetime import datetime
 import httpx
 
 import config
-from core.utils.swallowed import log_swallowed_error
 from core.agents.hallucination.patterns import (
     CITATION_PATTERNS,
     CONCRETE_DATA_RE,
@@ -39,6 +38,7 @@ from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.internal_llm import call_internal_llm
 from core.utils.llm_client import call_llm
 from core.utils.llm_parsing import parse_llm_json
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.hallucination")
 
