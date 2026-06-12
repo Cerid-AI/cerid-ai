@@ -443,6 +443,15 @@ VERIFICATION_EXPERT_MODEL = os.getenv(
     "openrouter/x-ai/grok-4.20",
 )
 
+# Web-search-enabled expert verification model (the `:online` variant) used by
+# the smart_router VERIFICATION_EXPERT branch when live search is desired. Kept
+# separate from VERIFICATION_EXPERT_MODEL (non-online) so the router has an
+# env-overridable, catalog-visible default instead of a hardcoded literal.
+VERIFICATION_EXPERT_WEB_MODEL = os.getenv(
+    "VERIFICATION_EXPERT_WEB_MODEL",
+    "openrouter/x-ai/grok-4.20:online",
+)
+
 # ---------------------------------------------------------------------------
 # External (Cross-Model) Verification
 # ---------------------------------------------------------------------------
@@ -686,6 +695,21 @@ SCHEDULE_RETENTION_ENFORCE = os.getenv(
 # model_config.json stays revertible via PUT /models/assignments.
 MODEL_AUTO_UPDATE_ENABLED = os.getenv("MODEL_AUTO_UPDATE_ENABLED", "true").lower() in ("true", "1")
 SCHEDULE_MODEL_AUTO_UPDATE = os.getenv("SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * 1")  # Mon 6 AM
+
+# Routing-tiers overlay: a JSON map {original_tier_id: resolved_id} written by
+# the weekly model_auto_update job (app/routers/models.py::apply_latest_assignments)
+# after the role-assignment pass. The smart_router reads it lazily at lookup time
+# to keep the FREE/CHEAP/CAPABLE/RESEARCH/EXPERT tier ids current without editing
+# the source tables. Lives next to model_config.json (app/data/) by default;
+# env-overridable. core/ reads this path from config — it never imports app/.
+# Missing/invalid overlay → tier tables are used as-is (fail soft).
+ROUTING_TIERS_OVERLAY_PATH = os.getenv(
+    "ROUTING_TIERS_OVERLAY_PATH",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "app", "data", "routing_tiers.json",
+    ),
+)
 
 # ---------------------------------------------------------------------------
 # Folder Scanning

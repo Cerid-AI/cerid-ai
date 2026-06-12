@@ -790,11 +790,21 @@ async def _run_model_auto_update() -> None:
 
         outcome = await apply_latest_assignments()
         applied = outcome.get("applied", [])
+        tier_updates = outcome.get("tier_updates", [])
         duration = time.time() - start
-        _log_execution("model_auto_update", "success", duration, f"applied={len(applied)}")
+        _log_execution(
+            "model_auto_update",
+            "success",
+            duration,
+            f"applied={len(applied)} tiers={len(tier_updates)}",
+        )
         if applied:
             logger.info(
                 "model_auto_update: %d role(s) updated to latest in-family", len(applied)
+            )
+        if tier_updates:
+            logger.info(
+                "model_auto_update: %d smart-router tier id(s) refreshed", len(tier_updates)
             )
     except Exception as e:  # noqa: BLE001 — scheduler error surface
         duration = time.time() - start

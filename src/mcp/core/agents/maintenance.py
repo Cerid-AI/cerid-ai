@@ -94,8 +94,8 @@ def check_system_health(
 async def check_llm_health() -> str:
     """Async LLM provider health check via a minimal ``call_llm`` probe.
 
-    Uses the free Llama 3.3 model with a 1-token budget so the probe is
-    effectively free.  Any response (including an empty string) is treated
+    Uses the free smart-categorize model with a 1-token budget so the probe
+    is effectively free.  Any response (including an empty string) is treated
     as reachable — we only care that the HTTP + auth path worked.
     """
     try:
@@ -103,7 +103,7 @@ async def check_llm_health() -> str:
 
         await call_llm(
             [{"role": "user", "content": "ping"}],
-            model="openrouter/meta-llama/llama-3.3-70b-instruct:free",
+            model=config.CATEGORIZE_MODELS["smart"],
             temperature=0.0,
             max_tokens=1,
             timeout=5.0,

@@ -102,6 +102,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-product-story.py
 	@echo "[drift] mcp-descriptions"
 	.venv/bin/python scripts/lint-mcp-descriptions.py
+	@echo "[drift] no-hardcoded-models (warn-only)"
+	.venv/bin/python scripts/lint-no-hardcoded-models.py --warn-only src/mcp/
 	@echo "[drift] ✓ drift + lint gates passed"
 
 prepush: ci-local drift-check ## FULL pre-push parity with remote CI (run before every push)

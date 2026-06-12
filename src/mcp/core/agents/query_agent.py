@@ -79,6 +79,18 @@ def _format_chroma_result(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a standardized result dict from a ChromaDB chunk."""
+    # RAG Phase 1.1 — provenance spine. Every KB vector result carries a
+    # canonical ``source_type`` ("pack" when the chunk originated from an
+    # installed knowledge pack, else "kb") plus a best-effort ``created_at``
+    # (chunk authored/created date, falling back to ingest date) so the
+    # envelope, prompt, ranking, and verifier can all reason about staleness
+    # and source class downstream.
+    pack_id = metadata.get("pack_id", "")
+    created_at = (
+        metadata.get("created_at")
+        or metadata.get("ingested_at")
+        or None
+    )
     return {
         "content": content,
         "relevance": round(relevance, 4),
@@ -88,6 +100,9 @@ def _format_chroma_result(
         "chunk_index": metadata.get("chunk_index", 0),
         "collection": config.collection_name(domain),
         "chunk_id": chunk_id,
+        "source_type": "pack" if pack_id else "kb",
+        "created_at": created_at,
+        "pack_id": pack_id,
         "ingested_at": metadata.get("ingested_at", ""),
         "sub_category": metadata.get("sub_category", ""),
         "tags_json": metadata.get("tags_json", "[]"),
@@ -1636,6 +1651,12 @@ def assemble_context(
             "filename": result.get("filename", ""),
             "domain": result.get("domain", ""),
             "chunk_index": result.get("chunk_index", 0),
+            # RAG Phase 1.1 — preserve provenance onto sources[]. Never
+            # clobber an existing source_type (memory/wiki/external set their
+            # own); default to "kb" only when the result didn't declare one.
+            "source_type": result.get("source_type", "kb"),
+            "created_at": result.get("created_at"),
+            "pack_id": result.get("pack_id", ""),
         })
         char_count += content_len
         artifact_counts[artifact_id] += 1
@@ -1926,6 +1947,9 @@ async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
             "filename": page.get("slug", entity_hint),
             "chunk_index": 0,
             "source_type": "wiki",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # compiled page dict carries no timestamp).
+            "created_at": page.get("updated_at") or page.get("created_at"),
             "source_authority": "compiled_wiki",
             "title": page.get("title", ""),
         }
@@ -1965,6 +1989,9 @@ async def _recall_memory_surface(
             "filename": m.get("memory_id", ""),
             "chunk_index": 0,
             "source_type": "memory",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # recalled memory dict carries no creation timestamp).
+            "created_at": m.get("created_at"),
             "source_authority": "user_memory",
             "memory_type": m.get("memory_type", "fact"),
         }
