@@ -14,7 +14,8 @@ import { ConceptPage } from "./concept-page"
 import { WikiIndexView } from "./wiki-index-view"
 import { useWikiEntities } from "@/hooks/use-wiki-entities"
 import { fetchDomainCounts } from "@/lib/api/domains"
-import { organizeByDomain } from "@/lib/graph/organize"
+import { collectTopTags, filterEntitiesByTags, organizeByDomain } from "@/lib/graph/organize"
+import { TagFilterBar } from "@/components/wiki/tag-filter-bar"
 import { domainIcon } from "@/lib/graph/domain-icons"
 import { domainSlot } from "@/lib/graph/identity"
 import { SectionedEntityListWiki } from "@/components/shared/sectioned-entity-list"
@@ -95,6 +96,7 @@ function breadcrumbLabel(
 export default function WikiPane() {
   const [view, setView] = useState<WikiView>({ kind: "landing" })
   const [domainFilter, setDomainFilter] = useState<string | null>(null)
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
   const [railOpen, setRailOpen] = useState<boolean>(readRailOpen)
 
   // Entity name for breadcrumb (resolved from the entity list when available)
@@ -215,12 +217,32 @@ export default function WikiPane() {
     })
   }
 
-  // Apply domain filter client-side
+  // Apply domain + tag filters client-side (Slice 6.3 adds the tag filter)
   const filteredEntities = useMemo(() => {
     if (!entities) return undefined
-    if (!domainFilter) return entities
-    return entities.filter((e) => e.primary_domain === domainFilter)
+    const byDomain = domainFilter
+      ? entities.filter((e) => e.primary_domain === domainFilter)
+      : entities
+    return filterEntitiesByTags(byDomain, selectedTags)
+  }, [entities, domainFilter, selectedTags])
+
+  // Available tag chips — union across the domain-filtered set (so the bar
+  // reflects what's actually visible), salience/frequency-ordered.
+  const availableTags = useMemo(() => {
+    if (!entities) return []
+    const byDomain = domainFilter
+      ? entities.filter((e) => e.primary_domain === domainFilter)
+      : entities
+    return collectTopTags(byDomain)
   }, [entities, domainFilter])
+
+  const toggleTag = (tag: string) =>
+    setSelectedTags((prev) => {
+      const next = new Set(prev)
+      if (next.has(tag)) next.delete(tag)
+      else next.add(tag)
+      return next
+    })
 
   const { sections, headerless } = useMemo(() => {
     return organizeByDomain(
@@ -404,6 +426,15 @@ export default function WikiPane() {
                   }
                 />
               </div>
+            )}
+
+            {!isLoading && !isError && availableTags.length > 0 && (
+              <TagFilterBar
+                tags={availableTags}
+                selected={selectedTags}
+                onToggle={toggleTag}
+                onClear={() => setSelectedTags(new Set())}
+              />
             )}
 
             {!isLoading && !isError && (filteredEntities?.length ?? 0) > 0 && (

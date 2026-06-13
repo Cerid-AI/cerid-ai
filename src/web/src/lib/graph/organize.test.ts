@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { organizeByDomain, organizeWithPinned } from "./organize"
+import { collectTopTags, filterEntitiesByTags, organizeByDomain, organizeWithPinned } from "./organize"
 import type { EntitySummary } from "@/lib/types/wiki"
 import type { DomainCount } from "@/lib/api/domains"
 
@@ -312,5 +312,57 @@ describe("organizeWithPinned — Best Matches + de-dup", () => {
     const { pinned, rest } = organizeWithPinned([], LIVE_DOMAIN_INDEX)
     expect(pinned.entities).toHaveLength(0)
     expect(rest.sections).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Slice 6.3 — tag filter helpers
+// ---------------------------------------------------------------------------
+
+describe("collectTopTags", () => {
+  function withTags(slug: string, tags: string[] | null): EntitySummary {
+    return { ...makeEntity(slug), top_tags: tags }
+  }
+
+  it("returns the union ordered by frequency desc then name asc", () => {
+    const entities = [
+      withTags("a", ["python", "docker"]),
+      withTags("b", ["python", "api"]),
+      withTags("c", ["python"]),
+    ]
+    // python(3) > api(1)==docker(1) → api before docker (lex)
+    expect(collectTopTags(entities)).toEqual(["python", "api", "docker"])
+  })
+
+  it("ignores entities with null/empty top_tags", () => {
+    expect(collectTopTags([withTags("a", null), withTags("b", [])])).toEqual([])
+  })
+})
+
+describe("filterEntitiesByTags", () => {
+  function withTags(slug: string, tags: string[] | null): EntitySummary {
+    return { ...makeEntity(slug), top_tags: tags }
+  }
+
+  const entities = [
+    withTags("a", ["python", "docker"]),
+    withTags("b", ["finance"]),
+    withTags("c", null),
+  ]
+
+  it("empty selection is a no-op (returns all)", () => {
+    expect(filterEntitiesByTags(entities, new Set()).map((e) => e.slug)).toEqual([
+      "a", "b", "c",
+    ])
+  })
+
+  it("keeps entities carrying ANY selected tag", () => {
+    const out = filterEntitiesByTags(entities, new Set(["python", "finance"]))
+    expect(out.map((e) => e.slug)).toEqual(["a", "b"])
+  })
+
+  it("drops entities with no tags when a filter is active", () => {
+    const out = filterEntitiesByTags(entities, new Set(["docker"]))
+    expect(out.map((e) => e.slug)).toEqual(["a"])
   })
 })
