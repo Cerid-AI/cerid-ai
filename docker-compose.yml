@@ -217,6 +217,12 @@ services:
       - CHROMA_ANONYMIZED_TELEMETRY=false
       - ARCHIVE_PATH=/archive
       - CERID_SYNC_DIR=/sync
+      # §7.1 — pin the knowledge-pack registry path explicitly so it can't
+      # silently resolve to a missing file (the "registry serves 0" failure).
+      # /app is the in-container package root (WORKDIR); the slim registry
+      # ships at config/knowledge_packs.json. Operators pointing at a
+      # curated/community registry override this in .env.
+      - CERID_KNOWLEDGE_PACKS_REGISTRY=${CERID_KNOWLEDGE_PACKS_REGISTRY:-/app/config/knowledge_packs.json}
       - ENABLE_SEMANTIC_CACHE=true
       - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
       - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5

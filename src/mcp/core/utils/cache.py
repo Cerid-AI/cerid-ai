@@ -154,6 +154,20 @@ def log_verification_metrics(
     except Exception as e:
         logger.warning(f"Failed to log verification metrics: {e}")
 
+    # Phase 4.3 — also feed the time-series MetricsCollector that
+    # /observability/quality aggregates (`verification_accuracy` was declared
+    # in METRIC_NAMES but never recorded). Best-effort; this is the single
+    # chokepoint both verify paths (streaming + non-streaming) flow through.
+    if total > 0:
+        try:
+            from utils.metrics import MetricsCollector
+            MetricsCollector(redis_client).record_metric(
+                "verification_accuracy", accuracy,
+                tags={"model": model or "unknown"},
+            )
+        except Exception as exc:  # noqa: BLE001 — metrics recording must never block verification
+            log_swallowed_error("core.utils.cache.log_verification_metrics.collector", exc)
+
 
 def log_claim_feedback(
     redis_client,
