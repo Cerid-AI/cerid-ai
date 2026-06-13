@@ -1,19 +1,17 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Slice 5.1 — the ingestion enrichment seam (RAG Quality Program 2026-06-12).
+"""Slice 5.1 + 5.2 — ingestion enrichment seam + classifier accuracy.
 
-Pins the contract:
+5.1 — ``ingest_content`` auto-classifies sub_category + tags via
+``ai_categorize`` when the caller supplied neither (opt-out via
+``enrich=False``); NEVER changes domain (conversations carve-out is then
+automatic); classifier failure proceeds untagged.
 
-- ``enrich=True`` (default): when the caller supplied neither tags nor
-  sub_category, ``ingest_content`` classifies them via ``ai_categorize`` so
-  the memory / connector / digest / text_input paths get the same
-  wiki-granularity + tag-sorting metadata as file uploads.
-- ``enrich=False``: skips the re-classify (triage already classified).
-- Enrichment NEVER changes ``domain`` — including the conversations carve-out,
-  which is satisfied for free (domain is never touched).
-- Caller-supplied tags suppress enrichment of tags.
-- Classifier failure → ingest proceeds untagged (never blocks).
+5.2 — ``ai_categorize`` samples head+middle+tail of the document, reports a
+confidence that demotes low-confidence domains to general + ``needs-review``,
+and accepts the new ``trading`` (finance) / ``career`` (personal)
+sub_categories.
 """
 
 from __future__ import annotations
@@ -82,8 +80,7 @@ class TestEnrichmentSeam:
         assert kw is not None, "create_artifact was not reached"
         assert kw["sub_category"] == "trading"
         assert sorted(json.loads(kw["tags_json"])) == ["earnings", "q3-report"]
-        # domain unchanged — enrichment must never move the collection.
-        assert kw["domain"] == "general"
+        assert kw["domain"] == "general"  # never moved
 
     def test_enrich_false_skips_classifier(
         self, mock_cat, mock_meta, mock_chroma, mock_neo4j, mock_redis, mock_graph,
@@ -96,14 +93,12 @@ class TestEnrichmentSeam:
         from app.services.ingestion import ingest_content
 
         ingest_content("triage already classified me", domain="general", enrich=False)
-
         mock_cat.assert_not_called()
 
     def test_conversations_domain_keeps_domain_gets_subcat(
         self, mock_cat, mock_meta, mock_chroma, mock_neo4j, mock_redis, mock_graph,
     ):
-        """HARD CONSTRAINT — conversations is never re-domained. Enrichment
-        only adds sub_category + tags; domain stays 'conversations'."""
+        """HARD CONSTRAINT — conversations is never re-domained."""
         mock_meta.return_value = {"summary": "s"}
         mock_cat.return_value = {
             "suggested_domain": "finance",  # tempting, but MUST be ignored
@@ -137,7 +132,6 @@ class TestEnrichmentSeam:
             metadata={"tags_json": json.dumps(["manual-tag"]), "sub_category": "preset"},
         )
 
-        # Both fields already present → classifier not consulted for enrichment.
         mock_cat.assert_not_called()
         kw = _create_artifact_kwargs(mock_graph)
         assert kw is not None
@@ -154,17 +148,15 @@ class TestEnrichmentSeam:
 
         from app.services.ingestion import ingest_content
 
-        # Must not raise — enrichment is best-effort.
-        result = ingest_content("some content", domain="general")
+        result = ingest_content("some content", domain="general")  # must not raise
         assert result is not None
         kw = _create_artifact_kwargs(mock_graph)
-        assert kw is not None  # ingest completed despite classifier failure
+        assert kw is not None
 
 
 @pytest.mark.asyncio
 async def test_triage_endpoint_passes_enrich_false():
-    """The /agent/triage path must call ingest_content(enrich=False) since
-    triage already classified."""
+    """The /agent/triage path must call ingest_content(enrich=False)."""
     import app.routers.agents as agents_mod
 
     captured: dict = {}
@@ -187,3 +179,106 @@ async def test_triage_endpoint_passes_enrich_false():
         await triage_file_endpoint(TriageFileRequest(file_path="/tmp/f.py"))
 
     assert captured.get("enrich") is False
+
+
+# ---------------------------------------------------------------------------
+# Slice 5.2 — classifier accuracy
+# ---------------------------------------------------------------------------
+
+
+def test_sample_short_text_returned_whole():
+    from utils.metadata import _sample_for_classification
+
+    assert _sample_for_classification("short doc", 1500) == "short doc"
+
+
+def test_sample_long_text_head_middle_tail():
+    from utils.metadata import _sample_for_classification
+
+    text = "H" * 1000 + "M" * 1000 + "T" * 1000  # 3000 chars
+    out = _sample_for_classification(text, 600)
+    assert "H" in out and "M" in out and "T" in out
+    assert out.count("[... elided ...]") == 2
+
+
+def _llm_json(payload: dict) -> str:
+    return json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_demotes_to_general_with_needs_review():
+    import config
+    from utils import metadata
+
+    payload = {
+        "domain": "finance", "sub_category": "trading",
+        "confidence": 0.3, "tags": ["earnings"], "keywords": [], "summary": "s",
+    }
+    with (
+        patch.object(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
+        patch("core.utils.llm_client.call_llm", new_callable=AsyncMock, return_value=_llm_json(payload)),
+    ):
+        out = await metadata.ai_categorize("ambiguous text", "doc.txt", mode="pro")
+
+    assert out["suggested_domain"] == "general"  # demoted
+    assert "needs-review" in out["tags"]
+    assert out["confidence"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_high_confidence_preserves_domain_and_trading_subcategory():
+    import config
+    from utils import metadata
+
+    payload = {
+        "domain": "finance", "sub_category": "trading",
+        "confidence": 0.9, "tags": ["signals"], "keywords": [], "summary": "s",
+    }
+    with (
+        patch.object(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
+        patch("core.utils.llm_client.call_llm", new_callable=AsyncMock, return_value=_llm_json(payload)),
+    ):
+        out = await metadata.ai_categorize("a trade signal log", "signals.csv", mode="pro")
+
+    assert out["suggested_domain"] == "finance"
+    assert out["sub_category"] == "trading"  # 5.2 new sub_category accepted
+    assert "needs-review" not in out["tags"]
+
+
+@pytest.mark.asyncio
+async def test_career_subcategory_accepted_under_personal():
+    import config
+    from utils import metadata
+
+    payload = {
+        "domain": "personal", "sub_category": "career",
+        "confidence": 0.8, "tags": ["resume"], "keywords": [], "summary": "s",
+    }
+    with (
+        patch.object(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
+        patch("core.utils.llm_client.call_llm", new_callable=AsyncMock, return_value=_llm_json(payload)),
+    ):
+        out = await metadata.ai_categorize("my resume", "resume.pdf", mode="pro")
+
+    assert out["suggested_domain"] == "personal"
+    assert out["sub_category"] == "career"  # 5.2 new sub_category accepted
+
+
+@pytest.mark.asyncio
+async def test_missing_confidence_defaults_high_no_demotion():
+    """A model that omits confidence must not be silently demoted."""
+    import config
+    from utils import metadata
+
+    payload = {
+        "domain": "finance", "sub_category": "tax",
+        "tags": ["w2"], "keywords": [], "summary": "s",  # no confidence key
+    }
+    with (
+        patch.object(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
+        patch("core.utils.llm_client.call_llm", new_callable=AsyncMock, return_value=_llm_json(payload)),
+    ):
+        out = await metadata.ai_categorize("a tax form", "w2.pdf", mode="pro")
+
+    assert out["suggested_domain"] == "finance"
+    assert "needs-review" not in out["tags"]
