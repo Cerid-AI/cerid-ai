@@ -42,6 +42,9 @@ interface UseChatSendOptions {
   // Auto-inject settings
   autoInject: boolean
   autoInjectThreshold: number
+  /** Include knowledge packs in KB retrieval (Slice 7.3). Default true;
+      when false, queryKB sends exclude_packs so packs are dropped. */
+  includePacks: boolean
 
   // KB context
   injectedContext: KBQueryResult[]
@@ -173,7 +176,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           }, 500))
           // Fire KB query and memory recall in parallel with shared timeout
           const [freshKB, freshMemories] = await Promise.all([
-            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal }), timeout]).catch(() => null),
+            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal, excludePacks: !options.includePacks }), timeout]).catch(() => null),
             Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => []),
           ])
           if (freshKB?.results?.length) {

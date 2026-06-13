@@ -185,11 +185,16 @@ def rerank(
 
     for result, ce_score in zip(candidates, ce_scores):
         original = result["relevance"]
-        result["relevance"] = round(
+        blended = (
             config.RERANK_CE_WEIGHT * ce_score
-            + config.RERANK_ORIGINAL_WEIGHT * original,
-            4,
+            + config.RERANK_ORIGINAL_WEIGHT * original
         )
+        # Personal-first policy (Slice 7.2): down-weight knowledge-pack chunks
+        # AFTER the blend so the multiplier is a stable knob, not entangled with
+        # model scores. pack_id is "" for personal/KB chunks (no effect).
+        if result.get("pack_id"):
+            blended *= config.PACK_RELEVANCE_WEIGHT
+        result["relevance"] = round(blended, 4)
 
     candidates.sort(key=lambda x: x["relevance"], reverse=True)
     # Append cascade-dropped candidates after the cross-encoded survivors so

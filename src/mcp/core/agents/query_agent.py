@@ -1703,6 +1703,7 @@ async def agent_query(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    exclude_packs: bool = False,
 ) -> dict[str, Any]:
     """Budget-gated public entry for multi-domain query.
 
@@ -1732,6 +1733,7 @@ async def agent_query(
                 graph_store=graph_store,
                 skip_cache=skip_cache,
                 metadata_filter=metadata_filter,
+                exclude_packs=exclude_packs,
             ),
             timeout=budget,
         )
@@ -2044,6 +2046,7 @@ async def _agent_query_impl(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    exclude_packs: bool = False,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
@@ -2353,6 +2356,16 @@ async def _agent_query_impl(
             )
         except Exception as exc:  # noqa: BLE001 — observability boundary
             log_swallowed_error("query_agent.active_learning_signals", exc)
+
+    # Step 4.9: Personal-first pack exclusion (Slice 7.3). When the caller opts
+    # out of knowledge packs for this query, drop every pack chunk before
+    # rerank/synthesis — applied here (after all retrieval + graph expansion) so
+    # no pack chunk from any path reaches the answer. Memory/wiki/external chunks
+    # carry no pack_id and are unaffected. (A Chroma where-clause can't express
+    # this: non-pack chunks omit the pack_id key entirely, so $ne/$exists can't
+    # select them — a post-retrieval drop is the robust path.)
+    if exclude_packs and results:
+        results = [r for r in results if not r.get("pack_id")]
 
     # Step 5: Reranking (includes both direct and graph-sourced results)
     with timer.step("reranking"):

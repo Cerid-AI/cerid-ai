@@ -147,6 +147,7 @@ class AgentQueryRequest(BaseModel):
     strict_domains: bool | None = Field(None, description="When True, disables cross-domain affinity bleed. None = use consumer default.")
     skip_cache: bool = Field(False, description="Bypass semantic cache and query cache (for fresh-data scenarios like setup wizard)")
     metadata_filter: dict | None = Field(None, description="ChromaDB where-clause for metadata filtering (e.g. {\"filename\": \"report.pdf\"})")
+    exclude_packs: bool = Field(False, description="When True, drop knowledge-pack chunks from retrieval (personal-first: answer from your own data only). Slice 7.3.")
     # --- Context source gates (absolute on/off per source) ---
     context_sources: dict | None = Field(
         None,
@@ -384,6 +385,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 allowed_domains=allowed_domains,
                 strict_domains=strict_domains,
                 model=req.model,
+                exclude_packs=req.exclude_packs,
             )
             # Mirror the manual path's KB-quality signal for the smart path so
             # the low_confidence field is meaningful (not just a default).
@@ -424,6 +426,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                     model=req.model,
                     skip_cache=req.skip_cache,
                     metadata_filter=req.metadata_filter,
+                    exclude_packs=req.exclude_packs,
                 )
 
             # CRAG gate: fire external when KB quality is below threshold OR
