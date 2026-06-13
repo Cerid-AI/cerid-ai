@@ -206,6 +206,17 @@ RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.
 # relevance for time-scoped queries).
 CRAG_STALENESS_WINDOW_DAYS = int(os.getenv("CRAG_STALENESS_WINDOW_DAYS", "7"))
 
+# Staleness window for claim VERIFICATION (Phase 4.2). When a temporal
+# (recency / current-event) claim is supported only by KB evidence older
+# than this window AND external web verification was inconclusive, the
+# verdict is downgraded to ``uncertain`` with reason ``stale_evidence``
+# rather than rubber-stamped ``verified`` on stale data. Defaults to the
+# CRAG window (same staleness notion, different surface) but is separately
+# tunable for operators who want verification stricter/looser than retrieval.
+VERIFICATION_STALENESS_WINDOW_DAYS = int(
+    os.getenv("VERIFICATION_STALENESS_WINDOW_DAYS", str(CRAG_STALENESS_WINDOW_DAYS))
+)
+
 # Wall-clock ceiling for a single agent_query() call. Two competing
 # constraints pick this value:
 #

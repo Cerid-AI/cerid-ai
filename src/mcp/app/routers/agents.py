@@ -20,6 +20,7 @@ from app.concurrency import KB_POOL
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
 from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
+from core.utils.swallowed import log_swallowed_error
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -480,6 +481,25 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         if isinstance(result, dict):
             result["low_confidence"] = _kb_low_conf
 
+        # Phase 4.3 — record a retrieval-quality proxy into the time-series
+        # collector /observability/quality reads (`retrieval_ndcg` was declared
+        # in METRIC_NAMES but never recorded). Proxy = mean relevance of the
+        # returned results; a true NDCG needs graded judgments we don't have at
+        # serve time, but mean relevance tracks the same signal (are the hits
+        # good?) cheaply. Best-effort; never blocks the response.
+        try:
+            _res = result.get("results") if isinstance(result, dict) else None
+            if _res:
+                _rels = [float(r.get("relevance", 0.0)) for r in _res]
+                if _rels:
+                    from utils.metrics import get_metrics_collector
+                    get_metrics_collector().record_metric(
+                        "retrieval_ndcg", round(sum(_rels) / len(_rels), 4),
+                        tags={"rag_mode": req.rag_mode or "manual"},
+                    )
+        except Exception as _exc:  # noqa: BLE001 — metrics recording must never block the query response
+            log_swallowed_error("app.routers.agents.retrieval_ndcg", _exc)
+
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
         if use_self_rag and req.response_text:
@@ -677,7 +697,6 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
                     # the claims are already in the response. Surface
                     # via log_swallowed_error so dashboards catch
                     # systematic save failures.
-                    from core.utils.swallowed import log_swallowed_error
                     log_swallowed_error(
                         "agent.hallucination.auto_persist",
                         Exception("save_verification_report failed"),

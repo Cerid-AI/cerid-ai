@@ -33,6 +33,7 @@ from config.features import (
     SEMANTIC_CACHE_THRESHOLD,
     SEMANTIC_CACHE_TTL,
 )
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.semantic_cache")
 
@@ -106,6 +107,24 @@ def _get_backend() -> _CacheBackend | None:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _record_cache_hit(redis_client: Any, hit: bool) -> None:
+    """Record a semantic-cache hit (1.0) or genuine miss (0.0) into the
+    time-series collector that /observability/quality reads (Phase 4.3 —
+    ``cache_hit_rate`` was declared in METRIC_NAMES but never recorded).
+
+    Best-effort: never raises into the cache-lookup return path. Called only
+    on genuine hit/miss outcomes, NOT on disabled/error returns (those would
+    skew the rate toward a misleading 0).
+    """
+    try:
+        from utils.metrics import MetricsCollector
+        MetricsCollector(redis_client).record_metric(
+            "cache_hit_rate", 1.0 if hit else 0.0,
+        )
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.hit_metric", exc)
+
+
 def cache_lookup(
     query_embedding: np.ndarray,
     redis_client: Any,
@@ -123,6 +142,7 @@ def cache_lookup(
 
     try:
         if backend.count() == 0:
+            _record_cache_hit(redis_client, hit=False)
             return None
 
         emb = np.asarray(query_embedding, dtype=np.float32).reshape(-1).tolist()
@@ -135,12 +155,14 @@ def cache_lookup(
         ids = (result.get("ids") or [[]])[0]
         distances = (result.get("distances") or [[]])[0]
         if not ids or not distances:
+            _record_cache_hit(redis_client, hit=False)
             return None
 
         entry_id = str(ids[0])
         # cosine space: distance == 1 - cos_sim
         similarity = 1.0 - float(distances[0])
         if similarity < thresh:
+            _record_cache_hit(redis_client, hit=False)
             return None
 
         result_raw = redis_client.get(_entry_key(entry_id))
@@ -150,13 +172,15 @@ def cache_lookup(
             # unbounded as TTLs cycle.
             try:
                 backend.delete(ids=[entry_id])
-            except Exception:  # silent-catch-allowed: best-effort lazy orphan eviction; failure does not affect the lookup return value
-                logger.debug("semantic_cache.orphan_evict_failed", exc_info=True)
+            except Exception as exc:
+                log_swallowed_error("core.retrieval.semantic_cache.orphan_evict", exc)
+            _record_cache_hit(redis_client, hit=False)
             return None
 
         logger.info(
             "Semantic cache hit (sim=%.4f, id=%s)", similarity, entry_id[:12]
         )
+        _record_cache_hit(redis_client, hit=True)
         return json.loads(result_raw)
 
     except Exception:
@@ -237,8 +261,8 @@ def invalidate_cache(redis_client: Any) -> int:
             try:
                 # Empty `where` clears the whole collection in chromadb 0.5+.
                 backend.delete(where={})
-            except Exception:  # silent-catch-allowed: best-effort backend clear; redis side already wiped, return value reflects that
-                logger.debug("semantic_cache.backend_clear_failed", exc_info=True)
+            except Exception as exc:
+                log_swallowed_error("core.retrieval.semantic_cache.backend_clear", exc)
 
         if count:
             logger.info("Semantic cache invalidated: %d keys", count)
