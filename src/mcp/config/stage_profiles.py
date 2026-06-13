@@ -29,10 +29,18 @@ Hardness    Tier in registry       Typical model (defaults shipped)
 ==========  =====================  ====================================
 TRIVIAL     ``free``               llama-3.3-70b-instruct:free
 SIMPLE      ``cheap``              gpt-4o-mini class
-MODERATE    ``capable``            claude-sonnet-4.6 / llama-3.3-70b
-HARD        ``research``           grok-4.x class
-FRONTIER    ``expert``             claude-opus class / sonnet (user pick)
+MODERATE    ``research``           grok-4.x class (capable + cheap + fast)
+HARD        ``capable``            claude-sonnet-4.6 class (reasoning)
+FRONTIER    ``expert``             claude-opus class
 ==========  =====================  ====================================
+
+Why MODERATE lands on ``research`` (grok-4.x) rather than ``capable``
+(sonnet): grok-4.3 priced at ~$0.20/$0.50 per MTok is ~30× cheaper than
+sonnet on output and meaningfully faster — and Wave-2 (2026-06-12)
+showed sonnet judging hit the verify-request 120s budget on long
+answers. Sonnet stays available for HARD where the reasoning depth
+actually pays for itself; the operator pin path is one env var away
+for any stage that wants to override this default.
 
 **User pins** — the cerid-ai operator has three knobs:
 
@@ -83,8 +91,14 @@ class Hardness(str, enum.Enum):
 HARDNESS_TO_TIER: dict[Hardness, str] = {
     Hardness.TRIVIAL: "free",
     Hardness.SIMPLE: "cheap",
-    Hardness.MODERATE: "capable",
-    Hardness.HARD: "research",
+    # MODERATE: judging / decomposition / extraction stages — picked grok-4.x
+    # class (research tier) over sonnet (capable tier) so the default is
+    # cost-light + latency-light. See module docstring for the rationale.
+    Hardness.MODERATE: "research",
+    # HARD: complex reasoning (Cypher gen, deep verification). Sonnet's
+    # extra rigor pays for itself; this is the bucket where the higher
+    # token cost is worth it.
+    Hardness.HARD: "capable",
     Hardness.FRONTIER: "expert",
 }
 

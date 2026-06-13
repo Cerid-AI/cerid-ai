@@ -74,7 +74,21 @@ def test_all_profiles_use_valid_enums():
 def test_helpers_for_known_stage():
     assert task_type_for("faithfulness/decompose") == TaskType.DECOMPOSITION
     assert hardness_for("faithfulness/decompose") == Hardness.MODERATE
-    assert tier_for("faithfulness/decompose") == "capable"
+    assert tier_for("faithfulness/decompose") == "research"
+
+
+def test_ladder_is_documented():
+    """HARDNESS_TO_TIER ladder matches the module docstring contract.
+
+    Pins the policy decision that MODERATE → research (grok-4.x) and HARD →
+    capable (sonnet), so a future edit that re-flips the ladder fails this
+    test before silently changing dispatch behavior across ~25 stages.
+    """
+    assert HARDNESS_TO_TIER[Hardness.TRIVIAL] == "free"
+    assert HARDNESS_TO_TIER[Hardness.SIMPLE] == "cheap"
+    assert HARDNESS_TO_TIER[Hardness.MODERATE] == "research"
+    assert HARDNESS_TO_TIER[Hardness.HARD] == "capable"
+    assert HARDNESS_TO_TIER[Hardness.FRONTIER] == "expert"
 
 
 def test_helpers_for_unknown_stage():
@@ -108,11 +122,15 @@ def test_resolver_env_pin_beats_profile(monkeypatch):
 
 
 def test_resolver_uses_profile_when_no_env_pin():
-    # Capable tier default — should not be grok-4.20 or any expert-tier model
+    """MODERATE-hardness stages resolve to the research tier (grok-4.x class)
+    so dispatch is cheap + fast by default. Sonnet is reserved for HARD."""
     model = _resolve_stage_model("faithfulness/decompose")
-    expected = get_model("tiers", "capable")
+    expected = get_model("tiers", "research")
     assert model == expected
+    # Hard guard against ever silently routing judges through the expensive
+    # opus tier or the cost-incident grok-4.20 model.
     assert "grok-4.20" not in model
+    assert "opus" not in model
 
 
 def test_resolver_returns_empty_for_unknown_stage():
@@ -124,9 +142,12 @@ def test_resolver_returns_empty_for_no_stage():
     assert _resolve_stage_model("") == ""
 
 
-def test_judging_stages_dont_route_to_grok_4_20():
+def test_judging_stages_dont_route_to_grok_4_20_or_opus():
     """Direct regression for the OpenRouter cost incident — RAGAS judges
-    should NOT hit the grok-4.20 expert tier under the default profile."""
+    should NOT hit the grok-4.20 model (the original cost vector) and
+    should NOT route to the opus expert tier (the bigger cost vector if
+    we ever raise MODERATE).
+    """
     judging_stages = [
         "faithfulness/decompose",
         "faithfulness/score",
@@ -138,9 +159,14 @@ def test_judging_stages_dont_route_to_grok_4_20():
     for stage in judging_stages:
         model = _resolve_stage_model(stage)
         assert "grok-4.20" not in model, (
-            f"Judging stage {stage!r} resolved to {model!r} — should land in "
-            "capable tier, not expert/grok-4.20. Update STAGE_PROFILES or "
-            "HARDNESS_TO_TIER if this is intentional."
+            f"Judging stage {stage!r} resolved to {model!r} — the grok-4.20 "
+            "literal is the original cost incident. Update STAGE_PROFILES "
+            "or HARDNESS_TO_TIER if this is intentional."
+        )
+        assert "opus" not in model, (
+            f"Judging stage {stage!r} resolved to {model!r} — opus is the "
+            "frontier expert tier, way over-spec for judging. Re-tag the "
+            "stage's hardness if expert quality is genuinely required."
         )
 
 
@@ -178,7 +204,7 @@ async def test_call_internal_llm_threads_resolved_model_into_call_llm():
             [{"role": "user", "content": "hi"}],
             stage="faithfulness/decompose",
         )
-    assert captured.get("model") == get_model("tiers", "capable")
+    assert captured.get("model") == get_model("tiers", "research")
 
 
 @pytest.mark.asyncio
