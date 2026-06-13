@@ -1,25 +1,49 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Derive Entity.primary_domain, domain_mix, primary_subcategory, domains_updated_at.
+"""Derive Entity.primary_domain, domain_mix, domain_salience, primary_subcategory, domains_updated_at.
 
 Algorithm
 ---------
 One read pass over (Artifact)-[:MENTIONS]->(Entity) aggregated per
-(entity, domain, sub_category), then folded in Python with a
-deterministic 4-rung tie-break:
+(entity, domain, sub_category), then folded in Python. Each (entity,
+domain) pair gets a **salience** score (Slice 6.1):
 
-  (1) Highest distinct-artifact count (the mode itself).
+  salience = specificity(domain)
+           × distinctiveness(domain)
+           × quality_mass(entity, domain)
+           × recency_decay(latest)
+
+  - specificity:    'general'/'conversations' are uncategorised/ambient,
+                    down-weighted to _LOW_SPECIFICITY; every other domain 1.0.
+  - distinctiveness: inverse global domain frequency (computed purely in
+                    the fold) — 30 mentions of a rare domain outweigh 60
+                    generic ones.
+  - quality_mass:   sum of artifact quality_score for the pair, falling
+                    back to the raw mention count for pre-quality nodes.
+  - recency_decay:  2^(-age_days / half_life) against an injected `now`
+                    (NOT temporal.recency_score — that reads the wall clock
+                    and would break run-to-run determinism).
+
+primary_domain is the salience argmax, with the original deterministic
+tie-break preserved for equal salience:
+
+  (1) Highest salience (the mode itself).
   (2) Non-general beats general — 'general' is explicitly "uncategorized
       or cross-domain", so any specific domain wins.
   (3) Most recent max(a.updated_at) among still-tied domains.
   (4) Lexicographic ascending — pure determinism, idempotent across runs.
 
+domain_mix stays a raw integer count map (downstream + endpoint tests treat
+it as counts); domain_salience is a separate float map. Both persist sorted
+desc. Salience is rounded to _SALIENCE_PRECISION so floats don't drift
+across runs (idempotency contract).
+
 DOMAIN_AFFINITY is explicitly excluded: it covers only 6 of 13 live
 domains (neither 'research' nor 'boardroom_foundation' appears in it),
 and the 1.4% tie rate doesn't justify machinery without coverage.
 
-Orphan entities (no MENTIONS path, ~32 live) get REMOVE on all four
+Orphan entities (no MENTIONS path, ~32 live) get REMOVE on all five
 fields — honest absence, never coerced to 'general'.
 
 Cost on live data: <2 s end-to-end (tens-of-ms read, negligible fold,
@@ -46,6 +70,45 @@ _WRITE_BATCH = int(os.getenv("DERIVE_DOMAINS_WRITE_BATCH", "500"))
 _MAX_ENTITIES = int(os.getenv("DERIVE_DOMAINS_MAX_ENTITIES", "100000"))
 
 _GENERAL_DOMAIN = "general"
+
+# --- Salience tuning (Slice 6.1) — env-overridable like _WRITE_BATCH. -------
+# Defensible defaults; tune at eval checkpoint 8.3 per plan decision-authority.
+_SALIENCE_HALF_LIFE_DAYS = float(os.getenv("DERIVE_DOMAINS_SALIENCE_HALF_LIFE_DAYS", "30"))
+# Ambient/uncategorised domains contribute, but shouldn't define an entity.
+_LOW_SPECIFICITY = float(os.getenv("DERIVE_DOMAINS_LOW_SPECIFICITY", "0.25"))
+_LOW_SPECIFICITY_DOMAINS = frozenset({"general", "conversations"})
+# Decimal places salience is rounded to before persist/compare — the
+# idempotency guard (raw floats would drift in the last digits run-to-run).
+_SALIENCE_PRECISION = 4
+
+
+def _specificity(domain: str) -> float:
+    """Down-weight ambient/uncategorised domains; everything specific is 1.0."""
+    return _LOW_SPECIFICITY if domain in _LOW_SPECIFICITY_DOMAINS else 1.0
+
+
+def _recency_decay(latest: str | None, now: datetime, half_life_days: float) -> float:
+    """Exponential recency decay against an injected `now` (pure — no clock read).
+
+    Mirrors core.utils.temporal.recency_score's tz-stripping and
+    neutral-0.5-on-unparseable behaviour, but takes `now` as a parameter so
+    the fold is deterministic across runs (same now + rows => same salience).
+    """
+    if not latest or half_life_days <= 0:
+        # Neutral 0.5 on missing date OR a misconfigured (zero/negative)
+        # half-life — never crash the nightly job or invert decay to growth.
+        return 0.5
+    try:
+        dt = datetime.fromisoformat(latest)
+    except (ValueError, TypeError):
+        return 0.5
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    ref = now.replace(tzinfo=None) if now.tzinfo is not None else now
+    age_days = (ref - dt).total_seconds() / 86400.0
+    if age_days < 0:
+        age_days = 0.0
+    return 2.0 ** (-age_days / half_life_days)
 
 
 class DeriveDomainsJob(BaseJob):
@@ -96,8 +159,11 @@ class DeriveDomainsJob(BaseJob):
         all_entity_ids = await asyncio.to_thread(self._fetch_all_entity_ids, driver)
         await progress_cb(0.5)
 
-        # Fold in Python — derive per-entity distributions + primary fields
-        update_rows, orphan_ids = _fold_distributions(mention_rows, all_entity_ids)
+        # Fold in Python — derive per-entity distributions + primary fields.
+        # `now` is captured once and injected so the fold stays deterministic
+        # (recency decay must not read the wall clock — see _recency_decay).
+        now = datetime.now(timezone.utc)
+        update_rows, orphan_ids = _fold_distributions(mention_rows, all_entity_ids, now)
         await progress_cb(0.7)
 
         written = await asyncio.to_thread(self._write_updates, driver, update_rows)
@@ -131,12 +197,14 @@ class DeriveDomainsJob(BaseJob):
             WHERE e.canonical_id IS NOT NULL
             WITH e, a.domain AS domain, a.sub_category AS sub,
                  count(DISTINCT a) AS n,
+                 sum(a.quality_score) AS qsum,
                  max(a.updated_at) AS latest
             RETURN
                 e.canonical_id AS cid,
                 domain,
                 sub,
                 n,
+                qsum,
                 latest
             LIMIT {_MAX_ENTITIES}
         """
@@ -175,6 +243,7 @@ class DeriveDomainsJob(BaseJob):
             MATCH (e:Entity {canonical_id: r.cid})
             SET e.primary_domain     = r.primary_domain,
                 e.domain_mix         = r.domain_mix,
+                e.domain_salience    = r.domain_salience,
                 e.primary_subcategory = r.primary_subcategory,
                 e.domains_updated_at = $now
         """
@@ -196,7 +265,7 @@ class DeriveDomainsJob(BaseJob):
         cypher = """
             UNWIND $ids AS cid
             MATCH (e:Entity {canonical_id: cid})
-            REMOVE e.primary_domain, e.domain_mix, e.primary_subcategory
+            REMOVE e.primary_domain, e.domain_mix, e.domain_salience, e.primary_subcategory
             SET e.domains_updated_at = $now
         """
         removed = 0
@@ -216,20 +285,51 @@ class DeriveDomainsJob(BaseJob):
 # ---------------------------------------------------------------------------
 
 
+def _quality_mass(qsum: float, n: int) -> float:
+    """Quality-weighted mention mass: sum of artifact quality_score, falling
+    back to the raw mention count for pre-quality nodes (qsum NULL/0)."""
+    return qsum if qsum > 0 else float(n)
+
+
 def _fold_distributions(
     mention_rows: list[dict[str, Any]],
     all_entity_ids: set[str],
+    now: datetime,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Fold raw (entity, domain, sub) rows into per-entity update dicts.
 
-    Returns:
-        update_rows: list of {cid, primary_domain, domain_mix, primary_subcategory}
+    `now` is injected (not read from the clock) so salience is deterministic
+    run-to-run. Returns:
+        update_rows: {cid, primary_domain, domain_mix, domain_salience, primary_subcategory}
         orphan_ids:  entity canonical_ids with no MENTIONS path
     """
-    # domain_agg[cid][domain] = {"n": int, "latest": str | None}
-    domain_agg: dict[str, dict[str, dict[str, Any]]] = defaultdict(lambda: defaultdict(lambda: {"n": 0, "latest": None}))
-    # sub_agg[cid][domain][sub] = int  (for primary_subcategory derivation)
-    sub_agg: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    # Pass 0 — global domain frequency (across ALL entities) for distinctiveness.
+    global_domain_total: dict[str, int] = defaultdict(int)
+    for row in mention_rows:
+        domain = str(row.get("domain") or "")
+        if domain:
+            global_domain_total[domain] += int(row.get("n") or 0)
+    total_all = sum(global_domain_total.values())
+    num_domains = len(global_domain_total)
+
+    def _distinctiveness(domain: str) -> float:
+        """Inverse global frequency, normalised so a uniform corpus => 1.0.
+        Rare domains score >1 (a mention there is more telling)."""
+        gt = global_domain_total.get(domain, 0)
+        if gt <= 0 or total_all <= 0 or num_domains <= 0:
+            return 1.0
+        return total_all / (num_domains * gt)
+
+    # domain_agg[cid][domain] = {"n": int, "latest": str | None, "qsum": float}
+    domain_agg: dict[str, dict[str, dict[str, Any]]] = defaultdict(
+        lambda: defaultdict(lambda: {"n": 0, "latest": None, "qsum": 0.0})
+    )
+    # sub_weight[cid][domain][sub] = float — salience-weighted sub counts
+    # (quality_mass × recency per row) so a high-quality recent sub outranks
+    # many stale low-quality ones, mirroring domain-level salience.
+    sub_weight: dict[str, dict[str, dict[str, float]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(float))
+    )
 
     mentioned_cids: set[str] = set()
 
@@ -241,6 +341,11 @@ def _fold_distributions(
         latest = row.get("latest")
         if latest is not None:
             latest = str(latest)
+        qsum_raw = row.get("qsum")
+        try:
+            qrow = float(qsum_raw) if qsum_raw is not None else 0.0
+        except (TypeError, ValueError):
+            qrow = 0.0
 
         if not cid or not domain:
             continue
@@ -248,12 +353,15 @@ def _fold_distributions(
         mentioned_cids.add(cid)
         d_slot = domain_agg[cid][domain]
         d_slot["n"] += n
+        d_slot["qsum"] += qrow
         # Keep max latest across sub-rows for same (entity, domain)
         if latest is not None:
             if d_slot["latest"] is None or latest > d_slot["latest"]:
                 d_slot["latest"] = latest
 
-        sub_agg[cid][domain][sub] += n
+        sub_weight[cid][domain][sub] += _quality_mass(qrow, n) * _recency_decay(
+            latest, now, _SALIENCE_HALF_LIFE_DAYS
+        )
 
     # Orphans: entities that exist but have no MENTIONS path
     orphan_ids = sorted(all_entity_ids - mentioned_cids)
@@ -262,17 +370,36 @@ def _fold_distributions(
     for cid in mentioned_cids:
         d_map = domain_agg[cid]
 
-        # Build domain_mix (sorted desc by count, then name for stability)
+        # Per-(entity, domain) salience, and a slot enriched with it for the picker.
+        salience_map: dict[str, float] = {}
+        picker_map: dict[str, dict[str, Any]] = {}
+        for domain, info in d_map.items():
+            mass = _quality_mass(info["qsum"], info["n"])
+            sal = round(
+                _specificity(domain)
+                * _distinctiveness(domain)
+                * mass
+                * _recency_decay(info["latest"], now, _SALIENCE_HALF_LIFE_DAYS),
+                _SALIENCE_PRECISION,
+            )
+            salience_map[domain] = sal
+            picker_map[domain] = {"n": info["n"], "latest": info["latest"], "salience": sal}
+
+        # domain_mix stays raw integer counts (downstream contract); salience
+        # rides in its own float map. Both sorted desc, then name for stability.
         domain_mix: dict[str, int] = {d: info["n"] for d, info in d_map.items()}
 
-        primary_domain = _pick_primary_domain(d_map)
-        primary_subcategory = _pick_primary_subcategory(sub_agg[cid].get(primary_domain, {}))
+        primary_domain = _pick_primary_domain(picker_map)
+        primary_subcategory = _pick_primary_subcategory(sub_weight[cid].get(primary_domain, {}))
 
         update_rows.append({
             "cid": cid,
             "primary_domain": primary_domain,
             "domain_mix": json.dumps(
                 dict(sorted(domain_mix.items(), key=lambda kv: (-kv[1], kv[0])))
+            ),
+            "domain_salience": json.dumps(
+                dict(sorted(salience_map.items(), key=lambda kv: (-kv[1], kv[0])))
             ),
             "primary_subcategory": primary_subcategory,
         })
@@ -281,9 +408,9 @@ def _fold_distributions(
 
 
 def _pick_primary_domain(d_map: dict[str, dict[str, Any]]) -> str:
-    """4-rung deterministic tie-break over a per-domain {n, latest} map.
+    """4-rung deterministic tie-break over a per-domain {n, latest, salience} map.
 
-    Rung 1: highest distinct-artifact count.
+    Rung 1: highest salience (quality- and recency-weighted, distinctiveness-scaled).
     Rung 2: non-general beats general.
     Rung 3: latest max(updated_at) among tied.
     Rung 4: lexicographic ascending.
@@ -291,9 +418,9 @@ def _pick_primary_domain(d_map: dict[str, dict[str, Any]]) -> str:
     if not d_map:
         return _GENERAL_DOMAIN  # shouldn't happen — caller guards
 
-    # Rung 1: find max count
-    max_n = max(info["n"] for info in d_map.values())
-    candidates = [d for d, info in d_map.items() if info["n"] == max_n]
+    # Rung 1: find max salience (rounded upstream, so equality is stable)
+    max_s = max(info["salience"] for info in d_map.values())
+    candidates = [d for d, info in d_map.items() if info["salience"] == max_s]
 
     if len(candidates) == 1:
         return candidates[0]
@@ -322,12 +449,14 @@ def _pick_primary_domain(d_map: dict[str, dict[str, Any]]) -> str:
     return sorted(candidates)[0]
 
 
-def _pick_primary_subcategory(sub_counts: dict[str, int]) -> str | None:
-    """Mode sub_category for a single domain's artifact mentions.
+def _pick_primary_subcategory(sub_counts: dict[str, float]) -> str | None:
+    """Salience-weighted mode sub_category for a single domain's mentions.
 
-    Returns None when every artifact carries the default sub_category
-    (the ingest default is 'general', seeded from taxonomy.py; all-default
-    = no signal, so store null rather than noise).
+    `sub_counts` carries quality-and-recency weighted mass per sub (see
+    sub_weight in the fold), so a recent high-quality sub outranks many
+    stale low-quality ones. Returns None when the winner is the default
+    sub_category ('general', seeded from taxonomy.py; all-default = no
+    signal, so store null rather than noise).
     """
     if not sub_counts:
         return None
