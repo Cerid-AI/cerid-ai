@@ -41,8 +41,23 @@ function normalizeEntitySummary(raw: Record<string, unknown>): EntitySummary {
     recent_activity_score: Number(raw.recent_activity_score ?? 0),
     last_updated_at: raw.summary_updated_at != null ? String(raw.summary_updated_at) : null,
     primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
+    top_tags: normalizeTopTags(raw.top_tags),
     match_rank: raw.match_rank != null ? Number(raw.match_rank) : null,
   }
+}
+
+/** Parse top_tags from an array or a JSON string (backend stores JSON). */
+function normalizeTopTags(raw: unknown): string[] | null {
+  if (Array.isArray(raw)) return (raw as unknown[]).map(String)
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed.map(String) : null
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 function normalizeRelatedEntity(raw: Record<string, unknown>): RelatedEntity {
@@ -171,17 +186,7 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
   }
 
   // top_tags (Slice 6.3): array of vocabulary tags (or a raw JSON string).
-  let top_tags: string[] | null = null
-  if (Array.isArray(raw.top_tags)) {
-    top_tags = (raw.top_tags as unknown[]).map(String)
-  } else if (typeof raw.top_tags === "string") {
-    try {
-      const parsed = JSON.parse(raw.top_tags)
-      top_tags = Array.isArray(parsed) ? parsed.map(String) : null
-    } catch {
-      top_tags = null
-    }
-  }
+  const top_tags = normalizeTopTags(raw.top_tags)
 
   return {
     slug: String(raw.slug ?? ""),

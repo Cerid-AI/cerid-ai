@@ -69,6 +69,11 @@ export interface EntitySummary {
    */
   primary_domain: string | null
   /**
+   * Top controlled-vocabulary tags (Slice 6.3), salience-ordered, capped at 5.
+   * Null/empty until DeriveDomainsJob runs. Surfaces list tag sort/filter.
+   */
+  top_tags?: string[] | null
+  /**
    * Search relevance rank from the backend (0=exact, 1=prefix, 2=substring, 3=canonical-only).
    * Present only in search results (q non-empty); absent in browse results.
    */

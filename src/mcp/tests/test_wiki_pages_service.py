@@ -142,6 +142,20 @@ class TestListEntities:
         # Malformed rows produce EntitySummary with empty strings (default fallback).
         assert len(results) >= 1
 
+    @pytest.mark.asyncio
+    async def test_top_tags_parsed_on_list_rows(self):
+        """Slice 6.3: top_tags JSON string on a list row parses to a list;
+        absent top_tags is None (pre-job rows still list cleanly)."""
+        rows = _entity_rows()
+        rows[0]["top_tags"] = '["python", "docker"]'  # has tags
+        # rows[1] has no top_tags key → None
+        driver = _make_driver()
+        with patch("app.services.wiki_pages._neo4j_adapter.list_top_entities", return_value=rows):
+            results = await list_entities(driver)
+
+        assert results[0].top_tags == ["python", "docker"]
+        assert results[1].top_tags is None
+
 
 # ---------------------------------------------------------------------------
 # get_entity_page — happy path
