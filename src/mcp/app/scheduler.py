@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -964,6 +965,43 @@ async def _run_derive_domains() -> None:
         logger.error("derive_domains scheduled job failed: %s", e)
 
 
+async def _run_backfill_enrichment() -> None:
+    """Phase 5.3 Track A — enrich tags + sub_category on bare artifacts.
+
+    Gated by ``CERID_BACKFILL_ENRICHMENT_ENABLED`` (operator opt-in — the job
+    runs the classifier per artifact). Metadata-only: never changes domain,
+    so conversations are enriched in place. Self-idles once the backlog
+    drains (scan returns 0).
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.backfill_enrichment import BackfillEnrichmentJob  # noqa: PLC0415
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = BackfillEnrichmentJob()
+        if queue is not None:
+            await queue.enqueue(job.new_record())
+            _log_execution("backfill_enrichment", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            result = await job.run(_noop)
+            _log_execution(
+                "backfill_enrichment", "success", time.time() - start,
+                f"enriched={result.metadata.get('enriched', 0)} "
+                f"scanned={result.metadata.get('scanned', 0)}",
+            )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        _log_execution("backfill_enrichment", "error", time.time() - start, str(e))
+        logger.error("backfill_enrichment scheduled job failed: %s", e)
+
+
 async def _run_memory_consolidation_sweep() -> None:
     """Weekly SAFE memory archival sweep — archival only, no LLM re-abstraction.
 
@@ -1304,6 +1342,22 @@ def start_scheduler() -> AsyncIOScheduler:
             CronTrigger.from_crontab(config.SCHEDULE_INBOX_TRIAGE),
             id="inbox_triage",
             name="Inbox triage (Pro)",
+            replace_existing=True,
+            max_instances=1,  # block overlapping runs (LLM cost)
+        )
+
+    # Phase 5.3 Track A — enrichment backfill. Operator opt-in via
+    # CERID_BACKFILL_ENRICHMENT_ENABLED (the job classifies per artifact);
+    # off by default even though SCHEDULE_BACKFILL_ENRICHMENT has a cron.
+    if (
+        os.getenv("CERID_BACKFILL_ENRICHMENT_ENABLED", "").lower() in ("true", "1", "yes")
+        and config.SCHEDULE_BACKFILL_ENRICHMENT
+    ):
+        _scheduler.add_job(
+            _run_backfill_enrichment,
+            CronTrigger.from_crontab(config.SCHEDULE_BACKFILL_ENRICHMENT),
+            id="backfill_enrichment",
+            name="Enrichment backfill (Track A)",
             replace_existing=True,
             max_instances=1,  # block overlapping runs (LLM cost)
         )
