@@ -178,6 +178,48 @@ class TestGetEntityPage:
         assert page.next_refresh_due is not None
 
     @pytest.mark.asyncio
+    async def test_parses_domain_salience_and_top_tags(self):
+        """Slice 6: domain_salience + top_tags arrive as JSON strings from
+        Neo4j and are parsed onto the page (salience order preserved)."""
+        raw = _full_entity_raw()
+        raw["primary_domain"] = "finance"
+        raw["domain_salience"] = '{"finance": 45.0, "general": 11.25}'
+        raw["top_tags"] = '["invoice", "budget"]'
+        driver = _make_driver()
+        with (
+            patch("app.services.wiki_pages._neo4j_adapter.get_entity", return_value=raw),
+            patch("app.services.wiki_pages._neo4j_adapter.get_confidence_band", return_value="high"),
+            patch(
+                "app.services.contradiction_log.list_recent",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            page = await get_entity_page(driver, "person:elon-musk")
+
+        assert page is not None
+        assert page.domain_salience == {"finance": 45.0, "general": 11.25}
+        assert list(page.domain_salience.keys()) == ["finance", "general"]
+        assert page.top_tags == ["invoice", "budget"]
+
+    @pytest.mark.asyncio
+    async def test_domain_salience_and_top_tags_null_when_absent(self):
+        """Pre-job entities (no salience/tags) parse to None, not a crash."""
+        driver = _make_driver()
+        with (
+            patch("app.services.wiki_pages._neo4j_adapter.get_entity", return_value=_full_entity_raw()),
+            patch("app.services.wiki_pages._neo4j_adapter.get_confidence_band", return_value="high"),
+            patch(
+                "app.services.contradiction_log.list_recent",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            page = await get_entity_page(driver, "person:elon-musk")
+
+        assert page is not None
+        assert page.domain_salience is None
+        assert page.top_tags is None
+
+    @pytest.mark.asyncio
     async def test_contradictions_are_pulled_from_service(self):
         from app.services.contradiction_log import ContradictionFinding
 

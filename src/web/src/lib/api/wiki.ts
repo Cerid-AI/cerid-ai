@@ -155,6 +155,34 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     }
   }
 
+  // domain_salience (Slice 6.1): same dual-shape guard as domain_mix —
+  // backend parses to a dict, but tolerate a raw JSON string defensively.
+  let domain_salience: Record<string, number> | null = null
+  if (raw.domain_salience != null) {
+    if (typeof raw.domain_salience === "object" && !Array.isArray(raw.domain_salience)) {
+      domain_salience = raw.domain_salience as Record<string, number>
+    } else if (typeof raw.domain_salience === "string") {
+      try {
+        domain_salience = JSON.parse(raw.domain_salience) as Record<string, number>
+      } catch {
+        domain_salience = null
+      }
+    }
+  }
+
+  // top_tags (Slice 6.3): array of vocabulary tags (or a raw JSON string).
+  let top_tags: string[] | null = null
+  if (Array.isArray(raw.top_tags)) {
+    top_tags = (raw.top_tags as unknown[]).map(String)
+  } else if (typeof raw.top_tags === "string") {
+    try {
+      const parsed = JSON.parse(raw.top_tags)
+      top_tags = Array.isArray(parsed) ? parsed.map(String) : null
+    } catch {
+      top_tags = null
+    }
+  }
+
   return {
     slug: String(raw.slug ?? ""),
     name: String(raw.name ?? ""),
@@ -173,6 +201,8 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     confidence_band: (raw.confidence_band as WikiEntityPage["confidence_band"]) ?? "unknown",
     primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
     domain_mix,
+    domain_salience,
+    top_tags,
     primary_subcategory: raw.primary_subcategory != null ? String(raw.primary_subcategory) : null,
     episodic_memories: episodicMemories.length > 0 ? episodicMemories : undefined,
   }

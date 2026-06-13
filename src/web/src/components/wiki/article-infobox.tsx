@@ -106,6 +106,15 @@ export function ArticleInfobox({
     ? formatRelativeTime(page.next_refresh_due)
     : null
 
+  // Salience-ordered domain mix (Slice 6.1): the backend persists
+  // domain_salience already sorted desc, so key order is the ranking. Drop the
+  // primary (shown by the badge) and surface the next few as a muted footer —
+  // this is the salience ordering, NOT raw mention counts.
+  const salienceMix = page.domain_salience
+    ? Object.keys(page.domain_salience).filter((d) => d !== page.primary_domain)
+    : []
+  const topTags = page.top_tags ?? []
+
   return (
     <Card
       className="gap-0 py-0 text-sm"
@@ -156,7 +165,8 @@ export function ArticleInfobox({
               </InfoboxRow>
             )}
 
-            {/* Row 2: Domain — only when present; links to domain landing */}
+            {/* Row 2: Domain — only when present; links to domain landing.
+                Salience-ordered mix footer (6.1) sits under the badge. */}
             {page.primary_domain && (
               <InfoboxRow label="Domain">
                 <button
@@ -172,6 +182,11 @@ export function ArticleInfobox({
                     </span>
                   )}
                 </button>
+                {salienceMix.length > 0 && (
+                  <div className="mt-0.5 text-label-xs text-muted-foreground">
+                    also {salienceMix.slice(0, 3).map(titleCase).join(" · ")}
+                  </div>
+                )}
               </InfoboxRow>
             )}
 
@@ -252,6 +267,25 @@ export function ArticleInfobox({
             )}
           </tbody>
         </table>
+
+        {/* Top tags chip row (Slice 6.3) — salience-ranked controlled-vocabulary
+            tags. Below the table (keeps the infobox at ≤8 rows); omit-if-absent. */}
+        {topTags.length > 0 && (
+          <div
+            className="mt-2 flex flex-wrap gap-1 border-t border-border/40 pt-2"
+            aria-label={`${page.name} top tags`}
+          >
+            {topTags.map((tag) => (
+              <Badge
+                key={tag}
+                variant="secondary"
+                className="text-label-xxs font-normal"
+              >
+                {titleCase(tag)}
+              </Badge>
+            ))}
+          </div>
+        )}
         {onOpenAtlas && (
           <button
             type="button"

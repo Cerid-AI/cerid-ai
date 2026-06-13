@@ -187,9 +187,13 @@ class WikiEntityPage(BaseModel):
     community_id: str | None = None
     community_label: str | None = None
     mention_count: int = 0
-    # Domain backbone fields (Cycle 1)
+    # Domain backbone fields (Cycle 1; Slice 6 adds salience + top_tags)
     primary_domain: str | None = None
     domain_mix: dict[str, int] | None = None
+    # Salience-ordered domain weights (Slice 6.1) and top controlled-vocabulary
+    # tags (Slice 6.3) — both derived by DeriveDomainsJob, null until it runs.
+    domain_salience: dict[str, float] | None = None
+    top_tags: list[str] | None = None
     primary_subcategory: str | None = None
     summary: str | None = None
     related_entities: list[RelatedEntity] = []
@@ -390,6 +394,34 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
                 domain_mix = {str(k): int(v) for k, v in parsed.items()}
         except (json.JSONDecodeError, TypeError, ValueError):
             domain_mix = None
+
+    raw_domain_salience = raw.get("domain_salience")
+    domain_salience: dict[str, float] | None = None
+    if raw_domain_salience:
+        try:
+            parsed_sal = (
+                json.loads(raw_domain_salience)
+                if isinstance(raw_domain_salience, str)
+                else raw_domain_salience
+            )
+            if isinstance(parsed_sal, dict):
+                # Preserve the salience-desc order DeriveDomainsJob persisted.
+                domain_salience = {str(k): float(v) for k, v in parsed_sal.items()}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            domain_salience = None
+
+    raw_top_tags = raw.get("top_tags")
+    top_tags: list[str] | None = None
+    if raw_top_tags:
+        try:
+            parsed_tags = (
+                json.loads(raw_top_tags) if isinstance(raw_top_tags, str) else raw_top_tags
+            )
+            if isinstance(parsed_tags, list):
+                top_tags = [str(t) for t in parsed_tags if t]
+        except (json.JSONDecodeError, TypeError, ValueError):
+            top_tags = None
+
     primary_subcategory: str | None = raw.get("primary_subcategory")
 
     return WikiEntityPage(
@@ -401,6 +433,8 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         mention_count=int(raw.get("mention_count") or 0),
         primary_domain=primary_domain,
         domain_mix=domain_mix,
+        domain_salience=domain_salience,
+        top_tags=top_tags,
         primary_subcategory=primary_subcategory,
         summary=raw.get("summary"),
         related_entities=related,
