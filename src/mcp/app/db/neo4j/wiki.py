@@ -195,7 +195,8 @@ def list_top_entities(
                     {rank_return}
                     e.summary             AS summary,
                     e.summary_updated_at  AS summary_updated_at,
-                    e.primary_domain      AS primary_domain
+                    e.primary_domain      AS primary_domain,
+                    e.top_tags            AS top_tags
                 {order_clause}
                 LIMIT $limit
                 """,

@@ -45,6 +45,21 @@ _PROC_JOB_KEY_FMT = "cerid:proc:job:{job_id}"
 # ---------------------------------------------------------------------------
 
 
+def _parse_top_tags(raw: Any) -> list[str] | None:
+    """Parse an entity's top_tags (JSON string from Neo4j, or already a list)
+    into a list of tag strings. Returns None on absent/malformed input."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(parsed, list):
+        return None
+    tags = [str(t) for t in parsed if t]
+    return tags or None
+
+
 class ExternalReference(BaseModel):
     """A single reference fetched from an external public API (Phase API.3).
 
@@ -137,6 +152,9 @@ class EntitySummary(BaseModel):
     summary: str | None = None
     summary_updated_at: str | None = None
     primary_domain: str | None = None
+    # Top controlled-vocabulary tags (Slice 6.3) — salience-ordered, capped at
+    # 5; null until DeriveDomainsJob runs. Surfaces tag sort/filter in lists.
+    top_tags: list[str] | None = None
     # Present only when a search term was supplied (list_top_entities
     # conditional CASE); absent on the no-q browse path.
     match_rank: int | None = None
@@ -248,6 +266,7 @@ async def list_entities(
                     summary=r.get("summary"),
                     summary_updated_at=r.get("summary_updated_at"),
                     primary_domain=r.get("primary_domain"),
+                    top_tags=_parse_top_tags(r.get("top_tags")),
                     match_rank=int(raw_rank) if raw_rank is not None else None,
                 )
             )
@@ -410,17 +429,7 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         except (json.JSONDecodeError, TypeError, ValueError):
             domain_salience = None
 
-    raw_top_tags = raw.get("top_tags")
-    top_tags: list[str] | None = None
-    if raw_top_tags:
-        try:
-            parsed_tags = (
-                json.loads(raw_top_tags) if isinstance(raw_top_tags, str) else raw_top_tags
-            )
-            if isinstance(parsed_tags, list):
-                top_tags = [str(t) for t in parsed_tags if t]
-        except (json.JSONDecodeError, TypeError, ValueError):
-            top_tags = None
+    top_tags: list[str] | None = _parse_top_tags(raw.get("top_tags"))
 
     primary_subcategory: str | None = raw.get("primary_subcategory")
 

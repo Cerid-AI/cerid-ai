@@ -73,6 +73,33 @@ describe("normalizeEntitySummary — allowlist contract", () => {
     expect(entity.primary_domain).toBeNull()
   })
 
+  it("maps top_tags from array (Slice 6.3 list seam)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawSummary({ top_tags: ["python", "docker"] })],
+    })
+    const [entity] = await fetchWikiEntities()
+    expect(entity.top_tags).toEqual(["python", "docker"])
+  })
+
+  it("parses top_tags from JSON string", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawSummary({ top_tags: '["python"]' })],
+    })
+    const [entity] = await fetchWikiEntities()
+    expect(entity.top_tags).toEqual(["python"])
+  })
+
+  it("top_tags is null when absent", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeRawSummary({ top_tags: undefined })],
+    })
+    const [entity] = await fetchWikiEntities()
+    expect(entity.top_tags).toBeNull()
+  })
+
   it("core fields are preserved (regression guard)", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
