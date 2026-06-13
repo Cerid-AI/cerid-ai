@@ -230,3 +230,33 @@ export function organizeWithPinned(
 export function flatItems(result: OrganizeResult): FlatItem[] {
   return result.flatItems
 }
+
+// ---------------------------------------------------------------------------
+// Tag filter (Slice 6.3) — pure helpers for the entity-list tag filter bar.
+// ---------------------------------------------------------------------------
+
+/** Collect the union of entity top_tags, ordered by frequency desc then name
+ *  asc — the chips shown in the filter bar. */
+export function collectTopTags(
+  entities: ReadonlyArray<{ top_tags?: string[] | null }>,
+): string[] {
+  const counts = new Map<string, number>()
+  for (const e of entities) {
+    for (const tag of e.top_tags ?? []) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([tag]) => tag)
+}
+
+/** Filter entities to those carrying ANY of the selected tags. Empty selection
+ *  is a no-op (returns all). Never reorders or sections — that stays taxonomy. */
+export function filterEntitiesByTags<T extends { top_tags?: string[] | null }>(
+  entities: ReadonlyArray<T>,
+  selected: ReadonlySet<string>,
+): T[] {
+  if (selected.size === 0) return [...entities]
+  return entities.filter((e) => (e.top_tags ?? []).some((tag) => selected.has(tag)))
+}
