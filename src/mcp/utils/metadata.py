@@ -173,6 +173,55 @@ def _extract_keywords_simple(text: str, max_keywords: int = 10) -> list[str]:
 # AI-assisted categorization (token-efficient)
 # ---------------------------------------------------------------------------
 
+_CONTROL_TAGS = frozenset({"needs-review"})
+
+
+def _normalize_tags(tags: list[str], domain: str, max_freeform: int = 3) -> list[str]:
+    """Phase 5.4 — converge free-form tags on the domain's vocabulary.
+
+    Tags are metadata, not taxonomy, so they stay open-vocabulary at the
+    margin — but they must converge on ``TAG_VOCABULARY`` so the sorting /
+    filtering surfaces (Phase 6.3) are coherent rather than fragmented across
+    ``q3-report`` / ``q3report`` / ``quarterly-report`` variants.
+
+    For each cleaned (lower/hyphen) tag:
+      * a vocabulary tag is kept verbatim;
+      * a near-miss (difflib ratio ≥ cutoff) is mapped to its canonical
+        vocabulary entry;
+      * everything else is a free-form tag, capped at ``max_freeform`` so a
+        tag-stuffed document can't drown the vocabulary signal.
+    Control tags (``needs-review``) are always preserved and never counted
+    against the free-form cap. Total is capped at 10 (the ai_categorize cap).
+    """
+    import difflib
+
+    vocab = [v.strip().lower() for v in config.TAG_VOCABULARY.get(domain, []) if v.strip()]
+    vocab_set = set(vocab)
+
+    kept: list[str] = []
+    freeform: list[str] = []
+    seen: set[str] = set()
+    for raw in tags:
+        if not isinstance(raw, str):
+            continue
+        t = raw.strip().lower().replace(" ", "-")
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        if t in _CONTROL_TAGS or t in vocab_set:
+            kept.append(t)
+            continue
+        match = difflib.get_close_matches(t, vocab, n=1, cutoff=0.82)
+        if match and match[0] not in seen:
+            kept.append(match[0])
+            seen.add(match[0])
+        elif match and match[0] in seen:
+            continue  # canonical form already present — drop the variant
+        else:
+            freeform.append(t)
+    return (kept + freeform[:max_freeform])[:10]
+
+
 def _sample_for_classification(text: str, budget: int) -> str:
     """Sample head + middle + tail of *text* into a classification snippet.
 
@@ -335,6 +384,12 @@ async def ai_categorize(
             suggested = config.DEFAULT_DOMAIN
             if "needs-review" not in tags:
                 tags = (tags + ["needs-review"])[:10]
+
+        # Phase 5.4 — converge tags on the (possibly demoted) domain's
+        # vocabulary so sorting/filtering surfaces stay coherent. Runs after
+        # the confidence gate so needs-review is preserved + normalized against
+        # the final domain.
+        tags = _normalize_tags(tags, suggested)
 
         # Validate sub_category against the (possibly demoted) domain's taxonomy
         sub_cat = result.get("sub_category", "").lower().strip()
