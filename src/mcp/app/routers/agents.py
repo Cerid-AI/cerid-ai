@@ -540,6 +540,9 @@ async def triage_file_endpoint(req: TriageFileRequest):
             triage_result["parsed_text"],
             triage_result["domain"],
             metadata=triage_result["metadata"],
+            # Triage already ran the classifier (domain + sub_category + tags
+            # are in metadata) — skip the Phase 5.1 enrichment re-classify.
+            enrich=False,
         )
         result["filename"] = triage_result["filename"]
         result["categorize_mode"] = triage_result.get("categorize_mode", "")
