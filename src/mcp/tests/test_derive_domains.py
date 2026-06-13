@@ -12,6 +12,8 @@ Covers:
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,25 +23,53 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 # Pure fold tests (no I/O)
 # ---------------------------------------------------------------------------
-from app.processor.jobs.derive_domains import _fold_distributions, _pick_primary_domain
+from app.processor.jobs.derive_domains import (
+    _fold_distributions,
+    _pick_primary_domain,
+    _recency_decay,
+)
+
+# Fixed injected clock — the fold takes `now` explicitly so salience (which
+# decays with recency) is deterministic across runs.
+_NOW = datetime(2026, 6, 13, tzinfo=timezone.utc)
 
 
 class TestPickPrimaryDomain:
-    """A8 tie-break ladder — one case per rung."""
+    """A8 tie-break ladder — one case per rung. The picker keys rung 1 on
+    salience (Slice 6.1); rungs 2-4 (non-general → latest → lex) are unchanged.
+    Each slot carries {n, latest, salience}; n is retained for downstream
+    domain_mix but is no longer the rung-1 selector."""
 
-    def test_rung1_highest_count_wins(self):
-        """Rung 1: highest distinct-artifact count."""
+    def test_recency_decay_neutral_on_bad_half_life(self):
+        """A misconfigured (zero/negative) half-life returns neutral 0.5 instead
+        of crashing the job or inverting decay to growth (boundary guard)."""
+        assert _recency_decay("2026-05-01", _NOW, 0) == 0.5
+        assert _recency_decay("2026-05-01", _NOW, -30) == 0.5
+        # sane half-life still decays a past date below 1.0
+        assert 0.0 < _recency_decay("2026-05-01", _NOW, 30) < 1.0
+
+    def test_rung1_highest_salience_wins(self):
+        """Rung 1: highest salience (not raw count)."""
         d_map = {
-            "coding": {"n": 5, "latest": "2026-01-01"},
-            "research": {"n": 3, "latest": "2026-06-01"},
+            "coding": {"n": 5, "latest": "2026-01-01", "salience": 5.0},
+            "research": {"n": 3, "latest": "2026-06-01", "salience": 3.0},
         }
         assert _pick_primary_domain(d_map) == "coding"
 
-    def test_rung2_non_general_beats_general(self):
-        """Rung 2: non-general wins when counts are tied."""
+    def test_rung1_salience_overrides_raw_count(self):
+        """A lower-count domain with higher salience beats a high-count one —
+        this is the whole point of 6.1 (distinctiveness/quality reweighting)."""
         d_map = {
-            "general": {"n": 4, "latest": "2026-06-01"},
-            "coding": {"n": 4, "latest": "2026-01-01"},
+            "general": {"n": 60, "latest": "2026-06-01", "salience": 11.25},
+            "finance": {"n": 30, "latest": "2026-06-01", "salience": 45.0},
+        }
+        assert _pick_primary_domain(d_map) == "finance"
+
+    def test_rung2_non_general_beats_general(self):
+        """Rung 2: non-general wins when salience is tied."""
+        d_map = {
+            "general": {"n": 4, "latest": "2026-06-01", "salience": 4.0},
+            "coding": {"n": 4, "latest": "2026-01-01", "salience": 4.0},
         }
         assert _pick_primary_domain(d_map) == "coding"
 
@@ -47,38 +77,38 @@ class TestPickPrimaryDomain:
         """If both tied candidates are non-general (no general in the set),
         rung 2 doesn't help — falls through to rung 3."""
         d_map = {
-            "coding": {"n": 3, "latest": "2026-01-01"},
-            "research": {"n": 3, "latest": "2026-06-01"},
+            "coding": {"n": 3, "latest": "2026-01-01", "salience": 3.0},
+            "research": {"n": 3, "latest": "2026-06-01", "salience": 3.0},
         }
         # rung3: most recent wins — research has later date
         assert _pick_primary_domain(d_map) == "research"
 
     def test_rung3_most_recent_updated_at_wins(self):
-        """Rung 3: when counts tied and neither/both are general, latest wins."""
+        """Rung 3: when salience tied and neither/both are general, latest wins."""
         d_map = {
-            "projects": {"n": 2, "latest": "2025-12-01"},
-            "finance": {"n": 2, "latest": "2026-05-15"},
+            "projects": {"n": 2, "latest": "2025-12-01", "salience": 2.0},
+            "finance": {"n": 2, "latest": "2026-05-15", "salience": 2.0},
         }
         assert _pick_primary_domain(d_map) == "finance"
 
     def test_rung4_lexicographic_ascending(self):
-        """Rung 4: identical counts, both non-general, same latest → lex asc."""
+        """Rung 4: identical salience, both non-general, same latest → lex asc."""
         d_map = {
-            "research": {"n": 2, "latest": "2026-06-01"},
-            "coding": {"n": 2, "latest": "2026-06-01"},
+            "research": {"n": 2, "latest": "2026-06-01", "salience": 2.0},
+            "coding": {"n": 2, "latest": "2026-06-01", "salience": 2.0},
         }
         assert _pick_primary_domain(d_map) == "coding"
 
     def test_rung2_general_only_returns_general(self):
         """If only general exists, it's returned (no non-general alternative)."""
-        d_map = {"general": {"n": 1, "latest": None}}
+        d_map = {"general": {"n": 1, "latest": None, "salience": 0.125}}
         assert _pick_primary_domain(d_map) == "general"
 
     def test_rung3_none_latest_sorts_last(self):
         """None latest treated as '' → sorts before any real date → loses rung 3."""
         d_map = {
-            "coding": {"n": 2, "latest": None},
-            "projects": {"n": 2, "latest": "2026-01-01"},
+            "coding": {"n": 2, "latest": None, "salience": 2.0},
+            "projects": {"n": 2, "latest": "2026-01-01", "salience": 2.0},
         }
         assert _pick_primary_domain(d_map) == "projects"
 
@@ -86,8 +116,13 @@ class TestPickPrimaryDomain:
 class TestFoldDistributions:
     """Integration tests for the full fold: orphan removal, idempotency."""
 
-    def _make_row(self, cid: str, domain: str, sub: str, n: int, latest: str) -> dict:
-        return {"cid": cid, "domain": domain, "sub": sub, "n": n, "latest": latest}
+    def _make_row(
+        self, cid: str, domain: str, sub: str, n: int, latest: str,
+        qsum: float | None = None,
+    ) -> dict:
+        # qsum defaults to None to exercise the pre-quality fallback-to-n path
+        # (legacy artifacts have no quality_score property → NULL aggregate).
+        return {"cid": cid, "domain": domain, "sub": sub, "n": n, "latest": latest, "qsum": qsum}
 
     def test_orphan_entities_in_remove_list(self):
         """Entities with no MENTIONS path land in orphan_ids, not update_rows."""
@@ -95,41 +130,43 @@ class TestFoldDistributions:
             self._make_row("e1", "coding", "general", 2, "2026-01-01"),
         ]
         all_ids = {"e1", "e2_orphan", "e3_orphan"}
-        update_rows, orphan_ids = _fold_distributions(mention_rows, all_ids)
+        update_rows, orphan_ids = _fold_distributions(mention_rows, all_ids, _NOW)
         assert [r["cid"] for r in update_rows] == ["e1"]
         assert sorted(orphan_ids) == ["e2_orphan", "e3_orphan"]
 
     def test_orphan_never_coerced_to_general(self):
         """Orphan entities are not silently assigned 'general'."""
-        update_rows, orphan_ids = _fold_distributions([], {"orphan_a"})
+        update_rows, orphan_ids = _fold_distributions([], {"orphan_a"}, _NOW)
         assert orphan_ids == ["orphan_a"]
         assert update_rows == []
 
     def test_run_twice_idempotency(self):
-        """Running fold twice on the same input produces identical output."""
+        """Running fold twice on the same input + same `now` produces identical
+        output — the job's core property. Salience is rounded so floats don't
+        drift in the last digits across runs."""
         mention_rows = [
             self._make_row("e1", "research", "papers", 5, "2026-06-01"),
             self._make_row("e1", "coding", "general", 3, "2026-05-01"),
             self._make_row("e2", "general", "general", 1, "2026-01-01"),
         ]
         all_ids = {"e1", "e2"}
-        r1, o1 = _fold_distributions(mention_rows, all_ids)
-        r2, o2 = _fold_distributions(mention_rows, all_ids)
+        r1, o1 = _fold_distributions(mention_rows, all_ids, _NOW)
+        r2, o2 = _fold_distributions(mention_rows, all_ids, _NOW)
         # Sort by cid for stable comparison
         r1_sorted = sorted(r1, key=lambda x: x["cid"])
         r2_sorted = sorted(r2, key=lambda x: x["cid"])
-        assert r1_sorted == r2_sorted
+        assert r1_sorted == r2_sorted  # includes domain_salience JSON byte-equality
         assert o1 == o2
 
     def test_domain_mix_sorted_desc_then_name(self):
-        """domain_mix JSON is sorted by count desc, then name asc for stability."""
-        import json
+        """domain_mix JSON stays raw integer counts, sorted by count desc then
+        name asc (salience rides in a separate field, NOT in domain_mix)."""
         mention_rows = [
             self._make_row("e1", "coding", "general", 5, "2026-01-01"),
             self._make_row("e1", "research", "papers", 2, "2026-05-01"),
             self._make_row("e1", "finance", "general", 2, "2026-03-01"),
         ]
-        update_rows, _ = _fold_distributions(mention_rows, {"e1"})
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
         assert len(update_rows) == 1
         mix = json.loads(update_rows[0]["domain_mix"])
         keys = list(mix.keys())
@@ -137,22 +174,106 @@ class TestFoldDistributions:
         assert keys[0] == "coding"
         assert keys[1] == "finance"
         assert keys[2] == "research"
+        # domain_mix values remain ints, never floats
+        assert all(isinstance(v, int) for v in mix.values())
+
+    def test_domain_salience_structure(self):
+        """domain_salience is a separate float map: keys ⊆ domain_mix keys,
+        sorted desc, every value rounded to <=4 decimal places."""
+        mention_rows = [
+            self._make_row("e1", "coding", "general", 5, "2026-06-01"),
+            self._make_row("e1", "research", "papers", 2, "2026-05-01"),
+            self._make_row("e1", "finance", "general", 2, "2026-03-01"),
+        ]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
+        row = update_rows[0]
+        sal = json.loads(row["domain_salience"])
+        mix = json.loads(row["domain_mix"])
+        # keys are a subset of domain_mix keys (same domains, no extras)
+        assert set(sal.keys()) <= set(mix.keys())
+        assert set(sal.keys()) == {"coding", "research", "finance"}
+        # sorted descending by salience
+        values = list(sal.values())
+        assert values == sorted(values, reverse=True)
+        # rounded to <=4 dp — idempotency guard
+        for v in sal.values():
+            assert round(v, 4) == v
+        # primary_domain is the salience argmax
+        assert row["primary_domain"] == max(sal, key=lambda k: sal[k])
+
+    def test_qsum_null_falls_back_to_count(self):
+        """A pre-quality artifact (qsum NULL) still contributes via the raw
+        count fallback — its entity gets a non-zero salience and a domain."""
+        rows_null = [self._make_row("legacy", "finance", "general", 4, "2026-06-01", qsum=None)]
+        update_rows, _ = _fold_distributions(rows_null, {"legacy"}, _NOW)
+        sal = json.loads(update_rows[0]["domain_salience"])
+        assert update_rows[0]["primary_domain"] == "finance"
+        assert sal["finance"] > 0
+
+    def test_quality_mass_outweighs_raw_count(self):
+        """With equal counts + recency (so distinctiveness cancels), summed
+        quality mass drives salience — high-quality mentions outrank
+        low-quality ones of the same volume."""
+        mention_rows = [
+            # equal counts (4 each), equal recency → only quality differs
+            self._make_row("e1", "coding", "general", 4, "2026-06-01", qsum=0.4),
+            self._make_row("e1", "finance", "general", 4, "2026-06-01", qsum=3.6),
+        ]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
+        assert update_rows[0]["primary_domain"] == "finance"
+
+    def test_specificity_downweights_general(self):
+        """A high-count 'general' loses to a lower-count specific domain because
+        specificity down-weights ambient/uncategorised domains (60 generic < 30
+        finance)."""
+        mention_rows = [
+            self._make_row("e1", "general", "general", 60, "2026-06-01"),
+            self._make_row("e1", "finance", "general", 30, "2026-06-01"),
+        ]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
+        # raw count would pick general (60 > 30); salience picks finance
+        assert update_rows[0]["primary_domain"] == "finance"
+
+    def test_distinctiveness_rewards_rare_domain(self):
+        """Equal local counts, but a globally-rare domain outranks a globally-
+        common one (a mention of the rare domain is more telling)."""
+        mention_rows = [
+            # e1 mentions coding and finance equally (same count, same recency)
+            self._make_row("e1", "coding", "general", 5, "2026-06-01"),
+            self._make_row("e1", "finance", "general", 5, "2026-06-01"),
+            # many other entities make 'coding' globally common, 'finance' rare
+            self._make_row("e2", "coding", "general", 95, "2026-06-01"),
+        ]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1", "e2"}, _NOW)
+        e1 = next(r for r in update_rows if r["cid"] == "e1")
+        assert e1["primary_domain"] == "finance"
+
+    def test_same_now_is_deterministic(self):
+        """The explicit-`now` contract: identical rows + identical now produce
+        byte-identical domain_salience (no wall-clock read in the fold)."""
+        mention_rows = [
+            self._make_row("e1", "finance", "investments", 3, "2026-05-01", qsum=2.1),
+        ]
+        a, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
+        b, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
+        assert a[0]["domain_salience"] == b[0]["domain_salience"]
 
     def test_primary_subcategory_null_when_all_default(self):
         """primary_subcategory is None when all contributing artifacts have 'general' sub."""
         mention_rows = [
             self._make_row("e1", "research", "general", 3, "2026-01-01"),
         ]
-        update_rows, _ = _fold_distributions(mention_rows, {"e1"})
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
         assert update_rows[0]["primary_subcategory"] is None
 
     def test_primary_subcategory_non_null_when_signal_present(self):
-        """primary_subcategory is set when a non-default sub is the mode."""
+        """primary_subcategory is set when a non-default sub is the (salience-
+        weighted) mode."""
         mention_rows = [
             self._make_row("e1", "research", "papers", 3, "2026-01-01"),
             self._make_row("e1", "research", "general", 1, "2026-02-01"),
         ]
-        update_rows, _ = _fold_distributions(mention_rows, {"e1"})
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
         assert update_rows[0]["primary_subcategory"] == "papers"
 
 
