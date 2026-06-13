@@ -576,6 +576,7 @@ def ingest_content(
     *,
     skip_quality: bool = False,
     pre_chunked: list[dict[str, Any]] | None = None,
+    enrich: bool = True,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
 
@@ -593,6 +594,18 @@ def ingest_content(
     retrieval can filter by structural shape. ``content`` is still the
     canonical artifact text used for content_hash / AI categorization /
     Neo4j summary — ``pre_chunked`` only overrides the chunk-write step.
+
+    ``enrich`` (Phase 5.1 — the enrichment seam) auto-classifies
+    ``sub_category`` + ``tags`` via ``ai_categorize`` when the caller
+    supplied neither. This makes enrichment opt-OUT at the single ingest
+    chokepoint: the memory / connector / digest / text_input paths that
+    historically passed a hardcoded domain and never tagged now get the
+    same wiki-granularity + tag-sorting metadata as file uploads. Triage
+    passes ``enrich=False`` because it already classified before calling.
+    Enrichment NEVER changes ``domain`` — the Chroma collection was chosen
+    from ``domain`` above, so domain corrections go through ``recategorize()``
+    (Track B), never here. Classifier failure logs + proceeds untagged;
+    ingest never blocks on it.
     """
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
@@ -843,6 +856,40 @@ def ingest_content(
     if near_dup:
         base_meta["near_duplicate_of"] = near_dup["artifact_id"]
         base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
+
+    # Phase 5.1 — enrichment seam. Fill sub_category + tags via the classifier
+    # when the caller supplied neither (memory / connector / digest /
+    # text_input paths). Opt-out via enrich=False (triage already classified).
+    # Runs AFTER caller + frontmatter tags are merged so those win. NEVER
+    # touches domain — the collection was chosen from `domain` above; domain
+    # corrections are Track B (recategorize). For domain=="conversations" this
+    # naturally yields sub_category + tags only, satisfying the isolation
+    # constraint without a special case.
+    if enrich:
+        _existing_tags_json = base_meta.get("tags_json", "[]") or "[]"
+        try:
+            _has_tags = bool(json.loads(_existing_tags_json))
+        except (json.JSONDecodeError, TypeError):
+            _has_tags = False
+        _has_subcat = bool(base_meta.get("sub_category"))
+        if not _has_tags or not _has_subcat:
+            try:
+                from core.utils.contextual import _run_coro_isolated
+
+                # Module-level ai_categorize (imported above) so tests can
+                # patch app.services.ingestion.ai_categorize.
+                _enr = _run_coro_isolated(ai_categorize(content, fname)) or {}
+                if not _has_subcat and _enr.get("sub_category"):
+                    base_meta["sub_category"] = _enr["sub_category"]
+                if not _has_tags and isinstance(_enr.get("tags"), list) and _enr["tags"]:
+                    base_meta["tags_json"] = json.dumps([
+                        t.strip().lower()
+                        for t in _enr["tags"]
+                        if isinstance(t, str) and t.strip()
+                    ])
+                # domain intentionally NOT adopted (see docstring + note above).
+            except Exception as exc:  # noqa: BLE001 — enrichment is best-effort; ingest never blocks on it
+                log_swallowed_error("app.services.ingestion.enrich", exc)
 
     # Phase O.1 — idempotency key: SHA-256(content + source_uri + tenant).
     # source_uri comes from metadata["filename"] if available.
