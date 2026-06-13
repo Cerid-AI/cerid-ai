@@ -437,6 +437,30 @@ class TestGraphDomainsEndpoint:
         assert data["derived_at"] is None
         assert data["domains"] == []
 
+    def test_salience_passthrough_and_default(self, domains_client):
+        """Slice 6.2: per-domain salience flows through to the response, and
+        defaults to 0.0 when get_domain_counts omits it (pre-job backend)."""
+        with (
+            patch("app.routers.graph.get_neo4j") as mock_get_neo4j,
+            patch("app.db.neo4j.taxonomy.get_domain_counts") as mock_counts,
+        ):
+            mock_get_neo4j.return_value = MagicMock()
+            mock_counts.return_value = {
+                "domains": [
+                    {"name": "finance", "salience": 45.0, "entity_count": 30,
+                     "artifact_count": 0, "in_taxonomy": True, "sub_categories": []},
+                    {"name": "general", "entity_count": 60,  # no salience key
+                     "artifact_count": 0, "in_taxonomy": True, "sub_categories": []},
+                ],
+                "uncategorized_entities": 0,
+                "derived_at": "2026-06-13T21:02:58Z",
+            }
+            resp = domains_client.get("/graph/domains")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["domains"][0]["salience"] == 45.0
+        assert data["domains"][1]["salience"] == 0.0  # default when absent
+
 
 # ---------------------------------------------------------------------------
 # Strata key extension shape test
@@ -547,3 +571,44 @@ def test_a4_subcategory_signal_measurement():
     # The test always passes — it's a measurement, not an assertion.
     # The number is the deliverable (per spec).
     assert total > 0  # sanity: DB is non-empty
+
+
+# ---------------------------------------------------------------------------
+# Slice 6.2: per-domain salience aggregation (pure helper)
+# ---------------------------------------------------------------------------
+
+
+class TestAggregateDomainSalience:
+    """_aggregate_domain_salience sums per-entity domain_salience maps into a
+    corpus-level per-domain salience mass."""
+
+    def test_sums_across_entities(self):
+        from app.db.neo4j.taxonomy import _aggregate_domain_salience
+
+        rows = [
+            '{"finance": 10.0, "general": 2.0}',
+            '{"finance": 5.0, "coding": 3.0}',
+        ]
+        totals = _aggregate_domain_salience(rows)
+        assert totals["finance"] == 15.0
+        assert totals["general"] == 2.0
+        assert totals["coding"] == 3.0
+
+    def test_accepts_already_parsed_dicts(self):
+        from app.db.neo4j.taxonomy import _aggregate_domain_salience
+
+        totals = _aggregate_domain_salience([{"finance": 1.5}, {"finance": 2.5}])
+        assert totals["finance"] == 4.0
+
+    def test_skips_malformed_rows(self):
+        from app.db.neo4j.taxonomy import _aggregate_domain_salience
+
+        rows = [None, "", "not-json", "[1,2,3]", '{"finance": "x"}', '{"finance": 4.0}']
+        totals = _aggregate_domain_salience(rows)
+        # only the last valid row contributes; bad value "x" is skipped
+        assert totals == {"finance": 4.0}
+
+    def test_empty_input_is_empty(self):
+        from app.db.neo4j.taxonomy import _aggregate_domain_salience
+
+        assert _aggregate_domain_salience([]) == {}

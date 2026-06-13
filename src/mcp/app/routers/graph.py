@@ -2227,6 +2227,9 @@ class DomainSummary(BaseModel):
     in_taxonomy: bool = False
     artifact_count: int = 0
     entity_count: int = 0
+    # Corpus-level salience mass (Slice 6.2) — the response is ordered by this;
+    # 0.0 until DeriveDomainsJob runs (degrades to entity_count ordering).
+    salience: float = 0.0
     sub_categories: list[DomainSubCategory] = []
 
 
@@ -2288,6 +2291,7 @@ async def get_domains() -> DomainsResponse:
             in_taxonomy=bool(d.get("in_taxonomy")),
             artifact_count=int(d.get("artifact_count") or 0),
             entity_count=int(d.get("entity_count") or 0),
+            salience=float(d.get("salience") or 0.0),
             sub_categories=sub_cats,
         ))
 
