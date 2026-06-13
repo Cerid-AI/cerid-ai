@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Derive Entity.primary_domain, domain_mix, domain_salience, primary_subcategory, domains_updated_at.
+"""Derive Entity domain fields: primary_domain, domain_mix, domain_salience, top_tags, primary_subcategory, domains_updated_at.
 
 Algorithm
 ---------
@@ -39,11 +39,16 @@ it as counts); domain_salience is a separate float map. Both persist sorted
 desc. Salience is rounded to _SALIENCE_PRECISION so floats don't drift
 across runs (idempotency contract).
 
+top_tags (Slice 6.3) is the entity's top-N controlled-vocabulary tags,
+salience-weighted (quality_mass × recency per tag) and vocabulary-filtered so
+free-form tags never surface as navigation/sort affordances. Persisted as a
+JSON list ordered by weight desc, name asc.
+
 DOMAIN_AFFINITY is explicitly excluded: it covers only 6 of 13 live
 domains (neither 'research' nor 'boardroom_foundation' appears in it),
 and the 1.4% tie rate doesn't justify machinery without coverage.
 
-Orphan entities (no MENTIONS path, ~32 live) get REMOVE on all five
+Orphan entities (no MENTIONS path, ~32 live) get REMOVE on all derived
 fields — honest absence, never coerced to 'general'.
 
 Cost on live data: <2 s end-to-end (tens-of-ms read, negligible fold,
@@ -59,6 +64,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import config
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
@@ -80,6 +86,16 @@ _LOW_SPECIFICITY_DOMAINS = frozenset({"general", "conversations"})
 # Decimal places salience is rounded to before persist/compare — the
 # idempotency guard (raw floats would drift in the last digits run-to-run).
 _SALIENCE_PRECISION = 4
+
+# --- Entity top_tags rollup (Slice 6.3) -------------------------------------
+_TOP_TAGS_N = int(os.getenv("DERIVE_DOMAINS_TOP_TAGS_N", "5"))
+# Flat set of every controlled-vocabulary tag across all domains. Entity-level
+# top_tags are vocabulary-only by construction — free-form stragglers never
+# surface as sort/filter affordances (that's the metadata/sorting contract;
+# free text stays a search concern, not a navigation one).
+_VOCABULARY_TAGS: frozenset[str] = frozenset(
+    tag for tags in config.TAG_VOCABULARY.values() for tag in tags
+)
 
 
 def _specificity(domain: str) -> float:
@@ -109,6 +125,22 @@ def _recency_decay(latest: str | None, now: datetime, half_life_days: float) -> 
     if age_days < 0:
         age_days = 0.0
     return 2.0 ** (-age_days / half_life_days)
+
+
+def _pick_top_tags(weights: dict[str, float]) -> list[str]:
+    """Top-N controlled-vocabulary tags for an entity, by salience weight.
+
+    Deterministic: weights are rounded before sort (so float drift can't
+    reorder near-ties) and ties break lexicographically. `weights` is already
+    vocabulary-filtered by the caller, so this never surfaces free-form tags.
+    """
+    if not weights:
+        return []
+    ranked = sorted(
+        weights.items(),
+        key=lambda kv: (-round(kv[1], _SALIENCE_PRECISION), kv[0]),
+    )
+    return [tag for tag, _ in ranked[:_TOP_TAGS_N]]
 
 
 class DeriveDomainsJob(BaseJob):
@@ -157,13 +189,18 @@ class DeriveDomainsJob(BaseJob):
         await progress_cb(0.4)
 
         all_entity_ids = await asyncio.to_thread(self._fetch_all_entity_ids, driver)
-        await progress_cb(0.5)
+        await progress_cb(0.45)
+
+        tag_rows = await asyncio.to_thread(self._fetch_tag_rows, driver)
+        await progress_cb(0.55)
 
         # Fold in Python — derive per-entity distributions + primary fields.
         # `now` is captured once and injected so the fold stays deterministic
         # (recency decay must not read the wall clock — see _recency_decay).
         now = datetime.now(timezone.utc)
-        update_rows, orphan_ids = _fold_distributions(mention_rows, all_entity_ids, now)
+        update_rows, orphan_ids = _fold_distributions(
+            mention_rows, all_entity_ids, now, tag_rows
+        )
         await progress_cb(0.7)
 
         written = await asyncio.to_thread(self._write_updates, driver, update_rows)
@@ -230,6 +267,31 @@ class DeriveDomainsJob(BaseJob):
             log_swallowed_error("derive_domains._fetch_all_entity_ids", exc)
             return set()
 
+    def _fetch_tag_rows(self, driver: Any) -> list[dict[str, Any]]:
+        """Per-(entity, tag) quality + recency aggregates over tagged mentions.
+
+        Drives the salience-weighted Entity.top_tags rollup (6.3). One row per
+        (entity, tag) the entity's artifacts carry via :TAGGED_WITH; the fold
+        vocabulary-filters and ranks them. Entities with no tags simply produce
+        no rows here (empty top_tags downstream)."""
+        cypher = f"""
+            MATCH (a:Artifact)-[:MENTIONS]->(e:Entity)
+            MATCH (a)-[:TAGGED_WITH]->(t:Tag)
+            WHERE e.canonical_id IS NOT NULL AND t.name IS NOT NULL
+            WITH e.canonical_id AS cid, t.name AS tag,
+                 count(DISTINCT a) AS n,
+                 sum(a.quality_score) AS qsum,
+                 max(a.updated_at) AS latest
+            RETURN cid, tag, n, qsum, latest
+            LIMIT {_MAX_ENTITIES}
+        """
+        try:
+            with driver.session() as session:
+                return list(session.run(cypher).data())
+        except (OSError, RuntimeError, ValueError) as exc:
+            log_swallowed_error("derive_domains._fetch_tag_rows", exc)
+            return []
+
     # ------------------------------------------------------------------
     # Write
     # ------------------------------------------------------------------
@@ -244,6 +306,7 @@ class DeriveDomainsJob(BaseJob):
             SET e.primary_domain     = r.primary_domain,
                 e.domain_mix         = r.domain_mix,
                 e.domain_salience    = r.domain_salience,
+                e.top_tags           = r.top_tags,
                 e.primary_subcategory = r.primary_subcategory,
                 e.domains_updated_at = $now
         """
@@ -265,7 +328,7 @@ class DeriveDomainsJob(BaseJob):
         cypher = """
             UNWIND $ids AS cid
             MATCH (e:Entity {canonical_id: cid})
-            REMOVE e.primary_domain, e.domain_mix, e.domain_salience, e.primary_subcategory
+            REMOVE e.primary_domain, e.domain_mix, e.domain_salience, e.top_tags, e.primary_subcategory
             SET e.domains_updated_at = $now
         """
         removed = 0
@@ -295,12 +358,15 @@ def _fold_distributions(
     mention_rows: list[dict[str, Any]],
     all_entity_ids: set[str],
     now: datetime,
+    tag_rows: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Fold raw (entity, domain, sub) rows into per-entity update dicts.
 
     `now` is injected (not read from the clock) so salience is deterministic
-    run-to-run. Returns:
-        update_rows: {cid, primary_domain, domain_mix, domain_salience, primary_subcategory}
+    run-to-run. `tag_rows` (per-(entity, tag) aggregates) drive the
+    vocabulary-only top_tags rollup; omit them and top_tags is empty. Returns:
+        update_rows: {cid, primary_domain, domain_mix, domain_salience,
+                      top_tags, primary_subcategory}
         orphan_ids:  entity canonical_ids with no MENTIONS path
     """
     # Pass 0 — global domain frequency (across ALL entities) for distinctiveness.
@@ -363,6 +429,27 @@ def _fold_distributions(
             latest, now, _SALIENCE_HALF_LIFE_DAYS
         )
 
+    # tag_weight[cid][tag] = salience-like weight (quality_mass × recency),
+    # vocabulary-filtered up front so non-vocabulary tags never accumulate.
+    tag_weight: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for row in tag_rows or []:
+        cid = str(row.get("cid") or "")
+        tag = str(row.get("tag") or "")
+        if not cid or tag not in _VOCABULARY_TAGS:
+            continue
+        n = int(row.get("n") or 0)
+        latest = row.get("latest")
+        if latest is not None:
+            latest = str(latest)
+        qsum_raw = row.get("qsum")
+        try:
+            qrow = float(qsum_raw) if qsum_raw is not None else 0.0
+        except (TypeError, ValueError):
+            qrow = 0.0
+        tag_weight[cid][tag] += _quality_mass(qrow, n) * _recency_decay(
+            latest, now, _SALIENCE_HALF_LIFE_DAYS
+        )
+
     # Orphans: entities that exist but have no MENTIONS path
     orphan_ids = sorted(all_entity_ids - mentioned_cids)
 
@@ -391,6 +478,7 @@ def _fold_distributions(
 
         primary_domain = _pick_primary_domain(picker_map)
         primary_subcategory = _pick_primary_subcategory(sub_weight[cid].get(primary_domain, {}))
+        top_tags = _pick_top_tags(tag_weight.get(cid, {}))
 
         update_rows.append({
             "cid": cid,
@@ -401,6 +489,7 @@ def _fold_distributions(
             "domain_salience": json.dumps(
                 dict(sorted(salience_map.items(), key=lambda kv: (-kv[1], kv[0])))
             ),
+            "top_tags": json.dumps(top_tags),
             "primary_subcategory": primary_subcategory,
         })
 
