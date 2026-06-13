@@ -219,6 +219,20 @@ export interface WikiEntityPage {
    */
   domain_mix?: Record<string, number> | null
   /**
+   * Salience-ordered domain weights (Slice 6.1) — domain → salience score,
+   * ordered by salience desc. Salience reweights raw counts by specificity,
+   * distinctiveness, quality, and recency, so this ordering can differ from
+   * domain_mix's raw-count ordering. Null until DeriveDomainsJob runs.
+   * Example: { "finance": 45.0, "general": 11.25 }
+   */
+  domain_salience?: Record<string, number> | null
+  /**
+   * Top controlled-vocabulary tags for this entity (Slice 6.3), salience-
+   * ordered, capped at 5. Vocabulary-only — free-form tags never appear here.
+   * Null/empty until DeriveDomainsJob runs.
+   */
+  top_tags?: string[] | null
+  /**
    * Most common sub_category among artifacts in the primary domain.
    * Null when no signal (all artifacts carry the default subcategory).
    */

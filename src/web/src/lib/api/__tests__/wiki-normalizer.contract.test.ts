@@ -149,6 +149,61 @@ describe("normalizeEntityPage — allowlist contract", () => {
     expect(page?.domain_mix).toBeNull()
   })
 
+  it("maps domain_salience from dict, preserving order (Slice 6.1)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPage({ domain_salience: { finance: 45.0, general: 11.25 } }),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.domain_salience).toEqual({ finance: 45.0, general: 11.25 })
+    expect(Object.keys(page?.domain_salience ?? {})).toEqual(["finance", "general"])
+  })
+
+  it("parses domain_salience from JSON string (old backend compatibility)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPage({ domain_salience: '{"finance":45.0,"general":11.25}' }),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.domain_salience).toEqual({ finance: 45.0, general: 11.25 })
+  })
+
+  it("domain_salience is null when absent", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPage({ domain_salience: undefined }),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.domain_salience).toBeNull()
+  })
+
+  it("maps top_tags from array (Slice 6.3)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPage({ top_tags: ["python", "docker", "api"] }),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.top_tags).toEqual(["python", "docker", "api"])
+  })
+
+  it("parses top_tags from JSON string (old backend compatibility)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPage({ top_tags: '["python","docker"]' }),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.top_tags).toEqual(["python", "docker"])
+  })
+
+  it("top_tags is null when absent", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawPage({ top_tags: undefined }),
+    })
+    const page = await fetchWikiEntity("tesla")
+    expect(page?.top_tags).toBeNull()
+  })
+
   it("domain_mix is null for malformed JSON string", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,

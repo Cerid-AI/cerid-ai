@@ -243,6 +243,8 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                     e.updated_at          AS updated_at,
                     e.primary_domain      AS primary_domain,
                     e.domain_mix          AS domain_mix,
+                    e.domain_salience     AS domain_salience,
+                    e.top_tags            AS top_tags,
                     e.primary_subcategory AS primary_subcategory
                 LIMIT 1
                 """,
