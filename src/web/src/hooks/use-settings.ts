@@ -136,6 +136,20 @@ export function useSettings() {
     })
   }, [])
 
+  // Include knowledge packs in chat KB retrieval (Slice 7.3). Per-query client
+  // preference (default ON), persisted locally — it maps to per-query
+  // exclude_packs, not a stored server setting (that's pack_relevance_weight).
+  const [includePacks, setIncludePacksState] = useState(() => {
+    try { return localStorage.getItem("cerid-include-packs") !== "false" } catch { return true }
+  })
+  const toggleIncludePacks = useCallback(() => {
+    setIncludePacksState((prev) => {
+      const next = !prev
+      persist("cerid-include-packs", String(next))
+      return next
+    })
+  }, [])
+
   const [expertVerification, setExpertVerificationState] = useState(() => readBool("cerid-expert-verification"))
   const toggleExpertVerification = useCallback(() => {
     setExpertVerificationState((prev) => {
@@ -423,6 +437,7 @@ export function useSettings() {
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject,
     autoInjectThreshold, setAutoInjectThreshold,
+    includePacks, toggleIncludePacks,
     costSensitivity, updateCostSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
     memoryExtraction, toggleMemoryExtraction,

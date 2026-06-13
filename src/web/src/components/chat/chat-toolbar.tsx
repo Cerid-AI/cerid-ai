@@ -208,6 +208,8 @@ interface ChatToolbarProps {
   toggleAutoInject: () => void
   autoInjectThreshold: number
   setAutoInjectThreshold: (v: number) => void
+  includePacks: boolean
+  toggleIncludePacks: () => void
   // Verification
   hallucinationEnabled: boolean
   toggleHallucinationEnabled: () => void
@@ -256,6 +258,7 @@ export function ChatToolbar({
   isNarrow,
   showKB, onToggleKB,
   autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
+  includePacks, toggleIncludePacks,
   hallucinationEnabled, toggleHallucinationEnabled,
   inlineMarkups, toggleInlineMarkups, expertVerification, toggleExpertVerification, onVerifyMessage,
   verificationDegraded, verificationUnavailable,
@@ -519,6 +522,9 @@ export function ChatToolbar({
             <>
               <MenuCheckboxItem checked={autoInject} onCheckedChange={toggleAutoInject}>
                 Auto-inject KB context
+              </MenuCheckboxItem>
+              <MenuCheckboxItem checked={includePacks} onCheckedChange={toggleIncludePacks}>
+                Include knowledge packs
               </MenuCheckboxItem>
               <MenuSeparator />
               <MenuLabel>Injection threshold</MenuLabel>

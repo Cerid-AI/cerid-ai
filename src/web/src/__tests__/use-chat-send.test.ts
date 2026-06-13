@@ -80,6 +80,7 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     costSensitivity: "medium" as const,
     autoInject: false,
     autoInjectThreshold: 0.6,
+    includePacks: true,
     injectedContext: [] as KBQueryResult[],
     kbResults: [] as KBQueryResult[],
     clearInjected: vi.fn(),
@@ -140,6 +141,30 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(sysMsg!.content).toContain("<document")
     expect(sysMsg!.content).toContain("auth.py")
     expect(sysMsg!.content).toContain("</document>")
+  })
+
+  it("sends exclude_packs to queryKB when includePacks is OFF (Slice 7.3)", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+    const opts = makeOptions({ autoInject: true, includePacks: false })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("anything")
+    })
+    expect(mockQueryKB).toHaveBeenCalled()
+    const callOpts = mockQueryKB.mock.calls[0][4]
+    expect(callOpts.excludePacks).toBe(true)
+  })
+
+  it("does not exclude packs when includePacks is ON (default)", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+    const opts = makeOptions({ autoInject: true, includePacks: true })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("anything")
+    })
+    expect(mockQueryKB).toHaveBeenCalled()
+    const callOpts = mockQueryKB.mock.calls[0][4]
+    expect(callOpts.excludePacks).toBe(false)
   })
 
   it("injects system message with <document> tags from manually injected context (autoInject OFF)", async () => {

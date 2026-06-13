@@ -94,6 +94,11 @@ class SettingsUpdateRequest(BaseModel):
     rerank_original_weight: float | None = Field(
         None, ge=0.0, le=1.0, description="Weight for original relevance score in reranking"
     )
+    pack_relevance_weight: float | None = Field(
+        None, ge=0.0, le=2.0,
+        description="Knowledge-pack down-weight multiplier (Slice 7.2). <1.0 makes "
+                    "personal data win ties; 1.0 = neutral. Advanced / SERVER scope.",
+    )
     # Advanced RAG pipeline toggles
     enable_contextual_chunks: bool | None = Field(
         None, description="Toggle LLM-generated situational summaries on chunks"
@@ -275,6 +280,7 @@ async def get_settings_endpoint():
         "hybrid_keyword_weight": config.HYBRID_KEYWORD_WEIGHT,
         "rerank_llm_weight": config.RERANK_LLM_WEIGHT,
         "rerank_original_weight": config.RERANK_ORIGINAL_WEIGHT,
+        "pack_relevance_weight": config.PACK_RELEVANCE_WEIGHT,
         "temporal_half_life_days": config.TEMPORAL_HALF_LIFE_DAYS,
         "temporal_recency_weight": config.TEMPORAL_RECENCY_WEIGHT,
         # Advanced RAG pipeline (read-write)
@@ -400,6 +406,10 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     if req.rerank_original_weight is not None:
         config.RERANK_ORIGINAL_WEIGHT = req.rerank_original_weight  # type: ignore[assignment]
         updated["rerank_original_weight"] = req.rerank_original_weight
+
+    if req.pack_relevance_weight is not None:
+        config.PACK_RELEVANCE_WEIGHT = req.pack_relevance_weight  # type: ignore[assignment]
+        updated["pack_relevance_weight"] = req.pack_relevance_weight
 
     # Advanced RAG pipeline — boolean toggles via set_toggle(), numeric params
     # via direct dual-mutation (not in FEATURE_TOGGLES registry).

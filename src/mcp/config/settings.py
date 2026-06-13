@@ -368,6 +368,12 @@ EXPERT_VERIFY_MAX_SOURCES = int(os.getenv("EXPERT_VERIFY_MAX_SOURCES", "3"))
 RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.4"))
 RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.4"))
 RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.6"))
+# Personal-first knowledge-pack ranking (Slice 7.2). Multiplier applied to the
+# blended rerank score of chunks carrying a pack_id, AFTER the cross-encoder
+# blend — a stable policy knob, not entangled with model scores. <1.0 makes
+# personal data win ties; packs still surface when clearly the best answer.
+# Operator-tunable at runtime via PATCH /settings (advanced/SERVER scope).
+PACK_RELEVANCE_WEIGHT = float(os.getenv("PACK_RELEVANCE_WEIGHT", "0.7"))
 
 # ---------------------------------------------------------------------------
 # Knowledge Graph Traversal

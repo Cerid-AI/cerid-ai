@@ -71,6 +71,12 @@
             "description": "Override Self-RAG toggle (None = use server config)",
             "title": "Enable Self Rag"
           },
+          "exclude_packs": {
+            "default": false,
+            "description": "When True, drop knowledge-pack chunks from retrieval (personal-first: answer from your own data only). Slice 7.3.",
+            "title": "Exclude Packs",
+            "type": "boolean"
+          },
           "metadata_filter": {
             "anyOf": [
               {

@@ -97,6 +97,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     ragMode, setRagMode,
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
+    includePacks, toggleIncludePacks,
     costSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
     memoryExtraction, toggleMemoryExtraction,
@@ -388,6 +389,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     costSensitivity,
     autoInject,
     autoInjectThreshold,
+    includePacks,
     injectedContext,
     kbResults: effectiveKBResults,
     clearInjected,
@@ -555,6 +557,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         toggleAutoInject={toggleAutoInject}
         autoInjectThreshold={autoInjectThreshold}
         setAutoInjectThreshold={setAutoInjectThreshold}
+        includePacks={includePacks}
+        toggleIncludePacks={toggleIncludePacks}
         hallucinationEnabled={hallucinationEnabled}
         toggleHallucinationEnabled={toggleHallucinationEnabled}
         inlineMarkups={inlineMarkups}
