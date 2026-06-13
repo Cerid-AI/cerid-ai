@@ -124,6 +124,11 @@ class TestFoldDistributions:
         # (legacy artifacts have no quality_score property → NULL aggregate).
         return {"cid": cid, "domain": domain, "sub": sub, "n": n, "latest": latest, "qsum": qsum}
 
+    def _make_tag_row(
+        self, cid: str, tag: str, n: int, qsum: float | None, latest: str,
+    ) -> dict:
+        return {"cid": cid, "tag": tag, "n": n, "qsum": qsum, "latest": latest}
+
     def test_orphan_entities_in_remove_list(self):
         """Entities with no MENTIONS path land in orphan_ids, not update_rows."""
         mention_rows = [
@@ -257,6 +262,63 @@ class TestFoldDistributions:
         a, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
         b, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
         assert a[0]["domain_salience"] == b[0]["domain_salience"]
+
+    # --- Slice 6.3: top_tags rollup ---------------------------------------
+
+    def test_top_tags_vocabulary_only(self):
+        """Only controlled-vocabulary tags surface; free-form tags are dropped
+        even when they out-count a vocabulary tag."""
+        mention_rows = [self._make_row("e1", "coding", "general", 3, "2026-06-01")]
+        tag_rows = [
+            self._make_tag_row("e1", "python", 3, None, "2026-06-01"),
+            self._make_tag_row("e1", "some-freeform-xyz", 9, None, "2026-06-01"),
+        ]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW, tag_rows)
+        assert json.loads(update_rows[0]["top_tags"]) == ["python"]
+
+    def test_top_tags_salience_weighted(self):
+        """Tags rank by quality-and-recency weight, not raw count — a
+        high-quality tag outranks a higher-count low-quality one."""
+        mention_rows = [self._make_row("e1", "coding", "general", 3, "2026-06-01")]
+        tag_rows = [
+            self._make_tag_row("e1", "docker", 2, 1.8, "2026-06-01"),  # high quality
+            self._make_tag_row("e1", "api", 5, 0.5, "2026-06-01"),     # high count, low quality
+        ]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW, tag_rows)
+        assert json.loads(update_rows[0]["top_tags"])[0] == "docker"
+
+    def test_top_tags_capped_at_n(self):
+        """At most _TOP_TAGS_N (5) tags surface; the lowest-weight one drops."""
+        mention_rows = [self._make_row("e1", "coding", "general", 6, "2026-06-01")]
+        tags = ["python", "docker", "api", "testing", "git", "security"]
+        tag_rows = [
+            self._make_tag_row("e1", t, n, None, "2026-06-01")
+            for n, t in zip([60, 50, 40, 30, 20, 10], tags)
+        ]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW, tag_rows)
+        top = json.loads(update_rows[0]["top_tags"])
+        assert len(top) == 5
+        assert top[0] == "python"
+        assert "security" not in top  # lowest weight dropped at the N cap
+
+    def test_top_tags_empty_without_tag_rows(self):
+        """No tag_rows → empty top_tags (honest absence, not omitted)."""
+        mention_rows = [self._make_row("e1", "coding", "general", 3, "2026-06-01")]
+        update_rows, _ = _fold_distributions(mention_rows, {"e1"}, _NOW)
+        assert json.loads(update_rows[0]["top_tags"]) == []
+
+    def test_top_tags_deterministic_with_lex_tiebreak(self):
+        """Equal-weight tags break ties lexicographically and are byte-stable
+        across runs (idempotency)."""
+        mention_rows = [self._make_row("e1", "coding", "general", 3, "2026-06-01")]
+        tag_rows = [
+            self._make_tag_row("e1", "python", 3, 1.2, "2026-05-01"),
+            self._make_tag_row("e1", "docker", 3, 1.2, "2026-05-01"),
+        ]
+        a, _ = _fold_distributions(mention_rows, {"e1"}, _NOW, tag_rows)
+        b, _ = _fold_distributions(mention_rows, {"e1"}, _NOW, tag_rows)
+        assert a[0]["top_tags"] == b[0]["top_tags"]
+        assert json.loads(a[0]["top_tags"]) == ["docker", "python"]
 
     def test_primary_subcategory_null_when_all_default(self):
         """primary_subcategory is None when all contributing artifacts have 'general' sub."""
