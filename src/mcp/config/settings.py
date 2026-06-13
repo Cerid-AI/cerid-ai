@@ -50,6 +50,15 @@ CATEGORIZE_MODELS = {
 # Max chars of document text sent to AI for classification (~400 tokens).
 AI_SNIPPET_MAX_CHARS = 1500
 
+# Phase 5.2 — classifier confidence floor. When ai_categorize returns a
+# confidence below this, the domain is forced to DEFAULT_DOMAIN and a
+# `needs-review` tag is attached instead of committing a confident-wrong
+# domain (which would mis-route the artifact's chunks + skew every graph
+# lens). The needs-review queue drives Track B domain corrections.
+CATEGORIZE_CONFIDENCE_THRESHOLD = float(
+    os.getenv("CATEGORIZE_CONFIDENCE_THRESHOLD", "0.55")
+)
+
 # ---------------------------------------------------------------------------
 # LLM timeout (seconds)
 # ---------------------------------------------------------------------------

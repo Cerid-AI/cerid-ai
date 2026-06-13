@@ -19,7 +19,10 @@ TAXONOMY = {
     "finance": {
         "description": "Financial documents, tax records, budgets",
         "icon": "dollar-sign",
-        "sub_categories": ["tax", "investments", "budgets", "receipts", "general"],
+        # `trading` (Phase 5.2): trade logs / signals / positions are a finance
+        # sub_category, NOT a new top-level domain — the 22-domain graph
+        # backbone + per-domain Chroma collections assume the existing set.
+        "sub_categories": ["tax", "investments", "budgets", "receipts", "trading", "general"],
     },
     "projects": {
         "description": "Project plans, meeting notes, specifications",
@@ -29,7 +32,9 @@ TAXONOMY = {
     "personal": {
         "description": "Personal notes, journal entries, health records",
         "icon": "user",
-        "sub_categories": ["notes", "health", "travel", "general"],
+        # `career` (Phase 5.2): resumes / job notes / reviews are a personal
+        # sub_category, not a top-level domain (see finance.trading note).
+        "sub_categories": ["notes", "health", "travel", "career", "general"],
     },
     "general": {
         "description": "Uncategorized or cross-domain content",
