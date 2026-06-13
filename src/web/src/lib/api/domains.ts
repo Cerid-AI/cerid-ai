@@ -28,6 +28,13 @@ export interface DomainCount {
   in_taxonomy: boolean
   artifact_count: number
   entity_count: number
+  /**
+   * Corpus-level salience mass (Slice 6.2). The response is ordered by this
+   * (salience desc), so domain cards reflect the salience model — ambient
+   * domains sink, distinctive ones rise — rather than raw entity counts.
+   * 0 until DeriveDomainsJob runs.
+   */
+  salience: number
   sub_categories: DomainSubCategory[]
 }
 
@@ -76,6 +83,7 @@ function normalizeDomainCount(raw: Record<string, unknown>): DomainCount {
     in_taxonomy: Boolean(raw.in_taxonomy),
     artifact_count: Number(raw.artifact_count ?? 0),
     entity_count: Number(raw.entity_count ?? 0),
+    salience: Number(raw.salience ?? 0),
     sub_categories: subCats,
   }
 }

@@ -15,6 +15,32 @@ from core.utils.time import utcnow_iso
 logger = logging.getLogger("ai-companion.graph")
 
 
+def _aggregate_domain_salience(rows: list[Any]) -> dict[str, float]:
+    """Sum per-entity domain_salience maps into a per-domain salience mass.
+
+    Each row is an entity's domain_salience (a JSON string from Neo4j, or an
+    already-parsed dict). Ambient domains are already down-weighted by
+    DeriveDomainsJob, so this corpus-level total reflects the salience model,
+    not raw mention counts. Malformed rows are skipped (degradable).
+    """
+    totals: dict[str, float] = {}
+    for raw in rows:
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        for domain, value in parsed.items():
+            try:
+                totals[str(domain)] = totals.get(str(domain), 0.0) + float(value)
+            except (TypeError, ValueError):
+                continue
+    return totals
+
+
 def get_domain_counts(driver) -> dict[str, Any]:
     """Aggregate per-domain entity/artifact counts for GET /graph/domains.
 
@@ -129,7 +155,16 @@ def get_domain_counts(driver) -> dict[str, Any]:
                 sub_entity_counts[d_name] = {}
             sub_entity_counts[d_name][sub_name] = record["entity_count"]
 
-        # Assemble sub_categories
+        # 7. Per-domain salience mass (Slice 6.2) — sum each entity's
+        #    domain_salience map; orders the spine by the salience model, not
+        #    raw entity counts. Zero for every domain until DeriveDomainsJob runs.
+        result = session.run(
+            "MATCH (e:Entity) WHERE e.domain_salience IS NOT NULL "
+            "RETURN e.domain_salience AS sal"
+        )
+        salience_by_domain = _aggregate_domain_salience([record["sal"] for record in result])
+
+        # Assemble sub_categories + attach salience
         for d_name, d_data in domains.items():
             subs = sub_artifact_counts.get(d_name, {})
             e_subs = sub_entity_counts.get(d_name, {})
@@ -141,11 +176,13 @@ def get_domain_counts(driver) -> dict[str, Any]:
                 }
                 for sub, a_cnt in sorted(subs.items())
             ]
+            d_data["salience"] = round(salience_by_domain.get(d_name, 0.0), 4)
 
-    # Sort by entity_count desc
+    # Sort by salience desc (the 6.1 model), falling back to entity_count when
+    # salience is absent (pre-job) so the pre-derivation order is unchanged.
     sorted_domains = sorted(
         domains.values(),
-        key=lambda d: (-d["entity_count"], d["name"]),
+        key=lambda d: (-d.get("salience", 0.0), -d["entity_count"], d["name"]),
     )
 
     return {
