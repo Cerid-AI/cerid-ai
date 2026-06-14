@@ -810,6 +810,7 @@ export interface ServerSettings {
   hybrid_keyword_weight?: number
   rerank_llm_weight?: number
   rerank_original_weight?: number
+  pack_relevance_weight?: number
   temporal_half_life_days?: number
   temporal_recency_weight?: number
   // Advanced RAG pipeline (read-write)

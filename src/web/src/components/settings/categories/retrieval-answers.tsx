@@ -285,6 +285,35 @@ function RerankWeightsPair({ settings, patch }: Pick<SettingsCategoryPageProps, 
   )
 }
 
+// ── Knowledge-pack relevance weight (Slice 7.2) ───────────────────────────────
+
+function PackRelevanceWeightRow({ settings, patch }: Pick<SettingsCategoryPageProps, "settings" | "patch">) {
+  const [local, setLocal] = useState(settings.pack_relevance_weight ?? 0.7)
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (server settings refresh)
+    setLocal(settings.pack_relevance_weight ?? 0.7)
+  }, [settings.pack_relevance_weight])
+
+  const def = getDef("retrieval.hybridWeights.packRelevanceWeight")
+  if (!def) return null
+
+  return (
+    <SettingRow def={def}>
+      <SliderRow
+        label={def.label}
+        value={local}
+        onChange={(v) => { setLocal(v); void patch({ pack_relevance_weight: v }) }}
+        min={0}
+        max={2}
+        step={0.05}
+        info={def.helpText}
+        recommended="Recommended: 0.7 (personal-first)"
+      />
+    </SettingRow>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RetrievalAnswersCategory({ settings, patch }: SettingsCategoryPageProps) {
@@ -453,6 +482,7 @@ export default function RetrievalAnswersCategory({ settings, patch }: SettingsCa
 
           <AdvancedDisclosure category="retrieval" group="hybridWeights">
             <RerankWeightsPair settings={settings} patch={patch} />
+            <PackRelevanceWeightRow settings={settings} patch={patch} />
             {(() => {
               const htDef = getDef("retrieval.hybridWeights.temporalHalfLife")
               const rwDef = getDef("retrieval.hybridWeights.recencyWeight")

@@ -223,6 +223,11 @@ services:
       # ships at config/knowledge_packs.json. Operators pointing at a
       # curated/community registry override this in .env.
       - CERID_KNOWLEDGE_PACKS_REGISTRY=${CERID_KNOWLEDGE_PACKS_REGISTRY:-/app/config/knowledge_packs.json}
+      # Slice 5.3 Track-A enrichment backfill — opt-in (default OFF for safe
+      # distribution). Set true to drain the pre-5.1 bare-tag artifact backlog
+      # nightly (metadata-only, paced, self-idles when drained). New artifacts
+      # are enriched at ingest (5.1), so this only matters for legacy backlogs.
+      - CERID_BACKFILL_ENRICHMENT_ENABLED=${CERID_BACKFILL_ENRICHMENT_ENABLED:-false}
       - ENABLE_SEMANTIC_CACHE=true
       - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
       - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
