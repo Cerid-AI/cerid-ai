@@ -528,9 +528,16 @@
           },
           "summary": {
             "additionalProperties": {
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
             },
-            "description": "Claim verification counts by status",
+            "description": "Verification summary: per-status counts plus assessed count and the float overall_confidence.",
             "title": "Summary",
             "type": "object"
           },

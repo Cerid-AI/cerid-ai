@@ -43,6 +43,11 @@ class SDKQueryResponse(_SDKBase):
     results: list[dict[str, Any]] = Field(default_factory=list, description="All results with full metadata")
 
 
+def _default_hallucination_summary() -> dict[str, float | int]:
+    """Zero-count summary used when verification is skipped."""
+    return {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0}
+
+
 class SDKHallucinationResponse(_SDKBase):
     """Response from ``POST /sdk/v1/hallucination`` — claim verification."""
 
@@ -51,9 +56,9 @@ class SDKHallucinationResponse(_SDKBase):
     skipped: bool = Field(default=False, description="True if verification was skipped (response too short or no claims)")
     reason: str | None = Field(default=None, description="Reason verification was skipped, if applicable")
     claims: list[dict[str, Any]] = Field(default_factory=list, description="Verified claims with status, confidence, and source info")
-    summary: dict[str, int] = Field(
-        default_factory=lambda: {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
-        description="Claim verification counts by status",
+    summary: dict[str, float | int] = Field(
+        default_factory=_default_hallucination_summary,
+        description="Verification summary: per-status counts plus assessed count and the float overall_confidence.",
     )
     mode: str = Field(
         default="thorough",
