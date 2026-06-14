@@ -386,7 +386,7 @@ async def _call_ollama(
             ]
     return await call_llm(
         fallback_messages,
-        model="openai/gpt-4o-mini",
+        model=config.INTERNAL_LLM_JSON_FALLBACK_MODEL,
         temperature=temperature,
         max_tokens=max_tokens,
         response_format=fallback_response_format,

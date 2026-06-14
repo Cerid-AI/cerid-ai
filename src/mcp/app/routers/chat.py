@@ -64,12 +64,8 @@ async def close_chat_client() -> None:
 router = APIRouter(tags=["chat"])
 
 # Models to try when the primary model fails with a retryable error.
-CHAT_FALLBACK_POOL = [
-    "openai/gpt-4o-mini",
-    "google/gemini-2.5-flash",
-    "x-ai/grok-4.3",
-    "anthropic/claude-sonnet-4.6",
-]
+# Defined in config (Slice 2.2 — model ids live in the registry, not here).
+CHAT_FALLBACK_POOL = config.CHAT_FALLBACK_POOL
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 

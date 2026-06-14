@@ -437,9 +437,7 @@ async def get_routing_info():
         "ollama_available": ollama_available,
         "ollama_models": _ollama_models if ollama_available else [],
         "model_registry": get_model_registry(),
-        "default_internal_model": os.getenv(
-            "INTERNAL_LLM_MODEL", "meta-llama/llama-3.3-70b-instruct"
-        ),
+        "default_internal_model": config.INTERNAL_LLM_MODEL or config.INTERNAL_LLM_MODEL_DEFAULT,
         "smart_routing_enabled": getattr(config, "SMART_ROUTING_ENABLED", True),
     }
 

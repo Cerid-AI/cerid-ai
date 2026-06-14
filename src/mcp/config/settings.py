@@ -895,6 +895,25 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 #   or a specific model ID
 INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
+# Display default surfaced by /providers when INTERNAL_LLM_MODEL is unset
+# (Slice 2.2 — model ids live in config, never as call-site literals).
+INTERNAL_LLM_MODEL_DEFAULT = os.getenv(
+    "INTERNAL_LLM_MODEL_DEFAULT", "meta-llama/llama-3.3-70b-instruct"
+)
+# JSON-mode fallback model for internal-LLM calls that must return strict JSON.
+INTERNAL_LLM_JSON_FALLBACK_MODEL = os.getenv(
+    "INTERNAL_LLM_JSON_FALLBACK_MODEL", "openai/gpt-4o-mini"
+)
+# Chat fallback pool — models tried when the primary chat model hits a
+# retryable error. Comma-separated env override; defaults to the v1 chain.
+CHAT_FALLBACK_POOL = [
+    m.strip()
+    for m in os.getenv(
+        "CHAT_FALLBACK_POOL",
+        "openai/gpt-4o-mini,google/gemini-2.5-flash,x-ai/grok-4.3,anthropic/claude-sonnet-4.6",
+    ).split(",")
+    if m.strip()
+]
 
 # Retry budget + backoff for the `_call_ollama` transient-back-pressure
 # loop (5xx / 429 / timeout / ConnectError). Mirrors the embed-side
