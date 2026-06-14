@@ -1,6 +1,6 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-06-02 (Commercial-GA Track 1: Pro feature truth-up & gating
+> **Last updated:** 2026-06-13 (RAG Quality Program close-out — see P0 status note below). Prior: 2026-06-02 (Commercial-GA Track 1: Pro feature truth-up & gating
 > lock-in and External agent / client backend support both **landed** — see ✅ markers below).
 > **Current candidate:** `v1.0.0-rc2.1`. The release-candidate captures Phases A–N of the
 > master plan + the K-program (K1–K6) + visualization polish (L, M). The `-rc` suffix
@@ -107,6 +107,15 @@ below shipped and are canary-validated; the "Cerid as a backend" guide is publis
 
 ### P0 — Knowledge-architecture depth & retrieval quality  _(added 2026-06-02)_
 Make the differentiator real and measured before GA, not just described.
+
+> **Status 2026-06-13:** largely landed. Artifact-level fusion + low-confidence
+> signals + the NLI-faithfulness benchmark shipped 2026-06-05 (see
+> `docs/GA_CHECKLIST.md`, `docs/NLI_FAITHFULNESS_BENCHMARK.md`). The **RAG Quality
+> Program** (Slices 1–7, 2026-06-12/13 — see `docs/COMPLETED_PHASES.md`) advanced
+> this P0 further: salience-weighted taxonomy, personal-first pack ranking,
+> stale-evidence verification, provenance end-to-end, with retrieval recall
+> validated at 1.0 (no regression) at Eval Checkpoint 2. Surface routing is live
+> per intent; episodic-memory recall lift remains a soak-measured outcome.
 - **All four knowledge surfaces first-class in the query path** — unify routing so wiki,
   vector, graph, and episodic-memory are selected per intent on the live query path (not only
   surfaced as observability), with the chosen surface returned in the response; wire
