@@ -31,6 +31,7 @@ function makeDomainCount(name: string, entityCount: number): DomainCount {
     in_taxonomy: false,
     artifact_count: entityCount * 3,
     entity_count: entityCount,
+    salience: 0,
     sub_categories: [],
   }
 }
