@@ -903,6 +903,7 @@ export interface SettingsUpdate {
   hybrid_keyword_weight?: number
   rerank_llm_weight?: number
   rerank_original_weight?: number
+  pack_relevance_weight?: number
   // Advanced RAG pipeline
   enable_contextual_chunks?: boolean
   enable_adaptive_retrieval?: boolean

@@ -79,6 +79,7 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     costSensitivity: "medium" as const,
     autoInject: false,
     autoInjectThreshold: 0.6,
+    includePacks: true,
     injectedContext: [] as KBQueryResult[],
     kbResults: [] as KBQueryResult[],
     clearInjected: vi.fn(),

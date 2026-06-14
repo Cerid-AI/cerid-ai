@@ -90,7 +90,7 @@ describe("WikiLanding — success state", () => {
   beforeEach(() => {
     mockedFetchDomainCounts.mockResolvedValue({
       domains: [
-        { name: "coding", icon: "code", description: null, in_taxonomy: true, artifact_count: 5, entity_count: 12, sub_categories: [] },
+        { name: "coding", icon: "code", description: null, in_taxonomy: true, artifact_count: 5, entity_count: 12, salience: 0, sub_categories: [] },
       ],
       uncategorized_entities: 0,
       derived_at: "2026-06-10T00:00:00Z",
