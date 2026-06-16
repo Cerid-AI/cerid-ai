@@ -905,18 +905,27 @@ async def pkb_answer_with_citations(
     chunk_budget = max(2000, 8000 - len(wiki_block))
     chunk_context = retrieval.get("context", "")[:chunk_budget]
     context = (wiki_block + chunk_context) if wiki_block else chunk_context
+    # Mode-aware synthesis (shared core primitive): analytical questions
+    # (counting / date arithmetic / preference-application) get a reasoning
+    # prompt instead of the extractive one, so the reader DERIVES the answer
+    # from evidence that is present but not literal instead of abstaining.
+    # Fact-lookup questions keep the concise extractive behaviour unchanged.
+    from core.agents.answer_synthesis import (
+        build_answer_messages,
+        classify_answer_mode,
+        suggested_max_tokens,
+    )
+
+    _mode = classify_answer_mode(question)
+    _messages = build_answer_messages(question, context, _mode)
+    # Preserve this tool's citation contract on top of the mode rules.
+    _messages[-1]["content"] += (
+        "\n- Cite the source identifiers from the context when you use them."
+    )
     answer = await call_internal_llm(
-        _llm_call_messages(
-            system=(
-                "Answer the question using ONLY the provided context. "
-                "If the context is insufficient, say so explicitly. Do "
-                "not invent facts. Cite source identifiers when the "
-                "context provides them. Be direct — no preamble."
-            ),
-            user=f"Question: {question}\n\nContext:\n{context}",
-        ),
+        _messages,
         temperature=0.1,
-        max_tokens=900,
+        max_tokens=max(900, suggested_max_tokens(_mode, 900)),
         stage="mcp_answer_with_citations",
     )
     answer = answer.strip()

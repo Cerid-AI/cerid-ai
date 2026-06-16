@@ -295,6 +295,20 @@ ADAPTIVE_RETRIEVAL_LIGHT_TOP_K = int(os.getenv("ADAPTIVE_RETRIEVAL_LIGHT_TOP_K",
 
 ENABLE_QUERY_DECOMPOSITION = os.getenv("ENABLE_QUERY_DECOMPOSITION", "true").lower() == "true"
 QUERY_DECOMPOSITION_MAX_SUBQUERIES = int(os.getenv("QUERY_DECOMPOSITION_MAX_SUBQUERIES", "4"))
+# Supersession-at-read: drop memories explicitly marked superseded by a newer
+# fact (the write path already sets ``superseded_by``; recall historically
+# ignored it and could surface stale values — the knowledge-update failure
+# mode). Correctness fix, default ON; reversible via env if a preservation
+# gate ever flags it.
+ENABLE_MEMORY_SUPERSESSION_FILTER = (
+    os.getenv("ENABLE_MEMORY_SUPERSESSION_FILTER", "true").lower() == "true"
+)
+# LLM-based decomposition for *implicit* multi-hop analytical questions (e.g.
+# "how many days between X and Y") that carry no conjunction trigger, so the
+# heuristic gate skips them. Adds one LLM call on the analytical-query hot path,
+# so it is default-OFF pending the benchmark_slo latency gate; flip on once the
+# SLO budget is confirmed (mirrors the eval, which forces it to measure uplift).
+ENABLE_LLM_QUERY_DECOMPOSITION = os.getenv("ENABLE_LLM_QUERY_DECOMPOSITION", "false").lower() == "true"
 
 ENABLE_MMR_DIVERSITY = os.getenv("ENABLE_MMR_DIVERSITY", "true").lower() == "true"
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
@@ -371,6 +385,7 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_memory_recall": ENABLE_MEMORY_RECALL,
     "enable_adaptive_retrieval": ENABLE_ADAPTIVE_RETRIEVAL,
     "enable_query_decomposition": ENABLE_QUERY_DECOMPOSITION,
+    "enable_llm_query_decomposition": ENABLE_LLM_QUERY_DECOMPOSITION,
     "enable_mmr_diversity": ENABLE_MMR_DIVERSITY,
     "enable_intelligent_assembly": ENABLE_INTELLIGENT_ASSEMBLY,
     "enable_late_interaction": ENABLE_LATE_INTERACTION,

@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
@@ -67,8 +68,12 @@ MIN_RESPONSE_LENGTH = 100
 # Soak data: 5.7% ReadTimeouts at the httpx 20s default — these bounds
 # replace that ceiling and surface the timeout branch via
 # log_swallowed_error.
-MEMORY_LLM_BUDGET_S = 6.0
-MEMORY_CONFLICT_LLM_BUDGET_S = 3.0
+# Env-tunable so offline/batch callers (e.g. the LongMemEval eval, which calls
+# a remote reader where a single extraction can exceed the live-chat budget)
+# can raise the ceiling without relaxing the interactive SLO. Default 6.0s
+# stays the live-chat bound.
+MEMORY_LLM_BUDGET_S = float(os.getenv("MEMORY_LLM_BUDGET_S", "6.0"))
+MEMORY_CONFLICT_LLM_BUDGET_S = float(os.getenv("MEMORY_CONFLICT_LLM_BUDGET_S", "3.0"))
 
 MEMORY_TYPES = {
     "empirical", "decision", "preference", "project_context", "temporal", "conversational",
@@ -84,15 +89,41 @@ async def extract_memories(
     response_text: str,
     conversation_id: str,
     model: str = "",
+    observation_date: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Use a lightweight LLM to extract memorable content from a response."""
+    """Use a lightweight LLM to extract memorable content from a response.
+
+    Parameters
+    ----------
+    observation_date:
+        When provided, the date the conversation occurred. The extractor
+        grounds relative time references ("last week", "yesterday") to
+        absolute dates against this anchor and captures fact transitions
+        (old → new). A memory dated only "last week" is unretrievable
+        months later; the absolute form stays meaningful. This materially
+        helps temporal-reasoning and knowledge-update recall downstream.
+    """
     if len(response_text) < MIN_RESPONSE_LENGTH:
         return []
+
+    date_guidance = ""
+    if observation_date:
+        date_guidance = (
+            f"This conversation occurred on {observation_date}. When the "
+            "content references relative time ('yesterday', 'last week', "
+            "'next month', 'recently'), resolve it to an ABSOLUTE date "
+            f"relative to {observation_date} and state that absolute date in "
+            "the extracted content. When the user describes CHANGING, "
+            "switching, replacing, or updating something, capture the "
+            "transition — both the new state AND what it replaced "
+            "(e.g. 'switched from almond to oat milk').\n\n"
+        )
 
     prompt = (
         "Analyze this assistant response and extract any memorable content. "
         "For each item, classify it as one of: fact, decision, preference, action_item.\n\n"
-        "Return ONLY a JSON array of objects with keys: content, memory_type, summary.\n"
+        + date_guidance
+        + "Return ONLY a JSON array of objects with keys: content, memory_type, summary.\n"
         "- content: the full extractable text\n"
         "- memory_type: one of fact/decision/preference/action_item\n"
         "- summary: a concise summary (max 500 chars)\n\n"
@@ -820,6 +851,38 @@ async def recall_memories(
                 "memory_type": metadata.get("memory_type", "fact"),
                 "summary": metadata.get("summary", ""),
             })
+
+    # Step 3.5: Supersession-at-read — drop candidates explicitly marked
+    # superseded by a newer fact. The write path sets ``superseded_by`` (via
+    # conflict resolution / mark_superseded), but recall previously ignored it
+    # and could surface a stale value alongside its replacement — the
+    # knowledge-update failure mode. We check Neo4j once for the whole candidate
+    # set using the driver this function already holds (keeping the core↛app
+    # boundary intact — no app.db import). Best-effort: a Neo4j hiccup leaves
+    # recall unchanged rather than failing.
+    from config.features import ENABLE_MEMORY_SUPERSESSION_FILTER
+
+    if ENABLE_MEMORY_SUPERSESSION_FILTER and neo4j_driver and scored_memories:
+        candidate_ids = [m["memory_id"] for m in scored_memories]
+        try:
+            with neo4j_driver.session() as session:
+                rows = session.run(
+                    "UNWIND $ids AS aid "
+                    "MATCH (a:Artifact {id: aid}) "
+                    "WHERE a.superseded_by IS NOT NULL "
+                    "RETURN a.id AS id",
+                    ids=candidate_ids,
+                )
+                superseded_ids = {r["id"] for r in rows}
+        except Exception as exc:  # noqa: BLE001 — recall proceeds unfiltered
+            log_swallowed_error(
+                "core.agents.memory.recall_memories_supersession", exc,
+            )
+            superseded_ids = set()
+        if superseded_ids:
+            scored_memories = [
+                m for m in scored_memories if m["memory_id"] not in superseded_ids
+            ]
 
     # Step 4: Sort by adjusted score descending
     scored_memories.sort(key=lambda m: m["adjusted_score"], reverse=True)
