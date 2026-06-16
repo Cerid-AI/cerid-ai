@@ -61,7 +61,10 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
             providers=resolve_providers(config.ONNX_EXECUTION_PROVIDERS),
         )
         _tokenizer = Tokenizer.from_file(tok_path)
-        _tokenizer.enable_truncation(max_length=512)
+        # Coupled to the model: 512 for ms-marco-MiniLM (default), 1024 for
+        # bge-reranker-v2-m3. A 512-token parent chunk + query overflows a
+        # 512 budget and silently loses the chunk's tail; bge reads it whole.
+        _tokenizer.enable_truncation(max_length=config.RERANK_MAX_LENGTH)
         _tokenizer.enable_padding()
 
         logger.info("Cross-encoder model ready (%s)", repo)

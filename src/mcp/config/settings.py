@@ -305,6 +305,14 @@ RERANK_CROSS_ENCODER_MODEL = os.getenv(
 #   onnx/model_quint8_avx2.onnx (23 MB, int8, requires AVX2)
 RERANK_ONNX_FILENAME = os.getenv("RERANK_ONNX_FILENAME", "onnx/model.onnx")
 RERANK_MODEL_CACHE_DIR = os.getenv("RERANK_MODEL_CACHE_DIR", "")
+# Max (query, chunk) pair length the cross-encoder tokenizer keeps before
+# truncating. Must NOT exceed the model's positional limit: ms-marco-MiniLM
+# caps at 512 (the default — safe for the shipped fallback model), while
+# bge-reranker-v2-m3 reads up to 1024 without clipping a full 512-token parent
+# chunk. Bump this to 1024 ONLY alongside RERANK_CROSS_ENCODER_MODEL=bge-…;
+# raising it past a model's limit makes ONNX inference fail on out-of-range
+# position ids.
+RERANK_MAX_LENGTH = int(os.getenv("RERANK_MAX_LENGTH", "512"))
 
 # ---------------------------------------------------------------------------
 # NLI Entailment (Natural Language Inference)
