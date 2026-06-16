@@ -2057,6 +2057,7 @@ async def _agent_query_impl(
         ENABLE_ADAPTIVE_RETRIEVAL,
         ENABLE_INTELLIGENT_ASSEMBLY,
         ENABLE_LATE_INTERACTION,
+        ENABLE_LLM_QUERY_DECOMPOSITION,
         ENABLE_MMR_DIVERSITY,
         ENABLE_QUERY_DECOMPOSITION,
         ENABLE_SEMANTIC_CACHE,
@@ -2151,9 +2152,18 @@ async def _agent_query_impl(
     _skip_normal_retrieval = False
     with timer.step("vector_search"):
         if ENABLE_QUERY_DECOMPOSITION:
+            # Force LLM decomposition for *implicit* multi-hop analytical queries
+            # (count / date-arithmetic / preference) that carry no conjunction
+            # trigger — but only when the SLO-gated flag is enabled, so the live
+            # query path's latency budget is unchanged by default.
+            from core.agents.answer_synthesis import AnswerMode, classify_answer_mode
             from core.retrieval.query_decomposer import decompose_query, needs_decomposition, parallel_retrieve
-            if needs_decomposition(search_query):
-                sub_queries = await decompose_query(search_query)
+            _analytical = classify_answer_mode(search_query) is not AnswerMode.EXTRACTIVE
+            _force_llm = ENABLE_LLM_QUERY_DECOMPOSITION and _analytical
+            if needs_decomposition(search_query) or _force_llm:
+                sub_queries = await decompose_query(
+                    search_query, use_llm=_force_llm, force_llm=_force_llm,
+                )
                 if len(sub_queries) > 1:
                     logger.info("Decomposed query into %d sub-queries: %s", len(sub_queries), sub_queries)
 

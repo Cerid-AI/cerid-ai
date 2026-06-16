@@ -53,6 +53,34 @@ class TestExtractMemories:
 
     @pytest.mark.asyncio
     @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
+    async def test_observation_date_grounds_prompt(self, mock_llm):
+        """observation_date injects absolute-date grounding + transition capture
+        instructions into the extraction prompt (R3)."""
+        mock_llm.return_value = "[]"
+
+        await extract_memories(
+            "x" * 200, "conv-123", observation_date="2023/05/15",
+        )
+
+        prompt = mock_llm.call_args.args[0][0]["content"]
+        assert "2023/05/15" in prompt
+        assert "ABSOLUTE date" in prompt
+        assert "transition" in prompt.lower()
+
+    @pytest.mark.asyncio
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
+    async def test_no_observation_date_leaves_prompt_ungrounded(self, mock_llm):
+        """Without observation_date the date-grounding block is absent
+        (backward-compatible default)."""
+        mock_llm.return_value = "[]"
+
+        await extract_memories("x" * 200, "conv-123")
+
+        prompt = mock_llm.call_args.args[0][0]["content"]
+        assert "ABSOLUTE date" not in prompt
+
+    @pytest.mark.asyncio
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_llm_returns_empty_json(self, mock_llm):
         """LLM returning empty array should return empty list."""
         mock_llm.return_value = "[]"
