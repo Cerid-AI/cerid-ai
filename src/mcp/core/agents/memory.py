@@ -123,10 +123,12 @@ async def extract_memories(
         "Analyze this assistant response and extract any memorable content. "
         "For each item, classify it as one of: fact, decision, preference, action_item.\n\n"
         + date_guidance
-        + "Return ONLY a JSON array of objects with keys: content, memory_type, summary.\n"
+        + "Return ONLY a JSON array of objects with keys: content, memory_type, summary, event_date.\n"
         "- content: the full extractable text\n"
         "- memory_type: one of fact/decision/preference/action_item\n"
-        "- summary: a concise summary (max 500 chars)\n\n"
+        "- summary: a concise summary (max 500 chars)\n"
+        "- event_date: the absolute date the fact is about, as ISO YYYY-MM-DD, "
+        "resolved from the conversation date above; use null if no date applies\n\n"
         "If nothing is worth extracting, return an empty array [].\n\n"
         f"Response:\n{response_text[:3000]}\n\n"
         "JSON array:"
@@ -159,10 +161,17 @@ async def extract_memories(
             mem_type = MEMORY_TYPE_MIGRATION.get(mem_type, mem_type)
             if mem_type not in config.MEMORY_TYPES:
                 mem_type = "empirical"
+            # Structured event_date — the absolute date the fact is ABOUT (not
+            # ingestion time). Falls back to the observation (session) date when
+            # the LLM doesn't pin one, so every dated session yields a usable
+            # event_date for downstream time-filtered retrieval + arithmetic.
+            ev = m.get("event_date")
+            event_date = str(ev) if ev and str(ev).lower() != "null" else (observation_date or "")
             valid.append({
                 "content": str(m.get("content", ""))[:2000],
                 "memory_type": mem_type,
                 "summary": str(m.get("summary", ""))[:500],
+                "event_date": event_date,
             })
         return valid
 
@@ -193,6 +202,7 @@ async def extract_and_store_memories(
     neo4j_driver=None,
     redis_client=None,
     ingest_fn: Callable[..., dict[str, Any]] | None = None,
+    observation_date: str | None = None,
 ) -> dict[str, Any]:
     """Extract memories and store each as a KB artifact in the conversations domain.
 
@@ -205,11 +215,19 @@ async def extract_and_store_memories(
     ingest_fn : Callable | None
         Callback for ingesting content into the KB. When ``None``, the ingest
         step is skipped and memories are only extracted, not stored.
+    observation_date : str | None
+        The date the conversation occurred. Threaded into ``extract_memories``
+        so relative time references are grounded to absolute dates and each
+        memory gets a structured ``event_date``. Historically dropped here —
+        the call site passed only ``model`` — leaving production extraction
+        date-blind; that gap is the linchpin for temporal/knowledge-update.
     """
     if not config.ENABLE_MEMORY_EXTRACTION:
         return {"status": "skipped", "reason": "Memory extraction disabled"}
 
-    memories = await extract_memories(response_text, conversation_id, model)
+    memories = await extract_memories(
+        response_text, conversation_id, model, observation_date=observation_date,
+    )
 
     if not memories:
         return {
@@ -343,6 +361,11 @@ async def extract_and_store_memories(
                 "valid_from": utcnow_iso(),
                 "access_count": "0",
             }
+            # event_date = the absolute date the fact is ABOUT (vs valid_from =
+            # ingestion time). Enables time-filtered/-windowed retrieval and
+            # deterministic date arithmetic downstream. Only set when known.
+            if mem.get("event_date"):
+                metadata["event_date"] = mem["event_date"]
 
             # ingest_fn is synchronous KB ingest — hand off to a worker
             # thread so we don't stall the event loop while parallel
