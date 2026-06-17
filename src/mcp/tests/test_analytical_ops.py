@@ -110,7 +110,7 @@ async def test_count_answer_dedups_and_counts() -> None:
     ))
     with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
         ans = await compute_count_answer("How many model kits?", "mem")
-    assert ans.startswith("5:")  # 6 listed, one dup collapsed → 5
+    assert ans == "5"  # 6 listed, one dup collapsed → bare scalar (no item list)
 
 
 @pytest.mark.asyncio
@@ -118,6 +118,56 @@ async def test_count_answer_none_when_empty() -> None:
     mock = AsyncMock(return_value='{"answerable": true, "items": []}')
     with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
         assert await compute_count_answer("q", "mem") is None
+
+
+# --- Tier 1 routing self-guards (deterministic; abstain → synthesis) ---
+
+
+@pytest.mark.asyncio
+async def test_count_abstains_on_frequency_question() -> None:
+    """'how often' is a frequency question — the count operator must abstain
+    (return None) BEFORE any LLM call so synthesis returns the current rate."""
+    mock = AsyncMock(return_value='{"answerable": true, "items": ["a", "b"]}')
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        assert await compute_count_answer(
+            "How often do I attend yoga classes?", "mem",
+        ) is None
+        assert await compute_count_answer(
+            "How many times a week do I run?", "mem",
+        ) is None
+    mock.assert_not_called()  # guarded before the extractor
+
+
+@pytest.mark.asyncio
+async def test_count_still_fires_on_genuine_count() -> None:
+    """'how many times have I <verb>' (no a/per) stays a count, not frequency."""
+    mock = AsyncMock(return_value='{"answerable": true, "items": ["x", "y", "z"]}')
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        assert await compute_count_answer(
+            "How many times have I visited Paris?", "mem",
+        ) == "3"
+
+
+@pytest.mark.asyncio
+async def test_temporal_abstains_on_ordering_question() -> None:
+    """An ordering question must not hit the date-delta operator."""
+    mock = AsyncMock(return_value=_DELTA_7)
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        assert await compute_temporal_answer(
+            "Which three events happened in the order from first to last?", "mem",
+        ) is None
+    mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_temporal_still_fires_on_delta_with_order_idiom() -> None:
+    """'in order to' is an idiom, not an ordering question — operator still runs."""
+    mock = AsyncMock(return_value=_DELTA_7)
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        ans = await compute_temporal_answer(
+            "How many days did I wait in order to get my visa?", "mem",
+        )
+    assert ans == "7 days"
 
 
 @pytest.mark.asyncio

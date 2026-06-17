@@ -69,6 +69,14 @@ _PREFERENCE_RE = re.compile(
     r"advise|propose|ideas for|options for)\b",
     re.I,
 )
+# "how often / times a week" is a FREQUENCY question (the answer is the current
+# rate), not an aggregation/count — and "how often" is literally in _AGGREGATION_RE
+# above, so it must be suppressed before the aggregation branch fires.
+_FREQUENCY_RE = re.compile(
+    r"\b(how often|how regularly|how frequently|"
+    r"how many times (?:a|per)\b|times (?:a|per) (?:day|week|month|year))",
+    re.I,
+)
 
 
 def classify_answer_mode(
@@ -84,7 +92,7 @@ def classify_answer_mode(
         return _TYPE_TO_MODE[question_type]
     if _TEMPORAL_RE.search(question):
         return AnswerMode.TEMPORAL
-    if _AGGREGATION_RE.search(question):
+    if _AGGREGATION_RE.search(question) and not _FREQUENCY_RE.search(question):
         return AnswerMode.AGGREGATION
     if _PREFERENCE_RE.search(question):
         return AnswerMode.PREFERENCE

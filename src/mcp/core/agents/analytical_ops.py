@@ -119,6 +119,33 @@ def dedup_items(items: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Routing self-guards — the operators ABSTAIN (return None → synthesis) when the
+# question is the wrong analytical sub-type. Deterministic, so they catch BOTH the
+# eval's oracle route (question_type → mode) and production's heuristic route. Per
+# the routing research: make the abstain decision EXTERNAL to the extract LLM (a
+# rule), since the LLM will otherwise fire an inapplicable operator anyway.
+# ---------------------------------------------------------------------------
+
+# "How often / times a week" is a FREQUENCY question (synthesis returns the current
+# rate) — NOT a one-off count. "how many times a/per <period>" is frequency; "how
+# many times have I <verb>" stays a count (no a/per after "times").
+_FREQUENCY_RE = re.compile(
+    r"\b(how often|how regularly|how frequently|"
+    r"how many times (?:a|per)\b|times (?:a|per) (?:day|week|month|year))",
+    re.I,
+)
+
+# Ordering / sequence questions ("which events in order", "first to last") are not
+# date-delta questions; the delta operator would emit a spurious "<n> days".
+# Exclude the idiom "in order to".
+_ORDERING_RE = re.compile(
+    r"\b(in (?:what |which |the )?order(?! to)|order from|chronological|"
+    r"first to last|last to first|earliest to latest)\b",
+    re.I,
+)
+
+
+# ---------------------------------------------------------------------------
 # LLM-driven extraction → deterministic compute
 # ---------------------------------------------------------------------------
 
@@ -275,6 +302,8 @@ async def compute_temporal_answer(
     ``None`` when the needed dates aren't extractable (caller falls back). When
     self-consistency is enabled, votes the delta over N sampled extractions.
     """
+    if _ORDERING_RE.search(question):
+        return None  # ordering/sequence question → synthesis, not a date delta
     reference = (
         f'Reference ("now", the date this question is asked): {reference_date}'
         if reference_date else ""
@@ -302,17 +331,23 @@ async def _count_once(
     if not items:
         return None
     n = len(items)
-    rendered = f"{n}: {', '.join(items)}" if n <= 12 else str(n)
-    return n, rendered
+    # Answer finalization: emit ONLY the scalar count. The old "<n>: <items>"
+    # form presented competing candidates (the count AND an item list that could
+    # be wrong/partial), which a yes/no equivalence judge resolves against us even
+    # when the count itself is correct. The item list stays in the vote key path
+    # for self-consistency, not in the answer.
+    return n, str(n)
 
 
 async def compute_count_answer(question: str, memory_block: str) -> str | None:
     """Answer a counting question by extracting a list and counting in code.
 
-    Returns ``"<n>"`` (plus the de-duplicated items for short lists), or
-    ``None`` when no items are extractable. When self-consistency is enabled,
-    votes the count over N sampled extractions.
+    Returns the bare ``"<n>"``, or ``None`` when no items are extractable or the
+    question isn't actually a count (e.g. a FREQUENCY question → fall through to
+    synthesis). When self-consistency is enabled, votes the count over N samples.
     """
+    if _FREQUENCY_RE.search(question):
+        return None  # "how often" → synthesis returns the current rate, not a count
     return await _self_consistent(
         lambda t: _count_once(question, memory_block, t),
     )
