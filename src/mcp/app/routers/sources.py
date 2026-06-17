@@ -55,20 +55,42 @@ class SourceKindMeta(BaseModel):
     family: str
     tier: str  # "core" | "pro"
     availability: str = "coming_soon"  # "available" | "oauth" | "coming_soon"
+    providers: list[str] = []  # webhook-backed kinds: the recipe providers to pick
+
+
+def _is_webhook_backed(kind: str) -> bool:
+    """Inbound webhook-fed kinds (``webhook``, ``chat_capture``, ``dev_events``).
+
+    These have no external *connect* step — the receiver endpoint
+    (``POST /sdk/v1/ingest/webhook/{token}``) handles inbound traffic and the
+    adapter recipe (resolved by provider) normalizes it. So they are created by
+    minting a token, not by a SourceConnector lifecycle. Derived from the family
+    map so a future webhook-backed kind is covered automatically.
+    """
+    return KIND_FAMILY.get(kind) == "webhook"  # type: ignore[call-overload]
+
+
+def _kind_providers(kind: str) -> list[str]:
+    """Recipe providers available for a webhook-backed kind (for the wizard
+    picker + create-time validation). Empty for non-recipe kinds."""
+    import core.ingest.adapters as _adapters  # noqa: F401 — registers recipes
+    from core.ingest.adapters.registry import providers_for_kind
+
+    return providers_for_kind(kind)
 
 
 def _kind_availability(kind: str, oauth_kinds: set[str]) -> str:
     """Capability flag for a source kind, so the wizard can gate kinds that
     have no working ingestion path (rather than letting POST /sources 501).
 
-    - ``available``   — a SourceConnector is registered, or the webhook special-case.
+    - ``available``   — a SourceConnector is registered, or a webhook-backed kind.
     - ``oauth``       — connectable via the /connectors OAuth flow (Gmail, etc.).
     - ``coming_soon`` — declared in SOURCE_KINDS but not yet implemented.
     """
     import core.ingest.sources.connectors as _conns  # noqa: F401 — registers connectors
     from core.ingest.sources.registry import get_connector
 
-    if kind == "webhook" or get_connector(kind) is not None:  # type: ignore[arg-type]
+    if _is_webhook_backed(kind) or get_connector(kind) is not None:  # type: ignore[arg-type]
         return "available"
     if kind in oauth_kinds:
         return "oauth"
@@ -168,6 +190,7 @@ async def list_source_kinds():
             family=KIND_FAMILY[k],
             tier=KIND_TIER[k],
             availability=_kind_availability(k, oauth_kinds),
+            providers=_kind_providers(k),
         )
         for k in SOURCE_KINDS
     ]
@@ -207,11 +230,39 @@ async def create_source(body: CreateSourceRequest):
     tier = KIND_TIER[kind]
     family = KIND_FAMILY[kind]
 
-    # Webhook kind: mint token, skip connector lifecycle
-    if kind == "webhook":
+    # Webhook-backed kinds (webhook, chat_capture, dev_events): mint a token,
+    # skip the connector lifecycle. Inbound traffic flows through the receiver
+    # endpoint, which resolves the adapter recipe by provider.
+    if _is_webhook_backed(kind):
+        config_in = dict(body.config)
+        requires_sig = False
+        # Typed webhook-backed kinds need a provider with a registered recipe —
+        # otherwise inbound payloads can't be normalized and the source is
+        # dead-on-arrival. The generic `webhook` kind stays permissive (raw
+        # pass-through), so provider is optional there.
+        if kind != "webhook":
+            provider = (config_in.get("provider") or "").strip()
+            valid = _kind_providers(kind)
+            if not provider:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"kind={kind!r} requires config.provider (one of {valid})",
+                )
+            from core.ingest.adapters.registry import get_recipe
+            recipe = get_recipe(kind, provider)
+            if recipe is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Unknown provider {provider!r} for kind={kind!r}; valid: {valid}",
+                )
+            requires_sig = bool(getattr(recipe, "requires_signature", False))
+
         token = webhook_tokens.generate_token()
-        config_to_store: dict[str, Any] = {"token": token, **body.config}
-        if body.config.get("require_hmac"):
+        config_to_store: dict[str, Any] = {"token": token, **config_in}
+        # Mint an HMAC secret when the caller opts in OR the provider mandates it
+        # (github / stripe set requires_signature) — without it the receiver
+        # rejects that provider's traffic as "mandated but unconfigured".
+        if config_in.get("require_hmac") or requires_sig:
             config_to_store["hmac_secret"] = webhook_tokens.generate_hmac_secret()
         src = srcdb.create_source(
             get_neo4j(),
@@ -308,7 +359,7 @@ async def test_source(source_id: str):
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    if src["kind"] == "webhook":
+    if _is_webhook_backed(src["kind"]):
         # No remote system to probe — receivers are inbound-only.
         return HealthProbeResult(ok=True, detail="Webhook receiver active")
 
