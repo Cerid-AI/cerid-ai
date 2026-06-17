@@ -22,6 +22,10 @@ from core.agents.answer_synthesis import (
         ("When did I start my new job?", AnswerMode.TEMPORAL),
         ("How many model kits have I bought?", AnswerMode.AGGREGATION),
         ("What is the total number of projects I lead?", AnswerMode.AGGREGATION),
+        # Frequency questions are NOT aggregation (the answer is the current rate),
+        # even though "how often" is inside the aggregation pattern.
+        ("How often do I attend yoga classes?", AnswerMode.EXTRACTIVE),
+        ("How many times a week do I run?", AnswerMode.EXTRACTIVE),
         ("Can you suggest a hotel for my Miami trip?", AnswerMode.PREFERENCE),
         ("What should I read next?", AnswerMode.PREFERENCE),
         ("What is my cat's name?", AnswerMode.EXTRACTIVE),
