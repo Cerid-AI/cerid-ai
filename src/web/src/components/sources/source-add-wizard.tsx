@@ -95,6 +95,13 @@ function SourceAddWizardInner({
     return kinds
   }, [kinds, initialFamily])
 
+  // Recipe providers for the selected webhook-backed kind (chat_capture /
+  // dev_events). Empty for kinds with no provider choice.
+  const providers = useMemo(
+    () => kinds?.find((k) => k.kind === kind)?.providers ?? [],
+    [kinds, kind],
+  )
+
   const createMut = useMutation({
     mutationFn: () => {
       if (!kind) throw new Error("kind required")
@@ -138,6 +145,7 @@ function SourceAddWizardInner({
         {step === "configure" && kind && (
           <ConfigureStep
             kind={kind}
+            providers={providers}
             displayName={displayName}
             onDisplayName={setDisplayName}
             config={config}
@@ -222,6 +230,7 @@ function PickStep({
 
 function ConfigureStep({
   kind,
+  providers,
   displayName,
   onDisplayName,
   config,
@@ -232,6 +241,7 @@ function ConfigureStep({
   error,
 }: {
   kind: string
+  providers: string[]
   displayName: string
   onDisplayName: (v: string) => void
   config: Record<string, unknown>
@@ -241,6 +251,9 @@ function ConfigureStep({
   isSubmitting: boolean
   error: string | null
 }) {
+  // Webhook-backed typed kinds require a provider; the backend 422s without
+  // one, so gate the Connect button until it's picked.
+  const providerMissing = providers.length > 0 && !config.provider
   return (
     <div className="space-y-4">
       <div>
@@ -256,7 +269,12 @@ function ConfigureStep({
         />
       </div>
 
-      <KindSpecificFields kind={kind} config={config} onConfig={onConfig} />
+      <KindSpecificFields
+        kind={kind}
+        providers={providers}
+        config={config}
+        onConfig={onConfig}
+      />
 
       {error && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -268,7 +286,7 @@ function ConfigureStep({
         <Button variant="ghost" onClick={onBack} disabled={isSubmitting}>
           Back
         </Button>
-        <Button onClick={onSubmit} disabled={isSubmitting}>
+        <Button onClick={onSubmit} disabled={isSubmitting || providerMissing}>
           {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-3 w-3 animate-spin" aria-hidden="true" />
@@ -288,13 +306,48 @@ function ConfigureStep({
 
 function KindSpecificFields({
   kind,
+  providers,
   config,
   onConfig,
 }: {
   kind: string
+  providers: string[]
   config: Record<string, unknown>
   onConfig: (v: Record<string, unknown>) => void
 }) {
+  // Webhook-backed typed kinds (chat_capture / dev_events): pick the provider
+  // whose recipe normalizes the inbound payload. A token is minted on create;
+  // the receiver URL is shown on the result step (WebhookShareCard).
+  if (providers.length > 0) {
+    return (
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-foreground" htmlFor="provider">
+          Provider
+        </label>
+        <select
+          id="provider"
+          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={String(config.provider ?? "")}
+          onChange={(e) => onConfig({ ...config, provider: e.target.value })}
+        >
+          <option value="" disabled>
+            Select a provider…
+          </option>
+          {providers.map((p) => (
+            <option key={p} value={p}>
+              {p.charAt(0).toUpperCase() + p.slice(1)}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          A unique webhook token is minted automatically. The receiver URL
+          appears after the source is created — point {String(config.provider) || "the provider"}
+          ’s outgoing webhook at it.
+        </p>
+      </div>
+    )
+  }
+
   if (kind === "rss" || kind === "url_watch") {
     return (
       <div>
@@ -380,7 +433,7 @@ function ResultStep({
         <span className="text-sm text-muted-foreground">ms to connect</span>
       </div>
 
-      {record.kind === "webhook" && (
+      {record.family === "webhook" && (
         <WebhookShareCard sourceId={record.id} />
       )}
 

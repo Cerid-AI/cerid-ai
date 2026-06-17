@@ -19,6 +19,10 @@ export interface SourceKindMeta {
   // Connectors; "coming_soon" → declared but not yet implemented. Backend
   // default for older payloads is "coming_soon".
   availability?: SourceAvailability
+  // Recipe providers for webhook-backed kinds (chat_capture → slack/discord/
+  // teams/matrix; dev_events → github/linear/sentry/stripe). The wizard renders
+  // these as a required picker. Empty/absent for kinds with no provider choice.
+  providers?: string[]
 }
 
 export interface SourceRecord {
