@@ -126,3 +126,79 @@ async def test_operators_fall_back_to_none_on_llm_error() -> None:
     with patch("core.agents.analytical_ops.call_internal_llm", new=boom):
         assert await compute_temporal_answer("q", "mem") is None
         assert await compute_count_answer("q", "mem") is None
+
+
+# --- self-consistency (sample N, mode-vote the COMPUTED answer) ---
+
+import contextlib  # noqa: E402
+
+import config  # noqa: E402
+
+
+@contextlib.contextmanager
+def _self_consistency(samples: int):
+    """Enable self-consistency with a fixed sample count for the block."""
+    with patch.object(config, "ENABLE_SELF_CONSISTENCY", True), patch.object(
+        config, "SELF_CONSISTENCY_SAMPLES", samples,
+    ), patch.object(config, "SELF_CONSISTENCY_TEMPERATURE", 0.7):
+        yield
+
+
+_DELTA_7 = (
+    '{"answerable": true, "start_event": {"iso_date": "2023-01-08"},'
+    ' "end_event": {"iso_date": "2023-01-15"}, "unit": "days",'
+    ' "endpoints_inclusive": false}'
+)
+_DELTA_8 = (
+    '{"answerable": true, "start_event": {"iso_date": "2023-01-08"},'
+    ' "end_event": {"iso_date": "2023-01-16"}, "unit": "days",'
+    ' "endpoints_inclusive": false}'
+)
+
+
+@pytest.mark.asyncio
+async def test_temporal_self_consistency_votes_majority_delta() -> None:
+    # Two samples compute "7 days", one computes "8 days" → majority wins.
+    mock = AsyncMock(side_effect=[_DELTA_7, _DELTA_8, _DELTA_7])
+    with _self_consistency(3), patch(
+        "core.agents.analytical_ops.call_internal_llm", new=mock,
+    ):
+        ans = await compute_temporal_answer("How many days between X and Y?", "mem")
+    assert ans == "7 days"
+    assert mock.call_count == 3  # N samples, not one
+
+
+@pytest.mark.asyncio
+async def test_temporal_self_consistency_samples_at_nonzero_temperature() -> None:
+    mock = AsyncMock(side_effect=[_DELTA_7, _DELTA_7, _DELTA_7])
+    with _self_consistency(3), patch(
+        "core.agents.analytical_ops.call_internal_llm", new=mock,
+    ):
+        await compute_temporal_answer("q", "mem")
+    # Sampling must use a non-zero temperature (else the votes are identical).
+    assert all(c.kwargs["temperature"] == 0.7 for c in mock.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_count_self_consistency_votes_over_count_not_surface_form() -> None:
+    five = '{"answerable": true, "items": ["a", "b", "c", "d", "e"]}'
+    five_alt = '{"answerable": true, "items": ["A!", "b", "c", "d", "e"]}'  # same 5
+    four = '{"answerable": true, "items": ["a", "b", "c", "d"]}'
+    # Two samples count 5 (despite surface drift), one counts 4 → 5 wins.
+    mock = AsyncMock(side_effect=[five, four, five_alt])
+    with _self_consistency(3), patch(
+        "core.agents.analytical_ops.call_internal_llm", new=mock,
+    ):
+        ans = await compute_count_answer("How many?", "mem")
+    assert ans is not None and ans.startswith("5")
+
+
+@pytest.mark.asyncio
+async def test_disabled_self_consistency_makes_one_temperature_zero_call() -> None:
+    mock = AsyncMock(return_value=_DELTA_7)
+    # No _self_consistency() wrapper → flag is at its default (off).
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        ans = await compute_temporal_answer("q", "mem")
+    assert ans == "7 days"
+    assert mock.call_count == 1
+    assert mock.call_args.kwargs["temperature"] == 0.0

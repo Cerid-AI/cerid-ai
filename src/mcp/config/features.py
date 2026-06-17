@@ -310,6 +310,20 @@ ENABLE_MEMORY_SUPERSESSION_FILTER = (
 # SLO budget is confirmed (mirrors the eval, which forces it to measure uplift).
 ENABLE_LLM_QUERY_DECOMPOSITION = os.getenv("ENABLE_LLM_QUERY_DECOMPOSITION", "false").lower() == "true"
 
+# Self-consistency for the analytical operators (temporal date-math + counting):
+# sample N extractions at a non-zero temperature and mode-vote the COMPUTED
+# answer. The extraction is the real uncertainty — the Python compute is
+# deterministic — so voting over the derived number (not free-form chain-of-
+# thought) is the high-signal aggregation (Wang et al. arXiv 2203.11171:
+# +12-18% on arithmetic/counting). Gated to analytical phrasings (~27% of items)
+# and default-OFF: it multiplies the analytical-extract LLM cost N×, so flip on
+# only once the full-500 paired run confirms the uplift (mirrors
+# ENABLE_LLM_QUERY_DECOMPOSITION's benchmark-gated rollout). N=1 ⇒ exactly the
+# current single temperature-0 call, so the default is a strict no-op.
+ENABLE_SELF_CONSISTENCY = os.getenv("ENABLE_SELF_CONSISTENCY", "false").lower() == "true"
+SELF_CONSISTENCY_SAMPLES = int(os.getenv("SELF_CONSISTENCY_SAMPLES", "5"))
+SELF_CONSISTENCY_TEMPERATURE = float(os.getenv("SELF_CONSISTENCY_TEMPERATURE", "0.7"))
+
 ENABLE_MMR_DIVERSITY = os.getenv("ENABLE_MMR_DIVERSITY", "true").lower() == "true"
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
 
@@ -386,6 +400,7 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_adaptive_retrieval": ENABLE_ADAPTIVE_RETRIEVAL,
     "enable_query_decomposition": ENABLE_QUERY_DECOMPOSITION,
     "enable_llm_query_decomposition": ENABLE_LLM_QUERY_DECOMPOSITION,
+    "enable_self_consistency": ENABLE_SELF_CONSISTENCY,
     "enable_mmr_diversity": ENABLE_MMR_DIVERSITY,
     "enable_intelligent_assembly": ENABLE_INTELLIGENT_ASSEMBLY,
     "enable_late_interaction": ENABLE_LATE_INTERACTION,

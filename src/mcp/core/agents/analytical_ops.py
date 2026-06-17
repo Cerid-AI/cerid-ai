@@ -23,8 +23,10 @@ without any LLM.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import date
 from typing import Any
 
@@ -173,13 +175,14 @@ Rules:
 
 async def _extract_json(
     question: str, memory_block: str, prompt: str, reference: str = "",
+    temperature: float = 0.0,
 ) -> dict[str, Any] | None:
     try:
         raw = await call_internal_llm(
             [{"role": "user", "content": prompt.format(
                 memory_block=memory_block, question=question, reference=reference,
             )}],
-            temperature=0.0,
+            temperature=temperature,
             max_tokens=400,
             response_format={"type": "json_object"},
             stage=ANALYTICAL_STAGE,
@@ -191,22 +194,62 @@ async def _extract_json(
     return data if isinstance(data, dict) else None
 
 
-async def compute_temporal_answer(
-    question: str, memory_block: str, reference_date: str | None = None,
-) -> str | None:
-    """Answer a temporal question by extracting dates and computing in code.
+# ---------------------------------------------------------------------------
+# Self-consistency: sample N extractions, mode-vote the COMPUTED answer
+# ---------------------------------------------------------------------------
+# The extraction (which dates / which items) is the real uncertainty; the
+# downstream Python compute is deterministic. So we vote over the derived
+# answer (the magnitude / the count), NOT over free-form reasoning. Default
+# N=1 ⇒ one temperature-0 call ⇒ strict no-op. See config.ENABLE_SELF_CONSISTENCY.
 
-    ``reference_date`` is the "now" the question is asked at — required for the
-    relative class ("how many weeks AGO / how long SINCE"), where one endpoint is
-    the present, not a memory. Production passes today's date; the eval passes
-    the item's ``question_date``. Returns ``"<n> <unit>"`` (magnitude), or
-    ``None`` when the needed dates aren't extractable (caller falls back).
-    """
-    reference = (
-        f'Reference ("now", the date this question is asked): {reference_date}'
-        if reference_date else ""
+
+def _sc_params() -> tuple[int, float]:
+    """(n_samples, temperature) for the analytical operators. (1, 0.0) when
+    self-consistency is disabled — the single deterministic call."""
+    import config
+    if not getattr(config, "ENABLE_SELF_CONSISTENCY", False):
+        return 1, 0.0
+    n = max(1, int(getattr(config, "SELF_CONSISTENCY_SAMPLES", 5)))
+    return n, float(getattr(config, "SELF_CONSISTENCY_TEMPERATURE", 0.7))
+
+
+def _vote(pairs: list[tuple[Any, str]]) -> str | None:
+    """Plurality vote over (key, rendered) samples; returns a rendered answer
+    for the winning key. Ties break to the first-seen key (deterministic)."""
+    if not pairs:
+        return None
+    counts: dict[Any, int] = {}
+    first_render: dict[Any, str] = {}
+    for key, rendered in pairs:
+        counts[key] = counts.get(key, 0) + 1
+        first_render.setdefault(key, rendered)
+    best = max(counts, key=lambda k: counts[k])
+    return first_render[best]
+
+
+async def _self_consistent(
+    once: Callable[[float], Awaitable[tuple[Any, str] | None]],
+) -> str | None:
+    """Run a single-shot operator once (deterministic) or N times (sampled,
+    mode-voted) per the self-consistency config. ``once(temperature)`` returns
+    a ``(vote_key, rendered_answer)`` pair, or ``None`` when not answerable."""
+    n_samples, temp = _sc_params()
+    if n_samples <= 1:
+        result = await once(0.0)
+        return result[1] if result else None
+    sampled = await asyncio.gather(*(once(temp) for _ in range(n_samples)))
+    return _vote([r for r in sampled if r is not None])
+
+
+async def _temporal_once(
+    question: str, memory_block: str, reference: str, temperature: float,
+) -> tuple[str, str] | None:
+    """One extraction → deterministic delta. Returns ``(vote_key, rendered)``
+    where both are ``"<n> <unit>"`` (the question fixes the unit, so the
+    rendered answer IS the canonical vote key)."""
+    data = await _extract_json(
+        question, memory_block, _TEMPORAL_PROMPT, reference, temperature,
     )
-    data = await _extract_json(question, memory_block, _TEMPORAL_PROMPT, reference)
     if not data or not data.get("answerable"):
         return None
     start = parse_iso_date(str((data.get("start_event") or {}).get("iso_date", "")))
@@ -216,16 +259,40 @@ async def compute_temporal_answer(
     unit = str(data.get("unit", "days")) or "days"
     inclusive = bool(data.get("endpoints_inclusive", False))
     n = abs(compute_delta(start, end, unit, inclusive))
-    return f"{n} {unit}"
+    rendered = f"{n} {unit}"
+    return rendered, rendered
 
 
-async def compute_count_answer(question: str, memory_block: str) -> str | None:
-    """Answer a counting question by extracting a list and counting in code.
+async def compute_temporal_answer(
+    question: str, memory_block: str, reference_date: str | None = None,
+) -> str | None:
+    """Answer a temporal question by extracting dates and computing in code.
 
-    Returns ``"<n>"`` (plus the de-duplicated items for short lists), or
-    ``None`` when no items are extractable.
+    ``reference_date`` is the "now" the question is asked at — required for the
+    relative class ("how many weeks AGO / how long SINCE"), where one endpoint is
+    the present, not a memory. Production passes today's date; the eval passes
+    the item's ``question_date``. Returns ``"<n> <unit>"`` (magnitude), or
+    ``None`` when the needed dates aren't extractable (caller falls back). When
+    self-consistency is enabled, votes the delta over N sampled extractions.
     """
-    data = await _extract_json(question, memory_block, _COUNT_PROMPT)
+    reference = (
+        f'Reference ("now", the date this question is asked): {reference_date}'
+        if reference_date else ""
+    )
+    return await _self_consistent(
+        lambda t: _temporal_once(question, memory_block, reference, t),
+    )
+
+
+async def _count_once(
+    question: str, memory_block: str, temperature: float,
+) -> tuple[int, str] | None:
+    """One extraction → dedup → ``len()``. Returns ``(count, rendered)``; the
+    vote key is the COUNT (the answer), not the decorated item list — two
+    samples that agree on 5 must not split the vote over surface-form drift."""
+    data = await _extract_json(
+        question, memory_block, _COUNT_PROMPT, "", temperature,
+    )
     if not data or not data.get("answerable"):
         return None
     raw_items = data.get("items")
@@ -235,6 +302,17 @@ async def compute_count_answer(question: str, memory_block: str) -> str | None:
     if not items:
         return None
     n = len(items)
-    if n <= 12:
-        return f"{n}: {', '.join(items)}"
-    return str(n)
+    rendered = f"{n}: {', '.join(items)}" if n <= 12 else str(n)
+    return n, rendered
+
+
+async def compute_count_answer(question: str, memory_block: str) -> str | None:
+    """Answer a counting question by extracting a list and counting in code.
+
+    Returns ``"<n>"`` (plus the de-duplicated items for short lists), or
+    ``None`` when no items are extractable. When self-consistency is enabled,
+    votes the count over N sampled extractions.
+    """
+    return await _self_consistent(
+        lambda t: _count_once(question, memory_block, t),
+    )
