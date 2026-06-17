@@ -79,6 +79,17 @@ def iter_recipes() -> Iterator[AdapterRecipe]:
     return iter(_REGISTRY.values())
 
 
+def providers_for_kind(kind: str) -> list[str]:
+    """Sorted provider names with a registered recipe for ``kind``.
+
+    Drives the wizard's provider picker for the webhook-backed kinds
+    (chat_capture → slack/discord/teams/matrix; dev_events → github/…).
+    Returns ``[]`` for kinds with no recipes (e.g. the generic ``webhook``
+    kind, which is raw pass-through).
+    """
+    return sorted(provider for (k, provider) in _REGISTRY if k == kind)
+
+
 def reset_for_tests() -> None:
     _REGISTRY.clear()
     _PROVIDER_INDEX.clear()
