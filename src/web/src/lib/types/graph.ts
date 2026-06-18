@@ -23,6 +23,8 @@ export interface GraphNode {
   recency_score: number
   /** True for the focal entity of the current view */
   focused: boolean
+  /** Primary domain derived by DeriveDomainsJob; null until first derivation run */
+  primary_domain?: string | null
 }
 
 /** Visual edge payload from /graph/neighborhood */

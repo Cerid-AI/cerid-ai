@@ -34,7 +34,7 @@ test-frontend:
 	cd src/web && npx vitest run
 
 typecheck-frontend:
-	cd src/web && npx tsc --noEmit
+	cd src/web && npx tsc -b
 
 build-frontend:
 	cd src/web && npm run build
@@ -68,7 +68,7 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	PYTHONPATH=src/mcp .venv/bin/pytest src/mcp/tests/ --ignore=src/mcp/tests/eval \
 	  -m "not benchmark_slo and not preservation and not integration" -x -q -p no:cacheprovider
 	@echo "[ci-local] frontend · eslint + tsc + vitest"
-	cd src/web && npx eslint . && npx tsc --noEmit && npx vitest run
+	cd src/web && npx eslint . && npx tsc -b && npx vitest run
 	@echo "[ci-local] supply-chain guard"
 	bash scripts/guard-no-ai-commits.sh
 	@echo "[ci-local] ✓ all local checks passed"
@@ -102,6 +102,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-product-story.py
 	@echo "[drift] mcp-descriptions"
 	.venv/bin/python scripts/lint-mcp-descriptions.py
+	@echo "[drift] no-hardcoded-models"
+	.venv/bin/python scripts/lint-no-hardcoded-models.py --strict src/mcp/
 	@echo "[drift] ✓ drift + lint gates passed"
 
 prepush: ci-local drift-check ## FULL pre-push parity with remote CI (run before every push)

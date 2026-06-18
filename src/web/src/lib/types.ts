@@ -13,7 +13,7 @@ export interface ChatMessage {
   degradedReason?: string
 }
 
-export type RagMode = "manual" | "smart" | "custom_smart"
+export type RagMode = "smart" | "always" | "off"
 
 /** Absolute on/off gates for each context source. Disabled sources skip retrieval entirely. */
 export interface ContextSources {
@@ -398,7 +398,14 @@ export interface KBQueryResult {
   summary?: string
   source_url?: string
   source_name?: string
-  source_type?: "kb" | "memory" | "external"
+  /** Phase 1.1: source class — "kb" | "pack" | "memory" | "wiki" | "external".
+   *  May be absent on older cached payloads; treat as "kb" when missing. */
+  source_type?: "kb" | "pack" | "memory" | "wiki" | "external"
+  /** Phase 1.1: ISO date/datetime string or null. Used for date= attribute in
+   *  the <document> header and for temporal staleness checks. */
+  created_at?: string | null
+  /** Phase 1.1: non-empty string when this chunk belongs to a knowledge pack. */
+  pack_id?: string
   starred?: boolean
   evergreen?: boolean
   retrieval_count?: number
@@ -803,6 +810,7 @@ export interface ServerSettings {
   hybrid_keyword_weight?: number
   rerank_llm_weight?: number
   rerank_original_weight?: number
+  pack_relevance_weight?: number
   temporal_half_life_days?: number
   temporal_recency_weight?: number
   // Advanced RAG pipeline (read-write)
@@ -895,6 +903,7 @@ export interface SettingsUpdate {
   hybrid_keyword_weight?: number
   rerank_llm_weight?: number
   rerank_original_weight?: number
+  pack_relevance_weight?: number
   // Advanced RAG pipeline
   enable_contextual_chunks?: boolean
   enable_adaptive_retrieval?: boolean

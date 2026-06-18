@@ -66,11 +66,26 @@ export function EntityListItem({ entity, selected, onSelect }: EntityListItemPro
 
       {/* Meta row */}
       <div className="mt-1.5 flex items-center gap-2 text-label-xs text-muted-foreground">
-        {entity.related_count > 0 && (
-          <span>{entity.related_count} related</span>
+        {entity.mention_count > 0 && (
+          <span>{entity.mention_count} mentions</span>
         )}
         {relativeTime && <span>Updated {relativeTime}</span>}
       </div>
+
+      {/* Top tags (Slice 6.3) — salience-ranked vocabulary chips; display only,
+          omit-if-absent. The filter bar above the list is the interactive control. */}
+      {entity.top_tags && entity.top_tags.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {entity.top_tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded bg-muted px-1.5 py-0.5 text-label-xxs text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
     </button>
   )
 }

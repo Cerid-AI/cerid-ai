@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
-import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult } from "@/lib/kb-utils"
+import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult, selectDocsWithinBudget } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
 import { compressConversation, queryKB, recallMemories } from "@/lib/api"
+import { RAG_SYSTEM_PREAMBLE } from "@/lib/rag-prompt"
 
 /** How many user+assistant pairs to keep in client-side sliding window fallback. */
 const FALLBACK_KEEP_PAIRS = 3
@@ -41,6 +42,9 @@ interface UseChatSendOptions {
   // Auto-inject settings
   autoInject: boolean
   autoInjectThreshold: number
+  /** Include knowledge packs in KB retrieval (Slice 7.3). Default true;
+      when false, queryKB sends exclude_packs so packs are dropped. */
+  includePacks: boolean
 
   // KB context
   injectedContext: KBQueryResult[]
@@ -172,7 +176,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           }, 500))
           // Fire KB query and memory recall in parallel with shared timeout
           const [freshKB, freshMemories] = await Promise.all([
-            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal }), timeout]).catch(() => null),
+            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal, excludePacks: !options.includePacks }), timeout]).catch(() => null),
             Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => []),
           ])
           if (freshKB?.results?.length) {
@@ -244,7 +248,11 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         // Separate documents from memories for distinct formatting
         const docSources = dedupedSources.filter((s) => s.source_type !== "memory")
         const memorySources = dedupedSources.filter((s) => s.source_type === "memory")
-        const contextParts = docSources.map(formatChunkWithHeader)
+        // Phase 2.4: apply per-model-family char budget at document granularity.
+        // Documents are already sorted by descending relevance; whole docs are kept
+        // or dropped — never truncated mid-document.
+        const { selected: budgetedDocs } = selectDocsWithinBudget(docSources, modelToUse)
+        const contextParts = budgetedDocs.map(formatChunkWithHeader)
         if (memorySources.length > 0) {
           const memParts = memorySources.map((m) => {
             const type = m.filename?.replace("memory:", "") ?? "fact"
@@ -273,7 +281,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
         allMessages.push({
           role: "system",
-          content: `The user has a personal knowledge base. Below are documents that may be relevant to this conversation. When these documents contain the answer, cite specific details and facts from them. When they do NOT contain the answer, use your general knowledge — never say "there is no information in your knowledge base" or refuse to answer. The user expects a helpful answer regardless of what the documents contain.${priorContextNote}\n\n${contextParts.join("\n\n")}`,
+          content: `${RAG_SYSTEM_PREAMBLE}${priorContextNote}\n\n${contextParts.join("\n\n")}`,
         })
 
         // Record injected chunks for session dedup on subsequent turns

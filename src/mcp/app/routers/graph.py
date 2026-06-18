@@ -73,6 +73,7 @@ class GraphNode(BaseModel):
     trust_state: str = "unknown"  # verified / partial / unverified / contradicted / unknown
     recency_score: float = 0.0    # 0..1, recent mentions push toward 1
     focused: bool = False
+    primary_domain: str | None = None
 
 
 class GraphEdge(BaseModel):
@@ -202,20 +203,23 @@ async def _query_neighborhood(
     if driver is None:
         raise HTTPException(status_code=503, detail="Neo4j unavailable")
 
-    # Cypher: native variable-length expansion (Neo4j 5.x). Degree cap uses the
-    # COUNT {} subquery form — size() over a relationship pattern was removed in
-    # Neo4j 5.x. Filter narrows by entity type if specified. We also pull
-    # edge attestation + contradiction flags for the visual encoding.
+    # Cypher: typed CO_MENTIONED traversal (Neo4j 5.x). Restricting to
+    # [:CO_MENTIONED] prevents paths routing through Community/Artifact hub
+    # nodes which inflate hop-2/3 result sets to O(community size). Degree
+    # cap uses COUNT {} subquery — size() over a pattern was removed in 5.x.
+    # Per-hop intermediate cap ($hop_degree) limits expansion through hubs
+    # that have high CO_MENTIONED degree without fully excluding them.
+    # Filter narrows by entity_type if specified.
     type_filter = ""
     if filter:
-        type_filter = "AND (e.type = $filter OR n.type = $filter)"
+        type_filter = "AND (e.entity_type = $filter OR n.entity_type = $filter)"
 
     cypher = f"""
         MATCH (n:Entity {{canonical_id: $entity}})
-        OPTIONAL MATCH path = (n)-[*1..{hops}]-(e:Entity)
+        OPTIONAL MATCH path = (n)-[:CO_MENTIONED*1..{hops}]-(e:Entity)
         WHERE e.canonical_id IS NOT NULL {type_filter}
-          AND COUNT {{ (e)--() }} < $max_degree
-        WITH n, collect(DISTINCT e) AS related, collect(DISTINCT relationships(path)) AS rel_lists
+          AND COUNT {{ (e)-[:CO_MENTIONED]-() }} < $max_degree
+        WITH n, collect(DISTINCT e) AS related
         UNWIND ([n] + related) AS node
         OPTIONAL MATCH (node)-[r]-(other:Entity)
         WHERE other IN ([n] + related)
@@ -237,6 +241,7 @@ async def _query_neighborhood(
             node.mention_count AS mention_count,
             node.trust_state AS trust_state,
             node.recency_score AS recency_score,
+            node.primary_domain AS primary_domain,
             edges_for_node AS edges
     """
 
@@ -268,6 +273,7 @@ async def _query_neighborhood(
             mention_count=_safe_int_props(row, "mention_count"),
             trust_state=row.get("trust_state") or "unknown",
             recency_score=_safe_float_props(row, "recency_score"),
+            primary_domain=row.get("primary_domain"),
         ))
         for e in row.get("edges") or []:
             src = e.get("from")
@@ -633,6 +639,7 @@ class EntityEmbedding3D(BaseModel):
     mention_count: int = 0
     trust_state: str = "unknown"
     projection: str = "fallback"  # "umap" or "fallback" (pre-backfill)
+    primary_domain: str | None = None
 
 
 class Embeddings3DResponse(BaseModel):
@@ -648,16 +655,16 @@ class Embeddings3DResponse(BaseModel):
 
 
 def _embeddings_3d_cache_key(filter_str: str, entities_csv: str) -> str:
-    # v2 suffix: payload gained `links` — versioning the key prevents serving
-    # a cached pre-links payload. The shared bust pattern cerid:graph:emb3d:*
-    # still matches.
+    # v3 suffix: payload gained `primary_domain` (Cycle 1 domain backbone) —
+    # versioning prevents a Domain lens showing all-"other" silently for 24 h.
+    # The shared bust pattern cerid:graph:emb3d:* still matches.
     if filter_str or entities_csv:
         h = hashlib.sha1(  # noqa: S324
             f"{filter_str}|{entities_csv}".encode("utf-8"),
             usedforsecurity=False,
         ).hexdigest()[:12]
-        return f"cerid:graph:emb3d:v2:{h}"
-    return "cerid:graph:emb3d:v2:all"
+        return f"cerid:graph:emb3d:v3:{h}"
+    return "cerid:graph:emb3d:v3:all"
 
 
 @router.get("/embeddings/3d", response_model=Embeddings3DResponse)
@@ -718,6 +725,7 @@ async def get_embeddings_3d(
             mention_count=int(r.get("mention_count") or 0),
             trust_state=r.get("trust_state") or "unknown",
             projection=r.get("method") or "fallback",
+            primary_domain=r.get("primary_domain"),
         )
         for r in rows
     ]
@@ -834,7 +842,8 @@ async def _query_embeddings_3d(
             e.umap_y AS y,
             e.umap_z AS z,
             coalesce(e.umap_method, 'fallback') AS method,
-            e.umap_computed_at AS computed_at
+            e.umap_computed_at AS computed_at,
+            e.primary_domain AS primary_domain
         LIMIT $max_entities
     """
 
@@ -858,7 +867,7 @@ async def _query_embeddings_3d(
 # ---------------------------------------------------------------------------
 
 _COMMUNITY_MAP_REDIS_KEY = "cerid:graph:map:communities"
-_GRAPH_MAP_CACHE_KEY = "cerid:graph:emb3d:v2:map"
+_GRAPH_MAP_CACHE_KEY = "cerid:graph:emb3d:v3:map"
 
 
 class MapCommunity(BaseModel):
@@ -887,30 +896,76 @@ class GraphMapResponse(BaseModel):
     silhouette: float | None = None
     computed_at: str | None = None
     cached: bool = False
+    layout_fallback: bool = False
+
+
+# Per-layout cache keys — keyed under the emb3d wildcard bust pattern
+# cerid:graph:emb3d:* so the nightly job invalidates all of them.
+# Omitting the ?layout param is byte-identical to ?layout=force.
+_VALID_LAYOUTS = frozenset({"force", "wells", "domain"})
+_LAYOUT_MAP_CACHE_KEY_TMPL = "cerid:graph:emb3d:v3:map:{layout}"
+_LAYOUT_COMMUNITY_REDIS_KEY_TMPL = "cerid:graph:map:communities:{layout}"
 
 
 @router.get("/map", response_model=GraphMapResponse)
-async def get_graph_map() -> GraphMapResponse:
+async def get_graph_map(
+    layout: str | None = Query(
+        default=None,
+        description="Layout basis: force (default), wells, or domain. "
+                    "Omitting is byte-identical to force. Unknown value → 422.",
+    ),
+) -> GraphMapResponse:
     """Full cartographic map payload for Constellation.
 
     Bundles the 2D-projected entity positions, CO_MENTIONED edge links, and
     the precomputed community hull/anchor/trust-mix artifacts from the
     compute_umap_3d nightly job into one cached response.
 
+    Supports ``?layout=force|wells|domain``.  Omitting the parameter is
+    byte-identical to ``?layout=force``.  Unknown values return 422.
+
     Cache: Redis SETEX ``GRAPH_EMBEDDINGS_3D_CACHE_TTL`` (default 24h).
-    The key ``cerid:graph:emb3d:v2:map`` matches the ``cerid:graph:emb3d:*``
-    bust pattern so a job recompute invalidates this endpoint automatically.
+    Per-layout cache keys ``cerid:graph:emb3d:v3:map:{layout}`` match the
+    ``cerid:graph:emb3d:*`` bust pattern so a job recompute invalidates all
+    of them automatically.
+
+    ``layout_fallback: true`` is returned when the requested non-default
+    layout artifact is missing — the response falls back to the force layout.
 
     Community artifacts degrade to ``communities=[]`` when the nightly job
     has not yet written the Redis artifact — the entity+link payload is
     always returned.
+
+    Use when: the Constellation renderer needs entity positions + community
+    hulls for the full cartographic map view.
+
+    Returns: count, entities (id/name/x/y/z/type/community/mention_count/
+    trust_state/projection/primary_domain), links (index triples), communities
+    (id/count/hull/anchor/label/top_hubs/trust_mix), silhouette, computed_at,
+    cached, layout_fallback.
     """
+    # Validate layout parameter
+    if layout is not None and layout not in _VALID_LAYOUTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown layout '{layout}'. Valid values: {sorted(_VALID_LAYOUTS)}.",
+        )
+
+    effective_layout = layout or "force"
+    is_non_default = effective_layout != "force"
+    layout_fallback = False
+
+    cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout=effective_layout)
+    community_redis_key = _LAYOUT_COMMUNITY_REDIS_KEY_TMPL.format(
+        layout=effective_layout
+    )
+
     redis = get_redis()
 
-    # Cache fast-path.
+    # Cache fast-path — per-layout key.
     if redis:
         try:
-            cached_raw = redis.get(_GRAPH_MAP_CACHE_KEY)
+            cached_raw = redis.get(cache_key)
             if cached_raw:
                 payload = json.loads(
                     cached_raw if isinstance(cached_raw, str)
@@ -920,7 +975,36 @@ async def get_graph_map() -> GraphMapResponse:
                 return GraphMapResponse(**payload)
         except (json.JSONDecodeError, ValueError, OSError) as exc:
             # silent-catch-allowed: cache miss is non-fatal — re-fetch.
-            logger.info("graph.map.cache_read_miss: %s", exc)
+            logger.info("graph.map.cache_read_miss layout=%s: %s", effective_layout, exc)
+
+    # For non-default layouts: check if per-layout position artifact exists in
+    # Redis. If missing, fall back to the force layout with layout_fallback=True.
+    if is_non_default and redis:
+        layout_pos_key = f"cerid:graph:emb3d:v3:layout_positions:{effective_layout}"
+        try:
+            has_layout_pos = redis.exists(layout_pos_key)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("app.routers.graph.map_layout_check", exc)
+            has_layout_pos = False
+        if not has_layout_pos:
+            layout_fallback = True
+            # Fall through to force layout positions
+            cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout="force")
+            community_redis_key = _LAYOUT_COMMUNITY_REDIS_KEY_TMPL.format(layout="force")
+            # Try the force cache first
+            if redis:
+                try:
+                    cached_raw = redis.get(cache_key)
+                    if cached_raw:
+                        payload = json.loads(
+                            cached_raw if isinstance(cached_raw, str)
+                            else cached_raw.decode("utf-8"),
+                        )
+                        payload["cached"] = True
+                        payload["layout_fallback"] = True
+                        return GraphMapResponse(**payload)
+                except (json.JSONDecodeError, ValueError, OSError) as exc:
+                    logger.info("graph.map.fallback_cache_read_miss: %s", exc)
 
     # Entity positions and links.
     rows = await _query_embeddings_3d(None, None)
@@ -928,18 +1012,31 @@ async def get_graph_map() -> GraphMapResponse:
     computed_at_values = [str(r["computed_at"]) for r in rows if r.get("computed_at")]
     computed_at: str | None = max(computed_at_values) if computed_at_values else None
 
+    # For non-force layouts, load per-layout positions and override x/y/z.
+    layout_pos_override: dict[str, list[float]] = {}
+    if is_non_default and not layout_fallback and redis:
+        try:
+            pos_raw = redis.get(f"cerid:graph:emb3d:v3:layout_positions:{effective_layout}")
+            if pos_raw:
+                layout_pos_override = json.loads(
+                    pos_raw if isinstance(pos_raw, str) else pos_raw.decode("utf-8")
+                )
+        except Exception as exc:  # noqa: BLE001 — position override is best-effort
+            log_swallowed_error("app.routers.graph.map_layout_positions", exc)
+
     payload_entities = [
         EntityEmbedding3D(
             id=r["id"],
             name=r.get("name") or r["id"],
-            x=float(r.get("x") or 0.0),
-            y=float(r.get("y") or 0.0),
-            z=float(r.get("z") or 0.0),
+            x=float(layout_pos_override[r["id"]][0] if r["id"] in layout_pos_override else (r.get("x") or 0.0)),
+            y=float(layout_pos_override[r["id"]][1] if r["id"] in layout_pos_override else (r.get("y") or 0.0)),
+            z=float(layout_pos_override[r["id"]][2] if r["id"] in layout_pos_override else (r.get("z") or 0.0)),
             type=r.get("type") or "unknown",
             community=r.get("community"),
             mention_count=int(r.get("mention_count") or 0),
             trust_state=r.get("trust_state") or "unknown",
             projection=r.get("method") or "fallback",
+            primary_domain=r.get("primary_domain"),
         )
         for r in rows
     ]
@@ -947,11 +1044,12 @@ async def get_graph_map() -> GraphMapResponse:
     links = await _query_embeddings_3d_links([r["id"] for r in rows])
 
     # Community artifacts — degrade gracefully if missing.
+    # Try per-layout key first, fall back to the legacy key.
     communities: list[MapCommunity] = []
     silhouette: float | None = None
     if redis:
         try:
-            raw = redis.get(_COMMUNITY_MAP_REDIS_KEY)
+            raw = redis.get(community_redis_key) or redis.get(_COMMUNITY_MAP_REDIS_KEY)
             if raw:
                 artifact = json.loads(
                     raw if isinstance(raw, str) else raw.decode("utf-8"),
@@ -978,18 +1076,19 @@ async def get_graph_map() -> GraphMapResponse:
         silhouette=silhouette,
         computed_at=computed_at,
         cached=False,
+        layout_fallback=layout_fallback,
     )
 
     if redis:
         try:
             redis.set(
-                _GRAPH_MAP_CACHE_KEY,
+                cache_key,
                 response.model_dump_json(),
                 ex=_EMBEDDINGS_3D_TTL_SECONDS,
             )
         except (OSError, ValueError) as exc:
             # silent-catch-allowed: cache-write failure non-fatal.
-            logger.info("graph.map.cache_write_failed: %s", exc)
+            logger.info("graph.map.cache_write_failed layout=%s: %s", effective_layout, exc)
 
     return response
 
@@ -1006,6 +1105,51 @@ _STRATA_WINDOW_CAP = 730
 _TRACK_MAX_EVENTS = 500
 _TRACK_CO_MENTIONED_CAP = 20
 _TRUST_STATES = frozenset({"verified", "partial", "unverified", "unknown"})
+# Tephra Cycle-2: event payload caps per spec (<=200/window, <=8/bucket)
+_STRATA_MAX_EVENTS_PER_WINDOW = 200
+_STRATA_MAX_EVENTS_PER_BUCKET = 8
+# Cache key version — bump when the cached payload shape breaks consumers.
+# v1 (original) → v2 (Tephra Cycle-2: lanes[], events[], top_entities, data_extent)
+_STRATA_CACHE_VERSION = "v2"
+
+
+class StrataTopEntity(BaseModel):
+    """One top entity in a per-(lane, bucket) slot."""
+    name: str
+    slug: str
+
+
+class StrataEventItem(BaseModel):
+    """One event entry in the strata events[] list (Tephra Cycle-2)."""
+    kind: str        # "refresh" | "enrich" | "contradict" | "contradiction_finding"
+    ts: str          # ISO-8601
+    lane_id: str     # domain name or community_id
+    bucket: str      # bucket key (same format as bucket_dates)
+    entity_slug: str = ""
+    entity_name: str = ""
+    summary: str = ""  # ≤140 chars
+    severity: str = ""  # for contradiction_finding: "low" | "medium" | "high"
+    source_artifact_id: str = ""
+
+
+class StrataVerificationAgg(BaseModel):
+    """Aggregated verification-report counts per (lane, bucket) (Tephra Cycle-2)."""
+    lane_id: str
+    bucket: str
+    count: int
+    verified: int
+    unverified: int
+    uncertain: int
+    overall_score_avg: float
+
+
+class StrataLaneMeta(BaseModel):
+    """Server-side lane metadata for Timeline canvas labels (amendment #8)."""
+    lane_id: str
+    label: str
+    icon: str = "file"   # lucide kebab-name from taxonomy; "file" fallback
+    summary_short: str = ""
+    summary_full: str = ""
 
 
 class StrataCommunity(BaseModel):
@@ -1019,9 +1163,10 @@ class StrataCommunity(BaseModel):
 
 
 class StrataSeriesRow(BaseModel):
-    """Per-(community, entity_type) mention buckets aligned to bucket_dates."""
+    """Per-(community, entity_type, domain) mention buckets aligned to bucket_dates."""
     community_id: str
     entity_type: str
+    domain: str
     buckets: list[int]
     unverified_buckets: list[int]
 
@@ -1037,12 +1182,14 @@ class StrataTrack(BaseModel):
     rank: int
     total_mentions: int
     buckets: list[int]
+    primary_domain: str | None = None
 
 
 class StrataMarker(BaseModel):
     date: str
     kind: str       # "ingest_burst" | "birth_surge"
     count: int
+    lane_id: str = ""  # Tephra Cycle-2: per-lane attribution ("" = global)
 
 
 class StrataTotals(BaseModel):
@@ -1051,7 +1198,7 @@ class StrataTotals(BaseModel):
 
 
 class StrataResponse(BaseModel):
-    """Shape returned by GET /graph/timeline/strata."""
+    """Shape returned by GET /graph/timeline/strata (Tephra Cycle-2 extended)."""
     from_date: str
     to_date: str
     granularity: str
@@ -1062,6 +1209,18 @@ class StrataResponse(BaseModel):
     markers: list[StrataMarker]
     totals: StrataTotals
     cached: bool = False
+    # Tephra Cycle-2 additive fields — all optional so old cached payloads still parse
+    lanes: list[StrataLaneMeta] = []
+    events: list[StrataEventItem] = []
+    verification_aggs: list[StrataVerificationAgg] = []
+    # Per-(lane, bucket) top entities for the hover tooltip (≤3 per slot)
+    top_entities: dict[str, list[StrataTopEntity]] = {}  # key: "{lane_id}:{bucket}"
+    # Earliest data timestamp across the window — lets the frontend implement
+    # data-extent clamping for the 180d default window (amendment #7)
+    data_extent_from: str | None = None
+    # Earliest KnowledgeLog entry — events before this date were never
+    # recorded; drives the pre-ledger hairline (honesty load-bearing)
+    ledger_start_date: str | None = None
 
 
 class TrackEvent(BaseModel):
@@ -1073,23 +1232,57 @@ class TrackEvent(BaseModel):
     co_mentioned: list[dict[str, str]]
 
 
+class TrackKnowledgeEvent(BaseModel):
+    """A KnowledgeLog event surfaced in the track detail (Tephra Cycle-2)."""
+    kind: str        # "refresh" | "enrich" | "contradict"
+    ts: str
+    entity_slug: str = ""
+    summary: str = ""
+    source_artifact_id: str = ""
+
+
+class TrackNewEntity(BaseModel):
+    """An entity born in this bucket window (Tephra Cycle-2)."""
+    name: str
+    slug: str
+    created_at: str
+
+
+class TrackVerification(BaseModel):
+    """Aggregated VerificationReport counts for this entity track (Tephra Cycle-2)."""
+    reports: int = 0
+    verified: int = 0
+    unverified: int = 0
+    uncertain: int = 0
+    overall_score_avg: float = 0.0
+
+
 class TrackDetailResponse(BaseModel):
-    """Shape returned by GET /graph/timeline/track/{canonical_id}."""
+    """Shape returned by GET /graph/timeline/track/{canonical_id} (Tephra Cycle-2)."""
     canonical_id: str
     name: str
     events: list[TrackEvent]
     cached: bool = False
+    # Tephra Cycle-2 additive fields — all optional for backward compat
+    knowledge_events: list[TrackKnowledgeEvent] = []
+    new_entities: list[TrackNewEntity] = []
+    verification: TrackVerification = TrackVerification()
+    community_summary: str = ""  # populated under community lens
 
 
 def _strata_cache_key(start: str, end: str, gran: str) -> str:
-    return f"cerid:graph:timeline:strata:{start}:{end}:{gran}"
+    # Version bump v1→v2: Tephra Cycle-2 extended payload (lanes, events,
+    # top_entities, verification_aggs) would break old-shape consumers if
+    # they read an unversioned cache entry from before this deploy.
+    return f"cerid:graph:timeline:strata:{_STRATA_CACHE_VERSION}:{start}:{end}:{gran}"
 
 
-def _track_cache_key(canonical_id: str, start: str, end: str) -> str:
-    return f"cerid:graph:timeline:track:{canonical_id}:{start}:{end}"
+def _track_cache_key(canonical_id: str, start: str, end: str, bucket: str = "") -> str:
+    suffix = f":{bucket}" if bucket else ""
+    return f"cerid:graph:timeline:track:{canonical_id}:{start}:{end}{suffix}"
 
 
-def _color_slot(community_id: str) -> int:
+def _color_slot_from_id(community_id: str) -> int:
     """Deterministic community→slot (0-7) compatible with communitySlot() on client."""
     h = hashlib.sha1(  # noqa: S324
         community_id.encode("utf-8"),
@@ -1102,10 +1295,17 @@ def _derive_markers(
     bucket_dates: list[str],
     mention_counts: list[int],
     birth_counts: list[int],
+    *,
+    lane_id: str = "",
 ) -> list[StrataMarker]:
     """Derive ingest_burst and birth_surge markers per spec.
 
     Rule: count > max(20, 3 × median of non-zero buckets).
+
+    When ``lane_id`` is non-empty the returned markers carry it so the
+    frontend can attribute the burst to a specific domain lane (Tephra
+    Cycle-2, amendment #1 per-lane attribution).  Global markers have
+    ``lane_id=""`` and are retained only for the community lens code path.
     """
     def _threshold(counts: list[int]) -> float:
         nonzero = [c for c in counts if c > 0]
@@ -1118,9 +1318,9 @@ def _derive_markers(
     markers: list[StrataMarker] = []
     for date, m_count, b_count in zip(bucket_dates, mention_counts, birth_counts):
         if m_count > mention_thresh:
-            markers.append(StrataMarker(date=date, kind="ingest_burst", count=m_count))
+            markers.append(StrataMarker(date=date, kind="ingest_burst", count=m_count, lane_id=lane_id))
         if b_count > birth_thresh:
-            markers.append(StrataMarker(date=date, kind="birth_surge", count=b_count))
+            markers.append(StrataMarker(date=date, kind="birth_surge", count=b_count, lane_id=lane_id))
     return markers
 
 
@@ -1284,12 +1484,14 @@ async def get_timeline_strata(
         RETURN
             coalesce(e.community_id, '__null__') AS community_id,
             coalesce(e.entity_type, e.type, 'unknown') AS entity_type,
+            coalesce(e.primary_domain, 'other') AS domain,
             m.created_at AS ts,
             coalesce(e.trust_state, 'unknown') AS trust_state,
             e.canonical_id AS canonical_id,
             coalesce(e.name, e.canonical_id) AS name,
             coalesce(e.mention_count, 0) AS mention_count,
-            e.created_at AS entity_created_at
+            e.created_at AS entity_created_at,
+            e.primary_domain AS primary_domain
     """
     try:
         rows = await asyncio.to_thread(
@@ -1310,16 +1512,23 @@ async def get_timeline_strata(
     bucket_index: dict[str, int] = {d: i for i, d in enumerate(bucket_dates)}
     n_buckets = len(bucket_dates)
 
-    # Accumulate per-(community, entity_type) buckets
+    # Accumulate per-(community, entity_type, domain) buckets
     # key → {"buckets": [int], "unverified_buckets": [int]}
-    series_acc: dict[tuple[str, str], dict[str, list[int]]] = {}
-    # per-community total mentions (for top-8 selection)
+    series_acc: dict[tuple[str, str, str], dict[str, list[int]]] = {}
+    # per-community total mentions (for top-8 selection — community lens; amendment #1)
     community_total: dict[str, int] = {}
     # per-entity accumulation for DOI + track buckets
     entity_acc: dict[str, dict[str, Any]] = {}
-    # global bucket totals for markers
+    # global bucket totals for markers (community lens rollup; stays per amendment #1)
     global_bucket_mentions: list[int] = [0] * n_buckets
     global_bucket_births: list[int] = [0] * n_buckets
+    # Tephra Cycle-2: per-domain bucket totals for per-lane markers
+    domain_bucket_mentions: dict[str, list[int]] = {}
+    domain_bucket_births: dict[str, list[int]] = {}
+    # Per-(lane, bucket) top-entity accumulation {(lane_id, bkey): {slug: name}}
+    lane_bucket_entities: dict[tuple[str, str], dict[str, str]] = {}
+    # Earliest mention ts for data_extent_from
+    earliest_ts: str | None = None
 
     # Track first-seen per entity within the query (to count births)
     entity_first_bucket: dict[str, int] = {}
@@ -1328,19 +1537,25 @@ async def get_timeline_strata(
         cid_raw = str(row.get("community_id") or "__null__")
         cid = cid_raw if cid_raw != "__null__" else "other"
         etype = str(row.get("entity_type") or "unknown")
+        domain = str(row.get("domain") or "other")
         ts = str(row.get("ts") or "")
         trust = str(row.get("trust_state") or "unknown")
         canon = str(row.get("canonical_id") or "")
         name = str(row.get("name") or canon)
         entity_created_at = str(row.get("entity_created_at") or "")
+        primary_domain_val = row.get("primary_domain")
 
         bkey = _bucket_key(ts, gran)
         bidx = bucket_index.get(bkey, -1)
         if bidx < 0:
             continue
 
-        # Series accumulation
-        sk = (cid, etype)
+        # Track earliest ts for data_extent_from hint
+        if ts and (earliest_ts is None or ts < earliest_ts):
+            earliest_ts = ts
+
+        # Series accumulation — key now includes domain
+        sk = (cid, etype, domain)
         if sk not in series_acc:
             series_acc[sk] = {
                 "buckets": [0] * n_buckets,
@@ -1350,11 +1565,23 @@ async def get_timeline_strata(
         if trust == "unverified":
             series_acc[sk]["unverified_buckets"][bidx] += 1
 
-        # Community total
+        # Community total (community lens rollup; amendment #1: keep for community lens)
         community_total[cid] = community_total.get(cid, 0) + 1
 
         # Global bucket mentions for ingest_burst marker
         global_bucket_mentions[bidx] += 1
+
+        # Per-domain bucket mentions for per-lane marker attribution
+        if domain not in domain_bucket_mentions:
+            domain_bucket_mentions[domain] = [0] * n_buckets
+        domain_bucket_mentions[domain][bidx] += 1
+
+        # Per-(lane, bucket) entity accumulation for top_entities
+        lb_key = (domain, bkey)
+        if lb_key not in lane_bucket_entities:
+            lane_bucket_entities[lb_key] = {}
+        if canon:
+            lane_bucket_entities[lb_key][canon] = name
 
         # Entity accumulation for tracks
         if canon:
@@ -1365,6 +1592,7 @@ async def get_timeline_strata(
                     "community_id": cid,
                     "trust_state": trust,
                     "first_seen": entity_created_at,
+                    "primary_domain": primary_domain_val,
                     "buckets": [0] * n_buckets,
                     "total": 0,
                     "last_bucket_idx": 0,
@@ -1381,6 +1609,10 @@ async def get_timeline_strata(
             entity_first_bucket[canon] = birth_bidx
             if birth_bidx >= 0:
                 global_bucket_births[birth_bidx] += 1
+                # Also track per-domain births
+                if domain not in domain_bucket_births:
+                    domain_bucket_births[domain] = [0] * n_buckets
+                domain_bucket_births[domain][birth_bidx] += 1
 
     # ── Top-8 communities (+ "other" rollup) ─────────────────────────────────
     sorted_comms = sorted(community_total.items(), key=lambda kv: kv[1], reverse=True)
@@ -1394,10 +1626,10 @@ async def get_timeline_strata(
         top_comm_set.add("other")
 
     # Remap series rows for communities outside top-8 → "other"
-    remapped_series: dict[tuple[str, str], dict[str, list[int]]] = {}
-    for (cid, etype), acc in series_acc.items():
+    remapped_series: dict[tuple[str, str, str], dict[str, list[int]]] = {}
+    for (cid, etype, domain), acc in series_acc.items():
         target_cid = cid if cid in top_comm_set else "other"
-        sk = (target_cid, etype)
+        sk = (target_cid, etype, domain)
         if sk not in remapped_series:
             remapped_series[sk] = {
                 "buckets": [0] * n_buckets,
@@ -1435,7 +1667,7 @@ async def get_timeline_strata(
         communities_out.append(StrataCommunity(
             community_id=cid,
             label=label,
-            color_slot=_color_slot(cid),
+            color_slot=_color_slot_from_id(cid),
             trust_mix=trust_mix,
             total_mentions=c_total,
             is_other=is_other,
@@ -1446,10 +1678,11 @@ async def get_timeline_strata(
         StrataSeriesRow(
             community_id=cid,
             entity_type=etype,
+            domain=domain,
             buckets=acc["buckets"],
             unverified_buckets=acc["unverified_buckets"],
         )
-        for (cid, etype), acc in remapped_series.items()
+        for (cid, etype, domain), acc in remapped_series.items()
         if cid in top_comm_set
     ]
 
@@ -1478,13 +1711,177 @@ async def get_timeline_strata(
             rank=rank,
             total_mentions=ea["total"],
             buckets=ea["buckets"],
+            primary_domain=ea.get("primary_domain"),
         ))
 
-    # ── Markers ───────────────────────────────────────────────────────────────
+    # ── Markers (global + per-lane) ───────────────────────────────────────────
+    # Community lens: global top-8 rollup stays (amendment #1).
     markers_out = _derive_markers(bucket_dates, global_bucket_mentions, global_bucket_births)
+
+    # Per-lane markers for domain lanes (amendment #1: bypassed on community lens;
+    # all domain-lens users see lane_id-attributed markers instead of the global rail).
+    for d_name, d_mentions in domain_bucket_mentions.items():
+        d_births = domain_bucket_births.get(d_name, [0] * n_buckets)
+        lane_markers = _derive_markers(bucket_dates, d_mentions, d_births, lane_id=d_name)
+        markers_out.extend(lane_markers)
 
     total_mentions = sum(global_bucket_mentions)
     total_entities = len(entity_acc)
+
+    # ── Tephra Cycle-2: domain taxonomy for lanes[] meta block ────────────────
+    lanes_out: list[StrataLaneMeta] = []
+    try:
+        from app.db.neo4j.taxonomy import get_domain_counts  # noqa: PLC0415
+
+        raw_domains = await asyncio.to_thread(get_domain_counts, driver)
+        for d in (raw_domains.get("domains") or []):
+            d_name_raw = d.get("name") or ""
+            lanes_out.append(StrataLaneMeta(
+                lane_id=d_name_raw,
+                label=d_name_raw.replace("_", " ").title(),
+                icon=str(d.get("icon") or "file"),
+                summary_short="",
+                summary_full="",
+            ))
+    except Exception as exc:  # noqa: BLE001 — lanes meta is non-fatal
+        log_swallowed_error(
+            "app.routers.graph.strata_lanes_meta",
+            exc,
+        )
+
+    # ── Tephra Cycle-2: KnowledgeLog events ──────────────────────────────────
+    events_out: list[StrataEventItem] = []
+    ledger_start: str | None = None
+    try:
+        from app.db.neo4j.knowledge_log import list_log_entries  # noqa: PLC0415
+
+        def _ledger_min_ts() -> str | None:
+            with driver.session() as s:
+                rec = s.run("MATCH (k:KnowledgeLog) RETURN min(k.ts) AS ts").single()
+                return str(rec["ts"]) if rec and rec["ts"] else None
+
+        ledger_start = await asyncio.to_thread(_ledger_min_ts)
+
+        log_rows = await asyncio.to_thread(
+            list_log_entries,
+            driver,
+            since=start_iso,
+            limit=_STRATA_MAX_EVENTS_PER_WINDOW,
+        )
+        # Per-bucket cap: track counts per (lane, bucket)
+        per_bucket_event_count: dict[tuple[str, str], int] = {}
+        for entry in log_rows:
+            slug = str(entry.get("entity_slug") or "")
+            # Join to domain via entity's primary_domain — available in entity_acc
+            lane_id = ""
+            if slug:
+                for ea in entity_acc.values():
+                    # entity_acc is keyed by canonical_id; slug may match name or id
+                    if ea.get("name") == slug or str(ea.get("primary_domain") or "") == slug:
+                        lane_id = str(ea.get("primary_domain") or "")
+                        break
+                # Fallback: try entity_acc directly by canonical_id == slug
+                if not lane_id and slug in entity_acc:
+                    lane_id = str(entity_acc[slug].get("primary_domain") or "")
+            if not lane_id:
+                continue  # can't place in a lane; skip
+
+            ts_val = str(entry.get("ts") or "")
+            bkey = _bucket_key(ts_val, gran)
+            if bkey not in bucket_index:
+                continue
+
+            bucket_key_pair = (lane_id, bkey)
+            cur = per_bucket_event_count.get(bucket_key_pair, 0)
+            if cur >= _STRATA_MAX_EVENTS_PER_BUCKET:
+                continue
+            per_bucket_event_count[bucket_key_pair] = cur + 1
+
+            summary_raw = str(entry.get("summary") or "")
+            events_out.append(StrataEventItem(
+                kind=str(entry.get("action") or "refresh"),
+                ts=ts_val,
+                lane_id=lane_id,
+                bucket=bkey,
+                entity_slug=slug,
+                entity_name=slug,
+                summary=summary_raw[:140],
+                source_artifact_id=str(entry.get("source_artifact_id") or ""),
+            ))
+    except Exception as exc:  # noqa: BLE001 — events are non-fatal
+        log_swallowed_error(
+            "app.routers.graph.strata_knowledge_events",
+            exc,
+        )
+
+    # ── Tephra Cycle-2: VerificationReport aggregates per (lane, bucket) ─────
+    verification_aggs_out: list[StrataVerificationAgg] = []
+    try:
+        verif_cypher = """
+            MATCH (vr:VerificationReport)
+            WHERE vr.created_at >= $start AND vr.created_at <= $end
+            RETURN
+                vr.created_at AS ts,
+                coalesce(vr.verified, 0) AS verified,
+                coalesce(vr.unverified, 0) AS unverified,
+                coalesce(vr.uncertain, 0) AS uncertain,
+                coalesce(vr.overall_score, 0.0) AS overall_score
+        """
+        verif_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            verif_cypher,
+            {"start": start_iso, "end": end_iso},
+        )
+        # Aggregate per (global bucket) — we don't have lane join on VerificationReport
+        # so we attribute to a synthetic "verification" lane in the aggs.
+        # Amendment #2: suppress sparse buckets below 3 reports.
+        verif_bucket_acc: dict[str, dict[str, Any]] = {}
+        for vrow in verif_rows:
+            vts = str(vrow.get("ts") or "")
+            vbkey = _bucket_key(vts, gran)
+            if vbkey not in bucket_index:
+                continue
+            if vbkey not in verif_bucket_acc:
+                verif_bucket_acc[vbkey] = {
+                    "count": 0, "verified": 0,
+                    "unverified": 0, "uncertain": 0, "score_sum": 0.0,
+                }
+            acc_v = verif_bucket_acc[vbkey]
+            acc_v["count"] += 1
+            acc_v["verified"] += int(vrow.get("verified") or 0)
+            acc_v["unverified"] += int(vrow.get("unverified") or 0)
+            acc_v["uncertain"] += int(vrow.get("uncertain") or 0)
+            acc_v["score_sum"] += float(vrow.get("overall_score") or 0.0)
+
+        for vbkey, vacc in verif_bucket_acc.items():
+            cnt = vacc["count"]
+            if cnt < 3:  # amendment #2: suppress sparse — never render 1-sample signal
+                continue
+            verification_aggs_out.append(StrataVerificationAgg(
+                lane_id="__verification__",
+                bucket=vbkey,
+                count=cnt,
+                verified=vacc["verified"],
+                unverified=vacc["unverified"],
+                uncertain=vacc["uncertain"],
+                overall_score_avg=round(vacc["score_sum"] / cnt, 4) if cnt else 0.0,
+            ))
+    except Exception as exc:  # noqa: BLE001 — verification aggs are non-fatal
+        log_swallowed_error(
+            "app.routers.graph.strata_verification_aggs",
+            exc,
+        )
+
+    # ── Tephra Cycle-2: per-(lane, bucket) top entities (≤3) ─────────────────
+    top_entities_out: dict[str, list[StrataTopEntity]] = {}
+    for (lb_lane, lb_bkey), ent_map in lane_bucket_entities.items():
+        # Take up to 3 entities by insertion order (they're already ordered by mention)
+        top3 = [
+            StrataTopEntity(name=n, slug=s)
+            for s, n in list(ent_map.items())[:3]
+        ]
+        top_entities_out[f"{lb_lane}:{lb_bkey}"] = top3
 
     response = StrataResponse(
         from_date=start_dt.isoformat(),
@@ -1497,6 +1894,12 @@ async def get_timeline_strata(
         markers=markers_out,
         totals=StrataTotals(mentions=total_mentions, entities_introduced=total_entities),
         cached=False,
+        lanes=lanes_out,
+        events=events_out,
+        verification_aggs=verification_aggs_out,
+        top_entities=top_entities_out,
+        data_extent_from=earliest_ts,
+        ledger_start_date=ledger_start,
     )
 
     # Cache 60s
@@ -1522,11 +1925,14 @@ async def get_timeline_track(
     canonical_id: str,
     from_date: str | None = Query(None, alias="from", description="ISO-8601 lower bound"),
     to_date: str | None = Query(None, alias="to", description="ISO-8601 upper bound"),
+    bucket: str | None = Query(None, description="Tephra Cycle-2: scope results to a single bucket key"),
 ) -> TrackDetailResponse:
     """Event-level detail for one entity track (lazy, zoom-triggered).
 
     Returns up to 500 mention events with per-event co-mentions (cap 20)
-    via shared-artifact cypher.
+    via shared-artifact cypher.  The optional ``bucket=`` param (Tephra
+    Cycle-2) scopes results to a single bucket and adds additive fields:
+    knowledge_events, new_entities, verification, community_summary.
 
     Cache: Redis 60s TTL.
     """
@@ -1538,7 +1944,7 @@ async def get_timeline_track(
 
     start_iso = start_dt.isoformat()
     end_iso = end_dt.isoformat()
-    cache_key = _track_cache_key(canonical_id, start_iso, end_iso)
+    cache_key = _track_cache_key(canonical_id, start_iso, end_iso, bucket or "")
     redis = get_redis()
 
     # Cache fast-path
@@ -1650,11 +2056,138 @@ async def get_timeline_track(
             co_mentioned=co_list,
         ))
 
+    # ── Tephra Cycle-2 additive fields ────────────────────────────────────────
+    knowledge_events_out: list[TrackKnowledgeEvent] = []
+    new_entities_out: list[TrackNewEntity] = []
+    verification_out = TrackVerification()
+    community_summary_out = ""
+
+    # KnowledgeLog events for this entity
+    try:
+        from app.db.neo4j.knowledge_log import list_log_entries  # noqa: PLC0415
+
+        ke_rows = await asyncio.to_thread(
+            list_log_entries,
+            driver,
+            entity_slug=canonical_id,
+            since=start_iso,
+            limit=100,
+        )
+        for ke in ke_rows:
+            knowledge_events_out.append(TrackKnowledgeEvent(
+                kind=str(ke.get("action") or "refresh"),
+                ts=str(ke.get("ts") or ""),
+                entity_slug=str(ke.get("entity_slug") or ""),
+                summary=str(ke.get("summary") or "")[:140],
+                source_artifact_id=str(ke.get("source_artifact_id") or ""),
+            ))
+    except Exception as exc:  # noqa: BLE001 — knowledge events non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_knowledge_events",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
+    # New entities born in the window (co-domain births)
+    try:
+        birth_cypher = """
+            MATCH (e:Entity)
+            WHERE e.created_at >= $start AND e.created_at <= $end
+            MATCH (a:Artifact)-[:MENTIONS]->(focal:Entity {canonical_id: $canonical_id})
+            WHERE (a)-[:MENTIONS]->(e)
+            RETURN DISTINCT
+                coalesce(e.name, e.canonical_id) AS name,
+                e.canonical_id AS slug,
+                e.created_at AS created_at
+            ORDER BY e.created_at DESC
+            LIMIT 20
+        """
+        birth_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            birth_cypher,
+            {"canonical_id": canonical_id, "start": start_iso, "end": end_iso},
+        )
+        for br in birth_rows:
+            new_entities_out.append(TrackNewEntity(
+                name=str(br.get("name") or ""),
+                slug=str(br.get("slug") or ""),
+                created_at=str(br.get("created_at") or ""),
+            ))
+    except Exception as exc:  # noqa: BLE001 — new_entities non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_new_entities",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
+    # VerificationReport aggregates for this entity's artifacts
+    try:
+        verif_track_cypher = """
+            MATCH (e:Entity {canonical_id: $canonical_id})<-[:MENTIONS]-(a:Artifact)
+            MATCH (vr:VerificationReport)-[:EXTRACTED_FROM]->(a)
+            WHERE vr.created_at >= $start AND vr.created_at <= $end
+            RETURN
+                count(vr) AS reports,
+                sum(coalesce(vr.verified, 0)) AS verified,
+                sum(coalesce(vr.unverified, 0)) AS unverified,
+                sum(coalesce(vr.uncertain, 0)) AS uncertain,
+                avg(coalesce(vr.overall_score, 0.0)) AS score_avg
+        """
+        vt_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            verif_track_cypher,
+            {"canonical_id": canonical_id, "start": start_iso, "end": end_iso},
+        )
+        if vt_rows:
+            vtr = vt_rows[0]
+            verification_out = TrackVerification(
+                reports=int(vtr.get("reports") or 0),
+                verified=int(vtr.get("verified") or 0),
+                unverified=int(vtr.get("unverified") or 0),
+                uncertain=int(vtr.get("uncertain") or 0),
+                overall_score_avg=round(float(vtr.get("score_avg") or 0.0), 4),
+            )
+    except Exception as exc:  # noqa: BLE001 — verification non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_verification",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
+    # Community summary for community lens
+    try:
+        comm_cypher = """
+            MATCH (e:Entity {canonical_id: $canonical_id})
+            MATCH (c:Community {id: toString(e.community_id)})
+            WHERE c.summary IS NOT NULL
+            RETURN c.summary AS summary LIMIT 1
+        """
+        comm_rows = await asyncio.to_thread(
+            _run_strata_cypher,
+            driver,
+            comm_cypher,
+            {"canonical_id": canonical_id},
+        )
+        if comm_rows:
+            community_summary_out = str(comm_rows[0].get("summary") or "")
+    except Exception as exc:  # noqa: BLE001 — community summary non-fatal
+        log_swallowed_error(
+            "app.routers.graph.track_community_summary",
+            exc,
+            context={"canonical_id": canonical_id},
+        )
+
     response = TrackDetailResponse(
         canonical_id=canonical_id,
         name=entity_name,
         events=events,
         cached=False,
+        knowledge_events=knowledge_events_out,
+        new_entities=new_entities_out,
+        verification=verification_out,
+        community_summary=community_summary_out,
     )
 
     if redis is not None:
@@ -1670,5 +2203,431 @@ async def get_timeline_track(
                 exc,
                 context={"cache_key": cache_key},
             )
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Domain aggregate endpoint (Cycle 1 domain backbone)
+# ---------------------------------------------------------------------------
+
+
+class DomainSubCategory(BaseModel):
+    """One sub-category row in the /graph/domains response."""
+    name: str
+    artifact_count: int
+    entity_count: int
+
+
+class DomainSummary(BaseModel):
+    """Per-domain aggregate for /graph/domains."""
+    name: str
+    icon: str | None = None
+    description: str | None = None
+    in_taxonomy: bool = False
+    artifact_count: int = 0
+    entity_count: int = 0
+    # Corpus-level salience mass (Slice 6.2) — the response is ordered by this;
+    # 0.0 until DeriveDomainsJob runs (degrades to entity_count ordering).
+    salience: float = 0.0
+    sub_categories: list[DomainSubCategory] = []
+
+
+class DomainsResponse(BaseModel):
+    """Shape returned by GET /graph/domains.
+
+    ``derived_at: null`` means DeriveDomainsJob has never run — every
+    frontend surface keys its degraded state on this signal.
+    """
+    domains: list[DomainSummary]
+    uncategorized_entities: int
+    derived_at: str | None
+
+
+@router.get("/domains", response_model=DomainsResponse)
+async def get_domains() -> DomainsResponse:
+    """Per-domain entity/artifact counts — the taxonomy-aware spine endpoint.
+
+    Sorted by entity_count desc. ``derived_at: null`` signals that the
+    DeriveDomainsJob has never run; frontend surfaces use this to render
+    byte-identical degraded states rather than erroring.
+
+    No Redis cache in v1 — two indexed aggregates run in single-digit ms
+    at live scale.  Add one if it ever shows in traces.
+    """
+    _empty = DomainsResponse(domains=[], uncategorized_entities=0, derived_at=None)
+
+    try:
+        driver = get_neo4j()
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.domains_neo4j_unavailable", exc)
+        return _empty
+
+    if driver is None:
+        return _empty
+
+    from app.db.neo4j.taxonomy import get_domain_counts  # noqa: PLC0415
+
+    try:
+        raw = await asyncio.to_thread(get_domain_counts, driver)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.domains_query", exc)
+        return _empty
+
+    domains_out: list[DomainSummary] = []
+    for d in raw.get("domains") or []:
+        sub_cats = [
+            DomainSubCategory(
+                name=sc["name"],
+                artifact_count=int(sc.get("artifact_count") or 0),
+                entity_count=int(sc.get("entity_count") or 0),
+            )
+            for sc in (d.get("sub_categories") or [])
+        ]
+        domains_out.append(DomainSummary(
+            name=d["name"],
+            icon=d.get("icon"),
+            description=d.get("description"),
+            in_taxonomy=bool(d.get("in_taxonomy")),
+            artifact_count=int(d.get("artifact_count") or 0),
+            entity_count=int(d.get("entity_count") or 0),
+            salience=float(d.get("salience") or 0.0),
+            sub_categories=sub_cats,
+        ))
+
+    return DomainsResponse(
+        domains=domains_out,
+        uncategorized_entities=int(raw.get("uncategorized_entities") or 0),
+        derived_at=raw.get("derived_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# STRATA Decomposition endpoint (Cycle 4)
+# ---------------------------------------------------------------------------
+
+_DECOMPOSITION_CACHE_KEY = "cerid:graph:emb3d:v3:decomposition"
+_DECOMPOSITION_TTL_SECONDS = int(
+    os.getenv("GRAPH_DECOMPOSITION_CACHE_TTL", str(86400))
+)
+
+
+class CommunityHub(BaseModel):
+    """Top-degree entity within a community, ordered by degree descending."""
+
+    id: str
+    name: str
+    degree: int
+
+
+class DecompositionL0Community(BaseModel):
+    """L0 community node in the decomposition tree (contract: L0Community)."""
+
+    id: str
+    mode_domain: str
+    purity: float
+    size: int
+    label: str | None = None
+    top_hubs: list[CommunityHub] = []
+
+
+class DecompositionL0RollupBucket(BaseModel):
+    """Rollup bucket for L0 communities of size < 4 (contract: L0RollupBucket)."""
+
+    kind: str = "rollup"
+    community_count: int
+    entity_count: int
+
+
+class DecompositionL1Community(BaseModel):
+    """L1 community node in the decomposition tree (contract: L1Community)."""
+
+    id: str
+    mode_domain: str
+    purity: float
+    size: int
+    label: str | None = None
+    top_hubs: list[CommunityHub] = []
+    children: list[DecompositionL0Community | DecompositionL0RollupBucket] = []
+
+
+class DecompositionSubcategory(BaseModel):
+    """Subcategory tier node (contract: SubCategoryNode)."""
+
+    id: str
+    label: str
+    entity_count: int
+    children: list[DecompositionL1Community] = []
+
+
+class DecompositionUnclustered(BaseModel):
+    """Per-domain unclustered bucket (contract: UnclusteredBucket)."""
+
+    count: int
+
+
+class DecompositionDomain(BaseModel):
+    """Domain node in the decomposition tree (contract: DomainNode)."""
+
+    id: str
+    label: str
+    entity_count: int
+    unclustered: DecompositionUnclustered
+    subcategories: list[DecompositionSubcategory] | None = None
+    communities: list[DecompositionL1Community] | None = None
+
+
+class DecompositionEntityLeaf(BaseModel):
+    """Entity leaf returned by ?community= param (contract: EntityLeaf)."""
+
+    id: str
+    name: str
+    type: str
+    trust_state: str
+    path: list[str]  # [domain, sub?, l1, l0]
+
+
+class DecompositionResponse(BaseModel):
+    """Shape returned by GET /graph/decomposition (contract: DecompositionPayload).
+
+    ``no_communities_computed: true`` means Leiden has never run — the
+    icicle should degrade to an honest Domain→Entity two-tier (A3).
+    """
+
+    domains: list[DecompositionDomain]
+    parent_map: dict[str, str]
+    uncategorized_count: int
+    no_communities_computed: bool
+    computed_at: str | None
+    cached: bool = False
+
+
+class DecompositionCommunityLeafResponse(BaseModel):
+    """Shape returned by GET /graph/decomposition?community=<id>."""
+
+    community_id: str
+    entities: list[DecompositionEntityLeaf]
+    cached: bool = False
+
+
+def _assemble_l1(l1: dict[str, Any]) -> DecompositionL1Community:
+    """Build a DecompositionL1Community from a raw decomposition dict."""
+    children: list[DecompositionL0Community | DecompositionL0RollupBucket] = []
+    for child in l1.get("children") or []:
+        if child.get("kind") == "rollup":
+            children.append(DecompositionL0RollupBucket(
+                kind="rollup",
+                community_count=int(child.get("community_count") or 0),
+                entity_count=int(child.get("entity_count") or 0),
+            ))
+        else:
+            children.append(DecompositionL0Community(
+                id=child["id"],
+                size=int(child.get("size") or 0),
+                label=child.get("label") or None,
+                mode_domain=child.get("mode_domain") or "",
+                purity=float(child.get("purity") or 1.0),
+                top_hubs=[CommunityHub(**h) for h in (child.get("top_hubs") or [])],
+            ))
+    return DecompositionL1Community(
+        id=l1["id"],
+        size=int(l1.get("size") or 0),
+        label=l1.get("label") or None,
+        mode_domain=l1.get("mode_domain") or "",
+        purity=float(l1.get("purity") or 1.0),
+        top_hubs=[CommunityHub(**h) for h in (l1.get("top_hubs") or [])],
+        children=children,
+    )
+
+
+@router.get("/decomposition", response_model=DecompositionResponse | DecompositionCommunityLeafResponse)
+async def get_graph_decomposition(
+    community: str | None = Query(
+        default=None,
+        description="When provided, return entity leaves for this L0 community "
+                    "each carrying path:[domain, sub?, l1, l0]. Omit for the full tree.",
+    ),
+) -> DecompositionResponse | DecompositionCommunityLeafResponse:
+    """STRATA decomposition tree — the Atlas icicle data source.
+
+    Without ?community=: returns the full tier tree (11 domains, conditional
+    subcategory groups from e.primary_subcategory, 262 L1 + 503 L0 communities
+    with sizes/labels/mode-domain/purity, derived L0→L1 parent map, per-domain
+    unclustered counts, size<4 rollup buckets, no_communities_computed flag).
+
+    With ?community=<id>: returns entity leaves for that L0 community, each
+    carrying path:[domain, sub?, l1, l0] for the search-palette path walk.
+
+    Cache: Redis SETEX 24h under ``cerid:graph:emb3d:v3:decomposition``
+    which matches the ``cerid:graph:emb3d:*`` bust pattern, so the nightly
+    compute_umap_3d run invalidates it automatically.
+
+    no_communities_computed=true means Leiden has never run — the client
+    should degrade to an honest Domain→Entity two-tier with the notice
+    "Clusters appear after the nightly analysis runs" (A3).
+
+    Use when: the Atlas icicle panel needs to render the knowledge-base
+    hierarchy for exploration.
+
+    Returns (tree): no_communities_computed, domains (with l1/l0 community
+    trees + rollup buckets + unclustered counts), l0_to_l1 parent map,
+    unclustered_by_domain, derived_at, cached.
+
+    Returns (leaf): community_id, entities (id/name/entity_type/trust_state/
+    mention_count/primary_domain/path), cached.
+    """
+    redis = get_redis()
+
+    _empty_tree = DecompositionResponse(
+        no_communities_computed=True,
+        domains=[],
+        parent_map={},
+        uncategorized_count=0,
+        computed_at=None,
+    )
+
+    try:
+        driver = get_neo4j()
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.graph.decomposition_neo4j_unavailable", exc)
+        return _empty_tree
+
+    if driver is None:
+        return _empty_tree
+
+    from app.db.neo4j.decomposition import (  # noqa: PLC0415
+        get_community_entities,
+        get_decomposition_tree,
+    )
+
+    # --- ?community= leaf path -------------------------------------------------
+    if community is not None:
+        leaf_cache_key = (
+            f"cerid:graph:emb3d:v3:decomposition:leaf:{community}"
+        )
+        if redis:
+            try:
+                cached_raw = redis.get(leaf_cache_key)
+                if cached_raw:
+                    payload = json.loads(
+                        cached_raw if isinstance(cached_raw, str)
+                        else cached_raw.decode("utf-8"),
+                    )
+                    payload["cached"] = True
+                    return DecompositionCommunityLeafResponse(**payload)
+            except (json.JSONDecodeError, ValueError, OSError) as exc:
+                logger.info("graph.decomposition.leaf_cache_miss community=%s: %s", community, exc)
+
+        try:
+            entities_raw = await asyncio.to_thread(get_community_entities, driver, community)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error(
+                "app.routers.graph.decomposition_leaf_query",
+                exc,
+                context={"community": community},
+            )
+            raise HTTPException(status_code=500, detail="Decomposition leaf query failed.")
+
+        if entities_raw is None:
+            raise HTTPException(status_code=404, detail=f"Community '{community}' not found.")
+
+        entity_leaves = [
+            DecompositionEntityLeaf(
+                id=e["id"],
+                name=e.get("name") or e["id"],
+                type=e.get("type") or "OTHER",
+                trust_state=e.get("trust_state") or "unknown",
+                path=e.get("path") or [],
+            )
+            for e in entities_raw
+        ]
+        leaf_response = DecompositionCommunityLeafResponse(
+            community_id=community,
+            entities=entity_leaves,
+            cached=False,
+        )
+
+        if redis:
+            try:
+                redis.set(
+                    leaf_cache_key,
+                    leaf_response.model_dump_json(),
+                    ex=_DECOMPOSITION_TTL_SECONDS,
+                )
+            except (OSError, ValueError) as exc:
+                logger.info("graph.decomposition.leaf_cache_write_failed: %s", exc)
+
+        return leaf_response
+
+    # --- Full tree path --------------------------------------------------------
+    if redis:
+        try:
+            cached_raw = redis.get(_DECOMPOSITION_CACHE_KEY)
+            if cached_raw:
+                payload = json.loads(
+                    cached_raw if isinstance(cached_raw, str)
+                    else cached_raw.decode("utf-8"),
+                )
+                payload["cached"] = True
+                return DecompositionResponse(**payload)
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
+            logger.info("graph.decomposition.cache_read_miss: %s", exc)
+
+    try:
+        raw = await asyncio.to_thread(get_decomposition_tree, driver)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.graph.decomposition_tree_query", exc)
+        return _empty_tree
+
+    # Assemble Pydantic models from raw dict (field names mirror the TS contract)
+    domain_nodes: list[DecompositionDomain] = []
+    for d in raw.get("domains") or []:
+        sub_nodes: list[DecompositionSubcategory] | None = None
+        if d.get("subcategories") is not None:
+            sub_nodes = [
+                DecompositionSubcategory(
+                    id=sc["id"],
+                    label=sc.get("label") or sc["id"],
+                    entity_count=int(sc.get("entity_count") or 0),
+                    children=[
+                        _assemble_l1(l1) for l1 in (sc.get("children") or [])
+                    ],
+                )
+                for sc in d["subcategories"]
+            ]
+
+        l1_list: list[DecompositionL1Community] = [
+            _assemble_l1(l1) for l1 in (d.get("communities") or [])
+        ]
+
+        domain_nodes.append(DecompositionDomain(
+            id=d["id"],
+            label=d.get("label") or d["id"],
+            entity_count=int(d.get("entity_count") or 0),
+            unclustered=DecompositionUnclustered(
+                count=int((d.get("unclustered") or {}).get("count") or 0),
+            ),
+            subcategories=sub_nodes,
+            communities=l1_list if sub_nodes is None else None,
+        ))
+
+    response = DecompositionResponse(
+        no_communities_computed=bool(raw.get("no_communities_computed", False)),
+        domains=domain_nodes,
+        parent_map=raw.get("parent_map") or {},
+        uncategorized_count=int(raw.get("uncategorized_count") or 0),
+        computed_at=raw.get("computed_at"),
+        cached=False,
+    )
+
+    if redis:
+        try:
+            redis.set(
+                _DECOMPOSITION_CACHE_KEY,
+                response.model_dump_json(),
+                ex=_DECOMPOSITION_TTL_SECONDS,
+            )
+        except (OSError, ValueError) as exc:
+            logger.info("graph.decomposition.cache_write_failed: %s", exc)
 
     return response

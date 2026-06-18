@@ -1,4 +1,5 @@
 from app.models.query_envelope import QueryEnvelope, SourceItem
+from core.agents.query_agent import _format_chroma_result, assemble_context
 
 
 def _src(
@@ -77,3 +78,115 @@ def test_envelope_round_trip_legacy():
     d1.pop("timestamp")
     d2.pop("timestamp")
     assert d1 == d2
+
+
+# ---------------------------------------------------------------------------
+# RAG Phase 1.1 — provenance spine on the KB vector path
+# ---------------------------------------------------------------------------
+
+
+def test_format_chroma_result_kb_source_type():
+    """KB chunks (no pack_id) get source_type='kb'."""
+    res = _format_chroma_result(
+        content="hello",
+        relevance=0.9,
+        chunk_id="c1",
+        domain="general",
+        metadata={"artifact_id": "a1", "created_at": "2026-01-02"},
+    )
+    assert res["source_type"] == "kb"
+    assert res["pack_id"] == ""
+
+
+def test_format_chroma_result_created_at_from_metadata():
+    """created_at threads straight from chunk metadata when present."""
+    res = _format_chroma_result(
+        content="hello",
+        relevance=0.5,
+        chunk_id="c1",
+        domain="general",
+        metadata={"created_at": "2026-03-04T05:06:07Z"},
+    )
+    assert res["created_at"] == "2026-03-04T05:06:07Z"
+
+
+def test_format_chroma_result_created_at_falls_back_to_ingested_at():
+    """Absent created_at, fall back to ingested_at; None when neither exists."""
+    res = _format_chroma_result(
+        content="hello",
+        relevance=0.5,
+        chunk_id="c1",
+        domain="general",
+        metadata={"ingested_at": "2026-02-01"},
+    )
+    assert res["created_at"] == "2026-02-01"
+
+    bare = _format_chroma_result(
+        content="hello",
+        relevance=0.5,
+        chunk_id="c2",
+        domain="general",
+        metadata={},
+    )
+    assert bare["created_at"] is None
+
+
+def test_format_chroma_result_pack_source_type():
+    """A chunk with a truthy pack_id is classified as source_type='pack'."""
+    res = _format_chroma_result(
+        content="pack chunk",
+        relevance=0.7,
+        chunk_id="c1",
+        domain="research",
+        metadata={"pack_id": "pack-xyz", "created_at": "2026-04-05"},
+    )
+    assert res["source_type"] == "pack"
+    assert res["pack_id"] == "pack-xyz"
+    assert res["created_at"] == "2026-04-05"
+
+
+def test_assemble_context_preserves_provenance_fields():
+    """assemble_context threads source_type/created_at/pack_id onto sources[]."""
+    results = [
+        _format_chroma_result(
+            content="kb body",
+            relevance=0.9,
+            chunk_id="c1",
+            domain="general",
+            metadata={"artifact_id": "a1", "created_at": "2026-01-02"},
+        ),
+        _format_chroma_result(
+            content="pack body",
+            relevance=0.8,
+            chunk_id="c2",
+            domain="research",
+            metadata={"artifact_id": "a2", "pack_id": "pk", "created_at": "2026-05-06"},
+        ),
+    ]
+    _, sources, _ = assemble_context(results, max_chars=10000)
+    by_artifact = {s["artifact_id"]: s for s in sources}
+    assert by_artifact["a1"]["source_type"] == "kb"
+    assert by_artifact["a1"]["created_at"] == "2026-01-02"
+    assert by_artifact["a1"]["pack_id"] == ""
+    assert by_artifact["a2"]["source_type"] == "pack"
+    assert by_artifact["a2"]["created_at"] == "2026-05-06"
+    assert by_artifact["a2"]["pack_id"] == "pk"
+
+
+def test_assemble_context_does_not_clobber_existing_source_type():
+    """A surface-injected result with its own source_type keeps it."""
+    results = [
+        {
+            "content": "memory body",
+            "relevance": 1.0,
+            "artifact_id": "m1",
+            "filename": "m1",
+            "domain": "conversations",
+            "chunk_index": 0,
+            "source_type": "memory",
+            "created_at": "2026-06-07",
+        }
+    ]
+    _, sources, _ = assemble_context(results, max_chars=10000)
+    assert sources[0]["source_type"] == "memory"
+    assert sources[0]["created_at"] == "2026-06-07"

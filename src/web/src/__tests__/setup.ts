@@ -159,3 +159,12 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true })
   }
 }
+
+// Polyfill IntersectionObserver for jsdom (used by ArticleToc current-section highlight)
+if (typeof globalThis.IntersectionObserver === "undefined") {
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof globalThis.IntersectionObserver
+}

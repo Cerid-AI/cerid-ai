@@ -8,7 +8,7 @@
 // View mode persists in localStorage "cerid-constellation-mode", default "map".
 // Both modes share the same server x/y layout so the mental map is stable.
 
-import { Suspense, lazy, useCallback, useMemo, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrbitControls, Stars } from "@react-three/drei"
 import { useQuery } from "@tanstack/react-query"
@@ -20,11 +20,14 @@ import { HubLabels } from "./hub-labels"
 import { AmbientParticles } from "./ambient-particles"
 import { TourCameraAnimator, TourControlPanel, useTourState } from "./tour-controller"
 import { QUALITY_SETTINGS, QUALITY_TIERS, loadQuality, saveQuality, type QualityTier } from "./quality"
-import { communityRgb, trustRgb, typeRgb } from "./palette"
+import { communityRgb, trustRgb, typeRgb, domainRgb } from "./palette"
 import { CartographerMap } from "./map/CartographerMap"
 import { useGraphMap } from "./map/use-graph-map"
 import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
 import type { CommunityHull } from "@/lib/api/graph-map"
+import { useNavigation } from "@/contexts/navigation-context"
+import { resolveMapTokens, type MapTokens } from "./map/community-layer"
+import type { MapLayout } from "@/lib/graph/cycle4-contracts"
 
 // ---------------------------------------------------------------------------
 // View-mode persistence
@@ -51,11 +54,12 @@ function saveViewMode(mode: ViewMode): void {
   }
 }
 
-type ColorLens = "cluster" | "trust" | "type"
+type ColorLens = "cluster" | "trust" | "type" | "domain"
 const COLOR_LENSES: { id: ColorLens; label: string; hint: string }[] = [
   { id: "cluster", label: "Clusters", hint: "Color by knowledge community" },
   { id: "trust", label: "Trust", hint: "Verification bands: green verified · amber partial · red unverified" },
   { id: "type", label: "Types", hint: "Color by entity type" },
+  { id: "domain", label: "Domains", hint: "Color by primary knowledge domain (hash-stable; icon + label identify collisions)" },
 ]
 
 // Postprocessing only loads for Ultra — nobody else pays for the bundle.
@@ -167,6 +171,8 @@ function MapConfigPanel({
 // ---------------------------------------------------------------------------
 
 export default function Constellation({ focalEntity, filter, onNodeClick }: ConstellationProps) {
+  const { goTo } = useNavigation()
+
   // ---------------------------------------------------------------------------
   // View mode: "map" (Cartographer 2D) | "3d" (R3F scene)
   // ---------------------------------------------------------------------------
@@ -189,6 +195,15 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   }, [])
 
   // ---------------------------------------------------------------------------
+  // Layout state — drives per-layout query key + presets
+  // ---------------------------------------------------------------------------
+  const [layout, setLayout] = useState<MapLayout>("force")
+  const handleLayout = useCallback((next: MapLayout) => setLayout(next), [])
+
+  // Ambient toggle — opt-in glow/neon mode, forced off under reduced-motion
+  const [ambientMode, setAmbientMode] = useState(false)
+
+  // ---------------------------------------------------------------------------
   // Cartographer map data (only fetches when in "map" mode to save bandwidth)
   // ---------------------------------------------------------------------------
   const {
@@ -197,7 +212,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     isError: mapError,
     error: mapErrorObj,
     drainNewIds,
-  } = useGraphMap()
+  } = useGraphMap(layout)
 
   // ---------------------------------------------------------------------------
   // Community card state (shown when a hull/community label is clicked)
@@ -257,6 +272,37 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     return arr
   }, [neighbors, data?.entities.length])
 
+  // Resolved tokens for the domain lens 3D path (domainRgb needs hex resolved from CSS vars).
+  // Lazy-init from DOM; re-resolves on theme change (same pattern as CartographerMap/Atlas).
+  const [tokens3D, setTokens3D] = useState<MapTokens>(() =>
+    typeof document !== "undefined" ? resolveMapTokens(document.documentElement) : {
+      clusters: Array(8).fill("#888888") as string[], // drift-allowed: SSR fallback only
+      clusterOther: "#888888", // drift-allowed: SSR fallback only
+      domains: Array(12).fill("#888888") as string[], // drift-allowed: SSR fallback only
+      domainOther: "#666666", // drift-allowed: SSR fallback only
+      edge: "#888888", // drift-allowed: SSR fallback only
+      dim: "#888888", // drift-allowed: SSR fallback only
+      interaction: "#00C8B4", // drift-allowed: SSR fallback only
+      foreground: "#111111", // drift-allowed: SSR fallback only
+      background: "#f5f5f5", // drift-allowed: SSR fallback only
+      trustVerified: "#555555", // drift-allowed: SSR fallback only
+      trustPartial: "#777777", // drift-allowed: SSR fallback only
+      trustUnverified: "#999999", // drift-allowed: SSR fallback only
+      grid: "#eeeeee", // drift-allowed: SSR fallback only
+    }
+  )
+
+  // Re-resolve domain tokens when theme changes (3D mode only — map mode
+  // has its own token observer inside CartographerMap/Atlas).
+  useEffect(() => {
+    if (viewMode !== "3d") return
+    const observer = new MutationObserver(() => {
+      setTokens3D(resolveMapTokens(document.documentElement))
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    return () => observer.disconnect()
+  }, [viewMode])
+
   // --- Exploration tools: lens recoloring, type filter, pin-to-focus ---
   const [lens, setLens] = useState<ColorLens>("cluster")
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
@@ -274,7 +320,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   }, [viewMode, mapData?.entities, data?.entities])
 
   // Lens colors: cluster = community palette, trust = verification bands,
-  // type = per-type hue. One Float32Array upload, GPU does the rest.
+  // type = per-type hue, domain = token-routed domain hue (first token-derived
+  // 3D color — sets the Cycle-4 precedent for demoting COMMUNITY_PALETTE_RGB).
+  // One Float32Array upload, GPU does the rest.
   const nodeColors = useMemo(() => {
     const ents = data?.entities ?? []
     const arr = new Float32Array(ents.length * 3)
@@ -283,11 +331,15 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
         ? trustRgb(ents[i].trust_state)
         : lens === "type"
           ? typeRgb(ents[i].type)
-          : communityRgb(ents[i].community)
+          : lens === "domain"
+            ? domainRgb(tokens3D, ents[i].primary_domain ?? null)
+            : communityRgb(ents[i].community)
       arr[i * 3] = rgb[0]; arr[i * 3 + 1] = rgb[1]; arr[i * 3 + 2] = rgb[2]
     }
     return arr
-  }, [data?.entities, lens])
+  // tokens3D is included so theme swaps re-derive colors for the domain lens.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.entities, lens, tokens3D])
 
   // Type filter fades (not hides) non-matching nodes — fade keeps the
   // structural context visible (yWorks KG-demo pattern).
@@ -320,6 +372,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     () => !(typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches),
     [],
   )
+
+  // Ambient mode = opt-in glow/neon; forced off under reduced-motion (Cycle 4 §5).
+  const effectiveAmbient = ambientMode && animate
 
   // Quality tier — Low (flat 2D) → Ultra (AAA bloom). Persisted per machine.
   const [quality, setQuality] = useState<QualityTier>(loadQuality)
@@ -417,8 +472,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           isError={mapError}
           errorMessage={mapErrorObj instanceof Error ? mapErrorObj.message : undefined}
           newEntityIds={newIds.size > 0 ? newIds : undefined}
-          onNodeClick={onNodeClick}
+          onInspect={onNodeClick}
           onCommunityClick={handleCommunityClick}
+          layoutFallback={mapData?.layout_fallback}
         />
 
         {/* Community card (shown when a hull is clicked) */}
@@ -472,8 +528,39 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           </div>
         )}
 
-        {/* Bottom-right controls: map config + view mode toggle */}
+        {/* Bottom-right controls: layout presets + map config + view mode toggle */}
         <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5">
+          {/* Layout presets — client-side, no Redis rows (free-tier cap respected) */}
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/80 p-0.5 backdrop-blur"
+            role="radiogroup"
+            aria-label="Layout preset"
+          >
+            {(
+              [
+                { id: "force", label: "Default map", hint: "Force-directed layout (default)" },
+                { id: "wells", label: "Tight clusters", hint: "Well-separated cluster layout" },
+                { id: "domain", label: "Domains apart", hint: "Domain-separated layout" },
+              ] as { id: MapLayout; label: string; hint: string }[]
+            ).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                role="radio"
+                aria-checked={layout === preset.id}
+                title={preset.hint}
+                onClick={() => handleLayout(preset.id)}
+                className={`rounded-md px-2 py-1 text-label-xs transition-colors ${
+                  layout === preset.id
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent/40"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
           {/* Map config popover */}
           <MapConfigPanel config={mapConfig} onChange={handleMapConfig} />
 
@@ -543,8 +630,8 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
 
   return (
     <div
-      className="cerid-stagger-fast relative h-full w-full bg-[#0A1F3D]"
-      style={{ ["--i" as string]: 0 }}
+      className="cerid-stagger-fast relative h-full w-full"
+      style={{ ["--i" as string]: 0, background: tokens3D.background }} // drift-allowed: token-routed runtime value
       role="application"
       aria-roledescription="3D knowledge graph"
       aria-label={`Constellation view of ${data.count} entities`}
@@ -564,10 +651,10 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
         gl={{ antialias: settings.antialias, alpha: false }}
         dpr={settings.dpr}
       >
-        <color attach="background" args={["#0A1F3D"]} />
+        <color attach="background" args={[tokens3D.background]} />
         {/* Fog starts past the structure at the default viewing distance —
             it should swallow the starfield's depth, not the graph itself. */}
-        {!settings.flat && <fog attach="fog" args={["#0A1F3D", 34, 95]} />}
+        {!settings.flat && <fog attach="fog" args={[tokens3D.background, 34, 95]} />}
 
         {/* Ambient + key lights for material visibility */}
         <ambientLight intensity={0.35} />
@@ -595,7 +682,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             entities={sceneEntities}
             links={data.links ?? []}
             animate={animate}
-            pulses={settings.pulses}
+            pulses={settings.pulses && effectiveAmbient}
             hoveredIndex={focusIndex}
             colors={nodeColors}
             visibility={visibility}
@@ -603,8 +690,8 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           <InstancedNodes
             entities={sceneEntities}
             animate={animate}
-            glow={settings.glow}
-            pulses={settings.pulses}
+            glow={settings.glow && effectiveAmbient}
+            pulses={settings.pulses && effectiveAmbient}
             hoveredIndex={focusIndex}
             neighbors={neighbors}
             degrees={degrees}
@@ -722,7 +809,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           </div>
           <button
             type="button"
-            onClick={() => onNodeClick?.(pinnedEntity.id)}
+            onClick={() => goTo("subjects", { mode: "wiki", entity: pinnedEntity.id })}
             className="mt-2 w-full rounded-md bg-accent px-2 py-1.5 text-label-xs font-medium text-accent-foreground hover:bg-accent/80"
           >
             Open in Wiki
@@ -762,6 +849,28 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             </button>
           ))}
         </div>
+
+        {/* Ambient toggle — opt-in glow/neon; disabled under prefers-reduced-motion */}
+        <button
+          type="button"
+          aria-pressed={effectiveAmbient}
+          disabled={!animate}
+          title={
+            !animate
+              ? "Ambient effects disabled (prefers-reduced-motion)"
+              : effectiveAmbient
+                ? "Ambient on — click to turn off neon/glow"
+                : "Ambient off — click to enable neon/glow"
+          }
+          onClick={() => setAmbientMode((v) => !v)}
+          className={`rounded-lg border border-border/60 bg-card/80 px-2 py-1 text-label-xs backdrop-blur transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            effectiveAmbient
+              ? "text-accent-foreground bg-accent/30 border-accent/60"
+              : "text-muted-foreground hover:bg-accent/40"
+          }`}
+        >
+          Ambient
+        </button>
 
         {/* View mode toggle */}
         <div
@@ -804,11 +913,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             <span>·</span>
             <span>{neighbors.get(hover.index)?.size ?? 0} connections</span>
           </div>
-          {(hoveredEntity.community || hoveredEntity.trust_state !== "unknown") && (
+          {hoveredEntity.trust_state !== "unknown" && (
             <div className="mt-0.5 flex items-center gap-2 text-label-xs text-muted-foreground">
-              {hoveredEntity.community && <span>cluster {hoveredEntity.community}</span>}
-              {hoveredEntity.community && hoveredEntity.trust_state !== "unknown" && <span>·</span>}
-              {hoveredEntity.trust_state !== "unknown" && <span>{hoveredEntity.trust_state}</span>}
+              <span>{hoveredEntity.trust_state}</span>
             </div>
           )}
           <div className="mt-1 text-label-xs text-muted-foreground/80">Click to open in Wiki</div>

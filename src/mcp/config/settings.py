@@ -50,6 +50,15 @@ CATEGORIZE_MODELS = {
 # Max chars of document text sent to AI for classification (~400 tokens).
 AI_SNIPPET_MAX_CHARS = 1500
 
+# Phase 5.2 — classifier confidence floor. When ai_categorize returns a
+# confidence below this, the domain is forced to DEFAULT_DOMAIN and a
+# `needs-review` tag is attached instead of committing a confident-wrong
+# domain (which would mis-route the artifact's chunks + skew every graph
+# lens). The needs-review queue drives Track B domain corrections.
+CATEGORIZE_CONFIDENCE_THRESHOLD = float(
+    os.getenv("CATEGORIZE_CONFIDENCE_THRESHOLD", "0.55")
+)
+
 # ---------------------------------------------------------------------------
 # LLM timeout (seconds)
 # ---------------------------------------------------------------------------
@@ -162,6 +171,11 @@ SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * 
 #  - Memory archival sweep (safe, no LLM re-abstraction) — weekly, Sunday 05:00.
 SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0")
 SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
+# Entity trust_state derivation — 1 min after compute_umap_3d.
+SCHEDULE_COMPUTE_TRUST_STATE = os.getenv("SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *")
+# Domain backbone derivation — 1 min after compute_trust_state.
+# Independent of umap: runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
+SCHEDULE_DERIVE_DOMAINS = os.getenv("SCHEDULE_DERIVE_DOMAINS", "32 3 * * *")
 SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0")
 # Cap LLM summaries generated per community-refresh run so a first run on a
 # large corpus can't issue an unbounded GPU batch. skip-existing already bounds
@@ -194,6 +208,23 @@ CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH = float(
 # threshold after initial retrieval, supplement with external sources before
 # proceeding to expensive reranking/generation.
 RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
+
+# Staleness window for current/recency-intent queries — when the query asks
+# about "current/now/today" and the freshest KB result is older than this,
+# fire external regardless of relevance score (Phase 3.2 — answerability over
+# relevance for time-scoped queries).
+CRAG_STALENESS_WINDOW_DAYS = int(os.getenv("CRAG_STALENESS_WINDOW_DAYS", "7"))
+
+# Staleness window for claim VERIFICATION (Phase 4.2). When a temporal
+# (recency / current-event) claim is supported only by KB evidence older
+# than this window AND external web verification was inconclusive, the
+# verdict is downgraded to ``uncertain`` with reason ``stale_evidence``
+# rather than rubber-stamped ``verified`` on stale data. Defaults to the
+# CRAG window (same staleness notion, different surface) but is separately
+# tunable for operators who want verification stricter/looser than retrieval.
+VERIFICATION_STALENESS_WINDOW_DAYS = int(
+    os.getenv("VERIFICATION_STALENESS_WINDOW_DAYS", str(CRAG_STALENESS_WINDOW_DAYS))
+)
 
 # Wall-clock ceiling for a single agent_query() call. Two competing
 # constraints pick this value:
@@ -274,6 +305,14 @@ RERANK_CROSS_ENCODER_MODEL = os.getenv(
 #   onnx/model_quint8_avx2.onnx (23 MB, int8, requires AVX2)
 RERANK_ONNX_FILENAME = os.getenv("RERANK_ONNX_FILENAME", "onnx/model.onnx")
 RERANK_MODEL_CACHE_DIR = os.getenv("RERANK_MODEL_CACHE_DIR", "")
+# Max (query, chunk) pair length the cross-encoder tokenizer keeps before
+# truncating. Must NOT exceed the model's positional limit: ms-marco-MiniLM
+# caps at 512 (the default — safe for the shipped fallback model), while
+# bge-reranker-v2-m3 reads up to 1024 without clipping a full 512-token parent
+# chunk. Bump this to 1024 ONLY alongside RERANK_CROSS_ENCODER_MODEL=bge-…;
+# raising it past a model's limit makes ONNX inference fail on out-of-range
+# position ids.
+RERANK_MAX_LENGTH = int(os.getenv("RERANK_MAX_LENGTH", "512"))
 
 # ---------------------------------------------------------------------------
 # NLI Entailment (Natural Language Inference)
@@ -337,6 +376,12 @@ EXPERT_VERIFY_MAX_SOURCES = int(os.getenv("EXPERT_VERIFY_MAX_SOURCES", "3"))
 RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.4"))
 RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.4"))
 RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.6"))
+# Personal-first knowledge-pack ranking (Slice 7.2). Multiplier applied to the
+# blended rerank score of chunks carrying a pack_id, AFTER the cross-encoder
+# blend — a stable policy knob, not entangled with model scores. <1.0 makes
+# personal data win ties; packs still surface when clearly the best answer.
+# Operator-tunable at runtime via PATCH /settings (advanced/SERVER scope).
+PACK_RELEVANCE_WEIGHT = float(os.getenv("PACK_RELEVANCE_WEIGHT", "0.7"))
 
 # ---------------------------------------------------------------------------
 # Knowledge Graph Traversal
@@ -438,6 +483,15 @@ VERIFICATION_EXPERT_MODEL = os.getenv(
     "openrouter/x-ai/grok-4.20",
 )
 
+# Web-search-enabled expert verification model (the `:online` variant) used by
+# the smart_router VERIFICATION_EXPERT branch when live search is desired. Kept
+# separate from VERIFICATION_EXPERT_MODEL (non-online) so the router has an
+# env-overridable, catalog-visible default instead of a hardcoded literal.
+VERIFICATION_EXPERT_WEB_MODEL = os.getenv(
+    "VERIFICATION_EXPERT_WEB_MODEL",
+    "openrouter/x-ai/grok-4.20:online",
+)
+
 # ---------------------------------------------------------------------------
 # External (Cross-Model) Verification
 # ---------------------------------------------------------------------------
@@ -534,11 +588,12 @@ SYNOPSIS_MAX_TOKENS = 100
 
 # Synopsis model options — user-selectable, with cost and throttle info.
 # Catalog-refreshed 2026-05-20 against OpenRouter live pricing.
-# Cheap-tier options refreshed: gpt-4o-mini → gpt-5-nano (3× cheaper input,
-# 67% cheaper output), gemini-2.5-flash → gemini-3.1-flash-lite (newer +
-# cheaper). Old IDs kept as legacy entries because operators may have them
-# pinned in their persisted Settings doc and a sudden removal would break
-# their synopsis route on next regenerate.
+# gemini-2.5-flash → gemini-3.1-flash-lite (newer + cheaper).
+# gpt-5-nano removed: reasoning model — max_tokens consumed as reasoning
+# budget, yielding 0 output chars (OPT-14). Old non-broken IDs kept as
+# legacy entries because operators may have them pinned in their persisted
+# Settings doc and a sudden removal would break their synopsis route on
+# next regenerate.
 SYNOPSIS_MODEL_OPTIONS = {
     "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
         "label": "Llama 3.3 (Free)",
@@ -546,13 +601,6 @@ SYNOPSIS_MODEL_OPTIONS = {
         "output_per_1m": 0.0,
         "rpm": 8,
         "throttle": 8.0,
-    },
-    "openrouter/openai/gpt-5-nano": {
-        "label": "GPT-5 Nano",
-        "input_per_1m": 0.05,
-        "output_per_1m": 0.40,
-        "rpm": 1000,
-        "throttle": 0.5,
     },
     "openrouter/openai/gpt-4o-mini": {
         "label": "GPT-4o Mini (legacy)",
@@ -688,6 +736,21 @@ SCHEDULE_RETENTION_ENFORCE = os.getenv(
 MODEL_AUTO_UPDATE_ENABLED = os.getenv("MODEL_AUTO_UPDATE_ENABLED", "true").lower() in ("true", "1")
 SCHEDULE_MODEL_AUTO_UPDATE = os.getenv("SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * 1")  # Mon 6 AM
 
+# Routing-tiers overlay: a JSON map {original_tier_id: resolved_id} written by
+# the weekly model_auto_update job (app/routers/models.py::apply_latest_assignments)
+# after the role-assignment pass. The smart_router reads it lazily at lookup time
+# to keep the FREE/CHEAP/CAPABLE/RESEARCH/EXPERT tier ids current without editing
+# the source tables. Lives next to model_config.json (app/data/) by default;
+# env-overridable. core/ reads this path from config — it never imports app/.
+# Missing/invalid overlay → tier tables are used as-is (fail soft).
+ROUTING_TIERS_OVERLAY_PATH = os.getenv(
+    "ROUTING_TIERS_OVERLAY_PATH",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "app", "data", "routing_tiers.json",
+    ),
+)
+
 # ---------------------------------------------------------------------------
 # Folder Scanning
 # ---------------------------------------------------------------------------
@@ -706,6 +769,14 @@ SCHEDULE_INBOX_TRIAGE = os.getenv("SCHEDULE_INBOX_TRIAGE", "*/15 * * * *")
 # everyone gets server-UTC-7am).
 SCHEDULE_DAILY_DIGEST = os.getenv("SCHEDULE_DAILY_DIGEST", "0 7 * * *")
 SCHEDULE_WATCHED_RESCAN = os.getenv("SCHEDULE_WATCHED_RESCAN", "")  # cron expr, e.g. "0 */6 * * *"=every 6h, empty=disabled
+# Phase 5.3 — Track A enrichment backfill. Gated OFF by default: the job
+# calls the classifier per artifact, so the operator opts in once after
+# Slice 5.1/5.2 land (CERID_BACKFILL_ENRICHMENT_ENABLED=true). Nightly until
+# the bare-tag backlog drains, then it self-idles (scan returns 0). Pace +
+# batch size cap LLM cost; metadata-only writes (no domain/collection moves).
+SCHEDULE_BACKFILL_ENRICHMENT = os.getenv("SCHEDULE_BACKFILL_ENRICHMENT", "0 3 * * *")  # 3 AM UTC
+BACKFILL_ENRICHMENT_BATCH = int(os.getenv("BACKFILL_ENRICHMENT_BATCH", "100"))
+BACKFILL_ENRICHMENT_PACE_S = float(os.getenv("BACKFILL_ENRICHMENT_PACE_S", "0.5"))
 SCHEDULE_MODEL_CATALOG = os.getenv("SCHEDULE_MODEL_CATALOG", "")  # cron expr, e.g. "0 6 * * *"=daily 6 AM, empty=disabled
 ENABLE_AI_TRIAGE = os.getenv("ENABLE_AI_TRIAGE", "").lower() in ("true", "1", "yes")  # Ollama content triage scoring
 
@@ -832,6 +903,25 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 #   or a specific model ID
 INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
+# Display default surfaced by /providers when INTERNAL_LLM_MODEL is unset
+# (Slice 2.2 — model ids live in config, never as call-site literals).
+INTERNAL_LLM_MODEL_DEFAULT = os.getenv(
+    "INTERNAL_LLM_MODEL_DEFAULT", "meta-llama/llama-3.3-70b-instruct"
+)
+# JSON-mode fallback model for internal-LLM calls that must return strict JSON.
+INTERNAL_LLM_JSON_FALLBACK_MODEL = os.getenv(
+    "INTERNAL_LLM_JSON_FALLBACK_MODEL", "openai/gpt-4o-mini"
+)
+# Chat fallback pool — models tried when the primary chat model hits a
+# retryable error. Comma-separated env override; defaults to the v1 chain.
+CHAT_FALLBACK_POOL = [
+    m.strip()
+    for m in os.getenv(
+        "CHAT_FALLBACK_POOL",
+        "openai/gpt-4o-mini,google/gemini-2.5-flash,x-ai/grok-4.3,anthropic/claude-sonnet-4.6",
+    ).split(",")
+    if m.strip()
+]
 
 # Retry budget + backoff for the `_call_ollama` transient-back-pressure
 # loop (5xx / 429 / timeout / ConnectError). Mirrors the embed-side

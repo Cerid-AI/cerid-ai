@@ -21,6 +21,7 @@ Layering
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -33,10 +34,30 @@ from core.utils.swallowed import log_swallowed_error
 logger = logging.getLogger("ai-companion.wiki_pages")
 
 ConfidenceBand = Literal["high", "medium", "low", "unknown"]
+RefreshStatus = Literal["idle", "due", "running"]
+
+# Redis key constants (must match processor_queue.py)
+_PROC_RUNNING_KEY = "cerid:proc:running"
+_PROC_JOB_KEY_FMT = "cerid:proc:job:{job_id}"
 
 # ---------------------------------------------------------------------------
 # Value objects
 # ---------------------------------------------------------------------------
+
+
+def _parse_top_tags(raw: Any) -> list[str] | None:
+    """Parse an entity's top_tags (JSON string from Neo4j, or already a list)
+    into a list of tag strings. Returns None on absent/malformed input."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(parsed, list):
+        return None
+    tags = [str(t) for t in parsed if t]
+    return tags or None
 
 
 class ExternalReference(BaseModel):
@@ -79,19 +100,42 @@ class ExternalReference(BaseModel):
 
 
 class RelatedEntity(BaseModel):
-    """A co-mentioned entity with its co-mention count."""
+    """A co-mentioned entity with its co-mention count.
+
+    Amendment #1+#2: ``has_summary`` and ``one_liner`` are projected
+    directly from the related entity node so the frontend can render
+    three-state wikilinks (normal / stub / no-link) and HoverCard
+    previews without an extra fetch.
+    """
 
     canonical_id: str
     name: str
     entity_type: str
     co_mention_count: int
+    # Amendment #1: does the related entity have a summary?
+    has_summary: bool = False
+    # Amendment #2: first 160 chars of the related entity's summary (None
+    # when has_summary is False).  Same derivation as /wiki/index one_liner.
+    one_liner: str | None = None
 
 
 class SourceCitation(BaseModel):
-    """A source artifact that mentions this entity, with chunk citations."""
+    """A source artifact that mentions this entity, with chunk citations.
+
+    ``display_title`` is the human-readable label: ``coalesce(a.title, a.filename)``.
+    ``title`` is retained for API compatibility but may be ``None`` for artifacts
+    ingested before the title field was populated.  Callers should prefer
+    ``display_title`` over ``title``.
+    """
 
     artifact_id: str
     title: str | None
+    # Resolved display label: coalesce(a.title, a.filename); always non-null when
+    # the artifact has a filename (i.e. was ingested from a real file).
+    display_title: str | None = None
+    filename: str | None = None
+    domain: str | None = None
+    source_type: str | None = None
     chunk_ids: list[str]
     confidence: float
     updated_at: str | None
@@ -107,6 +151,13 @@ class EntitySummary(BaseModel):
     recent_activity_score: int
     summary: str | None = None
     summary_updated_at: str | None = None
+    primary_domain: str | None = None
+    # Top controlled-vocabulary tags (Slice 6.3) — salience-ordered, capped at
+    # 5; null until DeriveDomainsJob runs. Surfaces tag sort/filter in lists.
+    top_tags: list[str] | None = None
+    # Present only when a search term was supplied (list_top_entities
+    # conditional CASE); absent on the no-q browse path.
+    match_rank: int | None = None
 
 
 class EpisodicMemoryItem(BaseModel):
@@ -130,7 +181,8 @@ class WikiEntityPage(BaseModel):
 
     Assembles the documented W.1 response shape:
         slug, name, summary, related_entities, source_artifacts,
-        contradictions, last_updated_at, next_refresh_due, confidence_band.
+        contradictions, last_updated_at, next_refresh_due, confidence_band,
+        refresh_status.
 
     ``contradictions`` is a raw list of dicts (one per ContradictionFinding)
     so the router can serialise them without a hard import of
@@ -138,6 +190,11 @@ class WikiEntityPage(BaseModel):
 
     Phase K2.2 adds ``episodic_memories`` — user-recorded memories that
     mention this entity (decay-aware, capped at 5).
+
+    ``refresh_status`` reflects actual job state:
+        "running" — a WikiRefreshJob for this entity is currently executing
+        "due"     — no running job but next_refresh_due is in the past
+        "idle"    — summary is fresh (next_refresh_due is in the future)
     """
 
     slug: str
@@ -148,6 +205,14 @@ class WikiEntityPage(BaseModel):
     community_id: str | None = None
     community_label: str | None = None
     mention_count: int = 0
+    # Domain backbone fields (Cycle 1; Slice 6 adds salience + top_tags)
+    primary_domain: str | None = None
+    domain_mix: dict[str, int] | None = None
+    # Salience-ordered domain weights (Slice 6.1) and top controlled-vocabulary
+    # tags (Slice 6.3) — both derived by DeriveDomainsJob, null until it runs.
+    domain_salience: dict[str, float] | None = None
+    top_tags: list[str] | None = None
+    primary_subcategory: str | None = None
     summary: str | None = None
     related_entities: list[RelatedEntity] = []
     source_artifacts: list[SourceCitation] = []
@@ -157,6 +222,8 @@ class WikiEntityPage(BaseModel):
     last_updated_at: str | None = None
     next_refresh_due: str | None = None
     confidence_band: ConfidenceBand = "unknown"
+    # Tri-state driven by actual job state, not timestamp heuristics.
+    refresh_status: RefreshStatus = "idle"
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +253,9 @@ async def list_entities(
     result = []
     for r in rows:
         try:
+            # match_rank is only present when a search term was given;
+            # the no-q browse path returns rows without this key.
+            raw_rank = r.get("match_rank")
             result.append(
                 EntitySummary(
                     canonical_id=r.get("canonical_id", ""),
@@ -195,6 +265,9 @@ async def list_entities(
                     recent_activity_score=int(r.get("recent_activity_score", 0)),
                     summary=r.get("summary"),
                     summary_updated_at=r.get("summary_updated_at"),
+                    primary_domain=r.get("primary_domain"),
+                    top_tags=_parse_top_tags(r.get("top_tags")),
+                    match_rank=int(raw_rank) if raw_rank is not None else None,
                 )
             )
         except Exception as exc:
@@ -247,9 +320,12 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         log_swallowed_error("wiki.get_entity_page.contradictions", exc, context={"slug": slug})
         # Non-fatal: contradictions section stays empty
 
-    # --- 4. next_refresh_due -------------------------------------------------
+    # --- 4. next_refresh_due + refresh_status --------------------------------
     summary_updated_at: str | None = raw.get("summary_updated_at")
     next_refresh_due = _compute_next_refresh(summary_updated_at)
+    refresh_status: RefreshStatus = await asyncio.to_thread(
+        _get_refresh_status, slug, next_refresh_due
+    )
 
     # --- 4a. Episodic memories (Phase K2.2) -----------------------------------
     episodic_memories: list[EpisodicMemoryItem] = []
@@ -301,6 +377,8 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
             name=r.get("name", ""),
             entity_type=r.get("entity_type", "OTHER"),
             co_mention_count=int(r.get("co_mention_count", 0)),
+            has_summary=bool(r.get("has_summary", False)),
+            one_liner=r.get("one_liner") or None,
         )
         for r in raw.get("related", [])
     ]
@@ -309,6 +387,10 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         SourceCitation(
             artifact_id=s.get("artifact_id", ""),
             title=s.get("title"),
+            display_title=s.get("title") or s.get("filename") or None,
+            filename=s.get("filename"),
+            domain=s.get("domain"),
+            source_type=s.get("source_type"),
             chunk_ids=s.get("chunk_ids", []),
             confidence=float(s.get("confidence") or 0.0),
             updated_at=s.get("updated_at"),
@@ -320,6 +402,37 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         _resolve_community_label, neo4j_driver, raw.get("community_id")
     )
 
+    # Domain backbone fields — parse domain_mix JSON string → dict
+    primary_domain: str | None = raw.get("primary_domain")
+    raw_domain_mix = raw.get("domain_mix")
+    domain_mix: dict[str, int] | None = None
+    if raw_domain_mix:
+        try:
+            parsed = json.loads(raw_domain_mix) if isinstance(raw_domain_mix, str) else raw_domain_mix
+            if isinstance(parsed, dict):
+                domain_mix = {str(k): int(v) for k, v in parsed.items()}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            domain_mix = None
+
+    raw_domain_salience = raw.get("domain_salience")
+    domain_salience: dict[str, float] | None = None
+    if raw_domain_salience:
+        try:
+            parsed_sal = (
+                json.loads(raw_domain_salience)
+                if isinstance(raw_domain_salience, str)
+                else raw_domain_salience
+            )
+            if isinstance(parsed_sal, dict):
+                # Preserve the salience-desc order DeriveDomainsJob persisted.
+                domain_salience = {str(k): float(v) for k, v in parsed_sal.items()}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            domain_salience = None
+
+    top_tags: list[str] | None = _parse_top_tags(raw.get("top_tags"))
+
+    primary_subcategory: str | None = raw.get("primary_subcategory")
+
     return WikiEntityPage(
         slug=slug,
         name=raw.get("name", ""),
@@ -327,6 +440,11 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         community_id=raw.get("community_id"),
         community_label=community_label,
         mention_count=int(raw.get("mention_count") or 0),
+        primary_domain=primary_domain,
+        domain_mix=domain_mix,
+        domain_salience=domain_salience,
+        top_tags=top_tags,
+        primary_subcategory=primary_subcategory,
         summary=raw.get("summary"),
         related_entities=related,
         source_artifacts=source_artifacts,
@@ -336,6 +454,7 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         last_updated_at=raw.get("updated_at"),
         next_refresh_due=next_refresh_due,
         confidence_band=confidence_band,
+        refresh_status=refresh_status,
     )
 
 
@@ -409,3 +528,64 @@ def _compute_next_refresh(summary_updated_at: str | None) -> str:
         except (ValueError, TypeError):
             pass
     return datetime.now(timezone.utc).isoformat()
+
+
+def _get_refresh_status(slug: str, next_refresh_due: str) -> RefreshStatus:
+    """Return the tri-state refresh status for an entity.
+
+    Checks the processor's running-job Redis set (``cerid:proc:running``)
+    for a live ``wiki_refresh`` job targeting this entity slug.  Failing
+    that, compares ``next_refresh_due`` to now.
+
+    States
+    ------
+    "running" — a WikiRefreshJob for this entity is currently executing.
+    "due"     — no running job; next_refresh_due is in the past (stale).
+    "idle"    — summary is fresh (next_refresh_due is in the future).
+
+    Fail-open: any Redis error returns "due" when next_refresh_due is
+    already past, else "idle" — never "running" on an uncertain read.
+    """
+    try:
+        from app.deps import get_redis  # noqa: PLC0415
+
+        redis = get_redis()
+        if redis is not None:
+            running_ids = redis.smembers(_PROC_RUNNING_KEY)
+            for job_id_raw in running_ids:
+                job_id = (
+                    job_id_raw.decode() if isinstance(job_id_raw, bytes) else str(job_id_raw)
+                )
+                job_key = _PROC_JOB_KEY_FMT.format(job_id=job_id)
+                job_type = redis.hget(job_key, "job_type")
+                if job_type:
+                    jt = job_type.decode() if isinstance(job_type, bytes) else str(job_type)
+                    if jt == "wiki_refresh":
+                        payload_raw = redis.hget(job_key, "payload")
+                        if payload_raw:
+                            try:
+                                payload_str = (
+                                    payload_raw.decode()
+                                    if isinstance(payload_raw, bytes)
+                                    else str(payload_raw)
+                                )
+                                payload = json.loads(payload_str)
+                                if payload.get("entity_slug") == slug:
+                                    return "running"
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "wiki.get_refresh_status", exc, context={"slug": slug}
+        )
+
+    # No running job found — fall back to schedule comparison.
+    try:
+        due_dt = datetime.fromisoformat(next_refresh_due)
+        if due_dt.tzinfo is None:
+            due_dt = due_dt.replace(tzinfo=timezone.utc)
+        if due_dt <= datetime.now(timezone.utc):
+            return "due"
+    except (ValueError, TypeError):
+        return "due"
+    return "idle"

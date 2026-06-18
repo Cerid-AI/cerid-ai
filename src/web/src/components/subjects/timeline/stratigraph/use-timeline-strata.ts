@@ -16,7 +16,9 @@ import {
 const POLL_MS = 75_000
 
 export interface UseTimelineStrataOptions {
-  period: "7d" | "30d" | "90d" | "365d"
+  /** Amendment #7: data-extent clamped default; "180d" ensures the May 9-10
+   *  deposition events (73% of mentions) stay in view regardless of corpus age. */
+  period: "7d" | "30d" | "90d" | "180d" | "365d"
   granularity?: "day" | "week" | "month"
   from?: string
   to?: string

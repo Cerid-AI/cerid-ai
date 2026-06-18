@@ -99,6 +99,8 @@ export interface StrataCommunity {
 export interface StrataSeries {
   community_id: string
   entity_type: string
+  /** Primary domain of the entity — coalesced to "other" server-side when null */
+  domain: string
   buckets: number[]
   /** Per-bucket count of unverified-trust entity mentions (amendment 1) */
   unverified_buckets?: number[]
@@ -114,6 +116,8 @@ export interface StrataTrack {
   rank: number
   total_mentions: number
   buckets: number[]
+  /** Primary domain of the entity; null when derivation has not yet run */
+  primary_domain?: string | null
 }
 
 export interface StrataMarker {
@@ -133,10 +137,17 @@ export interface TimelineStrataResponse {
   markers: StrataMarker[]
   totals: { mentions: number; entities_introduced: number }
   cached: boolean
+  lanes?: import("@/components/subjects/timeline/stratigraph/strata-types").LaneMeta[]
+  events?: import("@/components/subjects/timeline/stratigraph/strata-types").StrataEvent[]
+  verification_aggs?: import("@/components/subjects/timeline/stratigraph/strata-types").VerificationAggregate[]
+  top_entities?: Record<string, import("@/components/subjects/timeline/stratigraph/strata-types").TopEntity[]>
+  data_extent_from?: string | null
+  ledger_start_date?: string | null
 }
 
 export interface FetchStrataOptions {
-  period?: "7d" | "30d" | "90d" | "365d"
+  /** Amendment #7: "180d" added for data-extent-clamped default window. */
+  period?: "7d" | "30d" | "90d" | "180d" | "365d"
   granularity?: "day" | "week" | "month"
   from?: string
   to?: string
@@ -175,11 +186,16 @@ export interface TimelineTrackResponse {
   name: string
   events: TrackEvent[]
   cached: boolean
+  new_entities?: import("@/components/subjects/timeline/stratigraph/strata-types").NewEntity[]
+  knowledge_events?: import("@/components/subjects/timeline/stratigraph/strata-types").TrackEventExtended[]
+  verification?: import("@/components/subjects/timeline/stratigraph/strata-types").TrackVerification | null
+  community_summary?: string | null
 }
 
 export interface FetchTrackOptions {
   from?: string
   to?: string
+  bucket?: string
 }
 
 export async function fetchTimelineTrack(
@@ -189,6 +205,7 @@ export async function fetchTimelineTrack(
   const url = mcpUrl(`/graph/timeline/track/${encodeURIComponent(canonicalId)}`, {
     from: opts.from,
     to: opts.to,
+    bucket: opts.bucket,
   })
   const res = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to load timeline track"))

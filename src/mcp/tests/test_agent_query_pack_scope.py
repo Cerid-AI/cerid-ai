@@ -40,6 +40,7 @@ def client():
     with (
         patch.object(agents, "get_chroma", return_value=fake_chroma),
         patch.object(agents, "get_neo4j", return_value=fake_neo4j),
+        patch.object(agents, "get_graph_store", return_value=MagicMock()),
         patch.object(agents, "get_redis", return_value=fake_redis),
     ):
         yield TestClient(app, raise_server_exceptions=False)
@@ -97,3 +98,55 @@ class TestPackScopedQuery:
         # fresh-data scenario and the semantic cache could otherwise serve a
         # pre-pack hit.
         assert captured.get("skip_cache") is True
+
+    @pytest.mark.asyncio
+    async def test_exclude_packs_reaches_query_agent(self, client):
+        """Slice 7.3: the router forwards ``exclude_packs`` to ``agent_query``
+        so the personal-first pack drop is applied (default False when omitted)."""
+        captured: dict = {}
+
+        async def fake_agent_query(**kwargs):
+            captured.update(kwargs)
+            return {
+                "context": "", "sources": [], "confidence": 0.0,
+                "domains_searched": [], "total_results": 0, "results": [],
+            }
+
+        with patch(
+            "core.agents.query_agent.agent_query",
+            new=AsyncMock(side_effect=fake_agent_query),
+        ):
+            res = client.post(
+                "/agent/query",
+                json={
+                    "query": "summarize my notes",
+                    "exclude_packs": True,
+                    "skip_cache": True,
+                    "use_reranking": False,
+                },
+            )
+        assert res.status_code == 200, res.text
+        assert captured.get("exclude_packs") is True
+
+    @pytest.mark.asyncio
+    async def test_exclude_packs_defaults_false(self, client):
+        """Omitting exclude_packs keeps packs in scope (default False)."""
+        captured: dict = {}
+
+        async def fake_agent_query(**kwargs):
+            captured.update(kwargs)
+            return {
+                "context": "", "sources": [], "confidence": 0.0,
+                "domains_searched": [], "total_results": 0, "results": [],
+            }
+
+        with patch(
+            "core.agents.query_agent.agent_query",
+            new=AsyncMock(side_effect=fake_agent_query),
+        ):
+            res = client.post(
+                "/agent/query",
+                json={"query": "anything", "skip_cache": True, "use_reranking": False},
+            )
+        assert res.status_code == 200, res.text
+        assert captured.get("exclude_packs") is False

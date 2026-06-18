@@ -152,6 +152,12 @@ def health_check() -> dict:
         log_swallowed_error("app.routers.health.wiki_freshness_snapshot", exc)
         wiki_health = {"error": "snapshot_failed"}
 
+    # §7.1 regression guard — surface the resolved knowledge-pack registry
+    # path + pack count so a path-resolution break (the historical "registry
+    # serves 0" failure) is visible in every health probe instead of only
+    # showing up as an empty /knowledge_packs/registry response downstream.
+    knowledge_packs_health = _knowledge_packs_snapshot()
+
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": get_version(),
@@ -163,10 +169,38 @@ def health_check() -> dict:
         "openrouter_credits_exhausted": credits_exhausted,
         "embedding_cache": embedding_cache_stats,
         "wiki_freshness": wiki_health,
+        "knowledge_packs": knowledge_packs_health,
     }
     if ollama_status is not None:
         result["ollama"] = ollama_status
     return result
+
+
+def _knowledge_packs_snapshot() -> dict:
+    """§7.1 — knowledge-pack registry health for the health probe.
+
+    Resolves the registry path the same way the serving endpoint does
+    (``default_registry_path`` → honours ``CERID_KNOWLEDGE_PACKS_REGISTRY``)
+    and reports whether it exists + how many packs it holds. ``count == 0``
+    with ``exists == False`` is the signature of the path-resolution
+    regression this guard exists to catch.
+    """
+    try:
+        from app.services.knowledge_packs import default_registry_path
+        from core.knowledge.packs import load_registry
+
+        path = default_registry_path()
+        exists = path.exists()
+        count = len(load_registry(path)) if exists else 0
+        return {
+            "registry_path": str(path),
+            "registry_exists": exists,
+            "pack_count": count,
+            "ok": exists and count > 0,
+        }
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.knowledge_packs_snapshot", exc)
+        return {"ok": False, "error": "snapshot_failed"}
 
 
 def _wiki_freshness_snapshot(driver) -> dict:

@@ -14,7 +14,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Separator } from "@/components/ui/separator"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { useConversationsContext } from "@/contexts/conversations-context"
-import { useUIMode } from "@/contexts/ui-mode-context"
 import { withViewTransition } from "@/lib/view-transitions"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -72,9 +71,6 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
     bulkDelete, bulkArchive, active,
   } = useConversationsContext()
-  // useUIMode() retained as a no-op for compat; visibleNav now always
-  // shows the full NAV_ITEMS list (4 panes after Phase C consolidation).
-  useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
   const { data: modelUpdates } = useQuery({
     queryKey: ["model-updates"],
@@ -284,11 +280,6 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
 
         {/* Bottom controls */}
         <div className="space-y-1 border-t p-2">
-          {/* Phase C Day 3 — Simple/Advanced mode toggle removed.
-              All UI is revealed by default; UIModeProvider now hard-pins
-              to "advanced" and useUIMode() consumers continue to read
-              that constant without re-wiring. */}
-
           {/* Theme toggle */}
           <Tooltip>
             <TooltipTrigger asChild>

@@ -9,13 +9,14 @@
 // in the original) is structurally preserved. We re-theme and re-chrome
 // only; the F2 callback-ref pattern is intact.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import Sigma from "sigma"
 import type Graph from "graphology"
-import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight } from "lucide-react"
+import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight, Bookmark, ArrowLeft } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { fetchNeighborhood } from "@/lib/api/graph"
 import { adaptNeighborhood, recolorGraph } from "@/lib/graph/graphology-adapter"
 import { applyLayout } from "@/lib/graph/apply-layout"
@@ -31,12 +32,18 @@ import {
   applyParallelEdgeCurvature,
   type MapTokens,
 } from "@/lib/graph/identity"
+import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import type { AtlasEdgeAttributes, AtlasNodeAttributes } from "@/lib/types/graph"
 import { useAtlasKeyboard } from "./use-atlas-keyboard"
 import { AtlasA11yTree } from "./atlas-a11y-tree"
 import { AtlasContextMenu, type AtlasContextMenuTarget } from "./atlas-context-menu"
 import { AtlasSavedViews } from "./atlas-saved-views"
 import type { AtlasView } from "@/lib/api/atlas-views"
+import {
+  NEIGHBORHOOD_HOPS_MAX_PROMOTED,
+  type OnInspect,
+  type OnFocusEntity,
+} from "@/lib/graph/cycle4-contracts"
 
 type AtlasSigma = Sigma<AtlasNodeAttributes, AtlasEdgeAttributes>
 type AtlasGraph = Graph<AtlasNodeAttributes, AtlasEdgeAttributes>
@@ -331,6 +338,8 @@ interface PillToolbarProps {
   totalEdges: number
   config: AtlasConfig
   onConfigChange: (patch: Partial<AtlasConfig>) => void
+  savedViewsSlot?: ReactNode
+  onBackToOverview?: () => void
 }
 
 function PillToolbar({
@@ -345,11 +354,26 @@ function PillToolbar({
   totalEdges,
   config,
   onConfigChange,
+  savedViewsSlot,
+  onBackToOverview,
 }: PillToolbarProps) {
-  const [configOpen, setConfigOpen] = useState(false)
-
   return (
     <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-1.5 border-b border-border/40 bg-card/80 px-3 py-1.5 backdrop-blur">
+      {/* Back to overview */}
+      {onBackToOverview && (
+        <>
+          <button
+            type="button"
+            onClick={onBackToOverview}
+            aria-label="Back to overview"
+            className="flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-label-xs text-muted-foreground hover:bg-accent/30"
+          >
+            <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+            Overview
+          </button>
+          <div className="h-4 w-px bg-border/40" aria-hidden="true" />
+        </>
+      )}
       {/* Lens radiogroup */}
       <div role="radiogroup" aria-label="Analysis lens" className="flex items-center gap-0.5">
         {LENS_ORDER.map((lens) => {
@@ -381,10 +405,10 @@ function PillToolbar({
 
       <div className="h-4 w-px bg-border/40" aria-hidden="true" />
 
-      {/* Hop stepper 1|2|3 */}
+      {/* Hop stepper 1|NEIGHBORHOOD_HOPS_MAX_PROMOTED (A4: hops=3 URL-reachable not promoted) */}
       <div role="group" aria-label="Hop depth" className="flex items-center gap-0.5">
         <span className="text-label-xs text-muted-foreground">Hops</span>
-        {([1, 2, 3] as const).map((h) => (
+        {(Array.from({ length: NEIGHBORHOOD_HOPS_MAX_PROMOTED }, (_, i) => (i + 1) as 1 | 2 | 3)).map((h) => (
           <button
             key={h}
             type="button"
@@ -436,54 +460,55 @@ function PillToolbar({
         </span>
       )}
 
+      {/* Saved-views trigger (rendered from Atlas so the Popover root wraps both) */}
+      {savedViewsSlot}
+
       {/* Config popover */}
-      <div className="relative">
-        <button
-          type="button"
-          onClick={() => setConfigOpen((v) => !v)}
-          aria-label="Atlas settings"
-          aria-expanded={configOpen}
-          className="rounded border border-border/60 p-1 text-muted-foreground hover:bg-accent/30"
-        >
-          <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        {configOpen && (
-          <div className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-border/60 bg-card/95 p-3 shadow-xl backdrop-blur">
-            <div className="flex flex-col gap-2">
-              <div>
-                <div className="mb-1 text-label-xs font-medium text-muted-foreground">Label density</div>
-                <div className="flex gap-0.5" role="radiogroup" aria-label="Label density">
-                  {(["sparse", "normal", "dense"] as const).map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      role="radio"
-                      aria-checked={config.labelDensity === v}
-                      onClick={() => { onConfigChange({ labelDensity: v }); setConfigOpen(false) }}
-                      className={`rounded px-1.5 py-0.5 text-label-xs capitalize transition-colors ${
-                        config.labelDensity === v
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/30"
-                      }`}
-                    >
-                      {v}
-                    </button>
-                  ))}
-                </div>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label="Atlas settings"
+            className="rounded border border-border/60 p-1 text-muted-foreground hover:bg-accent/30"
+          >
+            <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-52 p-3">
+          <div className="flex flex-col gap-2">
+            <div>
+              <div className="mb-1 text-label-xs font-medium text-muted-foreground">Label density</div>
+              <div className="flex gap-0.5" role="radiogroup" aria-label="Label density">
+                {(["sparse", "normal", "dense"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={config.labelDensity === v}
+                    onClick={() => onConfigChange({ labelDensity: v })}
+                    className={`rounded px-1.5 py-0.5 text-label-xs capitalize transition-colors ${
+                      config.labelDensity === v
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/30"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
               </div>
-              <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={config.edgeLabels}
-                  onChange={(e) => onConfigChange({ edgeLabels: e.target.checked })}
-                  className="rounded border-border/60"
-                />
-                Edge labels
-              </label>
             </div>
+            <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={config.edgeLabels}
+                onChange={(e) => onConfigChange({ edgeLabels: e.target.checked })}
+                className="rounded border-border/60"
+              />
+              Edge labels
+            </label>
           </div>
-        )}
-      </div>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
@@ -496,8 +521,16 @@ export interface AtlasProps {
   entity: string
   hops?: 1 | 2 | 3
   filter?: string
-  onNodeClick?: (entityId: string) => void
-  onNodeDoubleClick?: (entityId: string) => void
+  /**
+   * Unified click contract (Cycle 4): pin/inspect only — never mode-switch.
+   * Replaces old onNodeClick. Called on node click to pin the entity card.
+   */
+  onInspect?: OnInspect
+  /**
+   * Explicit refocus: re-centers the neighborhood on a different entity.
+   * Called by "Make focal" card action only.
+   */
+  onFocusEntity?: OnFocusEntity
   /** Callback when user changes hop depth (from stepper or 1/2/3 keys) */
   onHopsChange?: (hops: 1 | 2 | 3) => void
   onToggleLensMenu?: () => void
@@ -507,6 +540,8 @@ export interface AtlasProps {
   /** Open entity in Timeline (new in Meridian) */
   onOpenInTimeline?: (entityId: string) => void
   onRestoreView?: (view: AtlasView) => void
+  /** Called when user clicks "Back to overview" in the toolbar */
+  onBackToOverview?: () => void
 }
 
 interface LayoutStatus {
@@ -526,8 +561,8 @@ export function Atlas({
   entity,
   hops = 2,
   filter,
-  onNodeClick,
-  onNodeDoubleClick,
+  onInspect,
+  onFocusEntity,
   onHopsChange,
   onToggleLensMenu,
   onSearchPalette,
@@ -535,6 +570,7 @@ export function Atlas({
   onOpenInWiki,
   onOpenInTimeline,
   onRestoreView,
+  onBackToOverview,
 }: AtlasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
@@ -543,14 +579,15 @@ export function Atlas({
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Callback refs — F2 fix preserved from v1
-  const onNodeClickRef = useRef(onNodeClick)
-  const onNodeDoubleClickRef = useRef(onNodeDoubleClick)
+  const onInspectRef = useRef(onInspect)
+  const onFocusEntityRef = useRef(onFocusEntity)
   useEffect(() => {
-    onNodeClickRef.current = onNodeClick
-    onNodeDoubleClickRef.current = onNodeDoubleClick
-  }, [onNodeClick, onNodeDoubleClick])
+    onInspectRef.current = onInspect
+    onFocusEntityRef.current = onFocusEntity
+  }, [onInspect, onFocusEntity])
 
   const [status, setStatus] = useState<LayoutStatus>({ state: "idle" })
+  const prevQueryKeyRef = useRef<string>("")
   const [sigmaInstance, setSigmaInstance] = useState<AtlasSigma | null>(null)
   const [graphInstance, setGraphInstance] = useState<AtlasGraph | null>(null)
   const [activeLenses, setActiveLenses] = useState<Set<LensId>>(new Set())
@@ -569,6 +606,8 @@ export function Atlas({
     typeof document !== "undefined" ? resolveMapTokens(document.documentElement) : {
       clusters: Array(8).fill("#888888") as string[], // drift-allowed: SSR fallback only
       clusterOther: "#888888", // drift-allowed: SSR fallback only
+      domains: Array(12).fill("#888888") as string[], // drift-allowed: SSR fallback only
+      domainOther: "#666666",   // drift-allowed: SSR fallback only
       edge: "#888888",          // drift-allowed: SSR fallback only
       dim: "#888888",           // drift-allowed: SSR fallback only
       interaction: "#00C8B4",   // drift-allowed: SSR fallback only
@@ -578,6 +617,7 @@ export function Atlas({
       trustPartial: "#777777",  // drift-allowed: SSR fallback only
       trustUnverified: "#999999", // drift-allowed: SSR fallback only
       grid: "#eeeeee",          // drift-allowed: SSR fallback only
+      fontSans: "system-ui, sans-serif", // drift-allowed: SSR fallback only
     }
   )
 
@@ -593,6 +633,7 @@ export function Atlas({
         s.setSetting("labelColor", { color: fresh.foreground })
         s.setSetting("defaultEdgeColor", fresh.edge)
         s.setSetting("defaultNodeColor", fresh.clusterOther)
+        s.setSetting("defaultDrawNodeHover", makeDrawNodeHover(fresh))
         s.refresh()
       }
     })
@@ -609,7 +650,7 @@ export function Atlas({
     const hopsParam = params.get("hops")
     if (lensParam) {
       const ids = lensParam.split(",").filter((id): id is LensId =>
-        ["contradiction", "open-question", "provenance", "quality"].includes(id)
+        ["contradiction", "open-question", "provenance", "quality", "domain"].includes(id)
       )
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot URL param read on mount; no subscriptions, no cascading renders
       if (ids.length) setActiveLenses(new Set(ids))
@@ -623,25 +664,35 @@ export function Atlas({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot on mount
   }, [])
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ["graph-neighborhood", entity, hops, filter ?? null],
     queryFn: ({ signal }) => fetchNeighborhood(entity, hops, filter, { signal }),
     staleTime: 30_000,
     enabled: Boolean(entity),
+    placeholderData: keepPreviousData,
   })
 
-  const fetchingStatus: LayoutStatus | null = useMemo(() => {
-    if (isLoading) return { state: "fetching" }
+  // Reset layout status when query key changes so refocus always shows loading/error correctly.
+  const queryKey = `${entity}:${hops}:${filter ?? ""}`
+  useEffect(() => {
+    if (prevQueryKeyRef.current && prevQueryKeyRef.current !== queryKey) {
+      setStatus({ state: "idle" })
+    }
+    prevQueryKeyRef.current = queryKey
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- queryKey is a stable derived string; setStatus is stable
+  }, [queryKey])
+
+  // Precedence: error > fetching/loading > layout-status.
+  // keepPreviousData means isFetching can be true while previous data is still shown.
+  const renderedStatus: LayoutStatus = useMemo(() => {
     if (isError) {
       return { state: "error", message: error instanceof Error ? error.message : "Graph fetch failed" }
     }
-    return null
-  }, [isLoading, isError, error])
-
-  const renderedStatus: LayoutStatus =
-    fetchingStatus && status.state !== "laying-out" && status.state !== "ready" && status.state !== "error"
-      ? fetchingStatus
-      : status
+    if (isLoading || (isFetching && status.state === "idle")) {
+      return { state: "fetching" }
+    }
+    return status
+  }, [isError, isLoading, isFetching, status, error])
 
   // Entity type counts for chip toolbar
   const typeCounts = useMemo((): Map<string, number> => {
@@ -686,6 +737,7 @@ export function Atlas({
       defaultNodeColor: currentTokens.clusterOther,
       defaultEdgeColor: currentTokens.edge,
       labelColor: { color: currentTokens.foreground },
+      defaultDrawNodeHover: makeDrawNodeHover(currentTokens),
       nodeProgramClasses: ATLAS_NODE_PROGRAM_CLASSES,
       edgeProgramClasses: ATLAS_EDGE_PROGRAM_CLASSES,
       defaultNodeType: ATLAS_DEFAULT_NODE_TYPE,
@@ -710,13 +762,14 @@ export function Atlas({
       if (nd) {
         sigma.getCamera().animate({ x: nd.x, y: nd.y }, { duration: 500 })
       }
-      onNodeClickRef.current?.(node)
+      // Unified click contract (Cycle 4): pin only — no mode switch.
+      onInspectRef.current?.(node)
     })
 
-    sigma.on("doubleClickNode", ({ node, event }) => {
-      // Prevent sigma's default double-click zoom
+    // Double-click removed (Cycle 4 click contract: Enter = inspect, not navigate).
+    sigma.on("doubleClickNode", ({ event }) => {
+      // Suppress sigma's default double-click zoom — no action.
       try { (event.original as MouseEvent | undefined)?.preventDefault?.() } catch { /* ok */ }
-      onNodeDoubleClickRef.current?.(node)
     })
 
     sigma.on("enterNode", ({ node, event }) => {
@@ -876,16 +929,16 @@ export function Atlas({
     setPinnedNode(null)
   }, [])
 
-  // Make focal: animate camera then trigger parent refocus
+  // Make focal: animate camera then trigger parent explicit refocus (A4 contract)
   const handleMakeFocal = useCallback((nodeId: string) => {
     const s = sigmaRef.current
     if (s) {
       const nd = s.getNodeDisplayData(nodeId)
       if (nd) s.getCamera().animate({ x: nd.x, y: nd.y }, { duration: 500 })
     }
-    onNodeClick?.(nodeId)
+    onFocusEntity?.(nodeId)
     setArrivalPingKey((k) => k + 1)
-  }, [onNodeClick])
+  }, [onFocusEntity])
 
   // Hop-ring graticule overlay
   useHopRingLayer(sigmaInstance, graphInstance, entity, hops, tokens)
@@ -897,7 +950,8 @@ export function Atlas({
     sigma: sigmaInstance,
     graph: graphInstance,
     focalEntity: entity,
-    onActivate: (id) => onNodeDoubleClick?.(id) ?? onNodeClick?.(id),
+    // Cycle 4: Enter = inspect (pin card), not navigate. A5 keyboard contract.
+    onActivate: (id) => { onInspect?.(id) },
     onToggleLensMenu: handleToggleLensMenu,
     onSearchPalette,
     onHopsChange: handleHopsChange,
@@ -925,7 +979,7 @@ export function Atlas({
       aria-activedescendant={selectedNodeId ?? undefined}
       onKeyDown={onKeyDown}
     >
-      {/* Pill toolbar (lens + hops + type chips + stats + config) */}
+      {/* Pill toolbar (lens + hops + type chips + stats + saved-views + config) */}
       {lensPanelVisible && renderedStatus.state !== "error" && (
         <PillToolbar
           activeLenses={activeLenses}
@@ -939,6 +993,40 @@ export function Atlas({
           totalEdges={graphInstance?.size ?? 0}
           config={config}
           onConfigChange={handleConfigChange}
+          onBackToOverview={onBackToOverview}
+          savedViewsSlot={
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Saved views"
+                  className="rounded border border-border/60 p-1 text-muted-foreground hover:bg-accent/30"
+                >
+                  <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 p-0">
+                <AtlasSavedViews
+                  focalEntity={entity}
+                  hops={hops}
+                  filter={filter}
+                  activeLenses={activeLenses}
+                  activeChips={activeTypeChips}
+                  getCameraState={() => {
+                    const sigma = sigmaInstance
+                    if (!sigma) return null
+                    const cam = sigma.getCamera().getState()
+                    return { x: cam.x, y: cam.y, ratio: cam.ratio, angle: cam.angle }
+                  }}
+                  onRestore={(view) => {
+                    setActiveLenses(new Set(view.lenses as LensId[]))
+                    if (view.chips?.length) setActiveTypeChips(new Set(view.chips))
+                    onRestoreView?.(view)
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+          }
         />
       )}
 
@@ -961,25 +1049,6 @@ export function Atlas({
         onClose={() => setContextMenuTarget(null)}
         onCite={(id, name) => onCiteInChat?.(id, name)}
         onOpenWiki={(id) => onOpenInWiki?.(id)}
-      />
-
-      <AtlasSavedViews
-        focalEntity={entity}
-        hops={hops}
-        filter={filter}
-        activeLenses={activeLenses}
-        activeChips={activeTypeChips}
-        getCameraState={() => {
-          const sigma = sigmaInstance
-          if (!sigma) return null
-          const cam = sigma.getCamera().getState()
-          return { x: cam.x, y: cam.y, ratio: cam.ratio, angle: cam.angle }
-        }}
-        onRestore={(view) => {
-          setActiveLenses(new Set(view.lenses as LensId[]))
-          if (view.chips?.length) setActiveTypeChips(new Set(view.chips))
-          onRestoreView?.(view)
-        }}
       />
 
       {/* Hover tooltip / pinned entity card */}

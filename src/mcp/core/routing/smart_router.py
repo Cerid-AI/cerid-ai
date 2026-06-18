@@ -15,6 +15,7 @@ add latency on every call (checks every 60 seconds).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import config
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.smart_router")
 
@@ -132,16 +134,23 @@ FREE_MODELS = {
     "llama-3.3": "openrouter/meta-llama/llama-3.3-70b-instruct",
 }
 
+# Single source of truth for the last-resort free-tier downgrade used by the
+# failover wrappers when no provider serves the originally-routed model. The
+# ``:free`` id is the OpenRouter routing slug probed for provider availability;
+# the bare id is what the RouteDecision carries. Both derive from FREE_MODELS
+# so this can't drift from the tier table above.
+_FREE_FALLBACK_MODEL = FREE_MODELS["llama-3.3"][len("openrouter/"):]  # bare id
+_FREE_FALLBACK_PROBE_ID = f"{_FREE_FALLBACK_MODEL}:free"
+
 # Cheap tier: catalog-refreshed 2026-05-20 against OpenRouter live models.
 # Dict keys are stable identifiers used at call sites — only the underlying
 # model ID + cost change with each catalog refresh.
-# - "gpt-4o-mini" slot: gpt-5-nano is 3× cheaper input than gpt-4o-mini for
-#   the same context window class. Quality regression risk is low — gpt-5-nano
-#   is the explicit "cheap workhorse" successor in the gpt-5 family.
+# - "gpt-4o-mini" slot: gpt-4o-mini. gpt-5-nano was removed (reasoning model:
+#   max_tokens consumed as reasoning budget → 0 output chars).
 # - "gemini-flash" slot: gemini-3.1-flash-lite is cheaper + newer + larger
 #   context than gemini-2.5-flash.
 CHEAP_MODELS: dict[str, dict[str, str | float]] = {
-    "gpt-4o-mini": {"id": "openrouter/openai/gpt-5-nano", "cost": 0.00005},
+    "gpt-4o-mini": {"id": "openrouter/openai/gpt-4o-mini", "cost": 0.00015},
     "gemini-flash": {"id": "openrouter/google/gemini-3.1-flash-lite", "cost": 0.00025},
 }
 
@@ -163,6 +172,76 @@ RESEARCH_MODELS: dict[str, dict[str, str | float]] = {
 EXPERT_MODELS: dict[str, dict[str, str | float]] = {
     "grok-4": {"id": "openrouter/x-ai/grok-4.20:online", "cost": 0.00125},
 }
+
+# ---------------------------------------------------------------------------
+# Routing-tiers overlay (weekly catalog refresh of the tier ids above)
+# ---------------------------------------------------------------------------
+# The weekly model_auto_update job resolves each tier id through
+# ``model_catalog.resolve_latest`` against the live OpenRouter catalog and
+# persists a ``{original_id: resolved_id}`` map to the path in
+# ``config.ROUTING_TIERS_OVERLAY_PATH``. We read it lazily here (mtime-cached)
+# so the tier tables stay current without editing source. Missing / unreadable
+# / malformed overlay → ``{}`` and every id resolves to itself (fail soft).
+# ``core`` reads only the path string from ``config`` — never imports ``app``.
+
+_tier_overlay: dict[str, str] = {}
+_tier_overlay_mtime: float = -1.0
+
+
+def _load_tier_overlay() -> dict[str, str]:
+    """Return the cached overlay map, reloading when the file's mtime changes."""
+    global _tier_overlay, _tier_overlay_mtime
+    path = getattr(config, "ROUTING_TIERS_OVERLAY_PATH", "")
+    if not path:
+        return {}
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        # No overlay yet (or unreadable) — fail soft to identity resolution.
+        if _tier_overlay:
+            _tier_overlay = {}
+            _tier_overlay_mtime = -1.0
+        return {}
+    if mtime != _tier_overlay_mtime:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+            _tier_overlay = {
+                str(k): str(v)
+                for k, v in raw.items()
+                if isinstance(k, str) and isinstance(v, str)
+            } if isinstance(raw, dict) else {}
+        except (OSError, ValueError) as exc:  # noqa: BLE001 — resilient overlay read
+            from core.utils.swallowed import log_swallowed_error
+
+            log_swallowed_error("smart_router.tier_overlay", exc)
+            _tier_overlay = {}
+        _tier_overlay_mtime = mtime
+    return _tier_overlay
+
+
+def _resolve_tier_id(raw_id: str) -> str:
+    """Map a tier-table id through the overlay; identity when absent."""
+    return _load_tier_overlay().get(raw_id, raw_id)
+
+
+def tier_source_ids() -> list[str]:
+    """Distinct *source* (pre-overlay) ids across every tier table.
+
+    The weekly auto-update job feeds these through
+    ``model_catalog.resolve_latest`` to build the overlay, so this is the
+    authoritative list of upgrade-eligible tier ids. Order-stable + de-duped.
+    """
+    ids: list[str] = list(FREE_MODELS.values())
+    for table in (CHEAP_MODELS, CAPABLE_MODELS, RESEARCH_MODELS, EXPERT_MODELS):
+        ids.extend(str(entry["id"]) for entry in table.values())
+    seen: set[str] = set()
+    out: list[str] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out
 
 # ---------------------------------------------------------------------------
 # Ollama availability cache
@@ -417,6 +496,7 @@ async def _classify_with_best_available(query: str) -> Complexity:
                 return level
 
     except Exception as e:
+        log_swallowed_error("core.routing.smart_router.ollama_classify", e)
         logger.debug("Ollama classification failed (%s), using heuristic", e)
 
     return heuristic_result
@@ -460,7 +540,7 @@ async def route(
     # 1. Task-specific models -- always take precedence
     if task_type == TaskType.VERIFICATION:
         p95 = _check_budget("verification", slo_budget_ms)
-        model = getattr(config, "VERIFICATION_MODEL", "openrouter/openai/gpt-4o-mini")
+        model = config.VERIFICATION_MODEL
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
         return RouteDecision(
@@ -475,11 +555,7 @@ async def route(
         p95 = _check_budget("verification_web", slo_budget_ms)
         # Catalog-refreshed 2026-05-20: grok-4.1-fast removed from
         # OpenRouter; grok-4.3 is the current cheap-search-tier xAI model.
-        model = getattr(
-            config,
-            "VERIFICATION_CURRENT_EVENT_MODEL",
-            "openrouter/x-ai/grok-4.3:online",
-        )
+        model = config.VERIFICATION_CURRENT_EVENT_MODEL
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
         return RouteDecision(
@@ -494,7 +570,9 @@ async def route(
         p95 = _check_budget("verification_expert", slo_budget_ms)
         # Catalog-refreshed 2026-05-20: grok-4 / grok-4:online removed
         # from OpenRouter; grok-4.20 is the current expert-tier xAI model.
-        model = getattr(config, "VERIFICATION_EXPERT_MODEL", "openrouter/x-ai/grok-4.20:online")
+        # The expert branch wants the web-search (:online) variant — see the
+        # VERIFICATION_EXPERT_WEB_MODEL note in config/settings.py.
+        model = config.VERIFICATION_EXPERT_WEB_MODEL
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
         return RouteDecision(
@@ -537,7 +615,7 @@ async def route(
         # No Ollama -- use free OpenRouter model
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
-            model=FREE_MODELS["llama-3.3"],
+            model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
             provider="openrouter_free",
             reason="free tier model",
             estimated_cost_per_1k=0.0,
@@ -581,7 +659,7 @@ async def route(
     if complexity == Complexity.RESEARCH:
         p95 = _check_budget("openrouter_research", slo_budget_ms)
         return RouteDecision(
-            model=str(RESEARCH_MODELS["grok-online"]["id"]),
+            model=_resolve_tier_id(str(RESEARCH_MODELS["grok-online"]["id"])),
             provider="openrouter_paid",
             reason=(
                 "research query — cheaper web model (high cost sensitivity)"
@@ -622,7 +700,7 @@ async def route(
                     )
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
-            model=FREE_MODELS["llama-3.3"],
+            model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
             provider="openrouter_free",
             reason="simple query — free tier sufficient",
             estimated_cost_per_1k=0.0,
@@ -635,7 +713,7 @@ async def route(
             # gpt-4o-mini is too weak for multi-step reasoning.
             p95 = _check_budget("openrouter_cheap", slo_budget_ms)
             return RouteDecision(
-                model=str(CHEAP_MODELS["gemini-flash"]["id"]),
+                model=_resolve_tier_id(str(CHEAP_MODELS["gemini-flash"]["id"])),
                 provider="openrouter_paid",
                 reason="complex query — cheapest capable model (high cost sensitivity)",
                 estimated_cost_per_1k=0.0003,
@@ -649,7 +727,7 @@ async def route(
             if cs == "low" else "complex query — strong reasoning needed"
         )
         return RouteDecision(
-            model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
+            model=_resolve_tier_id(str(CAPABLE_MODELS["claude-sonnet"]["id"])),
             provider="openrouter_paid",
             reason=reason,
             estimated_cost_per_1k=0.003,
@@ -660,7 +738,7 @@ async def route(
     if cs == "high":
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
-            model=FREE_MODELS["llama-3.3"],
+            model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
             provider="openrouter_free",
             reason="moderate query — free model (high cost sensitivity)",
             estimated_cost_per_1k=0.0,
@@ -670,7 +748,7 @@ async def route(
         # Task 17 decision table: MODERATE + low → CAPABLE (was CHEAP).
         p95 = _check_budget("openrouter_capable", slo_budget_ms)
         return RouteDecision(
-            model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
+            model=_resolve_tier_id(str(CAPABLE_MODELS["claude-sonnet"]["id"])),
             provider="openrouter_paid",
             reason="moderate query — capable model (low cost sensitivity)",
             estimated_cost_per_1k=0.003,
@@ -679,7 +757,7 @@ async def route(
     # Medium: cheap paid model balances quality and cost
     p95 = _check_budget("openrouter_cheap", slo_budget_ms)
     return RouteDecision(
-        model=str(CHEAP_MODELS["gpt-4o-mini"]["id"]),
+        model=_resolve_tier_id(str(CHEAP_MODELS["gpt-4o-mini"]["id"])),
         provider="openrouter_paid",
         reason="moderate query — cost-effective balance",
         estimated_cost_per_1k=0.00015,
@@ -748,11 +826,11 @@ def route_with_failover(
     if provider_name == "none":
         # Try free fallback
         provider_name, _api_key = resolve_provider_for_model(
-            "meta-llama/llama-3.3-70b-instruct:free", cfg
+            _FREE_FALLBACK_PROBE_ID, cfg
         )
         if provider_name != "none":
             decision = RouteDecision(
-                model="meta-llama/llama-3.3-70b-instruct",
+                model=_FREE_FALLBACK_MODEL,
                 provider=f"{provider_name}_free",
                 reason=f"{decision.reason} (downgraded: no provider for original model)",
                 estimated_cost_per_1k=0.0,
@@ -812,11 +890,11 @@ async def aroute_with_failover(
     if provider_name == "none":
         # Try free fallback
         provider_name, _api_key = resolve_provider_for_model(
-            "meta-llama/llama-3.3-70b-instruct:free", cfg
+            _FREE_FALLBACK_PROBE_ID, cfg
         )
         if provider_name != "none":
             decision = RouteDecision(
-                model="meta-llama/llama-3.3-70b-instruct",
+                model=_FREE_FALLBACK_MODEL,
                 provider=f"{provider_name}_free",
                 reason=f"{decision.reason} (downgraded: no provider for original model)",
                 estimated_cost_per_1k=0.0,
@@ -840,11 +918,15 @@ async def aroute_with_failover(
 
 
 def get_model_registry() -> dict:
-    """Return the full model registry for the Settings UI."""
+    """Return the full model registry for the Settings UI.
+
+    Tier ids are resolved through the routing-tiers overlay so the UI reflects
+    the same (catalog-refreshed) ids ``route()`` actually dispatches to.
+    """
     return {
-        "free": FREE_MODELS,
-        "cheap": {k: v["id"] for k, v in CHEAP_MODELS.items()},
-        "capable": {k: v["id"] for k, v in CAPABLE_MODELS.items()},
-        "research": {k: v["id"] for k, v in RESEARCH_MODELS.items()},
-        "expert": {k: v["id"] for k, v in EXPERT_MODELS.items()},
+        "free": {k: _resolve_tier_id(v) for k, v in FREE_MODELS.items()},
+        "cheap": {k: _resolve_tier_id(str(v["id"])) for k, v in CHEAP_MODELS.items()},
+        "capable": {k: _resolve_tier_id(str(v["id"])) for k, v in CAPABLE_MODELS.items()},
+        "research": {k: _resolve_tier_id(str(v["id"])) for k, v in RESEARCH_MODELS.items()},
+        "expert": {k: _resolve_tier_id(str(v["id"])) for k, v in EXPERT_MODELS.items()},
     }

@@ -18,11 +18,24 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Sigma from "sigma"
 import Graph from "graphology"
-import { Loader2 } from "lucide-react"
+import { Loader2, X } from "lucide-react"
 import type { GraphMapResponse, CommunityHull } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
 import { useCommunityLayer, resolveMapTokens, type MapTokens } from "./community-layer"
+import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
+import { useNavigation } from "@/contexts/navigation-context"
+import { domainColor } from "@/lib/graph/identity"
+import { createHealController } from "@/lib/graph/interactions/drag-heal"
+import type { OnInspect, OnFocusEntity } from "@/lib/graph/cycle4-contracts"
+// sigma's MouseCoords — local interface matching the vendored type
+interface SigmaMouseCoords {
+  x: number
+  y: number
+  original: MouseEvent | TouchEvent
+  preventSigmaDefault: () => void
+  sigmaDefaultPrevented: boolean
+}
 
 // ---------------------------------------------------------------------------
 // Sizing
@@ -37,6 +50,10 @@ function nodeRadius(degree: number): number {
 function edgeWidth(weight: number): number {
   return Math.min(2.5, Math.max(1, 1 + (weight / 10) * 1.5))
 }
+
+// Minimum interactive hit size in pixels — nodes that shrink past this floor
+// become unclickable; enforce for any visible node.
+const HIT_SIZE_MIN = 4
 
 // ---------------------------------------------------------------------------
 // Community color helpers
@@ -62,7 +79,7 @@ function clusterColor(communityId: string | null, tokens: MapTokens): string {
 // Lens coloring
 // ---------------------------------------------------------------------------
 
-type ColorLens = "cluster" | "trust" | "type"
+export type ColorLens = "cluster" | "trust" | "type" | "domain"
 
 const TYPE_SLOT: Record<string, number> = {
   PERSON: 0, Person: 0,
@@ -73,7 +90,7 @@ const TYPE_SLOT: Record<string, number> = {
 }
 
 function lensColor(
-  entity: { type: string; community: string | null; trust_state: string },
+  entity: { type: string; community: string | null; trust_state: string; primary_domain?: string | null },
   lens: ColorLens,
   tokens: MapTokens,
 ): string {
@@ -82,14 +99,47 @@ function lensColor(
     return slot !== undefined ? (tokens.clusters[slot] ?? tokens.clusterOther) : tokens.clusterOther
   }
   if (lens === "trust") {
-    // Trust lens: map to cluster slots 0(verified), 2(partial), 4(other)
-    // so node fill reflects trust grade using the muted categorical ramp
-    if (entity.trust_state === "verified") return tokens.clusters[0] ?? tokens.clusterOther
-    if (entity.trust_state === "partial") return tokens.clusters[2] ?? tokens.clusterOther
-    return tokens.clusterOther
+    // Trust lens: use dedicated trust tokens; fall back to neutral dim when
+    // no trust data is present (trust_state === "unknown" means no writer has
+    // run yet — show an honest muted neutral rather than fake green).
+    switch (entity.trust_state) {
+      case "verified":     return tokens.trustVerified
+      case "partial":      return tokens.trustPartial
+      case "unverified":   return tokens.trustUnverified
+      case "contradicted": return tokens.trustUnverified
+      default:             return tokens.dim
+    }
+  }
+  if (lens === "domain") {
+    return domainColor(tokens, entity.primary_domain ?? null)
   }
   // cluster (default)
   return clusterColor(entity.community, tokens)
+}
+
+// ---------------------------------------------------------------------------
+// Token equality check — avoid refreshing sigma when tokens are the same value
+// ---------------------------------------------------------------------------
+
+function tokensEqual(a: MapTokens, b: MapTokens): boolean {
+  if (a === b) return true
+  return (
+    a.foreground === b.foreground &&
+    a.background === b.background &&
+    a.edge === b.edge &&
+    a.dim === b.dim &&
+    a.interaction === b.interaction &&
+    a.clusterOther === b.clusterOther &&
+    a.domainOther === b.domainOther &&
+    a.trustVerified === b.trustVerified &&
+    a.trustPartial === b.trustPartial &&
+    a.trustUnverified === b.trustUnverified &&
+    a.fontSans === b.fontSans &&
+    a.clusters.length === b.clusters.length &&
+    a.clusters.every((c, i) => c === b.clusters[i]) &&
+    a.domains.length === b.domains.length &&
+    a.domains.every((c, i) => c === b.domains[i])
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +153,18 @@ interface PulseEntry {
 }
 
 const PULSE_DURATION_MS = 600
+
+// Drag state refs — managed separately from React state to avoid reducer
+// reinstalls on every pointer event.
+interface DragRef {
+  nodeId: string | null
+  startX: number
+  startY: number
+  didDrag: boolean
+}
+
+// Click-vs-drag threshold: 4px displacement classifies as drag.
+const DRAG_THRESHOLD_PX = 4
 
 // ---------------------------------------------------------------------------
 // Component props
@@ -119,8 +181,24 @@ export interface CartographerMapProps {
   isError: boolean
   errorMessage?: string
   newEntityIds?: Set<string>
-  onNodeClick?: (entityId: string) => void
+  /**
+   * Unified click contract (Cycle 4): pin/inspect only — never mode-switch.
+   * Replaces the old onNodeClick that conflated inspection with navigation.
+   */
+  onInspect?: OnInspect
+  /**
+   * Explicit refocus: re-centers the graph on this entity.
+   * Called by hull-card hub buttons only; node clicks use onInspect.
+   */
+  onFocusEntity?: OnFocusEntity
   onCommunityClick?: (community: CommunityHull) => void
+  /** layout_fallback: true → show inline "wells layout not computed yet" notice */
+  layoutFallback?: boolean
+  /**
+   * Called when the user Shift-drops a node to permanently pin it.
+   * Parent can persist this into the saved view's pinnedNodes field.
+   */
+  onPinnedNodesChange?: (pinnedNodes: Record<string, { x: number; y: number }>) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -137,13 +215,18 @@ export function CartographerMap({
   isError,
   errorMessage,
   newEntityIds,
-  onNodeClick,
+  onInspect,
+  onFocusEntity: _onFocusEntity, // eslint-disable-line @typescript-eslint/no-unused-vars
   onCommunityClick,
+  layoutFallback,
+  onPinnedNodesChange,
 }: CartographerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
-  const onNodeClickRef = useRef(onNodeClick)
-  onNodeClickRef.current = onNodeClick
+  const onInspectRef = useRef(onInspect)
+  onInspectRef.current = onInspect
+
+  const { goTo } = useNavigation()
 
   const [sigmaInstance, setSigmaInstance] = useState<Sigma | null>(null)
   const [tokens, setTokens] = useState<MapTokens>(() => {
@@ -154,6 +237,8 @@ export function CartographerMap({
     return {
       clusters: Array(8).fill("#999"), // drift-allowed: SSR fallback only, never reaches browser
       clusterOther: "#999", // drift-allowed: SSR fallback only, never reaches browser
+      domains: Array(12).fill("#999"), // drift-allowed: SSR fallback only, never reaches browser
+      domainOther: "#666", // drift-allowed: SSR fallback only, never reaches browser
       edge: "#ccc", // drift-allowed: SSR fallback only, never reaches browser
       dim: "#eee", // drift-allowed: SSR fallback only, never reaches browser
       interaction: "#00c8b4", // drift-allowed: SSR fallback only, never reaches browser
@@ -163,12 +248,34 @@ export function CartographerMap({
       trustPartial: "#555", // drift-allowed: SSR fallback only, never reaches browser
       trustUnverified: "#888", // drift-allowed: SSR fallback only, never reaches browser
       grid: "#eee", // drift-allowed: SSR fallback only, never reaches browser
+      fontSans: "system-ui, sans-serif", // drift-allowed: SSR fallback only, never reaches browser
     }
   })
 
   // Pinned entity card state
   const [pinnedId, setPinnedId] = useState<string | null>(null)
-  const [hoverState, setHoverState] = useState<{ id: string; x: number; y: number } | null>(null)
+  // Pinned node position overrides (Shift-drop drag-pins)
+  const [pinnedNodes, setPinnedNodes] = useState<Record<string, { x: number; y: number }>>({})
+  const pinnedNodesRef = useRef(pinnedNodes)
+  pinnedNodesRef.current = pinnedNodes
+  const onPinnedNodesChangeRef = useRef(onPinnedNodesChange)
+  onPinnedNodesChangeRef.current = onPinnedNodesChange
+
+  // Hover state lives in a ref — sigma events update it without triggering
+  // React re-renders that would reinstall reducers on every mousemove.
+  const hoverIdRef = useRef<string | null>(null)
+  // DOM tooltip state for the HTML overlay (separate from sigma hover plate)
+  const [tooltipState, setTooltipState] = useState<{ id: string; x: number; y: number } | null>(null)
+
+  // Drag state ref — no React state; updates don't trigger re-renders.
+  const dragRef = useRef<DragRef>({ nodeId: null, startX: 0, startY: 0, didDrag: false })
+  // Grab cursor state for the container
+  const [isDragging, setIsDragging] = useState(false)
+  // Reduced motion detection — optional chaining guards jsdom test env
+  const reducedMotion =
+    typeof window !== "undefined"
+      ? (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false)
+      : false
 
   // Pulse ring state: map from nodeId → start timestamp
   const [pulseMap, setPulseMap] = useState<Map<string, number>>(new Map())
@@ -176,9 +283,11 @@ export function CartographerMap({
   const pulseEntriesRef = useRef<PulseEntry[]>([])
 
   // Re-read tokens when theme changes (watch for .dark class toggle)
+  // Value-compare before setState to avoid unnecessary sigma rebuilds.
   useEffect(() => {
     const observer = new MutationObserver(() => {
-      setTokens(resolveMapTokens(document.documentElement))
+      const next = resolveMapTokens(document.documentElement)
+      setTokens((prev) => tokensEqual(prev, next) ? prev : next)
     })
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
     return () => observer.disconnect()
@@ -254,6 +363,7 @@ export function CartographerMap({
       renderLabels: true,
       labelSize: 11,
       labelWeight: "400",
+      labelFont: tokens.fontSans,
       // Default colors from tokens — no hex literals
       defaultNodeColor: tokens.clusterOther,
       defaultEdgeColor: tokens.edge,
@@ -264,26 +374,150 @@ export function CartographerMap({
       hideEdgesOnMove: true,
       // Edges rendered under nodes
       zIndex: true,
+      // Theme-aware hover plate (overrides sigma's hardcoded #FFF default)
+      defaultDrawNodeHover: makeDrawNodeHover(tokens),
     })
 
     sigmaRef.current = sigma
     setSigmaInstance(sigma)
 
+    // Build entity lookup for home positions (used by heal controller)
+    const entityById = new Map(data.entities.map((e) => [e.id, e]))
+
+    // Heal controller — one per sigma instance, disposed on teardown.
+    const healCtrl = createHealController({
+      getHome: (id) => {
+        const e = entityById.get(id)
+        return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }
+      },
+      getPos: (id) => {
+        if (!sigma.getGraph().hasNode(id)) return { x: 0, y: 0 }
+        const attrs = sigma.getGraph().getNodeAttributes(id)
+        return { x: attrs.x as number, y: attrs.y as number }
+      },
+      setPos: (id, pos) => {
+        if (!sigma.getGraph().hasNode(id)) return
+        sigma.getGraph().setNodeAttribute(id, "x", pos.x)
+        sigma.getGraph().setNodeAttribute(id, "y", pos.y)
+      },
+      neighbors: (id) => {
+        const g = sigma.getGraph()
+        if (!g.hasNode(id)) return []
+        const nbIds: string[] = []
+        g.forEachNeighbor(id, (n) => nbIds.push(n))
+        return nbIds
+      },
+      onSettle: () => {
+        // Full refresh on settle to rebuild quadtree for hit-testing.
+        sigma.refresh()
+      },
+      reducedMotion,
+    })
+
+    // ---------------------------------------------------------------------------
+    // downNode — begin drag (beside clickNode per sigma grounding doc)
+    // ---------------------------------------------------------------------------
+    sigma.on("downNode", ({ node, event, preventSigmaDefault }) => {
+      const orig = event.original as MouseEvent | TouchEvent
+      const clientX = "clientX" in orig ? (orig as MouseEvent).clientX : 0
+      const clientY = "clientY" in orig ? (orig as MouseEvent).clientY : 0
+
+      dragRef.current = { nodeId: node, startX: clientX, startY: clientY, didDrag: false }
+      preventSigmaDefault()
+
+      setIsDragging(true)
+      healCtrl.startDrag(node)
+    })
+
+    // ---------------------------------------------------------------------------
+    // mousemovebody — drag move (MouseCoords per sigma captor contract)
+    // ---------------------------------------------------------------------------
+    const mouseCaptor = sigma.getMouseCaptor()
+    const handleMouseMove = (coords: SigmaMouseCoords) => {
+      const drag = dragRef.current
+      if (!drag.nodeId) return
+
+      const orig = coords.original as MouseEvent
+      const clientX = orig.clientX ?? 0
+      const clientY = orig.clientY ?? 0
+
+      const dx = clientX - drag.startX
+      const dy = clientY - drag.startY
+      if (!drag.didDrag && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+
+      dragRef.current.didDrag = true
+
+      const graphPos = sigma.viewportToGraph({ x: coords.x, y: coords.y })
+      healCtrl.moveDrag(drag.nodeId, graphPos)
+      sigma.refresh({ skipIndexation: true })
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mouseCaptor.on("mousemovebody", handleMouseMove as any)
+
+    // ---------------------------------------------------------------------------
+    // mouseup — end drag or fire click (MouseCoords)
+    // ---------------------------------------------------------------------------
+    const handleMouseUp = (coords: SigmaMouseCoords) => {
+      const drag = dragRef.current
+      if (!drag.nodeId) return
+
+      const node = drag.nodeId
+      const didDrag = drag.didDrag
+      dragRef.current = { nodeId: null, startX: 0, startY: 0, didDrag: false }
+      setIsDragging(false)
+
+      if (didDrag) {
+        const orig = coords.original as MouseEvent
+        const isShift = orig.shiftKey ?? false
+        healCtrl.endDrag(node, { pin: isShift })
+        if (isShift) {
+          const attrs = sigma.getGraph().getNodeAttributes(node)
+          setPinnedNodes((prev) => {
+            const next = { ...prev, [node]: { x: attrs.x as number, y: attrs.y as number } }
+            onPinnedNodesChangeRef.current?.(next)
+            return next
+          })
+        }
+      } else {
+        // Click: pin/inspect only per unified click contract.
+        setPinnedId((prev) => (prev === node ? null : node))
+        onInspectRef.current?.(node)
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mouseCaptor.on("mouseup", handleMouseUp as any)
+
+    // ---------------------------------------------------------------------------
+    // clickNode — consumed by downNode path above; listen for non-drag clicks
+    // that sigma still emits when preventSigmaDefault was NOT called.
+    // (downNode always calls it, so this is a safety net for accessibility.)
+    // ---------------------------------------------------------------------------
     sigma.on("clickNode", ({ node }) => {
+      if (dragRef.current.nodeId !== null) return // already handled by mouseup
       setPinnedId((prev) => (prev === node ? null : node))
-      onNodeClickRef.current?.(node)
+      onInspectRef.current?.(node)
     })
 
     sigma.on("enterNode", ({ node, event }) => {
+      hoverIdRef.current = node
+      sigma.refresh({ skipIndexation: true })
       const orig = event.original
       const clientX = "clientX" in orig ? (orig as MouseEvent).clientX : 0
       const clientY = "clientY" in orig ? (orig as MouseEvent).clientY : 0
-      setHoverState({ id: node, x: clientX, y: clientY })
+      setTooltipState({ id: node, x: clientX, y: clientY })
     })
-    sigma.on("leaveNode", () => setHoverState(null))
-    sigma.on("moveBody", () => setHoverState(null))
+    sigma.on("leaveNode", () => {
+      hoverIdRef.current = null
+      sigma.refresh({ skipIndexation: true })
+      setTooltipState(null)
+    })
 
     return () => {
+      healCtrl.dispose()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mouseCaptor.off("mousemovebody", handleMouseMove as any)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mouseCaptor.off("mouseup", handleMouseUp as any)
       sigmaRef.current?.kill()
       sigmaRef.current = null
     }
@@ -293,69 +527,93 @@ export function CartographerMap({
   }, [data, config.edgeBudget, tokens])
 
   // ---------------------------------------------------------------------------
-  // Node/edge reducers for lens + filter + hover dimming (run without rebuild)
+  // Node/edge reducers for lens + filter + hover dimming (installed ONCE per
+  // sigma instance). Reducers read hoverIdRef.current so they stay stable
+  // without depending on hover state as a React value.
   // ---------------------------------------------------------------------------
+
+  // Stable ref to lens/typeFilter/tokens/pinnedId so the reducers can read the
+  // latest value without being re-installed on every change.
+  const lensRef = useRef(lens)
+  lensRef.current = lens
+  const typeFilterRef = useRef(typeFilter)
+  typeFilterRef.current = typeFilter
+  const tokensRef = useRef(tokens)
+  tokensRef.current = tokens
+  const pinnedIdRef = useRef(pinnedId)
+  pinnedIdRef.current = pinnedId
+  const pulseMapRef = useRef(pulseMap)
+  pulseMapRef.current = pulseMap
+  const dataRef = useRef(data)
+  dataRef.current = data
+
+  // Install reducers once per sigma instance; subsequent lens/filter/hover
+  // changes are visible via refs — just call sigma.refresh().
   useEffect(() => {
     if (!sigmaInstance || !data) return
 
     const sigma = sigmaInstance
-    const graph = sigma.getGraph()
 
-    // Rebuild degree map (quick since we have data in scope)
+    // Build entity index once for this sigma instance
+    const entityByIdMap = new Map(data.entities.map((e) => [e.id, e]))
+
+    // Build degree map for edge hit-floor enforcement
     const degreeMap = new Map<number, number>()
     for (const [s, t] of data.links) {
       degreeMap.set(s, (degreeMap.get(s) ?? 0) + 1)
       degreeMap.set(t, (degreeMap.get(t) ?? 0) + 1)
     }
 
-    // Build neighbor set for the pinned node for dimming
-    const pinnedNeighbors = new Set<string>()
-    if (pinnedId && graph.hasNode(pinnedId)) {
-      graph.forEachNeighbor(pinnedId, (n) => pinnedNeighbors.add(n))
-      pinnedNeighbors.add(pinnedId)
-    }
-
-    const hoverNeighbors = new Set<string>()
-    if (hoverState?.id && graph.hasNode(hoverState.id)) {
-      graph.forEachNeighbor(hoverState.id, (n) => hoverNeighbors.add(n))
-      hoverNeighbors.add(hoverState.id)
-    }
-
-    const focusNeighbors = pinnedId ? pinnedNeighbors : hoverState?.id ? hoverNeighbors : null
-    const focusCenter = pinnedId ?? hoverState?.id ?? null
-
-    // Build index for fast entity lookup
-    const entityByIdMap = new Map(data.entities.map((e) => [e.id, e]))
-
     sigma.setSetting("nodeReducer", (node, attrs) => {
       const entity = entityByIdMap.get(node)
       if (!entity) return { ...attrs, hidden: true }
 
+      const currentTokens = tokensRef.current
+      const currentLens = lensRef.current
+      const currentTypeFilter = typeFilterRef.current
+      const currentPinnedId = pinnedIdRef.current
+      const hoverId = hoverIdRef.current
+      const currentPulseMap = pulseMapRef.current
+      const currentDragId = dragRef.current.nodeId
+      const isPermanentPin = node in pinnedNodesRef.current
+
+      // Build neighbor sets for focus dimming
+      const graph = sigma.getGraph()
+      const focusCenter = currentPinnedId ?? hoverId ?? null
+      let focusNeighbors: Set<string> | null = null
+      if (focusCenter && graph.hasNode(focusCenter)) {
+        focusNeighbors = new Set<string>()
+        graph.forEachNeighbor(focusCenter, (n) => focusNeighbors!.add(n))
+        focusNeighbors.add(focusCenter)
+      }
+
       // Type filter dim
-      const typeFiltered = typeFilter.size > 0 && !typeFilter.has(entity.type)
+      const typeFiltered = currentTypeFilter.size > 0 && !currentTypeFilter.has(entity.type)
 
       // Focus dim: when there's a focus center, non-neighbors fade to dim token
       const hasFocus = focusNeighbors !== null
-      const inFocus = !hasFocus || focusNeighbors.has(node)
+      const inFocus = !hasFocus || focusNeighbors!.has(node)
 
       if (typeFiltered || (!inFocus && hasFocus)) {
         return {
           ...attrs,
-          color: tokens.dim,
+          color: currentTokens.dim,
           label: "",
-          size: attrs.size * 0.7,
+          // Enforce minimum interactive hit size even when dimmed
+          size: Math.max(HIT_SIZE_MIN, attrs.size * 0.7),
         }
       }
 
       // Apply lens recoloring
-      const color = lensColor(entity, lens, tokens)
+      const color = lensColor(entity, currentLens, currentTokens)
 
-      // Hover/selection ring: teal border on focal node and its 1-hop
+      // Hover/selection ring: teal border on focal node only (not all neighbors)
+      // — marking all neighbors `highlighted` causes many white plates (sigma
+      // renders highlighted nodes through the hover program).
       const isCenter = node === focusCenter
-      const isNeighbor = hasFocus && focusNeighbors.has(node) && !isCenter
 
       // Pulse ring: if within active pulse window, boost size slightly
-      const pulseEntry = pulseMap.get(node)
+      const pulseEntry = currentPulseMap.get(node)
       let extraSize = 0
       if (pulseEntry !== undefined) {
         const elapsed = Date.now() - pulseEntry
@@ -363,34 +621,53 @@ export function CartographerMap({
         extraSize = t * 4  // expands up to 4px at peak
       }
 
+      // Drag lift: +15% size on the actively-dragged node (visible affordance).
+      const isDragged = node === currentDragId && currentDragId !== null
+      const nodeSize = isDragged ? attrs.size * 1.15 : attrs.size + extraSize
+
       return {
         ...attrs,
         color,
-        size: attrs.size + extraSize,
-        // Use sigma's built-in highlighted for teal ring (rendered via NodeCircleProgram border)
-        highlighted: isCenter || isNeighbor,
-        zIndex: isCenter ? 2 : isNeighbor ? 1 : 0,
-        forceLabel: isCenter || (hasFocus && isNeighbor),
+        size: nodeSize,
+        // highlighted only on the hovered/pinned center — not all neighbors
+        highlighted: isCenter,
+        zIndex: isDragged ? 3 : isPermanentPin ? 2 : isCenter ? 2 : hasFocus && focusNeighbors!.has(node) ? 1 : 0,
+        forceLabel: isCenter || isPermanentPin || (hasFocus && focusNeighbors!.has(node)),
       }
     })
 
     sigma.setSetting("edgeReducer", (edge, attrs) => {
-      if (focusNeighbors === null) {
-        return { ...attrs, color: tokens.edge }
-      }
-      const src = sigmaInstance.getGraph().source(edge)
-      const tgt = sigmaInstance.getGraph().target(edge)
+      const currentPinnedId = pinnedIdRef.current
+      const hoverId = hoverIdRef.current
+      const focusCenter = currentPinnedId ?? hoverId ?? null
+      if (!focusCenter) return { ...attrs, color: tokensRef.current.edge }
+
+      const graph = sigma.getGraph()
+      if (!graph.hasNode(focusCenter)) return { ...attrs, color: tokensRef.current.edge }
+
+      const focusNeighbors = new Set<string>()
+      graph.forEachNeighbor(focusCenter, (n) => focusNeighbors.add(n))
+      focusNeighbors.add(focusCenter)
+
+      const src = graph.source(edge)
+      const tgt = graph.target(edge)
       const srcInFocus = focusNeighbors.has(src)
       const tgtInFocus = focusNeighbors.has(tgt)
       if (srcInFocus && tgtInFocus) {
-        // Ego edge: slightly brighter
-        return { ...attrs, color: tokens.edge, hidden: false }
+        return { ...attrs, color: tokensRef.current.edge, hidden: false }
       }
       return { ...attrs, hidden: true }
     })
 
     sigma.refresh()
-  }, [sigmaInstance, data, lens, typeFilter, tokens, pinnedId, hoverState, pulseMap])
+  }, [sigmaInstance, data])
+
+  // Trigger a cheap refresh whenever lens/filter/tokens/pinnedId/drag changes
+  // without reinstalling reducers.
+  useEffect(() => {
+    if (!sigmaInstance) return
+    sigmaInstance.refresh({ skipIndexation: true })
+  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, pulseMap, isDragging])
 
   // ---------------------------------------------------------------------------
   // Ingest pulse: fire when newEntityIds changes
@@ -465,8 +742,19 @@ export function CartographerMap({
   const handleClearPin = useCallback(() => setPinnedId(null), [])
 
   const handleOpenInWiki = useCallback(() => {
-    if (pinnedId) onNodeClickRef.current?.(pinnedId)
-  }, [pinnedId])
+    if (!pinnedId) return
+    goTo("subjects", { mode: "wiki", entity: pinnedId })
+  }, [pinnedId, goTo])
+
+  // ---------------------------------------------------------------------------
+  // Trust lens empty-state: detect when ALL nodes lack real trust data
+  // ---------------------------------------------------------------------------
+  const allTrustUnknown = !!(
+    data &&
+    data.entities.length > 0 &&
+    lens === "trust" &&
+    data.entities.every((e) => !e.trust_state || e.trust_state === "unknown")
+  )
 
   // ---------------------------------------------------------------------------
   // Render states
@@ -505,13 +793,14 @@ export function CartographerMap({
     )
   }
 
-  const hoveredEntity = hoverState
-    ? data.entities.find((e) => e.id === hoverState.id)
+  const hoveredEntity = tooltipState
+    ? data.entities.find((e) => e.id === tooltipState.id)
     : undefined
 
   return (
     <div
       className="relative h-full w-full bg-background"
+      style={{ cursor: isDragging ? "grabbing" : undefined }} // drift-allowed: runtime interaction state
       role="application"
       aria-roledescription="2D knowledge map"
       aria-label={`Cartographer map of ${data.count} entities`}
@@ -519,12 +808,19 @@ export function CartographerMap({
       {/* Sigma canvas container */}
       <div ref={containerRef} className="h-full w-full" aria-hidden="true" />
 
+      {/* Layout fallback notice — shown when requested layout not yet computed */}
+      {layoutFallback && (
+        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-amber-500/10 px-3 py-1.5 text-label-xs text-amber-700 dark:text-amber-400 backdrop-blur">
+          Wells layout not computed yet — showing force
+        </div>
+      )}
+
       {/* Hover tooltip */}
-      {hoverState && hoveredEntity && (
+      {tooltipState && hoveredEntity && (
         <div
           className="pointer-events-none fixed z-50 max-w-xs rounded-lg border border-border/60 bg-card/95 px-3 py-2 shadow-xl backdrop-blur"
           // Runtime-derived position — drift-allowlisted inline style (popover absolute positioning)
-          style={{ left: hoverState.x + 14, top: hoverState.y + 14 }} // drift-allowed: runtime pointer position
+          style={{ left: tooltipState.x + 14, top: tooltipState.y + 14 }} // drift-allowed: runtime pointer position
         >
           <div className="truncate text-sm font-semibold text-foreground">
             {hoveredEntity.name}
@@ -540,7 +836,7 @@ export function CartographerMap({
               </>
             )}
           </div>
-          <div className="mt-1 text-label-xs text-muted-foreground/70">Click to pin</div>
+          <div className="mt-1 text-label-xs text-muted-foreground/70">Click to inspect</div>
         </div>
       )}
 
@@ -566,7 +862,7 @@ export function CartographerMap({
               aria-label="Clear focus"
               className="rounded p-1 text-muted-foreground hover:bg-accent/40"
             >
-              ✕
+              <X className="h-3 w-3" aria-hidden="true" />
             </button>
           </div>
           <button
@@ -586,6 +882,13 @@ export function CartographerMap({
         {data.silhouette !== null &&
           ` · silhouette ${data.silhouette.toFixed(2)}`}
       </div>
+
+      {/* Trust lens empty-state notice */}
+      {allTrustUnknown && (
+        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-card/80 px-3 py-1.5 text-label-xs text-muted-foreground backdrop-blur">
+          Trust lens: no verification data yet
+        </div>
+      )}
 
       {/* Apply filter indicator */}
       {filter && (

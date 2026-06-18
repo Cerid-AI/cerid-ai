@@ -61,7 +61,10 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
             providers=resolve_providers(config.ONNX_EXECUTION_PROVIDERS),
         )
         _tokenizer = Tokenizer.from_file(tok_path)
-        _tokenizer.enable_truncation(max_length=512)
+        # Coupled to the model: 512 for ms-marco-MiniLM (default), 1024 for
+        # bge-reranker-v2-m3. A 512-token parent chunk + query overflows a
+        # 512 budget and silently loses the chunk's tail; bge reads it whole.
+        _tokenizer.enable_truncation(max_length=config.RERANK_MAX_LENGTH)
         _tokenizer.enable_padding()
 
         logger.info("Cross-encoder model ready (%s)", repo)
@@ -185,11 +188,16 @@ def rerank(
 
     for result, ce_score in zip(candidates, ce_scores):
         original = result["relevance"]
-        result["relevance"] = round(
+        blended = (
             config.RERANK_CE_WEIGHT * ce_score
-            + config.RERANK_ORIGINAL_WEIGHT * original,
-            4,
+            + config.RERANK_ORIGINAL_WEIGHT * original
         )
+        # Personal-first policy (Slice 7.2): down-weight knowledge-pack chunks
+        # AFTER the blend so the multiplier is a stable knob, not entangled with
+        # model scores. pack_id is "" for personal/KB chunks (no effect).
+        if result.get("pack_id"):
+            blended *= config.PACK_RELEVANCE_WEIGHT
+        result["relevance"] = round(blended, 4)
 
     candidates.sort(key=lambda x: x["relevance"], reverse=True)
     # Append cascade-dropped candidates after the cross-encoded survivors so

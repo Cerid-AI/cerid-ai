@@ -9,8 +9,13 @@ import type {
   TimelineStrataResponse,
   StrataTrack,
   StrataSeries,
-  StrataMarker,
 } from "@/lib/api/graph"
+import { domainSlot } from "@/lib/graph/identity"
+import type {
+  StrataEvent,
+  StrataMarkerExtended,
+} from "./strata-types"
+import { MARKER_KIND_META } from "./strata-types"
 
 // ---------------------------------------------------------------------------
 // Types the canvas layer consumes
@@ -28,6 +33,11 @@ export interface StratumLayout {
   communityId: string
   label: string
   colorSlot: number
+  /** Which token palette the colorSlot indexes into.
+   *  "cluster" → tokens.clusters / tokens.clusterOther  (default, -1 sentinel)
+   *  "domain"  → tokens.domains  / tokens.domainOther   (-1 sentinel)
+   */
+  colorFamily: "cluster" | "domain"
   /** Stacked height in pixels from the assigned baseline */
   heightPx: number
   /** Y offset of the top edge in canvas pixels */
@@ -53,6 +63,29 @@ export interface MarkerLayout {
   /** Fractional x position 0..1 within the time axis */
   xFrac: number
   label: string
+  /** Short DOM label (from MARKER_KIND_META) */
+  shortLabel: string
+  /** Whether this marker is a synthetic cluster overflow badge */
+  isClusterBadge?: boolean
+  /** lane_id this marker is attributed to; null/undefined = corpus-wide */
+  lane_id?: string | null
+}
+
+/** A positioned event glyph in the event-horizon strip (12px per lane). */
+export interface EventGlyphLayout {
+  /** ISO-8601 timestamp */
+  ts: string
+  kind: string
+  /** Fractional x position 0..1 within the visible time axis */
+  xFrac: number
+  /** lane_id this glyph belongs to */
+  lane_id: string
+  /** The original event payload, carried for hit-testing + tooltip */
+  event: StrataEvent
+  /** True when this is a synthetic cluster badge representing N overflow events */
+  isCluster: boolean
+  /** Number of events collapsed into this cluster badge (1 for non-clusters) */
+  clusterCount: number
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +246,7 @@ export function computeTypeLensStrata(
       communityId: `__type__${type}`,
       label: type,
       colorSlot: idx % 8,
+      colorFamily: "cluster",
       heightPx,
       topPx: cursor,
       trustMix: { verified: 0, partial: 0, unverified: 0 },
@@ -240,6 +274,142 @@ function allocateTracksForType(
   return candidates.slice(0, budget).map((t) => t.canonical_id)
 }
 
+export function allocateTracksForDomain(
+  tracks: StrataTrack[],
+  domain: string,
+  budget: number,
+  bucketDates: string[],
+  pinnedIds: Set<string>,
+): string[] {
+  const candidates = tracks.filter((t) => (t.primary_domain ?? "other") === domain)
+  candidates.sort((a, b) => trackDOI(b, bucketDates, pinnedIds) - trackDOI(a, bucketDates, pinnedIds))
+  return candidates.slice(0, budget).map((t) => t.canonical_id)
+}
+
+/**
+ * Re-partition strata by primary domain instead of community.
+ *
+ * Lane cap: 8 named domains by mention volume + 1 labeled "Other (N domains)"
+ * overflow lane. colorSlot = domainSlot(name) — never positional index.
+ * colorFamily = "domain" so StratigraphCanvas routes to tokens.domains.
+ *
+ * Pre-job degraded state: series.domain is "other" for all rows (server
+ * coalesces null → "other") → single "Other" lane renders headerless on the
+ * canvas, identical to today's appearance.
+ */
+export function computeDomainLensStrata(
+  response: TimelineStrataResponse,
+  canvasHeight: number,
+  trackBudget: number,
+  pinnedIds: Set<string>,
+): StratumLayout[] {
+  const bucketCount = response.bucket_dates.length
+  const domainMap = new Map<string, { buckets: number[]; unverifiedBuckets: Set<number>; mentions: number }>()
+
+  for (const s of response.series) {
+    const domain = s.domain ?? "other"
+    if (!domainMap.has(domain)) {
+      domainMap.set(domain, { buckets: new Array(bucketCount).fill(0), unverifiedBuckets: new Set(), mentions: 0 })
+    }
+    const entry = domainMap.get(domain)!
+    for (let i = 0; i < bucketCount; i++) {
+      entry.buckets[i] += s.buckets[i] ?? 0
+      if (s.unverified_buckets?.[i]) entry.unverifiedBuckets.add(i)
+    }
+    entry.mentions += s.buckets.reduce((a, b) => a + b, 0)
+  }
+
+  if (domainMap.size === 0) return []
+
+  const allDomains = [...domainMap.entries()]
+    .sort((a, b) => b[1].mentions - a[1].mentions)
+
+  // Cap at 8 named lanes; remainder folds into labeled Other overflow lane
+  const DOMAIN_LANE_CAP = 8
+  const named = allDomains.filter(([d]) => d !== "other")
+  const other = domainMap.get("other")
+
+  const topNamed = named.slice(0, DOMAIN_LANE_CAP)
+  const overflowNamed = named.slice(DOMAIN_LANE_CAP)
+
+  // Build the overflow "Other (N domains)" lane by merging overflowNamed + server "other"
+  const overflowCount = overflowNamed.length + (other ? 1 : 0)
+  const overflowBuckets: number[] = new Array(bucketCount).fill(0)
+  const overflowUnverified = new Set<number>()
+  let overflowMentions = 0
+
+  for (const [, data] of overflowNamed) {
+    for (let i = 0; i < bucketCount; i++) overflowBuckets[i] += data.buckets[i] ?? 0
+    for (const bi of data.unverifiedBuckets) overflowUnverified.add(bi)
+    overflowMentions += data.mentions
+  }
+  if (other) {
+    for (let i = 0; i < bucketCount; i++) overflowBuckets[i] += other.buckets[i] ?? 0
+    for (const bi of other.unverifiedBuckets) overflowUnverified.add(bi)
+    overflowMentions += other.mentions
+  }
+
+  const laneCount = topNamed.length + (overflowMentions > 0 ? 1 : 0)
+  if (laneCount === 0) return []
+
+  const totalMentions = topNamed.reduce((s, [, v]) => s + v.mentions, 0) + overflowMentions
+  const MAX_STRATUM_PX = Math.floor(canvasHeight * 0.9)
+  const sqrtMax = Math.sqrt(Math.max(1, totalMentions))
+
+  let cursor = 0
+  const strata: StratumLayout[] = []
+
+  for (const [domain, data] of topNamed) {
+    const sqrt = Math.sqrt(Math.max(1, data.mentions))
+    const heightPx = Math.max(2, Math.round((sqrt / sqrtMax) * (MAX_STRATUM_PX / laneCount) * 3))
+
+    strata.push({
+      communityId: `__domain__${domain}`,
+      label: domain,
+      // colorSlot = domain hash — stable, never positional
+      colorSlot: domainSlot(domain),
+      colorFamily: "domain",
+      heightPx,
+      topPx: cursor,
+      trustMix: { verified: 0, partial: 0, unverified: 0 },
+      totalMentions: data.mentions,
+      isOther: false,
+      bucketHeights: computeBucketHeights(data.buckets, heightPx),
+      bucketCounts: data.buckets,
+      unverifiedBuckets: data.unverifiedBuckets,
+      trackIds: allocateTracksForDomain(response.tracks, domain, trackBudget, response.bucket_dates, pinnedIds),
+    })
+    cursor += heightPx + 1
+  }
+
+  // Labeled overflow lane — never silent
+  if (overflowMentions > 0) {
+    const overflowLabel = overflowCount > 0
+      ? `Other (${overflowCount} domain${overflowCount === 1 ? "" : "s"})`
+      : "Other"
+    const sqrt = Math.sqrt(Math.max(1, overflowMentions))
+    const heightPx = Math.max(2, Math.round((sqrt / sqrtMax) * (MAX_STRATUM_PX / laneCount) * 3))
+
+    strata.push({
+      communityId: "__domain__other",
+      label: overflowLabel,
+      colorSlot: -1, // → domainOther
+      colorFamily: "domain",
+      heightPx,
+      topPx: cursor,
+      trustMix: { verified: 0, partial: 0, unverified: 0 },
+      totalMentions: overflowMentions,
+      isOther: true,
+      bucketHeights: computeBucketHeights(overflowBuckets, heightPx),
+      bucketCounts: overflowBuckets,
+      unverifiedBuckets: overflowUnverified,
+      trackIds: allocateTracksForDomain(response.tracks, "other", trackBudget, response.bucket_dates, pinnedIds),
+    })
+  }
+
+  return strata
+}
+
 // ---------------------------------------------------------------------------
 // Bucket height computation — sqrt stacking with 2px floor
 // ---------------------------------------------------------------------------
@@ -259,7 +429,10 @@ export interface ComputeStrataOptions {
   canvasHeight: number
   trackBudget: number
   pinnedIds: Set<string>
-  /** Frozen order from prior session (amendment 5). null = compute fresh. */
+  /** Frozen order from prior session (amendment 5).
+   *  null = compute fresh.
+   *  Amendment #1: freeze/re-rank is GATED to community lens only.
+   *  Domain lens passes frozenOrder=null to bypass this path entirely. */
   frozenOrder: string[] | null
 }
 
@@ -344,6 +517,7 @@ export function computeStrata(opts: ComputeStrataOptions): ComputeStrataResult {
       // Always the client hash — the server's color_slot is informative only
       // (sha1-based) and would diverge from the Cartographer hulls' hues.
       colorSlot: communitySlot(community.community_id),
+      colorFamily: "cluster",
       heightPx,
       topPx: cursor,
       trustMix,
@@ -368,6 +542,7 @@ export function computeStrata(opts: ComputeStrataOptions): ComputeStrataResult {
       communityId: other.community_id,
       label: other.label || "Other",
       colorSlot: -1, // signals "use clusterOther color"
+      colorFamily: "cluster",
       heightPx,
       topPx: cursor,
       trustMix: {
@@ -414,8 +589,13 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 // Marker viewport clustering (≤6 per viewport + overflow badge)
 // ---------------------------------------------------------------------------
 
+/**
+ * Cluster axis markers into at most maxVisible entries.
+ * Uses MARKER_KIND_META for labels — replaces the hardcoded two-kind tables.
+ * Non-clusterable kinds (e.g. contradiction_finding) are always kept.
+ */
 export function clusterMarkers(
-  markers: StrataMarker[],
+  markers: StrataMarkerExtended[],
   fromDate: string,
   toDate: string,
   maxVisible: number = 6,
@@ -426,36 +606,140 @@ export function clusterMarkers(
   const t1 = new Date(toDate).getTime()
   const span = t1 - t0 || 1
 
-  // Position each marker
-  const positioned = markers.map((m) => {
+  const positioned: MarkerLayout[] = markers.map((m) => {
     const t = new Date(m.date).getTime()
     const xFrac = Math.max(0, Math.min(1, (t - t0) / span))
-    const label = m.kind === "ingest_burst"
-      ? `Ingest burst (${m.count})`
-      : `Birth surge (${m.count})`
-    return { ...m, xFrac, label }
+    const meta = MARKER_KIND_META[m.kind]
+    const label = meta
+      ? `${meta.label} (${m.count})`
+      : `${m.kind} (${m.count})`
+    const shortLabel = meta?.shortLabel ?? m.kind
+    return { ...m, xFrac, label, shortLabel, isClusterBadge: false }
   })
 
-  if (positioned.length <= maxVisible) return positioned
-
-  // Sort by count desc, keep the most significant; cluster the rest
-  const sorted = [...positioned].sort((a, b) => b.count - a.count)
-  const kept = sorted.slice(0, maxVisible - 1)
-  const overflow = sorted.slice(maxVisible - 1)
-
-  // Create a synthetic cluster badge near the median of the overflowed markers
-  const medianX = overflow.reduce((s, m) => s + m.xFrac, 0) / overflow.length
-  const totalCount = overflow.reduce((s, m) => s + m.count, 0)
-  kept.push({
-    date: overflow[0].date,
-    kind: "cluster",
-    count: totalCount,
-    xFrac: medianX,
-    label: `+${overflow.length} more (${totalCount} events)`,
+  // Always preserve non-clusterable kinds (e.g. contradiction markers)
+  const pinned = positioned.filter((m) => {
+    const meta = MARKER_KIND_META[m.kind]
+    return meta ? !meta.clusterable : false
+  })
+  const clusterable = positioned.filter((m) => {
+    const meta = MARKER_KIND_META[m.kind]
+    return meta ? meta.clusterable : true
   })
 
-  return kept.sort((a, b) => a.xFrac - b.xFrac)
+  const budget = Math.max(0, maxVisible - pinned.length)
+
+  if (clusterable.length <= budget) {
+    return [...pinned, ...clusterable].sort((a, b) => a.xFrac - b.xFrac)
+  }
+
+  // Sort clusterable by count desc, keep the most significant
+  const sorted = [...clusterable].sort((a, b) => b.count - a.count)
+  const kept = sorted.slice(0, Math.max(0, budget - 1))
+  const overflow = sorted.slice(Math.max(0, budget - 1))
+
+  if (overflow.length > 0) {
+    const medianX = overflow.reduce((s, m) => s + m.xFrac, 0) / overflow.length
+    const totalCount = overflow.reduce((s, m) => s + m.count, 0)
+    kept.push({
+      date: overflow[0].date,
+      kind: "cluster",
+      count: totalCount,
+      xFrac: medianX,
+      label: `+${overflow.length} more (${totalCount} events)`,
+      shortLabel: `+${overflow.length}`,
+      isClusterBadge: true,
+    })
+  }
+
+  return [...pinned, ...kept].sort((a, b) => a.xFrac - b.xFrac)
 }
+
+// ---------------------------------------------------------------------------
+// Event-horizon layout pass
+// Positions event glyphs in the 12px strip above each stratum.
+// Reuses the clusterable-by-kind logic from clusterMarkers.
+// ---------------------------------------------------------------------------
+
+const EVENT_HORIZON_H = 12
+const EVENT_HORIZON_MAX_GLYPHS = 6
+
+/**
+ * Compute positioned event glyphs for one (lane, strip).
+ * Feeds clusterMarkers-equivalent logic per lane per visible run.
+ * Called per stratum; laneId matches StratumLayout.communityId / LaneMeta.lane_id.
+ */
+export function computeEventHorizonGlyphs(
+  events: StrataEvent[],
+  laneId: string,
+  fromDate: string,
+  toDate: string,
+): EventGlyphLayout[] {
+  if (events.length === 0) return []
+
+  const laneEvents = events.filter((e) => e.lane_id === laneId)
+  if (laneEvents.length === 0) return []
+
+  const t0 = new Date(fromDate).getTime()
+  const t1 = new Date(toDate).getTime()
+  const span = t1 - t0 || 1
+
+  const positioned = laneEvents.map((e): EventGlyphLayout => {
+    const t = new Date(e.ts).getTime()
+    const xFrac = Math.max(0, Math.min(1, (t - t0) / span))
+    return {
+      ts: e.ts,
+      kind: e.kind,
+      xFrac,
+      lane_id: laneId,
+      event: e,
+      isCluster: false,
+      clusterCount: 1,
+    }
+  })
+
+  // Contradiction events are never clustered — always preserved
+  const pinned = positioned.filter((g) => {
+    const meta = MARKER_KIND_META[g.kind]
+    return meta ? !meta.clusterable : false
+  })
+  const clusterable = positioned.filter((g) => {
+    const meta = MARKER_KIND_META[g.kind]
+    return meta ? meta.clusterable : true
+  })
+
+  const budget = Math.max(0, EVENT_HORIZON_MAX_GLYPHS - pinned.length)
+
+  if (clusterable.length <= budget) {
+    return [...pinned, ...clusterable].sort((a, b) => a.xFrac - b.xFrac)
+  }
+
+  // Sort by ts desc (most recent first), keep budget-1, cluster rest
+  const sorted = [...clusterable].sort((a, b) =>
+    new Date(b.ts).getTime() - new Date(a.ts).getTime()
+  )
+  const kept = sorted.slice(0, Math.max(0, budget - 1))
+  const overflow = sorted.slice(Math.max(0, budget - 1))
+
+  if (overflow.length > 0) {
+    const medianFrac = overflow.reduce((s, g) => s + g.xFrac, 0) / overflow.length
+    // Synthetic cluster entry — event field carries a representative event
+    kept.push({
+      ts: overflow[0].ts,
+      kind: overflow[0].kind,
+      xFrac: medianFrac,
+      lane_id: laneId,
+      event: overflow[0].event,
+      isCluster: true,
+      clusterCount: overflow.length,
+    })
+  }
+
+  return [...pinned, ...kept].sort((a, b) => a.xFrac - b.xFrac)
+}
+
+/** The pixel height of the event-horizon strip per lane. */
+export const EVENT_HORIZON_PX = EVENT_HORIZON_H
 
 // ---------------------------------------------------------------------------
 // Trust blend for Trust lens — amendment 1 severity priority

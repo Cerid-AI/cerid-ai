@@ -1,8 +1,8 @@
 # Cerid AI — UI Architecture
 
-> **Last updated:** 2026-05-21 (Phase C close — final 4-pane shape)
+> **Last updated:** 2026-06-11 (SEXTANT settings redesign + Subjects eval cycles 1–4)
 >
-> **Plan reference:** [`tasks/2026-05-21-cerid-v1-systemic-implementation-plan.md`](../tasks/2026-05-21-cerid-v1-systemic-implementation-plan.md)
+> **Plan reference:** [`tasks/2026-05-21-cerid-v1-systemic-implementation-plan.md`](../tasks/2026-05-21-cerid-v1-systemic-implementation-plan.md); settings redesign [`tasks/2026-06-10-settings-ia-redesign.md`](../tasks/2026-06-10-settings-ia-redesign.md)
 
 ## Sidebar layout
 
@@ -13,7 +13,7 @@ After Phases A → C, the sidebar has **4 top-level panes** plus theme + tier co
 │  Chat                          │  ← MessageSquare
 │  Subjects                      │  ← Compass     (Atlas / Constellation / Timeline / Wiki)
 │  Sources                       │  ← Files       (Library / Activity / Connectors)
-│  Settings                      │  ← Settings    (Essentials / Pipeline / System / Governance / Plugins / Diagnostics / Pro)
+│  Settings                      │  ← Settings    (Models / Knowledge / Retrieval & Answers / Privacy / Extensions / Appearance / Plan & Billing / System)
 └────────────────────────────────┘
 ```
 
@@ -23,7 +23,7 @@ The shape of each pane is owned by a tabbed/mode sub-controller; deep links use 
 |---|---|---|
 | Subjects | `?mode=` | atlas / constellation / timeline / wiki |
 | Sources | `?sources_mode=` | library / activity / connectors |
-| Settings | `?diagnostics_tab=` | (only Diagnostics sub-tab uses this — status / analytics / activity) |
+| Settings | `?setting=` / `?settings_q=` | `?setting=` deep-links/reveals a single setting by id (registry-driven); `?settings_q=` drives the settings search; `?diagnostics_tab=` still selects the Diagnostics sub-tab (status / analytics / activity) |
 
 The legacy `?entity=` param is shared across all panes for cross-pane deep linking (an entity opened from a Communities link, for example).
 
@@ -72,9 +72,11 @@ The Pane union retains the legacy values for one release window so existing test
 | Pane | Entry component | Sub-tabs / modes |
 |---|---|---|
 | Chat | `components/chat/chat-panel.tsx` | (no sub-tabs) |
-| Subjects | `components/subjects/subjects-pane.tsx` | Atlas (2D WebGL) / Constellation (3D R3F) / Timeline / Wiki |
+| Subjects | `components/subjects/subjects-pane.tsx` | Atlas (decomposition icicle + Neighborhood leaf) / Constellation (cartographic map, R3F) / Timeline (Tephra) / Wiki (FOLIO) |
 | Sources | `components/sources/sources-pane.tsx` | Library (current KB pane) / Activity / Connectors |
-| Settings | `components/settings/settings-pane.tsx` | Essentials, Pipeline, System, Governance, Plugins, **Diagnostics**, Pro |
+| Settings | `components/settings/settings-pane.tsx` | 8 intent categories (Models, Knowledge, Retrieval & Answers, Privacy, Extensions, Appearance, Plan & Billing, System) + a separate **Diagnostics** console entry below the separator (preserves the `?diagnostics_tab=` contract) |
+
+Settings categories are defined declaratively in `components/settings/categories/*.tsx` (one file per category) over the registry in `lib/settings-registry/` — see § Settings registry below.
 
 Diagnostics sub-tabs (inside Settings):
 - Status — `components/monitoring/monitoring-pane.tsx`
@@ -87,7 +89,12 @@ Diagnostics sub-tabs (inside Settings):
 |---|---|---|
 | Quick-capture FAB | `components/quick-capture/quick-capture-fab.tsx` | Floating action button + ⌘⇧N global. Note / URL / Upload modes. Mounted at AppLayout sibling level so it persists across pane switches. |
 | Knowledge-source selector | `components/chat/knowledge-source-selector.tsx` | Chip in chat composer. Three modes (kb / kb+web / llm+kb) with localStorage persistence. Backend wiring lands incrementally — Phase C ships UI + state. |
-| Atlas saved views | `components/subjects/atlas/atlas-saved-views.tsx` | Per-user named Atlas configurations, Redis-backed via `/atlas/views/*`. |
+| Atlas decomposition icicle | `components/subjects/atlas/decomposition/DecompositionIcicle.tsx` (+ `use-decomposition.ts`) | Default Atlas view: domains → communities → entities, backed by `GET /graph/decomposition`. Breadcrumb + Esc/Shift+Esc; ego-network demoted to a Neighborhood leaf mode (hops ≤2). |
+| Graph drag-heal | `lib/graph/interactions/drag-heal.ts` | Critically-damped lerp-home on node drag (neighbor falloff, interruptible, `reduced-motion` snap). Mounted on the Constellation cartographer. |
+| Shared hover plate | `lib/graph/draw-node-hover.ts` | One hover-plate renderer shared across Subjects graph modes (kills the white-box / flicker class). |
+| Atlas saved views | `components/subjects/atlas/atlas-saved-views.tsx` | Per-user named Atlas configurations, Redis-backed via `/atlas/views/*`. Saved-view schema is **v3** (adds `atlasTier` for icicle-tier restore). |
+| Domain / Trust lenses | `lib/graph/identity.ts` (`domainSlot`) + `compute_trust_state` job | Domain colour lens (12 `--color-domain-*` tokens via the salt-796 hash) and Trust lens (reads `Entity.trust_state`) across canvas / timeline / palette. |
+| Wiki → Atlas cross-link | `components/wiki/article-infobox.tsx` | "Open in Atlas" infobox button → `useNavigation().goTo("subjects", {mode:"atlas", entity})`. |
 | Atlas right-click menu | `components/subjects/atlas/atlas-context-menu.tsx` | Cite in chat / Open in Wiki / Copy entity id. |
 | Search palette | `components/subjects/search-palette.tsx` | ⌘K-invoked entity picker for Subjects pane. |
 | Wiki provenance markers | `components/wiki/provenance-marker.tsx` | Inline section badges: auto / user-edited / contradicted / uncertain. |
@@ -99,13 +106,30 @@ Diagnostics sub-tabs (inside Settings):
 | Knowledge-source selector | `components/chat/knowledge-source-selector.tsx` | Chip in chat composer (kb / kb+web / llm+kb). |
 | Settings Diagnostics tab | `components/settings/diagnostics-section.tsx` | 3 sub-tabs consolidating Monitoring / Audit / Agents. |
 
-## UIModeProvider (legacy)
+## Settings registry (SEXTANT, 2026-06-10)
 
-Phase C Day 3 reduced `contexts/ui-mode-context.tsx` to a pass-through. The Provider now always returns `{mode:"advanced", isSimple:false, setMode:no-op, toggle:no-op}`. Existing `useUIMode()` consumers (settings-pane, essentials-section, sidebar, chat-panel, setup-wizard, advanced-mode wrapper, system-section) read this constant unchanged. The Provider + hook are retained — not deleted — to avoid a 7-file cleanup in one commit; their bodies are now trivial.
+Settings is registry-driven: every control is one `SettingDef` in
+`lib/settings-registry/` (per-category def files). A def carries
+`{id, category, group, level: core|advanced, label, helpText, scopeOfEffect,
+keywords, type, writer, entitlement→featureFlag, dependsOn, danger,
+visibleWhen}`. `keywords` retains the **old tab names** so search still finds a
+moved setting. The `writer` is a discriminated union
+(`settings-patch | preferences | endpoint | local | env | readonly`) so storage
+dispatch is type-safe.
 
-`AdvancedMode` wrapper (`components/common/advanced-mode.tsx`) is correspondingly a pass-through.
+| Piece | File | Notes |
+|---|---|---|
+| Registry | `lib/settings-registry/` | Single source of truth; one def file per category. |
+| Category pages | `components/settings/categories/*.tsx` | 8 files: models, knowledge, retrieval-answers, privacy, extensions, appearance, plan-billing, system. |
+| Search | `components/settings/settings-search.tsx` | Registry-driven token-AND search; `/` keyboard shortcut; persisted in `?settings_q=`. |
+| Reveal channel | `components/settings/reveal-context.tsx` | `?setting=<id>` deep links + search-result clicks; force-opens the containing `AdvancedDisclosure` regardless of detail level. |
+| Detail level | `lib/settings-mode.ts` + `AdvancedDisclosure` in `settings-primitives.tsx` | "Settings detail level" Simple\|Advanced radiogroup (localStorage `cerid-settings-mode`, default `simple`). Consumed **only** by `AdvancedDisclosure` default-open state — it is NOT an app-wide UI mode. |
+| Entitlements | `hooks/use-entitlements.ts` | `useEntitlements()` → per-setting `{available \| locked \| flag-off \| degraded}`; one consolidated entitlement treatment + one Recommendations card (`recommendation-banner.tsx`). |
 
-localStorage key `cerid-ui-mode` is no longer written; existing values are read but ignored. Cleanup tracked for v1.1.
+> **Removed:** the old app-wide `ui-mode-context.tsx` / `useUIMode()` /
+> `AdvancedMode` wrapper and the `cerid-ui-mode` localStorage key were deleted
+> (SET-01). The Simple\|Advanced control is now settings-scoped only. Old
+> settings tabs (Essentials / Pipeline / Governance / Pro) no longer exist.
 
 ## What's NOT in the architecture
 
@@ -119,7 +143,7 @@ localStorage key `cerid-ui-mode` is no longer written; existing values are read 
 |---|---|---|
 | Pane tests | `src/web/src/__tests__/*-pane.test.tsx` | Each top-level pane has its own integration test mocking the heavy sub-components |
 | Navigation redirect tests | `src/web/src/__tests__/navigation-redirect.test.tsx` | Locks the LEGACY_PANE_REDIRECTS contract per redirect |
-| UI mode contract | `src/web/src/__tests__/ui-mode.test.tsx` | Asserts the always-advanced pass-through |
+| Settings pane | `src/web/src/__tests__/settings-pane.test.tsx` | Registry-driven render, detail-level radiogroup, reveal/round-trip (replaced the deleted `ui-mode.test.tsx`). |
 | Component-level tests | `src/web/src/components/**/*.test.{ts,tsx}` | Inline next to each component |
 
 ## Performance budgets

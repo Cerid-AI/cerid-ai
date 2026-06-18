@@ -6,7 +6,6 @@ import { logSwallowedError } from "@/lib/log-swallowed"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { MessageSquare, Database, Settings, Brain, Shield, ChevronRight, ChevronLeft, Sparkles } from "lucide-react"
-import { useUIMode } from "@/contexts/ui-mode-context"
 import { cn } from "@/lib/utils"
 
 const STEPS = [
@@ -105,14 +104,12 @@ interface OnboardingDialogProps {
 
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   const [step, setStep] = useState(0)
-  const { setMode } = useUIMode()
   const [selectedMode, setSelectedMode] = useState<"simple" | "advanced">("simple")
 
   const isLastStep = step === STEPS.length
   const totalSteps = STEPS.length + 1 // +1 for mode selection step
 
   const handleFinish = () => {
-    setMode(selectedMode)
     try { localStorage.setItem("cerid-onboarding-complete", "true") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-onboarding-complete" }) }
     onComplete()
   }

@@ -136,6 +136,20 @@ export function useSettings() {
     })
   }, [])
 
+  // Include knowledge packs in chat KB retrieval (Slice 7.3). Per-query client
+  // preference (default ON), persisted locally — it maps to per-query
+  // exclude_packs, not a stored server setting (that's pack_relevance_weight).
+  const [includePacks, setIncludePacksState] = useState(() => {
+    try { return localStorage.getItem("cerid-include-packs") !== "false" } catch { return true }
+  })
+  const toggleIncludePacks = useCallback(() => {
+    setIncludePacksState((prev) => {
+      const next = !prev
+      persist("cerid-include-packs", String(next))
+      return next
+    })
+  }, [])
+
   const [expertVerification, setExpertVerificationState] = useState(() => readBool("cerid-expert-verification"))
   const toggleExpertVerification = useCallback(() => {
     setExpertVerificationState((prev) => {
@@ -150,9 +164,9 @@ export function useSettings() {
   const [ragMode, setRagModeState] = useState<RagMode>(() => {
     try {
       const v = localStorage.getItem("cerid-rag-mode")
-      if (v === "manual" || v === "smart" || v === "custom_smart") return v
+      if (v === "smart" || v === "always" || v === "off") return v
     } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-rag-mode" }) }
-    return "manual"
+    return "smart"
   })
 
   const [costSensitivity, setCostSensitivity] = useState<"low" | "medium" | "high">(() => {
@@ -250,7 +264,7 @@ export function useSettings() {
         if (s.enable_memory_extraction !== undefined) hydrateMemory(s.enable_memory_extraction, serverWins)
         if (s.rag_mode && (serverWins || !localStorage.getItem("cerid-rag-mode"))) {
           const rm = s.rag_mode as string
-          if (rm === "manual" || rm === "smart" || rm === "custom_smart") {
+          if (rm === "smart" || rm === "always" || rm === "off") {
             setRagModeState(rm as RagMode)
             persist("cerid-rag-mode", rm)
           }
@@ -375,7 +389,7 @@ export function useSettings() {
     setRagModeState(mode)
     persist("cerid-rag-mode", mode)
     bumpSettingsUpdatedAt()
-    updateSettings({ rag_mode: mode }).catch(() => { /* noop */ })
+    return updateSettings({ rag_mode: mode })
   }, [])
 
   const updateCostSensitivity = useCallback((value: "low" | "medium" | "high") => {
@@ -423,6 +437,7 @@ export function useSettings() {
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject,
     autoInjectThreshold, setAutoInjectThreshold,
+    includePacks, toggleIncludePacks,
     costSensitivity, updateCostSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
     memoryExtraction, toggleMemoryExtraction,

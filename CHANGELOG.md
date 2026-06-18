@@ -2,6 +2,53 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — RAG Quality Program (2026-06-12 → 06-13)
+
+Systemic response to the 2026-06-11 chat/RAG qualitative eval — 6 root-cause
+classes across 8 phases, shipped as Slices 1–7 + two eval checkpoints. Full
+plan: `tasks/2026-06-12-rag-quality-program-plan.md`.
+
+### Retrieval & verification
+
+- **Provenance spine + honesty contract (Slices 1–2)** — every retrieval result
+  carries `source_type` (`kb`/`pack`/`memory`/`wiki`/`external`) + `created_at`;
+  prompt document blocks carry type + date; the RAG preamble is honesty-first
+  (qualify time-sensitive values, say plainly when the KB doesn't cover).
+- **Retrieval spine (Slice 3)** — graph_store threaded via DI (fixes
+  `graph_results=0`); the CRAG gate fires external on stale KB for "current X"
+  queries (`temporal_intent_days` + `freshest_kb_age_days`,
+  `CRAG_STALENESS_WINDOW_DAYS=7`); rerank resilience under burst (semaphore +
+  `reranker_status` tagging).
+- **Verification trust (Slice 4)** — a time-sensitive claim resting on KB
+  evidence older than `VERIFICATION_STALENESS_WINDOW_DAYS` now returns
+  `uncertain/stale_evidence`, never `verified`-on-stale; `verification_accuracy`
+  / `cache_hit_rate` / `retrieval_ndcg` recorded into `/observability/quality`;
+  `/health.knowledge_packs` registry guard.
+
+### Ingestion, taxonomy & ranking
+
+- **Ingestion enrichment (Slice 5)** — one enrichment seam in `ingest_content`
+  (memory/connector/digest paths now get sub_category + tags, never a domain
+  change); classifier samples head+mid+tail, requires a sub_category + confidence
+  (low-confidence → `general` + `needs-review`); tags converge on
+  `TAG_VOCABULARY` via difflib.
+- **Salience-weighted taxonomy (Slice 6)** — `DeriveDomainsJob` v2 derives
+  `primary_domain` from `salience = specificity × distinctiveness × quality_mass
+  × recency_decay` (new `Entity.domain_salience`, alongside the integer
+  `domain_mix`); `/graph/domains` orders by corpus salience mass; new
+  `Entity.top_tags` (vocab-only) drives the wiki infobox chip row + entity-list
+  tag filter; the article infobox shows a salience-ordered domain mix.
+- **Personal-first pack ranking (Slice 7)** — knowledge-pack chunks are
+  down-weighted by `PACK_RELEVANCE_WEIGHT` (0.7, runtime-tunable via
+  `PATCH /settings` + an advanced settings slider) after the rerank blend;
+  `exclude_packs` on `POST /agent/query` and a chat-toolbar "Include knowledge
+  packs" toggle drop packs entirely for a query.
+
+### Tooling
+
+- **Model-pinning enforced** — `lint-no-hardcoded-models` flipped from warn-only
+  to blocking; the last call-site model literals moved into config.
+
 ## Unreleased — Audit & agents pane test coverage (2026-06-07)
 
 ### Frontend

@@ -24,6 +24,8 @@ export interface EntityEmbedding3D {
   trust_state: string
   /** Projection algorithm used: "umap" or "pca" (fallback) */
   projection: "umap" | "pca"
+  /** Primary domain derived by DeriveDomainsJob; null until first derivation run */
+  primary_domain?: string | null
 }
 
 export interface Embeddings3DResponse {

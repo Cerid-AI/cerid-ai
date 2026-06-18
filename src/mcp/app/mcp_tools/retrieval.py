@@ -905,20 +905,50 @@ async def pkb_answer_with_citations(
     chunk_budget = max(2000, 8000 - len(wiki_block))
     chunk_context = retrieval.get("context", "")[:chunk_budget]
     context = (wiki_block + chunk_context) if wiki_block else chunk_context
-    answer = await call_internal_llm(
-        _llm_call_messages(
-            system=(
-                "Answer the question using ONLY the provided context. "
-                "If the context is insufficient, say so explicitly. Do "
-                "not invent facts. Cite source identifiers when the "
-                "context provides them. Be direct — no preamble."
-            ),
-            user=f"Question: {question}\n\nContext:\n{context}",
-        ),
-        temperature=0.1,
-        max_tokens=900,
-        stage="mcp_answer_with_citations",
+    # Mode-aware synthesis (shared core primitive): analytical questions
+    # (counting / date arithmetic / preference-application) get a reasoning
+    # prompt instead of the extractive one, so the reader DERIVES the answer
+    # from evidence that is present but not literal instead of abstaining.
+    # Fact-lookup questions keep the concise extractive behaviour unchanged.
+    from core.agents.analytical_ops import (
+        compute_count_answer,
+        compute_temporal_answer,
     )
+    from core.agents.answer_synthesis import (
+        AnswerMode,
+        build_answer_messages,
+        classify_answer_mode,
+        suggested_max_tokens,
+    )
+
+    _mode = classify_answer_mode(question)
+    # Deterministic analytical operators first: date arithmetic / counting are
+    # extracted as structured facts and computed in code (no LLM mental math),
+    # removing the off-by-one / miscount errors that survive a strong reader.
+    # Returns None when not answerable that way → fall through to synthesis.
+    answer: str | None = None
+    if _mode is AnswerMode.TEMPORAL:
+        from core.utils.time import utcnow_iso
+        # Production has the reference "now" for free — pass today so the
+        # operator can answer relative "how long ago / since" questions.
+        answer = await compute_temporal_answer(
+            question, context, reference_date=utcnow_iso()[:10],
+        )
+    elif _mode is AnswerMode.AGGREGATION:
+        answer = await compute_count_answer(question, context)
+
+    if answer is None:
+        _messages = build_answer_messages(question, context, _mode)
+        # Preserve this tool's citation contract on top of the mode rules.
+        _messages[-1]["content"] += (
+            "\n- Cite the source identifiers from the context when you use them."
+        )
+        answer = await call_internal_llm(
+            _messages,
+            temperature=0.1,
+            max_tokens=max(900, suggested_max_tokens(_mode, 900)),
+            stage="mcp_answer_with_citations",
+        )
     answer = answer.strip()
 
     # 3. Extract claims from the answer + bind each to its source by

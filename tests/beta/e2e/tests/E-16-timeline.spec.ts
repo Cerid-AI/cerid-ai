@@ -62,6 +62,14 @@ test("E-16 Stratigraph mounts, hovers a stratum, switches lens and filters", asy
   await expect(canvas).toBeVisible({ timeout: 5_000 })
   await page.getByRole("radio", { name: "Types" }).click({ force: true })
   await expect(canvas).toBeVisible({ timeout: 5_000 })
+
+  // Domain lens partitions lanes by taxonomy domain and renders the legend.
+  await page.getByRole("radio", { name: "Domains" }).click({ force: true })
+  await expect(canvas).toBeVisible({ timeout: 5_000 })
+  await expect(
+    page.getByText(/^(Coding|General|Research|Conversations|Projects)$/).first(),
+  ).toBeVisible({ timeout: 10_000 })
+
   await page.getByRole("radio", { name: "Clusters" }).click({ force: true })
   await expect(canvas).toBeVisible({ timeout: 5_000 })
 

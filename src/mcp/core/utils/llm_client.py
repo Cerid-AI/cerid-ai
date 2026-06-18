@@ -38,6 +38,13 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger("ai-companion.llm_client")
 
+# Free-tier default when no model is supplied and ``INTERNAL_LLM_MODEL`` is
+# unset. Mirrors the smart-router FREE tier (``smart_router.FREE_MODELS``) so
+# the implicit fallback can't drift from the routing tables. Kept as a local
+# constant (not an import) because this module sits below ``core.routing`` in
+# the import graph and loads on the hot path.
+_DEFAULT_INTERNAL_MODEL = "meta-llama/llama-3.3-70b-instruct"  # model-literal-allowed: designated central internal-LLM fallback constant
+
 # ---------------------------------------------------------------------------
 # Singleton connection pool for OpenRouter
 # ---------------------------------------------------------------------------
@@ -297,7 +304,7 @@ async def call_llm(
         )
 
     if not model:
-        model = os.getenv("INTERNAL_LLM_MODEL", "") or "meta-llama/llama-3.3-70b-instruct"
+        model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
 
     model = _strip_openrouter_prefix(model)
 
@@ -397,7 +404,7 @@ async def call_llm_raw(
         )
 
     if not model:
-        model = os.getenv("INTERNAL_LLM_MODEL", "") or "meta-llama/llama-3.3-70b-instruct"
+        model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
 
     model = _strip_openrouter_prefix(model)
 

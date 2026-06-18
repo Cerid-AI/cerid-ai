@@ -1,17 +1,18 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Wiki provenance Sankey — Phase M Day 5.
+// Wiki provenance Sankey — Phase M Day 5 (revised).
 //
 // Visualizes the chain of evidence for an entity's wiki page: source
-// artifacts → claim type → entity. Uses recharts Sankey (already in
-// the dependency tree for Phase L's cost flow viz).
+// artifacts → entity. Built from the source_artifacts array already
+// present on the WikiEntityPage — no additional fetch required.
 //
-// Reuses the existing `/graph/neighborhood` endpoint — the artifacts
-// that mention this entity are already in its 1-hop neighborhood. We
-// extract them client-side rather than adding a new endpoint.
+// The original design bucketed edges by `r.attestation`, but that field
+// has no writer anywhere in the backend (all edges default to "inferred"
+// via coalesce). The chart is rebuilt from real data: source artifact
+// titles + per-MENTIONS confidence values, grouped by source_type.
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import {
   Sankey,
   Tooltip,
@@ -19,22 +20,22 @@ import {
   Rectangle,
   Layer,
 } from "recharts"
-import { AlertCircle, ChevronDown, ChevronRight, GitBranch } from "lucide-react"
+import { ChevronDown, ChevronRight, GitBranch } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { EmptyState } from "@/components/ui/empty-state"
-import { fetchNeighborhood } from "@/lib/api/graph"
-import type { NeighborhoodResponse } from "@/lib/types/graph"
 import { cn } from "@/lib/utils"
 import { communitySlot } from "@/components/subjects/timeline/stratigraph/strata-layout"
 import { resolveMapTokens } from "@/components/subjects/constellation/map/community-layer"
+import type { SourceCitation } from "@/lib/types/wiki"
+import { useState } from "react"
 
 interface ProvenanceSankeyProps {
   entitySlug: string
   entityName?: string
   /** Community ID of the focal entity, for the entity terminus hue. */
   communityId?: string | null
+  /** Source artifacts from the wiki page — the real data source for this chart. */
+  sourceArtifacts: SourceCitation[]
   /** Click → opens the full Atlas with the entity focused + provenance lens on. */
   onOpenAtlas?: (slug: string) => void
 }
@@ -43,62 +44,49 @@ export function ProvenanceSankey({
   entitySlug,
   entityName,
   communityId,
+  sourceArtifacts,
   onOpenAtlas,
 }: ProvenanceSankeyProps) {
   const [expanded, setExpanded] = useState(false)
-  const [data, setData] = useState<NeighborhoodResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!expanded || data || loading) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
-    setLoading(true)
-    fetchNeighborhood(entitySlug, 1)
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"))
-      .finally(() => setLoading(false))
-  }, [expanded, entitySlug, data, loading])
 
   const sankeyData = useMemo(() => {
-    if (!data) return null
-    const focal = data.focal_entity
+    if (sourceArtifacts.length === 0) return null
 
-    const buckets = new Map<string, number>()
-    let unattested = 0
-    for (const edge of data.edges) {
-      if (edge.source !== focal && edge.target !== focal) continue
-      const bucket = edge.attestation || "unknown"
-      buckets.set(bucket, (buckets.get(bucket) ?? 0) + 1)
-      if (bucket === "inferred") unattested += 1
+    // Group sources by source_type (or "file" as default).
+    const groups = new Map<string, { count: number; totalConf: number }>()
+    for (const src of sourceArtifacts) {
+      const key = src.source_type ?? "file"
+      const existing = groups.get(key) ?? { count: 0, totalConf: 0 }
+      groups.set(key, {
+        count: existing.count + 1,
+        totalConf: existing.totalConf + (src.confidence ?? 0.5),
+      })
     }
 
-    if (buckets.size === 0) return null
+    if (groups.size === 0) return null
 
+    const terminalName = entityName ?? entitySlug
     const nodes = [
       { name: "Sources" },
-      ...Array.from(buckets.keys()).map((b) => ({ name: b })),
-      { name: entityName ?? focal },
+      ...Array.from(groups.keys()).map((g) => ({ name: g })),
+      { name: terminalName },
     ]
     const nodeIndex = new Map(nodes.map((n, i) => [n.name, i]))
     const links = [
-      ...Array.from(buckets.entries()).map(([bucket, count]) => ({
+      ...Array.from(groups.entries()).map(([group, stats]) => ({
         source: nodeIndex.get("Sources") ?? 0,
-        target: nodeIndex.get(bucket) ?? 0,
-        value: count,
+        target: nodeIndex.get(group) ?? 0,
+        value: stats.count,
       })),
-      ...Array.from(buckets.entries()).map(([bucket, count]) => ({
-        source: nodeIndex.get(bucket) ?? 0,
-        target: nodeIndex.get(entityName ?? focal) ?? 0,
-        value: count,
+      ...Array.from(groups.entries()).map(([group, stats]) => ({
+        source: nodeIndex.get(group) ?? 0,
+        target: nodeIndex.get(terminalName) ?? 0,
+        value: stats.count,
+        avgConfidence: stats.totalConf / stats.count,
       })),
     ]
-    return { nodes, links, unattested, entityName: entityName ?? focal }
-  }, [data, entityName])
-
-  const handleOpenAtlas = useCallback(() => {
-    onOpenAtlas?.(entitySlug)
-  }, [entitySlug, onOpenAtlas])
+    return { nodes, links, sourceCount: sourceArtifacts.length, entityName: terminalName }
+  }, [sourceArtifacts, entityName, entitySlug])
 
   return (
     <section aria-labelledby="wiki-provenance-sankey-heading" data-testid="provenance-sankey">
@@ -124,27 +112,15 @@ export function ProvenanceSankey({
           id="wiki-provenance-sankey-body"
           className="mt-2 rounded-md border border-border bg-card/50 p-3"
         >
-          {loading && (
-            <div className="space-y-2 py-2" role="status" aria-label="Loading provenance data">
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-4/5" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          )}
-          {error && (
-            <Alert variant="destructive" className="py-2">
-              <AlertCircle className="h-3.5 w-3.5" />
-              <AlertDescription className="text-xs">{error}</AlertDescription>
-            </Alert>
-          )}
-          {data && (!sankeyData || sankeyData.nodes.length < 3) && (
+          {/* empty state — no source artifacts recorded */}
+          {!sankeyData && (
             <EmptyState
               icon={GitBranch}
-              title="No attestation recorded"
-              description={`No source attestation recorded for ${entityName ?? entitySlug} yet.`}
+              title="No sources recorded"
+              description={`No source artifacts are linked to ${entityName ?? entitySlug} yet.`}
             />
           )}
-          {sankeyData && sankeyData.nodes.length >= 3 && (
+          {sankeyData && (
             <>
               <div className="h-40">
                 <ResponsiveContainer width="100%" height="100%">
@@ -154,31 +130,29 @@ export function ProvenanceSankey({
                     nodePadding={14}
                     linkCurvature={0.5}
                     iterations={32}
+                    margin={{ left: 80, right: 80, top: 8, bottom: 8 }}
                     node={<SankeyNode communityId={communityId} entityNodeName={sankeyData.entityName} />}
                     link={{ stroke: "currentColor", className: "text-border/60", strokeOpacity: 0.5 }}
                   >
                     <Tooltip
-                      formatter={((value: number) => [`${value}`, "edges"]) as never}
+                      formatter={((value: number) => [`${value}`, "sources"]) as never}
                     />
                   </Sankey>
                 </ResponsiveContainer>
               </div>
               <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
-                <span>
-                  {sankeyData.links.length / 2} attestation buckets
-                  {sankeyData.unattested > 0 && (
-                    <> · <span className="text-destructive">{sankeyData.unattested} inferred</span></>
-                  )}
-                </span>
-                <Button
-                  variant="link"
-                  size="sm"
-                  onClick={handleOpenAtlas}
-                  data-testid="provenance-sankey-open-atlas"
-                  className={cn("h-auto py-0 text-xs")}
-                >
-                  Open in Atlas →
-                </Button>
+                <span>{sankeyData.sourceCount} source{sankeyData.sourceCount !== 1 ? "s" : ""} recorded</span>
+                {onOpenAtlas && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={() => onOpenAtlas(entitySlug)}
+                    data-testid="provenance-sankey-open-atlas"
+                    className={cn("h-auto py-0 text-xs")}
+                  >
+                    Open in Atlas →
+                  </Button>
+                )}
               </div>
             </>
           )}
@@ -195,7 +169,7 @@ interface SankeyNodeProps {
   y?: number
   width?: number
   height?: number
-  payload?: { name?: string; sourceLinks?: unknown[] }
+  payload?: { name?: string; sourceLinks?: unknown[]; targetLinks?: unknown[] }
   /** Community ID of the focal entity — drives hue on the entity terminus node */
   communityId?: string | null
   /** Name of the entity terminus node so we can identify it */
@@ -204,8 +178,14 @@ interface SankeyNodeProps {
 
 function SankeyNode(props: SankeyNodeProps) {
   const { x = 0, y = 0, width = 8, height = 0, payload, communityId, entityNodeName } = props
-  const isLeft = (payload?.sourceLinks?.length ?? 0) > 0
   const name = payload?.name
+
+  // A node is a left-side label when it has source links (it sends flow outward).
+  // A node is a right-side label when it has target links and no source links (it receives flow).
+  // Middle nodes have both: label goes right (away from incoming links).
+  const hasSourceLinks = (payload?.sourceLinks?.length ?? 0) > 0
+  const isOrigin = hasSourceLinks && (payload?.targetLinks?.length ?? 0) === 0
+  const labelRight = !isOrigin
 
   // Entity terminus gets community hue; all other nodes use neutral foreground/40.
   const isEntityNode = name === entityNodeName
@@ -220,6 +200,10 @@ function SankeyNode(props: SankeyNodeProps) {
     fillOpacity = 0.75
   }
 
+  // Clamp label length to prevent overflow inside the SVG bounds.
+  const maxChars = 12
+  const label = name && name.length > maxChars ? `${name.slice(0, maxChars)}…` : (name ?? "")
+
   return (
     <Layer>
       <Rectangle
@@ -231,14 +215,15 @@ function SankeyNode(props: SankeyNodeProps) {
         fillOpacity={fillOpacity}
       />
       <text
-        x={isLeft ? x - 4 : x + width + 4}
+        x={labelRight ? x + width + 4 : x - 4}
         y={y + height / 2}
-        textAnchor={isLeft ? "end" : "start"}
+        textAnchor={labelRight ? "start" : "end"}
         dominantBaseline="middle"
-        className="text-[9px] fill-foreground"
+        className="text-label-xxs fill-foreground"
       >
-        {name}
+        {label}
       </text>
     </Layer>
   )
 }
+

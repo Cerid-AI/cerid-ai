@@ -13,9 +13,11 @@ import {
   bucketTrustSuffix,
   trackDOI,
   communitySlot,
+  computeEventHorizonGlyphs,
   type LODLevel,
 } from "@/components/subjects/timeline/stratigraph/strata-layout"
 import type { TimelineStrataResponse } from "@/lib/api/graph"
+import type { StrataEvent } from "@/components/subjects/timeline/stratigraph/strata-types"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -57,12 +59,14 @@ function makeResponse(overrides: Partial<TimelineStrataResponse> = {}): Timeline
       {
         community_id: "c1",
         entity_type: "PERSON",
+        domain: "research",
         buckets: [30, 40, 30],
         unverified_buckets: [0, 0, 0],
       },
       {
         community_id: "c2",
         entity_type: "ORG",
+        domain: "coding",
         buckets: [20, 15, 15],
         unverified_buckets: [0, 5, 0],
       },
@@ -434,5 +438,128 @@ describe("computeStrata — frozen order", () => {
       frozenOrder: ["c1", "c3"], // c3 not present
     })
     expect(reRankAvailable).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tephra — event-horizon glyph layout (computeEventHorizonGlyphs)
+// ---------------------------------------------------------------------------
+
+function makeEvent(overrides: Partial<StrataEvent> = {}): StrataEvent {
+  return {
+    ts: "2026-05-15T10:00:00Z",
+    kind: "refresh",
+    lane_id: "research",
+    entity_slug: "quantum-annealing",
+    entity_name: "Quantum Annealing",
+    ...overrides,
+  }
+}
+
+describe("computeEventHorizonGlyphs — event mapping", () => {
+  it("returns empty array when no events for the lane", () => {
+    const events: StrataEvent[] = [makeEvent({ lane_id: "coding" })]
+    const result = computeEventHorizonGlyphs(events, "research", "2026-05-01", "2026-06-01")
+    expect(result).toHaveLength(0)
+  })
+
+  it("returns a glyph for each event in the lane (≤6)", () => {
+    const events = Array.from({ length: 4 }, (_, i) =>
+      makeEvent({ ts: `2026-05-${String(i + 10).padStart(2, "0")}T10:00:00Z`, lane_id: "research" })
+    )
+    const result = computeEventHorizonGlyphs(events, "research", "2026-05-01", "2026-06-01")
+    expect(result).toHaveLength(4)
+    for (const g of result) {
+      expect(g.xFrac).toBeGreaterThanOrEqual(0)
+      expect(g.xFrac).toBeLessThanOrEqual(1)
+      expect(g.lane_id).toBe("research")
+    }
+  })
+
+  it("positions glyphs in correct fractional order (sorted by ts)", () => {
+    const events = [
+      makeEvent({ ts: "2026-05-20T00:00:00Z", lane_id: "research" }),
+      makeEvent({ ts: "2026-05-10T00:00:00Z", lane_id: "research" }),
+    ]
+    const result = computeEventHorizonGlyphs(events, "research", "2026-05-01", "2026-06-01")
+    // After sort by xFrac
+    const sorted = [...result].sort((a, b) => a.xFrac - b.xFrac)
+    // Earlier date should have smaller xFrac
+    expect(sorted[0].xFrac).toBeLessThan(sorted[1].xFrac)
+  })
+})
+
+describe("computeEventHorizonGlyphs — sparse suppression (amendment #2)", () => {
+  it("never clusters contradiction_finding events (always kept pinned)", () => {
+    // 7 contradiction events — budget is 6 but contradictions are non-clusterable
+    const events = Array.from({ length: 7 }, (_, i) =>
+      makeEvent({
+        kind: "contradiction_finding",
+        ts: `2026-05-${String(i + 1).padStart(2, "0")}T10:00:00Z`,
+        lane_id: "research",
+        severity: "high",
+      })
+    )
+    const result = computeEventHorizonGlyphs(events, "research", "2026-05-01", "2026-06-01")
+    // No contradiction should be clustered
+    for (const g of result) {
+      if (g.kind === "contradiction_finding") {
+        expect(g.isCluster).toBe(false)
+      }
+    }
+  })
+
+  it("clusters overflow clusterable events into a single badge", () => {
+    // 10 refresh events → should cluster overflow
+    const events = Array.from({ length: 10 }, (_, i) =>
+      makeEvent({
+        kind: "refresh",
+        ts: `2026-05-${String(i + 1).padStart(2, "0")}T10:00:00Z`,
+        lane_id: "research",
+      })
+    )
+    const result = computeEventHorizonGlyphs(events, "research", "2026-05-01", "2026-06-01")
+    expect(result.length).toBeLessThanOrEqual(6)
+    const clusters = result.filter((g) => g.isCluster)
+    expect(clusters.length).toBeLessThanOrEqual(1)
+    if (clusters[0]) {
+      expect(clusters[0].clusterCount).toBeGreaterThan(1)
+    }
+  })
+})
+
+describe("clusterMarkers — MARKER_KIND_META registry (Tephra)", () => {
+  it("uses MARKER_KIND_META shortLabel in result", () => {
+    const markers = [
+      { date: "2026-05-10", kind: "ingest_burst", count: 100 },
+    ]
+    const result = clusterMarkers(markers, "2026-05-01", "2026-06-01", 6)
+    expect(result[0].shortLabel).toBe("ingest")
+  })
+
+  it("uses MARKER_KIND_META label for non-ingest markers", () => {
+    const markers = [
+      { date: "2026-05-10", kind: "birth_surge", count: 50 },
+    ]
+    const result = clusterMarkers(markers, "2026-05-01", "2026-06-01", 6)
+    expect(result[0].shortLabel).toBe("birth")
+  })
+
+  it("never clusters contradiction_finding markers", () => {
+    // Mix of clusterable + non-clusterable; non-clusterable must survive
+    const markers = [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        date: `2026-05-${String(i + 1).padStart(2, "0")}`,
+        kind: "ingest_burst",
+        count: 10,
+      })),
+      { date: "2026-05-15", kind: "contradiction_finding", count: 1 },
+    ]
+    const result = clusterMarkers(markers, "2026-05-01", "2026-06-01", 6)
+    // Contradiction must be in the result
+    const contrad = result.find((m) => m.kind === "contradiction_finding")
+    expect(contrad).toBeDefined()
+    // It must NOT be a cluster badge
+    expect(contrad?.isClusterBadge).toBeFalsy()
   })
 })

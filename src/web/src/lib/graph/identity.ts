@@ -52,6 +52,47 @@ export function trustColor(tokens: MapTokens, trustState: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// domainSlot — stable hash into one of 12 domain palette slots.
+//
+// Algorithm shape is byte-consistent with communitySlot: accumulate per char
+// with (h<<5)-h + charCode, |=0 after each step.  After accumulation we apply
+// an avalanche finalization step folding in DOMAIN_HASH_SALT (796) — the
+// single documented seed constant required to guarantee the 12 canonical
+// taxonomy domain names ("coding", "finance", "projects", "personal",
+// "general", "conversations", "notes", "mail", "messages", "meetings",
+// "inbox", "digests") each map to a distinct slot.  Without the salt the
+// base polynomial hash % 12 has four 3-way collisions for these names.
+// The salt value (796) was found by exhaustive search; it is the smallest
+// positive integer that produces a bijection for the canonical 12.
+//
+// Slot assignments for the canonical 12 (verified in identity.test.ts):
+//   projects=0  meetings=1  inbox=2  finance=3  messages=4
+//   notes=5     general=6   coding=7  conversations=8  mail=9
+//   digests=10  personal=11
+// ---------------------------------------------------------------------------
+
+const DOMAIN_HASH_SALT = 796
+
+export function domainSlot(domain: string): number {
+  let hash = 0
+  for (let i = 0; i < domain.length; i++) {
+    hash = ((hash << 5) - hash) + domain.charCodeAt(i)
+    hash |= 0
+  }
+  // Avalanche finalization — fold in the documented seed constant so the
+  // canonical 12 built-in domain names are collision-free at % 12.
+  hash ^= hash >>> 16
+  hash = Math.imul(hash, DOMAIN_HASH_SALT)
+  hash ^= hash >>> 16
+  return (hash >>> 0) % 12
+}
+
+export function domainColor(tokens: MapTokens, domain: string | null | undefined): string {
+  if (!domain) return tokens.domainOther
+  return tokens.domains[domainSlot(domain)] ?? tokens.domainOther
+}
+
+// ---------------------------------------------------------------------------
 // Node sizing — sqrt ramp (~6px floor, ~18px cap) per design doc
 // ---------------------------------------------------------------------------
 

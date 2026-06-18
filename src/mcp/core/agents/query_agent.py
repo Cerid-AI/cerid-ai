@@ -79,6 +79,18 @@ def _format_chroma_result(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a standardized result dict from a ChromaDB chunk."""
+    # RAG Phase 1.1 — provenance spine. Every KB vector result carries a
+    # canonical ``source_type`` ("pack" when the chunk originated from an
+    # installed knowledge pack, else "kb") plus a best-effort ``created_at``
+    # (chunk authored/created date, falling back to ingest date) so the
+    # envelope, prompt, ranking, and verifier can all reason about staleness
+    # and source class downstream.
+    pack_id = metadata.get("pack_id", "")
+    created_at = (
+        metadata.get("created_at")
+        or metadata.get("ingested_at")
+        or None
+    )
     return {
         "content": content,
         "relevance": round(relevance, 4),
@@ -88,6 +100,9 @@ def _format_chroma_result(
         "chunk_index": metadata.get("chunk_index", 0),
         "collection": config.collection_name(domain),
         "chunk_id": chunk_id,
+        "source_type": "pack" if pack_id else "kb",
+        "created_at": created_at,
+        "pack_id": pack_id,
         "ingested_at": metadata.get("ingested_at", ""),
         "sub_category": metadata.get("sub_category", ""),
         "tags_json": metadata.get("tags_json", "[]"),
@@ -1096,7 +1111,8 @@ async def rerank_results(
         return await _rerank_cross_encoder(results, query)
     if mode == "llm":
         return await _rerank_llm(results, query)
-    # mode == "none" or unknown
+    # mode == "none" or unknown — preserve vector order. Absence of a
+    # reranker_status field means "no degradation"; only failure paths tag.
     return results
 
 
@@ -1146,6 +1162,14 @@ async def _rerank_cross_encoder(
         return results
 
 
+# Quenchforge serves a single rerank slot per machine; firing N concurrent
+# rerank calls at it causes 500-storms that trip the circuit breaker (OPT-5).
+# Serialize at the client so production never overwhelms the daemon — eval
+# harnesses still need their own PACE_S because the semaphore protects the
+# daemon, not batch etiquette.
+_RERANK_QUENCHFORGE_SEM = asyncio.Semaphore(1)
+
+
 async def _maybe_rerank_via_quenchforge(
     results: list[dict[str, Any]],
     query: str,
@@ -1169,7 +1193,8 @@ async def _maybe_rerank_via_quenchforge(
         from utils.quenchforge_client import quenchforge_rerank
         documents = [r.get("content", "") for r in results]
         with span("retrieval.rerank", "quenchforge", k=len(results)):
-            scores = await quenchforge_rerank(query, documents)
+            async with _RERANK_QUENCHFORGE_SEM:
+                scores = await quenchforge_rerank(query, documents)
         for r, s in zip(results, scores, strict=False):
             r["relevance"] = float(s)
             r["reranker_status"] = "quenchforge"
@@ -1227,6 +1252,8 @@ async def _rerank_llm(
     remainder = results[config.QUERY_RERANK_CANDIDATES:]
 
     if len(candidates) <= 1:
+        for r in results:
+            r.setdefault("reranker_status", "llm_too_few_candidates")
         return results
 
     snippets = []
@@ -1280,10 +1307,16 @@ async def _rerank_llm(
 
     except CircuitOpenError:
         logger.warning("Bifrost rerank circuit open, falling back to embedding sort")
-        return sorted(results, key=lambda x: x["relevance"], reverse=True)
+        fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
+        for r in fallback:
+            r.setdefault("reranker_status", "llm_circuit_open")
+        return fallback
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError, ValueError) as e:
         logger.warning("LLM reranking failed, falling back to embedding sort: %s", e)
-        return sorted(results, key=lambda x: x["relevance"], reverse=True)
+        fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
+        for r in fallback:
+            r.setdefault("reranker_status", "llm_failed")
+        return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -1636,6 +1669,12 @@ def assemble_context(
             "filename": result.get("filename", ""),
             "domain": result.get("domain", ""),
             "chunk_index": result.get("chunk_index", 0),
+            # RAG Phase 1.1 — preserve provenance onto sources[]. Never
+            # clobber an existing source_type (memory/wiki/external set their
+            # own); default to "kb" only when the result didn't declare one.
+            "source_type": result.get("source_type", "kb"),
+            "created_at": result.get("created_at"),
+            "pack_id": result.get("pack_id", ""),
         })
         char_count += content_len
         artifact_counts[artifact_id] += 1
@@ -1664,6 +1703,7 @@ async def agent_query(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    exclude_packs: bool = False,
 ) -> dict[str, Any]:
     """Budget-gated public entry for multi-domain query.
 
@@ -1693,6 +1733,7 @@ async def agent_query(
                 graph_store=graph_store,
                 skip_cache=skip_cache,
                 metadata_filter=metadata_filter,
+                exclude_packs=exclude_packs,
             ),
             timeout=budget,
         )
@@ -1926,6 +1967,9 @@ async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
             "filename": page.get("slug", entity_hint),
             "chunk_index": 0,
             "source_type": "wiki",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # compiled page dict carries no timestamp).
+            "created_at": page.get("updated_at") or page.get("created_at"),
             "source_authority": "compiled_wiki",
             "title": page.get("title", ""),
         }
@@ -1965,6 +2009,9 @@ async def _recall_memory_surface(
             "filename": m.get("memory_id", ""),
             "chunk_index": 0,
             "source_type": "memory",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # recalled memory dict carries no creation timestamp).
+            "created_at": m.get("created_at"),
             "source_authority": "user_memory",
             "memory_type": m.get("memory_type", "fact"),
         }
@@ -1999,6 +2046,7 @@ async def _agent_query_impl(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    exclude_packs: bool = False,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
@@ -2009,6 +2057,7 @@ async def _agent_query_impl(
         ENABLE_ADAPTIVE_RETRIEVAL,
         ENABLE_INTELLIGENT_ASSEMBLY,
         ENABLE_LATE_INTERACTION,
+        ENABLE_LLM_QUERY_DECOMPOSITION,
         ENABLE_MMR_DIVERSITY,
         ENABLE_QUERY_DECOMPOSITION,
         ENABLE_SEMANTIC_CACHE,
@@ -2103,9 +2152,18 @@ async def _agent_query_impl(
     _skip_normal_retrieval = False
     with timer.step("vector_search"):
         if ENABLE_QUERY_DECOMPOSITION:
+            # Force LLM decomposition for *implicit* multi-hop analytical queries
+            # (count / date-arithmetic / preference) that carry no conjunction
+            # trigger — but only when the SLO-gated flag is enabled, so the live
+            # query path's latency budget is unchanged by default.
+            from core.agents.answer_synthesis import AnswerMode, classify_answer_mode
             from core.retrieval.query_decomposer import decompose_query, needs_decomposition, parallel_retrieve
-            if needs_decomposition(search_query):
-                sub_queries = await decompose_query(search_query)
+            _analytical = classify_answer_mode(search_query) is not AnswerMode.EXTRACTIVE
+            _force_llm = ENABLE_LLM_QUERY_DECOMPOSITION and _analytical
+            if needs_decomposition(search_query) or _force_llm:
+                sub_queries = await decompose_query(
+                    search_query, use_llm=_force_llm, force_llm=_force_llm,
+                )
                 if len(sub_queries) > 1:
                     logger.info("Decomposed query into %d sub-queries: %s", len(sub_queries), sub_queries)
 
@@ -2309,6 +2367,16 @@ async def _agent_query_impl(
         except Exception as exc:  # noqa: BLE001 — observability boundary
             log_swallowed_error("query_agent.active_learning_signals", exc)
 
+    # Step 4.9: Personal-first pack exclusion (Slice 7.3). When the caller opts
+    # out of knowledge packs for this query, drop every pack chunk before
+    # rerank/synthesis — applied here (after all retrieval + graph expansion) so
+    # no pack chunk from any path reaches the answer. Memory/wiki/external chunks
+    # carry no pack_id and are unaffected. (A Chroma where-clause can't express
+    # this: non-pack chunks omit the pack_id key entirely, so $ne/$exists can't
+    # select them — a post-retrieval drop is the robust path.)
+    if exclude_packs and results:
+        results = [r for r in results if not r.get("pack_id")]
+
     # Step 5: Reranking (includes both direct and graph-sourced results)
     with timer.step("reranking"):
         results = await rerank_results(
@@ -2441,6 +2509,15 @@ async def _agent_query_impl(
         except Exception as e:
             logger.warning(f"Failed to log query: {e}")
 
+    # Reranker status — first non-empty value across `results` so callers can
+    # surface degradation (`onnx_failed_no_fallback`, `llm_circuit_open`,
+    # `disabled`, etc.). Set per-result by `rerank_results`; aggregated here so
+    # the envelope carries the signal without consumers having to iterate.
+    reranker_status = next(
+        (r.get("reranker_status") for r in results if r.get("reranker_status")),
+        None,
+    )
+
     result_dict: dict[str, Any] = {
         "context": context,
         "sources": sources,
@@ -2451,6 +2528,7 @@ async def _agent_query_impl(
         "graph_results": graph_results_added,
         "results": results,
         "surface_route": _surface_route,
+        "reranker_status": reranker_status,
         "domains_no_results": _domains_no_results(
             list(effective_domains) if effective_domains else list(DOMAINS), results
         ),

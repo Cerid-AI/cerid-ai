@@ -295,6 +295,43 @@ ADAPTIVE_RETRIEVAL_LIGHT_TOP_K = int(os.getenv("ADAPTIVE_RETRIEVAL_LIGHT_TOP_K",
 
 ENABLE_QUERY_DECOMPOSITION = os.getenv("ENABLE_QUERY_DECOMPOSITION", "true").lower() == "true"
 QUERY_DECOMPOSITION_MAX_SUBQUERIES = int(os.getenv("QUERY_DECOMPOSITION_MAX_SUBQUERIES", "4"))
+# Supersession-at-read: drop memories explicitly marked superseded by a newer
+# fact (the write path already sets ``superseded_by``; recall historically
+# ignored it and could surface stale values — the knowledge-update failure
+# mode). Correctness fix, default ON; reversible via env if a preservation
+# gate ever flags it.
+ENABLE_MEMORY_SUPERSESSION_FILTER = (
+    os.getenv("ENABLE_MEMORY_SUPERSESSION_FILTER", "true").lower() == "true"
+)
+# LLM-based decomposition for *implicit* multi-hop analytical questions (e.g.
+# "how many days between X and Y") that carry no conjunction trigger, so the
+# heuristic gate skips them. Adds one LLM call on the analytical-query hot path,
+# so it is default-OFF pending the benchmark_slo latency gate; flip on once the
+# SLO budget is confirmed (mirrors the eval, which forces it to measure uplift).
+ENABLE_LLM_QUERY_DECOMPOSITION = os.getenv("ENABLE_LLM_QUERY_DECOMPOSITION", "false").lower() == "true"
+
+# Self-consistency for the analytical operators (temporal date-math + counting):
+# sample N extractions at a non-zero temperature and mode-vote the COMPUTED
+# answer. The extraction is the real uncertainty — the Python compute is
+# deterministic — so voting over the derived number (not free-form chain-of-
+# thought) is the high-signal aggregation (Wang et al. arXiv 2203.11171:
+# +12-18% on arithmetic/counting). Gated to analytical phrasings (~27% of items)
+# and default-OFF: it multiplies the analytical-extract LLM cost N×, so flip on
+# only once the full-500 paired run confirms the uplift (mirrors
+# ENABLE_LLM_QUERY_DECOMPOSITION's benchmark-gated rollout). N=1 ⇒ exactly the
+# current single temperature-0 call, so the default is a strict no-op.
+ENABLE_SELF_CONSISTENCY = os.getenv("ENABLE_SELF_CONSISTENCY", "false").lower() == "true"
+SELF_CONSISTENCY_SAMPLES = int(os.getenv("SELF_CONSISTENCY_SAMPLES", "5"))
+SELF_CONSISTENCY_TEMPERATURE = float(os.getenv("SELF_CONSISTENCY_TEMPERATURE", "0.7"))
+
+# Time-anchored retrieval (LongMemEval authors: +11.3% recall): an LLM extracts
+# the date RANGE a question is about and dated chunks recorded in/near that range
+# get an ADDITIVE proximity boost (never a hard filter, so a wrong window can't
+# drop recall). Default-OFF pending the full-500 A/B; the weight is on the same
+# scale as the temporal strategy's coarse year-boost (+1.0 in-window).
+ENABLE_TEMPORAL_PROXIMITY_BOOST = os.getenv("ENABLE_TEMPORAL_PROXIMITY_BOOST", "false").lower() == "true"
+TEMPORAL_PROXIMITY_WEIGHT = float(os.getenv("TEMPORAL_PROXIMITY_WEIGHT", "1.0"))
+TEMPORAL_PROXIMITY_HALFLIFE_DAYS = float(os.getenv("TEMPORAL_PROXIMITY_HALFLIFE_DAYS", "30"))
 
 ENABLE_MMR_DIVERSITY = os.getenv("ENABLE_MMR_DIVERSITY", "true").lower() == "true"
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
@@ -371,6 +408,9 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_memory_recall": ENABLE_MEMORY_RECALL,
     "enable_adaptive_retrieval": ENABLE_ADAPTIVE_RETRIEVAL,
     "enable_query_decomposition": ENABLE_QUERY_DECOMPOSITION,
+    "enable_llm_query_decomposition": ENABLE_LLM_QUERY_DECOMPOSITION,
+    "enable_self_consistency": ENABLE_SELF_CONSISTENCY,
+    "enable_temporal_proximity_boost": ENABLE_TEMPORAL_PROXIMITY_BOOST,
     "enable_mmr_diversity": ENABLE_MMR_DIVERSITY,
     "enable_intelligent_assembly": ENABLE_INTELLIGENT_ASSEMBLY,
     "enable_late_interaction": ENABLE_LATE_INTERACTION,

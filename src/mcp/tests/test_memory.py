@@ -190,3 +190,38 @@ class TestArchiveOldMemories:
         assert result["archived_count"] == 5
         assert result["retention_days"] == 90
         session.run.assert_called_once()
+
+
+class TestBridgeObservationDate:
+    """The app-layer bridge stamps today's date for the live ingestion path so
+    relative-time facts get a resolvable ``event_date``. Production previously
+    passed None at every live call site → memories landed date-blind."""
+
+    @pytest.mark.asyncio
+    @patch(
+        "app.agents.memory._core_extract_and_store_memories",
+        new_callable=AsyncMock,
+    )
+    async def test_defaults_observation_date_to_today(self, mock_core):
+        """No observation_date → bridge defaults to today (live conversation)."""
+        from core.utils.time import utcnow_iso
+
+        mock_core.return_value = {"status": "ok"}
+        await extract_and_store_memories(
+            "x" * 200, "conv-1", ingest_fn=MagicMock(),
+        )
+        assert mock_core.call_args.kwargs["observation_date"] == utcnow_iso()[:10]
+
+    @pytest.mark.asyncio
+    @patch(
+        "app.agents.memory._core_extract_and_store_memories",
+        new_callable=AsyncMock,
+    )
+    async def test_explicit_observation_date_passes_through(self, mock_core):
+        """An explicit (historical) date is preserved, not overwritten."""
+        mock_core.return_value = {"status": "ok"}
+        await extract_and_store_memories(
+            "x" * 200, "conv-1", ingest_fn=MagicMock(),
+            observation_date="2023-01-15",
+        )
+        assert mock_core.call_args.kwargs["observation_date"] == "2023-01-15"

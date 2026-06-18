@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -790,11 +791,21 @@ async def _run_model_auto_update() -> None:
 
         outcome = await apply_latest_assignments()
         applied = outcome.get("applied", [])
+        tier_updates = outcome.get("tier_updates", [])
         duration = time.time() - start
-        _log_execution("model_auto_update", "success", duration, f"applied={len(applied)}")
+        _log_execution(
+            "model_auto_update",
+            "success",
+            duration,
+            f"applied={len(applied)} tiers={len(tier_updates)}",
+        )
         if applied:
             logger.info(
                 "model_auto_update: %d role(s) updated to latest in-family", len(applied)
+            )
+        if tier_updates:
+            logger.info(
+                "model_auto_update: %d smart-router tier id(s) refreshed", len(tier_updates)
             )
     except Exception as e:  # noqa: BLE001 — scheduler error surface
         duration = time.time() - start
@@ -869,6 +880,126 @@ async def _run_compute_umap_3d() -> None:
         duration = time.time() - start
         _log_execution("compute_umap_3d", "error", duration, str(e))
         logger.error("compute_umap_3d scheduled job failed: %s", e)
+
+
+async def _run_compute_trust_state() -> None:
+    """Nightly Entity.trust_state derivation from VerificationReport evidence.
+
+    Runs 1 minute after compute_umap_3d (default 4:31 AM) so trust_state
+    is fresh when Constellation renders.  Gated via SCHEDULE_COMPUTE_TRUST_STATE.
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.compute_trust_state import ComputeTrustStateJob  # noqa: PLC0415
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = ComputeTrustStateJob()
+        if queue is not None:
+            record = job.new_record()
+            await queue.enqueue(record)
+            _log_execution("compute_trust_state", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            result = await job.run(_noop)
+            dist = result.metadata.get("distribution", {})
+            _log_execution(
+                "compute_trust_state",
+                "success",
+                time.time() - start,
+                f"written={result.metadata.get('written', 0)} dist={dist}",
+            )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("compute_trust_state", "error", duration, str(e))
+        logger.error("compute_trust_state scheduled job failed: %s", e)
+
+
+async def _run_derive_domains() -> None:
+    """Nightly Entity.primary_domain derivation from artifact MENTIONS.
+
+    Runs 1 minute after compute_trust_state (default 3:32 AM) so
+    primary_domain is fresh when graph surfaces render. Independent of
+    umap — runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
+    Gated via SCHEDULE_DERIVE_DOMAINS.
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.derive_domains import DeriveDomainsJob  # noqa: PLC0415
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = DeriveDomainsJob()
+        if queue is not None:
+            record = job.new_record()
+            await queue.enqueue(record)
+            _log_execution("derive_domains", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            result = await job.run(_noop)
+            _log_execution(
+                "derive_domains",
+                "success",
+                time.time() - start,
+                f"written={result.metadata.get('written', 0)} "
+                f"orphans_cleared={result.metadata.get('orphans_cleared', 0)}",
+            )
+        # Post-run: bust the emb3d/map serving caches so primary_domain
+        # changes propagate within a pan rather than waiting 24 h.
+        _bust_job_caches("derive_domains")
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("derive_domains", "error", duration, str(e))
+        logger.error("derive_domains scheduled job failed: %s", e)
+
+
+async def _run_backfill_enrichment() -> None:
+    """Phase 5.3 Track A — enrich tags + sub_category on bare artifacts.
+
+    Gated by ``CERID_BACKFILL_ENRICHMENT_ENABLED`` (operator opt-in — the job
+    runs the classifier per artifact). Metadata-only: never changes domain,
+    so conversations are enriched in place. Self-idles once the backlog
+    drains (scan returns 0).
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.backfill_enrichment import BackfillEnrichmentJob  # noqa: PLC0415
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = BackfillEnrichmentJob()
+        if queue is not None:
+            await queue.enqueue(job.new_record())
+            _log_execution("backfill_enrichment", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            result = await job.run(_noop)
+            _log_execution(
+                "backfill_enrichment", "success", time.time() - start,
+                f"enriched={result.metadata.get('enriched', 0)} "
+                f"scanned={result.metadata.get('scanned', 0)}",
+            )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        _log_execution("backfill_enrichment", "error", time.time() - start, str(e))
+        logger.error("backfill_enrichment scheduled job failed: %s", e)
 
 
 async def _run_memory_consolidation_sweep() -> None:
@@ -1085,6 +1216,9 @@ _JOB_CACHE_PATTERNS: dict[str, list[str]] = {
     "compute_umap_3d": ["cerid:graph:emb3d:*"],
     "community_refresh": ["cerid:graph:emb3d:*"],
     "config_recommender": ["cerid:recommendations*"],
+    # derive_domains writes primary_domain onto entities — the emb3d/map
+    # caches embed those fields, so they must be busted after a run.
+    "derive_domains": ["cerid:graph:emb3d:*"],
 }
 
 # Manual runs in flight, so a double-click can't stack a second pass over a
@@ -1212,6 +1346,22 @@ def start_scheduler() -> AsyncIOScheduler:
             max_instances=1,  # block overlapping runs (LLM cost)
         )
 
+    # Phase 5.3 Track A — enrichment backfill. Operator opt-in via
+    # CERID_BACKFILL_ENRICHMENT_ENABLED (the job classifies per artifact);
+    # off by default even though SCHEDULE_BACKFILL_ENRICHMENT has a cron.
+    if (
+        os.getenv("CERID_BACKFILL_ENRICHMENT_ENABLED", "").lower() in ("true", "1", "yes")
+        and config.SCHEDULE_BACKFILL_ENRICHMENT
+    ):
+        _scheduler.add_job(
+            _run_backfill_enrichment,
+            CronTrigger.from_crontab(config.SCHEDULE_BACKFILL_ENRICHMENT),
+            id="backfill_enrichment",
+            name="Enrichment backfill (Track A)",
+            replace_existing=True,
+            max_instances=1,  # block overlapping runs (LLM cost)
+        )
+
     # Sync export (optional — empty SCHEDULE_SYNC_EXPORT disables)
     if getattr(config, "SCHEDULE_SYNC_EXPORT", ""):
         _scheduler.add_job(
@@ -1300,6 +1450,35 @@ def start_scheduler() -> AsyncIOScheduler:
             ),
             id="compute_umap_3d",
             name="Constellation 3D coordinate compute",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Entity trust_state derivation — nightly, 1 min after compute_umap_3d.
+    # Gated; empty SCHEDULE_COMPUTE_TRUST_STATE disables.
+    if getattr(config, "SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *"):
+        _scheduler.add_job(
+            _run_compute_trust_state,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *"),
+            ),
+            id="compute_trust_state",
+            name="Entity trust_state derivation",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Domain backbone derivation — nightly, 1 min after compute_trust_state.
+    # Gated; empty SCHEDULE_DERIVE_DOMAINS disables. Runs standalone even
+    # when umap is disabled (SCHEDULE_COMPUTE_UMAP_3D empty).
+    if getattr(config, "SCHEDULE_DERIVE_DOMAINS", "32 3 * * *"):
+        _scheduler.add_job(
+            _run_derive_domains,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_DERIVE_DOMAINS", "32 3 * * *"),
+            ),
+            id="derive_domains",
+            name="Entity domain derivation",
             replace_existing=True,
             max_instances=1,
         )

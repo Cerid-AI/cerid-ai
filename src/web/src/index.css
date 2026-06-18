@@ -100,6 +100,29 @@
     --color-map-cluster-6: oklch(0.64 0.055 165);   /* moss */
     --color-map-cluster-7: oklch(0.66 0.055 60);    /* sand */
     --color-map-cluster-other: oklch(0.60 0.010 240); /* neutral gray for OTHER */
+    /* ---------------------------------------------------------------
+       Domain token family (taxonomy backbone, 12 hues + other)
+       Same L/C band as cluster family but hue-systematic (30° step),
+       making the two families visually distinguishable as groups.
+       Cluster: desaturated scattered hues; Domain: C 0.060 uniform step.
+       AA-safe on both light (L 0.91 bg) and dark (L 0.16 bg) surfaces.
+       Consumed by sigma/canvas via resolveMapTokens (oklch→hex readback);
+       DOM surfaces use var(--color-domain-N) directly (browser OKLCH ok).
+       MUST NOT contain raw hex (drift gate).
+       --------------------------------------------------------------- */
+    --color-domain-0:  oklch(0.63 0.060   0);   /* red */
+    --color-domain-1:  oklch(0.63 0.060  30);   /* orange-red */
+    --color-domain-2:  oklch(0.63 0.060  60);   /* amber */
+    --color-domain-3:  oklch(0.63 0.060  90);   /* yellow-green */
+    --color-domain-4:  oklch(0.63 0.060 120);   /* green */
+    --color-domain-5:  oklch(0.63 0.060 150);   /* teal-green */
+    --color-domain-6:  oklch(0.63 0.060 180);   /* cyan */
+    --color-domain-7:  oklch(0.63 0.060 210);   /* sky */
+    --color-domain-8:  oklch(0.63 0.060 240);   /* blue */
+    --color-domain-9:  oklch(0.63 0.060 270);   /* violet */
+    --color-domain-10: oklch(0.63 0.060 300);   /* purple */
+    --color-domain-11: oklch(0.63 0.060 330);   /* rose */
+    --color-domain-other: oklch(0.58 0.008 240); /* neutral dim — distinct from cluster-other */
     /* Edge: background mixed 75% toward --background per-theme */
     --color-map-edge: oklch(0.72 0.008 240);
     /* Dim token: flat replaced color for non-focal nodes */
@@ -217,6 +240,20 @@
     --color-map-cluster-6: oklch(0.69 0.055 165);
     --color-map-cluster-7: oklch(0.71 0.055 60);
     --color-map-cluster-other: oklch(0.48 0.012 240);
+    /* Domain dark-mode overrides — lifted lightness for dark backgrounds */
+    --color-domain-0:  oklch(0.68 0.060   0);
+    --color-domain-1:  oklch(0.68 0.060  30);
+    --color-domain-2:  oklch(0.68 0.060  60);
+    --color-domain-3:  oklch(0.68 0.060  90);
+    --color-domain-4:  oklch(0.68 0.060 120);
+    --color-domain-5:  oklch(0.68 0.060 150);
+    --color-domain-6:  oklch(0.68 0.060 180);
+    --color-domain-7:  oklch(0.68 0.060 210);
+    --color-domain-8:  oklch(0.68 0.060 240);
+    --color-domain-9:  oklch(0.68 0.060 270);
+    --color-domain-10: oklch(0.68 0.060 300);
+    --color-domain-11: oklch(0.68 0.060 330);
+    --color-domain-other: oklch(0.42 0.010 240); /* distinct from dark cluster-other (0.48) */
     --color-map-edge: oklch(0.30 0.015 240);
     --color-map-dim: oklch(0.28 0.015 240);
     --color-map-trust-verified: oklch(0.80 0.015 240);
@@ -434,6 +471,42 @@
   .group:hover .scroll-title-inner {
     animation: none !important;
   }
+}
+
+/* Appearance — per-app reduced-motion override (Settings → Appearance).
+ * Mirrors the prefers-reduced-motion media rule above for users whose OS
+ * setting doesn't match their in-app preference. data-motion is applied to
+ * <html> by hooks/use-theme.ts before first paint. */
+html[data-motion="reduce"] *,
+html[data-motion="reduce"] *::before,
+html[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="reduce"] .dark .glow-teal,
+html[data-motion="reduce"] .dark .text-brand-shine,
+html[data-motion="reduce"] .group:hover .scroll-title-inner {
+  animation: none !important;
+}
+
+/* Appearance — density tokens (v1 scope: settings + list surfaces only).
+ * `density-row` / `density-stack` are the spacing hooks SettingRow and
+ * category pages compose; compact tightens both. data-density is applied
+ * to <html> by hooks/use-theme.ts. */
+.density-row {
+  padding-block: 0.5rem;
+}
+.density-stack {
+  display: grid;
+  gap: 1rem;
+}
+html[data-density="compact"] .density-row {
+  padding-block: 0.25rem;
+}
+html[data-density="compact"] .density-stack {
+  gap: 0.5rem;
 }
 
 /* KB artifact card action buttons — always show pointer cursor */

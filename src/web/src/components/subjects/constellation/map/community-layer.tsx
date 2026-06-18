@@ -35,6 +35,11 @@ export interface MapTokens {
   /** CSS color string for cluster hue 0..7 + "other" */
   clusters: string[]
   clusterOther: string
+  /** CSS color strings for domain hue 0..11 (resolved OKLCH→hex via canvas readback).
+   *  DOM surfaces use var(--color-domain-N) directly; only sigma/canvas/WebGL paths
+   *  go through resolveMapTokens(). Non-optional: TS structural typing guards stubs. */
+  domains: string[]
+  domainOther: string
   edge: string
   dim: string
   interaction: string
@@ -47,6 +52,9 @@ export interface MapTokens {
   trustUnverified: string
   /** Optional dot-grid underlay color */
   grid: string
+  /** Resolved font-family string for canvas 2D (var() stripped).
+   *  Present after resolveMapTokens(); absent in SSR/test stubs — callers fall back to labelFont. */
+  fontSans?: string
 }
 
 // Normalize any CSS color (oklch, hsl, named…) to #rrggbb via a 1×1
@@ -75,11 +83,18 @@ function normalizeColor(cssColor: string): string {
 export function resolveMapTokens(root: Element): MapTokens {
   const style = getComputedStyle(root)
   const get = (name: string) => normalizeColor(style.getPropertyValue(name).trim())
+  // Resolve font-family as a plain string — canvas ctx.font cannot parse var().
+  const rawFont = style.getPropertyValue("--font-sans").trim()
+  const fontSans = rawFont.replace(/^['"]|['"]$/g, "") || "system-ui, sans-serif"
   return {
     clusters: [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
       get(`--color-map-cluster-${i}`)
     ),
     clusterOther: get("--color-map-cluster-other"),
+    domains: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) =>
+      get(`--color-domain-${i}`)
+    ),
+    domainOther: get("--color-domain-other"),
     edge: get("--color-map-edge"),
     dim: get("--color-map-dim"),
     interaction: get("--color-map-interaction"),
@@ -89,6 +104,7 @@ export function resolveMapTokens(root: Element): MapTokens {
     trustPartial: get("--color-map-trust-partial"),
     trustUnverified: get("--color-map-trust-unverified"),
     grid: get("--color-map-grid"),
+    fontSans,
   }
 }
 
@@ -229,7 +245,7 @@ export function useCommunityLayer({
           const vAnchor = s.graphToViewport({ x: community.anchor[0], y: community.anchor[1] })
           const labelText = community.label.toUpperCase()
           const fontSize = Math.max(11, Math.min(20, 11 + Math.sqrt(community.count) * 0.5))
-          ctx.font = `500 ${fontSize}px var(--font-sans, system-ui, sans-serif)`
+          ctx.font = `500 ${fontSize}px ${tokens.fontSans}`
           ctx.letterSpacing = "0.08em"
           ctx.textAlign = "center"
           ctx.textBaseline = "middle"

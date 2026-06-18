@@ -119,23 +119,33 @@ def decompose_heuristic(query: str) -> list[str]:
 async def decompose_query(
     query: str,
     use_llm: bool = False,
+    force_llm: bool = False,
 ) -> list[str]:
     """Decompose a query into sub-queries.
 
     Tries heuristic decomposition first. Falls back to LLM if
     use_llm=True and heuristics don't produce a split.
 
+    ``force_llm=True`` runs the LLM split even when ``needs_decomposition``
+    is False — required for *implicit* multi-hop questions ("how many days
+    between X and Y") that carry no conjunction/comparison trigger yet still
+    name two distinct anchors. Caller-gated (analytical intents only) so the
+    LLM cost isn't paid on every query.
+
     Returns list of sub-queries (always at least 1 — the original).
     """
-    if not needs_decomposition(query):
+    triggered = needs_decomposition(query)
+    if not triggered and not (use_llm and force_llm):
         return [query]
 
-    sub_queries = decompose_heuristic(query)
-    if len(sub_queries) > 1:
-        logger.info("Decomposed query into %d sub-queries (heuristic)", len(sub_queries))
-        return sub_queries
+    if triggered:
+        sub_queries = decompose_heuristic(query)
+        if len(sub_queries) > 1:
+            logger.info("Decomposed query into %d sub-queries (heuristic)", len(sub_queries))
+            return sub_queries
 
-    # LLM fallback (optional, rarely needed)
+    # LLM fallback — runs when heuristics didn't split and either the query
+    # triggered decomposition or the caller forced the LLM path.
     if use_llm:
         try:
             from core.utils.internal_llm import call_internal_llm

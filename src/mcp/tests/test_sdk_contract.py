@@ -102,6 +102,36 @@ class TestSDKHallucination:
         assert "claims" in data
 
 
+    @patch("app.routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock)
+    def test_hallucination_fractional_overall_confidence(self, mock_hall):
+        # Regression: the verifier reports a fractional overall_confidence
+        # (e.g. 0.99) inside summary. SDKHallucinationResponse.summary was
+        # typed dict[str, int], so FastAPI rejected the float and 500'd.
+        mock_hall.return_value = {
+            "conversation_id": "conv-1",
+            "skipped": False,
+            "claims": [{"claim": "X", "status": "verified", "confidence": 0.99}],
+            "summary": {
+                "total": 1,
+                "assessed": 1,
+                "overall_confidence": 0.99,
+                "verified": 1,
+                "unverified": 0,
+                "uncertain": 0,
+            },
+        }
+
+        client = TestClient(_make_app())
+        resp = client.post(
+            "/sdk/v1/hallucination",
+            json={"response_text": "X is true.", "conversation_id": "conv-1"},
+        )
+        assert resp.status_code == 200
+        summary = resp.json()["summary"]
+        assert summary["overall_confidence"] == 0.99
+        assert summary["total"] == 1
+
+
 class TestSDKMemoryExtract:
     """POST /sdk/v1/memory/extract should return extraction results."""
 

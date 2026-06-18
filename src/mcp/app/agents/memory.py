@@ -36,11 +36,26 @@ async def extract_and_store_memories(
     neo4j_driver: Any = None,
     redis_client: Any = None,
     ingest_fn: Any = None,
+    observation_date: str | None = None,
 ) -> dict[str, Any]:
-    """Bridge wrapper that injects ``ingest_content`` when no ingest_fn is provided."""
+    """Bridge wrapper that injects ``ingest_content`` when no ingest_fn is provided.
+
+    Defaults ``observation_date`` to today for the live ingestion path: every
+    app-layer caller (chat tool, /memory/extract routes, queue task) reaches
+    extraction for a conversation that is happening *now*, so "now" is the
+    correct anchor. Without it the LLM cannot resolve relative dates ("last
+    Monday") to an absolute ``event_date`` and the memory lands date-blind —
+    invisible to temporal retrieval/arithmetic. Pass an explicit date only when
+    ingesting historical content (the eval calls core ``extract_memories``
+    directly with the session date, so it is unaffected by this default).
+    """
     if ingest_fn is None:
         from app.services.ingestion import ingest_content
         ingest_fn = ingest_content
+
+    if observation_date is None:
+        from core.utils.time import utcnow_iso
+        observation_date = utcnow_iso()[:10]
 
     return await _core_extract_and_store_memories(
         response_text=response_text,
@@ -50,4 +65,5 @@ async def extract_and_store_memories(
         neo4j_driver=neo4j_driver,
         redis_client=redis_client,
         ingest_fn=ingest_fn,
+        observation_date=observation_date,
     )

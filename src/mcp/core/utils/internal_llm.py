@@ -28,6 +28,7 @@ import httpx
 
 import config
 from core.utils.circuit_breaker import CircuitOpenError, get_breaker
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.internal_llm")
 
@@ -84,6 +85,46 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
     return default_provider
 
 
+def _resolve_stage_model(stage: str | None) -> str:
+    """Resolve the LLM model id for a specific call site.
+
+    Lookup order (first match wins):
+    1. ``PROVIDER_STAGE_<NORMALIZED_STAGE>_MODEL`` env var — operator pin
+       (e.g. ``PROVIDER_STAGE_FAITHFULNESS_DECOMPOSE_MODEL=openrouter/google/gemini-2.5-flash``).
+    2. ``config.stage_profiles.STAGE_PROFILES[stage]`` → tier → model from
+       ``utils.model_registry.ACTIVE_MODELS["tiers"]``. The smart default —
+       judges land on a moderate model, summaries on a simple one, frontier
+       generation on the user's expert pick.
+    3. Empty string. ``call_llm``'s existing fallback chain
+       (``INTERNAL_LLM_MODEL`` → ``_DEFAULT_INTERNAL_MODEL``) takes over.
+
+    Stage profile classification lives in :mod:`config.stage_profiles`;
+    the (hardness → tier → model id) policy lives in the registry. Both
+    are user-tunable without touching this resolver.
+    """
+    if not stage:
+        return ""
+    try:
+        from config.stage_profiles import env_pin_for, tier_for
+    except ImportError:
+        return ""
+    pinned = env_pin_for(stage)
+    if pinned:
+        return pinned
+    tier = tier_for(stage)
+    if not tier:
+        return ""
+    try:
+        from utils.model_registry import get_model
+    except ImportError:
+        return ""
+    try:
+        return get_model("tiers", tier) or ""
+    except Exception:  # noqa: BLE001 — registry must never block a call
+        log_swallowed_error("core.utils.internal_llm.resolve_stage_model", Exception(f"registry lookup failed for tier={tier}"))
+        return ""
+
+
 async def call_internal_llm(
     messages: list[dict[str, str]],
     *,
@@ -101,20 +142,31 @@ async def call_internal_llm(
     The *stage* argument is a first-class observability breadcrumb: every
     internal-LLM call is attributed to a named pipeline stage (e.g.
     ``"topic_extraction"``, ``"claim_extraction"``, ``"contextual_summary"``).
-    It also drives per-stage provider routing — see
-    :func:`_resolve_stage_provider`.
+    It also drives:
+      - per-stage provider routing (:func:`_resolve_stage_provider`)
+      - per-stage model selection (:func:`_resolve_stage_model`), which
+        maps stages → (task_type, hardness) → tier → model id via
+        :mod:`config.stage_profiles`. Caller doesn't pick a model; the
+        registry does, and the operator can override per stage via env
+        (``PROVIDER_STAGE_<NAME>_MODEL``) or per tier via the registry.
     """
     default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
     provider = _resolve_stage_provider(stage, default_provider)
+    resolved_model = _resolve_stage_model(stage)
     log: logging.Logger | logging.LoggerAdapter = logger
     if stage:
         log = logging.LoggerAdapter(logger, {"llm_stage": stage})
         try:
             import sentry_sdk  # type: ignore[import-not-found]
             sentry_sdk.set_tag("llm_stage", stage)
+            if resolved_model:
+                sentry_sdk.set_tag("llm_stage_model", resolved_model)
         except ImportError:
             pass
-        log.debug("internal LLM call provider=%s stage=%s", provider, stage)
+        log.debug(
+            "internal LLM call provider=%s stage=%s model=%s",
+            provider, stage, resolved_model or "<caller-default>",
+        )
 
     if provider in ("ollama", "quenchforge"):
         return await _call_ollama(
@@ -129,6 +181,7 @@ async def call_internal_llm(
         from core.utils.llm_client import call_llm
         return await call_llm(
             messages,
+            model=resolved_model,
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
@@ -333,7 +386,7 @@ async def _call_ollama(
             ]
     return await call_llm(
         fallback_messages,
-        model="openai/gpt-4o-mini",
+        model=config.INTERNAL_LLM_JSON_FALLBACK_MODEL,
         temperature=temperature,
         max_tokens=max_tokens,
         response_format=fallback_response_format,

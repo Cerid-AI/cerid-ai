@@ -24,6 +24,11 @@ QUERY_CACHE_TTL = 300  # 5 minutes
 # the request surfaces a degraded result instead of hanging the event loop.
 CHROMA_QUERY_TIMEOUT = 10.0
 NEO4J_QUERY_TIMEOUT = 15.0
+# Per-source budget for external data sources inside the synchronous
+# /agent/query path. Must stay under the 3 s cold-query SLO (R5-1) with
+# headroom — a hung source (e.g. DuckDuckGo) otherwise serializes its
+# full timeout into first-touch responses until the circuit opens.
+EXTERNAL_SOURCE_QUERY_TIMEOUT = 2.0
 
 # ── Budget & rate limits ────────────────────────────────────────────
 MONTHLY_BUDGET_USD = 20.0

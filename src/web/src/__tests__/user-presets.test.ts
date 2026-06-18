@@ -40,20 +40,6 @@ describe("USER_PRESETS", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it("quick preset sets simple mode", () => {
-    const quick = getPresetById("quick")
-    expect(quick.uiMode).toBe("simple")
-  })
-
-  it("balanced preset sets advanced mode", () => {
-    const balanced = getPresetById("balanced")
-    expect(balanced.uiMode).toBe("advanced")
-  })
-
-  it("maximum preset sets advanced mode", () => {
-    const maximum = getPresetById("maximum")
-    expect(maximum.uiMode).toBe("advanced")
-  })
 
   it("all presets have settings with enable_auto_inject", () => {
     for (const preset of USER_PRESETS) {

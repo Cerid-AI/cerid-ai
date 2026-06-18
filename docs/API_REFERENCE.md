@@ -17,6 +17,7 @@
 - `DELETE /settings/recommendations/{id}` — Clear a recommendation from the active hash + drop the per-tenant dismissal. Used by the "Enable now" flow so the banner closes immediately. (C3.2 / v0.93.3)
 - `POST /wiki/write_note` — Two-way vault write (RAG C3.3 / v0.93.2). `{vault_id, path, content, frontmatter?, mode?: "create"|"append"|"overwrite", allow_synthesis_input?}` → `{file_path, artifact_id, ingested, frontmatter_written, mode}`. Atomic write via tmp + `os.replace`; reuses `VaultProfile.classify_path` for path safety; re-ingests as Artifact with `source_type="cerid-synthesis"`.
 - `PATCH /settings` (extended, v0.93.3) — Accepts `enable_sparse_retrieval`, `hybrid_fusion_mode` (`"weighted_sum" | "rrf" | "tri_rrf"`), `hybrid_rrf_sparse_weight`. The sparse toggle mutates `os.environ["RETRIEVAL_SPARSE_ENABLED"]` + `core.retrieval.sparse.SPARSE_ENABLED` live; invalid fusion mode returns 400.
+- `PATCH /settings` (extended, Slice 7.2) — Accepts `pack_relevance_weight` (float `0.0`–`2.0`, default `0.7`, advanced / SERVER scope). Multiplier applied to knowledge-pack chunks after reranking; below `1.0` makes personal data win ties, `1.0` is neutral. Surfaced live (`config.PACK_RELEVANCE_WEIGHT`); also exposed in `GET /settings`.
 - `GET /collections` — List ChromaDB collections
 - `GET /scheduler` — Scheduled job status
 - `POST /query` — Query knowledge base (domain, top_k)
@@ -272,6 +273,7 @@ curl -X POST http://localhost:8888/agent/query \
 **RAG mode fields (optional):**
 - `rag_mode` — `"manual"` (KB only, default), `"smart"` (KB + memory + external in parallel), or `"custom_smart"` (Pro tier, configurable weights/toggles)
 - `source_config` — Custom Smart weights/toggles (Pro tier only). Keys: `kb_enabled`, `memory_enabled`, `external_enabled`, `kb_weight`, `memory_weight`, `external_weight`, `memory_types`
+- `exclude_packs` (bool, default `false`, Slice 7.3) — when `true`, drops every knowledge-pack chunk (those carrying a `pack_id`) before rerank/synthesis (personal-first: answer from your own data only). Memory/wiki/external sources are unaffected.
 
 When `rag_mode` is `"smart"` or `"custom_smart"`, the response includes:
 - `source_breakdown` — `{kb: [...], memory: [...], external: [...]}` with per-source results
@@ -747,3 +749,29 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 
 ### Memory Recall
 - Tool: `pkb_memory_recall` — Context-aware memory retrieval with salience-aware decay scoring (6 memory types: empirical, decision, preference, project_context, temporal, conversational)
+
+### Knowledge Graph (Subjects panes)
+
+Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. See [`docs/ROUTER_REGISTRY.md`](ROUTER_REGISTRY.md) for the generated parameter/response detail.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/graph/map` | Cartographic map payload for Constellation (2D-projected positions, CO_MENTIONED links, community hulls). `?layout=force\|wells\|domain` — omitting is byte-identical to `force`; unknown value → 422. Per-layout Redis cache keys `cerid:graph:emb3d:v3:map:{layout}`; `layout_fallback: true` when a non-default layout artifact is missing (falls back to force). Communities degrade to `[]` until the nightly `compute_umap_3d` job writes them. |
+| `GET` | `/graph/domains` | Per-domain entity/artifact counts — the taxonomy-aware spine for the Domain lens. Each domain carries `salience` (float, corpus-level salience mass, Slice 6.2) and the response is **sorted by salience desc** (falls back to `entity_count` ordering pre-derivation, when salience is 0). `derived_at: null` signals the `DeriveDomainsJob` has never run (frontends render a degraded state, not an error). No cache in v1. |
+| `GET` | `/graph/decomposition` | STRATA Atlas icicle source. Without `?community=`: the full tier tree (domains → conditional subcategory groups → L1 → L0 communities, with sizes/labels/purity, L0→L1 parent map, per-domain unclustered counts, size<4 rollup buckets, `no_communities_computed` flag). With `?community=<id>`: entity leaves for that L0 community, each carrying `path:[domain, sub?, l1, l0]`. Redis 24h cache under the `cerid:graph:emb3d:*` bust pattern. `no_communities_computed: true` ⇒ Leiden never ran; client degrades to a Domain→Entity two-tier. |
+| `GET` | `/graph/timeline` | Aggregated entity-activity timeline (legacy summary shape). |
+| `GET` | `/graph/timeline/strata` | Tephra Cycle-2 stratigraphic timeline payload. Additive optional fields over the base shape: `lanes[]` (lane meta), `events[]` (event-horizon items), `verification_aggs[]` (sparse-suppressed when <3), `top_entities` (per `{lane}:{bucket}`, ≤3), `data_extent_from` (earliest data ts, for 180d-window clamping), `ledger_start_date` (earliest KnowledgeLog ts — drives the pre-ledger hairline). All optional so old cached payloads still parse. |
+| `GET` | `/graph/timeline/track/{canonical_id}` | Lazy zoom-triggered event detail for one entity track (≤500 mention events, co-mentions cap 20). `?from`/`?to` ISO bounds; `?bucket=` scopes to a single bucket and adds `knowledge_events`, `new_entities`, `verification`, `community_summary`. Redis 60s cache. |
+
+### Wiki (Knowledge Pages)
+
+Karpathy LLM-Wiki surface. All under the `/wiki` prefix.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/wiki/entities` | List entity wiki pages (`limit` 1–200, default 30). `?q=` searches name/canonical_id server-side before the limit (spans the whole set). When `q` is supplied, results carry a `match_rank` ordering (exact > prefix > substring); the no-`q` path is byte-identical to before. Each row carries `top_tags` (Slice 6.3, salience-ranked vocabulary tags) for the entity-list tag filter. |
+| `GET` | `/wiki/entities/{slug}` | Full entity page (summary, related entities, source-artifact citations, contradictions, confidence band). Carries `domain_salience` (salience-ordered domain map, Slice 6.1) + `top_tags` (Slice 6.3) for the infobox salience-mix footer + chip row. Related entities carry `has_summary` + `one_liner` (drives three-state wikilinks + hovercards). 404 if absent. |
+| `GET` | `/wiki/concepts/{community_id}` | Concept (Leiden community) page: prose summary + member list. Accepts `concept:{level}:{native_id}` and bare `{level}:{native_id}`. `confidence_band` is intentionally omitted — CONCEPT pages have no claim-based confidence; absence means not-applicable (a phantom `unknown` band was removed). |
+| `GET` | `/wiki/log` | Karpathy-style chronological ledger of wiki refreshes/enrichments/contradiction updates. Filter by `entity_slug`, `since`; paginated newest-first (`limit` default 50). Backs the page-history view. |
+| `GET` | `/wiki/index` | LLM-readable catalog (one row per entity: slug, name, one-liner, last-updated, activity score, `has_summary`). `?q=` filters server-side pre-limit; `?order=name` sorts A-Z (default: activity desc). |
+| `POST` | `/wiki/write_note` | Two-way vault write (see SDK section above). |

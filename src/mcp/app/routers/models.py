@@ -20,6 +20,7 @@ from core.routing.model_catalog import (
     diff_assignments,
     fetch_openrouter_catalog,
     resolve_assignments,
+    resolve_latest,
 )
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -32,6 +33,14 @@ _logger = logging.getLogger("ai-companion.models")
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _MODEL_CONFIG_PATH = _DATA_DIR / "model_config.json"
+
+# Routing-tiers overlay the smart_router reads (env-overridable via config).
+# Falls back to the default app/data location when the setting is absent.
+import config as _config  # noqa: E402
+
+_ROUTING_TIERS_OVERLAY_PATH = Path(
+    getattr(_config, "ROUTING_TIERS_OVERLAY_PATH", str(_DATA_DIR / "routing_tiers.json"))
+)
 
 _TEMPLATE_DIR = Path(
     os.getenv(
@@ -48,7 +57,7 @@ DEFAULT_ASSIGNMENTS: dict[str, str] = {
     "coding": "anthropic/claude-sonnet-4.6",
     "research": "x-ai/grok-4.3",
     "simple": "google/gemini-2.5-flash",
-    "general": "openai/gpt-4o-mini",
+    "general": "anthropic/claude-sonnet-4.6",
     "classifier": "meta-llama/llama-3.3-70b-instruct",
     "verification": "x-ai/grok-4.3",
     "categorization": "meta-llama/llama-3.3-70b-instruct:free",
@@ -276,7 +285,46 @@ async def _compute_model_updates() -> dict:
         "last_checked": datetime.now(timezone.utc).isoformat(),
         "catalog_size": len(ids),
         "resolved": resolved,
+        "catalog_ids": ids,
     }
+
+
+def _refresh_routing_tiers_overlay(catalog_ids_list: list[str]) -> list[dict[str, str]]:
+    """Resolve every smart-router tier id through the catalog and persist the
+    ``{original_id: resolved_id}`` overlay the router reads.
+
+    Conservative semantics match the role pass: ``resolve_latest`` only upgrades
+    dotted-version ids within the same family (never cross-series). Only changed
+    ids are written into the map (identity entries are omitted to keep it small;
+    the router treats a missing key as identity). Empty catalog → no write.
+    Returns the per-id diff rows ``{id, from, to}`` for logging. Fail soft: any
+    write error is logged and swallowed so the weekly job never errors on it.
+    """
+    if not catalog_ids_list:
+        return []
+
+    from core.routing.smart_router import tier_source_ids
+
+    overlay: dict[str, str] = {}
+    diff: list[dict[str, str]] = []
+    for src in tier_source_ids():
+        resolved = resolve_latest(src, catalog_ids_list)
+        if resolved != src:
+            overlay[src] = resolved
+            diff.append({"id": src, "from": src, "to": resolved})
+
+    try:
+        _ROUTING_TIERS_OVERLAY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ROUTING_TIERS_OVERLAY_PATH.write_text(json.dumps(overlay, indent=2) + "\n")
+    except OSError as exc:
+        from core.utils.swallowed import log_swallowed_error
+
+        log_swallowed_error("models.routing_tiers_overlay", exc)
+        return diff
+
+    for row in diff:
+        _logger.info("routing-tiers overlay: %s -> %s", row["from"], row["to"])
+    return diff
 
 
 async def apply_latest_assignments() -> dict:
@@ -287,8 +335,19 @@ async def apply_latest_assignments() -> dict:
     required for the change to take effect, as with manual assignment edits.)"""
     result = await _compute_model_updates()
     applied: list[dict[str, str]] = result["updates"]
+
+    # Tier-overlay refresh runs every pass, independent of the role diff: the
+    # smart-router tier tables upgrade on their own cadence, so an empty role
+    # diff must NOT skip the tier refresh.
+    tier_diff = _refresh_routing_tiers_overlay(result.get("catalog_ids", []))
+
     if not applied:
-        return {"applied": [], "restart_required": False, "catalog_size": result["catalog_size"]}
+        return {
+            "applied": [],
+            "restart_required": False,
+            "catalog_size": result["catalog_size"],
+            "tier_updates": tier_diff,
+        }
 
     _save_config(result["resolved"])
     try:
@@ -297,7 +356,12 @@ async def apply_latest_assignments() -> dict:
         _logger.warning("Bifrost config regen skipped (template missing): %s", exc)
     for row in applied:
         _logger.info("model auto-update: %s %s -> %s", row["role"], row["from"], row["to"])
-    return {"applied": applied, "restart_required": True, "catalog_size": result["catalog_size"]}
+    return {
+        "applied": applied,
+        "restart_required": True,
+        "catalog_size": result["catalog_size"],
+        "tier_updates": tier_diff,
+    }
 
 
 @router.get("/updates")

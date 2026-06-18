@@ -104,6 +104,12 @@ def init_schema(driver) -> None:
             "CREATE INDEX entity_type_idx IF NOT EXISTS "
             "FOR (e:Entity) ON (e.entity_type)"
         )
+        # Domain backbone index (Cycle 1) — powers /graph/domains counts
+        # and future ?domain= filter paths.
+        session.run(
+            "CREATE INDEX entity_primary_domain_idx IF NOT EXISTS "
+            "FOR (e:Entity) ON (e.primary_domain)"
+        )
 
         # --- Community layer (Workstream E Phase 4b.1) ---
         # Leiden community detection materialises (:Community) nodes

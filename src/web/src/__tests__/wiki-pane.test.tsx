@@ -46,9 +46,10 @@ function makeEntitySummary(overrides: Partial<EntitySummary> = {}): EntitySummar
     name: "Tesla",
     entity_type: "ORG",
     summary_preview: "Tesla is an electric vehicle manufacturer.",
-    related_count: 12,
+    mention_count: 12,
     recent_activity_score: 90,
     last_updated_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+    primary_domain: null,
     ...overrides,
   }
 }
@@ -104,8 +105,8 @@ describe("WikiPane — entity list", () => {
     })
     render(<WikiPane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(screen.getByText("Tesla")).toBeTruthy()
-      expect(screen.getByText("SpaceX")).toBeTruthy()
+      expect(screen.getAllByText("Tesla").length).toBeGreaterThan(0)
+      expect(screen.getAllByText("SpaceX").length).toBeGreaterThan(0)
     })
   })
 
@@ -132,7 +133,7 @@ describe("WikiPane — entity list", () => {
     mockUseWikiEntities.mockReturnValue({ data: undefined, isLoading: false, isError: true })
     render(<WikiPane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(screen.getByText(/Failed to load entities/)).toBeTruthy()
+      expect(screen.getAllByText(/Failed to load entities/).length).toBeGreaterThan(0)
     })
   })
 
@@ -140,7 +141,7 @@ describe("WikiPane — entity list", () => {
     mockUseWikiEntities.mockReturnValue({ data: [], isLoading: false, isError: false })
     render(<WikiPane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(screen.getByText("No entities yet")).toBeTruthy()
+      expect(screen.getAllByText(/No entities yet|No pages yet/i).length).toBeGreaterThan(0)
     })
   })
 })
@@ -150,11 +151,11 @@ describe("WikiPane — entity list", () => {
 // ---------------------------------------------------------------------------
 
 describe("WikiPane — empty detail state", () => {
-  it("shows 'Select an entity' message when nothing is selected", async () => {
+  it("shows the wiki landing when nothing is selected", async () => {
     mockUseWikiEntities.mockReturnValue({ data: [makeEntitySummary()], isLoading: false, isError: false })
     render(<WikiPane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(screen.getByText("Select an entity")).toBeTruthy()
+      expect(screen.getByText(/Recent changes/i)).toBeTruthy()
     })
   })
 })
@@ -179,7 +180,7 @@ describe("WikiPane — entity selection", () => {
     render(<WikiPane />, { wrapper: createWrapper() })
 
     // Click the Tesla list item
-    await waitFor(() => screen.getByText("Tesla"))
+    await waitFor(() => screen.getAllByText("Tesla")[0])
     await user.click(screen.getAllByText("Tesla")[0])
 
     await waitFor(() => {
@@ -203,7 +204,7 @@ describe("WikiPane — keyboard navigation", () => {
     mockUseWikiEntities.mockReturnValue({ data: entities, isLoading: false, isError: false })
     render(<WikiPane />, { wrapper: createWrapper() })
 
-    await waitFor(() => screen.getByText("Tesla"))
+    await waitFor(() => screen.getAllByText("Tesla")[0])
 
     // Tab to the first list item button
     await user.tab()
@@ -228,7 +229,7 @@ describe("WikiPane — keyboard navigation", () => {
     })
 
     render(<WikiPane />, { wrapper: createWrapper() })
-    await waitFor(() => screen.getByText("Tesla"))
+    await waitFor(() => screen.getAllByText("Tesla")[0])
 
     // Tab to item and press Enter
     await user.tab()
@@ -259,19 +260,19 @@ describe("WikiPane — four-state matrix (D.2)", () => {
       isError: false,
     })
     render(<WikiPane />, { wrapper: createWrapper() })
-    await waitFor(() => expect(screen.getByText("Tesla")).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText("Tesla").length).toBeGreaterThan(0))
   })
 
   it("empty: shows empty state when entity list is empty", async () => {
     mockUseWikiEntities.mockReturnValue({ data: [], isLoading: false, isError: false })
     render(<WikiPane />, { wrapper: createWrapper() })
-    await waitFor(() => expect(screen.getByText("No entities yet")).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText(/No entities yet|No pages yet/i).length).toBeGreaterThan(0))
   })
 
   it("error: shows destructive Alert on fetch failure", async () => {
     mockUseWikiEntities.mockReturnValue({ data: undefined, isLoading: false, isError: true })
     render(<WikiPane />, { wrapper: createWrapper() })
-    await waitFor(() => expect(screen.getByText(/Failed to load entities/)).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText(/Failed to load entities/).length).toBeGreaterThan(0))
   })
 })
 

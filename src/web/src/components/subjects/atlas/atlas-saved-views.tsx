@@ -85,7 +85,7 @@ export function AtlasSavedViews({
 
   return (
     <div
-      className="absolute left-3 top-3 z-10 w-[240px] rounded-lg border border-border bg-card/95 p-3 shadow-lg backdrop-blur"
+      className="p-3"
       role="group"
       aria-label="Atlas saved views"
     >
