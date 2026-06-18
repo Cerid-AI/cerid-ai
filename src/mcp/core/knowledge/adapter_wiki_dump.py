@@ -141,8 +141,18 @@ def iter_pages_from_dump(stream: IO[bytes]) -> Iterator[_ParsedPage]:
     # sha256 verification. iterparse is the only memory-bounded option
     # for multi-100 MB Wikimedia dumps; defusedxml.iterparse is API-
     # equivalent but adds a transitive dep we'd rather avoid.
-    context = ET.iterparse(stream, events=("end",))  # nosec B314
-    for _event, elem in context:
+    # ``start`` events let us grab the document root so we can clear it after
+    # each page. Clearing only ``elem`` frees the page's own subtree but the
+    # root keeps accumulating the emptied ``<page>`` siblings, so memory grows
+    # linearly with page count — clearing the root drops them and keeps the
+    # parse genuinely bounded (the docstring's promise).
+    context = ET.iterparse(stream, events=("start", "end"))  # nosec B314
+    root = None
+    for event, elem in context:
+        if event == "start":
+            if root is None:
+                root = elem
+            continue
         if not elem.tag.endswith("}page") and elem.tag != "page":
             continue
         title = (_find_local(elem, "title") or "").strip()
@@ -161,6 +171,8 @@ def iter_pages_from_dump(stream: IO[bytes]) -> Iterator[_ParsedPage]:
             is_redirect=is_redirect,
         )
         elem.clear()
+        if root is not None:
+            root.clear()
 
 
 def _find_local(elem: ET.Element, local_name: str) -> str | None:

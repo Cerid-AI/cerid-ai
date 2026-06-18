@@ -510,25 +510,37 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
             ),
         )
 
+    # Only acknowledge (202) once the payload is durably enqueued. If the
+    # queue is unavailable or the push fails, return 503 so the sender
+    # retries per webhook conventions — acknowledging a payload we dropped
+    # is irrecoverable data loss with no retry signal to the sender.
+    redis_client = get_redis()
+    if redis_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook queue unavailable; please retry.",
+        )
     try:
-        redis_client = get_redis()
-        if redis_client is not None:
-            redis_client.rpush(
-                f"cerid:webhook_inbox:{source_id}",
-                _json.dumps(
-                    {
-                        "received_at": utcnow_iso(),
-                        "payload": payload,
-                        "normalized": normalized,
-                    },
-                ),
-            )
-    except Exception as exc:  # noqa: BLE001 — observability boundary
+        redis_client.rpush(
+            f"cerid:webhook_inbox:{source_id}",
+            _json.dumps(
+                {
+                    "received_at": utcnow_iso(),
+                    "payload": payload,
+                    "normalized": normalized,
+                },
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — surfaced as 503 below
         log_swallowed_error(
             "sdk_ingest_webhook.enqueue",
             exc,
             context={"source_id": source_id},
         )
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to enqueue webhook payload; please retry.",
+        ) from exc
 
     return {
         "status": "accepted",

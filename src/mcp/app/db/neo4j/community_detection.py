@@ -156,10 +156,14 @@ def detect_communities(
     communities_seen: dict[int, set[str]] = {}
     edges_total = 0
     with driver.session(database=neo4j_database) as session:
-        # Drop existing IN_COMMUNITY edges (idempotent re-run).
+        # Drop existing IN_COMMUNITY edges so the partition can be rebuilt.
+        # We deliberately do NOT delete Community nodes here: the MERGE below
+        # re-attaches each recurring community by id and (via ON MATCH)
+        # preserves its cached .summary, so the LLM summary cost-guard
+        # (community_summaries: WHERE c.summary IS NULL) still skips them.
+        # Stale communities from the prior partition are pruned AFTER the
+        # rebuild, once we know which ids survived.
         session.run("MATCH (:Entity)-[r:IN_COMMUNITY]->(:Community) DELETE r")
-        # Drop orphan Community nodes (no edges yet — they'll be reborn below).
-        session.run("MATCH (c:Community) WHERE NOT (c)<-[:IN_COMMUNITY]-() DELETE c")
 
         # Walk every Entity, write its [level,id] community pairs.
         rows = list(session.run(
@@ -199,6 +203,16 @@ def detect_communities(
                 ).consume()
                 edges_total += summary.counters.relationships_created
                 communities_seen.setdefault(level, set()).add(community_id)
+
+        # Prune communities that existed in a PRIOR partition but are absent
+        # from this run. Recurring ids were preserved above (with their cached
+        # summaries); only genuinely-stale communities are removed. Replaces
+        # the old blanket pre-delete that discarded every summary each run.
+        seen_ids = [cid for ids in communities_seen.values() for cid in ids]
+        session.run(
+            "MATCH (c:Community) WHERE NOT c.id IN $seen DETACH DELETE c",
+            seen=seen_ids,
+        )
 
         # Drop tiny communities below the size threshold (Leiden often
         # produces singletons — they're noise and add scheduler load).

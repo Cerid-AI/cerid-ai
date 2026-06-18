@@ -146,6 +146,30 @@ class SparseIndex:
             self._append_to_disk(entries)
         return added
 
+    def remove_documents(self, chunk_ids: list[str]) -> int:
+        """Remove documents by chunk_id from the index and the on-disk
+        corpus. Returns the count removed.
+
+        Used on re-ingest: an edited artifact reuses its chunk_ids, so
+        ``add_documents`` dedup-skips them and the sparse index would keep
+        serving the PRE-edit vectors while ChromaDB holds the new text.
+        Removing first lets the caller re-encode the fresh text.
+        """
+        remove_set = {c for c in chunk_ids if c in self._docs}
+        if not remove_set:
+            return 0
+        for cid in remove_set:
+            self._docs.pop(cid, None)
+            self._doc_tenant.pop(cid, None)
+        # Rebuild the inverted index from the surviving docs — simpler and
+        # less error-prone than surgically filtering every posting list.
+        self._postings = defaultdict(list)
+        for cid, vec in self._docs.items():
+            for tid, weight in vec.items():
+                self._postings[tid].append((cid, weight))
+        self._rewrite_disk()
+        return len(remove_set)
+
     # -- search --------------------------------------------------------------
 
     def search(
@@ -272,6 +296,36 @@ class SparseIndex:
             )
             sentry_sdk.capture_exception()
 
+    def _rewrite_disk(self) -> None:
+        """Atomically rewrite the JSONL corpus from current in-memory state
+        (temp file + ``os.replace``). The append path can't remove lines.
+        """
+        try:
+            tmp = self._corpus_file.with_suffix(".jsonl.tmp")
+            with open(tmp, "w") as f:
+                for cid, vec in self._docs.items():
+                    entry = {
+                        "id": cid,
+                        "tenant_id": self._doc_tenant.get(
+                            cid, config.DEFAULT_TENANT_ID
+                        ),
+                        "v": {str(tid): w for tid, w in vec.items()},
+                    }
+                    f.write(json.dumps(entry) + "\n")
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError as fsync_exc:
+                    log_swallowed_error(
+                        "core.retrieval.sparse_index.fsync", fsync_exc,
+                    )
+            os.replace(tmp, self._corpus_file)
+        except Exception:
+            logger.exception(
+                "sparse.rewrite_failed", extra={"domain": self.domain},
+            )
+            sentry_sdk.capture_exception()
+
 
 # ---------------------------------------------------------------------------
 # Module-level index cache
@@ -311,6 +365,18 @@ def index_chunks(
         return 0
     idx = get_index(domain)
     return idx.add_documents(chunk_ids, texts, tenant_id=tenant_id)
+
+
+def remove_chunks(domain: str, chunk_ids: list[str]) -> int:
+    """Remove chunks from a domain's sparse index (in-memory + disk).
+
+    Called on re-ingest before re-adding an edited artifact's chunks.
+    No-op when the encoder is unavailable.
+    """
+    if not _sparse.is_available():
+        return 0
+    idx = get_index(domain)
+    return idx.remove_documents(chunk_ids)
 
 
 def search_sparse(

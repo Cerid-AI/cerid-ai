@@ -392,7 +392,7 @@ async def get_webhook_url(source_id: str, request: Request):
     src = srcdb.get_source(get_neo4j(), source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
-    if src["kind"] != "webhook":
+    if not _is_webhook_backed(src["kind"]):
         raise HTTPException(status_code=422, detail="Not a webhook source")
     config = src.get("config") or {}
     token = config.get("token") if isinstance(config, dict) else None

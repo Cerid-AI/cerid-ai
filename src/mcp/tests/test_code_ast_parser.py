@@ -61,6 +61,38 @@ def test_parse_code_extracts_top_level_definitions(tmp_path):
     assert types.count("CodeClass") == 1
 
 
+def test_parse_code_captures_top_level_residual_code(tmp_path):
+    """Module-level code outside def/class/import is captured as ``Other``,
+    not silently dropped. Regression: constants, the module docstring, and
+    ``if __name__ == '__main__'`` blocks were never chunked/embedded.
+    """
+    p = _write(tmp_path, "calc.py", SAMPLE_PY)
+    elements = parse_code(p)
+    other = [el for el in elements if el["element_type"] == "Other"]
+    assert other, "top-level residual code must be captured as an Other element"
+    assert any("CONST = 42" in el["text"] for el in other)
+
+
+def test_parse_code_script_module_is_not_dropped(tmp_path):
+    """A def-free script-style module still yields embeddable content."""
+    script = (
+        '"""Module docstring."""\n'
+        "import os\n\n"
+        "DATA_DIR = os.environ.get('DATA_DIR', '/tmp')\n"
+        "VALUES = [1, 2, 3]\n\n"
+        'if __name__ == "__main__":\n'
+        "    print(DATA_DIR, VALUES)\n"
+    )
+    p = _write(tmp_path, "script.py", script)
+    elements = parse_code(p)
+    # Without residual capture this returned only the single CodeImport.
+    other = [el for el in elements if el["element_type"] == "Other"]
+    assert other
+    joined = "\n".join(el["text"] for el in other)
+    assert "DATA_DIR" in joined
+    assert '__main__' in joined
+
+
 def test_parse_code_extracts_function_names(tmp_path):
     p = _write(tmp_path, "calc.py", SAMPLE_PY)
     elements = parse_code(p)
@@ -225,5 +257,10 @@ def test_chunk_elements_dispatches_code_strategies(tmp_path):
     assert "CodeFunction" in types
     assert "CodeClass" in types
     assert "CodeImport" in types
+    # Code-strategy chunks carry the breadcrumb header. Top-level residual
+    # ("Other", e.g. ``CONST = 42``) routes to the token chunker and does
+    # not — assert the breadcrumb only on the code element types.
+    code_types = {"CodeFunction", "CodeClass", "CodeImport"}
     for c in chunks:
-        assert c["text"].startswith("# ")
+        if c["metadata"]["element_type"] in code_types:
+            assert c["text"].startswith("# ")

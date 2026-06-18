@@ -80,11 +80,17 @@ async def guarded_get(
     method: str = "GET",
     user_agent: str = "CeridAI-Connector/1.0",
     timeout: float = DEFAULT_TIMEOUT,
+    max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> httpx.Response:
     """SSRF-guarded fetch. Validates the target, disables auto-redirects, and
     manually follows up to ``MAX_REDIRECTS`` hops re-validating each Location.
-    Raises ValueError on a blocked target / redirect loop; httpx.HTTPError on
-    network failure. Returns the final (non-redirect) response.
+    Raises ValueError on a blocked target / redirect loop / oversize body;
+    httpx.HTTPError on network failure. Returns the final (non-redirect)
+    response with its body fully loaded.
+
+    The response is streamed and the download is aborted once it exceeds
+    ``max_bytes`` — the cap is enforced DURING the read, not after the whole
+    (attacker-controlled) body has been buffered into memory.
     """
     current = url
     async with httpx.AsyncClient(
@@ -94,10 +100,36 @@ async def guarded_get(
     ) as client:
         for _hop in range(MAX_REDIRECTS + 1):
             await asyncio.to_thread(assert_fetchable, current)  # blocking DNS off the loop
-            resp = await client.request(method, current)
-            location = resp.headers.get("location")
-            if resp.is_redirect and location:
-                current = urljoin(current, location)
-                continue
-            return resp
+            async with client.stream(method, current) as resp:
+                location = resp.headers.get("location")
+                if resp.is_redirect and location:
+                    current = urljoin(current, location)
+                    continue
+                total = 0
+                chunks: list[bytes] = []
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError(
+                            f"response body exceeds {max_bytes} byte cap (DoS guard)"
+                        )
+                    chunks.append(chunk)
+                body = b"".join(chunks)
+                # aiter_bytes yields content-decoded bytes, so the original
+                # framing headers no longer describe `body`; drop them to keep
+                # the returned response self-consistent for callers.
+                headers = httpx.Headers(
+                    [
+                        (k, v)
+                        for k, v in resp.headers.items()
+                        if k.lower()
+                        not in ("content-encoding", "content-length", "transfer-encoding")
+                    ]
+                )
+                return httpx.Response(
+                    status_code=resp.status_code,
+                    headers=headers,
+                    content=body,
+                    request=resp.request,
+                )
     raise ValueError(f"too many redirects (> {MAX_REDIRECTS})")

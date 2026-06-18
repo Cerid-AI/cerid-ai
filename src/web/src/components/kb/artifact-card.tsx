@@ -497,8 +497,10 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
           </div>
         )}
 
-        {/* Delete confirmation */}
-        {!compact && confirmDelete && onDelete && (
+        {/* Delete confirmation — rendered in compact mode too: the delete
+            button below is always visible, so gating the confirmation on
+            !compact made delete a silent no-op in the default grid view. */}
+        {confirmDelete && onDelete && (
           <div role="presentation" className="mt-2 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 p-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
             <span className="text-label-sm text-destructive">Delete this artifact?</span>
             <div className="flex-1" />

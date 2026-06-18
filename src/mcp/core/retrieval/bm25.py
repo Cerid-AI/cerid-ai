@@ -110,6 +110,37 @@ class BM25Index:
 
         return len(new_entries)
 
+    def remove_documents(self, chunk_ids: list[str]) -> int:
+        """Remove documents by chunk_id from the index and the on-disk
+        corpus. Returns the count removed.
+
+        Used on re-ingest: an edited artifact keeps its chunk_ids, so
+        ``add_documents`` dedup-skips them and the keyword index would
+        otherwise keep serving the PRE-edit text while ChromaDB holds the
+        new text. Removing first lets the caller re-add the fresh text.
+        """
+        remove_set = {c for c in chunk_ids if c in self._doc_id_set}
+        if not remove_set:
+            return 0
+
+        kept_texts: list[str] = []
+        kept_ids: list[str] = []
+        for cid, text in zip(self._doc_ids, self._texts):
+            if cid in remove_set:
+                continue
+            kept_texts.append(text)
+            kept_ids.append(cid)
+
+        self._texts = kept_texts
+        self._doc_ids = kept_ids
+        self._doc_id_set = set(kept_ids)
+        for cid in remove_set:
+            self._doc_tenant.pop(cid, None)
+
+        self._rebuild()
+        self._rewrite_disk()
+        return len(remove_set)
+
     def search(
         self,
         query: str,
@@ -256,6 +287,33 @@ class BM25Index:
             logger.exception("bm25.persist_failed", extra={"domain": self.domain})
             sentry_sdk.capture_exception()
 
+    def _rewrite_disk(self) -> None:
+        """Rewrite the whole JSONL corpus from current in-memory state,
+        atomically (temp file + ``os.replace``). The normal write path is
+        append-only; removal needs a full rewrite to drop stale lines.
+        """
+        try:
+            tmp = self._corpus_file.with_suffix(".jsonl.tmp")
+            with open(tmp, "w") as f:
+                for cid, text in zip(self._doc_ids, self._texts):
+                    entry = {
+                        "id": cid,
+                        "text": text,
+                        "tenant_id": self._doc_tenant.get(
+                            cid, config.DEFAULT_TENANT_ID
+                        ),
+                    }
+                    f.write(json.dumps(entry) + "\n")
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError as fsync_exc:
+                    log_swallowed_error("core.retrieval.bm25.fsync", fsync_exc)
+            os.replace(tmp, self._corpus_file)
+        except Exception:
+            logger.exception("bm25.rewrite_failed", extra={"domain": self.domain})
+            sentry_sdk.capture_exception()
+
 
 # ---------------------------------------------------------------------------
 # Module-level index cache
@@ -285,6 +343,17 @@ def index_chunks(
     """
     idx = get_index(domain)
     return idx.add_documents(chunk_ids, texts, tenant_id=tenant_id)
+
+
+def remove_chunks(domain: str, chunk_ids: list[str]) -> int:
+    """Remove chunks from a domain's BM25 index (in-memory + disk).
+
+    Called on re-ingest before re-adding an edited artifact's chunks so the
+    keyword index never serves stale pre-edit text. No-op when BM25 is
+    unavailable or the ids aren't present.
+    """
+    idx = get_index(domain)
+    return idx.remove_documents(chunk_ids)
 
 
 def search_bm25(

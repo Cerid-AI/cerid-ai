@@ -63,6 +63,50 @@ def test_search_returns_empty_when_unavailable(monkeypatch, tmp_path):
     assert sparse_index.search_sparse("code", "anything") == []
 
 
+def test_remove_chunks_drops_from_index_postings_and_disk(mock_encoder):
+    sparse_index.index_chunks(
+        "code",
+        ["doc1", "doc2", "doc3"],
+        ["alpha gamma", "alpha beta delta", "epsilon zeta"],
+    )
+    removed = sparse_index.remove_chunks("code", ["doc2"])
+    assert removed == 1
+
+    idx = sparse_index.get_index("code")
+    assert idx.size == 2
+    assert "doc2" not in idx._docs
+    # Inverted index was rebuilt — no posting still references doc2.
+    assert all(
+        doc_id != "doc2"
+        for postings in idx._postings.values()
+        for doc_id, _w in postings
+    )
+    # Disk was rewritten (not append-only): a fresh index agrees.
+    sparse_index.reset_for_test()
+    idx2 = sparse_index.get_index("code")
+    assert idx2.size == 2
+    assert "doc2" not in idx2._docs
+
+
+def test_remove_then_readd_refreshes_stale_vector(mock_encoder):
+    """Re-ingest: same chunk_id, new text must replace the stale vector."""
+    sparse_index.index_chunks("code", ["doc1"], ["alpha gamma"])
+    # Naive re-add is a dedup no-op (proves the staleness bug).
+    assert sparse_index.index_chunks("code", ["doc1"], ["epsilon zeta"]) == 0
+    sparse_index.remove_chunks("code", ["doc1"])
+    assert sparse_index.index_chunks("code", ["doc1"], ["epsilon zeta"]) == 1
+    # Now matches the new text's tokens, not the old.
+    hits = {cid for cid, _ in sparse_index.search_sparse("code", "epsilon zeta", top_k=5)}
+    assert "doc1" in hits
+
+
+def test_remove_chunks_noop_when_unavailable(monkeypatch, tmp_path):
+    monkeypatch.setattr(sparse, "is_available", lambda: False)
+    monkeypatch.setattr(sparse_index, "SPARSE_DATA_DIR", str(tmp_path))
+    sparse_index.reset_for_test()
+    assert sparse_index.remove_chunks("code", ["c1"]) == 0
+
+
 def test_add_and_search_roundtrip(mock_encoder):
     added = sparse_index.index_chunks(
         "code",
