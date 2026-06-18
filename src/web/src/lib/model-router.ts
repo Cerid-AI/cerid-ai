@@ -183,8 +183,15 @@ export function recommendModel(
     // Skip if context would exceed model's effective window
     if (estimatedInputTokens > candidate.effectiveContextWindow) continue
 
-    // For temporal queries, skip models with stale knowledge cutoff
-    if (isTemporalQuery && candidate.capabilities?.knowledgeCutoff) {
+    // For temporal queries, skip stale-cutoff models — EXCEPT web-search-capable
+    // ones, which fetch current info at query time and so are unaffected by a
+    // stale training cutoff. (This also keeps the routing decision stable as
+    // any given model's cutoff ages past the window — no date-dependent flake.)
+    if (
+      isTemporalQuery &&
+      !candidate.capabilities?.webSearch &&
+      candidate.capabilities?.knowledgeCutoff
+    ) {
       const cutoffDate = new Date(candidate.capabilities.knowledgeCutoff + "-01")
       const ageMs = Date.now() - cutoffDate.getTime()
       const ageMonths = ageMs / (30 * 24 * 60 * 60 * 1000)
@@ -195,17 +202,39 @@ export function recommendModel(
     if (score < minScore) continue
 
     const candidateCost = estimateTurnCost(candidate, contextChars, estimatedOutput)
-    if (candidateCost < bestCost) {
+    if (isTemporalQuery) {
+      // Temporal queries need live information: prefer a web-search-capable
+      // model over a cheaper non-search one; within the same search capability,
+      // fall back to the cheaper model.
+      const candidateSearch = !!candidate.capabilities?.webSearch
+      const bestSearch = !!bestModel.capabilities?.webSearch
+      if (
+        (candidateSearch && !bestSearch) ||
+        (candidateSearch === bestSearch && candidateCost < bestCost)
+      ) {
+        bestModel = candidate
+        bestCost = candidateCost
+      }
+    } else if (candidateCost < bestCost) {
       bestModel = candidate
       bestCost = candidateCost
     }
   }
 
+  // Routing a temporal query to a web-search model is a correctness upgrade,
+  // not a cost optimization — keep it even when it costs more than the current
+  // (non-search) model, so the savings threshold below doesn't veto it.
+  const switchedForTemporalSearch =
+    isTemporalQuery &&
+    bestModel.id !== currentModel.id &&
+    !!bestModel.capabilities?.webSearch &&
+    !currentModel.capabilities?.webSearch
+
   // Apply sensitivity: only switch if savings exceed threshold
   const minSavingsRatio = SAVINGS_THRESHOLD[costSensitivity] ?? SAVINGS_THRESHOLD.medium
   const savingsRatio = currentCost > 0 ? (currentCost - bestCost) / currentCost : 0
 
-  if (savingsRatio < minSavingsRatio) {
+  if (savingsRatio < minSavingsRatio && !switchedForTemporalSearch) {
     bestModel = currentModel
     bestCost = currentCost
   }
@@ -218,6 +247,8 @@ export function recommendModel(
   let reasoning: string
   if (bestModel.id === currentModel.id) {
     reasoning = `${currentModel.label} is already optimal for this ${complexity} query (score: ${Math.round(currentScore)})`
+  } else if (switchedForTemporalSearch) {
+    reasoning = `${bestModel.label} has live web search — preferred for this time-sensitive query`
   } else {
     reasoning = `${bestModel.label} scores ${Math.round(bestScore)} for this ${topIntent} task — saves ~${formatCost(savings)}/turn`
   }

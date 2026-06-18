@@ -211,6 +211,14 @@ configured:
 * **`:online` web-search claim verification** — OpenRouter-specific
   feature.  Quenchforge has no web-search proxy.
 
+**External-source latency budget.** `/agent/query` may consult external
+knowledge sources (e.g. DuckDuckGo) on the hot path. Each such call is bounded
+by `EXTERNAL_SOURCE_QUERY_TIMEOUT = 2.0` (`src/mcp/config/constants.py`) so a
+hung source can't blow the cold-start SLO — before this cap a single slow
+source serialized a ~5 s wait into the first-touch response until its circuit
+opened. The orchestrator adds a small outer margin on top of the per-source
+budget.
+
 ## Observability contract
 
 The canonical endpoint is `GET /health`. Every observability signal must appear in `/health.invariants`:
@@ -241,3 +249,357 @@ Served by `/`, `/health`, and `/openapi.json`. Single source of truth: `pyprojec
 | What are the project conventions? | [`docs/CONVENTIONS.md`](CONVENTIONS.md) |
 | What's resolved / shipped? | [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) |
 | Current sprint work? | `tasks/todo.md` |
+| Sidebar pane shape + redirect map? | [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) |
+| Atlas + Constellation perf budgets? | [`docs/PERF_BUDGETS.md`](PERF_BUDGETS.md) |
+| Visualization endpoints? | `/graph/decomposition`, `/graph/map` (`?layout=`), `/graph/domains`, `/graph/neighborhood`, `/graph/timeline/strata`, `/graph/tour/generate`, `/atlas/views/*` |
+| How are entity domains assigned? | § Domain backbone (below); `DeriveDomainsJob`, `GET /graph/domains` |
+| How do connectors work? | `core/ingest/sources/base.py` + `core/ingest/sources/registry.py`; one connector module per `kind` under `core/ingest/sources/connectors/` |
+| How does the webhook receiver dispatch by provider? | `core/ingest/adapters/` recipes; `(kind, provider)` index resolves `kind=webhook + config.provider=slack` → `chat_capture/slack` recipe |
+| Where's the Source-management REST surface? | `src/mcp/app/routers/sources.py` (list / kinds / create / test / policy / webhook-url / delete) |
+
+## Visualization tier (Cerid v1.0)
+
+Sidebar consolidates to 4 panes (Chat / Subjects / Sources / Settings). The
+Subjects pane hosts four visualization modes (Atlas / Constellation / Timeline
+/ Wiki), reworked across the 2026-06 eval cycles (TRELLIS / Tephra / FOLIO /
+STRATA):
+
+- **Atlas (STRATA, Cycle 4)** — default mode is now a DOM **decomposition
+  icicle**: domains → conditional subcategory groups → L1 → L0 communities →
+  entities, backed by `GET /graph/decomposition` (with `?community=<id>` for
+  the leaf walk). The old ego-network view is demoted to an explicit
+  **Neighborhood** leaf mode (hops promoted to ≤2), backed by
+  `GET /graph/neighborhood`. Fresh installs degrade to a Domain→Entity two-tier
+  via the `no_communities_computed` flag.
+- **Constellation (Cycle 4)** — 2D-in-3D cartographic map backed by
+  `GET /graph/map?layout=force|wells|domain` (per-layout cache keys,
+  `layout_fallback`, 422 on invalid). Adds **drag-heal** interactivity
+  (`lib/graph/interactions/drag-heal.ts` — critically-damped lerp-home,
+  neighbor falloff, interruptible, `reduced-motion` snap), a layout switcher,
+  3D token restyle (neon → opt-in Ambient), z-axis recency, and tour mode
+  (`POST /graph/tour/generate`, Pro-gated).
+- **Timeline (Tephra, Cycle 2)** — stratigraphic timeline backed by
+  `GET /graph/timeline/strata` (+ lazy `…/track/{id}?bucket=`): event-horizon
+  strip, since-you-last-looked band, domain lanes with summary-derived labels,
+  pre-ledger hairline (`ledger_start_date`).
+- **Wiki (FOLIO, Cycle 3)** — Vector-2022 encyclopedia anatomy; see § Knowledge
+  architecture and `GET /wiki/{entities,entities/{slug},concepts,log,index}`.
+- **Lenses + saved views** — lens transforms (contradiction, open-question,
+  provenance, quality, **Domain**, **Trust**) compose via sigma's
+  nodeReducer/edgeReducer. The Trust lens reads `Entity.trust_state` from the
+  nightly `compute_trust_state` job. Per-user named view CRUD via
+  `/atlas/views/*`; saved-view schema is **v3** (adds `atlasTier`).
+
+See [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) for the full pane shape,
+NavigationProvider redirect map, and component layout reference, and
+[`docs/BACKGROUND_JOBS.md`](BACKGROUND_JOBS.md) § Knowledge-graph nightly jobs
+for the jobs that feed these surfaces.
+
+## Domain backbone (TRELLIS, Cycle 1)
+
+Entities carry a derived domain spine so every Subjects surface can group,
+colour, and filter by domain consistently:
+
+- **Per-entity fields** (written by `DeriveDomainsJob`): `primary_domain`,
+  `domain_mix` (JSON, sorted desc by count then name), `primary_subcategory`,
+  `domains_updated_at`. Primary selection uses a 4-rung tie-break
+  (count → non-`general` → recency → lexicographic). Orphan entities have the
+  domain fields `REMOVE`d. See [`docs/BACKGROUND_JOBS.md`](BACKGROUND_JOBS.md)
+  § Knowledge-graph nightly jobs.
+- **Rollup endpoint:** `GET /graph/domains` — per-domain entity/artifact
+  counts; `derived_at: null` means the job has never run.
+- **Frontend colour:** a stable `domainSlot(domain)` hash (salt 796,
+  collision-free for the canonical 12) in `lib/graph/identity.ts` maps each
+  domain to a `--color-domain-0..11` CSS token (plus an `other` token). The old
+  hard-coded `DOMAIN_BADGE_COLORS` map was deleted.
+
+## Ingestion architecture (Cerid v1.0 RC2)
+
+Every ingestion stream is a `(:Source)` node in Neo4j with a `kind`
+from one of 22 supported kinds (11 Core + 11 Pro) across 9 families
+(files / feeds / chat / mail / calendar / media / webhook / adapter /
+pack). Connectors are protocol objects under
+`core/ingest/sources/connectors/`; each implements the four
+lifecycle methods of `core.ingest.sources.base.SourceConnector`:
+
+| Method | When called |
+|---|---|
+| `connect(config) → ConnectResult` | Once per source — validates config, performs one-time setup (OAuth callback, watch handle, …), returns initial cursor + connection_time_ms |
+| `fetch_since(source_id, cursor, config)` | Driven by the `source_poll` scheduler worker (`SCHEDULE_SOURCE_POLL`, rss/url_watch); async-iterates `SourceArtifactEvent`, persisting `cursor_after` after each ingested artifact (crash-safe). `config` carries the feed url/domain so core stays app-import-free. |
+| `health_check(source_id, config)` | Cheap probe; surfaces on the source-detail pane and `/observability/connector-health` |
+| `disconnect(source_id, config)` | Cleanup — OAuth revocation, watch teardown, daemon stop. Idempotent |
+
+`health_check` and `disconnect` take `config` alongside `source_id`
+so connectors stay inside the `core → app` import contract — the
+router owns the Neo4j round-trip.
+
+### Source kinds + tiers
+
+11 Core kinds: `folder`, `bookmarks`, `rss`, `url_watch`, `webhook`,
+`chat_capture`, `dev_events`, `clipboard`, `voice_note`,
+`external_adapter`, `knowledge_pack`.
+
+11 Pro kinds: `gmail`, `outlook`, `google_calendar`,
+`outlook_calendar`, `meeting_audio`, `apple_notes`, `apple_mail`,
+`imessage`, `apple_calendar`, `apple_photos`, `apple_reminders`.
+
+Single source of truth: `core/ingest/sources/kinds.py` (Literal +
+KIND_FAMILY + KIND_TIER maps; import-time asserts enforce drift).
+
+### Sync cursor service
+
+`app.services.sync_cursor` — Redis-first hot reads (sub-ms), Neo4j
+fallback + cache warm on miss. Writes go to BOTH stores so a Redis
+flush loses at most the last in-flight cursor. Cursor shape is
+connector-defined; the service treats it as opaque JSON.
+
+### Webhook receiver + adapter recipes
+
+Inbound HTTP traffic lands at `POST /sdk/v1/ingest/webhook/{token}`.
+The receiver:
+
+1. Resolves the `(:Source)` by token (constant-time compare, kind
+   filter to `webhook` for security).
+2. Optionally verifies `X-Cerid-Signature: sha256=<hex>` against the
+   source's `hmac_secret`.
+3. Parses JSON body.
+4. Looks up an **adapter recipe** by `config.provider` via the
+   `core.ingest.adapters` registry's provider→canonical-kind index.
+   13 recipes ship: Slack / Discord / Teams / Matrix (chat_capture),
+   GitHub / Linear / Sentry / Stripe (dev_events), Readwise / Pocket /
+   Instapaper / Raindrop / Telegram (external_adapter). Each recipe
+   normalizes the provider-shaped payload into one or more
+   `CanonicalArtifact` records.
+5. Enqueues the (raw + normalized) payload to
+   `cerid:webhook_inbox:{source_id}` for the ingest worker.
+
+Returns 202 immediately. The token is the routing credential; the
+canonical destination kind comes from the recipe — `kind=webhook`
+stays the security boundary, recipes provide the routing flexibility.
+
+### Knowledge Stats + sparklines
+
+`GET /observability/knowledge-stats` returns five orthogonal corpus
+dimensions (artifacts, chunks, entities, edges-total, source-kinds
+diversity) in a single Cypher round-trip; Redis-cached 60s.
+`GET /observability/knowledge-stats/history?days=N` returns daily
+snapshots for sparkline rendering. The nightly snapshot scheduler
+(`SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT`, default midnight UTC) MERGEs
+one `:KnowledgeStatsSnapshot` per day.
+
+### Per-source policies
+
+Each source carries:
+
+- `retention_policy: { mode: "keep_all" | "days" | "count", … }`
+  applied nightly by `SCHEDULE_RETENTION_ENFORCE` via
+  `core.ingest.retention.plan_for_source` + `app.services.retention.apply_retention_plan`.
+- `quality_floor: float [0.0, 1.0]` — artifacts with a computed
+  quality_score below the floor are dropped before chunking +
+  embedding. Lookup is memoized per-source in
+  `app.services.quality_floors`.
+
+Both edit through `POST /sources/{id}/policy`.
+
+### OAuth flow (Pro cloud connectors)
+
+`app.routers.oauth` exposes start + callback endpoints for Google
+(Gmail + Calendar) and Microsoft (Outlook + Calendar). Redis-backed
+state tokens with 10-minute TTL and single-use semantics. Token
+exchange against the upstream providers is configuration-driven via
+the sibling MCP servers (`google_workspace`, `ms365`).
+
+### Browser extension + Apple ecosystem
+
+`packages/extension/` is a Manifest V3 browser extension — popup
+with Save Page → readability extraction → `POST /sdk/v1/ingest`.
+Works on Chrome + Firefox; Edge + Safari deferred.
+
+`packages/desktop/swift/CeridMail/` + `CeridReminders/` are TCC-
+scoped Swift helper binaries. The Python connectors at
+`core/ingest/sources/connectors/apple_mail.py` and `apple_reminders.py`
+subprocess to them. Health-check reports helper-binary availability
+on the host's PATH.
+
+## Pro tier (Cerid v1.0 Phases D-H)
+
+The Pro feature surface sits atop the visualization tier as three
+architectural additions:
+
+### Desktop-host connectors (Phase D)
+
+The Electron main process (`packages/desktop/src/main/`) reads
+on-disk Apple data directly via Node.js, then POSTs structured
+payloads to `/ingest/structured`. Three connectors in this shape:
+Apple Notes (gzipped protobuf via `better-sqlite3` + `protobufjs`),
+Apple Mail (`.emlx` parser walking V10/MailData), iMessage (chat.db
++ minimal NSKeyedArchiver typedstream decoder). FDA + per-category
+TCC grants surfaced via `permissions-step.tsx` (`node-mac-permissions`
+≥ 2.5 + Electron's `systemPreferences`).
+
+### Sibling MCP servers (Phase F)
+
+`stacks/connectors/docker-compose.yml` brings up two opt-in
+profile=pro services — `google-workspace-mcp` (taylorwilsdon v1.21.0)
+and `ms365-mcp` (Softeria v0.111.0, pinned by commit SHA because of
+its high release velocity). Both speak streamable-HTTP MCP on
+loopback with a static bearer (`CERID_CONNECTORS_BEARER`). Cerid
+backend uses `MCPClientPool` with per-connector headers; the sibling
+servers own OAuth + refresh-token rotation. Four plugin
+ConnectorPlugins (`gmail`, `google_calendar`, `outlook`,
+`outlook_calendar`) wrap their MCP tool surface behind
+`DataSource` subclasses, joining the standard `query_all` fan-out.
+
+### Native Swift helpers (Phase G)
+
+`packages/desktop/swift/` ships three SPM CLI executables built via
+`swift build` (no Xcode `.xcodeproj` needed): `ceridek` (EventKit),
+`ceridphotos` (PhotoKit metadata), `ceridspotlight` (CoreSpotlight
+donor). Python plugins (`plugins/apple_calendar`,
+`plugins/apple_photos`, `plugins/spotlight_donor`) invoke them via
+`asyncio.subprocess` and parse JSON-over-stdio. TCC grants inherit
+from the parent Electron app's signed bundle — load-bearing contract
+documented in `packages/desktop/swift/README.md`.
+
+The three Xcode-required native targets (App Intents, Share
+Extension, Quick Look) are deferred — see
+`docs/PHASE_G_DEFERRED.md`.
+
+### Calendar stitching fallback chain
+
+`meeting_capture.calendar_stitch.match_to_event` (async since Phase F)
+resolves calendar events from the first available source in this
+order: `google_calendar` → `outlook_calendar` → `apple_calendar`
+(Swift helper) → `apple_calendar_eventkit` (legacy). Documented in
+`docs/PRO_GOOGLE_CALENDAR.md`.
+
+### Privacy filter
+
+`utils/domain_privacy.py` enforces per-domain visibility floors
+against the active `private_mode` level. Currently:
+`messages`/`imessage` require Level 2+. Wired into
+`pkb_search_filtered` so iMessage content disappears from retrieval
+when the floor isn't met. Privacy-defaults to closed on Redis
+unavailability.
+
+### Metamorphic verification (Phase H)
+
+`plugins/metamorphic/plugin.py` extends the hallucination pipeline
+with per-claim metamorphic scoring: each factoid gets synonym +
+antonym mutations via the internal LLM, then heuristic entailment
+checks classify it as `ok` / `suspicious` / `likely_hallucinated`.
+Registered via the existing `set_metamorphic_handler` stub
+interface in `app/agents/hallucination/metamorphic.py`.
+
+See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
+Phase D-H cumulative metrics and per-phase shipping log.
+
+## Knowledge architecture (Cerid v1.0 Phases K1-K6)
+
+The K-program turns the four primitives (vectors / graph / wiki /
+episodic memory) into an integrated architecture inspired by
+Karpathy's LLM Wiki pattern, Palantir Ontology-Augmented Generation,
+and A-Mem agentic memory.
+
+### Four knowledge surfaces
+
+| Surface | Primary key | Cost profile |
+|---|---|---|
+| **W**iki | `entity_slug` | Read-cheap (1 Neo4j round-trip), write-batched |
+| **V**ector | `chunk_id` | Read-medium (50-200ms Chroma + rerank), write-incremental |
+| **G**raph | `(entity, edge)` | Read-cheap (20-100ms Cypher), write-incremental |
+| **M**emory | `memory_id` | Read-medium, write-explicit + decay-scored |
+
+The surfaces are orthogonal; a query can hit two or three. The
+top-level surface router decides.
+
+### Surface router (Phase K3)
+
+`core/retrieval/surface_router.py` classifies user queries into
+five intent buckets via regex-only fast path (~0.5ms/query):
+
+| Intent | Detection signal | Primary surface |
+|---|---|---|
+| `compiled_summary` | "what is X / who is X / tell me about Y" | wiki |
+| `specific_fact` | quoted spans, "find the X where Y" | vector |
+| `relational` | "how does X relate to Y / what connects" | graph |
+| `personal_context` | "what did we decide / I prefer" | memory |
+| `mixed` (fallback) | no regex match | vector + graph + wiki |
+
+Precedence: `personal_context` > `specific_fact` > `relational`
+> `compiled_summary`. Personal-context first because "what did we
+decide about X" must NOT route to wiki even though X looks like a
+summary target.
+
+Exposed as `pkb_surface_route` (MCP tool) and consumed inside
+`pkb_agent_query` (optional `surfaces=[...]` arg) and
+`pkb_answer_with_citations` (wiki page prepended to context budget
+when W surface fires).
+
+### Event hooks + compounding loop (Phase K1)
+
+`app/processor/event_hooks.py` is a lightweight in-process pub/sub
+that wires the ingest path to the wiki refresh path without
+coupling the two jobs:
+
+```
+ingest_content() -> Neo4j commit + Chroma flip
+    -> EntityExtractionJob (enqueued post-commit)
+        -> upsert entities + MENTIONS edges
+        -> emit "entities_added" event
+            -> wiki_refresh subscriber (with per-entity Redis debounce)
+                -> WikiRefreshJob (enqueued)
+                    -> generate prose summary via local LLM
+                    -> write_entity_summary + external enrichment
+                    -> emit "wiki_refreshed" knowledge log entry
+```
+
+Failure isolation: each subscriber's exceptions are caught by the
+dispatcher so a broken handler can't break the emitter.
+
+Three freshness loops feed back into the queue:
+
+1. **On-write debounced refresh** (Phase K1.3) — per-entity Redis
+   debounce (5min TTL) prevents bulk-ingest write amplification.
+2. **Nightly stale-sweep** (Phase K1.4) — 3 AM cron picks the top
+   `WIKI_STALE_SWEEP_LIMIT` (default 100) entities with
+   `summary_updated_at < now()-24h` ordered by mention_count.
+3. **Weekly drift lint** (Phase K2.4) — Sunday 4 AM scans for
+   unresolved contradictions on stale summaries (force refresh)
+   + high-mention coverage gaps (debounced refresh).
+
+### Karpathy log + index (Phase K4)
+
+`(:KnowledgeLog)` Neo4j label is an append-only ledger written by
+`WikiRefreshJob.on_success` — Karpathy's `log.md` equivalent.
+`GET /wiki/log` paginates by entity/since. `GET /wiki/index` is a
+Karpathy-shaped catalog (slug + one-liner + activity_score +
+has_summary) that the surface router consults when fuzzy name
+matching misses.
+
+### Cross-surface linking (Phase K2)
+
+Per Palantir's OAG influence — the graph is the typed cross-
+reference layer; every other surface references entities by
+`canonical_id`:
+
+| From | To | Edge |
+|---|---|---|
+| Memory artifact | Entity | `(:Artifact {memory_type})-[:MENTIONS]->(:Entity)` |
+| Wiki page | Memory | `WikiEntityPage.episodic_memories` (decay-scored) |
+| Wiki page | Contradiction | `(:Entity)-[:HAS_CONTRADICTION]->(:ContradictionFinding)` |
+| Conversation | Wiki touch | `EXTRACTED_FROM` edge + `entities_added` event |
+
+### Observability (Phase K6)
+
+`/health.wiki_freshness` returns six metrics in one Cypher round-
+trip: total/active entity counts, coverage %, unresolved
+contradictions, 24h log activity. Surfaces in Settings →
+Diagnostics → Analytics via `KnowledgePanel`. Six preservation
+invariants (`tests/test_knowledge_architecture_invariants.py`)
+gate the wiring against regression.
+
+See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
+Phase K1-K6 cumulative metrics and the
+`tasks/2026-05-22-knowledge-architecture-redesign.md` design doc
+for the strategic rationale.

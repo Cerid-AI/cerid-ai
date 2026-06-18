@@ -27,6 +27,11 @@ from sentry_sdk.types import Event, Hint
 # logger drops the event from Sentry without affecting stdout logging.
 _IGNORED_LOGGERS = (
     "chromadb.telemetry.product.posthog",
+    # httpx INFO logs every successful HTTP call. ~1.5M events/month at our
+    # poll cadence across hyperliquid/kalshi/alternative.me/internal Chroma.
+    # Sentry audit (2026-05-18) called this out as the #2 log noise source.
+    # We still capture WARNING+ from httpx so genuine failures surface.
+    "httpx",
 )
 
 # Provider API keys — not covered by DEFAULT_DENYLIST (which covers generic "api_key").
@@ -41,6 +46,36 @@ _EXTRA_DENYLIST = [
 _NOISY_POLL_SUBSTRINGS = ("/ingestion/progress", "/health", "/observability/queue-depth")
 # Note: "/health" will also match /observability/health-score (polled by the
 # observability dashboard) — that's incidentally desirable; it's noisy too.
+
+# Health-endpoint transaction names FastApiIntegration emits when configured
+# with transaction_style="endpoint" — these are function-name-styled rather
+# than URL-styled, so the substring match above misses them. The Sentry audit
+# (2026-05-18) found `app.routers.health.health_ping` alone at 412,700
+# transactions per 30 days — biggest single span line item. Set to 0 (drop
+# entirely) since healthcheck spans have zero diagnostic value once we have
+# /health/live and /health (uptime endpoints with their own monitoring).
+_HEALTH_TRANSACTIONS = frozenset({
+    # FastApiIntegration transaction_style="endpoint" names — function-styled.
+    "app.routers.health.health_ping",
+    "app.routers.health.health_check",
+    "app.routers.health.health_check_endpoint",
+    "app.routers.health.health_status_endpoint",
+    "app.routers.health.liveness_probe",
+    "app.routers.health.readiness_probe",
+    # SDK-side health probe (3,100 spans/24h pre-filter per 2026-05-20 audit).
+    "app.routers.sdk.sdk_health",
+    "app.routers.sdk.sdk_health_detailed",
+    # External-adapter healthcheck.
+    "app.routers.external_apis.adapter_health",
+    # Observability-dashboard health-score poll.
+    "app.routers.observability.get_health_score",
+    # URL-styled equivalents for upstream proxies / older SDK versions.
+    "/health/status",
+    "/health/live",
+    "/health",
+    "/sdk/v1/health",
+    "/observability/health-score",
+})
 
 
 # Per-fingerprint rate limit. Sentry already groups duplicate events into
@@ -119,6 +154,11 @@ def _traces_sampler(sampling_context: dict[str, Any]) -> float:
         or {}
     )
     txn = ctx.get("name") or ""
+    # Health endpoints — pure noise; drop entirely.
+    if txn in _HEALTH_TRANSACTIONS:
+        return 0.0
+    # Other poll endpoints (ingestion progress, observability dashboards) —
+    # keep a thin trickle so latency regressions surface.
     for noisy in _NOISY_POLL_SUBSTRINGS:
         if noisy in txn:
             return 0.01
@@ -135,7 +175,11 @@ def init_sentry() -> bool:
     if not dsn:
         return False
 
-    profiles_rate = float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.1"))
+    # Default profiles_rate lowered from 0.1 → 0.0 (2026-05-18): the Sentry
+    # audit found zero diagnostic value flowing from the profiles tier vs
+    # the storage cost. Operators who want profile coverage can override via
+    # the env var. Production environments can re-enable selectively.
+    profiles_rate = float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.0"))
 
     for logger_name in _IGNORED_LOGGERS:
         ignore_logger(logger_name)

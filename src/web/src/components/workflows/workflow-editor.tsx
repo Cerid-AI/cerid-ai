@@ -88,6 +88,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
   // Reset state when workflow changes
   useEffect(() => {
     if (workflow) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setName(workflow.name)
       setDescription(workflow.description)
       setNodes(workflow.nodes)

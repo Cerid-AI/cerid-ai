@@ -29,6 +29,24 @@ _COMPARISON_PATTERN = re.compile(
 )
 _MULTI_QUESTION = re.compile(r"\?\s*(?:and|also|additionally|plus|what|how|why|when)", re.IGNORECASE)
 _LIST_PATTERN = re.compile(r"\b(?:first|second|third|1\)|2\)|3\)|\d+\.)\s", re.IGNORECASE)
+# The comparison capture window extends a few words backward, so it absorbs the
+# leading command/interrogative verb ("What is the difference between X and Y"
+# → term "the"). Strip these lead-ins (repeatedly) so synthesized sub-queries
+# are "What is X?" not "What is the?".
+_COMPARISON_LEADIN = re.compile(
+    r"^(?:compare|contrast|explain|describe|what\s+is|what\s+are|whats|what's"
+    r"|tell\s+me\s+about|the|an?|difference\s+between)(?:\s+|$)",
+    re.IGNORECASE,
+)
+
+
+def _clean_comparison_term(term: str) -> str:
+    """Strip leading command/article words from a captured comparison term."""
+    t, prev = term.strip(), None
+    while t and t != prev:
+        prev = t
+        t = _COMPARISON_LEADIN.sub("", t).strip()
+    return t
 
 
 def needs_decomposition(query: str) -> bool:
@@ -71,12 +89,17 @@ def decompose_heuristic(query: str) -> list[str]:
     # Try comparison decomposition first
     match = _COMPARISON_PATTERN.search(q)
     if match:
-        term_a, term_b = match.group(1), match.group(2)
-        return [
-            f"What is {term_a}?",
-            f"What is {term_b}?",
-            q,  # Keep the original comparison question too
-        ][:QUERY_DECOMPOSITION_MAX_SUBQUERIES]
+        term_a = _clean_comparison_term(match.group(1))
+        term_b = _clean_comparison_term(match.group(2))
+        # Only synthesize per-term sub-queries when both cleaned terms are real
+        # (≥2 chars). Otherwise the capture grabbed only lead-in words — fall
+        # through to the other split strategies instead of emitting "What is the?".
+        if len(term_a) >= 2 and len(term_b) >= 2:
+            return [
+                f"What is {term_a}?",
+                f"What is {term_b}?",
+                q,  # Keep the original comparison question too
+            ][:QUERY_DECOMPOSITION_MAX_SUBQUERIES]
 
     # Try splitting on conjunction patterns
     parts = _CONJUNCTION_SPLIT.split(q)
@@ -96,23 +119,33 @@ def decompose_heuristic(query: str) -> list[str]:
 async def decompose_query(
     query: str,
     use_llm: bool = False,
+    force_llm: bool = False,
 ) -> list[str]:
     """Decompose a query into sub-queries.
 
     Tries heuristic decomposition first. Falls back to LLM if
     use_llm=True and heuristics don't produce a split.
 
+    ``force_llm=True`` runs the LLM split even when ``needs_decomposition``
+    is False — required for *implicit* multi-hop questions ("how many days
+    between X and Y") that carry no conjunction/comparison trigger yet still
+    name two distinct anchors. Caller-gated (analytical intents only) so the
+    LLM cost isn't paid on every query.
+
     Returns list of sub-queries (always at least 1 — the original).
     """
-    if not needs_decomposition(query):
+    triggered = needs_decomposition(query)
+    if not triggered and not (use_llm and force_llm):
         return [query]
 
-    sub_queries = decompose_heuristic(query)
-    if len(sub_queries) > 1:
-        logger.info("Decomposed query into %d sub-queries (heuristic)", len(sub_queries))
-        return sub_queries
+    if triggered:
+        sub_queries = decompose_heuristic(query)
+        if len(sub_queries) > 1:
+            logger.info("Decomposed query into %d sub-queries (heuristic)", len(sub_queries))
+            return sub_queries
 
-    # LLM fallback (optional, rarely needed)
+    # LLM fallback — runs when heuristics didn't split and either the query
+    # triggered decomposition or the caller forced the LLM path.
     if use_llm:
         try:
             from core.utils.internal_llm import call_internal_llm

@@ -14,9 +14,12 @@ adding new cerid-series consumers.
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request
 
 import config
+from app.middleware.idempotency import idempotent
 from app.models.sdk import (
     SDKHallucinationResponse,
     SDKHealthResponse,
@@ -130,7 +133,7 @@ async def sdk_hallucination(req: HallucinationCheckRequest):
         503: _503,
     },
 )
-async def sdk_memory_extract(req: MemoryExtractionRequest, wait: bool = False):
+async def sdk_memory_extract(req: MemoryExtractionRequest, request: Request, wait: bool = False):
     """Default-async endpoint with sync escape hatch.
 
     Routing:
@@ -148,7 +151,9 @@ async def sdk_memory_extract(req: MemoryExtractionRequest, wait: bool = False):
     from fastapi.responses import JSONResponse
 
     if wait or not is_memory_async_mode():
-        return await memory_extract_endpoint(req)
+        # Idempotency-Key (GA P0.5 D1) on the sync path only; the async/202 path
+        # is already job-id idempotent via the queue.
+        return await idempotent(request, lambda: memory_extract_endpoint(req))
 
     queue = get_memory_queue()
     job = queue.enqueue(
@@ -321,13 +326,22 @@ def sdk_health():
 
 
 @router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})
-def sdk_ingest(req: dict):
-    result = ingest_content(
-        req.get("content", ""),
-        domain=req.get("domain", "general"),
-        metadata={"tags": req.get("tags", "")},
+async def sdk_ingest(req: dict, request: Request):
+    # Preserve client-supplied provenance metadata (GA P0.2): external clients
+    # pass rich metadata (title / provenance / source_file / …). Keep the
+    # legacy `tags` field alongside it rather than overwriting with tags-only.
+    metadata = dict(req.get("metadata") or {})
+    metadata.setdefault("tags", req.get("tags", ""))
+    # Idempotency-Key (GA P0.5 D1): a retried ingest with the same key does not
+    # double-write. No-op when the header is absent.
+    return await idempotent(
+        request,
+        lambda: ingest_content(
+            req.get("content", ""),
+            domain=req.get("domain", "general"),
+            metadata=metadata,
+        ),
     )
-    return result
 
 
 @router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})
@@ -359,11 +373,294 @@ async def sdk_ingest_file(req: dict):
     ),
     responses={422: _422, 503: _503},
 )
-async def sdk_ingest_external(request: ExternalIngestRequest) -> IngestResult:
+async def sdk_ingest_external(request: ExternalIngestRequest, http_request: Request) -> IngestResult:
     from core.context.identity import get_tenant_id
 
     tenant = get_tenant_id()
-    return await ingest_external(request, tenant=tenant)
+    # Idempotency-Key (GA P0.5 D1): `request` here is the body model; headers
+    # live on the FastAPI `http_request`. No-op without the header.
+    return await idempotent(http_request, lambda: ingest_external(request, tenant=tenant))
+
+
+# ---------------------------------------------------------------------------
+# Webhook receiver — generic inbound HTTP endpoint per (:Source)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/ingest/webhook/{token}",
+    summary="Token-gated webhook receiver",
+    description=(
+        "Generic inbound endpoint for any external service. The ``{token}`` "
+        "path segment identifies a previously-created webhook-kind Source "
+        "record whose ``config`` carries the matching token + optional HMAC "
+        "secret. Returns ``202 Accepted`` immediately and queues the payload "
+        "for async processing.\n\n"
+        "**Authentication:** the token itself is the credential. For higher "
+        "assurance, configure an HMAC secret on the source and require "
+        "``X-Cerid-Signature: sha256=<hex>`` on every request; mismatched "
+        "signatures return 401.\n\n"
+        "**Adapter routing:** payloads can carry the canonical fields "
+        "directly OR the source's config can declare per-source "
+        "``field_mappings`` (Readwise / Pocket / Slack / GitHub-events / "
+        "etc.) that extract them from a third-party-shaped payload."
+    ),
+    responses={
+        404: {"description": "Unknown webhook token"},
+        401: {"description": "HMAC signature missing or invalid"},
+    },
+    status_code=202,
+)
+async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
+    """Token-gated webhook receiver. See module docstring."""
+    import json as _json
+
+    from app.db.neo4j import sources as srcdb
+    from app.deps import get_neo4j, get_redis
+    from app.services.webhook_tokens import (
+        find_webhook_source,
+        verify_hmac_signature,
+    )
+    from core.utils.swallowed import log_swallowed_error
+    from core.utils.time import utcnow_iso
+
+    driver = get_neo4j()
+
+    # Resolve the webhook source by token.
+    source = find_webhook_source(driver, token)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Unknown webhook token")
+
+    # Read body once; HMAC + ingestion both need it.
+    body = await request.body()
+
+    # Optional HMAC verification when the source's config declares a secret.
+    config = source.get("config", {}) or {}
+    secret = config.get("hmac_secret") if isinstance(config, dict) else None
+    signature_header = request.headers.get("X-Cerid-Signature", "")
+    if secret and not verify_hmac_signature(secret, body, signature_header):
+        raise HTTPException(
+            status_code=401,
+            detail="HMAC signature missing or invalid",
+        )
+
+    try:
+        payload = _json.loads(body.decode("utf-8")) if body else {}
+    except (UnicodeDecodeError, _json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Malformed JSON: {exc}")
+
+    source_id = source["id"]
+
+    # Adapter-recipe routing. If the source declares a provider
+    # (e.g., kind=chat_capture + provider=slack), look up the
+    # matching recipe and normalize the payload into one or more
+    # CanonicalArtifact records before enqueue. Falls back to raw
+    # payload pass-through when no recipe is registered.
+    try:
+        srcdb.update_source_status(driver, source_id, status="connected")
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "sdk_ingest_webhook.update_status",
+            exc,
+            context={"source_id": source_id},
+        )
+
+    provider = (config.get("provider") or "").strip() if isinstance(config, dict) else ""
+    normalized: list[dict] | None = None
+    requires_sig = False
+    if provider:
+        try:
+            # Side-effect-imports the adapter package (registers recipes).
+            import core.ingest.adapters as _adapters  # noqa: F401
+            from core.ingest.adapters.registry import get_recipe
+
+            recipe = get_recipe(source["kind"], provider)
+            if recipe is not None:
+                requires_sig = bool(getattr(recipe, "requires_signature", False))
+                artifacts = recipe.fn(payload, config or {})
+                normalized = [
+                    {
+                        "title": a.title,
+                        "content": a.content,
+                        "url": a.url,
+                        "timestamp": a.timestamp,
+                        "provider": a.provider,
+                        "raw": a.raw,
+                    }
+                    for a in artifacts
+                ]
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "sdk_ingest_webhook.recipe",
+                exc,
+                context={"source_id": source_id, "provider": provider},
+            )
+
+    # Enforce the recipe's signature mandate: a provider whose recipe declares
+    # requires_signature (e.g. github, stripe) MUST have an hmac_secret on the
+    # source to verify against — otherwise the receiver silently accepts
+    # unauthenticated payloads. The HMAC value-check above only fires when a
+    # secret is present; this closes the "mandated but unconfigured" gap.
+    if requires_sig and not secret:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Provider {provider!r} requires HMAC signing; configure an "
+                "hmac_secret on the source before sending webhooks."
+            ),
+        )
+
+    # Only acknowledge (202) once the payload is durably enqueued. If the
+    # queue is unavailable or the push fails, return 503 so the sender
+    # retries per webhook conventions — acknowledging a payload we dropped
+    # is irrecoverable data loss with no retry signal to the sender.
+    redis_client = get_redis()
+    if redis_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook queue unavailable; please retry.",
+        )
+    try:
+        redis_client.rpush(
+            f"cerid:webhook_inbox:{source_id}",
+            _json.dumps(
+                {
+                    "received_at": utcnow_iso(),
+                    "payload": payload,
+                    "normalized": normalized,
+                },
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — surfaced as 503 below
+        log_swallowed_error(
+            "sdk_ingest_webhook.enqueue",
+            exc,
+            context={"source_id": source_id},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to enqueue webhook payload; please retry.",
+        ) from exc
+
+    return {
+        "status": "accepted",
+        "source_id": source_id,
+        "normalized_count": str(len(normalized)) if normalized is not None else "0",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Voice-note ingest — multipart upload → transcript → artifact
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/ingest/voice-note",
+    summary="Voice-note transcribe + ingest",
+    description=(
+        "Accepts a short audio clip (WAV / WebM / M4A — anything ffmpeg can "
+        "decode), transcribes it with the bundled whisper.cpp pipeline, and "
+        "ingests the transcript as an artifact linked to a voice_note Source.\n\n"
+        "Recommended clip length: 30 s – 5 min. Larger clips should route "
+        "through the Meeting Capture pipeline (``/meetings``) instead."
+    ),
+    responses={
+        422: {"description": "Invalid audio payload"},
+        500: {"description": "Transcription pipeline failure"},
+        501: {"description": "Whisper runtime deps not installed"},
+    },
+    status_code=201,
+)
+async def sdk_ingest_voice_note(request: Request) -> dict:
+    """Multipart upload → transcript → artifact.
+
+    The endpoint is *synchronous*: the wizard waits for the transcript
+    so it can pulse the duration and surface a snippet in the F11
+    overlay's result step. Long-running transcription (>10s) is the
+    caller's signal to switch to the Meeting Capture pipeline.
+    """
+    import tempfile
+    import time as _time
+    from pathlib import Path as _Path
+
+    # Multipart parse — FastAPI's File()/Form() dependency injection
+    # works but Request.form() is simpler when we only need one field.
+    form = await request.form()
+    audio = form.get("audio")
+    if audio is None or not hasattr(audio, "read"):
+        raise HTTPException(status_code=422, detail="missing 'audio' multipart field")
+
+    suffix = _Path(getattr(audio, "filename", "voice.wav")).suffix or ".wav"
+    started = _time.perf_counter()
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await audio.read())
+        tmp_path = _Path(tmp.name)
+
+    try:
+        # Reuse the meeting_capture transcription path — whisper.cpp via
+        # pywhispercpp. The plugin is internal-only; community builds
+        # receive 501 with installation guidance.
+        try:
+            from plugins.meeting_capture import decode, transcribe
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    f"voice-note transcription unavailable: {exc}. "
+                    "Install meeting_capture plugin deps (pywhispercpp + ffmpeg)."
+                ),
+            ) from exc
+
+        try:
+            pcm_path = await asyncio.to_thread(decode.to_pcm16, tmp_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"audio decode failed: {exc}",
+            ) from exc
+
+        try:
+            transcript_result = await asyncio.to_thread(transcribe.transcribe_pcm, pcm_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"transcription failed: {exc}",
+            ) from exc
+
+        text = (transcript_result.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="transcript was empty")
+
+        # Ingest as a fresh artifact in the general domain. Metadata
+        # carries the voice_note marker so retrieval can filter on it.
+        from app.services.ingestion import ingest_content as _ingest_content
+
+        ingest_result = await asyncio.to_thread(
+            _ingest_content,
+            text,
+            "general",
+            {
+                "kind": "voice_note",
+                "ingest_source": "voice_note_endpoint",
+                "duration_words": len(text.split()),
+            },
+            skip_quality=False,
+        )
+
+        elapsed_ms = int((_time.perf_counter() - started) * 1000)
+        return {
+            "status": "ingested",
+            "artifact_id": ingest_result.get("artifact_id"),
+            "transcript": text,
+            "transcribe_ms": elapsed_ms,
+            "word_count": len(text.split()),
+        }
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------

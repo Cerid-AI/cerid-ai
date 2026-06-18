@@ -1,115 +1,187 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-05-15 (post-v0.95.1 — cerid-kb MCP overhaul: 57 tools, decorator-based tool registry, schema-fidelity + description-quality CI gates, per-tool audit + metrics, SSE staleness reaper, `POST /mcp/call-sync`, active-learning schema, GDS-Louvain graph tools, `_warnings` envelope.)
-> **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
-> **Internal sprint backlog:** `tasks/todo.md` (internal-only).
+> **Last updated:** 2026-06-13 (RAG Quality Program close-out — see P0 status note below). Prior: 2026-06-02 (Commercial-GA Track 1: Pro feature truth-up & gating
+> lock-in and External agent / client backend support both **landed** — see ✅ markers below).
+> **Current candidate:** `v1.0.0-rc2.1`. The release-candidate captures Phases A–N of the
+> master plan + the K-program (K1–K6) + visualization polish (L, M). The `-rc` suffix
+> drops when the Commercial-GA program below closes.
+> **Currently shipped:** Atlas (decomposition icicle) + Constellation cartographic map,
+> Subjects/Sources/Settings consolidation (4-pane), the registry-driven Settings redesign
+> (SEXTANT) and the Subjects UX cycles (TRELLIS domain backbone / Tephra timeline / FOLIO
+> wiki / STRATA atlas), Apple ecosystem baseline, meeting-capture runtime, cloud
+> connectors, Swift CLI helpers, metamorphic verification, Custom Smart RAG, AI inbox
+> triage, daily digest, advanced analytics, Tour, the Knowledge
+> Architecture program, Pro billing/checkout + license activation. 60 MCP tools, 5,910+
+> Python tests, 1,411+ frontend cases, 113 preservation tests. Full ledger:
+> [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md).
+> **Shipped releases:** [CHANGELOG.md](../CHANGELOG.md) and the
+> [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 
 ---
 
-## Priority Legend
+## What this roadmap is
 
-- **P0 -- Blocker:** Must fix before any public release
-- **P1 -- High:** Critical for product-market fit
-- **P2 -- Medium:** Important for growth and retention
-- **P3 -- Low:** Nice-to-have, quality-of-life
+The product is feature-complete. The work that remains is **commercial hardening** —
+making it possible to *sell and manage* Cerid Pro, making the Pro feature surface
+*truthful and regression-locked*, and making the release *operationally ready* — followed
+by validation and launch. It is organized as three tracks.
 
----
+- **Track 1 — Commercial GA** (primary near-term driver): Pro sale, Pro management, and
+  Pro/billing hardening. This is the critical path to dropping the `-rc` suffix.
+- **Track 2 — Validation & launch:** soak window, observability go-live, and the
+  go-to-market items that gate the public release.
+- **Track 3 — Post-GA / v1.1:** deferred enhancements that don't block the first
+  commercial release.
 
-## P0 -- Blockers
-
-_All P0 items completed._
-
----
-
-## P1 -- High Priority
-
-### ✅ Private Mode (Ephemeral Sessions) -- SHIPPED v0.84.0
-
-Toggle in chat toolbar; 4 configurable security levels; `CERID_PRIVATE_MODE` + `CERID_PRIVATE_MODE_LEVEL` env vars wired through `features.py`, `settings.py`, `chat-toolbar.tsx`, `chat-panel.tsx`, `use-chat.ts`, `use-conversations.ts`. Visual lock indicator in toolbar. Session data wiped on close.
-
-**Follow-up (P2):** Level 4 ("clear Redis query cache on session end") validation sweep — confirm the cache flush path works end-to-end on session close.
-
-### ✅ Conversation Management UX -- SHIPPED v0.84.0
-
-Archive/unarchive, bulk select/delete/archive, and conversation search all landed. Files: `src/web/src/components/chat/conversation-list.tsx` (search + archive toggles), `src/web/src/components/layout/sidebar.tsx` (bulk ops at lines 70 + 240), `src/web/src/hooks/use-conversations.ts` (archived-default migration for pre-existing records).
-
-### ✅ Agent Communication Console -- SHIPPED v0.84.0
-
-Real-time activity panel with humanized agent messages. Files: `src/web/src/components/agents/agent-console.tsx` (105 LOC), `agents-pane.tsx`, `agent-cards.tsx`. SSE exponential backoff with abort-on-unmount (landed in v0.83.0 bug-hunt).
-
-### ✅ Model Management & Auto-Update Detection -- SHIPPED v0.84.0
-
-`src/web/src/components/settings/model-management.tsx` renders "N new models available" banners and deprecation warnings. `system-section.tsx:1174+` contains the Model Updates subsection. OpenRouter catalog polling in place.
-
-**Follow-up (P2):** Cost-comparison view (current model vs alternatives) — catalog data is already fetched; needs a UI surface in settings.
-
-### ✅ Pro Tier Purchase Path -- SHIPPED (Stripe checkout end-to-end)
-
-Billing backend (Stripe Checkout session creation, webhook event handling across the subscription lifecycle, license-key generation/validation, waitlist, status) lives in the internal-only distribution. The Pro Settings pane (`src/web/src/components/settings/pro-section.tsx`) wires the upgrade button to the billing endpoint and opens the Stripe-hosted Checkout URL; manual license-key entry remains as a fallback for offline activation.
-
-**Follow-up (P2):** Pro-anchor feature (audio transcription) still pending.
-
-### ✅ Pro Mode Configuration & Feature Access -- SHIPPED v0.84.0
-
-Settings → Pro tab renders feature status indicators per tier, license-key entry with backend validation, current-plan display, waitlist join, and a feature-discovery matrix listing all Pro-gated capabilities.
+Priority legend: **P0** blocker · **P1** high · **P2** medium · **P3** low.
 
 ---
 
-## P2 -- Medium Priority
+## Track 1 — Commercial GA
 
-### Expanded File Type Handling
-- Specialized parsers for code (AST extraction for Python, JS/TS)
-- Image OCR for scanned PDFs (Pro tier)
-- Audio transcription for meeting notes (Pro tier — anchor feature for Pro path)
-- Markdown frontmatter extraction (YAML/TOML headers -> metadata)
+The Pro tier's *features* are largely built and gated; this track makes the *commerce
+around them* production-grade and the *gating* trustworthy end-to-end.
 
-### Bulk Import Enhancements
-- Ollama content triage (score 1-5 for value assessment)
-- Scheduled folder re-scan (cron-based watch)
+### P0 — Pro feature truth-up & gating lock-in — ✅ Landed (2026-06-01)
+Make the tier system tell the truth and hold it against regression.
+*Shipped: connector loader fixed so class-based plugins load and gate (with a boot test);
+gating allowlist pruned to the genuinely-pending features; previously-ungated analytics now
+gated; the feature/tier matrix is generated from the source of truth and drift-gated in CI;
+the Pro settings pane renders live from the capabilities API.*
+- Reconcile the runtime-gating ledger so every shipped Pro feature is gate-asserted by the
+  gating lint (no silently-ungated paid features, no stale exemptions).
+- Close the remaining gating gaps on Pro surfaces that are reachable without a tier check.
+- Verify the connector plugins load and gate as intended under the plugin loader (a
+  load-correctness pass, with a boot test so it can't regress).
+- Generate the public **feature/tier matrix** from the single source of truth and gate it
+  in CI, so it can never drift from the code again.
+- Drive the Pro settings pane from the live capabilities API rather than a hand-maintained
+  list, so the UI never lies about what a tier unlocks.
 
-### Ingestion Pipeline Evolution
+### P0 — Pro subscription self-service
+Let a customer buy *and* manage their subscription without operator intervention.
+- **Stripe Customer Portal** integration for GA: customers update payment method, view and
+  download invoices, and cancel or change plan from a hosted, PCI-offloaded surface.
+- Enrich subscription status (renewal date, trial end, plan, cancellation state) so the
+  app answers basic billing questions without a support ticket.
+- (A fully native, on-brand management UI is a v1.1 follow-on — see Track 3.)
 
-#### Pipeline Hardening
-- Dead-letter queue, BM25 rollback, triage-to-ingest bridge, per-file status
+### P0 — License lifecycle & operator administration
+Make licenses safe to issue, revoke, and audit.
+- Operator tooling to issue licenses (trials, B2B, sales overrides), revoke with hard
+  enforcement (chargeback/fraud), refund, and audit the full lifecycle.
+- License **expiry enforcement** and **seat/device binding**, with an offline-activation
+  fallback for disconnected installs.
+- A single canonical license-verification path.
 
-#### Core Data Sources
-- IMAP email (env vars scaffolded in settings.py), RSS feeds, browser bookmarks, inbound webhooks, clipboard, macOS Quick Actions
+### P1 — Complete the Pro Apple connector suite
+Land the remaining Apple-native readers so the advertised Pro suite is whole at GA.
+- Apple Mail, iMessage, and Reminders readers (joining the already-shipped Apple Notes,
+  Calendar, and Photos), each behind its feature gate and TCC/Full-Disk-Access consent.
+- iMessage content honors Private Mode (Level 2+) at query time.
 
-#### Pro Data Sources
-- Gmail OAuth, Outlook Graph, Apple Notes, Calendar sync, Docling parser
+### P0 — Stripe live-mode hardening & billing observability
+- Document and validate all billing/licensing configuration; pin the Stripe API version.
+- Webhook idempotency hardened and proven; checkout protected against double-submit.
+- Billing-path error monitoring + payment-failure alerting.
+- Operational runbook for the test→live migration and the GA charge/refund proof.
 
-#### Storage Dashboard
-- Storage metrics, usage bars, persistent history, activity feed
+### P0 — External agent / client backend support — ✅ Landed (2026-06-01)
+Make Cerid usable as a shared knowledge + LLM + memory backend for other applications
+without per-client shims — a GA-required surface, not a v1.1 follow-on. *All five points
+below shipped and are canary-validated; the "Cerid as a backend" guide is published in
+[`docs/SDK_GUIDE.md`](SDK_GUIDE.md).*
+- **First-class custom knowledge domains:** clients ingest to and query their own domain
+  names without pre-registration (today only built-in / env-registered domains pass
+  validation); an unknown-but-unused domain degrades to empty results, never an error.
+- **Rich provenance metadata** preserved end-to-end on the SDK ingest path (today only
+  tags persist there), so client artifacts keep their attribution through retrieval.
+- **Flexible LLM task types:** accept client-defined task-type labels, mapping unknown
+  ones to safe internal routing rather than failing.
+- **Custom domains first-class in retrieval and ranking**, with client-domain activity
+  surfaced in health (no false "empty-collection" alerts).
+- A complete, documented **"Cerid as a backend" SDK surface** (most endpoints already
+  ship; closes the ingest-metadata gap) plus an integration guide, validated by a
+  reference external client running end-to-end with no compatibility shims. See
+  [`docs/SDK_GUIDE.md`](SDK_GUIDE.md).
 
-#### KB Interface Refresh
-- Live progress, source badges, previews, near-duplicate merge, quality visualizations
+### P0 — Knowledge-architecture depth & retrieval quality  _(added 2026-06-02)_
+Make the differentiator real and measured before GA, not just described.
+
+> **Status 2026-06-13:** largely landed. Artifact-level fusion + low-confidence
+> signals + the NLI-faithfulness benchmark shipped 2026-06-05 (see
+> `docs/GA_CHECKLIST.md`, `docs/NLI_FAITHFULNESS_BENCHMARK.md`). The **RAG Quality
+> Program** (Slices 1–7, 2026-06-12/13 — see `docs/COMPLETED_PHASES.md`) advanced
+> this P0 further: salience-weighted taxonomy, personal-first pack ranking,
+> stale-evidence verification, provenance end-to-end, with retrieval recall
+> validated at 1.0 (no regression) at Eval Checkpoint 2. Surface routing is live
+> per intent; episodic-memory recall lift remains a soak-measured outcome.
+- **All four knowledge surfaces first-class in the query path** — unify routing so wiki,
+  vector, graph, and episodic-memory are selected per intent on the live query path (not only
+  surfaced as observability), with the chosen surface returned in the response; wire
+  episodic-memory auto-recall for personal-context queries.
+- **Retrieval-quality validation** — artifact-level rank fusion; honest, published retrieval
+  and verification benchmarks as the release floor; surface low-confidence and
+  empty-collection signals so the UI never silently returns nothing.
+- **Idempotent ingest** across the SDK write surface, completing the external-backend story.
+- **Verification, evidenced** — publish the NLI-faithfulness benchmark that substantiates the
+  trust differentiator (no competitor ships entailment-gated retrieval).
 
 ---
 
-## P3 -- Low Priority / Future
+## Track 2 — Validation & launch
 
-### SSO / SAML Implementation (Enterprise)
-- SAML 2.0 SP with IdP metadata import
-- Common IdPs: Okta, Azure AD, OneLogin
-- Tenant-scoped SSO configuration
-- Currently scaffolded as feature flag only (SSO env vars documented in the internal `.env.example`)
-
-### Enterprise Feature Scaffolding
-- All Vault features get endpoint stubs returning 403 with upgrade message
-- UI placeholders showing "Available in Cerid Vault"
-- Scaffolded: SSO/SAML, advanced audit logging, SIEM export,
-  tenant management UI, compliance reporting, dedicated support portal
-
-### Code Quality Improvements
-- Type hints on all public APIs, mypy strict mode
-- Parent-child hierarchical RAG (currently feature-flagged off)
-- Graph RAG with entity extraction and query rewriting
-
-### Chat Messages Virtualization (deferred from v0.84.0)
-- First attempt broke 46 jsdom measurement-dependent tests — needs `@tanstack/react-virtual` approach with jsdom-safe measure shim. Named-sprint candidate; high risk.
+- **14-day soak** of the release candidate in staging; collect the K-program success
+  metrics (wiki coverage, staleness, faithfulness, chunks-per-answer, memory→entity
+  linkage, contradiction surfacing) and make the concept-pages activate/close decision.
+- **Observability go-live:** production frontend error-monitoring DSN provisioned; alert
+  thresholds configured (error rate, p99 latency, health-degradation).
+- **Go-to-market (business-gated):** pricing page (`$15/mo · $144/yr · 14-day trial`),
+  60–90s demo video (Constellation hero), Apple App Store / TestFlight submission, launch
+  comms, and the `v1.0.0` tag.
 
 ---
 
-## Next Sprint Candidates
+## Track 3 — Post-GA / v1.1
 
-Released work is tracked in [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page; the canonical sprint backlog lives in the internal repo.
+- Native, on-brand subscription-management UI (first-party, replacing the hosted portal
+  deep-link).
+- First-party plugin marketplace.
+- SSO / SAML and advanced audit logging (Enterprise tier — currently scaffolded).
+- NLI GPU path (upstream inference dependency).
+- Chat-message virtualization default-flip (currently opt-in via env flag).
+- Expanded file-type handling (code AST extraction, Markdown frontmatter), bulk-import
+  enhancements (content triage, scheduled re-scan), and ingestion pipeline hardening.
+- External-client backend **polish** (the GA core ships in Track 1): per-client LLM
+  routing hints, namespaced/registered custom domains with descriptions, and an optional
+  per-namespace audit store for pure-client workloads.
+
+### Competitive backlog _(from the 2026-06-02 market study + audits)_
+- **Developer-API depth:** batch ingest, cursor pagination, rate-limit/cost response headers,
+  streaming SDK methods (incl. streaming verification), and quality/eval endpoints — the
+  ergonomics the "knowledge-backend for agents" segment now expects.
+- **Retrieval depth:** relevance-score calibration with confidence intervals, adaptive
+  reranking, sparse-retrieval activation as corpora grow, and a GPU verification path.
+- **Onboarding:** a guided setup wizard with auto-tuning — the single biggest adoption lever
+  for a self-hosted product.
+- **Ecosystem:** publish Cerid in the MCP server registry; expand the public benchmark suite.
+- **Pro depth:** an "always-fresh knowledge" staleness/provenance dashboard; a scheduled
+  "knowledge health" verification report; multi-modal capture (audio/video transcription,
+  image OCR); and a governance/audit layer for teams.
+- **Packaging:** a team tier and usage-based pricing for the API-backend audience, alongside
+  the existing solo Pro.
+
+---
+
+## Tiers
+
+| Tier | License | Audience | Price |
+|---|---|---|---|
+| **Cerid Core** | Apache-2.0 | Developers, researchers, personal use | Free |
+| **Cerid Pro** | BSL-1.1 | Business and power users | $15/mo · $144/yr |
+| **Cerid Enterprise** | Commercial | Regulated and large organizations | Contact |
+
+The full feature/tier breakdown lives in
+[`docs/TIER_MATRIX.md`](TIER_MATRIX.md). Released work is tracked in
+[CHANGELOG.md](../CHANGELOG.md) and the
+[GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.

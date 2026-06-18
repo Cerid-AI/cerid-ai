@@ -57,12 +57,55 @@ export interface EntitySummary {
   entity_type: string
   /** Truncated summary text for list preview (may be null if not yet computed). */
   summary_preview: string | null
-  /** Number of entities co-mentioned with this one (approximated from mention_count). */
-  related_count: number
+  /** Corpus mention count (backend field ``mention_count`` — was incorrectly labeled ``related_count``). */
+  mention_count: number
   /** Backend recent_activity_score — higher = more recently active. */
   recent_activity_score: number
   /** ISO-8601 timestamp, or null. */
   last_updated_at: string | null
+  /**
+   * Primary domain derived by the DeriveDomainsJob (e.g. "research", "coding").
+   * Null for orphan entities (no MENTIONS path) or pre-job state.
+   */
+  primary_domain: string | null
+  /**
+   * Top controlled-vocabulary tags (Slice 6.3), salience-ordered, capped at 5.
+   * Null/empty until DeriveDomainsJob runs. Surfaces list tag sort/filter.
+   */
+  top_tags?: string[] | null
+  /**
+   * Search relevance rank from the backend (0=exact, 1=prefix, 2=substring, 3=canonical-only).
+   * Present only in search results (q non-empty); absent in browse results.
+   */
+  match_rank?: number | null
+}
+
+// ---------------------------------------------------------------------------
+// Wiki log entry (GET /wiki/log)
+// ---------------------------------------------------------------------------
+
+export interface WikiLogEntry {
+  log_id: string
+  /** ISO-8601 timestamp. */
+  ts: string
+  /** Action verb: "refresh" | "enrich" | "contradict" | string */
+  action: string
+  entity_slug: string
+  /** Summary snapshot at the time of the log entry. */
+  summary: string | null
+  /** Source artifact that triggered the entry, if present. */
+  source_artifact_id: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Episodic memory (assembled by wiki_pages.py — render deferred to v1.1)
+// ---------------------------------------------------------------------------
+
+export interface EpisodicMemory {
+  memory_type: string
+  valid_from: string | null
+  access_count: number
+  content: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +118,14 @@ export interface RelatedEntity {
   name: string
   /** Co-mention count — strength of the relationship. */
   co_mention_strength: number
+  /** Entity type (e.g. "ORG", "OTHER"). Dropped by the old normalizer; now preserved. */
+  entity_type: string
+  /** Backend coalesced display title. Preserved from normalizer for wikilink hover cards. */
+  display_title: string | null
+  /** True when the related entity already has a generated summary. Enables three-state wikilink styling. */
+  has_summary: boolean
+  /** First 160 chars of the related entity's summary, for HoverCard previews. Null when has_summary is false. */
+  one_liner: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -83,11 +134,21 @@ export interface RelatedEntity {
 
 export interface SourceCitation {
   artifact_id: string
+  /**
+   * Display title: coalesce(a.title, a.filename) from the backend.
+   * Non-null whenever the artifact has a filename.
+   */
   title: string | null
-  /** chunk_ids from the backend; used as a chunk-hash chip. */
-  chunk_hash: string
-  /** Domain derived from artifact metadata (may be empty string). */
-  domain: string
+  /** Filename from the artifact node — used as fallback display label. */
+  filename: string | null
+  /** Domain derived from artifact metadata (e.g. "notes", "finance"). */
+  domain: string | null
+  /** Artifact source type (e.g. "file", "vault", "url"). */
+  source_type: string | null
+  /** Confidence of the MENTIONS edge (0..1). */
+  confidence: number | null
+  /** ISO-8601 — when this artifact was last updated. */
+  updated_at: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -135,5 +196,55 @@ export interface WikiEntityPage {
   external_references: ExternalReference[]
   last_updated_at: string | null
   next_refresh_due: string | null
+  /**
+   * Actual refresh-job state from the backend scheduler.
+   *   "idle"    — no refresh scheduled or needed.
+   *   "due"     — a refresh is scheduled but not yet started.
+   *   "running" — a wiki-refresh job is actively in flight for this entity.
+   * Absent when the backend has not yet shipped this field (treated as "idle").
+   */
+  refresh_status?: "idle" | "due" | "running"
   confidence_band: ConfidenceBand
+  /** Leiden community ID this entity belongs to, or null if unassigned. */
+  community_id?: string | null
+  /** Human label for the community (from the cartographic map artifact). */
+  community_label?: string | null
+  /** Total corpus mentions (for display in the identity header capsule). */
+  mention_count?: number
+  /**
+   * Primary domain derived by DeriveDomainsJob (e.g. "research").
+   * Null for orphans or pre-job state.
+   */
+  primary_domain?: string | null
+  /**
+   * Full domain distribution — JSON-parsed dict of domain → mention count,
+   * sorted by count desc. Keys are domain names; values are distinct
+   * artifact mention counts. Null when domain data is not yet derived.
+   * Example: { "research": 5, "coding": 2 }
+   */
+  domain_mix?: Record<string, number> | null
+  /**
+   * Salience-ordered domain weights (Slice 6.1) — domain → salience score,
+   * ordered by salience desc. Salience reweights raw counts by specificity,
+   * distinctiveness, quality, and recency, so this ordering can differ from
+   * domain_mix's raw-count ordering. Null until DeriveDomainsJob runs.
+   * Example: { "finance": 45.0, "general": 11.25 }
+   */
+  domain_salience?: Record<string, number> | null
+  /**
+   * Top controlled-vocabulary tags for this entity (Slice 6.3), salience-
+   * ordered, capped at 5. Vocabulary-only — free-form tags never appear here.
+   * Null/empty until DeriveDomainsJob runs.
+   */
+  top_tags?: string[] | null
+  /**
+   * Most common sub_category among artifacts in the primary domain.
+   * Null when no signal (all artifacts carry the default subcategory).
+   */
+  primary_subcategory?: string | null
+  /**
+   * Episodic memories assembled by wiki_pages.py (≤5 rows).
+   * Normalized in v1; section render deferred to v1.1 pending non-empty live data.
+   */
+  episodic_memories?: EpisodicMemory[]
 }

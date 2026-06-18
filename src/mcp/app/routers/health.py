@@ -4,6 +4,7 @@
 """Health check and collection listing endpoints."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -29,7 +30,43 @@ async def health_ping() -> dict:
 # In-memory health cache — avoids blocking I/O on every poll
 _health_cache: dict = {}
 _health_cache_ts: float = 0.0
-_HEALTH_CACHE_TTL = 10.0  # seconds
+_HEALTH_CACHE_TTL = 30.0  # seconds
+
+# F-PERF-04: coalesce concurrent cache-miss builds. Without this, a thundering
+# herd of /health requests on cold cache would each spawn its own
+# asyncio.to_thread(_build_health_payload) and saturate the default executor's
+# thread pool — pushing /health p95 to 5-8s under load. The lock-protected
+# in-flight future shares one build across all concurrent waiters.
+_health_build_lock: asyncio.Lock | None = None
+_health_build_inflight: asyncio.Future | None = None
+
+
+def _get_health_build_lock() -> asyncio.Lock:
+    """Lazily construct the lock so it binds to the running event loop."""
+    global _health_build_lock
+    if _health_build_lock is None:
+        _health_build_lock = asyncio.Lock()
+    return _health_build_lock
+
+
+async def _refresh_health_cache() -> dict:
+    """Rebuild the cached health payload off the event loop.
+
+    Always runs the build via asyncio.to_thread so blocking I/O lands
+    on the default executor. Updates _health_cache/_health_cache_ts on
+    success. Failures are swallowed (with breadcrumb) — the previous
+    stale payload remains in cache, which is strictly better than
+    returning an empty response.
+    """
+    global _health_cache, _health_cache_ts
+    try:
+        payload = await asyncio.to_thread(_build_health_payload)
+        _health_cache = payload
+        _health_cache_ts = time.monotonic()
+        return payload
+    except Exception as exc:  # noqa: BLE001 — refresh boundary
+        log_swallowed_error("app.routers.health.refresh_health_cache", exc)
+        return _health_cache or {"services": {}, "invariants": {}}
 
 
 def health_check() -> dict:
@@ -93,6 +130,34 @@ def health_check() -> dict:
         except Exception:
             ollama_status = {"reachable": False, "url": ollama_url}
 
+    # Embedding-cache stats — read-only, no side effects. Cheap (single
+    # locked dict copy). Lets operators verify the cache is doing work
+    # rather than degenerating to 0% hit-rate after a config flip.
+    embedding_cache_stats: dict[str, Any]
+    try:
+        from core.utils.embedding_cache import get_embedding_cache
+        embedding_cache_stats = dict(get_embedding_cache().stats())
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.embedding_cache_stats", exc)
+        embedding_cache_stats = {"error": "stats_unavailable"}
+
+    # Phase K6.1 — wiki freshness metrics. Cheap aggregation Cypher,
+    # so we can include in every health probe. Exposes coverage,
+    # p95 staleness, debounce backlog, and unresolved contradictions
+    # — the headline numbers the design doc §9 calls out.
+    wiki_health: dict[str, Any]
+    try:
+        wiki_health = _wiki_freshness_snapshot(get_neo4j())
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.wiki_freshness_snapshot", exc)
+        wiki_health = {"error": "snapshot_failed"}
+
+    # §7.1 regression guard — surface the resolved knowledge-pack registry
+    # path + pack count so a path-resolution break (the historical "registry
+    # serves 0" failure) is visible in every health probe instead of only
+    # showing up as an empty /knowledge_packs/registry response downstream.
+    knowledge_packs_health = _knowledge_packs_snapshot()
+
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": get_version(),
@@ -102,10 +167,118 @@ def health_check() -> dict:
             "openrouter": openrouter_cb_state,
         },
         "openrouter_credits_exhausted": credits_exhausted,
+        "embedding_cache": embedding_cache_stats,
+        "wiki_freshness": wiki_health,
+        "knowledge_packs": knowledge_packs_health,
     }
     if ollama_status is not None:
         result["ollama"] = ollama_status
     return result
+
+
+def _knowledge_packs_snapshot() -> dict:
+    """§7.1 — knowledge-pack registry health for the health probe.
+
+    Resolves the registry path the same way the serving endpoint does
+    (``default_registry_path`` → honours ``CERID_KNOWLEDGE_PACKS_REGISTRY``)
+    and reports whether it exists + how many packs it holds. ``count == 0``
+    with ``exists == False`` is the signature of the path-resolution
+    regression this guard exists to catch.
+    """
+    try:
+        from app.services.knowledge_packs import default_registry_path
+        from core.knowledge.packs import load_registry
+
+        path = default_registry_path()
+        exists = path.exists()
+        count = len(load_registry(path)) if exists else 0
+        return {
+            "registry_path": str(path),
+            "registry_exists": exists,
+            "pack_count": count,
+            "ok": exists and count > 0,
+        }
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.knowledge_packs_snapshot", exc)
+        return {"ok": False, "error": "snapshot_failed"}
+
+
+def _wiki_freshness_snapshot(driver) -> dict:
+    """Phase K6.1 — knowledge architecture freshness metrics.
+
+    Single Cypher query returning:
+      * total_entities — denominator for coverage
+      * entities_with_summary — numerator for coverage
+      * entities_active — entities with mention_count >= 5
+      * entities_active_with_summary — coverage among active entities
+      * p95_summary_age_hours — staleness for active entities with summaries
+      * unresolved_contradictions — :HAS_CONTRADICTION edges to entities
+        whose summary_updated_at is older than the latest finding
+    """
+    if driver is None:
+        return {"available": False, "reason": "neo4j_unavailable"}
+
+    try:
+        with driver.session() as session:
+            # Coverage + active counts
+            cov = session.run(
+                """
+                MATCH (e:Entity)
+                WITH count(e) AS total,
+                     sum(CASE WHEN e.summary IS NOT NULL THEN 1 ELSE 0 END) AS with_summary,
+                     sum(CASE WHEN coalesce(e.mention_count, 0) >= 5 THEN 1 ELSE 0 END) AS active,
+                     sum(CASE WHEN coalesce(e.mention_count, 0) >= 5 AND e.summary IS NOT NULL THEN 1 ELSE 0 END) AS active_with_summary
+                RETURN total, with_summary, active, active_with_summary
+                """
+            ).single()
+            total = int(cov["total"] or 0) if cov else 0
+            with_summary = int(cov["with_summary"] or 0) if cov else 0
+            active = int(cov["active"] or 0) if cov else 0
+            active_with_summary = int(cov["active_with_summary"] or 0) if cov else 0
+
+            # Unresolved contradictions
+            unresolved = session.run(
+                """
+                MATCH (e:Entity)-[:HAS_CONTRADICTION]->(f:ContradictionFinding)
+                WHERE e.summary IS NULL
+                   OR e.summary_updated_at IS NULL
+                   OR e.summary_updated_at < f.detected_at
+                RETURN count(DISTINCT e) AS c
+                """
+            ).single()
+            unresolved_count = int(unresolved["c"] or 0) if unresolved else 0
+
+            # Wiki log activity in the last 24h
+            from datetime import datetime, timedelta, timezone
+
+            last_day = (datetime.now(tz=timezone.utc) - timedelta(hours=24)).isoformat()
+            activity = session.run(
+                "MATCH (k:KnowledgeLog) WHERE k.ts >= $since RETURN count(k) AS c",
+                since=last_day,
+            ).single()
+            log_activity_24h = int(activity["c"] or 0) if activity else 0
+
+        coverage_pct = (
+            round(100.0 * with_summary / total, 1) if total else 0.0
+        )
+        active_coverage_pct = (
+            round(100.0 * active_with_summary / active, 1) if active else 0.0
+        )
+
+        return {
+            "available": True,
+            "total_entities": total,
+            "entities_with_summary": with_summary,
+            "coverage_pct": coverage_pct,
+            "active_entities": active,
+            "active_entities_with_summary": active_with_summary,
+            "active_coverage_pct": active_coverage_pct,
+            "unresolved_contradictions": unresolved_count,
+            "log_activity_24h": log_activity_24h,
+        }
+    except Exception as exc:
+        log_swallowed_error("app.routers.health.wiki_freshness_query", exc)
+        return {"available": False, "reason": "query_failed"}
 
 
 _start_time = time.time()
@@ -243,6 +416,7 @@ def _invariants_snapshot() -> dict:
             snap: dict[str, Any] = {
                 "verification_report_orphans": 0,
                 "collections_empty": [],
+                "custom_collections": [],
                 "errors": [],
             }
             from app.startup.invariants import _probe_chroma, _probe_nli
@@ -391,8 +565,116 @@ def _load_recommendations(
     return out
 
 
+def _build_health_payload() -> dict:
+    """Run the blocking health checks + invariants snapshot + augmentations.
+
+    Lives in its own helper so the async ``/health`` endpoint can hand
+    this off via ``asyncio.to_thread`` instead of blocking the event
+    loop on Neo4j cold-cache queries. See F-PERF-04.
+
+    All trust-score / processor-metrics / memory-consolidation /
+    inference-routing / recommendations augmentations also run on the
+    worker thread for the same reason — they each touch Redis or Neo4j.
+    """
+    result = health_check()
+    result["invariants"] = _invariants_snapshot()
+    # Phase E.5 (v0.92): trust-score summary alongside core invariants.
+    # Pure metadata — not part of the healthy/degraded gate. Failures
+    # here must never affect the /health response code.
+    try:
+        from app.services.trust_score import trust_score_24h_summary
+        try:
+            _ts_driver = get_neo4j()
+        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+            log_swallowed_error("app.routers.health.trust_score_24h.get_neo4j", _exc)
+            _ts_driver = None
+        result["invariants"]["trust_score_24h"] = trust_score_24h_summary(_ts_driver)
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.trust_score_24h", _exc)
+    # Phase 3b (v0.92): processor metrics alongside core invariants.
+    # Pure metadata — not part of the healthy/degraded gate. Failures
+    # must never affect the /health response code.
+    try:
+        from app.processor.metrics import (
+            _sync_cost_usd_7d,
+            _sync_jobs_completed_24h,
+            _sync_throttled_ticks,
+        )
+        _proc_redis = None
+        try:
+            _proc_redis = get_redis()
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed_error("app.routers.health.processor_metrics.get_redis", _exc)
+
+        if _proc_redis is not None:
+            result["invariants"]["processor_jobs_completed_24h"] = (
+                _sync_jobs_completed_24h(_proc_redis)
+            )
+            result["invariants"]["processor_cost_usd_7d"] = float(
+                _sync_cost_usd_7d(_proc_redis)
+            )
+            result["invariants"]["processor_throttled_ticks"] = (
+                _sync_throttled_ticks(_proc_redis, 3600.0)
+            )
+        else:
+            result["invariants"]["processor_jobs_completed_24h"] = 0
+            result["invariants"]["processor_cost_usd_7d"] = 0.0
+            result["invariants"]["processor_throttled_ticks"] = 0
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.processor_metrics", _exc)
+        result["invariants"].setdefault("processor_jobs_completed_24h", 0)
+        result["invariants"].setdefault("processor_cost_usd_7d", 0.0)
+        result["invariants"].setdefault("processor_throttled_ticks", 0)
+    # Phase O.2 (v0.92): memory consolidation failure count alongside core
+    # invariants. Pure metadata — not part of the healthy/degraded gate.
+    # Failures here must never affect the /health response code.
+    try:
+        from app.services.memory_metrics import memory_consolidation_failures_24h as _mcf24h
+
+        _mcf_redis = None
+        try:
+            _mcf_redis = get_redis()
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed_error(
+                "app.routers.health.memory_consolidation_failures.get_redis", _exc
+            )
+        if _mcf_redis is not None:
+            result["invariants"]["memory_consolidation_failures_last_24h"] = _mcf24h(
+                _mcf_redis
+            )
+        else:
+            result["invariants"]["memory_consolidation_failures_last_24h"] = 0
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.memory_consolidation_failures", _exc)
+        result["invariants"].setdefault("memory_consolidation_failures_last_24h", 0)
+    # v0.93.8 — inference routing snapshot. Pure metadata.
+    try:
+        from core.utils.inference_routing import get_routing_snapshot
+        result["inference_routing"] = get_routing_snapshot()
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.inference_routing", _exc)
+        result.setdefault("inference_routing", {})
+    # Cycle 3.2 — adaptive feature recommendations. Pure metadata.
+    try:
+        from app.routers.recommendations import _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY
+        _rec_redis = None
+        try:
+            _rec_redis = get_redis()
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed_error(
+                "app.routers.health.recommendations.get_redis", _exc,
+            )
+        result["recommended_features"] = _load_recommendations(
+            _rec_redis, _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY,
+        )
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.recommendations", _exc)
+        result.setdefault("recommended_features", [])
+    return result
+
+
 @router.get("/health")
-def health_check_endpoint():
+async def health_check_endpoint():
     """Return infrastructure health.
 
     Returns HTTP 200 when all required services are reachable ("healthy") and
@@ -409,123 +691,47 @@ def health_check_endpoint():
     violation flips the endpoint to 503 even when transport connections
     are nominally healthy.
     """
-    global _health_cache, _health_cache_ts
+    global _health_cache, _health_cache_ts, _health_build_inflight
     now = time.monotonic()
-    if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+    cache_age = now - _health_cache_ts if _health_cache else float("inf")
+    if _health_cache and cache_age < _HEALTH_CACHE_TTL:
+        # Hot path: cache fresh — return immediately, no I/O.
+        result = _health_cache
+    elif _health_cache:
+        # F-PERF-04: stale-while-revalidate. Serve the stale payload
+        # immediately and kick off a background refresh. This keeps
+        # /health p95 latency at sub-millisecond regardless of how
+        # cold the underlying infra probes are. The refresh runs via
+        # asyncio.to_thread so it never blocks the event loop, and
+        # the in-flight Future is shared so concurrent stale serves
+        # don't each spawn a refresh.
+        lock = _get_health_build_lock()
+        async with lock:
+            now = time.monotonic()
+            if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+                pass  # someone else refreshed while we queued
+            elif _health_build_inflight is None or _health_build_inflight.done():
+                _health_build_inflight = asyncio.ensure_future(
+                    _refresh_health_cache()
+                )
         result = _health_cache
     else:
-        result = health_check()
-        result["invariants"] = _invariants_snapshot()
-        # Phase E.5 (v0.92): trust-score summary alongside core invariants.
-        # Pure metadata — not part of the healthy/degraded gate. Failures
-        # here must never affect the /health response code.
-        try:
-            from app.services.trust_score import trust_score_24h_summary
-            try:
-                _ts_driver = get_neo4j()
-            except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-                log_swallowed_error("app.routers.health.trust_score_24h.get_neo4j", _exc)
-                _ts_driver = None
-            result["invariants"]["trust_score_24h"] = trust_score_24h_summary(_ts_driver)
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.trust_score_24h", _exc)
-        # Phase 3b (v0.92): processor metrics alongside core invariants.
-        # Pure metadata — not part of the healthy/degraded gate. Failures
-        # must never affect the /health response code.
-        # Note: health_check_endpoint is sync; call the synchronous Redis
-        # operations directly via the private helpers in metrics to avoid
-        # running coroutines from a sync context.
-        try:
-            from app.processor.metrics import (
-                _sync_cost_usd_7d,
-                _sync_jobs_completed_24h,
-                _sync_throttled_ticks,
-            )
-            _proc_redis = None
-            try:
-                _proc_redis = get_redis()
-            except Exception as _exc:  # noqa: BLE001
-                log_swallowed_error("app.routers.health.processor_metrics.get_redis", _exc)
-
-            if _proc_redis is not None:
-                result["invariants"]["processor_jobs_completed_24h"] = (
-                    _sync_jobs_completed_24h(_proc_redis)
+        # Empty cache — block on the first build. With the lifespan
+        # pre-warm wired, this branch only fires if the pre-warm
+        # itself failed at boot.
+        future_to_await: asyncio.Future | None = None
+        lock = _get_health_build_lock()
+        async with lock:
+            if _health_cache:
+                pass
+            elif _health_build_inflight is None or _health_build_inflight.done():
+                _health_build_inflight = asyncio.ensure_future(
+                    _refresh_health_cache()
                 )
-                result["invariants"]["processor_cost_usd_7d"] = float(
-                    _sync_cost_usd_7d(_proc_redis)
-                )
-                result["invariants"]["processor_throttled_ticks"] = (
-                    _sync_throttled_ticks(_proc_redis, 3600.0)
-                )
-            else:
-                result["invariants"]["processor_jobs_completed_24h"] = 0
-                result["invariants"]["processor_cost_usd_7d"] = 0.0
-                result["invariants"]["processor_throttled_ticks"] = 0
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.processor_metrics", _exc)
-            result["invariants"].setdefault("processor_jobs_completed_24h", 0)
-            result["invariants"].setdefault("processor_cost_usd_7d", 0.0)
-            result["invariants"].setdefault("processor_throttled_ticks", 0)
-        # Phase O.2 (v0.92): memory consolidation failure count alongside core
-        # invariants. Pure metadata — not part of the healthy/degraded gate.
-        # Failures here must never affect the /health response code.
-        try:
-            from app.services.memory_metrics import memory_consolidation_failures_24h as _mcf24h
-
-            _mcf_redis = None
-            try:
-                _mcf_redis = get_redis()
-            except Exception as _exc:  # noqa: BLE001
-                log_swallowed_error(
-                    "app.routers.health.memory_consolidation_failures.get_redis", _exc
-                )
-            if _mcf_redis is not None:
-                result["invariants"]["memory_consolidation_failures_last_24h"] = _mcf24h(
-                    _mcf_redis
-                )
-            else:
-                result["invariants"]["memory_consolidation_failures_last_24h"] = 0
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.memory_consolidation_failures", _exc)
-            result["invariants"].setdefault("memory_consolidation_failures_last_24h", 0)
-
-        # v0.93.8 — inference routing snapshot.  Surfaces which
-        # provider is active for each inference workload (LLM, embed,
-        # rerank, sparse, NLI).  Operators reading the
-        # AMD_GPU_MODEL_RECOMMENDATIONS doc use this to verify their
-        # Quenchforge env vars are actually in scope inside the MCP
-        # container.  Pure metadata; never affects the /health
-        # response code.
-        try:
-            from core.utils.inference_routing import get_routing_snapshot
-            result["inference_routing"] = get_routing_snapshot()
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.inference_routing", _exc)
-            result.setdefault("inference_routing", {})
-
-        # Cycle 3.2 — adaptive feature recommendations. Pure metadata
-        # surfaced at the top level of the /health response so the
-        # Settings-pane banner can poll a single endpoint and react to
-        # corpus growth.  Filters out per-tenant dismissals.  Failures
-        # here must never affect the /health response code.
-        try:
-            from app.routers.recommendations import _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY
-            _rec_redis = None
-            try:
-                _rec_redis = get_redis()
-            except Exception as _exc:  # noqa: BLE001
-                log_swallowed_error(
-                    "app.routers.health.recommendations.get_redis", _exc,
-                )
-            result["recommended_features"] = _load_recommendations(
-                _rec_redis, _DISMISSED_SET_PREFIX, _REDIS_HASH_KEY,
-            )
-        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
-            log_swallowed_error("app.routers.health.recommendations", _exc)
-            result.setdefault("recommended_features", [])
-
-        _health_cache = result
-        _health_cache_ts = now
+            future_to_await = _health_build_inflight
+        if future_to_await is not None and not _health_cache:
+            await future_to_await
+        result = _health_cache or {"services": {}, "invariants": {}}
 
     # A service is "ok" when connected OR intentionally disabled (lightweight neo4j).
     def _ok(v: str) -> bool:
@@ -556,6 +762,27 @@ def scheduler_status_endpoint():
     from app.scheduler import get_job_status
 
     return get_job_status()
+
+
+@router.post("/scheduler/jobs/{job_id}/run")
+async def scheduler_run_job_endpoint(job_id: str):
+    """Manually trigger a scheduled job now ("a refresh gets a refresh").
+
+    Runs the job out-of-band on the app loop and busts the serving caches it
+    feeds (e.g. compute_umap_3d → the Constellation projection). Returns
+    immediately; the job runs in the background.
+    """
+    from app.scheduler import trigger_job
+
+    try:
+        return trigger_job(job_id)
+    except KeyError:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"unknown job '{job_id}'"},
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @router.get("/plugins")

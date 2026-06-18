@@ -21,6 +21,8 @@
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
+import { captureException } from "./sentry"
+
 const MAX_TOAST_LEN = 240
 
 /**
@@ -64,7 +66,12 @@ export const queryClient = new QueryClient({
         mutationKey: mutation.options.mutationKey ?? [],
         fullMessage,
       })
-      // TODO(sentry): migrate to Sentry.captureException(err, { extra: { mutationKey, fullMessage } })
+      // Phase PT6 — Frontend Sentry integration. No-ops when Sentry
+      // isn't initialized (dev / missing DSN). See lib/sentry.ts.
+      captureException(err, {
+        mutationKey: mutation.options.mutationKey ?? [],
+        fullMessage,
+      })
     },
   }),
   defaultOptions: {

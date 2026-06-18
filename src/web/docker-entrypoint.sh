@@ -16,9 +16,11 @@ VERSION_JS="/usr/share/nginx/html/version.json"
 MCP_URL="${VITE_MCP_URL:-/api/mcp}"
 BIFROST_URL="${VITE_BIFROST_URL:-/api/bifrost}"
 API_KEY="${VITE_CERID_API_KEY:-}"
+SENTRY_DSN_WEB="${VITE_SENTRY_DSN_WEB:-}"
+APP_VERSION="${VITE_APP_VERSION:-}"
 
 cat > "$ENV_JS" <<EOF
-window.__ENV__ = {VITE_MCP_URL: "${MCP_URL}", VITE_BIFROST_URL: "${BIFROST_URL}", VITE_CERID_API_KEY: "${API_KEY}"};
+window.__ENV__ = {VITE_MCP_URL: "${MCP_URL}", VITE_BIFROST_URL: "${BIFROST_URL}", VITE_CERID_API_KEY: "${API_KEY}", VITE_SENTRY_DSN_WEB: "${SENTRY_DSN_WEB}", VITE_APP_VERSION: "${APP_VERSION}"};
 EOF
 
 # Write version manifest (used by stale-cache detection)

@@ -80,9 +80,11 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     costSensitivity: "medium" as const,
     autoInject: false,
     autoInjectThreshold: 0.6,
+    includePacks: true,
     injectedContext: [] as KBQueryResult[],
     kbResults: [] as KBQueryResult[],
     clearInjected: vi.fn(),
+    privateModeLevel: 0,
     onBeforeSend: vi.fn(),
     ...overrides,
     // expose sendSpy separately so callers can inspect it
@@ -141,6 +143,30 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(sysMsg!.content).toContain("</document>")
   })
 
+  it("sends exclude_packs to queryKB when includePacks is OFF (Slice 7.3)", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+    const opts = makeOptions({ autoInject: true, includePacks: false })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("anything")
+    })
+    expect(mockQueryKB).toHaveBeenCalled()
+    const callOpts = mockQueryKB.mock.calls[0][4]
+    expect(callOpts.excludePacks).toBe(true)
+  })
+
+  it("does not exclude packs when includePacks is ON (default)", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+    const opts = makeOptions({ autoInject: true, includePacks: true })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("anything")
+    })
+    expect(mockQueryKB).toHaveBeenCalled()
+    const callOpts = mockQueryKB.mock.calls[0][4]
+    expect(callOpts.excludePacks).toBe(false)
+  })
+
   it("injects system message with <document> tags from manually injected context (autoInject OFF)", async () => {
     const manual = makeKBResult({ artifact_id: "m1", filename: "budget.xlsx", domain: "finance" })
     const opts = makeOptions({
@@ -159,6 +185,38 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(sysMsg!.content).toContain("<document")
     expect(sysMsg!.content).toContain("budget.xlsx")
     expect(opts.clearInjected).toHaveBeenCalled()
+  })
+
+  it("injects NOTHING at privateModeLevel >= 2 — KB bypass honored (CHAT-01)", async () => {
+    // Manual context + an auto-inject KB hit + a recalled memory are all present,
+    // but Private Mode L2 ("model sees only what you type") must drop them all.
+    const manual = makeKBResult({ artifact_id: "m1", filename: "private.xlsx", domain: "finance" })
+    const kbChunk = makeKBResult({ artifact_id: "a1", filename: "auth.py", relevance: 0.95 })
+    mockQueryKB.mockResolvedValue({ results: [kbChunk] })
+    mockRecallMemories.mockResolvedValue([
+      { content: "secret pref", relevance: 0.9, memory_type: "preference", summary: "secret pref",
+        memory_id: "m", source_authority: 0.9, base_similarity: 0.9, access_count: 1, source_type: "memory" as const },
+    ])
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      injectedContext: [manual],
+      privateModeLevel: 2,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("What is in my private docs?")
+    })
+
+    const msgs = sentMessages(opts._sendSpy)
+    // No system message at all → the payload carries no KB documents or memories.
+    expect(msgs.every((m) => m.role !== "system")).toBe(true)
+    // No source refs leak onto the assistant message either.
+    expect(sentSources(opts._sendSpy)).toBeUndefined()
+    // Auto-inject is structurally skipped — the KB is never even queried.
+    expect(mockQueryKB).not.toHaveBeenCalled()
   })
 
   it("filters out results below autoInjectThreshold", async () => {
@@ -366,6 +424,50 @@ describe("useChatSend — KB injection payload assembly", () => {
       domain: "finance",
       chunk_index: 2,
     })
+  })
+
+  it("applies per-model-family char budget — drops docs that exceed the budget (Phase 2.4)", async () => {
+    // GPT-4o-mini budget is 20_000 chars. Create a doc that uses 15k,
+    // and a second doc that would push total over 20k.
+    const first = makeKBResult({
+      artifact_id: "budget-a",
+      filename: "first.py",
+      relevance: 0.95,
+      content: "a".repeat(15_000),
+    })
+    const second = makeKBResult({
+      artifact_id: "budget-b",
+      filename: "second.py",
+      relevance: 0.90,
+      content: "b".repeat(8_000),
+    })
+    mockQueryKB.mockResolvedValue({ results: [first, second] })
+
+    const gptMiniModel = "openrouter/openai/gpt-4o-mini"
+    // Override the model-router mock to return gpt-4o-mini
+    const { recommendModel } = await import("@/lib/model-router")
+    ;(recommendModel as ReturnType<typeof vi.fn>).mockReturnValue({
+      model: { id: gptMiniModel, effectiveContextWindow: 102_400 },
+      estimatedCost: 0, reasoning: "", savingsVsCurrent: 0,
+    })
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      selectedModel: gptMiniModel,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("query triggering budget check")
+    })
+
+    const msgs = sentMessages(opts._sendSpy)
+    const sysMsg = msgs.find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    // first.py (15k) fits; second.py (15k+8k=23k) exceeds 20k budget → dropped
+    expect(sysMsg!.content).toContain("first.py")
+    expect(sysMsg!.content).not.toContain("second.py")
   })
 
   it("creates a new conversation when activeId is null", async () => {

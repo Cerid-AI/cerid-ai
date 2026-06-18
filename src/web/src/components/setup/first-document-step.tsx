@@ -11,10 +11,17 @@ import { uploadFile, queryKB } from "@/lib/api"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import { SamplePackTab } from "@/components/setup/sample-pack-tab"
 
-interface FirstDocState {
+export interface FirstDocState {
   ingested: boolean
   queried: boolean
   skipped: boolean
+  /**
+   * Number of documents added during this step. Single upload → 1; sample
+   * pack install → pack.artifact_count. Drives the Review and Mode summaries
+   * so they don't show stale "0 documents" after a successful install
+   * (F-04-07).
+   */
+  documentCount: number
 }
 
 interface FirstDocumentStepProps {
@@ -84,7 +91,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       // setTimeout that used to live here: it was too short on slow hardware
       // (silent empty results) and pure latency on fast hardware.
       setPhase("chat")
-      onChange({ ...state, ingested: true })
+      onChange({ ...state, ingested: true, documentCount: Math.max(state.documentCount, 1) })
     } catch (err) {
       setIngestError(formatIngestError(err, file.name))
       setPhase("choose")
@@ -104,6 +111,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
 
     try {
       // Fetch the bundled sample content and upload it
+      // eslint-disable-next-line no-restricted-syntax -- static SPA asset, not an MCP API path; must NOT be prefixed with /api/mcp
       const res = await fetch("/sample-knowledge.md")
       if (!res.ok) {
         // Fallback: create a blob with basic content
@@ -122,7 +130,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
 
       setIngestProgress(null)
       setPhase("chat")
-      onChange({ ...state, ingested: true })
+      onChange({ ...state, ingested: true, documentCount: Math.max(state.documentCount, 1) })
     } catch (err) {
       setIngestError(formatIngestError(err, "sample-knowledge.md"))
       setPhase("choose")
@@ -154,7 +162,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
         topResult?.content
           ?? `Found ${result.total_results} result(s) across ${(result.domains_searched ?? []).join(", ") || "all domains"}.`,
       )
-      onChange({ ...state, ingested: true, queried: true })
+      onChange({ ...state, ingested: true, queried: true, documentCount: Math.max(state.documentCount, 1) })
       setPhase("done")
     } catch {
       setResponse("Query failed — the knowledge base may still be indexing. Try again in a moment.")
@@ -173,11 +181,17 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
 
   const { isDragOver, dragHandlers } = useDragDrop(onFilesDropped)
 
-  const handlePackInstalled = useCallback((packId: string) => {
-    // Mark the step complete so the wizard's "Next" button unlocks.
-    // packId is logged here for future telemetry (suppress lint).
+  const handlePackInstalled = useCallback((packId: string, articleCount: number) => {
+    // Mark the step complete so the wizard's "Next" button unlocks. Set
+    // documentCount to the pack's article count so downstream summaries
+    // (Review / Mode) display the real count instead of stale "0 documents".
     void packId
-    onChange({ ...state, ingested: true, skipped: false })
+    onChange({
+      ...state,
+      ingested: true,
+      skipped: false,
+      documentCount: Math.max(state.documentCount, articleCount),
+    })
   }, [state, onChange])
 
   return (
@@ -208,7 +222,16 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
           {/* Drag-drop upload zone */}
           <div
             {...dragHandlers}
+            role="button"
+            tabIndex={0}
+            aria-label="Click to choose a file or drag a file here to upload"
             onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                fileInputRef.current?.click()
+              }
+            }}
             className={cn(
               "relative flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors",
               isDragOver

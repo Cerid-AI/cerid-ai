@@ -142,6 +142,20 @@ class TestListEntities:
         # Malformed rows produce EntitySummary with empty strings (default fallback).
         assert len(results) >= 1
 
+    @pytest.mark.asyncio
+    async def test_top_tags_parsed_on_list_rows(self):
+        """Slice 6.3: top_tags JSON string on a list row parses to a list;
+        absent top_tags is None (pre-job rows still list cleanly)."""
+        rows = _entity_rows()
+        rows[0]["top_tags"] = '["python", "docker"]'  # has tags
+        # rows[1] has no top_tags key → None
+        driver = _make_driver()
+        with patch("app.services.wiki_pages._neo4j_adapter.list_top_entities", return_value=rows):
+            results = await list_entities(driver)
+
+        assert results[0].top_tags == ["python", "docker"]
+        assert results[1].top_tags is None
+
 
 # ---------------------------------------------------------------------------
 # get_entity_page — happy path
@@ -176,6 +190,48 @@ class TestGetEntityPage:
         assert page.confidence_band == "high"
         assert page.last_updated_at == "2026-05-10T12:00:00+00:00"
         assert page.next_refresh_due is not None
+
+    @pytest.mark.asyncio
+    async def test_parses_domain_salience_and_top_tags(self):
+        """Slice 6: domain_salience + top_tags arrive as JSON strings from
+        Neo4j and are parsed onto the page (salience order preserved)."""
+        raw = _full_entity_raw()
+        raw["primary_domain"] = "finance"
+        raw["domain_salience"] = '{"finance": 45.0, "general": 11.25}'
+        raw["top_tags"] = '["invoice", "budget"]'
+        driver = _make_driver()
+        with (
+            patch("app.services.wiki_pages._neo4j_adapter.get_entity", return_value=raw),
+            patch("app.services.wiki_pages._neo4j_adapter.get_confidence_band", return_value="high"),
+            patch(
+                "app.services.contradiction_log.list_recent",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            page = await get_entity_page(driver, "person:elon-musk")
+
+        assert page is not None
+        assert page.domain_salience == {"finance": 45.0, "general": 11.25}
+        assert list(page.domain_salience.keys()) == ["finance", "general"]
+        assert page.top_tags == ["invoice", "budget"]
+
+    @pytest.mark.asyncio
+    async def test_domain_salience_and_top_tags_null_when_absent(self):
+        """Pre-job entities (no salience/tags) parse to None, not a crash."""
+        driver = _make_driver()
+        with (
+            patch("app.services.wiki_pages._neo4j_adapter.get_entity", return_value=_full_entity_raw()),
+            patch("app.services.wiki_pages._neo4j_adapter.get_confidence_band", return_value="high"),
+            patch(
+                "app.services.contradiction_log.list_recent",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            page = await get_entity_page(driver, "person:elon-musk")
+
+        assert page is not None
+        assert page.domain_salience is None
+        assert page.top_tags is None
 
     @pytest.mark.asyncio
     async def test_contradictions_are_pulled_from_service(self):

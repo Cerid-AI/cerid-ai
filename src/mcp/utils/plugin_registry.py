@@ -14,7 +14,7 @@ import httpx
 logger = logging.getLogger("ai-companion.plugin_registry")
 
 # Default registry URL (GitHub raw JSON).  Override via PLUGIN_REGISTRY_URL env var.
-REGISTRY_URL = os.getenv(
+REGISTRY_URL = os.getenv(  # env-capture-allowed: plugin registry URL — startup-only third-party config
     "PLUGIN_REGISTRY_URL",
     "https://raw.githubusercontent.com/Cerid-AI/plugin-registry/main/registry.json",
 )

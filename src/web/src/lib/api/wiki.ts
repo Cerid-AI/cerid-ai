@@ -13,7 +13,7 @@
  *                                     save-to-vault UI)
  */
 
-import { MCP_BASE, mcpHeaders, extractError } from "./common"
+import { MCP_BASE, mcpHeaders, mcpUrl, extractError } from "./common"
 import type { WatchedFolder } from "./settings"
 import { fetchWatchedFolders } from "./settings"
 import type {
@@ -23,6 +23,8 @@ import type {
   ContradictionFinding,
   RelatedEntity,
   SourceCitation,
+  WikiLogEntry,
+  EpisodicMemory,
 } from "@/lib/types/wiki"
 
 // ---------------------------------------------------------------------------
@@ -35,10 +37,27 @@ function normalizeEntitySummary(raw: Record<string, unknown>): EntitySummary {
     name: String(raw.name ?? ""),
     entity_type: String(raw.entity_type ?? "OTHER"),
     summary_preview: raw.summary != null ? String(raw.summary) : null,
-    related_count: Number(raw.mention_count ?? 0),
+    mention_count: Number(raw.mention_count ?? 0),
     recent_activity_score: Number(raw.recent_activity_score ?? 0),
     last_updated_at: raw.summary_updated_at != null ? String(raw.summary_updated_at) : null,
+    primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
+    top_tags: normalizeTopTags(raw.top_tags),
+    match_rank: raw.match_rank != null ? Number(raw.match_rank) : null,
   }
+}
+
+/** Parse top_tags from an array or a JSON string (backend stores JSON). */
+function normalizeTopTags(raw: unknown): string[] | null {
+  if (Array.isArray(raw)) return (raw as unknown[]).map(String)
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed.map(String) : null
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 function normalizeRelatedEntity(raw: Record<string, unknown>): RelatedEntity {
@@ -46,16 +65,37 @@ function normalizeRelatedEntity(raw: Record<string, unknown>): RelatedEntity {
     slug: String(raw.canonical_id ?? ""),
     name: String(raw.name ?? ""),
     co_mention_strength: Number(raw.co_mention_count ?? 0),
+    entity_type: String(raw.entity_type ?? "OTHER"),
+    display_title: raw.display_title != null ? String(raw.display_title) : null,
+    has_summary: Boolean(raw.has_summary ?? false),
+    one_liner: raw.one_liner != null ? String(raw.one_liner) : null,
+  }
+}
+
+function normalizeEpisodicMemory(raw: Record<string, unknown>): EpisodicMemory {
+  return {
+    memory_type: String(raw.memory_type ?? ""),
+    valid_from: raw.valid_from != null ? String(raw.valid_from) : null,
+    access_count: Number(raw.access_count ?? 0),
+    content: raw.content != null ? String(raw.content) : null,
   }
 }
 
 function normalizeSourceCitation(raw: Record<string, unknown>): SourceCitation {
-  const chunkIds = Array.isArray(raw.chunk_ids) ? (raw.chunk_ids as string[]) : []
   return {
     artifact_id: String(raw.artifact_id ?? ""),
-    title: raw.title != null ? String(raw.title) : null,
-    chunk_hash: chunkIds[0] ?? "",
-    domain: "",
+    // Prefer backend display_title (already coalesced: a.title ?? a.filename). Fall back
+    // through title → filename so old backend responses still display something.
+    title: raw.display_title != null
+      ? String(raw.display_title)
+      : raw.title != null
+        ? String(raw.title)
+        : null,
+    filename: raw.filename != null ? String(raw.filename) : null,
+    domain: raw.domain != null ? String(raw.domain) : null,
+    source_type: raw.source_type != null ? String(raw.source_type) : null,
+    confidence: raw.confidence != null ? Number(raw.confidence) : null,
+    updated_at: raw.updated_at != null ? String(raw.updated_at) : null,
   }
 }
 
@@ -104,11 +144,57 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
   const externalRefs = Array.isArray(raw.external_references)
     ? (raw.external_references as Record<string, unknown>[]).map(normalizeExternalReference)
     : []
+  const episodicMemories = Array.isArray(raw.episodic_memories)
+    ? (raw.episodic_memories as Record<string, unknown>[]).map(normalizeEpisodicMemory)
+    : []
+
+  const rawRefreshStatus = raw.refresh_status as string | undefined
+  const refresh_status: WikiEntityPage["refresh_status"] =
+    rawRefreshStatus === "running" || rawRefreshStatus === "due" || rawRefreshStatus === "idle"
+      ? rawRefreshStatus
+      : undefined
+
+  // domain_mix is stored as a JSON string on the backend; the backend service
+  // already parses it to dict before serializing the page payload, but we
+  // guard both shapes here in case an older backend sends the raw string.
+  let domain_mix: Record<string, number> | null = null
+  if (raw.domain_mix != null) {
+    if (typeof raw.domain_mix === "object" && !Array.isArray(raw.domain_mix)) {
+      domain_mix = raw.domain_mix as Record<string, number>
+    } else if (typeof raw.domain_mix === "string") {
+      try {
+        domain_mix = JSON.parse(raw.domain_mix) as Record<string, number>
+      } catch {
+        domain_mix = null
+      }
+    }
+  }
+
+  // domain_salience (Slice 6.1): same dual-shape guard as domain_mix —
+  // backend parses to a dict, but tolerate a raw JSON string defensively.
+  let domain_salience: Record<string, number> | null = null
+  if (raw.domain_salience != null) {
+    if (typeof raw.domain_salience === "object" && !Array.isArray(raw.domain_salience)) {
+      domain_salience = raw.domain_salience as Record<string, number>
+    } else if (typeof raw.domain_salience === "string") {
+      try {
+        domain_salience = JSON.parse(raw.domain_salience) as Record<string, number>
+      } catch {
+        domain_salience = null
+      }
+    }
+  }
+
+  // top_tags (Slice 6.3): array of vocabulary tags (or a raw JSON string).
+  const top_tags = normalizeTopTags(raw.top_tags)
 
   return {
     slug: String(raw.slug ?? ""),
     name: String(raw.name ?? ""),
     entity_type: String(raw.entity_type ?? "OTHER"),
+    community_id: raw.community_id != null ? String(raw.community_id) : undefined,
+    community_label: raw.community_label != null ? String(raw.community_label) : undefined,
+    mention_count: Number(raw.mention_count ?? 0),
     summary: raw.summary != null ? String(raw.summary) : null,
     related_entities: related,
     source_artifacts: sources,
@@ -116,7 +202,14 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     external_references: externalRefs,
     last_updated_at: raw.last_updated_at != null ? String(raw.last_updated_at) : null,
     next_refresh_due: raw.next_refresh_due != null ? String(raw.next_refresh_due) : null,
+    refresh_status,
     confidence_band: (raw.confidence_band as WikiEntityPage["confidence_band"]) ?? "unknown",
+    primary_domain: raw.primary_domain != null ? String(raw.primary_domain) : null,
+    domain_mix,
+    domain_salience,
+    top_tags,
+    primary_subcategory: raw.primary_subcategory != null ? String(raw.primary_subcategory) : null,
+    episodic_memories: episodicMemories.length > 0 ? episodicMemories : undefined,
   }
 }
 
@@ -131,13 +224,15 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
  */
 export async function fetchWikiEntities({
   limit = 30,
-}: { limit?: number } = {}): Promise<EntitySummary[]> {
-  const res = await fetch(`${MCP_BASE}/wiki/entities?limit=${limit}`, { headers: mcpHeaders() })
+  q,
+}: { limit?: number; q?: string } = {}): Promise<EntitySummary[]> {
+  const url = mcpUrl("/wiki/entities", { limit, q: q?.trim() || undefined })
+  const res = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!res.ok) {
     throw new Error(`Wiki entities fetch failed (${res.status})`)
   }
-  const data = (await res.json()) as Record<string, unknown>[]
-  return data.map(normalizeEntitySummary)
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return rows.map(normalizeEntitySummary)
 }
 
 /**
@@ -243,6 +338,39 @@ export async function fetchContradictions({
   if (!res.ok) {
     throw new Error(`Contradictions fetch failed (${res.status})`)
   }
-  const data = (await res.json()) as Record<string, unknown>[]
-  return data.map(normalizeContradiction)
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return rows.map(normalizeContradiction)
+}
+
+function normalizeWikiLogEntry(raw: Record<string, unknown>): WikiLogEntry {
+  return {
+    log_id: String(raw.log_id ?? ""),
+    ts: String(raw.ts ?? ""),
+    action: String(raw.action ?? ""),
+    entity_slug: String(raw.entity_slug ?? ""),
+    summary: raw.summary != null ? String(raw.summary) : null,
+    source_artifact_id: raw.source_artifact_id != null ? String(raw.source_artifact_id) : null,
+  }
+}
+
+/**
+ * GET /wiki/log?entity_slug={slug}
+ *
+ * Per-entity revision ledger (newest-first). Rows carry the snapshot
+ * summary text so the history pane can show a collapsed diff per entry.
+ */
+export async function fetchWikiLog({
+  entity_slug,
+  limit = 50,
+}: {
+  entity_slug: string
+  limit?: number
+}): Promise<WikiLogEntry[]> {
+  const url = mcpUrl("/wiki/log", { entity_slug, limit })
+  const res = await fetch(url.toString(), { headers: mcpHeaders() })
+  if (!res.ok) {
+    throw new Error(`Wiki log fetch failed (${res.status})`)
+  }
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return rows.map(normalizeWikiLogEntry)
 }

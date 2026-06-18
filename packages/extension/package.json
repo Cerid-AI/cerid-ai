@@ -1,0 +1,20 @@
+{
+  "name": "@cerid/extension",
+  "version": "0.1.0",
+  "description": "Cerid AI browser extension — capture web pages into your local knowledge base.",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/chrome": "^0.0.300",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}

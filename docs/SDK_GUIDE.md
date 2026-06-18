@@ -1,14 +1,19 @@
 # Cerid AI SDK Guide
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
-survives internal refactoring of core paths. Current version: **1.1.0**.
+survives internal refactoring of core paths. Current wire-protocol version:
+**1.1.0**. Client packages: `cerid-sdk` (Python) **0.1.1**, `@cerid-ai/sdk`
+(TypeScript) **0.1.1** — both updated 2026-05-24 to expose all 15 endpoints.
+Both client packages stay pre-1.0 through the v1.0 RC cycle; they flip to
+1.0.0 when the main product flips to GA (per `docs/SDK_PUBLISHING.md`).
 
 ## Overview
 
-The SDK exposes 12 endpoints covering knowledge base operations, health
-monitoring, content ingestion, taxonomy, search, plugin discovery, and
-server configuration. All endpoints return typed JSON responses defined
-by Pydantic models in `models/sdk.py`.
+The SDK exposes 15 endpoints covering knowledge-base operations, health
+monitoring, content ingestion (text / file / adapter-shaped), taxonomy,
+search, plugin discovery, smart-routed LLM completion, async memory
+extraction with job polling, and server configuration. All endpoints
+return typed JSON responses defined by Pydantic models in `models/sdk.py`.
 
 ## Authentication
 
@@ -48,22 +53,26 @@ client = CeridClient(
     api_key="sk-cerid-...",  # optional  # pragma: allowlist secret
 )
 
-# Query the knowledge base
-result = client.query("How does the circuit breaker work?", domain="coding")
+# Query the knowledge base (domains is a list; mix your own + built-ins)
+result = client.kb.query("How does the circuit breaker work?", domains=["coding"])
 print(result.results[0].content)
 
 # Check service health
-health = client.health()
+health = client.system.health()
 print(health.version, health.services)
 
-# Ingest content
-resp = client.ingest("PostgreSQL uses MVCC for concurrency.", domain="databases")
+# Ingest content — any domain name works; attach provenance metadata
+resp = client.kb.ingest(
+    "PostgreSQL uses MVCC for concurrency.",
+    domain="databases",
+    metadata={"title": "MVCC note", "provenance": "design_review"},
+)
 print(resp.artifact_id, resp.chunks)
 
 # Verify claims
-check = client.hallucination_check(
-    response_text="Redis defaults to port 6380.",
-    query="What port does Redis use?",
+check = client.verify.check(
+    "Redis defaults to port 6380.",
+    context="What port does Redis use?",
 )
 for claim in check.claims:
     print(claim.status, claim.confidence)
@@ -84,24 +93,80 @@ const client = new CeridClient({
   apiKey: "sk-cerid-...", // optional  // pragma: allowlist secret
 });
 
-// Query the knowledge base
-const result = await client.query("circuit breaker pattern", {
-  domain: "coding",
-  topK: 5,
-});
+// Query the knowledge base (domains is a list)
+const result = await client.kb.query({ query: "circuit breaker pattern", domains: ["coding"], topK: 5 });
 console.log(result.results[0].content);
 
 // Check health
-const health = await client.health();
+const health = await client.system.health();
 console.log(health.version, health.services);
 
-// Ingest a file
-const resp = await client.ingestFile("/data/report.pdf", {
-  domain: "finance",
-  tags: ["quarterly"],
+// Ingest content with provenance metadata (any domain name works)
+const resp = await client.kb.ingest({
+  content: "PostgreSQL uses MVCC for concurrency.",
+  domain: "databases",
+  metadata: { title: "MVCC note", provenance: "design_review" },
 });
-console.log(resp.artifactId, resp.chunks);
+console.log(resp.artifact_id, resp.chunks);
 ```
+
+## Using Cerid as a backend for external agents / clients
+
+Cerid works as a shared **knowledge + LLM + memory backend** for other
+applications (agent teams, internal tools, vertical products). Clients use
+their own domains, attach provenance, and route custom LLM tasks with **no
+server-side configuration and no compatibility shims**.
+
+### Custom knowledge domains
+
+Ingest to and query **any domain name** — not just the built-in set. A custom
+domain needs no pre-registration: ingest creates its collection on first use,
+and queries against it return your content. An unknown domain with no data
+degrades to empty results (never a 400). List your domain explicitly so your
+private context is searched first.
+
+```python
+client.kb.ingest("Q3 launch plan: target accounts and sequence.", domain="my_gtm")
+result = client.kb.query("Q3 launch sequence", domains=["my_gtm", "general"])
+```
+
+> Operators: built-in domains can carry descriptions/icons via the
+> `CERID_CUSTOM_DOMAINS` env var, but ad-hoc client domains work without it.
+
+### Rich provenance metadata
+
+Attach arbitrary metadata to any ingest — stored with the artifact and returned
+at retrieval, so client outputs keep their attribution. The legacy `tags`
+field is preserved alongside it.
+
+```python
+client.kb.ingest(
+    "Decision: adopt MVCC for the ledger store.",
+    domain="my_decisions",
+    metadata={"title": "ADR-014", "provenance": "design_review", "source_file": "adr-014.md"},
+)
+```
+
+### Flexible LLM task types
+
+`client.llm.complete` accepts your own `task_type` labels (e.g. `"gtm_creative"`,
+`"agent_phase_2"`). Built-in types (`chat`, `internal`, `verification`,
+`classification`) route to tuned tiers; **unknown values map to safe internal
+routing** rather than failing.
+
+```python
+out = client.llm.complete(
+    messages=[{"role": "user", "content": "Draft a one-line value prop."}],
+    task_type="gtm_creative",   # custom — routed as internal
+)
+```
+
+### Operator visibility
+
+`GET /health` reports `invariants.custom_collections` — the client-created
+collections — so operators can see external-client activity. Built-in
+"empty collection" alerts are scoped to built-in domains and won't fire on a
+freshly-created client domain.
 
 ## Endpoint Reference
 
@@ -110,23 +175,26 @@ console.log(resp.artifactId, resp.chunks);
 | 1 | POST | `/sdk/v1/query` | Multi-domain KB search with hybrid BM25+vector retrieval |
 | 2 | POST | `/sdk/v1/hallucination` | Verify factual claims against the KB |
 | 3 | POST | `/sdk/v1/memory/extract` | Extract facts from conversation text and store as artifacts |
-| 4 | GET | `/sdk/v1/health` | Service connectivity, version, and feature flags |
-| 5 | POST | `/sdk/v1/ingest` | Ingest raw text content into the KB |
-| 6 | POST | `/sdk/v1/ingest/file` | Ingest a file (PDF, DOCX, code, 30+ formats) |
-| 7 | GET | `/sdk/v1/collections` | List all KB collections (one per domain) |
-| 8 | GET | `/sdk/v1/taxonomy` | Domain taxonomy tree with sub-categories and tags |
-| 9 | GET | `/sdk/v1/health/detailed` | Extended health with circuit breakers and degradation tier |
-| 10 | GET | `/sdk/v1/settings` | Read-only server config: version, tier, feature flags |
-| 11 | POST | `/sdk/v1/search` | Direct vector search without agent orchestration |
-| 12 | GET | `/sdk/v1/plugins` | List loaded plugins with status and tier |
+| 4 | GET | `/sdk/v1/memory/extract/jobs/{job_id}` | Poll an async memory_extract job (when `MEMORY_QUEUE_MODE=async`) |
+| 5 | POST | `/sdk/v1/llm/complete` | Smart-routed LLM completion across FREE / CHEAP / CAPABLE / RESEARCH / EXPERT tiers |
+| 6 | GET | `/sdk/v1/health` | Service connectivity, version, and feature flags |
+| 7 | POST | `/sdk/v1/ingest` | Ingest raw text content into the KB |
+| 8 | POST | `/sdk/v1/ingest/file` | Ingest a file (PDF, DOCX, code, 30+ formats) |
+| 9 | POST | `/sdk/v1/ingest/external` | Adapter-shaped ingest for external services (Readwise / Pocket / Telegram-bot / Raindrop / Instapaper, with arbitrary `field_mappings` config) |
+| 10 | GET | `/sdk/v1/collections` | List all KB collections (one per domain) |
+| 11 | GET | `/sdk/v1/taxonomy` | Domain taxonomy tree with sub-categories and tags |
+| 12 | GET | `/sdk/v1/health/detailed` | Extended health with circuit breakers and degradation tier |
+| 13 | GET | `/sdk/v1/settings` | Read-only server config: version, tier, feature flags |
+| 14 | POST | `/sdk/v1/search` | Direct vector search without agent orchestration |
+| 15 | GET | `/sdk/v1/plugins` | List loaded plugins with status and tier |
 
 ### Request/Response Examples
 
 **POST /sdk/v1/query**
 
 ```json
-// Request
-{"query": "circuit breaker pattern", "domain": "coding", "top_k": 5}
+// Request — domains is a list; any name (built-in or custom client domain) is accepted
+{"query": "circuit breaker pattern", "domains": ["coding"], "top_k": 5}
 
 // Response
 {"results": [{"content": "...", "relevance": 0.92, "domain": "coding"}], "domains_searched": ["coding"], "total_results": 1}
@@ -135,8 +203,8 @@ console.log(resp.artifactId, resp.chunks);
 **POST /sdk/v1/ingest**
 
 ```json
-// Request
-{"content": "PostgreSQL uses MVCC.", "domain": "databases", "tags": ["postgres"]}
+// Request — `metadata` is arbitrary provenance, stored + retrievable; `tags` is preserved alongside it
+{"content": "PostgreSQL uses MVCC.", "domain": "databases", "metadata": {"title": "MVCC note", "provenance": "design_review"}, "tags": "postgres"}
 
 // Response
 {"status": "success", "artifact_id": "art-200", "chunks": 1, "domain": "databases"}

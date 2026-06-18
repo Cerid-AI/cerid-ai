@@ -2,6 +2,1753 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — RAG Quality Program (2026-06-12 → 06-13)
+
+Systemic response to the 2026-06-11 chat/RAG qualitative eval — 6 root-cause
+classes across 8 phases, shipped as Slices 1–7 + two eval checkpoints. Full
+plan: `tasks/2026-06-12-rag-quality-program-plan.md`.
+
+### Retrieval & verification
+
+- **Provenance spine + honesty contract (Slices 1–2)** — every retrieval result
+  carries `source_type` (`kb`/`pack`/`memory`/`wiki`/`external`) + `created_at`;
+  prompt document blocks carry type + date; the RAG preamble is honesty-first
+  (qualify time-sensitive values, say plainly when the KB doesn't cover).
+- **Retrieval spine (Slice 3)** — graph_store threaded via DI (fixes
+  `graph_results=0`); the CRAG gate fires external on stale KB for "current X"
+  queries (`temporal_intent_days` + `freshest_kb_age_days`,
+  `CRAG_STALENESS_WINDOW_DAYS=7`); rerank resilience under burst (semaphore +
+  `reranker_status` tagging).
+- **Verification trust (Slice 4)** — a time-sensitive claim resting on KB
+  evidence older than `VERIFICATION_STALENESS_WINDOW_DAYS` now returns
+  `uncertain/stale_evidence`, never `verified`-on-stale; `verification_accuracy`
+  / `cache_hit_rate` / `retrieval_ndcg` recorded into `/observability/quality`;
+  `/health.knowledge_packs` registry guard.
+
+### Ingestion, taxonomy & ranking
+
+- **Ingestion enrichment (Slice 5)** — one enrichment seam in `ingest_content`
+  (memory/connector/digest paths now get sub_category + tags, never a domain
+  change); classifier samples head+mid+tail, requires a sub_category + confidence
+  (low-confidence → `general` + `needs-review`); tags converge on
+  `TAG_VOCABULARY` via difflib.
+- **Salience-weighted taxonomy (Slice 6)** — `DeriveDomainsJob` v2 derives
+  `primary_domain` from `salience = specificity × distinctiveness × quality_mass
+  × recency_decay` (new `Entity.domain_salience`, alongside the integer
+  `domain_mix`); `/graph/domains` orders by corpus salience mass; new
+  `Entity.top_tags` (vocab-only) drives the wiki infobox chip row + entity-list
+  tag filter; the article infobox shows a salience-ordered domain mix.
+- **Personal-first pack ranking (Slice 7)** — knowledge-pack chunks are
+  down-weighted by `PACK_RELEVANCE_WEIGHT` (0.7, runtime-tunable via
+  `PATCH /settings` + an advanced settings slider) after the rerank blend;
+  `exclude_packs` on `POST /agent/query` and a chat-toolbar "Include knowledge
+  packs" toggle drop packs entirely for a query.
+
+### Tooling
+
+- **Model-pinning enforced** — `lint-no-hardcoded-models` flipped from warn-only
+  to blocking; the last call-site model literals moved into config.
+
+## Unreleased — Audit & agents pane test coverage (2026-06-07)
+
+### Frontend
+
+- **4-state + axe test coverage for the `audit` and `agents` panes** — the only
+  two required panes that previously had no state-matrix or accessibility tests.
+  Adds 20 tests asserting Loading / Error+retry / Empty / Success and
+  axe-cleanliness for each.
+- **Fixed a missing-state gap in the custom-agents pane** — a load failure
+  rendered a retry-less warning card. It now renders the standard `PaneError`
+  (destructive `Alert` + Retry), and the loading state uses `Skeleton` rows
+  instead of a bare spinner. The inline banner is retained for create/delete
+  action errors so an action failure no longer clears the list.
+
+## Unreleased — Security dependency floors (2026-06-07)
+
+### Security
+
+- **Raised `jinja2` floor to `>=3.1.6`** (CVE-2025-27516 — sandbox `|attr` filter
+  bypass) and **`mcp` floor to `>=1.27.2`**. The resolved lock already pinned both
+  fixed versions, so this tightens the declared minimums to guarantee them and
+  closes the corresponding public-mirror Dependabot advisories; no lock change.
+
+## Unreleased — CI security-scan green-up (2026-06-07)
+
+### Fixed
+
+- **`main` CI `security` (bandit) job is green again.** Two findings were
+  suppressed with the wrong syntax — `# noqa: S324` is a ruff code, which bandit
+  does not honor. Both are non-issues on inspection and are now suppressed
+  correctly:
+  - `core/agents/hallucination/contradiction_sink.py` — the SHA-1 is a
+    non-crypto idempotency id; switched to `hashlib.sha1(..., usedforsecurity=False)`.
+  - `core/ingest/sources/connectors/rss.py` — `ElementTree.fromstring` (B314) is
+    fed only after a dependency-free DOCTYPE/ENTITY guard already refuses XXE /
+    entity-expansion feeds; annotated `# nosec B314` with that rationale.
+
+## Unreleased — Apple Mail & Reminders incremental sync (2026-06-07)
+
+### Pro connectors
+
+- **Apple Mail & Reminders now ingest incrementally** (previously the connectors
+  could connect + health-check but `fetch_since` was a no-op awaiting the host
+  helper). Both halves landed:
+  - **Swift host helpers** (`packages/desktop/swift/`): `ceridmail since <iso>`
+    walks the Mail.app `.emlx` archive (strips the length prefix, parses RFC822
+    headers + body, mtime-prefiltered and bounded per run) and `ceridreminders
+    since <iso>` fetches EventKit reminders modified after the cursor — both emit
+    oldest-first JSON. `CeridMail` is now in the Swift build set.
+  - **Python connectors**: real `fetch_since` marshals the helper subprocess,
+    ingests each item via the DI sink, and advances the sync cursor per artifact
+    (crash-safe at-least-once; `ingest_content` dedups re-delivery). Safe no-op
+    when the helper isn't installed or the ingest sink isn't wired.
+  - The connector poll worker now treats `apple_mail` / `apple_reminders` as
+    pollable kinds, so a connected source syncs on the `SCHEDULE_SOURCE_POLL`
+    cadence. Reading the archives requires the helper's TCC grant (Full Disk
+    Access for Mail; Reminders access), inherited from the signed desktop bundle.
+- **Desktop host invoker for Reminders.** The desktop app now reads Reminders by
+  invoking the bundled `ceridreminders` helper (EventKit is unreachable from the
+  Node/TS layer, so this is the host path), parsing its JSON and posting each
+  reminder to `/ingest/structured` — mirroring the existing Apple Mail/Notes
+  desktop connectors. An **Apple Reminders card** in the Sources → Apple Sources
+  pane shows the reminder/list counts (or a "needs access" state) and a
+  one-click "Sync to KB" action, alongside the Notes/Mail/Messages cards.
+
+## Unreleased — GA engineering close-out: Apple suite, idempotent ingest, inference reliability (2026-06-06 → 2026-06-07)
+
+### Pro connectors
+
+- **Apple Mail + iMessage readers complete the Pro Apple suite.** Joining the
+  already-shipped Notes, Calendar, and Photos readers, both ship behind their feature
+  gate and TCC / Full-Disk-Access consent; iMessage honors Private Mode (Level 2+) at
+  query time. With these landed the Pro-gating allowlist is now **empty** — every Pro
+  flag has a runtime gate. (#130, #133)
+
+### Model management
+
+- **Model-currency + hardware-compatibility guard.** Settings and the setup wizard now
+  surface a `GET /models/doctor` report that flags stale or hardware-incompatible model
+  assignments (e.g. a model known to crash on the detected GPU). (#132)
+
+### Ingestion & retrieval
+
+- **Idempotent ingest.** Artifacts get a content-addressed `artifact_id` (content hash)
+  with deterministic chunk ids and `upsert` / `MERGE` writes, so re-delivering the same
+  content produces zero duplicate chunks (concurrency-safe via the id-unique constraint). (#144)
+- **Ingestion / corpus backlog cleared.** Server-side URL fetches route through a shared
+  SSRF guard (`safe_fetch`: scheme allowlist + resolve-and-reject-internal + per-hop
+  revalidation); failed ingests land in a dead-letter store; per-source quality-floor is
+  enforced; daily-digest items carry tags; community summaries are length-capped. (#140)
+- **Source kinds are capability-gated.** `GET /sources/kinds` reports availability
+  (available / oauth / coming_soon) and the UI disables unavailable kinds — no more
+  `POST /sources` 501s; edge attestation defaults honestly to `inferred`. (#142)
+
+### Reliability & observability
+
+- **Per-workload inference circuit breakers.** Separate `quenchforge-chat` / `-embed` /
+  `-rerank` breakers with retry inside the breaker; `/health.inference_routing` reports
+  truthful serving / degraded state. (#138)
+- **NLI-faithfulness benchmark published** as the soak floor —
+  `docs/NLI_FAITHFULNESS_BENCHMARK.md` (faithfulness 0.93, recall@10 0.842), with a
+  per-intent soak metric wired. (#129)
+
+### Operability / CI
+
+- **Stack-launch safety.** `start-cerid.sh` asserts the compose project identity, refuses
+  to open a data dir a foreign container already bind-mounts (corruption guard), and
+  repairs a corrupt Redis AOF before boot.
+- **`make prepush`** gives full pre-push parity with the remote `lint` job (the drift +
+  silent-catch gates that `ci-local` alone omits). (#141)
+- **Live-stack CI is fully namespaced** (`-ci` containers / isolated network / offset
+  ports / project-scoped volumes / distinct image identity) so the merge-only
+  `preservation` + `benchmark-slo` gates on a self-hosted runner can no longer clobber a
+  co-located dev stack.
+
+### Dependencies
+
+- **Embeddable widget dev stack upgraded** — TypeScript 6.0, jsdom 29, vite-plugin-dts 5
+  (now with `@microsoft/api-extractor` for single-file type bundling; `rollupTypes` →
+  `bundleTypes`), jest-axe 10, axe-core 4.12. (#152)
+- Python (python-docx 1.2, python-pptx 1.0.2, extract-msg 0.55, pywhispercpp 1.5, ragas
+  floor 0.4.3), nginx 1.31-alpine, and the `src/web` npm group bumped; 6 dev-scope
+  security alerts cleared. (#116–#122, #151, #153)
+
+## Unreleased — soak metric: chunks-per-answer instrumentation (2026-06-05)
+
+### Observability — K-program soak
+
+- **Chunks-per-answer is now measured end-to-end.** The grounded-answer path
+  (`pkb_answer_with_citations`) records one sample per answer — the retrieved-chunk
+  count, tagged by surface-router intent (compiled-summary vs baseline) — into a daily
+  Redis list. `scripts/k_program_metrics.py` reads those lists and reports the median
+  reduction. Closes the open half of the soak's metric 4 (the collector previously read
+  scalar keys nothing wrote); the metric is now soak-evaluable. Best-effort emit: a
+  metric write never fails a user query.
+
+## Unreleased — Commercial-GA P0: Pro-gating truth-up + external-client backend (2026-06-01)
+
+### Pro-tier gating truth-up & lock-in
+
+- **Plugin loader now loads class-based plugins.** `ConnectorPlugin`/`ParserPlugin`
+  subclasses (gmail, outlook, google/outlook calendar, apple calendar/photos, meeting
+  capture) failed to load — the loader required a module-level `register()`, mis-read
+  dict-form `requires`, and lacked package context for relative imports. Fixed all three;
+  added a boot test so Pro connectors can't silently fail to register their DataSources.
+- **Gating regression lock.** Pruned the Pro-gating allowlist (18→4) so the lint asserts
+  gates for the 15 already-gated flags; gated `advanced_analytics` (the `/analytics` surface)
+  behind `@require_feature`; generated `docs/TIER_MATRIX.md` from the flag source of truth
+  with a drift gate; drove the Settings → Pro pane from the live `/billing/capabilities`
+  (which now returns a complete flat `features` map).
+
+### Pro billing & licensing
+
+- **Pro purchase & management surface.** Buy Pro through hosted checkout, manage the
+  subscription via the customer portal, and see live subscription status in Settings → Pro.
+- **Offline-verifiable license keys.** Manually-entered Pro keys validate locally — no
+  phone-home — with a tamper-proof embedded expiry. An activated tier now survives restarts
+  and lapses gracefully back to Community when the license expires (Stripe-managed
+  subscriptions remain governed by their billing lifecycle). License status reports the
+  remaining period.
+
+### External agent / client backend support
+
+- **Custom knowledge domains are first-class.** Clients may ingest to and query their own
+  domain names without pre-registration; unknown domains degrade to empty results instead
+  of `400`. Custom collections are surfaced in `/health.invariants.custom_collections`, and
+  the built-in "empty collection" signal is scoped to built-in domains.
+- **Provenance metadata on ingest.** `/sdk/v1/ingest` and both SDKs (`kb.ingest(metadata=…)`)
+  preserve arbitrary client metadata end-to-end (previously dropped to tags-only).
+- **Flexible LLM task types.** `/sdk/v1/llm/complete` accepts client-defined `task_type`
+  values, mapping unknown ones to safe internal routing instead of erroring.
+- **Docs:** `SDK_GUIDE.md` gains a "Using Cerid as a backend for external agents / clients"
+  guide; SDK quickstarts corrected to the resource API (`client.kb.*`, `client.system.*`).
+
+## Unreleased — post-rc2.1: auto-latest model selection + CI hardening (2026-05-31)
+
+### Backend — model selection
+
+- **Auto-find + auto-apply the latest in-family model per role.** New
+  `core/routing/model_catalog.py` fetches the OpenRouter catalog and resolves
+  the newest in-family version for each role's pinned model — preserving variant
+  and size suffixes (`-fast`, `:free`, `70b`), never crossing families, and
+  leaving ids without a dotted version pinned. `POST /models/updates/check`
+  (dry-run diff), `POST /models/updates/apply` (persist assignments + regenerate
+  the Bifrost config), and `GET /models/updates` now do real catalog-backed work
+  (were no-op stubs). A weekly `model_auto_update` scheduler job adopts the
+  latest per role, gated by `MODEL_AUTO_UPDATE_ENABLED` (default on) /
+  `SCHEDULE_MODEL_AUTO_UPDATE`. (#100)
+
+### Dependencies
+
+- pydantic `>=2.13.4,<3`, PyStemmer `>=3.0.0` (→ 3.1.0), cryptography
+  `>=48.0.0,<49`, reportlab `>=4.5.1,<5` (dev), sentry-sdk `>=2.61.0`, and the
+  npm group (14 updates). Locks regenerated via `scripts/regen-lock.sh`. (#64,
+  #98, #101, #106)
+- pywhispercpp `transcribe()` call uses `detect_language=True` for auto-detect —
+  the newer stub types `language` as `str` (not `str | None`). (#106)
+
+### CI / build
+
+- Temporal ("right now") queries route to a web-search-capable model; the
+  model-router test was de-time-bombed. (#99)
+- Live-stack gates (`preservation`, `benchmark-slo`): runner is now
+  `LIVESTACK_RUNNER`-driven, defaulting to `ubuntu-latest` so they run even when
+  the self-hosted Mac Pro pool is offline. On the self-hosted runner they build a
+  venv from the runner's `python3.12` instead of `actions/setup-python` (which
+  `sudo`s on macOS). (#103, #105, #107)
+- `lock-sync` seeds the committed lock before `pip-compile` so it only diffs on
+  real `requirements.txt` changes (no more daily latest-resolve drift); Trivy
+  scans add `ignore-unfixed: true`; chromadb + perl-base CVEs ignored in
+  pip-audit and Trivy with dated re-eval. (#102, #108, #109)
+
+## v1.0.0-rc2 — 2026-05-27
+
+### RC2: Ingestion Experience workstream (2026-05-24)
+
+Full delivery of `tasks/2026-05-24-ingestion-experience-plan.md` — the
+single largest UX upgrade between RC1 and GA. Brings a real `(:Source)`
+model, a unified protocol-driven connector layer, 22 source kinds (11
+Core + 11 Pro) spanning 9 families, a recipe-driven adapter library
+for inbound webhooks, voice-note ingest, retention + quality-floor
+policy editing, OAuth scaffolding for Gmail / Outlook, host-side Apple
+ecosystem stubs, a Manifest V3 browser extension, and a full Sources
+pane redesign (hero, FAB, wizard, detail pane, Constellation MVP,
+hotkey overlay).
+
+### Backend — ingestion architecture
+
+- **(:Source) node + protocol layer** — Neo4j `(:Source)` records the
+  canonical state of every ingestion stream; migration `m0003`
+  installs the constraint + indexes. `core.ingest.sources.base` defines
+  the `SourceConnector` protocol (`connect` / `fetch_since` /
+  `health_check` / `disconnect`), and `app.db.neo4j.sources` is the
+  data-access shim. Eight connectors registered: RSS, URL-watch,
+  webhook, bookmarks (NETSCAPE HTML one-shot), clipboard, apple_mail,
+  apple_reminders. (`45a95e4`, `534cd44`, `261a7ad`, `4ab69ed`)
+- **Sync-cursor service** — Redis-first hot reads with Neo4j fallback +
+  cache warm; writes go to both so a Redis flush loses at most the
+  last in-flight cursor. (`45a95e4`)
+- **Sources REST surface** — `GET /sources`, `GET /sources/kinds`,
+  `POST /sources`, `GET /sources/{id}`, `POST /sources/{id}/test`,
+  `POST /sources/{id}/policy`, `GET /sources/{id}/webhook-url`,
+  `DELETE /sources/{id}`. Credentials redacted on every read except
+  the dedicated webhook-url endpoint. (`534cd44`, `d105c01`)
+- **Webhook receiver** — `POST /sdk/v1/ingest/webhook/{token}` with
+  token-only or HMAC-required modes; constant-time signature compare;
+  Redis enqueue per source-id. Adapter-recipe routing via the
+  `core.ingest.adapters` package: 13 registered recipes spanning Slack,
+  Discord, Teams, Matrix (chat_capture); GitHub, Linear, Sentry,
+  Stripe (dev_events); Readwise, Pocket, Instapaper, Raindrop,
+  Telegram (external_adapter). A provider→canonical-kind index lets
+  the receiver dispatch on `config.provider` while the source itself
+  stays `kind=webhook` (security boundary). (`8b71e06`, `261a7ad`)
+- **Voice-note endpoint** — `POST /sdk/v1/ingest/voice-note` (multipart
+  audio). Reuses the meeting_capture decode + transcribe stages;
+  synchronous so the overlay can surface the transcript inline.
+  Returns 501 with install guidance when the plugin runtime deps
+  aren't present. (`261a7ad`)
+- **Knowledge Stats** — `GET /observability/knowledge-stats` (Redis-
+  cached, 60s TTL), `GET /observability/knowledge-stats/history` for
+  sparkline rendering, daily MERGE snapshot scheduler. SSE
+  `/observability/source-activity` skeleton for the live activity
+  stream. (`45a95e4`)
+- **Per-source retention** — `core.ingest.retention` policy planner
+  (keep_all / days / count modes); `app.services.retention` applies
+  plans against Chroma + Neo4j; nightly `SCHEDULE_RETENTION_ENFORCE`
+  scheduler entry. (`d105c01`)
+- **Per-source quality floors** — `app.services.quality_floors` with
+  per-source memoization + invalidator; floors editable via the
+  `/sources/{id}/policy` endpoint. (`d105c01`)
+- **OAuth scaffold** — `app.routers.oauth` exposes `/oauth/google/start`
+  + `/callback` and the Microsoft mirror, Redis-backed state tokens
+  with 10-minute TTL and single-use semantics. Token exchange against
+  the upstream providers is configuration-driven (sibling MCP). (`d105c01`)
+- **Apple ecosystem connectors** — `apple_mail` + `apple_reminders`
+  Python connectors subprocess to the host-side Swift helpers; status
+  reflects helper binary availability. (`4ab69ed`)
+
+### Frontend — Sources pane redesign
+
+- **Knowledge Stats hero** — Liquid Glass card with five metric cards
+  (artifacts / chunks / entities / edges / diversity), each carrying a
+  60×16 SVG sparkline; 7d / 30d window toggle; 22-segment gold→teal
+  diversity bar; click-through navigation to filtered destinations.
+  (`8b71e06`)
+- **Empty-state gallery** — 22-tile picker, Core/Pro split with lock
+  badges on Pro; `.cerid-stagger` cascade on entrance. (`534cd44`)
+- **Add-Source FAB radial menu** — 9-petal arc with
+  `.cerid-radial-stagger`, ⌘⇧S toggle, Esc + click-away dismiss.
+  (`534cd44`)
+- **Source-add wizard** — three-step dialog (pick → configure →
+  result), per-kind config UIs for rss / url_watch / webhook,
+  `.metric-value-pulse` on the result `connection_time_ms`. (`534cd44`)
+- **Source-detail pane** — Liquid Glass header, Activity / Health /
+  Policy / Danger zone sections; retention picker + quality-floor
+  slider commit in one PATCH. (`d105c01`)
+- **Sources Constellation MVP** — R3F scene with central anchor +
+  orbital source nodes, family-color palette, auto-rotate. Reuses the
+  `vendor-r3f` chunk (no new bundle cost). (`d105c01`)
+- **Live HUD ticker** — thin strip above the hero showing total
+  artifacts, ingestion rate, median connect time, diversity. (`d105c01`)
+- **Webhook share card** — Liquid Glass receiver-URL + curl-example
+  surface in the wizard's result step. (`d105c01`)
+- **Pro upgrade overlay** — Liquid Glass dialog for Pro-gated kinds.
+  (`d105c01`)
+- **Voice-note overlay** — Liquid Glass dialog with WebAudio waveform
+  (32-bar peak sampler at rAF cadence), MediaRecorder capture, ⌘⇧V.
+  (`261a7ad`)
+- **Hotkey overlay** — `useHotkey` hook + Sources-context Radix dialog,
+  `?` to open, ⌘1-⌘4 sub-tab switching. (`8b71e06`)
+- **Install-extension card** — Chrome + Firefox deep-link surface for
+  the new browser extension. (`4ab69ed`)
+- **Sparkline primitive** — `components/ui/sparkline.tsx`, zero-dep
+  SVG, tweens via the `.cerid-sparkline-pulse` utility. (`45a95e4`)
+
+### Host-side scaffolds
+
+- **`packages/desktop/swift/CeridMail/`** — Mail.app archive reader
+  with subcommands `{scan | since | message}`; .emlx walker wires
+  alongside the host-binary build. (`4ab69ed`)
+- **`packages/desktop/swift/CeridReminders/`** — EventKit Reminders
+  reader, TCC-scoped via `requestFullAccessToReminders` (macOS 14+).
+  (`4ab69ed`)
+- **`packages/desktop/shortcuts/`** — three Apple Shortcuts action
+  templates (Save to Cerid / Search Cerid / Ask Cerid) in JSON form;
+  operator generates `.shortcut` plists from the templates. (`4ab69ed`)
+- **`packages/extension/`** — Manifest V3 browser extension; popup
+  with Save Page + Open Cerid; inline readability extractor; Playwright
+  spec; works on Chrome + Firefox. (`4ab69ed`)
+
+### Tests
+
+- Five new unit suites (webhook_tokens 5 cases, sparkline 6 cases,
+  knowledge-stats-hero 6 cases).
+- Three new beta E2E specs (E-11 Sources pane mount + paint budget,
+  E-12 webhook recipe round-trip, E-13 Knowledge Stats p95 regression
+  guard).
+- Two new integration test files (`test_meeting_capture_e2e.py`,
+  `test_apple_connectors_e2e.py`) — skip-aware when fixtures or
+  helper binaries aren't present.
+
+### Regression posture
+
+- ruff / mypy clean, import-linter `core → app` KEPT across every
+  commit, eslint 0 warnings, vitest 1339/1341 (2 pre-existing latency-
+  SLO benchmarks unrelated).
+- Vite main bundle steady at 534.75 KB through all six phase commits.
+- env / router-registry / sync-manifest / sdk-openapi drift gates
+  all green.
+- Live contract matrix verified against `http://localhost:8888` for
+  every new endpoint.
+
+### Commits
+
+`45a95e4` Phase 1 · `8b71e06` Phase 2A · `534cd44` Phase 2B ·
+`261a7ad` Phase 2C · `d105c01` Phase 3 · `4ab69ed` Phase 4a + 4b + 5
+
+### Post-rc1 polish: tech-debt sweep + S2 doc reconciliation + Sentry/SDK closeouts (2026-05-24)
+
+Tail-end work on top of v1.0.0-rc1, after the UX polish sprint, executing
+phases S1–S3 of the unified GA program plus the SDK-coverage audit
+findings.
+
+### Tech debt + observability
+
+- **Atlas hover type fix** — `AtlasNodeAttributes.highlighted?: boolean`
+  declared so the K-program sigma hover handler typechecks under CI's
+  stricter `keyof T` inference. The CI failure cascaded across `frontend`,
+  `preservation`, and `benchmark / slo` via the cerid-web docker build;
+  one fix cleared all three. (`541218b`)
+- **Graph timeline broad-excepts wired to `log_swallowed_error`** — four
+  sites in `app/routers/graph.py` (timeline cache read, neo4j-unavailable,
+  cypher-failed, cypher-exec-failed) migrated from
+  `logger.debug`/`warning` to the canonical helper so failures surface
+  in `/health.swallowed_errors_last_hour` and Sentry context tagging.
+  (`88b8b68`)
+- **Drift artifacts regenerated** — `docs/ROUTER_REGISTRY.md` 362 → 363
+  routes (the K5 `/concepts/{community_id:path}` row that had been
+  missing since the K-program landed); `requirements.lock` brought into
+  sync with pip-compile for fastapi/starlette/uvicorn patches. (`b39ea30`)
+
+### Documentation reconciliation (Phase S2 of the unified GA program)
+
+- **`docs/COMPLETED_PHASES.md`** — five new entries cover the gap from
+  v0.93.7 → v1.0.0-rc1: v0.93.8–v0.95.x stack, v0.96.0+v0.96.1 ablation
+  hardening, v1.0 master plan Phases A–N + L + M, Knowledge Architecture
+  program K1–K6, v1.0.0-rc1 + UX polish sprint.
+- **`CLAUDE.md` + `docs/ROADMAP.md`** — preservation counts corrected
+  to actual (55 test functions across 11 modules; was claimed 79/15).
+- **`tasks/todo.md`** — pruned 289 → 92 lines: K-program section flipped
+  to SHIPPED with pointer to the master plan's S4 metric soak;
+  pre-v1.0 historical sections removed (v0.96 candidate themes,
+  Workstream E status, Post-v0.90.0 candidates, cerid-trading-agent
+  backend issues — all resolved or absorbed into the unified GA program).
+- **`tasks/lessons.md` graduation** — 486 → 332 LOC. Tightened
+  operational gotchas to recipe-form while preserving the irreplaceable
+  hardware/recovery runbooks (GPU on Mac Pro Vega II, Neo4j WAL recovery,
+  Docker bind-mount drift, setup-wizard env file) at full length.
+  Removed two entries already cross-referenced as graduated in the
+  table above (Chrome localhost cache → CONVENTIONS Frontend;
+  external:true network bridge → CONVENTIONS Docker). (`5ec9f6d`)
+
+### Frontend Sentry production wiring (GA_CHECKLIST P0)
+
+Three real gaps closed in the otherwise-wired `@sentry/react` integration:
+
+- **`AppErrorBoundary.componentDidCatch` → `captureException`** with the
+  React component stack as a `componentStack` extra. Render-time crashes
+  previously never reached production observability. (`645e0d2`)
+- **`lib/sentry.ts` prefers `window.__ENV__.VITE_SENTRY_DSN_WEB`** over
+  `import.meta.env`, matching the runtime-override pattern already in
+  `lib/api/common.ts` for `VITE_MCP_URL`. DSN rotation no longer
+  requires a rebuild.
+- **`docker-entrypoint.sh` + `docker-compose.yml`** emit
+  `VITE_SENTRY_DSN_WEB` + `VITE_APP_VERSION` into `window.__ENV__` at
+  container boot, plumbed from the host environment.
+
+`CLAUDE.md` Sentry table updated to list `cerid-ai-web` as Active. The
+DSN itself is operator-provisioned (next step: create the
+`cerid-ai-web` Sentry project + add `SENTRY_DSN_WEB` to the GitHub
+secrets + `.env` on operator hosts).
+
+### S4 soak instrumentation
+
+- **`scripts/k_program_metrics.py` polish** — auto-load repo-root `.env`
+  for host-side runs; `notifications_disabled_classifications=["UNRECOGNIZED"]`
+  silences Neo4j property-key warnings on fresh corpora; `_fmt()`
+  renders `None` as em-dash in the `--cron` weekly markdown so rows
+  scan cleanly before metric writers have emitted samples. Verified
+  end-to-end against the live stack: all 6 metrics report
+  `available: true`. (`e4e60a1`)
+
+### SDK client coverage (audit closeout, pre-GA)
+
+Server exposed 15 endpoints at wire-protocol 1.1.0; client packages
+at 0.1.0 covered only 12 of them. Three real capability gaps closed
+across both Python + TypeScript clients:
+
+- **`GET /sdk/v1/memory/extract/jobs/{job_id}`** — async memory-extract
+  callers received a `job_id` from `POST /memory/extract` and had no
+  SDK method to poll it; the entire `MEMORY_QUEUE_MODE=async` flow was
+  broken end-to-end through typed clients.
+- **`POST /sdk/v1/llm/complete`** — smart-routed LLM completion across
+  FREE/CHEAP/CAPABLE/RESEARCH/EXPERT tiers with `slo_budget_ms`-aware
+  tier filtering. New `LLMResource` (sync + async) on the Python client;
+  new `LLMResource` on the TypeScript client.
+- **`POST /sdk/v1/ingest/external`** — adapter-shaped ingest for
+  Readwise / Pocket / Telegram-bot / Raindrop / Instapaper integrations.
+  `kb.ingest_external()` (Python) / `kb.ingestExternal()` (TypeScript).
+
+Client packages bumped **0.1.0 → 0.1.1** (patch, additive — both stay
+pre-1.0 through the v1.0 RC cycle and flip to 1.0.0 when the main
+product goes GA). Wire-protocol stays at 1.1.0 (no server change —
+these endpoints already shipped server-side; only the clients caught
+up). `docs/SDK_GUIDE.md` corrected from "12 endpoints" to "15
+endpoints"; full table refresh. (`4ca8f2c`)
+
+### Verification
+
+- 5,537 backend tests + 1,329 frontend tests + 24 Python SDK tests +
+  28 TypeScript SDK tests pass on `c739eb8`.
+- CI green on `main` end-to-end after the drift-artifact regeneration
+  and Atlas TS fix.
+- Public mirror synced (`scripts/sync-repos.py`); leak-scanner clean.
+
+### UX polish sprint: motion design system + Liquid Glass + shared-element transitions (2026-05-24)
+
+Three-commit cohesive UX sprint atop v1.0.0-rc1. Introduces a project-wide
+motion design system (one easing curve + four duration steps), the Liquid
+Glass surface treatment, View Transitions API integration with
+shared-element morphing, and broad polish across panes, lists, popovers,
+and buttons. Authored alongside two new global skills
+(`fluid-design` + `cerid-ux-best-practices`) that codify the patterns
+for future contributors and agent sessions.
+
+### Frontend — motion foundation
+
+- **Motion design tokens** (`src/web/src/index.css`): `--ease-fluid`
+  (cubic-bezier 0.16/1/0.3/1) and four duration tokens —
+  `--duration-fast` 120ms (hover/focus/press), `--duration-snug` 180ms
+  (chip/menu/popover), `--duration-medium` 260ms (drawer/sheet/mode swap),
+  `--duration-grand` 480ms (hero/opening sequence). Every animation now
+  references these instead of hardcoding values.
+- **New utilities**: `.liquid-glass` (backdrop-filter + SVG refraction +
+  inset rim light, with `prefers-reduced-transparency` solid fallback),
+  `.cerid-stagger` / `.cerid-stagger-fast` (`--i`-indexed list cascade
+  capped at 8 to avoid jank on long lists), `.cerid-press` (0.97 scale
+  on `:active`, longhand-declared so Tailwind transition utilities don't
+  clobber it), `.cerid-fade-swap` (data-state-driven content cross-fade),
+  `.metric-pulse` + `.metric-value-pulse` (teal halo + scale tween on
+  numeric value change). All honor `prefers-reduced-motion`.
+
+### Frontend — shared-element transitions
+
+- **`lib/view-transitions.ts`**: feature-detected wrapper around
+  `document.startViewTransition` with `withViewTransition(update)` and
+  `tagForTransition(el, name)` helpers. Bypasses on
+  `prefers-reduced-motion` or when the API is absent (Firefox <129 /
+  Safari <18 fall through to direct execution).
+- **Shared-element morphs wired**: focal-entity name morphs between the
+  Subjects mode-switcher chip and the Wiki H1 (`view-transition-name:
+  "focal-entity"`); Quick-capture FAB morphs into the modal surface
+  (`"quick-capture-surface"`); sidebar active-pane indicator slides
+  between buttons (`"active-pane-indicator"` — consolidated onto the
+  shared helper from the prior inline implementation).
+
+### Frontend — Liquid Glass surfaces
+
+- **`<LiquidGlassDefs />`** (`components/ui/liquid-glass-defs.tsx`):
+  SVG `<filter>` with `feTurbulence` + `feDisplacementMap` mounted once
+  at App root; reused by every `.liquid-glass` surface via
+  `filter: url(#cerid-liquid-glass)`. Subtle refraction (scale=6) gives
+  the surface a hint of physical material without distorting content
+  underneath.
+- **Applied to**: Atlas lens panel, Tour controller (idle button +
+  loading pill + control pill + subtitle bar), Quick-capture modal
+  panel, Search palette, Wiki entity-detail sticky header.
+
+### Frontend — opening sequence
+
+- **`<OpeningSequence />`** (`components/ui/opening-sequence.tsx`):
+  3-phase state machine — "playing" (gold ring reveals, navy shield,
+  teal opening "C" draws in, inner glow blooms, 1100ms) → "fading"
+  (overlay fades to transparent, 400ms) → "done" (overlay unmounts,
+  content rises). `sessionStorage` flag `cerid:opening-sequence-played`
+  skips on revisit; `prefers-reduced-motion` also skips. Mounted at
+  z-index 9999 with a navy backdrop above all panes.
+
+### Frontend — list stagger + cross-fades
+
+- **List stagger**: Conversation list, Wiki entity list, Subjects search
+  palette results now cascade in via `.cerid-stagger-fast` with
+  `--i = Math.min(idx, 8)`. Applied only to lists meeting the user on
+  navigation; in-place updates are not staggered.
+- **Cross-fade mount**: Wiki entity-detail-view root and Constellation
+  root use `.cerid-stagger-fast --i=0` so the canvas/content fades up
+  rather than hard-cutting from the loading state.
+
+### Frontend — press anticipation + popover origin
+
+- **Button**: `.cerid-press` applied at the cva base variant so every
+  shadcn `<Button>` gets the 0.97 scale-down on `:active` with token
+  durations. Replaced `transition-all` (which was clobbering the press
+  transition) with the longhand declaration inside `.cerid-press`.
+- **Popover**: `transformOrigin` pinned to
+  `var(--radix-popover-content-transform-origin)` so menus grow from
+  their trigger, not from the center. (`<Select>` was already
+  origin-aware via the shadcn template.)
+
+### Frontend — sigma hover affordance
+
+- **Atlas** (`components/subjects/atlas/Atlas.tsx`): `enterNode` /
+  `leaveNode` handlers toggle sigma's built-in `highlighted` graph
+  attribute, with a try/catch swallowing the race where a node is
+  removed mid-event. Provides a hover affordance on canvas-rendered
+  nodes that CSS hover transforms can't reach.
+
+### Frontend — knowledge panel metric pulse
+
+- **`<MetricCard>`** (`components/analytics/knowledge-panel.tsx`):
+  tracks the previous value with `useRef`, applies `.metric-pulse`
+  (teal box-shadow halo) + `.metric-value-pulse` (scale + brand-teal
+  color tween) for 900ms when the underlying value changes. Reduced-
+  motion compliant.
+
+### Frontend — utilities
+
+- **`lib/flip.ts`** + tests: vanilla FLIP (First, Last, Invert, Play)
+  helper for layout changes. `snapshotPositions`, `playFromSnapshot`,
+  and the `flip(elements, mutate, options?)` convenience wrapper.
+  WeakMap-tracked in-flight cancels so overlapping `flip()` calls on
+  the same element don't race on inline-style resets. 5 unit tests
+  including the concurrent-call regression case.
+
+### Skills (global)
+
+- **`fluid-design`** (kemiljk/fluid-design) installed at
+  `~/.agents/skills/fluid-design`. Karim El Kholy's 10-principle guide
+  to fluid interfaces (physics-based motion, interruptibility, direct
+  manipulation, velocity preservation, shared-element transitions,
+  input-method adaptation, animated layout, rubber-banding, choreography,
+  reduced motion).
+- **`cerid-ux-best-practices`** (new, authored this sprint) at
+  `~/.agents/skills/cerid-ux-best-practices`. Codifies the Cerid-specific
+  patterns the codebase has converged on — motion tokens, Liquid Glass
+  utility, View Transitions helpers, stagger + FLIP, origin-based
+  popovers, metric-pulse pattern, sigma hover affordance, opening
+  sequence, mode swap choreography, anti-patterns, and a cohesion
+  checklist. Available to future sessions across every supported agent
+  surface (Claude Code, Codex, Cursor, etc.) via the standard skills
+  symlink.
+
+### Tests
+
+- `__tests__/opening-sequence.test.tsx` — 5 tests: SVG renders on first
+  paint, skip when sessionStorage flag set, skip on prefers-reduced-
+  motion, auto-dismiss after 1400ms, `LiquidGlassDefs` mounts the
+  filter.
+- `__tests__/view-transitions.test.ts` — 6 tests: fallback when API
+  unavailable, uses `startViewTransition` when present, bypasses on
+  reduced-motion, `tagForTransition` null + restore semantics.
+- `__tests__/flip.test.ts` — 5 tests covering snapshot semantics,
+  reduced-motion bypass, empty-input no-op, compose helper, and the
+  concurrent-call regression.
+
+### Verification
+
+- Frontend Vitest suite: 1325 passed / 2 skipped (up from 1320 / 2).
+- `tsc --noEmit`: 0 errors.
+- `vite build`: succeeds with the long-standing ~800KB bundle advisory.
+- ESLint: 0 errors; all 8 warnings on touched files are pre-existing.
+- Independent code review (`feature-dev:code-reviewer` subagent): two
+  high-confidence findings (Button transition collision, FLIP concurrent
+  race) caught and fixed in the follow-up commit `314f9cd`.
+
+### Commits
+
+- `a79c276` feat(ux): Liquid Glass + opening sequence + mode transitions
+  + View Transitions API
+- `800a765` feat(ux): motion tokens, stagger, FLIP, glass + sigma hover
+  sweep
+- `314f9cd` fix(ux): review-driven follow-ups to motion sweep
+
+## v1.0.0-rc1 — 2026-05-23
+
+### Phases K2–K6: Cross-surface linkage + surface router + Karpathy log/index + ops (2026-05-22)
+
+Completes the Knowledge Architecture program (K1 shipped earlier
+today). The four knowledge surfaces (wiki / vector / graph /
+episodic memory) now cross-link, and the LLM has a top-level
+router that picks among them.
+
+### Backend (K2 — Cross-surface linkage)
+
+- **Memory→entity edges** (`core/agents/memory.py`): every stored
+  memory now enqueues an `EntityExtractionJob` so its mentioned
+  entities flow into the graph. Reuses the K1.1 machinery —
+  the existing event chain handles the wiki refresh. Default ON,
+  toggleable via `CERID_MEMORY_ENTITY_EXTRACTION_ENABLED=false`.
+- **Episodic memory on wiki pages** (`app/services/wiki_pages.py`,
+  `app/db/neo4j/wiki.py`): `WikiEntityPage` gains an
+  `episodic_memories` field; up to 5 recent memories per entity
+  surface on the wiki page alongside source citations + external
+  references. Distinct from `source_artifacts` because their
+  provenance and decay characteristics differ.
+- **Typed contradiction edges** (`app/db/neo4j/contradictions.py`):
+  `(:Entity)-[:HAS_CONTRADICTION]->(:ContradictionFinding)` written
+  alongside the existing `entity_slug` property. Lets graph
+  traversals avoid property-filter scans.
+- **Contradiction-triggered refresh** (`app/services/contradiction_log.py`):
+  `log_contradiction` emits a `contradiction_detected` event that
+  bypasses the wiki refresh debounce — when the corpus disagrees
+  with itself, the user deserves a fresh summary now.
+- **Weekly drift lint** (`app/scheduler.py`): Sunday 4 AM cron
+  (`SCHEDULE_WIKI_DRIFT_LINT`) finds entities with unresolved
+  contradictions on stale summaries (force refresh) + high-mention
+  entities with no summary (debounced refresh). Bounded by
+  `WIKI_DRIFT_LINT_LIMIT` (default 50).
+
+### Backend (K3 — Surface router)
+
+- **`core/retrieval/surface_router.py`** — top-level intent
+  classifier with five classes (compiled_summary / specific_fact /
+  relational / personal_context / mixed). Regex-only fast path
+  (~0.5ms per query); each intent maps to a primary surface +
+  fallback list. Extracts entity hint for compiled-summary intents
+  so callers can fuzzy-lookup a slug.
+- **`pkb_agent_query` is now surface-aware** (`app/tools.py`):
+  optional `surfaces=[...]` arg restricts retrieval to a subset;
+  default uses the router. When the W surface fires and an entity
+  hint matches, the response includes a light `wiki_page`
+  projection (slug + name + summary + confidence band).
+- **`pkb_surface_route` MCP tool** (`app/mcp_tools/router.py`):
+  exposes the router as a tool so orchestrators can ask "which
+  surfaces should I consult" without re-implementing the
+  heuristics. Cost class: low.
+- **Wiki pages in `pkb_answer_with_citations`**
+  (`app/mcp_tools/retrieval.py`): when the surface router
+  classifies a compiled-summary intent and a wiki page resolves,
+  the page summary is prepended to the context budget as a
+  high-priority block (up to 2000 chars reserved). Response
+  `retrieval_meta` carries `surface_route` + `wiki_page` metadata.
+
+### Backend (K4 — Karpathy log + index)
+
+- **`KnowledgeLog` Neo4j label** (`app/db/neo4j/knowledge_log.py`):
+  append-only ledger written by `WikiRefreshJob.on_success` with
+  action / entity_slug / 200-char summary / timestamp. Karpathy's
+  `log.md` equivalent.
+- **`GET /wiki/log`** (paginated, filterable by entity_slug + since
+  timestamp) — chronological view of what the system learned.
+- **`GET /wiki/index`** — Karpathy-shaped catalog (slug + one-liner
+  + last_updated + activity_score + has_summary). LLM-readable for
+  slug discovery when fuzzy name matching misses.
+
+### Backend (K6 — Operational excellence)
+
+- **`/health.wiki_freshness`** (`app/routers/health.py`): six
+  metrics in one Cypher round-trip — total/active entity counts,
+  coverage percentages, unresolved contradictions, 24h log
+  activity. Powers the K6.2 dashboard.
+
+### Frontend
+
+- **`components/analytics/knowledge-panel.tsx`** (K6.2): six-card
+  Knowledge architecture metrics row inside Settings → Diagnostics
+  → Analytics. Warns when active coverage <80% or unresolved
+  contradictions >0.
+- **`AnalyticsPanel`** composes the new panel alongside the
+  Phase L visualizations.
+
+### Tests
+
+- **34 surface router tests** (intent classification, surface
+  mapping, precedence rules, MCP tool integration).
+- **6 K6.3 preservation invariants** — assert the wiring stays in
+  place: ingest hook present, entity extraction emits event,
+  wiki refresh subscriber auto-registered, surface router intent
+  classes stable, /health exposes wiki_freshness.
+- All K1+K2+K3+K4+K6 tests: **62 passing**. Pre-existing
+  ingestion + entity-extraction + wiki suite stays green
+  (146 + 50 tests still pass).
+- Frontend typecheck: clean.
+
+### Phase K1: Close the wiki orphan loop (2026-05-22)
+
+First phase of the Knowledge Architecture program (plan:
+`tasks/2026-05-22-knowledge-architecture-redesign.md`). Closes the
+gap that left `WikiRefreshJob` defined but never enqueued — entity
+wiki pages now compound on ingest, not on backfill scripts.
+
+### Backend
+
+- **Ingestion hook** (`app/services/ingestion.py`):
+  `_enqueue_entity_extraction_if_enabled` fires after the Neo4j
+  commit + Chroma flip on every `ingest_content` call. Default ON;
+  reverts to backfill-only via `CERID_ENTITY_EXTRACTION_ENABLED=false`.
+- **Event bus** (`app/processor/event_hooks.py`): lightweight
+  in-process pub/sub. `EntityExtractionJob` emits an
+  `entities_added` event with the extracted canonical_ids on
+  successful upsert; subscriber failures isolate so a broken
+  handler can't break the emitter.
+- **Wiki refresh subscriber** (`app/processor/subscribers/wiki_refresh.py`):
+  consumes `entities_added` events and enqueues `WikiRefreshJob`
+  per entity, gated by a per-entity Redis debounce
+  (`cerid:wiki:debounce:{slug}`, default 5 min TTL via
+  `WIKI_REFRESH_DEBOUNCE_TTL`). Fails open when Redis is down —
+  the orphan-loop bug we just fixed taught us under-refreshing is
+  worse than over-refreshing.
+- **Nightly stale-sweep cron** (`app/scheduler.py`):
+  `_run_wiki_stale_sweep` runs at 3 AM local (override via
+  `SCHEDULE_WIKI_STALE_SWEEP`), finds entities with
+  `summary_updated_at < now() - 24h` ordered by `mention_count
+  DESC`, enqueues `WikiRefreshJob` for up to
+  `WIKI_STALE_SWEEP_LIMIT` (default 100). Catches entities whose
+  ingest happened before this phase shipped.
+- **`pkb_wiki_lookup` MCP tool** (`app/mcp_tools/wiki.py`):
+  primary read entry for the Wiki surface. Three depth levels —
+  `summary` (lightweight), `full` (+ related + sources +
+  contradictions), `with_refs` (+ external Wikipedia/Wikidata).
+  Fuzzy-matches on miss so callers can pass either canonical
+  slugs (`org:tesla`) or natural names (`Tesla`).
+
+### Tests
+
+- 6 unit tests for the event bus (subscribe / emit / unsubscribe /
+  failure isolation).
+- 6 unit tests for the wiki refresh subscriber (debounce acquire,
+  debounce block, force-bypass, Redis-unavailable fail-open,
+  env-disable, empty-slug guard).
+- 8 unit tests for `pkb_wiki_lookup` (per-depth payload shaping,
+  fuzzy match auto-resolve, ResourceNotFoundError on miss,
+  InvalidParamsError on bad inputs).
+- 3 tests for the ingestion enqueue hook (default-on, env-off,
+  failure-swallow).
+
+All 23 new tests pass; full suite for ingestion + entity
+extraction stays green (146/146).
+
+### Phase M: Timeline + Tour preview + Wiki mini-viz + Saved-views generalization (2026-05-22)
+
+Round-trips the four Subjects modes (Atlas / Constellation / Timeline /
+Wiki) into a unified analytic surface. Saved views become a
+cross-mode concept; Timeline gets a real backend; tour mode opens up
+a Pro upgrade path via a 15s preview.
+
+### Backend
+
+- `GET /graph/timeline` — bucketed mention + entity-birth aggregation
+  over a configurable window (`?entity=…&period=30d&granularity=auto`),
+  Redis-cached for 60s. Granularity auto-resolves day/week/month based
+  on window size. Backs Subjects → Timeline and the Wiki mention-
+  sparkline.
+- `POST /graph/tour/generate` — new `preview: bool` flag returns a
+  clamped 15s / 3-stop tour for community users so Tour mode is
+  discoverable without a Pro flag. Full path still requires
+  `pro_visualization_tour`.
+- `/atlas/views` — saved views now accept the full Subjects mode
+  taxonomy (`atlas | constellation | timeline | wiki`) with a
+  Pydantic validator. New `?mode=` filter on the list endpoint.
+  Free tier capped at 3 pinned views (HTTP 402 above the cap);
+  any active Pro viz feature lifts the cap. Health endpoint
+  exposes `pro_unlocked` + `supported_modes`.
+
+### Frontend
+
+- `components/subjects/timeline/Timeline.tsx` — chronological
+  scrubber with period selector (7d/30d/90d/1y), play/pause,
+  1×/5×/10× speed, recharts BarChart + cumulative LineChart of
+  entity births.
+- `components/wiki/mention-sparkline.tsx` — collapsible 90-day
+  mention area chart in the Wiki entity page; lazy fetches and
+  deep-links into Subjects → Timeline.
+- `components/wiki/provenance-sankey.tsx` — Sankey of attestation
+  flow (Sources → bucket → entity), deep-links into Atlas with
+  the provenance lens.
+- `components/wiki/contradiction-link.tsx` — affordance to jump
+  from the Wiki contradictions block into Atlas with the
+  contradiction lens pre-active.
+- `components/subjects/subjects-views-sidebar.tsx` — per-mode
+  saved-views list on Constellation / Timeline / Wiki. Reads
+  tier + free-tier cap from the backend so the cap hint never
+  drifts from policy.
+
+### Tests
+
+- 22 backend tests for `/graph/timeline` (granularity, bucket
+  keys, period parsing, endpoint surface).
+- 4 backend tests for tour preview (community-tier access,
+  3-stop clamp, narration truncation, Pro ignores preview).
+- 7 backend tests for atlas-views generalization (mode
+  acceptance, unknown mode rejection, mode filter, free-tier
+  cap, Pro unlocks unlimited, health surface).
+- 9 frontend tests for the wiki mini-viz trio, 5 for the
+  SubjectsViewsSidebar. Pre-existing subjects-pane regression
+  flipped to assert the Timeline tab is enabled.
+
+### Phase L: Advanced Analytics (2026-05-22)
+
+Four visualizations land in Settings → Diagnostics → Analytics. Two
+free-tier (trust + growth), two Pro-tier (cost + quality timeline).
+
+### Backend
+
+`app/routers/analytics.py` — three new endpoints aggregating existing
+telemetry (no new storage):
+
+- `GET /analytics/ingestion-by-day` — bucketed Neo4j artifact counts
+  with per-domain breakdown + normalized intensity for the heatmap
+- `GET /analytics/cost-by-stage` — LLM cost grouped by `stage` tag
+  from the Redis time-series; unknown stages bucket to `other`;
+  Sankey-ready provider→stage edges
+- `GET /analytics/quality-timeline` — daily-averaged NDCG@10,
+  faithfulness, memory recall, verification accuracy with honest
+  gaps for days without samples
+
+Static `_STAGE_PROVIDER` mapping classifies each stage into one of:
+`ingest / retrieval / verification / curator / pro_features / other`.
+
+### Frontend
+
+Four visualization components in `components/analytics/`:
+
+- `TrustSunburst` — two concentric recharts Pies. Outer ring colored
+  by status, center colored by band, drill-down opens the existing
+  TrustScoreModal.
+- `GrowthHeatmap` — custom SVG 53×7 grid, brand-teal intensity
+  scale, click-to-deep-link into Sources → Activity with `?since=`.
+- `CostSankey` — recharts Sankey with custom node renderer for
+  label placement. Pro-gated with lock overlay.
+- `QualityTimeline` — recharts LineChart with four lines on a [0,1]
+  Y axis, `connectNulls={false}` for honest gaps. Pro-gated.
+
+`AnalyticsPanel` composes all four with cross-link wiring. Mounted
+into Settings → Diagnostics → Analytics tab via lazy Suspense; the
+existing AuditPane renders below.
+
+### Tests + docs
+
+- 12 backend (`test_analytics_router.py`) — empty-state paths, day
+  bucketing, intensity calc, stage attribution, unknown-stage
+  bucketing, Sankey edge construction, daily-average aggregation,
+  window validation
+- 11 frontend (`analytics-components.test.tsx`) — heatmap grid,
+  click-to-deep-link, Pro-lock overlays, latest-values headline,
+  composite panel render
+- 146-line `docs/PRO_ANALYTICS.md` — what's shown, REST surface,
+  data layer notes, cross-link map, troubleshooting matrix
+
+### Visualization library
+
+Used existing recharts 3.8.1 (Sankey + LineChart + Pie). The heatmap
+uses raw SVG — no new dependency. Trade-off worth noting:
+real-sunburst libraries (d3-hierarchy, @nivo/sunburst) would render
+true wedge-shaped rings; the two-Pie approach gives the same visual
+read for our use case while keeping the dep tree flat.
+
+---
+
+### Phase K: Daily Digest (2026-05-22)
+
+Pro-tier: scheduled LLM-synthesized "what happened in the last 24h"
+summary, persisted as a KB artifact + delivered via webhook event.
+
+### Day 1 — agent + scheduler
+
+`core/agents/daily_digest.py`:
+  - `generate_daily_digest()` async entry point fans three parallel
+    reads: recent artifacts (last N hours via `list_artifacts(since=)`),
+    curator-flagged content (`quality_score < 0.5`), and Phase J
+    inbox urgent + actionable threads.
+  - Deterministic `top_categories` (count by domain) + LLM-supplied
+    `highlight` annotations.
+  - Five-section structured output: top_categories / key_threads /
+    urgent / action_items / quality_alerts.
+  - Tolerant JSON parser (dict / fenced / embedded / heuristic).
+  - LLM-down: deterministic categories still ship; narrative
+    sections empty.
+  - Zero-activity day → minimal-but-explicit digest persisted, not
+    silence.
+  - Persists as KB artifact in new `digests` domain via
+    `/ingest/structured`.
+
+`_run_daily_digest` scheduler job (default cron `0 7 * * *`) gated
+by feature flag + `CERID_DAILY_DIGEST_ENABLED` env toggle. Fires
+`digest.ready` webhook event on success (payload includes
+digest_id, counts, persisted_artifact_id).
+
+### Day 2 — REST surface + Subjects filter
+
+`app/routers/digests.py`:
+  - `GET  /digests/latest`     → most recent summary
+  - `GET  /digests/recent`     → last N summaries (clamped 1-30)
+  - `GET  /digests/{date}`     → digest for ISO-8601 date
+  - `POST /digests/run-now`    → trigger immediately (Pro-gated;
+    bypasses env toggle since user opted in by hitting endpoint)
+
+Subjects pane: new `?since=ISO` URL param round-trip + visible
+filter chip that the user can clear. Digest notifications deep-link
+into Subjects with this param set, so "Open" shows last-24h state.
+
+### Day 3 — TAXONOMY + tests + docs
+
+  - `digests` registered in `config/taxonomy.py` TAXONOMY (sub_categories: daily / weekly / general).
+  - 21 agent unit tests, 11 router tests, 6 scheduler tests, 7
+    preservation invariants = **45 new backend tests**.
+  - `docs/PRO_DAILY_DIGEST.md` (146 lines): setup, cadence config,
+    REST examples, webhook payload spec, privacy posture,
+    troubleshooting matrix.
+
+### Architecture notes
+
+- **Email deferred**: the original plan called for email delivery
+  but the codebase has no SMTP infra. Phase K ships the webhook
+  event (`digest.ready`) as the universal delivery contract;
+  email-via-SMTP becomes a Phase K.2 worker that subscribes to
+  the same event once operator credentials are configured.
+- **Per-user timezone deferred**: v1 uses server-UTC cadence
+  globally. Multi-user-mode + per-user `digest_timezone` settings
+  arrive in Phase K.2.
+- **Subjects `?since=` filter** is currently a UI chip; the
+  underlying graph queries don't narrow on the timestamp yet.
+  Wiring through `/graph/neighborhood` is Phase K.2.
+
+`.env.example` regenerated with `SCHEDULE_DAILY_DIGEST` default.
+`docs/ROUTER_REGISTRY.md` regenerated with `/digests/*`.
+
+---
+
+### Phase J: AI Inbox Triage (2026-05-22)
+
+Pro-tier: Cerid runs an LLM categorization pass over recent unread
+Gmail + Outlook threads every 15 minutes, persists each as a KB
+artifact in domain `inbox`, and surfaces categories in chat via
+two new MCP tools.
+
+### Day 1 — agent
+
+`core/agents/inbox_triage.py`:
+  - `triage_inboxes()` fetches via Gmail + Outlook DataSources,
+    groups by thread (subject normalization drops Re:/Fwd:), runs
+    `call_internal_llm(stage="inbox_triage")` per thread with a
+    strict JSON-output prompt.
+  - Five-category enum: `urgent` / `actionable` / `personal` /
+    `newsletter` / `promo`. Default `actionable` so threads surface
+    rather than bury as `promo`.
+  - Tolerant LLM-response parser (dict / fenced JSON / embedded
+    JSON / heuristic fallback).
+  - Heuristic categorize (title+body keyword match) for LLM-down
+    fallback so the agent never crashes a batch on one bad call.
+  - Write-back via `/ingest/structured` with idempotent
+    `source_id = "inbox_triage:<source>:<thread_id>"` — re-triage
+    of the same thread updates the same artifact.
+
+### Day 2 — toggle + scheduler
+
+`app/scheduler.py` registers `_run_inbox_triage` on the
+`SCHEDULE_INBOX_TRIAGE` cron (default `*/15 * * * *`). Two gates
+before any work happens:
+  1. `inbox_triage` feature flag (Pro tier)
+  2. `CERID_INBOX_TRIAGE_ENABLED=true` env toggle (operator opt-in)
+
+`max_instances=1` blocks overlap when the LLM is slow.
+`INBOX_TRIAGE_MAX_PER_SOURCE` caps fetch (default 30).
+
+### Day 3 — MCP tools + chat integration
+
+`app/mcp_tools/inbox.py` registers two tools:
+  - **`pkb_inbox_triage`** (cost_class=high): fresh triage pass
+  - **`pkb_inbox_filter`** (cost_class=low): read-only query
+    against previously-triaged threads. No LLM call.
+
+Chat: "what's urgent today" → `pkb_inbox_filter(category="urgent")`.
+"Triage my inbox" → `pkb_inbox_triage`.
+
+### Tests + docs
+
+  - 19 unit tests (`test_inbox_triage.py`)
+  - 5 scheduler tests (`test_inbox_triage_scheduler.py`)
+  - 8 MCP-tool tests (`test_inbox_mcp_tools.py`)
+  - 5 preservation invariants (`test_preservation_inbox_triage.py`)
+
+`docs/PRO_INBOX_TRIAGE.md` (118 lines) covers setup, cadence,
+privacy, troubleshooting. `.env.example` regenerated.
+
+---
+
+### Phase I: Custom Smart RAG (2026-05-21)
+
+Pro-tier per-source weight tuning. Users can adjust how each data
+source + KB collection influences retrieval rankings, with effects
+multiplicative and applied before MMR diversification.
+
+### Backend
+
+`utils/rag_weights.py` — single source of truth for the weight map:
+
+  - Redis storage: `cerid:rag:weights:global` (single-user) or
+    `cerid:rag:weights:user:<id>` (multi-user). Hash mapping
+    source_name → str(weight).
+  - Naming: DataSource names (`gmail`, `wikipedia`) for external
+    sources, `kb:<domain>` prefix for KB collections.
+  - Range: `[0.0, 2.0]` with `1.0` default. Out-of-range silently
+    clamped at read AND write time.
+  - `is_active()` short-circuit: returns False when feature flag off
+    OR no non-default weights set. Lets the hot-path skip the work
+    entirely for free-tier users.
+  - `apply_to_result()` composes multipliers: a result that hits
+    both `source_name="gmail"` AND `domain="mail"` receives both
+    weights multiplicatively.
+
+`app/routers/rag_weights.py` — REST surface:
+
+  - `GET /settings/rag/weights` → current map + feature_enabled flag
+  - `PUT /settings/rag/weights` → bulk update (Pro-gated, 403 otherwise)
+  - `DELETE /settings/rag/weights` → reset all (Pro-gated)
+  - `GET /settings/rag/weights/sources` → enumerate sources for UI
+
+### Retrieval integration
+
+`DataSourceRegistry.query_all` (`app/data_sources/base.py`) pre-fetches
+the weight map once per query, then scales each result's confidence
+by the per-source multiplier. Clamps post-multiplication to `[0, 1]`.
+
+`multi_domain_query` (`core/agents/query_agent.py`) applies the
+`kb:<domain>` weights to per-domain KB results BEFORE the cross-domain
+merge, so the existing relevance ordering carries the user's
+preferences.
+
+Both paths zero-cost when no non-default weights set.
+
+### UI
+
+`components/settings/smart-rag-weights.tsx` — Pro-gated panel that
+replaces the previous placeholder Smart RAG card:
+
+  - One slider per source with description + KB/DataSource icon
+  - Range slider 0.0-2.0 step 0.1
+  - "Estimated recall impact" heuristic on unsaved changes
+  - Save button POSTs only non-default weights (Redis hash storage
+    efficiency)
+  - Reset all → DELETE → clear server-side
+  - Community-tier shows lock overlay + upgrade CTA
+  - Server-side `feature_enabled=false` honored even at Pro tier
+
+### Tests
+
+  - `test_rag_weights.py` — 23 unit tests (storage, clamping,
+    apply_to_result, is_active short-circuit, REST surface)
+  - `test_rag_weights_integration.py` — 7 integration tests
+    (DataSource weight application, clamping, feature-flag bypass)
+  - `test_preservation_smart_rag.py` — 5 preservation invariants
+    (endpoint shapes, public surface, feature flag declared)
+  - `smart-rag-weights.test.tsx` — 10 frontend tests (render, lock
+    overlay, dirty state, save/reset, error path, kb vs ds rows)
+
+### Docs
+
+`docs/PRO_SMART_RAG.md` — operator-facing guide with REST examples,
+troubleshooting table, privacy notes, and future-work pointer.
+`docs/ROUTER_REGISTRY.md` regenerated with `/settings/rag/weights/*`.
+
+### Privacy compat
+
+Existing privacy filters still bind: the `messages` domain still
+requires `private_mode` Level 2+ regardless of weight. The new
+filter is purely a ranking multiplier — it cannot un-hide
+privacy-gated content.
+
+---
+
+### Phase G + H + deferred cleanups (2026-05-21)
+
+Three coordinated drops: native Apple Swift CLI helpers (Phase G), real
+metamorphic verification plugin (Phase H), and three high-value
+deferred items from earlier phases (D.2 privacy filter, F.2 connector
+OAuth surface).
+
+### Phase G — Apple Swift helpers (EventKit + PhotoKit + CoreSpotlight)
+
+`packages/desktop/swift/` ships three SPM CLI helpers — no Xcode
+required for these targets. Each is invoked from the Python MCP
+backend via subprocess + JSON-over-stdio:
+
+  - **`ceridek`** — Calendar + Reminders via EventKit. Modern
+    `requestFullAccessToEvents` on macOS 14+ with legacy fallback.
+    Exit code 3 = TCC denial (distinguishable from crash).
+  - **`ceridphotos`** — Photo metadata enumeration via PhotoKit.
+    Metadata-only (never reads pixel data). Handles Limited library
+    status. Surfaces media subtypes (live, panorama, hdr, etc).
+  - **`ceridspotlight`** — CoreSpotlight donor. Reads NDJSON from
+    stdin, batches via `CSSearchableIndex.indexSearchableItems`. Items
+    get a `cerid://kb/<id>` content_url so clicks launch the Electron
+    app via the custom URL scheme already registered.
+
+Build infra: `packages/desktop/swift/Makefile` builds all three via
+`swift build`, codesigns when `DEVELOPER_ID` is set. TCC inheritance
+contract documented in `packages/desktop/swift/README.md`.
+
+Python plugin wrappers:
+  - `plugins/apple_calendar/` — ConnectorPlugin conforming to
+    CalendarDataSource Protocol; joins meeting_capture's calendar
+    stitching fallback chain (now google → outlook → apple).
+  - `plugins/apple_photos/` — metadata-only DataSource.
+  - `plugins/spotlight_donor/` — write-side helper (`donate(items)` +
+    `purge(domain)`) for the rest of the backend to call after
+    ingestion.
+
+Three connectors handle the subprocess error contract: exit 3 = TCC
+denied (soft-skip with empty results), other non-zero = log + return
+None, off-platform = no-op.
+
+#### Deferred to a Phase G follow-up sprint
+
+App Intents (Shortcuts.app voice), Share Extension (`.appex`), and
+Quick Look Extension (`.appex`) require Xcode infrastructure that
+roughly doubles the Phase G investment. Documented in
+`docs/PHASE_G_DEFERRED.md` with the build pipeline trade-off rationale.
+
+### Phase H — Metamorphic verification (real plugin)
+
+`plugins/metamorphic/plugin.py` implements the per-claim metamorphic
+scoring behind the existing stub. For each extracted factoid:
+
+  1. LLM generates synonym + antonym mutations
+  2. Heuristic entailment check (token-overlap + negation-aware)
+     tests each mutation against the source context
+  3. Status classification:
+     - synonym entailed + antonym not entailed → `ok`
+     - both entailed → `suspicious` (context too permissive)
+     - synonym not entailed → `likely_hallucinated`
+  4. Aggregate weighted score 0.0–1.0 per answer
+
+Per-claim depth annotations flow back to the chat layer where they
+render as Pro-tier hallucination depth indicators on each citation.
+
+Max 5 factoids per answer to bound LLM cost. The plugin's
+`register()` injects via the existing `set_metamorphic_handler` stub
+interface — zero changes to the hallucination pipeline.
+
+### Deferred D.2 — domain privacy filter for messages
+
+`utils/domain_privacy.py` formalizes the "messages require
+private_mode Level 2+" contract documented in `docs/PRO_MESSAGES.md`.
+
+  - `DOMAIN_PRIVACY_FLOOR` declares per-domain minimum level
+    (currently: messages=2, imessage=2)
+  - `visible_domains(requested, level)` filters list
+  - `get_global_private_mode_level()` reads from Redis with
+    privacy-defaulting (returns 0 on any error)
+
+Wired into `pkb_search_filtered` so iMessage content is excluded from
+retrieval when private_mode is below the floor — including the
+implicit "domains=None means all" case (we expand to the full DOMAINS
+list before filtering).
+
+### Deferred F.2 — connector OAuth surface
+
+`app/routers/connectors.py` exposes the unified REST surface for the
+desktop Pro onboarding wizard:
+
+  - `GET /connectors` → list status per (feature_enabled, env_complete,
+    data_source_registered, data_source_configured, sibling_reachable,
+    circuit_open)
+  - `GET /connectors/{slug}` → one connector's detail
+  - `POST /connectors/{slug}/auth/start` → kind-specific OAuth start
+    (Google: browser URL, Microsoft: device-code instructions, Apple:
+    System Settings deep-link)
+  - `GET /connectors/{slug}/auth/status` → poll endpoint for the
+    wizard
+  - `POST /connectors/{slug}/disconnect` → kind-specific revocation
+    instructions
+
+Six connectors registered (gmail, google_calendar, outlook,
+outlook_calendar, apple_calendar, apple_photos).
+
+### Tests
+
+  - Phase G: 20 (apple_calendar 9 + apple_photos 5 + spotlight_donor 6)
+  - Phase H: 13 (metamorphic plugin + stub delegation)
+  - Domain privacy: 18 (filter contract + reader fallbacks)
+  - Connector router: 15 (list/get/start/status/disconnect)
+
+66 new backend tests this drop. All green.
+
+### Drift gates regenerated
+
+`docs/ROUTER_REGISTRY.md` extended with `/connectors/*` routes.
+`docs/openapi-sdk-v1.json` regenerated. Feature flag
+`spotlight_donation` added.
+
+---
+
+### Phase F: MCP cloud connectors (2026-05-21)
+
+Gmail / Google Calendar / Outlook / Outlook Calendar land as Pro-tier
+connectors backed by sibling MCP servers running in their own Docker
+containers. The Cerid backend talks to them over streamable-HTTP with
+a static bearer token; the sibling servers own OAuth refresh.
+
+### Architecture
+
+- `stacks/connectors/docker-compose.yml` — opt-in Pro stack with two
+  sibling services:
+  - `google-workspace-mcp` (taylorwilsdon/google_workspace_mcp v1.21.0,
+    pinned by SHA) → Gmail + Calendar tools, single-user OAuth mode
+  - `ms365-mcp` (Softeria/ms-365-mcp-server v0.111.0, pinned by SHA) →
+    Outlook + Calendar tools, MSAL device-code flow
+- `MCPClientPool` extended with per-connector `headers` so the static
+  bearer travels on every outbound `tools/call`.
+- App lifespan registers both connectors at startup when
+  `CERID_CONNECTORS_BEARER` is set; cleanly disconnects on shutdown.
+
+### Plugin layer
+
+- `plugins/gmail/` — Pro `ConnectorPlugin` wrapping `GmailDataSource`.
+  Fans `search_gmail_messages` then hydrates the top N via
+  `get_gmail_message_content` (budget: `GMAIL_MAX_FULL_FETCH`).
+- `plugins/google_calendar/` — `GoogleCalendarDataSource` implementing
+  the new `CalendarDataSource` Protocol on top of the sibling server's
+  `get_events` tool. Used by both query-time fan-out and meeting
+  capture's calendar stitching.
+- `plugins/outlook/` — `OutlookDataSource` against `ms365-mcp` (tries
+  `search-messages`, `search_messages`, then `list-messages` to
+  tolerate Softeria's high release velocity).
+- `plugins/outlook_calendar/` — `OutlookCalendarDataSource` against
+  `ms365-mcp`'s `list-calendar-events`. Joins the calendar stitching
+  fallback chain in `meeting_capture/calendar_stitch.py`:
+  google_calendar → outlook_calendar → apple_calendar_eventkit.
+
+### Async-native calendar stitching
+
+`meeting_capture.calendar_stitch.match_to_event` is now async, which
+the new MCP-backed calendar sources require. The sync `parse_meeting`
+caller bridges via `asyncio.run` (safe because it runs in a worker
+thread); the async-native call site in `app/routers/meetings.py`
+awaits directly.
+
+### Tests
+
+- 14 — `test_google_calendar_data_source.py` (protocol contract, event
+  coercion across MCP response shapes, fan-out failure paths)
+- 10 — `test_gmail_data_source.py` (search+hydrate, content-fetch
+  isolation, confidence shaping)
+- 4 — `test_calendar_stitch_async.py` (async path, no-calendar no-op,
+  missing-list_events soft-skip, coverage threshold)
+- 9 — `test_outlook_data_source.py` (mail + calendar coercion, tool
+  fallback chain)
+- 6 — `test_preservation_cloud_connectors.py` (feature flags, protocol
+  importability, settings env vars, fallback chain composition)
+
+Plus migration of `test_meetings_router.py` to await the now-async
+`match_to_event`.
+
+### Docs
+
+`docs/PRO_GMAIL.md`, `docs/PRO_GOOGLE_CALENDAR.md`, `docs/PRO_OUTLOOK.md`
+— operator setup, MSAL device-code walkthrough, Cerid feature-flag
+enablement, and troubleshooting for each connector.
+
+### Settings additions
+
+`config/settings.py` adds `CERID_CONNECTORS_BEARER`,
+`GOOGLE_WORKSPACE_MCP_URL`, `MS365_MCP_URL`, `GOOGLE_OAUTH_CLIENT_ID`,
+`GOOGLE_OAUTH_CLIENT_SECRET`. `.env.example` regenerated.
+
+### Deferred
+
+- Day 2's explicit OAuth wizard surface — operators currently complete
+  OAuth via the sibling MCP server's own flow (documented per
+  connector). A unified `/connectors/{slug}/auth/*` REST surface lands
+  when Pro onboarding is built out in the desktop wizard.
+- Bulk Gmail backfill (>5min for 1000 threads) — current connector
+  is search-on-demand. Bulk indexing would amortize the cost across
+  background ingestion windows.
+
+---
+
+### Phase E: Meeting capture runtime (2026-05-21)
+
+Activated the existing meeting_capture plugin's runtime: Whisper +
+pyannote + calendar stitching + 8-stage job orchestration.
+
+### Day 1 — pin runtime deps
+
+Pinned `pywhispercpp` 1.4.1, `pyannote-audio` 3.4.0, `silero-vad`
+5.1.2 in `requirements.lock` (+ transitive torch 2.12, torchaudio
+2.11, pyannote-core/pipeline/database/metrics). Plugin tests stayed
+green (18/18 with mocks).
+
+### Day 2 — HF token onboarding wizard
+
+  - `GET /settings/hf-token` → `{configured, last4, updated_at}` —
+    never echoes the token value
+  - `PUT /settings/hf-token` → stores via the same .env + sidecar
+    pattern as openrouter-key
+  - `POST /settings/hf-token/test` → validates via `/whoami-v2` then
+    probes both gated pyannote models for per-model access
+    (distinguishes "token bad" 401 from "ToS not accepted" 403)
+  - `HFTokenStep` React component embeddable in setup wizard or
+    settings panel with gated-model links, per-model accept badges
+  - Adds `HF_TOKEN` to `setup.py` `_OPTIONAL_KEYS` so it surfaces
+    without blocking core onboarding
+
+### Day 3 — Whisper model download manager
+
+`/settings/whisper/*` endpoints expose six canonical models
+(tiny/base/small/medium/medium-q5_0/large-v3) with per-platform RTF
+estimates. Streaming downloads land at `~/.cerid/models/whisper/`
+with cooperative cancellation via `asyncio.Event`. UI component
+`WhisperModelManager` with size+quality+RTF readout, per-model
+download/cancel/delete buttons, live progress bar (~500ms poll).
+
+### Day 4 — Meeting ingestion job orchestration
+
+  - `POST /meetings/upload` accepts audio file (m4a/mp3/wav/flac/
+    ogg/webm/mp4), kicks off background job, returns job_id
+  - `GET /meetings/job/{id}` poll surface
+  - `GET /meetings/jobs` list
+
+8-stage pipeline: queued → decoding → transcribing → diarizing →
+merging → stitching → summarizing → ingesting → completed. Each
+stage emits progress + percent. Stages run in `asyncio.to_thread`
+so FastAPI stays responsive while whisper/pyannote crunch.
+
+Non-fatal failure paths:
+  - diarization fails → empty speaker_turns (transcript proceeds,
+    no speaker labels)
+  - calendar stitch fails → no calendar metadata added
+  - summary fails → empty summary/action_items
+
+### Day 5 — Sources Meeting Capture tab + preservation
+
+Sources pane gains a fourth tab "Meetings" with drag/drop upload
+zone, per-stage progress, completed-job preview with duration +
+speaker count + calendar-matched badge.
+
+Tests: 7 backend (router) + 8 frontend (panel) + 5 preservation
+invariants (HF token shape, Whisper models shape, suffix gating,
+job 404, jobs list shape).
+
+---
+
+### Phase D: Apple ecosystem connectors (2026-05-21)
+
+MacOS-native data sources land in the Electron desktop app: Notes, Mail,
+and iMessage read directly from their on-disk SQLite + emlx + protobuf
+stores and ingest into the local KB. TCC permission wizard onboards the
+user through the macOS privacy stack; Sparkle was deferred in favor of
+the existing electron-updater + GitHub Releases path. Phase E (meeting
+capture runtime) and Phase A/B/C (UI consolidation) shipped earlier in
+the same overall v1.0 release window.
+
+### Day-by-day shape
+
+- **Day 1** — entitlement comment cleanup; App Store Connect API key path
+  added to the existing electron-builder workflow.
+- **Day 2** — `permissions-step.tsx` TCC wizard (Microphone / Calendar /
+  Reminders / Contacts / Photos / Full Disk Access). Uses Electron's
+  built-in `systemPreferences` for media + `node-mac-permissions` ≥ 2.5
+  for the rest. FDA detection via probe-read of the Mail Envelope Index;
+  no programmatic prompt exists for FDA, so the wizard deep-links to
+  System Settings and surfaces the relaunch-required warning.
+- **Day 3-4** — Apple Notes connector (`packages/desktop/src/main/
+  connectors/apple_notes.ts`). Reads `NoteStore.sqlite` via better-
+  sqlite3, decodes `ZICNOTEDATA.ZDATA` gzipped protobuf via a minimal
+  schema, surfaces folder hierarchy + plain text. Encrypted notes
+  counted but never decrypted.
+- **Day 5-6** — Apple Mail connector. Reads `V10/MailData/Envelope
+  Index` for metadata, walks the `.mbox` directories for `.emlx` body
+  files, strips multipart wrappers + HTML to extract plain text.
+- **Day 7-8** — iMessage connector. Reads `chat.db` joined to handles
+  + conversations; decodes `message.attributedBody` via a minimal
+  NSKeyedArchiver typedstream parser (handles the Ventura+ schema
+  where `message.text` is often empty). Per-conversation opt-in
+  (default: nothing ingested) — privacy-first.
+- **Day 9** — `/ingest/structured` backend endpoint integrates all three
+  connectors via a single shape: `{content, domain, source_id,
+  metadata}`. Preservation invariant locks the contract.
+- **Day 10** — docs (`docs/PRO_APPLE_NOTES.md`, `docs/PRO_APPLE_MAIL.md`,
+  `docs/PRO_MESSAGES.md`). Drift gates regenerated.
+
+### Architecture decision: Sparkle out, electron-updater stays
+
+Research confirmed Sparkle (Cocoa) is impractical from Electron without
+a substantial native helper. Existing `electron-updater` + GitHub
+Releases path already produces signed + notarized DMGs that
+auto-update correctly. The Sparkle EdDSA keypair generated during
+operator prep stays in the operator's Keychain as a future option.
+
+### Native extensions deferred
+
+Spotlight integration, Share Sheet extension, Shortcuts.app App Intents,
+and Quick Look generators all require Swift Xcode targets + `xcodebuild`
+in the build pipeline. Deferred to a Phase D.2 sprint once that infra
+is justified. EventKit (Calendar+Reminders) and Photos connectors are
+also deferred — they need the same Swift helper infrastructure.
+
+### Tests + drift
+
+- 6 backend (`test_ingest_structured.py`) + 5 preservation
+  (`test_preservation_apple_connectors.py`) + 12 frontend
+  (`apple-connectors-section.test.tsx`) + 8 frontend
+  (`permissions-step.test.tsx`).
+- `docs/ROUTER_REGISTRY.md` regenerated; `/ingest/structured` added.
+
+---
+
+### v1.0.0 candidate: visualization tier + pane consolidation (2026-05-21)
+
+Cerid v1.0's visual + UX shape. Three plan phases shipped in one
+2026-05-21 sprint: Phase A (Atlas + Subjects pane), Phase B
+(Constellation + Sources pane), Phase C (Settings consolidation +
+final 4-pane shape). Master plan:
+`tasks/2026-05-21-cerid-v1-systemic-implementation-plan.md`.
+End-state docs: [`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md),
+[`docs/PERF_BUDGETS.md`](docs/PERF_BUDGETS.md).
+
+### Sidebar: 9 → 4 panes
+
+`Chat / Subjects / Sources / Settings` is the final shape. Legacy
+goTo() callsites (`goTo("wiki")`, `goTo("monitoring")`, etc) resolve
+transparently via a NavigationProvider redirect map; the Pane union
+keeps the legacy values for one release window so existing tests +
+direct programmatic mounts continue to work.
+
+### Subjects pane
+
+- **Atlas mode (2D, sigma.js v3)** — custom halo NodeProgram (GLSL
+  SDF ring), force-atlas2 layout in Web Worker, 4 lenses
+  (contradiction / open-question / provenance / quality) composing
+  via sigma's nodeReducer/edgeReducer, full keyboard nav
+  (Tab/N/Arrow/+/-/Enter/H/R/L/⌘K), screen-reader a11y tree,
+  right-click context menu (Cite in chat / Open in Wiki / Copy id),
+  per-user saved views via `/atlas/views/*` (Redis-backed CRUD).
+- **Constellation mode (3D, R3F + drei)** — InstancedMesh node
+  renderer (one draw call for N entities), ambient particle cloud
+  (800-point THREE.Points, AdditiveBlending), tour mode with
+  LLM-narrated camera waypoints + Web Speech API TTS + always-on
+  subtitle (a11y). Pro-gated.
+- **Wiki mode** — existing WikiPane wrapped, now augmented with
+  provenance markers (auto / user-edited / contradicted / uncertain)
+  and an opt-in inline mini-graph reusing Atlas at 1-hop.
+- **Timeline mode** — placeholder; lands later.
+- **⌘K search palette** for cross-mode entity picking.
+
+### Sources pane
+
+3-mode shell:
+
+- **Library** — wraps existing KnowledgePane (artifacts + uploads +
+  search + tag management). Migration to Sources-native components
+  is incremental.
+- **Activity** — live ingestion stream polling
+  `/ingestion/progress` (3s) + `/admin/ingest-history` (30s).
+  Active section renders per-file 4-stage pipeline progress
+  (parsing → chunking → embedding → indexing). Recent section
+  shows settled entries with source-type icons + domain badges +
+  chunks count. New arrivals flash a brand-teal glow via CSS
+  keyframe.
+- **Connectors** — unified list+detail for watched folders +
+  external API adapters + ingestion plugins. Per-kind detail
+  panels (FolderDetail / ExternalAPIDetail / PluginDetail) with
+  stats grids, health probes, and toggle actions.
+
+### Settings pane
+
+- **Diagnostics tab** consolidates Monitoring (Status) + Audit
+  (Analytics) + Agents (Activity) into one set of 3 sub-tabs.
+  Sub-tab state persists to `?diagnostics_tab=` URL param.
+- **Simple/Advanced mode toggle removed** — UIModeProvider is now
+  a pass-through that always returns `{mode:"advanced",isSimple:false}`.
+  All UI revealed by default. localStorage `cerid-ui-mode` no
+  longer written; existing values read-then-ignored (cleanup in v1.1).
+
+### Chat composer additions
+
+- **Knowledge-source selector chip** (kb / kb+web / llm+kb) with
+  brand-color ambient glow. Backend wiring to retrieval pipeline
+  is incremental.
+- **Quick-capture FAB** at the AppLayout sibling level (visible
+  from every pane). `⌘⇧N` global shortcut opens a 3-mode modal
+  (Note / URL / Upload) with drop-anywhere file handling.
+
+### New backend endpoints
+
+- `GET /graph/neighborhood?entity=&hops=1-3&filter=` — APOC byhop
+  expansion with Redis 60s LRU cache + degree cap (default 500).
+- `GET /graph/embeddings/3d?entities=&filter=` — UMAP-or-fallback
+  3D coords for Constellation rendering, 24h Redis cache.
+- `POST /graph/tour/generate` — narrated camera arc through the
+  knowledge graph. Pro-gated.
+- `GET|POST|PATCH|DELETE /atlas/views` — per-user saved Atlas
+  configurations, Redis-backed with 50-view per-user quota.
+- Backfill job `compute_umap_3d` writes `umap_x/y/z/method/
+  computed_at` onto Entity nodes; v1 uses a deterministic
+  community-cluster fallback layout until the entity-embedding
+  pipeline wires through.
+
+### Perf
+
+Measured 2026-05-21 on M2 Pro / Chrome / dev build (renderer-only
+median per-frame wall-clock):
+
+- Atlas, 1,000 nodes, no lenses: **8.3ms / 120fps ceiling**
+- Atlas, 1,000 nodes, all 4 lenses: **10.2ms / 98fps ceiling**
+- Atlas, 5,000 nodes: 40.3ms / 25fps (degraded, soft territory)
+- Atlas, 10,000 nodes: 101ms / 10fps (degraded, soft territory)
+
+Atlas budget at 1K nodes is **comfortably met**. 5K+ degradation
+documented in `docs/PERF_BUDGETS.md` with path-to-60fps options
+(WebGL2 instancing, LOD downsampling).
+
+### Tests
+
+- 1,218 frontend tests pass (108 files)
+- 43 new backend tests
+- Build-mode `tsc -b` clean, ruff clean, mypy clean
+- Production build clean; all chunks under their respective caps
+  (main 800KB, lazy 3D 1.2MB)
+
+### Deferred to v1.1 / Phase B.2 / C.2
+
+- LLM-quality UMAP projection (v1 uses community-cluster fallback)
+- Sources-native sub-component migration (Library still mounts the
+  existing KnowledgePane unchanged)
+- Settings tab label rename (Essentials → General, etc.)
+- Right-side KB column removal from chat
+- localStorage `cerid-ui-mode` + UIModeProvider deletion
+- Chat composer knowledge-source selector → retrieval-route wiring
+- Particle ingestion stream → SSE upgrade (currently polling)
+
+## v0.96.1 candidate — ablation hardening + LongMemEval throughput (folded into v1.0.0-rc1; never separately tagged)
+
+The 2026-05-18 expert audit follow-on (post the [2026-05-17 ablation results](tasks/2026-05-17-ablation-results.md))
+that hardens the eval surface against the silent-zero / canonical-
+clobber / daemon-instability failure classes uncovered during the
+v0.96.0 ablation work, and lands the throughput improvements
+(parallel ingest, stage-aware routing, disk-backed cache, two-pass
+scorer) that take ablation wall-clock from ~80 min to ~10 min.
+
+### Eval safety guards
+
+- **Variant-aware preserve-floor** (`fa98eb3`, hardened in `1fe60e9`)
+  — `write_result` keeps the canonical baseline in place when an
+  experimental run undershoots it. The 2026-05-18 audit added a
+  sample-size arm: a smaller-sample run can never replace a larger-
+  sample canonical, regardless of variant. Restored the v0.95.9
+  canonical (n=468, recall=0.432) that an in-session smoke run had
+  silently clobbered to n=60, 0.333.
+- **`latest_per_variant` actually populated** — the pydantic schema
+  field existed since v0.96.0 Phase 1 but no write path populated
+  it. Now writes the per-variant snapshot (`recall_score`, `n_items`,
+  `per_type_breakdown`, `cerid_version`, `run_id`, `completed_at`)
+  on every write. Carried forward on read. Updated on the
+  preserve-canonical path too — the map is the per-variant ledger,
+  independent of which run wins the canonical slot. Fixes silently-
+  broken trust-score dashboard / per-variant ablation surfaces.
+
+### Internal-LLM hardening (`29f8b4b`)
+
+- **Stage-aware provider routing** via the `stage=` kwarg →
+  `_resolve_stage_provider`: env override
+  `PROVIDER_STAGE_<NORMALIZED_STAGE>` (e.g.
+  `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`) beats
+  `config.PIPELINE_PROVIDERS[stage]` beats the global
+  `INTERNAL_LLM_PROVIDER`. Lets operators route the LLM-judge scorer
+  to OpenRouter to escape local-chat-slot queueing while keeping
+  privacy-sensitive stages on the local daemon.
+- **Retry loop in `_call_ollama`** for transient back-pressure
+  (5xx, 429, timeouts, ConnectError). Exponential backoff (default
+  base 0.5s, capped at 3 attempts via `INTERNAL_LLM_MAX_RETRIES`).
+  Eliminates the 10–15% Quenchforge-5xx fall-through rate that
+  contaminated the 2026-05-17 ablations.
+
+### LongMemEval scorer
+
+- **Two-pass scorer** (`9b65be3`) — substring shortcut, LLM judge
+  only for misses. Wired into the CLI as `--two-pass-scorer`
+  (or `LONGMEMEVAL_SCORER=two-pass`). ~33% wall-time reduction on
+  the stratified-60 subset without changing measured recall.
+- **Tighter judge token budget** (`9b65be3`) — `LongMemEvalScorer`
+  `max_tokens` 5 → 2. Empirical probe on llama3.1-8b confirms "YES."
+  / "NO." emit cleanly within 2 tokens.
+
+### LongMemEval throughput
+
+- **Parallel ingest** (`f6b4042`) — `runner.run` uses
+  `asyncio.gather` in chunks of `LONGMEMEVAL_INGEST_PARALLEL`
+  (default 4). `EphemeralChromaPipeline` gains an eager
+  `asyncio.Lock` (audit fixed a lazy-init race) protecting the
+  reset-on-item-boundary check and the chunk-counter increment, with
+  the heavy `collection.add()` running outside the lock via
+  `loop.run_in_executor`. The async-bridge in `OnnxEmbeddingFunction`
+  lets concurrent executor threads multiplex httpx embed calls
+  across the daemon's parallel slot.
+
+### Embedding cache (`6f2b97b`, `e89be4e`)
+
+- **In-memory LRU** keyed on `(namespace, sha256(text))`. Namespace
+  encodes the active provider + model (`qf:<model>` for Quenchforge,
+  `onnx:<model>` for local). Bounded by `CERID_EMBED_CACHE_SIZE`
+  (default 50 000).
+- **Disk tier** — `PersistentEmbeddingCache` adds an SQLite tier
+  enabled by `CERID_EMBED_CACHE_PATH`; default empty = memory-only.
+  Namespace-keyed identically to memory so different backends coexist
+  in one DB. WAL mode for cross-process safety. Disk failures
+  degrade to memory-only with a warning. **2026-05-18 audit fix**:
+  `_disk_enabled` writes moved under the instance lock.
+
+### Observability + ergonomics
+
+- **`/health.embedding_cache`** + LongMemEval runner summary now
+  expose hits/misses/size/hit_rate (`a382bc6`); persistent-cache
+  stats add `disk_hits`, `disk_misses`, `disk_enabled`, `disk_path`.
+- **Routing-aware query prefix** in `OnnxEmbeddingFunction`
+  (`eb189c0`) — derives the query prefix from the active backend
+  instead of hardcoding Snowflake's.
+- **Auto-wire `INTERNAL_LLM_PROVIDER` for quenchforge ablations**
+  (`8c82952`) — closes the silent-zero bug class when the host
+  shell lacks `OPENROUTER_API_KEY`.
+- **Log clarity** (`12364ed`) — gpu-embed-only mode logs actual
+  `chunk_max_chars` instead of hardcoded "no chunking".
+
+### New env vars
+
+| Name | Default | Purpose |
+|---|---|---|
+| `PROVIDER_STAGE_<STAGE>` | unset | Per-stage internal-LLM provider override (e.g. `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`) |
+| `INTERNAL_LLM_MAX_RETRIES` | `3` | Cap on transient-failure retry attempts in `_call_ollama` |
+| `INTERNAL_LLM_RETRY_BACKOFF` | `0.5` | Exponential backoff base (seconds) for the retry loop |
+| `CERID_EMBED_CACHE_PATH` | unset | If set, enables disk-backed cache at the given path (SQLite) |
+| `LONGMEMEVAL_INGEST_PARALLEL` | `4` | Parallel-ingest chunk size in the LongMemEval runner |
+| `LONGMEMEVAL_SCORER` | `llm` | New value `two-pass` engages the substring + LLM composite |
+
+---
+
+## Earlier post-v0.96.0 work — client-side embedding cache (superseded by entry above)
+
+Tier-1 follow-up from the [2026-05-17 session handoff](tasks/2026-05-17-session-handoff.md).
+Targets the ~30% embed redundancy on LongMemEval haystacks (sessions
+reuse across items in the canonical 60-item / 500-item run) and the
+same pattern in cerid ingest's rectify / dedupe paths.
+
+- **`core/utils/embedding_cache.py`** — process-wide LRU keyed on
+  `(namespace, sha256(text))` where `namespace` encodes the active
+  provider + model (`qf:<model>` for Quenchforge, `onnx:<model>` for
+  local). Thread-safe; bounded by `CERID_EMBED_CACHE_SIZE`
+  (default 50 000, set 0 to disable).
+- **`OnnxEmbeddingFunction.__call__`** now splits each batch into
+  cache hits and misses, embeds only the misses through the existing
+  Quenchforge → sidecar → ONNX chain, and stitches results back in
+  input order. Saves one network round-trip per re-embed; namespace
+  isolation prevents a config flip from silently mixing vector spaces
+  (mitigates the same family of bugs the 503/Retry-After fix in
+  v0.96.0 closed for the live path).
+- 44 unit tests cover LRU semantics, namespace isolation, thread
+  safety, env-var configuration, and the mixed-hit-miss ordering
+  invariant.
+
 ## v0.96.0 — quality uplift: production retrieval stack, memory extraction, question-aware routing, RAGAS lift (2026-05-16)
 
 Five-phase quality uplift release per

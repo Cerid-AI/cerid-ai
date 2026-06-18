@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
@@ -32,6 +33,26 @@ from core.utils.time import utcnow, utcnow_iso
 logger = logging.getLogger("ai-companion.memory")
 
 # ---------------------------------------------------------------------------
+# Phase K2.1 — entity-extraction enqueue dependency injection slot.
+#
+# Set by the app layer at startup (app.startup or equivalent) so the
+# core memory pipeline can fire entity extraction for new memories
+# without crossing the core/ → app/ boundary.
+# ---------------------------------------------------------------------------
+_entity_extraction_enqueue: Callable[[str], None] | None = None
+
+
+def set_entity_extraction_enqueue(fn: Callable[[str], None] | None) -> None:
+    """Install (or clear) the callback invoked when a new memory is stored.
+
+    The callback receives the artifact_id of the freshly-stored memory.
+    Idempotent: callers re-register safely. Passing ``None`` clears the
+    slot (used by tests to isolate side effects).
+    """
+    global _entity_extraction_enqueue
+    _entity_extraction_enqueue = fn
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 MIN_RESPONSE_LENGTH = 100
@@ -47,8 +68,12 @@ MIN_RESPONSE_LENGTH = 100
 # Soak data: 5.7% ReadTimeouts at the httpx 20s default — these bounds
 # replace that ceiling and surface the timeout branch via
 # log_swallowed_error.
-MEMORY_LLM_BUDGET_S = 12.0
-MEMORY_CONFLICT_LLM_BUDGET_S = 8.0
+# Env-tunable so offline/batch callers (e.g. the LongMemEval eval, which calls
+# a remote reader where a single extraction can exceed the live-chat budget)
+# can raise the ceiling without relaxing the interactive SLO. Default 6.0s
+# stays the live-chat bound.
+MEMORY_LLM_BUDGET_S = float(os.getenv("MEMORY_LLM_BUDGET_S", "6.0"))
+MEMORY_CONFLICT_LLM_BUDGET_S = float(os.getenv("MEMORY_CONFLICT_LLM_BUDGET_S", "3.0"))
 
 MEMORY_TYPES = {
     "empirical", "decision", "preference", "project_context", "temporal", "conversational",
@@ -64,18 +89,46 @@ async def extract_memories(
     response_text: str,
     conversation_id: str,
     model: str = "",
+    observation_date: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Use a lightweight LLM to extract memorable content from a response."""
+    """Use a lightweight LLM to extract memorable content from a response.
+
+    Parameters
+    ----------
+    observation_date:
+        When provided, the date the conversation occurred. The extractor
+        grounds relative time references ("last week", "yesterday") to
+        absolute dates against this anchor and captures fact transitions
+        (old → new). A memory dated only "last week" is unretrievable
+        months later; the absolute form stays meaningful. This materially
+        helps temporal-reasoning and knowledge-update recall downstream.
+    """
     if len(response_text) < MIN_RESPONSE_LENGTH:
         return []
+
+    date_guidance = ""
+    if observation_date:
+        date_guidance = (
+            f"This conversation occurred on {observation_date}. When the "
+            "content references relative time ('yesterday', 'last week', "
+            "'next month', 'recently'), resolve it to an ABSOLUTE date "
+            f"relative to {observation_date} and state that absolute date in "
+            "the extracted content. When the user describes CHANGING, "
+            "switching, replacing, or updating something, capture the "
+            "transition — both the new state AND what it replaced "
+            "(e.g. 'switched from almond to oat milk').\n\n"
+        )
 
     prompt = (
         "Analyze this assistant response and extract any memorable content. "
         "For each item, classify it as one of: fact, decision, preference, action_item.\n\n"
-        "Return ONLY a JSON array of objects with keys: content, memory_type, summary.\n"
+        + date_guidance
+        + "Return ONLY a JSON array of objects with keys: content, memory_type, summary, event_date.\n"
         "- content: the full extractable text\n"
         "- memory_type: one of fact/decision/preference/action_item\n"
-        "- summary: a concise summary (max 500 chars)\n\n"
+        "- summary: a concise summary (max 500 chars)\n"
+        "- event_date: the absolute date the fact is about, as ISO YYYY-MM-DD, "
+        "resolved from the conversation date above; use null if no date applies\n\n"
         "If nothing is worth extracting, return an empty array [].\n\n"
         f"Response:\n{response_text[:3000]}\n\n"
         "JSON array:"
@@ -108,10 +161,17 @@ async def extract_memories(
             mem_type = MEMORY_TYPE_MIGRATION.get(mem_type, mem_type)
             if mem_type not in config.MEMORY_TYPES:
                 mem_type = "empirical"
+            # Structured event_date — the absolute date the fact is ABOUT (not
+            # ingestion time). Falls back to the observation (session) date when
+            # the LLM doesn't pin one, so every dated session yields a usable
+            # event_date for downstream time-filtered retrieval + arithmetic.
+            ev = m.get("event_date")
+            event_date = str(ev) if ev and str(ev).lower() != "null" else (observation_date or "")
             valid.append({
                 "content": str(m.get("content", ""))[:2000],
                 "memory_type": mem_type,
                 "summary": str(m.get("summary", ""))[:500],
+                "event_date": event_date,
             })
         return valid
 
@@ -142,6 +202,7 @@ async def extract_and_store_memories(
     neo4j_driver=None,
     redis_client=None,
     ingest_fn: Callable[..., dict[str, Any]] | None = None,
+    observation_date: str | None = None,
 ) -> dict[str, Any]:
     """Extract memories and store each as a KB artifact in the conversations domain.
 
@@ -154,11 +215,19 @@ async def extract_and_store_memories(
     ingest_fn : Callable | None
         Callback for ingesting content into the KB. When ``None``, the ingest
         step is skipped and memories are only extracted, not stored.
+    observation_date : str | None
+        The date the conversation occurred. Threaded into ``extract_memories``
+        so relative time references are grounded to absolute dates and each
+        memory gets a structured ``event_date``. Historically dropped here —
+        the call site passed only ``model`` — leaving production extraction
+        date-blind; that gap is the linchpin for temporal/knowledge-update.
     """
     if not config.ENABLE_MEMORY_EXTRACTION:
         return {"status": "skipped", "reason": "Memory extraction disabled"}
 
-    memories = await extract_memories(response_text, conversation_id, model)
+    memories = await extract_memories(
+        response_text, conversation_id, model, observation_date=observation_date,
+    )
 
     if not memories:
         return {
@@ -204,11 +273,19 @@ async def extract_and_store_memories(
     except ImportError:
         pass
 
-    results = []
-    stored_count = 0
-    skipped_count = 0
+    # F-AUTO-03: parallelize per-memory consolidation+ingest. Each memory's
+    # work is a chain of independent LLM (classify_memory, conflict resolve)
+    # + Neo4j + KB ingest calls; serializing them blew the 10s SLO. asyncio.gather
+    # lets the LLM calls overlap and the synchronous KB/Neo4j work runs on
+    # the default executor via asyncio.to_thread inside the helper.
+    async def _process_one_memory(idx: int, mem: dict) -> dict:
+        """Run consolidation + conflict-detection + ingest for one memory.
 
-    for idx, mem in enumerate(memories):
+        Returns a result dict that gets appended to ``results`` by the
+        caller, plus carries internal status fields (``_stored`` /
+        ``_skipped``) for counter aggregation. These underscore-prefixed
+        fields are stripped before the final list returns to the caller.
+        """
         try:
             # Consolidation check: ADD / UPDATE / NOOP
             action_label = "ADD"
@@ -226,14 +303,13 @@ async def extract_and_store_memories(
                     logger.debug(
                         "Memory consolidation: NOOP — %s", action.reason,
                     )
-                    skipped_count += 1
-                    results.append({
+                    return {
                         "memory_type": mem["memory_type"],
                         "summary": mem["summary"],
                         "status": "skipped_duplicate",
                         "reason": action.reason,
-                    })
-                    continue
+                        "_skipped": True,
+                    }
 
                 if action_label == "UPDATE":
                     supersede_target = action.target_id
@@ -262,17 +338,10 @@ async def extract_and_store_memories(
                             effective_content = resolution["merged_text"]
                 except Exception as exc:  # noqa: BLE001 — conflict-detection failure must not lose the memory
                     # Phase 44 conflict detection/resolution spans several LLM
-                    # + graph calls (detect_memory_conflict + resolve_memory_conflict),
-                    # so many exception types are reachable: httpx HTTPError,
-                    # neo4j driver errors, asyncio timeouts, JSON parse errors.
-                    # Issue #51 resolution: keep broad-catch with observability.
-                    # Propagating would cancel the parent loop iteration and
-                    # lose the memory we were about to store — strictly worse
-                    # than the duplicate-accumulation problem we're swallowing.
-                    # The accumulation rate is visible on
-                    # /health.swallowed_errors_last_hour; if it spikes, a
-                    # background deduplication sweep is the answer (tracked
-                    # under future-task), not narrowing here.
+                    # + graph calls; many exception types are reachable.
+                    # Propagating would cancel the per-memory task and lose
+                    # the memory — strictly worse than the duplicate-
+                    # accumulation problem we're swallowing.
                     log_swallowed_error(
                         "core.agents.memory.phase44_conflict_detection",
                         exc,
@@ -292,11 +361,22 @@ async def extract_and_store_memories(
                 "valid_from": utcnow_iso(),
                 "access_count": "0",
             }
+            # event_date = the absolute date the fact is ABOUT (vs valid_from =
+            # ingestion time). Enables time-filtered/-windowed retrieval and
+            # deterministic date arithmetic downstream. Only set when known.
+            if mem.get("event_date"):
+                metadata["event_date"] = mem["event_date"]
 
-            result = ingest_fn(effective_content, "conversations", metadata=metadata)
+            # ingest_fn is synchronous KB ingest — hand off to a worker
+            # thread so we don't stall the event loop while parallel
+            # memories' LLM calls are still in flight.
+            result = await asyncio.to_thread(
+                ingest_fn, effective_content, "conversations", metadata=metadata
+            )
 
+            stored = False
             if result.get("status") == "success":
-                stored_count += 1
+                stored = True
                 new_artifact_id = result.get("artifact_id", "")
 
                 # Mark superseded memory if this was an UPDATE
@@ -307,7 +387,9 @@ async def extract_and_store_memories(
                     and new_artifact_id
                     and mark_superseded is not None
                 ):
-                    mark_superseded(neo4j_driver, supersede_target, new_artifact_id)
+                    await asyncio.to_thread(
+                        mark_superseded, neo4j_driver, supersede_target, new_artifact_id
+                    )
 
                 if redis_client:
                     try:
@@ -323,7 +405,7 @@ async def extract_and_store_memories(
                                 "consolidation_action": action_label,
                             },
                         )
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 — observability boundary
                         log_swallowed_error(
                             "core.agents.memory.log_extraction_event",
                             exc,
@@ -331,7 +413,7 @@ async def extract_and_store_memories(
                         )
 
                 if neo4j_driver and new_artifact_id:
-                    try:
+                    def _link_extracted_from() -> None:
                         with neo4j_driver.session() as session:
                             session.run(
                                 "MATCH (m:Artifact {id: $memory_id}) "
@@ -340,8 +422,25 @@ async def extract_and_store_memories(
                                 memory_id=new_artifact_id,
                                 convo_id=conversation_id,
                             )
-                    except Exception as e:  # Neo4j driver exceptions vary by version
-                        logger.warning("Failed to create EXTRACTED_FROM relationship: %s", e)
+                    try:
+                        await asyncio.to_thread(_link_extracted_from)
+                    except Exception as exc:  # noqa: BLE001 — neo4j driver exceptions vary by version
+                        log_swallowed_error(
+                            "core.agents.memory.link_extracted_from",
+                            exc,
+                            redis_client=redis_client,
+                        )
+
+                # Phase K2.1 — entity extraction enqueue for the memory.
+                if new_artifact_id and _entity_extraction_enqueue is not None:
+                    try:
+                        _entity_extraction_enqueue(new_artifact_id)
+                    except Exception as exc:  # noqa: BLE001 — observability boundary
+                        log_swallowed_error(
+                            "core.agents.memory.entity_extraction_enqueue",
+                            exc,
+                            redis_client=redis_client,
+                        )
 
             entry = {
                 "memory_type": mem["memory_type"],
@@ -349,18 +448,56 @@ async def extract_and_store_memories(
                 "status": result.get("status", "error"),
                 "artifact_id": result.get("artifact_id", ""),
                 "consolidation_action": action_label,
+                "_stored": stored,
             }
             if conflict_resolutions:
                 entry["conflict_resolutions"] = conflict_resolutions
-            results.append(entry)
-        except Exception as e:
-            logger.warning(f"Failed to store memory: {e}")
-            results.append({
+            return entry
+        except Exception as exc:  # noqa: BLE001 — top-level per-memory failure boundary
+            log_swallowed_error(
+                "core.agents.memory.process_one_memory",
+                exc,
+                redis_client=redis_client,
+            )
+            return {
                 "memory_type": mem["memory_type"],
                 "summary": mem["summary"],
                 "status": "error",
-                "error": str(e),
+                "error": str(exc),
+            }
+
+    raw_results = await asyncio.gather(
+        *[_process_one_memory(idx, mem) for idx, mem in enumerate(memories)],
+        return_exceptions=True,
+    )
+
+    results: list[dict] = []
+    stored_count = 0
+    skipped_count = 0
+    for idx, r in enumerate(raw_results):
+        if isinstance(r, BaseException):
+            # _process_one_memory swallows its own exceptions; reaching
+            # here means gather captured something exceptional (e.g.
+            # CancelledError). Log and continue so one bad memory does
+            # not poison the batch's response shape.
+            log_swallowed_error(
+                "core.agents.memory.gather_unexpected",
+                r if isinstance(r, Exception) else Exception(repr(r)),
+                redis_client=redis_client,
+            )
+            mem = memories[idx]
+            results.append({
+                "memory_type": mem.get("memory_type", "unknown"),
+                "summary": mem.get("summary", ""),
+                "status": "error",
+                "error": str(r),
             })
+            continue
+        if r.pop("_stored", False):
+            stored_count += 1
+        if r.pop("_skipped", False):
+            skipped_count += 1
+        results.append(r)
 
     return {
         "conversation_id": conversation_id,
@@ -681,20 +818,35 @@ async def recall_memories(
         access_count = int(metadata.get("access_count", 0))
         artifact_id = metadata.get("artifact_id", chunk_id)
 
-        # Step 2: Apply decay/reinforcement
+        mem_type = metadata.get("memory_type", "decision")
+        # Step 2a: Ranking score — reinforcement (access frequency, ≤5×) boosts
+        # ORDER among recalled memories.
         adjusted_score = calculate_memory_score(
             base_score=base_similarity,
             access_count=access_count,
             age_days=age_days,
-            memory_type=metadata.get("memory_type", "decision"),
+            memory_type=mem_type,
+        )
+        # Step 2b: Relevance score — base similarity × decay WITHOUT the
+        # reinforcement multiplier. All recall/relevance GATING uses this so a
+        # frequently-accessed but semantically-poor match cannot clear the
+        # relevance floor on popularity alone (reinforcement, capped at 5×,
+        # previously inflated a 0.2-similarity memory to 0.8 and slipped it past
+        # both the per-type floor and the keyword-guard). Reinforcement affects
+        # ranking order only, never whether a memory is recalled.
+        relevance_score = calculate_memory_score(
+            base_score=base_similarity,
+            access_count=0,
+            age_days=age_days,
+            memory_type=mem_type,
         )
 
-        # Per-type minimum recall threshold
+        # Per-type minimum recall threshold (gated on relevance, not reinforced)
         type_min = config.MEMORY_MIN_RECALL_BY_TYPE.get(
-            metadata.get("memory_type", "decision"),
+            mem_type,
             config.MEMORY_MIN_RECALL_SCORE,
         )
-        if adjusted_score < type_min:
+        if relevance_score < type_min:
             continue
 
         # NLI relevance check — ensure memory is semantically relevant, not just keyword match
@@ -704,8 +856,8 @@ async def recall_memories(
             mem_nli = nli_score(doc[:512], query)
             if mem_nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
                 continue  # Memory contradicts query context — skip
-            if mem_nli["entailment"] < 0.3 and adjusted_score < 0.5:
-                continue  # Low entailment + low score = keyword match, not relevant
+            if mem_nli["entailment"] < 0.3 and relevance_score < 0.5:
+                continue  # Low entailment + low (decayed, non-reinforced) relevance = keyword match
         except Exception as exc:
             # NLI unavailable — fall back to adjusted_score alone.
             log_swallowed_error("core.agents.memory.recall_memories_nli_relevance", exc)
@@ -722,6 +874,38 @@ async def recall_memories(
                 "memory_type": metadata.get("memory_type", "fact"),
                 "summary": metadata.get("summary", ""),
             })
+
+    # Step 3.5: Supersession-at-read — drop candidates explicitly marked
+    # superseded by a newer fact. The write path sets ``superseded_by`` (via
+    # conflict resolution / mark_superseded), but recall previously ignored it
+    # and could surface a stale value alongside its replacement — the
+    # knowledge-update failure mode. We check Neo4j once for the whole candidate
+    # set using the driver this function already holds (keeping the core↛app
+    # boundary intact — no app.db import). Best-effort: a Neo4j hiccup leaves
+    # recall unchanged rather than failing.
+    from config.features import ENABLE_MEMORY_SUPERSESSION_FILTER
+
+    if ENABLE_MEMORY_SUPERSESSION_FILTER and neo4j_driver and scored_memories:
+        candidate_ids = [m["memory_id"] for m in scored_memories]
+        try:
+            with neo4j_driver.session() as session:
+                rows = session.run(
+                    "UNWIND $ids AS aid "
+                    "MATCH (a:Artifact {id: aid}) "
+                    "WHERE a.superseded_by IS NOT NULL "
+                    "RETURN a.id AS id",
+                    ids=candidate_ids,
+                )
+                superseded_ids = {r["id"] for r in rows}
+        except Exception as exc:  # noqa: BLE001 — recall proceeds unfiltered
+            log_swallowed_error(
+                "core.agents.memory.recall_memories_supersession", exc,
+            )
+            superseded_ids = set()
+        if superseded_ids:
+            scored_memories = [
+                m for m in scored_memories if m["memory_id"] not in superseded_ids
+            ]
 
     # Step 4: Sort by adjusted score descending
     scored_memories.sort(key=lambda m: m["adjusted_score"], reverse=True)

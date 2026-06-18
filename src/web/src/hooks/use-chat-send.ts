@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
-import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult } from "@/lib/kb-utils"
+import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult, selectDocsWithinBudget } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
 import { compressConversation, queryKB, recallMemories } from "@/lib/api"
+import { RAG_SYSTEM_PREAMBLE } from "@/lib/rag-prompt"
 
 /** How many user+assistant pairs to keep in client-side sliding window fallback. */
 const FALLBACK_KEEP_PAIRS = 3
@@ -41,11 +42,21 @@ interface UseChatSendOptions {
   // Auto-inject settings
   autoInject: boolean
   autoInjectThreshold: number
+  /** Include knowledge packs in KB retrieval (Slice 7.3). Default true;
+      when false, queryKB sends exclude_packs so packs are dropped. */
+  includePacks: boolean
 
   // KB context
   injectedContext: KBQueryResult[]
   kbResults: KBQueryResult[]
   clearInjected: () => void
+
+  /** Private Mode level (0=off, 1=no logging, 2=also bypass KB injection,
+   *  3=also no memory). At level >= 2 the send path injects NO KB documents or
+   *  memories, so the model sees only what the user types. Enforced here — the
+   *  single payload-assembly boundary — because the context is assembled
+   *  client-side and a backend gate cannot un-inject it. */
+  privateModeLevel: number
 
   /** Non-empty when retrieval breached its time budget for the current query.
    *  Propagated onto the assistant ChatMessage so MessageBubble can render a
@@ -128,9 +139,14 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       }
       options.addMessage(convoId, userMsg)
 
+      // Private Mode L2+ ("bypass KB injection — model sees only what you type"):
+      // inject NOTHING — no manual context, no auto-inject, no memory recall.
+      // This is the single boundary that enforces the toolbar's privacy promise.
+      const bypassKB = options.privateModeLevel >= 2
+
       // Combine manually injected + auto-injected context
       // Skip chunks already sent to the model in prior turns (session dedup)
-      const manuallyInjected = [...options.injectedContext]
+      const manuallyInjected = bypassKB ? [] : [...options.injectedContext]
       const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
       const priorInjected = injectedHistoryRef.current
 
@@ -145,7 +161,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       // time, delaying the chat/stream response.  Follow-up messages benefit
       // more from context injection once the conversation topic is established.
       const isFirstMessage = !(options.activeMessages?.length)
-      if (options.autoInject && !isFirstMessage) {
+      if (options.autoInject && !isFirstMessage && !bypassKB) {
         let freshResults = options.kbResults
         // Only hit the network when the cache is cold. Wave-0 Task 3:
         // useOrchestratedQuery / useKBContext already populate TanStack
@@ -160,7 +176,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           }, 500))
           // Fire KB query and memory recall in parallel with shared timeout
           const [freshKB, freshMemories] = await Promise.all([
-            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal }), timeout]).catch(() => null),
+            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal, excludePacks: !options.includePacks }), timeout]).catch(() => null),
             Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => []),
           ])
           if (freshKB?.results?.length) {
@@ -232,7 +248,11 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         // Separate documents from memories for distinct formatting
         const docSources = dedupedSources.filter((s) => s.source_type !== "memory")
         const memorySources = dedupedSources.filter((s) => s.source_type === "memory")
-        const contextParts = docSources.map(formatChunkWithHeader)
+        // Phase 2.4: apply per-model-family char budget at document granularity.
+        // Documents are already sorted by descending relevance; whole docs are kept
+        // or dropped — never truncated mid-document.
+        const { selected: budgetedDocs } = selectDocsWithinBudget(docSources, modelToUse)
+        const contextParts = budgetedDocs.map(formatChunkWithHeader)
         if (memorySources.length > 0) {
           const memParts = memorySources.map((m) => {
             const type = m.filename?.replace("memory:", "") ?? "fact"
@@ -261,7 +281,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
         allMessages.push({
           role: "system",
-          content: `The user has a personal knowledge base. Below are documents that may be relevant to this conversation. When these documents contain the answer, cite specific details and facts from them. When they do NOT contain the answer, use your general knowledge — never say "there is no information in your knowledge base" or refuse to answer. The user expects a helpful answer regardless of what the documents contain.${priorContextNote}\n\n${contextParts.join("\n\n")}`,
+          content: `${RAG_SYSTEM_PREAMBLE}${priorContextNote}\n\n${contextParts.join("\n\n")}`,
         })
 
         // Record injected chunks for session dedup on subsequent turns

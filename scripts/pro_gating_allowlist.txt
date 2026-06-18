@@ -1,0 +1,18 @@
+# Pro-tier feature flags that do NOT yet have a runtime gate because their
+# implementation has not landed. Every other Pro flag is gate-asserted by
+# scripts/lint-pro-gating.py (which scans both src/mcp/ and the top-level
+# plugins/ tree) + tests/test_pro_gating_contract.py. Removing a gate for a
+# flag that is NOT on this list fails the lint — that is the regression lock.
+#
+# Format: one flag per line; comments start with #.
+#
+# Pruned 2026-06-01 (Commercial-GA P0): the 12 already-gated connector/meeting/
+# intelligence flags were removed once the plugin loader was fixed to load the
+# class-based ConnectorPlugin/ParserPlugin gates. apple_notes_reader +
+# calendar_sync left the list once the lint began scanning the top-level
+# plugins/ tree where their gates live.
+
+# All Apple Pro connectors are now implemented + gated (Commercial-GA Phase 4
+# complete): apple_mail_reader (4.1) + imessage_reader (4.2) gated 2026-06-06 via
+# src/mcp/plugins/apple_mail and src/mcp/plugins/apple_imessage. The allowlist is
+# now empty — every Pro flag has a runtime gate.

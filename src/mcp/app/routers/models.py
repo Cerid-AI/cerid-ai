@@ -15,6 +15,13 @@ from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from pydantic import BaseModel, Field
 
 from config.providers import PROVIDER_REGISTRY
+from core.routing.model_catalog import (
+    catalog_ids,
+    diff_assignments,
+    fetch_openrouter_catalog,
+    resolve_assignments,
+    resolve_latest,
+)
 
 router = APIRouter(prefix="/models", tags=["models"])
 _logger = logging.getLogger("ai-companion.models")
@@ -26,6 +33,14 @@ _logger = logging.getLogger("ai-companion.models")
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _MODEL_CONFIG_PATH = _DATA_DIR / "model_config.json"
+
+# Routing-tiers overlay the smart_router reads (env-overridable via config).
+# Falls back to the default app/data location when the setting is absent.
+import config as _config  # noqa: E402
+
+_ROUTING_TIERS_OVERLAY_PATH = Path(
+    getattr(_config, "ROUTING_TIERS_OVERLAY_PATH", str(_DATA_DIR / "routing_tiers.json"))
+)
 
 _TEMPLATE_DIR = Path(
     os.getenv(
@@ -40,11 +55,11 @@ _TEMPLATE_NAME = "config.yaml.template"
 
 DEFAULT_ASSIGNMENTS: dict[str, str] = {
     "coding": "anthropic/claude-sonnet-4.6",
-    "research": "x-ai/grok-4.1-fast",
+    "research": "x-ai/grok-4.3",
     "simple": "google/gemini-2.5-flash",
-    "general": "openai/gpt-4o-mini",
+    "general": "anthropic/claude-sonnet-4.6",
     "classifier": "meta-llama/llama-3.3-70b-instruct",
-    "verification": "x-ai/grok-4.1-fast",
+    "verification": "x-ai/grok-4.3",
     "categorization": "meta-llama/llama-3.3-70b-instruct:free",
     "synopsis": "meta-llama/llama-3.3-70b-instruct:free",
 }
@@ -243,35 +258,140 @@ async def update_assignments(body: ModelAssignments):
     )
 
 
+def _current_assignments() -> dict[str, str]:
+    """Active role→model map: defaults overlaid with persisted user config."""
+    merged = dict(DEFAULT_ASSIGNMENTS)
+    merged.update(_load_config().get("assignments", {}))
+    return merged
+
+
+async def _compute_model_updates() -> dict:
+    """Resolve the latest in-family model for every role against the live
+    OpenRouter catalog. Pure read — no persistence. Empty catalog (offline /
+    fetch failure) yields no updates rather than an error."""
+    import config as _settings  # module-level `config` is shadowed by a param elsewhere
+
+    current = _current_assignments()
+    ids = catalog_ids(await fetch_openrouter_catalog())
+    # Hardware-compatibility guard: the auto-update never adopts a model the
+    # active platform can't run (e.g. a Metal-crash model on amd-mac).
+    profile = getattr(_settings, "CERID_HARDWARE_PROFILE", "")
+    resolved = resolve_assignments(current, ids, hardware_profile=profile) if ids else dict(current)
+    updates = diff_assignments(current, resolved)
+    return {
+        "updates": updates,
+        "new": updates,
+        "deprecated": [],
+        "last_checked": datetime.now(timezone.utc).isoformat(),
+        "catalog_size": len(ids),
+        "resolved": resolved,
+        "catalog_ids": ids,
+    }
+
+
+def _refresh_routing_tiers_overlay(catalog_ids_list: list[str]) -> list[dict[str, str]]:
+    """Resolve every smart-router tier id through the catalog and persist the
+    ``{original_id: resolved_id}`` overlay the router reads.
+
+    Conservative semantics match the role pass: ``resolve_latest`` only upgrades
+    dotted-version ids within the same family (never cross-series). Only changed
+    ids are written into the map (identity entries are omitted to keep it small;
+    the router treats a missing key as identity). Empty catalog → no write.
+    Returns the per-id diff rows ``{id, from, to}`` for logging. Fail soft: any
+    write error is logged and swallowed so the weekly job never errors on it.
+    """
+    if not catalog_ids_list:
+        return []
+
+    from core.routing.smart_router import tier_source_ids
+
+    overlay: dict[str, str] = {}
+    diff: list[dict[str, str]] = []
+    for src in tier_source_ids():
+        resolved = resolve_latest(src, catalog_ids_list)
+        if resolved != src:
+            overlay[src] = resolved
+            diff.append({"id": src, "from": src, "to": resolved})
+
+    try:
+        _ROUTING_TIERS_OVERLAY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ROUTING_TIERS_OVERLAY_PATH.write_text(json.dumps(overlay, indent=2) + "\n")
+    except OSError as exc:
+        from core.utils.swallowed import log_swallowed_error
+
+        log_swallowed_error("models.routing_tiers_overlay", exc)
+        return diff
+
+    for row in diff:
+        _logger.info("routing-tiers overlay: %s -> %s", row["from"], row["to"])
+    return diff
+
+
+async def apply_latest_assignments() -> dict:
+    """Fetch the catalog, resolve the latest in-family model per role, and —
+    if anything changed — persist the new assignments and regenerate the
+    Bifrost config. Returns the applied diff. Used by the scheduler auto-update
+    job and the ``POST /models/updates/apply`` endpoint. (Bifrost restart still
+    required for the change to take effect, as with manual assignment edits.)"""
+    result = await _compute_model_updates()
+    applied: list[dict[str, str]] = result["updates"]
+
+    # Tier-overlay refresh runs every pass, independent of the role diff: the
+    # smart-router tier tables upgrade on their own cadence, so an empty role
+    # diff must NOT skip the tier refresh.
+    tier_diff = _refresh_routing_tiers_overlay(result.get("catalog_ids", []))
+
+    if not applied:
+        return {
+            "applied": [],
+            "restart_required": False,
+            "catalog_size": result["catalog_size"],
+            "tier_updates": tier_diff,
+        }
+
+    _save_config(result["resolved"])
+    try:
+        generate_bifrost_config(result["resolved"])
+    except FileNotFoundError as exc:
+        _logger.warning("Bifrost config regen skipped (template missing): %s", exc)
+    for row in applied:
+        _logger.info("model auto-update: %s %s -> %s", row["role"], row["from"], row["to"])
+    return {
+        "applied": applied,
+        "restart_required": True,
+        "catalog_size": result["catalog_size"],
+        "tier_updates": tier_diff,
+    }
+
+
 @router.get("/updates")
 async def list_model_updates():
-    """List pending model updates.
-
-    Returns both the flat ``updates`` list (ModelUpdatesFullResponse) and the
-    categorised ``new``/``deprecated`` buckets (ModelUpdatesResponse) so both
-    frontend callers get the shape they expect.
-    """
-    return {
-        "updates": [],
-        "new": [],
-        "deprecated": [],
-        "last_checked": None,
-        "catalog_size": 0,
-    }
+    """Latest in-family model updates available per role (live OpenRouter check)."""
+    result = await _compute_model_updates()
+    result.pop("resolved", None)
+    return result
 
 
 @router.post("/updates/check")
 async def check_model_updates():
-    """Trigger a model update check against OpenRouter."""
-    # Future: compare local model registry against OpenRouter /api/v1/models
+    """Check OpenRouter for newer in-family models per role (dry-run, no apply)."""
+    result = await _compute_model_updates()
     return {
         "checked": True,
         "success": True,
-        "new_updates": 0,
-        "new_count": 0,
+        "new_updates": len(result["updates"]),
+        "new_count": len(result["updates"]),
         "deprecated_count": 0,
-        "last_checked": None,
+        "updates": result["updates"],
+        "last_checked": result["last_checked"],
+        "catalog_size": result["catalog_size"],
     }
+
+
+@router.post("/updates/apply")
+async def apply_model_updates():
+    """Adopt the latest in-family model for every role + regenerate Bifrost."""
+    return await apply_latest_assignments()
 
 
 @router.post("/updates/dismiss/{update_id}")
@@ -314,3 +434,49 @@ async def list_available_models():
             )
 
     return AvailableModelsResponse(models=models, total=len(models))
+
+
+@router.get("/doctor")
+async def model_doctor():
+    """Audit the live model config against the active hardware profile + the
+    OpenRouter catalog.
+
+    Surfaces: hardware-incompatible pins (error), dead remote pins (warn), and
+    local-model currency vs the known-good set (info), plus validate-on-device
+    upgrade candidates. Consumed by the setup wizard + Settings → Models UX so
+    the operator always sees whether the configured models are the most capable
+    ones compatible with their hardware. Read-only; never mutates config.
+    """
+    import config as _settings
+    from core.routing.model_compat import build_compat_report
+
+    profile = getattr(_settings, "CERID_HARDWARE_PROFILE", "")
+    provider = getattr(_settings, "INTERNAL_LLM_PROVIDER", "")
+
+    configured: dict[str, str] = dict(_current_assignments())  # OpenRouter roles
+    local_roles: dict[str, str] = {}
+
+    internal_model = getattr(_settings, "INTERNAL_LLM_MODEL", "")
+    if internal_model:
+        configured["INTERNAL_LLM_MODEL"] = internal_model
+        # Only a local provider makes INTERNAL_LLM_MODEL a local "chat" pin;
+        # under openrouter it's a remote id (dead-pin/incompat checks apply).
+        if provider in ("quenchforge", "ollama"):
+            local_roles["INTERNAL_LLM_MODEL"] = "chat"
+    for var, role in (
+        ("OLLAMA_DEFAULT_MODEL", "chat"),
+        ("QUENCHFORGE_EMBED_MODEL", "embed"),
+        ("QUENCHFORGE_RERANK_MODEL", "rerank"),
+    ):
+        val = getattr(_settings, var, "")
+        if val:
+            configured[var] = val
+            local_roles[var] = role
+
+    ids = catalog_ids(await fetch_openrouter_catalog())
+    return build_compat_report(
+        configured=configured,
+        hardware_profile=profile,
+        catalog_ids=ids,
+        local_roles=local_roles,
+    )

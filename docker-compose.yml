@@ -17,6 +17,17 @@
 #   docker compose up -d --build  # rebuild MCP + Web images
 #   docker compose logs -f        # tail all logs
 
+# NO pinned `name:` here — deliberately. This file syncs VERBATIM to the public
+# mirror, so a hardcoded name would be wrong in one repo: a pinned
+# `cerid-ai-internal` shipped to the public dir is exactly what let a run there
+# masquerade as the personal stack and collide on its data dirs (the 2026-06-07
+# cross-wiring). Compose's default project name is the basename of the compose
+# file's directory, which is correct per-repo (`cerid-ai-internal` here,
+# `cerid-ai` in the mirror) and structurally cannot cross-wire — the project
+# follows the directory you invoke from. The launcher (start-cerid.sh) asserts
+# COMPOSE_PROJECT_NAME, if set, matches that basename. Sandbox overlays pin their
+# own `-p`.
+
 services:
   # ──────────────────────────────────────────────
   # Layer 1: Infrastructure (no dependencies)
@@ -206,6 +217,17 @@ services:
       - CHROMA_ANONYMIZED_TELEMETRY=false
       - ARCHIVE_PATH=/archive
       - CERID_SYNC_DIR=/sync
+      # §7.1 — pin the knowledge-pack registry path explicitly so it can't
+      # silently resolve to a missing file (the "registry serves 0" failure).
+      # /app is the in-container package root (WORKDIR); the slim registry
+      # ships at config/knowledge_packs.json. Operators pointing at a
+      # curated/community registry override this in .env.
+      - CERID_KNOWLEDGE_PACKS_REGISTRY=${CERID_KNOWLEDGE_PACKS_REGISTRY:-/app/config/knowledge_packs.json}
+      # Slice 5.3 Track-A enrichment backfill — opt-in (default OFF for safe
+      # distribution). Set true to drain the pre-5.1 bare-tag artifact backlog
+      # nightly (metadata-only, paced, self-idles when drained). New artifacts
+      # are enriched at ingest (5.1), so this only matters for legacy backlogs.
+      - CERID_BACKFILL_ENRICHMENT_ENABLED=${CERID_BACKFILL_ENRICHMENT_ENABLED:-false}
       - ENABLE_SEMANTIC_CACHE=true
       - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
       - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
@@ -272,6 +294,16 @@ services:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
     environment:
       - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+      # Frontend Sentry (GA_CHECKLIST P0). Empty by default — the SDK
+      # no-ops without a DSN. Set in .env or the host shell to start
+      # shipping FE errors to the cerid-ai-web Sentry project. Re-read
+      # by docker-entrypoint.sh at every container start so DSN rotation
+      # does not require a rebuild.
+      - VITE_SENTRY_DSN_WEB=${VITE_SENTRY_DSN_WEB:-}
+      # Stamped into Sentry's `release` tag. Defaults to "dev"; production
+      # operators should pin to a versioned tag matching the MCP backend's
+      # SENTRY_RELEASE so traces line up across the stack.
+      - VITE_APP_VERSION=${VITE_APP_VERSION:-}
     depends_on:
       mcp-server:
         condition: service_healthy

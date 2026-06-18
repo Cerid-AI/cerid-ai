@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Pre-push hook: run full local validation before allowing a push, so GitHub
+# Action minutes are only spent at merge time (merge queue), not on broken pushes.
+#
+# Install: git config core.hooksPath scripts/hooks   (or: make install-hooks)
+# Escape hatch: git push --no-verify
+set -euo pipefail
+
+# Skip when the push only deletes refs (local sha is all-zeros for every ref).
+ZERO=0000000000000000000000000000000000000000
+deleting_only=true
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  [ "$local_sha" != "$ZERO" ] && deleting_only=false
+done
+$deleting_only && exit 0
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "── pre-push: running full local validation (make ci-local) ──"
+echo "   override with: git push --no-verify"
+if make ci-local; then
+  echo "── pre-push: ✓ local validation passed — pushing ──"
+  exit 0
+fi
+echo "── pre-push: ✗ local validation FAILED — push blocked ──"
+echo "   Fix the failures above, or override with: git push --no-verify"
+exit 1

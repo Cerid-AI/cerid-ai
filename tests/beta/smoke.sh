@@ -12,6 +12,13 @@ export RESULTS_FILE="${SCRIPT_DIR}/reports/smoke.results"
 > "$RESULTS_FILE"
 
 MCP_BASE="http://localhost:8888"
+# Read REDIS_PASSWORD from the canonical operator .env when the test
+# harness shell didn't inherit it. The hardcoded `cerid-dev` fallback
+# only works for fresh-clone bootstraps; live stacks use the .env
+# password.
+if [[ -z "${REDIS_PASSWORD:-}" && -f "${SCRIPT_DIR}/../../.env" ]]; then
+  REDIS_PASSWORD=$(grep '^REDIS_PASSWORD=' "${SCRIPT_DIR}/../../.env" | head -1 | cut -d= -f2-)
+fi
 REDIS_PW="${REDIS_PASSWORD:-cerid-dev}"
 FAILED=0
 
@@ -49,8 +56,9 @@ s01_check
 # S-02: Health endpoint
 assert_json_field "${MCP_BASE}/health" '.status' "healthy" "S-02" "Health endpoint returns healthy" || FAILED=1
 
-# S-03: ChromaDB heartbeat
-assert_http_status "http://localhost:8001/api/v1/heartbeat" "200" "S-03" "ChromaDB heartbeat" || FAILED=1
+# S-03: ChromaDB heartbeat — v1 was deprecated in Chroma 1.x (returns
+# HTTP 410); v2 is the current endpoint shipping with chromadb==1.5.9.
+assert_http_status "http://localhost:8001/api/v2/heartbeat" "200" "S-03" "ChromaDB heartbeat" || FAILED=1
 
 # S-04: Neo4j browser
 assert_http_status "http://localhost:7474" "200" "S-04" "Neo4j HTTP reachable" || FAILED=1

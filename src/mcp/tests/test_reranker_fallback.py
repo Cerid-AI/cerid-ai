@@ -12,7 +12,7 @@ caller can surface the degraded state.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -67,3 +67,27 @@ async def test_onnx_success_does_not_tag_status():
 
     assert [r["filename"] for r in out] == ["c.md", "b.md", "a.md"]
     assert not any("reranker_status" in r for r in out)
+
+
+@pytest.mark.parametrize("max_length", [512, 1024])
+def test_tokenizer_truncation_uses_configured_max_length(max_length):
+    """The cross-encoder tokenizer truncates at RERANK_MAX_LENGTH, not a
+    hardcoded 512 — so bge-reranker-v2-m3 can read a full 512-token parent
+    chunk + query (1024) instead of silently clipping the chunk's tail."""
+    from core.retrieval import reranker
+
+    fake_tokenizer = MagicMock()
+
+    # Reset the module singletons so _load_model runs its full body.
+    with patch.object(reranker, "_session", None), patch.object(
+        reranker, "_tokenizer", None,
+    ), patch.object(reranker.config, "RERANK_MAX_LENGTH", max_length), patch(
+        "core.retrieval.reranker.hf_hub_download", return_value="/tmp/fake",
+    ), patch(
+        "core.retrieval.reranker.ort.InferenceSession", return_value=MagicMock(),
+    ), patch(
+        "core.retrieval.reranker.Tokenizer.from_file", return_value=fake_tokenizer,
+    ):
+        reranker._load_model()
+
+    fake_tokenizer.enable_truncation.assert_called_once_with(max_length=max_length)

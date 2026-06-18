@@ -244,6 +244,11 @@ class _ContentExtractor(HTMLParser):
         self._in_content_subtree = not bool(content_selector.tag)
         self._content_open_count = 0  # nesting depth for selector matches
         self._fragment_path: list[str] = []  # tag stack for break decisions
+        # Parallel to _fragment_path: True where that open element actually
+        # matched the content selector. Lets handle_endtag decrement the
+        # subtree count only for matching closes, not every same-named tag
+        # (a plain nested </div> must not close a `div.body` content region).
+        self._content_match_stack: list[bool] = []
 
         # h1 (or configured title_tag) wins; document <title> is fallback
         # when no in-body title is found.
@@ -270,8 +275,10 @@ class _ContentExtractor(HTMLParser):
             self._strip_depth = 1
             return
 
+        matched_content = False
         if self._content_selector.tag:
             if self._content_selector.matches(tag, attr_dict):
+                matched_content = True
                 self._content_open_count += 1
                 self._in_content_subtree = True
         if self._in_content_subtree and not self._h1_title and tag == self._title_tag:
@@ -281,6 +288,7 @@ class _ContentExtractor(HTMLParser):
             self._capturing_doc_title = True
             self._doc_title_buf = []
         self._fragment_path.append(tag)
+        self._content_match_stack.append(matched_content)
         # Block-level open: emit a newline so paragraphs separate cleanly.
         if tag in _BLOCK_TAGS and self._chunks and not self._chunks[-1].endswith("\n"):
             self._chunks.append("\n")
@@ -293,12 +301,11 @@ class _ContentExtractor(HTMLParser):
 
         if self._fragment_path and self._fragment_path[-1] == tag:
             self._fragment_path.pop()
-
-        if self._content_selector.tag and self._content_open_count > 0:
-            # We can't perfectly correlate without tracking open-tag
-            # attrs here, but assuming a sane sitemap-DOM, end-tag of
-            # the selector tag closes one subtree.
-            if tag == self._content_selector.tag:
+            # Pop the matching content-flag in lockstep so we only close the
+            # content subtree on the element that actually opened it — a plain
+            # nested </div> inside `div.body` must not truncate the region.
+            closed_match = self._content_match_stack.pop() if self._content_match_stack else False
+            if closed_match and self._content_open_count > 0:
                 self._content_open_count -= 1
                 if self._content_open_count == 0:
                     self._in_content_subtree = False

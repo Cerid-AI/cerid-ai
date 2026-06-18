@@ -92,20 +92,35 @@ describe("ModeSelectionStep", () => {
         onSelectMode={onSelectMode}
         configSummary={{
           providerCount: 2,
-          providerNames: ["Openrouter", "Anthropic"],
+          providerNames: ["OpenRouter", "Anthropic"],
           domainCount: 4,
           ollamaEnabled: true,
           ollamaModel: "llama3.2:3b",
           documentCount: 3,
+          inferenceBackend: "ollama",
         }}
       />,
     )
-    expect(screen.getByText(/Openrouter \+ Anthropic configured/)).toBeInTheDocument()
+    expect(screen.getByText(/OpenRouter \+ Anthropic configured/)).toBeInTheDocument()
     expect(screen.getByText(/3 documents ingested/)).toBeInTheDocument()
     expect(screen.getByText(/llama3\.2:3b/)).toBeInTheDocument()
   })
 
-  it("shows 'not configured' when ollama is disabled", () => {
+  it("shows inference backend in summary (F-04-05)", () => {
+    render(
+      <ModeSelectionStep
+        selectedMode="simple"
+        onSelectMode={onSelectMode}
+        configSummary={{
+          ...DEFAULT_SUMMARY,
+          inferenceBackend: "quenchforge",
+        }}
+      />,
+    )
+    expect(screen.getByText(/Backend: Quenchforge/)).toBeInTheDocument()
+  })
+
+  it("hides chat-model line when ollama disabled (F-04-08: no reranker mislabel)", () => {
     render(
       <ModeSelectionStep
         selectedMode="simple"
@@ -113,6 +128,9 @@ describe("ModeSelectionStep", () => {
         configSummary={DEFAULT_SUMMARY}
       />,
     )
-    expect(screen.getByText(/not configured/)).toBeInTheDocument()
+    // Previously rendered "Local LLM: not configured" — the line is now
+    // omitted entirely so a reranker model can't be mislabelled as a chat LLM.
+    expect(screen.queryByText(/not configured/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Local LLM:/)).not.toBeInTheDocument()
   })
 })

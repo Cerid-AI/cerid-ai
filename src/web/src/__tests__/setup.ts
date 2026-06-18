@@ -3,8 +3,36 @@
 
 import "@testing-library/jest-dom/vitest"
 import { afterEach, expect, vi } from "vitest"
-import { cleanup } from "@testing-library/react"
+import type { ReactElement, ReactNode, JSXElementConstructor } from "react"
+import { cleanup, type RenderOptions } from "@testing-library/react"
 import { toHaveNoViolations } from "jest-axe"
+
+// Production App.tsx mounts a single <TooltipProvider> at the root so any
+// component below can use <Tooltip>. Tests render components in isolation
+// without that wrapper, so Radix's TooltipProvider context is missing and
+// throws "Tooltip must be used within TooltipProvider". Wrap RTL's `render`
+// here so the provider is implicit across every test, matching production.
+vi.mock("@testing-library/react", async () => {
+  const actual = await vi.importActual<typeof import("@testing-library/react")>(
+    "@testing-library/react",
+  )
+  const React = await import("react")
+  const { TooltipProvider } = await import("@/components/ui/tooltip")
+  const wrappedRender = (ui: ReactElement, options?: RenderOptions) => {
+    const existingWrapper = options?.wrapper as
+      | JSXElementConstructor<{ children: ReactNode }>
+      | undefined
+    const Wrapper = ({ children }: { children: ReactNode }) =>
+      React.createElement(
+        TooltipProvider,
+        { delayDuration: 0, children: existingWrapper
+          ? React.createElement(existingWrapper, { children })
+          : children },
+      )
+    return actual.render(ui, { ...options, wrapper: Wrapper })
+  }
+  return { ...actual, render: wrappedRender }
+})
 
 // jest-axe matcher — any test can call `await expect(container).toHaveNoViolations()`
 // after rendering. Backstop for the kind of affordance / labelling regressions
@@ -130,4 +158,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     }
     Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true })
   }
+}
+
+// Polyfill IntersectionObserver for jsdom (used by ArticleToc current-section highlight)
+if (typeof globalThis.IntersectionObserver === "undefined") {
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof globalThis.IntersectionObserver
 }

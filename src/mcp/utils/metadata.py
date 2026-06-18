@@ -173,6 +173,79 @@ def _extract_keywords_simple(text: str, max_keywords: int = 10) -> list[str]:
 # AI-assisted categorization (token-efficient)
 # ---------------------------------------------------------------------------
 
+_CONTROL_TAGS = frozenset({"needs-review"})
+
+
+def _normalize_tags(tags: list[str], domain: str, max_freeform: int = 3) -> list[str]:
+    """Phase 5.4 — converge free-form tags on the domain's vocabulary.
+
+    Tags are metadata, not taxonomy, so they stay open-vocabulary at the
+    margin — but they must converge on ``TAG_VOCABULARY`` so the sorting /
+    filtering surfaces (Phase 6.3) are coherent rather than fragmented across
+    ``q3-report`` / ``q3report`` / ``quarterly-report`` variants.
+
+    For each cleaned (lower/hyphen) tag:
+      * a vocabulary tag is kept verbatim;
+      * a near-miss (difflib ratio ≥ cutoff) is mapped to its canonical
+        vocabulary entry;
+      * everything else is a free-form tag, capped at ``max_freeform`` so a
+        tag-stuffed document can't drown the vocabulary signal.
+    Control tags (``needs-review``) are always preserved and never counted
+    against the free-form cap. Total is capped at 10 (the ai_categorize cap).
+    """
+    import difflib
+
+    vocab = [v.strip().lower() for v in config.TAG_VOCABULARY.get(domain, []) if v.strip()]
+    vocab_set = set(vocab)
+
+    kept: list[str] = []
+    freeform: list[str] = []
+    seen: set[str] = set()
+    for raw in tags:
+        if not isinstance(raw, str):
+            continue
+        t = raw.strip().lower().replace(" ", "-")
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        if t in _CONTROL_TAGS or t in vocab_set:
+            kept.append(t)
+            continue
+        match = difflib.get_close_matches(t, vocab, n=1, cutoff=0.82)
+        if match and match[0] not in seen:
+            kept.append(match[0])
+            seen.add(match[0])
+        elif match and match[0] in seen:
+            continue  # canonical form already present — drop the variant
+        else:
+            freeform.append(t)
+    return (kept + freeform[:max_freeform])[:10]
+
+
+def _sample_for_classification(text: str, budget: int) -> str:
+    """Sample head + middle + tail of *text* into a classification snippet.
+
+    Head-only truncation (the prior behavior) mis-classified documents whose
+    opening looks generic — resumes lead with contact details, trading
+    signals with a boilerplate header — because the discriminating content
+    sits past the first ``budget`` chars. When the document fits the budget
+    it's returned whole. Otherwise the budget is split 50/25/25 across head,
+    middle, and tail with elision markers between the slices.
+    """
+    if len(text) <= budget:
+        return text
+    head_len = budget // 2
+    mid_len = budget // 4
+    tail_len = budget - head_len - mid_len
+    mid_start = (len(text) - mid_len) // 2
+    head = text[:head_len]
+    middle = text[mid_start:mid_start + mid_len]
+    tail = text[-tail_len:]
+    return (
+        f"{head}\n[... elided ...]\n{middle}\n[... elided ...]\n{tail}"
+    )
+
+
 def _build_taxonomy_prompt_section() -> str:
     """Build the taxonomy description for the AI categorization prompt."""
     lines = []
@@ -217,15 +290,22 @@ async def ai_categorize(
 
     model_id = config.CATEGORIZE_MODELS.get(mode, config.CATEGORIZE_MODELS["smart"])
 
-    # Token efficiency: truncate to snippet
-    snippet = text[:config.AI_SNIPPET_MAX_CHARS]
-    if len(text) > config.AI_SNIPPET_MAX_CHARS:
-        snippet += "\n[... truncated for classification ...]"
+    # Phase 5.2 — head+middle+tail sampling within the snippet budget.
+    # Head-only classification failed on documents whose first ~1500 chars
+    # look generic (resumes lead with contact info; trading signals lead with
+    # a boilerplate header). Sampling across the document surfaces the
+    # discriminating content for sub_category accuracy.
+    snippet = _sample_for_classification(text, config.AI_SNIPPET_MAX_CHARS)
 
     taxonomy_section = _build_taxonomy_prompt_section()
     prompt = (
-        f"Classify this document into exactly one domain and sub-category.\n\n"
+        f"Classify this document into exactly one domain and one sub-category "
+        f"FROM THAT DOMAIN's listed sub-categories.\n\n"
         f"Available taxonomy:\n{taxonomy_section}\n\n"
+        f"Pick the most specific sub-category that fits — only fall back to "
+        f"'general' when none of the domain's specific sub-categories apply. "
+        f"Give a one-line rationale for the sub-category choice.\n"
+        f"Report your confidence (0.0-1.0) that the domain is correct.\n\n"
         f"Also suggest up to 5 descriptive tags (lowercase, hyphenated). "
         f"Prefer the 'preferred tags' listed for the chosen domain when they fit. "
         f"You may add 1-2 free-form tags if nothing in the vocabulary matches.\n"
@@ -233,7 +313,8 @@ async def ai_categorize(
         f"Filename: {filename}\n"
         f"Content:\n{snippet}\n\n"
         f'Respond ONLY with JSON: '
-        f'{{"domain": "...", "sub_category": "...", "tags": ["..."], '
+        f'{{"domain": "...", "sub_category": "...", "sub_category_rationale": "...", '
+        f'"confidence": 0.0, "tags": ["..."], '
         f'"keywords": ["..."], "summary": "..."}}'
     )
 
@@ -272,13 +353,6 @@ async def ai_categorize(
             logger.warning(f"AI suggested unknown domain '{suggested}', using default")
             suggested = config.DEFAULT_DOMAIN
 
-        # Validate sub_category against taxonomy
-        sub_cat = result.get("sub_category", "").lower().strip()
-        domain_info = config.TAXONOMY.get(suggested, {})
-        valid_subs = [s.lower() for s in domain_info.get("sub_categories", ["general"])]
-        if sub_cat not in valid_subs:
-            sub_cat = config.DEFAULT_SUB_CATEGORY
-
         # Clean tags: lowercase, strip, limit to 10
         raw_tags = result.get("tags", [])
         tags = [
@@ -287,9 +361,47 @@ async def ai_categorize(
             if isinstance(t, str) and t.strip()
         ][:10]
 
+        # Phase 5.2 — confidence gate. A low-confidence domain pick mis-routes
+        # the artifact's chunks (per-domain collection) AND skews every graph
+        # lens, so a confident-wrong domain is worse than an honest "general".
+        # Below the floor → force general + a `needs-review` tag that drives
+        # the Track B correction queue. The sub_category is preserved when the
+        # model still gave a usable one — sub_category is metadata on the
+        # artifact, not a collection selector, so it's safe to keep.
+        try:
+            confidence = float(result.get("confidence", 1.0))
+        except (ValueError, TypeError):
+            confidence = 1.0
+        confidence = max(0.0, min(1.0, confidence))
+        low_confidence = confidence < config.CATEGORIZE_CONFIDENCE_THRESHOLD
+        if low_confidence and suggested != config.DEFAULT_DOMAIN:
+            logger.info(
+                "ai_categorize confidence %.2f < %.2f for domain '%s' — "
+                "demoting to '%s' + needs-review",
+                confidence, config.CATEGORIZE_CONFIDENCE_THRESHOLD,
+                suggested, config.DEFAULT_DOMAIN,
+            )
+            suggested = config.DEFAULT_DOMAIN
+            if "needs-review" not in tags:
+                tags = (tags + ["needs-review"])[:10]
+
+        # Phase 5.4 — converge tags on the (possibly demoted) domain's
+        # vocabulary so sorting/filtering surfaces stay coherent. Runs after
+        # the confidence gate so needs-review is preserved + normalized against
+        # the final domain.
+        tags = _normalize_tags(tags, suggested)
+
+        # Validate sub_category against the (possibly demoted) domain's taxonomy
+        sub_cat = result.get("sub_category", "").lower().strip()
+        domain_info = config.TAXONOMY.get(suggested, {})
+        valid_subs = [s.lower() for s in domain_info.get("sub_categories", ["general"])]
+        if sub_cat not in valid_subs:
+            sub_cat = config.DEFAULT_SUB_CATEGORY
+
         return {
             "suggested_domain": suggested,
             "sub_category": sub_cat,
+            "confidence": confidence,
             "tags": tags,
             "keywords": result.get("keywords", []),
             "summary": result.get("summary", ""),

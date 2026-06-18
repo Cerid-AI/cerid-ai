@@ -5,10 +5,51 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # No paths-ignore here: the workflow must run on EVERY PR so the `ci-ok`
+    # aggregator (the single required status check) always reports. A
+    # workflow-level paths-ignore skips the whole workflow on docs-only PRs,
+    # which leaves required checks "expected, never reported" → PR blocked
+    # forever. The `changes` job below skips the real work on docs-only PRs, so
+    # cost is preserved without the deadlock.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # Detect whether any non-docs path changed. FAIL-SAFE: any error/empty diff
+  # yields code=true (run CI), so a detector bug can never skip required CI on a
+  # real code change — worst case it runs cheap CI on a docs PR.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: detect
+        run: |
+          code=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=200 origin "${{ github.base_ref }}" >/dev/null 2>&1 || true
+            files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>/dev/null || true)
+          else
+            files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null || true)
+          fi
+          # code=false ONLY when we got a non-empty list AND every file is docs.
+          if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/|tasks/|[^/]*\.md$)'; then
+            code=false
+          fi
+          echo "changed files:"; printf '%s\n' "$files"
+          echo "code=$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   # Python backend
   lint:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -23,6 +64,8 @@ jobs:
         run: cd src/mcp && lint-imports
 
   typecheck:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -35,6 +78,9 @@ jobs:
       - run: cd src/mcp && python -m mypy . --config-file ../../pyproject.toml
 
   test:
+    needs: [changes, lint, typecheck]
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -47,10 +93,14 @@ jobs:
       - run: pip install -r src/mcp/requirements.txt
       - run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
       - name: Run tests with coverage
-        run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
+        # `not integration` deselects tests that require live external services
+        # (Redis, MCP HTTP server). Those tests run under the preservation gate
+        # which boots the full stack; running them here would fail with
+        # connection-refused on the bare ubuntu runner.
+        run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo and not integration" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
       - name: Upload coverage to Codecov
         if: success()
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: src/mcp/coverage.xml
           fail_ci_if_error: false
@@ -60,6 +110,9 @@ jobs:
           pip-licenses --fail-on="GPL-2.0-only;GPL-3.0-only" --format=plain
 
   security:
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    needs: [changes, lint, typecheck]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -132,6 +185,20 @@ jobs:
           #                reachable here — installs use --require-hashes against requirements.lock
           #                and self-update is disabled in the container. Affects only the pre-installed
           #                pip on the CI runner. Re-eval 2026-08-31 (after pip 26.1 lands on hosted runners).
+          # PYSEC-2025-183: pyjwt weak-encryption advisory — disputed by upstream (WONTFIX). Requires the
+          #                consumer to pass a short HMAC key; pyjwt is used only by the JWT auth path, gated
+          #                by CERID_MULTI_USER=true with an operator-supplied 256-bit secret. Default
+          #                community deployment never executes it. Re-eval 2026-08-31.
+          # CVE-2026-45829: pre-auth code injection in chromadb >=1.0.0 via trust_remote_code=true on the
+          #                collections endpoint. Not reachable — trust_remote_code is never set anywhere in
+          #                the codebase (grep-verified) and Chroma binds loopback-only. Re-eval 2026-09-30.
+          # PYSEC-2026-196: pip treats console_scripts/gui_scripts as paths (not file names) without sanitizing
+          #                the resolved install dir; fixed in pip 26.1.2. Same class as CVE-2026-6357/3219 —
+          #                affects only the runner's pre-installed pip; installs use --require-hashes against
+          #                requirements.lock with self-update disabled. Re-eval 2026-08-31.
+          # CVE-2025-3000: torch.jit.script memory corruption, local-host attack vector only. torch is a
+          #                transitive inference dep; the codebase never calls torch.jit.script (grep-verified)
+          #                and never compiles untrusted TorchScript. No fixed version. Re-eval 2026-07-31.
           # Migration planned for Phase 11
           pip-audit --desc \
             --ignore-vuln CVE-2026-26013 \
@@ -141,13 +208,19 @@ jobs:
             --ignore-vuln CVE-2026-4539 \
             --ignore-vuln CVE-2026-3219 \
             --ignore-vuln GHSA-fv5p-p927-qmxr \
-            --ignore-vuln CVE-2026-6357
+            --ignore-vuln CVE-2026-6357 \
+            --ignore-vuln PYSEC-2025-183 \
+            --ignore-vuln CVE-2026-45829 \
+            --ignore-vuln PYSEC-2026-196 \
+            --ignore-vuln CVE-2025-3000
       - name: ReDoS regex audit (dlint)
         run: |
           pip install dlint flake8
           python -m flake8 --select=DUO138 src/mcp/
 
   lock-sync:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Use same Python image as Dockerfile to ensure identical pip-compile output
@@ -158,11 +231,20 @@ jobs:
       - name: Check Python lock file is up to date
         run: |
           cd src/mcp
+          # Seed the output path with the committed lock so pip-compile preserves
+          # existing pins (treats them as constraints) and only changes the lock
+          # when requirements.txt itself changes — NOT whenever a new in-range
+          # transitive version publishes on PyPI. Stops the daily latest-resolve
+          # drift; intentional bumps stay a deliberate pip-compile re-run.
+          cp requirements.lock /tmp/requirements.lock
           pip-compile requirements.txt -o /tmp/requirements.lock --generate-hashes --no-header --allow-unsafe
-          diff requirements.lock /tmp/requirements.lock || (echo "::error::requirements.lock is out of date. Run: cd src/mcp && pip-compile requirements.txt -o requirements.lock --generate-hashes --no-header --allow-unsafe" && exit 1)
+          diff requirements.lock /tmp/requirements.lock || (echo "::error::requirements.lock is out of date vs requirements.txt. Run: cd src/mcp && pip-compile requirements.txt -o requirements.lock --generate-hashes --no-header --allow-unsafe" && exit 1)
 
   # Frontend
   frontend:
+    needs: [changes, lint, typecheck]
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -184,16 +266,30 @@ jobs:
         run: npm test
       - name: Vite build
         run: npx vite build
-      - name: Check bundle size (fail if any chunk > 800KB)
+      - name: Check bundle size (fail if any chunk exceeds caps)
+        # 800KB main cap protects the initial-load surface. Constellation's
+        # lazy 3D stack (three + R3F + drei) needs ~900KB minified / ~240KB
+        # gzipped on its own chunk — that's the cost of a WebGL2 3D engine
+        # and is fine because it only loads when the user picks Constellation
+        # mode (lazy import). Allowlist any chunk whose name starts with the
+        # known-large lazy entry markers up to 1.2MB.
         run: |
-          max_bytes=$((800 * 1024))
+          main_max=$((800 * 1024))
+          lazy3d_max=$((1200 * 1024))
           fail=0
           for file in dist/assets/*.js; do
             size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
             size_kb=$((size / 1024))
+            base=$(basename "$file")
             echo "$file: ${size_kb}KB"
-            if [ "$size" -gt "$max_bytes" ]; then
-              echo "::error::Bundle chunk $file exceeds 800KB limit: ${size_kb}KB"
+            cap=$main_max
+            cap_name="800KB"
+            if [[ "$base" == vendor-r3f-* || "$base" == vendor-three-* || "$base" == Constellation-* ]]; then
+              cap=$lazy3d_max
+              cap_name="1.2MB (lazy 3D)"
+            fi
+            if [ "$size" -gt "$cap" ]; then
+              echo "::error::Bundle chunk $file exceeds $cap_name limit: ${size_kb}KB"
               fail=1
             fi
           done
@@ -206,7 +302,9 @@ jobs:
   # Docker
   docker:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, security, lock-sync, frontend]
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend]
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -289,6 +387,48 @@ jobs:
           # httpx's Cookies API, not by libcurl's. No upstream Debian fix yet;
           # re-eval 2026-06-30.
           CVE-2026-6276
+          # perl-base Archive::Tar symlink — pulled into Debian base layer.
+          # We never invoke perl from application code (no Archive::Tar calls,
+          # no perl scripts in container). Trivy flags it transitively. No
+          # upstream fix in Debian 13 yet. Re-eval 2026-07-31.
+          CVE-2026-42496
+          # perl-base heap buffer overflow during compilation — same surface
+          # as CVE-2026-42496; perl interpreter never executes in container.
+          # No upstream fix; re-eval 2026-07-31.
+          CVE-2026-8376
+          # perl-base Archive::Tar memory exhaustion (HIGH) — same surface;
+          # no Archive::Tar usage from application code. No upstream fix;
+          # re-eval 2026-07-31.
+          CVE-2026-9538
+          # MIT Kerberos 5 DoS via integer underflow — affects libgssapi-krb5-2,
+          # libk5crypto3, libkrb5-3, libkrb5support0. Container never initiates
+          # GSSAPI/Kerberos handshakes (httpx-only HTTP/HTTPS). No upstream fix in
+          # Debian 13. Re-eval 2026-07-31.
+          CVE-2026-40356
+          # perl-base Archive::Tar hardlink — companion to CVE-2026-42496 (the
+          # symlink variant). Same rationale; no Archive::Tar usage from
+          # application code. No upstream fix; re-eval 2026-07-31.
+          CVE-2026-42497
+          # perl-base perl-IO-Compress arbitrary code execution (HIGH) — same
+          # perl-base surface; the perl interpreter never executes in the
+          # container. No upstream fix in Debian 13 yet. Re-eval 2026-07-31.
+          CVE-2026-48962
+          # OpenSSL heap use-after-free in PKCS7_verify() (libssl3t64/openssl/
+          # openssl-provider-legacy). Application code never verifies
+          # PKCS7/S-MIME signatures — openssl is only exercised for TLS via
+          # httpx. No fixed version in Debian 13 as of 2026-06-10.
+          # Re-eval 2026-06-30.
+          CVE-2026-45447
+          # perl-base IO::Uncompress::Unzip CPU exhaustion on crafted zip —
+          # same never-executes-perl surface as the entries above. No upstream
+          # fix in Debian 13 as of 2026-06-10. Re-eval 2026-06-30.
+          CVE-2026-48959
+          # chromadb 1.5.9 pre-auth code injection via trust_remote_code=true on
+          # the collections endpoint. Not reachable — trust_remote_code is set
+          # nowhere in the codebase (grep-verified) and the Chroma server binds
+          # loopback-only. Mirrors the pip-audit ignore in the security job.
+          # Re-eval 2026-09-30 (chromadb patch cadence).
+          CVE-2026-45829
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
@@ -309,3 +449,27 @@ jobs:
 
   # frontend-marketing: removed — marketing site separated to Cerid-AI/cerid-ai-marketing repo
   # frontend-desktop: removed — desktop (Electron) build lives in internal repo only
+
+  # ── Single required status check ──────────────────────────────────────────
+  # Branch protection requires THIS job, not the individual jobs. It always
+  # runs (if: always()), aggregates the real jobs, and passes when they
+  # succeeded OR were skipped — so a docs-only PR (where every job above skips
+  # via the `changes` gate) still gets a green required check. Fixes the
+  # "required check never reported → docs PR blocked forever" deadlock.
+  ci-ok:
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require no failures (skipped is OK)
+        run: |
+          results='${{ join(needs.*.result, ',') }}'
+          echo "job results: $results"
+          case "$results" in
+            *failure*|*cancelled*)
+              echo "::error::a required CI job failed or was cancelled"
+              exit 1 ;;
+            *)
+              echo "all required jobs passed or were skipped" ;;
+          esac

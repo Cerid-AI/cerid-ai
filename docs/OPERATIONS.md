@@ -276,7 +276,7 @@ Rebuild MCP after setting: `./scripts/start-cerid.sh --build`
 
 | Token | Default | Env Var |
 |-------|---------|---------|
-| Access | 30 minutes | `CERID_JWT_ACCESS_TTL` |
+| Access | 15 minutes | `CERID_JWT_ACCESS_TTL` |
 | Refresh | 7 days | `CERID_JWT_REFRESH_TTL` |
 
 ### JWT Secret Rotation

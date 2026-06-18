@@ -8,6 +8,9 @@
 .env.*.backup
 .env.pre-live-*
 .env.post-live-*
+.env.public-sandbox
+.env.sandbox
+.env.*-sandbox
 !.env.example
 *.key
 OPENROUTER_API_KEY*
@@ -111,6 +114,8 @@ tests/beta/eval/reports/
 # Internal task tracking & plans (not for public repo)
 tasks/
 .claude/plans/
+# Claude Code session lock files — runtime artifacts, expire on session end
+.claude/*.lock
 
 # Runtime log artifacts
 src/mcp/rag-api-logs.txt
@@ -120,3 +125,7 @@ tests/BUG_REPORT.md
 
 # Smoke test scratch directory (host path, outside repo)
 /tmp/cerid-smoke/
+test-results/
+
+# Playwright MCP runtime output
+.playwright-mcp/

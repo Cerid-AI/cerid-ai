@@ -5,8 +5,34 @@ import { describe, it, expect } from "vitest"
 import { USER_PRESETS, getPresetById, type PresetId } from "@/lib/user-presets"
 
 describe("USER_PRESETS", () => {
-  it("contains exactly three presets", () => {
-    expect(USER_PRESETS).toHaveLength(3)
+  it("contains the five preset modes", () => {
+    // quick / balanced / maximum + Pro-tier privacy_first / power_user
+    // shipped in the UX consolidation pass.
+    expect(USER_PRESETS).toHaveLength(5)
+  })
+
+  it("privacy_first preset turns all automations off", () => {
+    const pf = getPresetById("privacy_first")
+    expect(pf.automations).toBeDefined()
+    expect(pf.automations!.every((a) => a.enabled === false)).toBe(true)
+    expect(pf.automations!.every((a) => a.schedule === "")).toBe(true)
+  })
+
+  it("power_user preset enables both automations", () => {
+    const pu = getPresetById("power_user")
+    expect(pu.automations).toBeDefined()
+    expect(pu.automations!.every((a) => a.enabled === true)).toBe(true)
+    // Triage on a sub-hour cadence; digest at a daily fixed time.
+    const triage = pu.automations!.find((a) => a.feature === "inbox_triage")
+    expect(triage?.schedule).toContain("*/")
+    const digest = pu.automations!.find((a) => a.feature === "daily_digest")
+    expect(digest?.schedule).toMatch(/^\d+ \d+/)
+  })
+
+  it("Pro presets carry the requiresPro flag", () => {
+    expect(getPresetById("power_user").requiresPro).toBe(true)
+    // privacy_first ships at all tiers
+    expect(getPresetById("privacy_first").requiresPro).toBeUndefined()
   })
 
   it("has unique IDs", () => {
@@ -14,20 +40,6 @@ describe("USER_PRESETS", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it("quick preset sets simple mode", () => {
-    const quick = getPresetById("quick")
-    expect(quick.uiMode).toBe("simple")
-  })
-
-  it("balanced preset sets advanced mode", () => {
-    const balanced = getPresetById("balanced")
-    expect(balanced.uiMode).toBe("advanced")
-  })
-
-  it("maximum preset sets advanced mode", () => {
-    const maximum = getPresetById("maximum")
-    expect(maximum.uiMode).toBe("advanced")
-  })
 
   it("all presets have settings with enable_auto_inject", () => {
     for (const preset of USER_PRESETS) {

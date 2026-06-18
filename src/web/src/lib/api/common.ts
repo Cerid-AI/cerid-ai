@@ -40,6 +40,28 @@ export function mcpHeaders(extra: Record<string, string> = {}): Record<string, s
   return headers
 }
 
+/**
+ * Build an absolute URL for an MCP API path. `MCP_BASE` may be a relative
+ * prefix ("/api/mcp"), so `new URL(relativePath)` throws "Invalid URL"; and a
+ * fetch that forgets the prefix silently falls through nginx to the SPA shell
+ * (HTTP 200 text/html, which then explodes on `.json()`). Routing every MCP
+ * request through this helper prevents both error classes: always prefix
+ * MCP_BASE, always anchor to the current origin.
+ */
+export function mcpUrl(
+  path: string,
+  params?: Record<string, string | number | null | undefined>,
+): URL {
+  const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost"
+  const url = new URL(`${MCP_BASE}${path}`, origin)
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== null && value !== undefined) url.searchParams.set(key, String(value))
+    }
+  }
+  return url
+}
+
 export async function extractError(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json()

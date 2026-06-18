@@ -159,10 +159,18 @@ def get_routing_snapshot() -> dict[str, dict[str, Any]]:
         ),
     }
 
+    # Merge the LIVE serving/degraded signal recorded by the actual call sites
+    # (core.utils.inference_health) so this surface reports what is *actually*
+    # answering — not just the configured intent. A workload that has silently
+    # fallen back (e.g. quenchforge down -> local ONNX / OpenRouter) is flagged
+    # degraded=true with serving=<fallback>, so /health stops advertising a
+    # provider it isn't using.
+    from core.utils import inference_health
+
     return {
-        "llm": llm_block,
-        "embed": embed_block,
-        "rerank": rerank_block,
+        "llm": inference_health.annotate_block("llm", llm_block),
+        "embed": inference_health.annotate_block("embed", embed_block),
+        "rerank": inference_health.annotate_block("rerank", rerank_block),
         "sparse": sparse_block,
         "nli": nli_block,
     }

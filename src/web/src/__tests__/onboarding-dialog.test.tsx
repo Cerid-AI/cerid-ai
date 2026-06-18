@@ -4,11 +4,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog"
-import { UIModeProvider } from "@/contexts/ui-mode-context"
-
-function Wrapper({ children }: { children: React.ReactNode }) {
-  return <UIModeProvider>{children}</UIModeProvider>
-}
 
 beforeEach(() => {
   localStorage.clear()
@@ -21,12 +16,12 @@ function getStepTitle(name: string) {
 
 describe("OnboardingDialog", () => {
   it("renders welcome step initially", () => {
-    render(<OnboardingDialog open onComplete={() => {}} />, { wrapper: Wrapper })
+    render(<OnboardingDialog open onComplete={() => {}} />)
     expect(getStepTitle("Welcome to Cerid AI")).toBeInTheDocument()
   })
 
   it("advances through steps with Next button", () => {
-    render(<OnboardingDialog open onComplete={() => {}} />, { wrapper: Wrapper })
+    render(<OnboardingDialog open onComplete={() => {}} />)
     expect(getStepTitle("Welcome to Cerid AI")).toBeInTheDocument()
 
     fireEvent.click(screen.getByText("Next"))
@@ -37,7 +32,7 @@ describe("OnboardingDialog", () => {
   })
 
   it("shows mode selection on the last step", () => {
-    render(<OnboardingDialog open onComplete={() => {}} />, { wrapper: Wrapper })
+    render(<OnboardingDialog open onComplete={() => {}} />)
 
     // Advance through all content steps
     fireEvent.click(screen.getByText("Next"))
@@ -51,7 +46,7 @@ describe("OnboardingDialog", () => {
 
   it("calls onComplete and sets localStorage on finish", () => {
     const onComplete = vi.fn()
-    render(<OnboardingDialog open onComplete={onComplete} />, { wrapper: Wrapper })
+    render(<OnboardingDialog open onComplete={onComplete} />)
 
     // Advance to mode selection
     fireEvent.click(screen.getByText("Next"))
@@ -65,7 +60,7 @@ describe("OnboardingDialog", () => {
   })
 
   it("Back button returns to previous step", () => {
-    render(<OnboardingDialog open onComplete={() => {}} />, { wrapper: Wrapper })
+    render(<OnboardingDialog open onComplete={() => {}} />)
 
     fireEvent.click(screen.getByText("Next"))
     expect(getStepTitle("Navigate with the Sidebar")).toBeInTheDocument()
@@ -75,7 +70,7 @@ describe("OnboardingDialog", () => {
   })
 
   it("does not show Back button on first step", () => {
-    render(<OnboardingDialog open onComplete={() => {}} />, { wrapper: Wrapper })
+    render(<OnboardingDialog open onComplete={() => {}} />)
     expect(screen.queryByText("Back")).not.toBeInTheDocument()
   })
 })

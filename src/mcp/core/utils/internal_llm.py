@@ -28,6 +28,7 @@ import httpx
 
 import config
 from core.utils.circuit_breaker import CircuitOpenError, get_breaker
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.internal_llm")
 
@@ -56,6 +57,74 @@ async def close_ollama_client() -> None:
         _ollama_client = None
 
 
+def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
+    """Resolve the LLM provider for a specific call site.
+
+    Lookup order (first match wins):
+    1. ``PROVIDER_STAGE_<NORMALIZED_STAGE>`` env var. Stage names like
+       ``"longmemeval/score"`` normalize to ``LONGMEMEVAL_SCORE``.
+    2. ``config.PIPELINE_PROVIDERS[stage]`` for well-known stages
+       (``claim_extraction``, ``query_decomposition``, …).
+    3. ``default_provider`` (the global ``INTERNAL_LLM_PROVIDER``).
+
+    Lets operators send heavy or latency-sensitive call sites to a
+    different provider than the global default — e.g. route
+    ``stage=longmemeval/score`` to OpenRouter to escape local-chat-slot
+    queueing while keeping privacy-sensitive stages (``memory_resolution``,
+    ``claim_extraction``) on the local daemon.
+    """
+    if not stage:
+        return default_provider
+    normalized = stage.upper().replace("/", "_").replace("-", "_")
+    env_override = os.environ.get(f"PROVIDER_STAGE_{normalized}")
+    if env_override:
+        return env_override
+    pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
+    if stage in pipeline_providers:
+        return pipeline_providers[stage]
+    return default_provider
+
+
+def _resolve_stage_model(stage: str | None) -> str:
+    """Resolve the LLM model id for a specific call site.
+
+    Lookup order (first match wins):
+    1. ``PROVIDER_STAGE_<NORMALIZED_STAGE>_MODEL`` env var — operator pin
+       (e.g. ``PROVIDER_STAGE_FAITHFULNESS_DECOMPOSE_MODEL=openrouter/google/gemini-2.5-flash``).
+    2. ``config.stage_profiles.STAGE_PROFILES[stage]`` → tier → model from
+       ``utils.model_registry.ACTIVE_MODELS["tiers"]``. The smart default —
+       judges land on a moderate model, summaries on a simple one, frontier
+       generation on the user's expert pick.
+    3. Empty string. ``call_llm``'s existing fallback chain
+       (``INTERNAL_LLM_MODEL`` → ``_DEFAULT_INTERNAL_MODEL``) takes over.
+
+    Stage profile classification lives in :mod:`config.stage_profiles`;
+    the (hardness → tier → model id) policy lives in the registry. Both
+    are user-tunable without touching this resolver.
+    """
+    if not stage:
+        return ""
+    try:
+        from config.stage_profiles import env_pin_for, tier_for
+    except ImportError:
+        return ""
+    pinned = env_pin_for(stage)
+    if pinned:
+        return pinned
+    tier = tier_for(stage)
+    if not tier:
+        return ""
+    try:
+        from utils.model_registry import get_model
+    except ImportError:
+        return ""
+    try:
+        return get_model("tiers", tier) or ""
+    except Exception:  # noqa: BLE001 — registry must never block a call
+        log_swallowed_error("core.utils.internal_llm.resolve_stage_model", Exception(f"registry lookup failed for tier={tier}"))
+        return ""
+
+
 async def call_internal_llm(
     messages: list[dict[str, str]],
     *,
@@ -73,20 +142,31 @@ async def call_internal_llm(
     The *stage* argument is a first-class observability breadcrumb: every
     internal-LLM call is attributed to a named pipeline stage (e.g.
     ``"topic_extraction"``, ``"claim_extraction"``, ``"contextual_summary"``).
-    It flows into log records and, when the Sentry SDK is active, into
-    the current scope as a tag. Callers are encouraged — but not required —
-    to supply it.
+    It also drives:
+      - per-stage provider routing (:func:`_resolve_stage_provider`)
+      - per-stage model selection (:func:`_resolve_stage_model`), which
+        maps stages → (task_type, hardness) → tier → model id via
+        :mod:`config.stage_profiles`. Caller doesn't pick a model; the
+        registry does, and the operator can override per stage via env
+        (``PROVIDER_STAGE_<NAME>_MODEL``) or per tier via the registry.
     """
-    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    provider = _resolve_stage_provider(stage, default_provider)
+    resolved_model = _resolve_stage_model(stage)
     log: logging.Logger | logging.LoggerAdapter = logger
     if stage:
         log = logging.LoggerAdapter(logger, {"llm_stage": stage})
         try:
             import sentry_sdk  # type: ignore[import-not-found]
             sentry_sdk.set_tag("llm_stage", stage)
+            if resolved_model:
+                sentry_sdk.set_tag("llm_stage_model", resolved_model)
         except ImportError:
             pass
-        log.debug("internal LLM call provider=%s stage=%s", provider, stage)
+        log.debug(
+            "internal LLM call provider=%s stage=%s model=%s",
+            provider, stage, resolved_model or "<caller-default>",
+        )
 
     if provider in ("ollama", "quenchforge"):
         return await _call_ollama(
@@ -101,6 +181,7 @@ async def call_internal_llm(
         from core.utils.llm_client import call_llm
         return await call_llm(
             messages,
+            model=resolved_model,
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
@@ -134,13 +215,14 @@ async def _call_ollama(
         label = "Ollama"
         start_hint = "is 'ollama serve' running?"
     model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
-    # Breaker key is provider-specific so a Quenchforge outage doesn't trip
-    # the Ollama breaker (and vice versa). Pre-v0.93.9 both providers shared
-    # the "ollama" breaker; mismatched failures cascaded across an operator
-    # who happened to have both daemons running on different ports.
-    # quenchforge_client uses the "quenchforge" breaker for /v1/embeddings
-    # and /v1/rerank — this internal-LLM /api/chat path matches that key.
-    breaker = get_breaker(provider) if provider == "quenchforge" else get_breaker("ollama")
+    # Breaker key is provider- AND workload-specific. Pre-v0.93.9 both providers
+    # shared the "ollama" breaker; v0.93.9 split by provider. The chat path now
+    # also gets its OWN "quenchforge-chat" breaker, separate from the
+    # "quenchforge-embed" / "quenchforge-rerank" breakers in quenchforge_client:
+    # the slow Vega II chat slot returns transient 502 under load, and a shared
+    # "quenchforge" breaker let those chat 502s open the circuit for the
+    # (healthy, fast) embed/rerank slots too — locking out the whole backend.
+    breaker = get_breaker("quenchforge-chat") if provider == "quenchforge" else get_breaker("ollama")
 
     # Advanced flags (default off). When any is set, additive payload fields
     # are surfaced; the wire stays valid against stock Ollama and Quenchforge.
@@ -187,26 +269,125 @@ async def _call_ollama(
         data = resp.json()
         return data.get("message", {}).get("content", "")
 
+    # Retry transient back-pressure INSIDE the breaker call so one logical
+    # request is at most ONE breaker outcome. Pre-fix the retry loop wrapped
+    # breaker.call, so a single transiently-loading slot (502 × N retries)
+    # counted as N breaker failures and opened a healthy backend's breaker by
+    # itself. Mirrors quenchforge_client's embed/rerank pattern (retry inside
+    # breaker.call). On AMD-Mac the chat slot can return 502/timeout under
+    # sustained load, but a short backoff lets the daemon catch up. Capped at 3
+    # attempts so a truly dead daemon still fails over within ~5 s.
+    # 5xx, timeouts, and ConnectError are retryable; circuit-open and 4xx are not
+    # (4xx is re-raised straight through and the breaker excludes it from the
+    # failure count).
+    max_retries = int(os.environ.get("INTERNAL_LLM_MAX_RETRIES", "3"))
+    backoff_base = float(os.environ.get("INTERNAL_LLM_RETRY_BACKOFF", "0.5"))
+    from core.utils import inference_health
+
+    async def _do_call_with_retries() -> str:
+        inner_exc: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                return await _do_call()
+            except httpx.ConnectError as exc:
+                inner_exc = exc
+                if attempt + 1 < max_retries:
+                    delay = backoff_base * (2 ** attempt)
+                    logger.info(
+                        "%s connect error (attempt %d/%d) — retry in %.2fs",
+                        label, attempt + 1, max_retries, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning(
+                    "%s unreachable at %s (%s) — falling back to OpenRouter",
+                    label, base_url, start_hint,
+                )
+                raise
+            except httpx.TimeoutException as exc:
+                inner_exc = exc
+                if attempt + 1 < max_retries:
+                    delay = backoff_base * (2 ** attempt)
+                    logger.info(
+                        "%s timeout (attempt %d/%d) — retry in %.2fs",
+                        label, attempt + 1, max_retries, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning(
+                    "%s request timed out after %d attempts — falling back to OpenRouter",
+                    label, max_retries,
+                )
+                raise
+            except httpx.HTTPStatusError as exc:
+                inner_exc = exc
+                status = exc.response.status_code
+                # Retry server-side (5xx) and rate-limit (429) but not 4xx
+                # classes that signal a bad request — backoff won't fix those.
+                if (500 <= status < 600 or status == 429) and attempt + 1 < max_retries:
+                    delay = backoff_base * (2 ** attempt)
+                    logger.info(
+                        "%s HTTP %d (attempt %d/%d) — retry in %.2fs",
+                        label, status, attempt + 1, max_retries, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning(
+                    "%s HTTP %d (after %d attempts) — falling back to OpenRouter",
+                    label, status, attempt + 1,
+                )
+                raise
+        # Unreachable: every iteration returns or raises.
+        raise inner_exc if inner_exc is not None else RuntimeError(
+            "internal_llm retry loop fell through without a result"
+        )
+
+    last_exc: Exception | None = None
     try:
-        return await breaker.call(_do_call)
-    except CircuitOpenError:
+        result = await breaker.call(_do_call_with_retries)
+        inference_health.record_success("llm", provider=provider)
+        return result
+    except CircuitOpenError as exc:
         logger.warning("%s circuit breaker open — falling back to OpenRouter", label)
-    except httpx.ConnectError:
-        logger.warning("%s unreachable at %s (%s) — falling back to OpenRouter", label, base_url, start_hint)
-    except httpx.TimeoutException:
-        logger.warning("%s request timed out (model may be loading or server overloaded) — falling back to OpenRouter", label)
-    except httpx.HTTPStatusError as e:
-        logger.warning("%s HTTP %d — falling back to OpenRouter", label, e.response.status_code)
+        last_exc = exc
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+        last_exc = exc  # the specific failure was already logged in the retry loop
+    # Local backend exhausted — fall back to OpenRouter. Record the degradation
+    # so /health.inference_routing.llm reports serving=openrouter / degraded
+    # instead of advertising the local provider that just failed.
+    inference_health.record_fallback(
+        "llm",
+        configured=provider,
+        served_by="openrouter",
+        detail=str(last_exc) if last_exc else "",
+    )
+    del last_exc  # informational only; the fall-through path doesn't need it
 
     # Explicitly use a known-valid OpenRouter model for fallback —
     # INTERNAL_LLM_MODEL may hold an Ollama-native name (e.g. "llama3.2:3b")
     # that OpenRouter rejects with 400.  Also forward json_mode so callers
     # like memory extraction that request structured JSON get it on fallback.
     from core.utils.llm_client import call_llm
+
+    fallback_messages = messages
+    fallback_response_format = None
+    if json_mode:
+        fallback_response_format = {"type": "json_object"}
+        # OpenAI/OpenRouter reject response_format=json_object unless the word
+        # "json" appears somewhere in the prompt (HTTP 400). A local backend
+        # (Ollama/Quenchforge) is lenient, so a caller that asked for JSON
+        # without literally saying "json" succeeds locally but 400s on the
+        # cloud fallback. Guarantee the token defensively so the fallback is
+        # actually reachable for every json-mode caller.
+        if not any("json" in str(m.get("content", "")).lower() for m in messages):
+            fallback_messages = [
+                *messages,
+                {"role": "system", "content": "Respond with valid JSON only."},
+            ]
     return await call_llm(
-        messages,
-        model="openai/gpt-4o-mini",
+        fallback_messages,
+        model=config.INTERNAL_LLM_JSON_FALLBACK_MODEL,
         temperature=temperature,
         max_tokens=max_tokens,
-        response_format={"type": "json_object"} if json_mode else None,
+        response_format=fallback_response_format,
     )

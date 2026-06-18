@@ -38,6 +38,7 @@ from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.internal_llm import call_internal_llm
 from core.utils.llm_client import call_llm
 from core.utils.llm_parsing import parse_llm_json
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.hallucination")
 
@@ -433,11 +434,15 @@ async def _extract_claims_llm(
         "JSON array:"
     )
 
-    # Model fallback chain: try free models first, then paid
+    # Model fallback chain: try free models first, then paid. The final
+    # diversity slot pulls the smart-router CHEAP tier (gemini-flash) rather
+    # than a pinned literal, so it tracks the routing tables / catalog refresh.
+    from core.routing.smart_router import CHEAP_MODELS
+
     fallback_models = [
         config.LLM_INTERNAL_MODEL,                            # Free tier (Llama 3.3 70B)
         config.VERIFICATION_MODEL,                             # Paid (GPT-4o-mini)
-        "openrouter/google/gemini-2.5-flash",                  # Free fallback
+        str(CHEAP_MODELS["gemini-flash"]["id"]),              # Cheap-tier fallback
     ]
     # Deduplicate while preserving order
     seen_models: set[str] = set()
@@ -481,6 +486,7 @@ async def _extract_claims_llm(
                 logger.info("Internal LLM claim extraction succeeded (%d claims)", len(claims_internal))
                 return claims_internal
     except Exception as e:
+        log_swallowed_error("core.agents.hallucination.extraction.internal_claims", e)
         logger.debug("Internal LLM claim extraction failed (%s), trying external models", e)
 
     for model in models:

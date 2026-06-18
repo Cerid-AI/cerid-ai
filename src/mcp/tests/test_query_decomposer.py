@@ -82,6 +82,33 @@ class TestDecomposeQuery:
         result = await decompose_query("")
         assert result == [""]
 
+    @pytest.mark.asyncio
+    async def test_force_llm_splits_implicit_multihop(self):
+        """force_llm reaches the LLM even when needs_decomposition is False
+        (implicit multi-hop with no conjunction trigger)."""
+        from unittest.mock import AsyncMock, patch
+
+        q = "How many days between my MoMA visit and the Met exhibit?"
+        assert needs_decomposition(q) is False  # no trigger → heuristic skips it
+        with patch(
+            "core.utils.internal_llm.call_internal_llm",
+            new=AsyncMock(return_value='["when did I visit MoMA", "when was the Met exhibit"]'),
+        ):
+            result = await decompose_query(q, use_llm=True, force_llm=True)
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_force_llm_off_by_default_no_llm_call(self):
+        """Without force_llm, an implicit multi-hop query is NOT sent to the LLM."""
+        from unittest.mock import AsyncMock, patch
+
+        q = "How many days between my MoMA visit and the Met exhibit?"
+        mock = AsyncMock(return_value="[]")
+        with patch("core.utils.internal_llm.call_internal_llm", new=mock):
+            result = await decompose_query(q, use_llm=True)  # force_llm defaults False
+        mock.assert_not_awaited()
+        assert result == [q]
+
 
 class TestParallelRetrieve:
     """Tests for parallel_retrieve()."""

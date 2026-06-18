@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  type LucideIcon,
 } from "lucide-react"
 import {
   Dialog,
@@ -31,7 +32,7 @@ interface TrustScoreModalProps {
 }
 
 function StatusPill({ status }: { status: ComponentStatus }) {
-  const configs: Record<ComponentStatus, { label: string; className: string; Icon: React.ElementType }> = {
+  const configs: Record<ComponentStatus, { label: string; className: string; Icon: LucideIcon }> = {
     ok: { label: "OK", className: "bg-green-500/15 text-green-700 dark:text-green-400", Icon: CheckCircle },
     warn: { label: "Warning", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400", Icon: AlertCircle },
     fail: { label: "Failing", className: "bg-red-500/15 text-red-700 dark:text-red-400", Icon: XCircle },
@@ -187,10 +188,16 @@ export function TrustScoreModal({ open, onOpenChange, data }: TrustScoreModalPro
         </div>
 
         {visibleComponents.length > 0 ? (
-          <Tabs defaultValue={defaultTab} className="mt-2">
-            {/* V-P2.3: horizontally scroll the tab strip when 6+ components
-                appear. flex-wrap was producing a second un-separated row. */}
-            <TabsList className="flex h-auto flex-nowrap gap-1 overflow-x-auto bg-muted/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <Tabs defaultValue={defaultTab} className="mt-2 min-w-0">
+            {/* min-w-0 (Tabs) + w-full (TabsList): DialogContent is a CSS grid;
+                without min-w-0 the grid item's default min-width:auto lets the
+                non-wrapping TabsList force the track to its content width
+                (~800px), overflowing the dialog and stretching every sibling.
+                These cap the track at the dialog width so the overflow-x-auto
+                below actually scrolls.
+                V-P2.3: horizontally scroll the tab strip when 6+ components
+                appear (flex-wrap produced a second un-separated row). */}
+            <TabsList className="flex h-auto w-full flex-nowrap gap-1 overflow-x-auto bg-muted/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {visibleComponents.map((comp) => (
                 <TabsTrigger key={comp.id} value={comp.id} className="shrink-0 text-xs">
                   {comp.label}

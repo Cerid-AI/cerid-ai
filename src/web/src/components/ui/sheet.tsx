@@ -37,7 +37,7 @@ function SheetContent({
   side = "bottom",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
-  side?: "bottom" | "right"
+  side?: "bottom" | "right" | "left"
 }) {
   return (
     <DialogPrimitive.Portal>
@@ -48,6 +48,7 @@ function SheetContent({
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           side === "bottom" && "inset-x-0 bottom-0 rounded-t-xl border-t data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom",
           side === "right" && "inset-y-0 right-0 w-3/4 max-w-sm border-l data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
+          side === "left" && "inset-y-0 left-0 w-3/4 max-w-xs border-r data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left",
           className,
         )}
         {...props}

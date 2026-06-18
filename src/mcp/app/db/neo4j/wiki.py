@@ -50,6 +50,67 @@ logger = logging.getLogger("ai-companion.graph.wiki")
 _THIRTY_DAYS_ISO = None  # computed lazily
 
 
+# ---------------------------------------------------------------------------
+# Phase K2.2 — episodic memory for an entity
+# ---------------------------------------------------------------------------
+
+
+def get_memories_for_entity(
+    driver: Any,
+    entity_slug: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Fetch episodic memories that mention ``entity_slug``.
+
+    Returns up to ``limit`` rows ordered by recency (the conversation
+    memories with the latest ``valid_from``). Each row carries the
+    fields the wiki page renders directly — no further joins needed.
+
+    Filters out archived memories so the wiki page reflects the live
+    state. The decay-adjusted score is computed by the service layer
+    on top of the raw rows; this query stays cheap so the page render
+    keeps its ~10 ms budget.
+    """
+    if not driver or not entity_slug:
+        return []
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (m:Artifact)-[:MENTIONS]->(e:Entity {canonical_id: $slug})
+                WHERE coalesce(m.archived, false) = false
+                  AND m.memory_type IS NOT NULL
+                RETURN m.id AS memory_id,
+                       m.memory_type AS memory_type,
+                       m.summary AS summary,
+                       m.valid_from AS valid_from,
+                       coalesce(m.access_count, 0) AS access_count
+                ORDER BY coalesce(m.valid_from, m.created_at) DESC
+                LIMIT $lim
+                """,
+                slug=entity_slug,
+                lim=limit,
+            )
+            return [
+                {
+                    "memory_id": row["memory_id"],
+                    "memory_type": row["memory_type"],
+                    "summary": row["summary"] or "",
+                    "valid_from": row["valid_from"],
+                    "access_count": int(row["access_count"]),
+                }
+                for row in result
+            ]
+    except Exception as exc:
+        log_swallowed_error(
+            "wiki.get_memories_for_entity", exc, context={"slug": entity_slug}
+        )
+        return []
+
+
+
 def _thirty_days_ago_iso() -> str:
     """ISO string for now-minus-30-days. Computed once per process call."""
     from datetime import timedelta
@@ -62,42 +123,86 @@ def _thirty_days_ago_iso() -> str:
 # ---------------------------------------------------------------------------
 
 
-def list_top_entities(driver: Any, *, limit: int = 30) -> list[dict[str, Any]]:
+def list_top_entities(
+    driver: Any, *, limit: int = 30, search: str | None = None
+) -> list[dict[str, Any]]:
     """Return up to ``limit`` entities ordered by recent activity score.
 
     ``recent_activity_score`` is the count of distinct Artifact nodes that
     mention this entity and were updated within the last 30 days. Entities
     with no recent activity sort last (score 0).
 
+    When ``search`` is given, the name/canonical_id filter runs in Cypher
+    *before* the LIMIT, so the match spans the whole entity set — not just
+    the first ``limit`` rows the client happened to fetch (F5).
+
+    When ``search`` is given, a conditional ``match_rank`` is computed:
+        0 = exact name or canonical_id match
+        1 = name prefix match
+        2 = name substring match
+        3 = canonical_id-only match (name did not match)
+    This rank is absent (no WITH-stage CASE) on the no-search browse path
+    so the browse ordering stays byte-identical.
+
     Returns a list of property dicts with keys:
         canonical_id, name, entity_type, mention_count,
         recent_activity_score, summary, summary_updated_at
+        [match_rank only when search is non-empty]
     """
     effective_limit = min(limit, 200)
     since = _thirty_days_ago_iso()
+    search_lc = (search or "").strip().lower()
+
+    if search_lc:
+        where = (
+            "WHERE toLower(e.name) CONTAINS $search "
+            "OR toLower(e.canonical_id) CONTAINS $search"
+        )
+        # rank_clause is injected as an extra WITH projection, preceded by a
+        # comma so it separates cleanly from recent_activity_score.
+        rank_with_clause = """,
+                     CASE
+                       WHEN toLower(e.name) = $search
+                            OR toLower(e.canonical_id) = $search THEN 0
+                       WHEN toLower(e.name) STARTS WITH $search THEN 1
+                       WHEN toLower(e.name) CONTAINS $search THEN 2
+                       ELSE 3
+                     END AS match_rank"""
+        order_clause = "ORDER BY match_rank ASC, recent_activity_score DESC, mention_count DESC"
+        rank_return = "match_rank,"
+    else:
+        where = ""
+        rank_with_clause = ""
+        order_clause = "ORDER BY recent_activity_score DESC, mention_count DESC"
+        rank_return = ""
 
     try:
         with driver.session() as session:
             result = session.run(
-                """
+                f"""
                 MATCH (e:Entity)
+                {where}
                 OPTIONAL MATCH (a:Artifact)-[:MENTIONS]->(e)
                   WHERE a.updated_at >= $since
                 WITH e,
-                     count(DISTINCT a) AS recent_activity_score
+                     count(DISTINCT a) AS recent_activity_score{rank_with_clause}
                 RETURN
                     e.canonical_id        AS canonical_id,
                     e.name                AS name,
                     e.entity_type         AS entity_type,
                     coalesce(e.mention_count, 0) AS mention_count,
                     recent_activity_score,
+                    {rank_return}
                     e.summary             AS summary,
-                    e.summary_updated_at  AS summary_updated_at
-                ORDER BY recent_activity_score DESC, mention_count DESC
+                    e.summary_updated_at  AS summary_updated_at,
+                    e.primary_domain      AS primary_domain,
+                    e.top_tags            AS top_tags
+                {order_clause}
                 LIMIT $limit
                 """,
                 since=since,
                 limit=effective_limit,
+                search=search_lc,
             )
             return [dict(r) for r in result]
     except Exception as exc:
@@ -133,9 +238,15 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                     e.name                AS name,
                     e.entity_type         AS entity_type,
                     coalesce(e.mention_count, 0) AS mention_count,
+                    e.community_id        AS community_id,
                     e.summary             AS summary,
                     e.summary_updated_at  AS summary_updated_at,
-                    e.updated_at          AS updated_at
+                    e.updated_at          AS updated_at,
+                    e.primary_domain      AS primary_domain,
+                    e.domain_mix          AS domain_mix,
+                    e.domain_salience     AS domain_salience,
+                    e.top_tags            AS top_tags,
+                    e.primary_subcategory AS primary_subcategory
                 LIMIT 1
                 """,
                 slug=slug,
@@ -146,6 +257,10 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
             entity = dict(entity_row)
 
             # --- 2. Related entities (top-10 co-mentions) --------------------
+            # Amendment #1+#2: project has_summary and one_liner per related
+            # entity so frontend can render three-state wikilinks and HoverCard
+            # previews without a second fetch.  The projection already touches
+            # the other nodes so the extra RETURN aliases add negligible cost.
             related_result = session.run(
                 """
                 MATCH (e:Entity {canonical_id: $slug})
@@ -159,7 +274,9 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                     other.canonical_id  AS canonical_id,
                     other.name          AS name,
                     other.entity_type   AS entity_type,
-                    co_mention_count
+                    co_mention_count,
+                    other.summary IS NOT NULL          AS has_summary,
+                    left(other.summary, 160)           AS one_liner
                 """,
                 slug=slug,
             )
@@ -170,11 +287,15 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                 """
                 MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity {canonical_id: $slug})
                 RETURN
-                    a.id          AS artifact_id,
-                    a.title       AS title,
-                    m.chunk_ids   AS chunk_ids_json,
-                    m.confidence  AS confidence,
-                    a.updated_at  AS updated_at
+                    a.id                              AS artifact_id,
+                    a.title                           AS title,
+                    coalesce(a.title, a.filename)     AS display_title,
+                    a.filename                        AS filename,
+                    a.domain                          AS domain,
+                    a.source_type                     AS source_type,
+                    m.chunk_ids                       AS chunk_ids_json,
+                    m.confidence                      AS confidence,
+                    a.updated_at                      AS updated_at
                 ORDER BY a.updated_at DESC
                 LIMIT 50
                 """,

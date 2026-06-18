@@ -194,11 +194,42 @@ class TestAssembleContext:
 # ---------------------------------------------------------------------------
 
 class TestMultiDomainQuery:
-    def test_invalid_domain_raises(self):
-        with pytest.raises(ValueError, match="Invalid domains"):
-            asyncio.run(
-                multi_domain_query("test", domains=["nonexistent_domain_xyz"])
+    def test_custom_domain_does_not_raise(self):
+        """A client-defined domain outside the built-in set must NOT 400 — it
+        degrades to empty results when its collection isn't queryable.
+        (External-client backend support, GA P0.1.)"""
+        chroma_client = MagicMock()
+        chroma_client.get_collection.side_effect = Exception("Collection not found")
+        with patch("core.retrieval.bm25.is_available", return_value=False):
+            results = asyncio.run(
+                multi_domain_query(
+                    "test", domains=["my_client_domain"], chroma_client=chroma_client
+                )
             )
+        assert results == []
+
+    def test_custom_domain_with_existing_collection_is_queried(self):
+        """A custom domain whose collection exists is queried like a built-in."""
+        collection = MagicMock()
+        collection.query.return_value = {
+            "ids": [["chunk_1"]],
+            "distances": [[0.2]],
+            "documents": [["client content"]],
+            "metadatas": [[{"artifact_id": "a1", "filename": "x", "chunk_index": 0}]],
+        }
+        chroma_client = MagicMock()
+        chroma_client.get_collection.return_value = collection
+        # Default MagicMock list_collections isn't iterable → existing set is
+        # empty → no short-circuit → the custom domain is queried directly.
+        with patch("core.retrieval.bm25.is_available", return_value=False):
+            results = asyncio.run(
+                multi_domain_query(
+                    "test", domains=["my_client_domain"], chroma_client=chroma_client
+                )
+            )
+        assert len(results) == 1
+        assert results[0]["domain"] == "my_client_domain"
+        assert results[0]["content"] == "client content"
 
     @patch("core.agents.query_agent.config")
     def test_query_single_domain(self, mock_config):

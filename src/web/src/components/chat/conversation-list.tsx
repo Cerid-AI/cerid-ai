@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from "react"
+import { flushSync } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Archive, ArchiveRestore, Search, Trash2, Pencil, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { snapshotPositions, playFromSnapshot } from "@/lib/flip"
 import type { Conversation } from "@/lib/types"
 
 /** Highlight matching substrings in text by wrapping them in <mark> tags. */
@@ -139,20 +142,46 @@ export function ConversationList({
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
+  // Ref for the scrollable list region so FLIP can snapshot every visible
+  // row before a removal commits and slide the survivors into place.
+  const listRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Snapshot rows, run a mutation that removes one or more of them via the
+   * parent's state setter, then play the surviving siblings into their new
+   * positions. flushSync is required because the parent's setState is async
+   * by default — without it, snapshotPositions would measure post-commit
+   * and see zero deltas.
+   */
+  const withFlip = useCallback((mutate: () => void) => {
+    const items = listRef.current
+      ? (Array.from(
+          listRef.current.querySelectorAll<HTMLElement>("[data-flip-item]"),
+        ))
+      : []
+    if (items.length === 0) {
+      mutate()
+      return
+    }
+    const snaps = snapshotPositions(items)
+    flushSync(mutate)
+    void playFromSnapshot(snaps)
+  }, [])
+
   const handleBulkDelete = useCallback(() => {
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
-    onBulkDelete(ids)
+    withFlip(() => onBulkDelete(ids))
     setConfirmDeleteOpen(false)
     exitEditMode()
-  }, [selectedIds, onBulkDelete, exitEditMode])
+  }, [selectedIds, onBulkDelete, exitEditMode, withFlip])
 
   const handleBulkArchive = useCallback(() => {
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
-    onBulkArchive(ids)
+    withFlip(() => onBulkArchive(ids))
     exitEditMode()
-  }, [selectedIds, onBulkArchive, exitEditMode])
+  }, [selectedIds, onBulkArchive, exitEditMode, withFlip])
 
   return (
     <div className="flex h-full flex-col">
@@ -253,14 +282,16 @@ export function ConversationList({
         </div>
       ) : (
         <ScrollArea className="flex-1">
-          <div className="space-y-1 p-2">
-            {filtered.map((convo) => (
+          <div ref={listRef} className="space-y-1 p-2">
+            {filtered.map((convo, idx) => (
               <div
                 key={convo.id}
+                data-flip-item
                 role="button"
                 tabIndex={0}
+                style={{ ["--i" as string]: Math.min(idx, 8) }}
                 className={cn(
-                  "group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-muted",
+                  "cerid-stagger-fast group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-muted",
                   activeId === convo.id && "bg-muted",
                 )}
                 onClick={() => {
@@ -293,6 +324,7 @@ export function ConversationList({
                 <div className="min-w-0 flex-1 max-w-[calc(100%-4rem)] scroll-title">
                   {renamingId === convo.id ? (
                     <input
+                      // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline rename input; mount means rename was explicitly invoked
                       autoFocus
                       className="w-full bg-transparent text-xs outline-none border-b border-brand"
                       value={renameValue}
@@ -308,17 +340,24 @@ export function ConversationList({
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
-                    <span
-                      className="scroll-title-inner"
-                      onDoubleClick={(e) => {
-                        if (!onRename) return
-                        e.stopPropagation()
-                        setRenamingId(convo.id)
-                        setRenameValue(convo.title)
-                      }}
-                    >
-                      <HighlightedText text={convo.title} query={debouncedQuery} />
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="scroll-title-inner"
+                          onDoubleClick={(e) => {
+                            if (!onRename) return
+                            e.stopPropagation()
+                            setRenamingId(convo.id)
+                            setRenameValue(convo.title)
+                          }}
+                        >
+                          <HighlightedText text={convo.title} query={debouncedQuery} />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[360px] break-words">
+                        {convo.title}
+                      </TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
                 {!editMode && (
@@ -331,7 +370,7 @@ export function ConversationList({
                         className="h-7 w-7"
                         onClick={(e) => {
                           e.stopPropagation()
-                          onUnarchive(convo.id)
+                          withFlip(() => onUnarchive(convo.id))
                         }}
                       >
                         <ArchiveRestore className="h-3 w-3" />
@@ -344,7 +383,7 @@ export function ConversationList({
                         className="h-7 w-7"
                         onClick={(e) => {
                           e.stopPropagation()
-                          onArchive(convo.id)
+                          withFlip(() => onArchive(convo.id))
                         }}
                       >
                         <Archive className="h-3 w-3" />
@@ -357,7 +396,7 @@ export function ConversationList({
                       className="h-7 w-7"
                       onClick={(e) => {
                         e.stopPropagation()
-                        onDelete(convo.id)
+                        withFlip(() => onDelete(convo.id))
                       }}
                     >
                       <Trash2 className="h-3 w-3" />

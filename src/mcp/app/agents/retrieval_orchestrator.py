@@ -17,6 +17,7 @@ import asyncio
 import logging
 from typing import Any
 
+from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
 from config.settings import (
     MEMORY_RECALL_MIN_SCORE,
     MEMORY_RECALL_TIMEOUT_MS,
@@ -46,6 +47,7 @@ async def orchestrated_query(
     chroma_client: Any = None,
     redis_client: Any = None,
     neo4j_driver: Any = None,
+    graph_store: Any = None,
     memory_top_k: int | None = None,
     memory_min_score: float | None = None,
     source_config: dict | None = None,
@@ -94,6 +96,7 @@ async def orchestrated_query(
             chroma_client=chroma_client,
             redis_client=redis_client,
             neo4j_driver=neo4j_driver,
+            graph_store=graph_store,
             **kwargs,
         )
         return result
@@ -120,6 +123,7 @@ async def orchestrated_query(
         chroma_client=chroma_client,
         redis_client=redis_client,
         neo4j_driver=neo4j_driver,
+        graph_store=graph_store,
         **kwargs,
     )) if _kb_on else None
 
@@ -197,6 +201,9 @@ async def orchestrated_query(
             "source_url": raw.get("source_url", ""),
             "source_name": raw.get("source_name", raw.get("title", "")),
             "source_type": "external",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # external connector result carries no publish/fetch timestamp).
+            "created_at": raw.get("created_at") or raw.get("published_at"),
         })
 
     timings["external_ms"] = round((_time.monotonic() - ext_start) * 1000, 1)
@@ -216,6 +223,9 @@ async def orchestrated_query(
             "base_similarity": m.get("base_similarity", 0.0),
             "access_count": m.get("access_count", 0),
             "source_type": "memory",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # recalled memory dict carries no creation timestamp).
+            "created_at": m.get("created_at"),
         }
         for m in memory_results
     ]
@@ -269,7 +279,7 @@ def _extract_search_terms(query: str) -> str:
 async def _query_external_sources(
     query: str,
     domain: str | None = None,
-    timeout: float = 5.0,
+    timeout: float = EXTERNAL_SOURCE_QUERY_TIMEOUT,
 ) -> list[dict]:
     """Query all enabled external data sources with a hard timeout.
 

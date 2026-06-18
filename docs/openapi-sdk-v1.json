@@ -71,6 +71,12 @@
             "description": "Override Self-RAG toggle (None = use server config)",
             "title": "Enable Self Rag"
           },
+          "exclude_packs": {
+            "default": false,
+            "description": "When True, drop knowledge-pack chunks from retrieval (personal-first: answer from your own data only). Slice 7.3.",
+            "title": "Exclude Packs",
+            "type": "boolean"
+          },
           "metadata_filter": {
             "anyOf": [
               {
@@ -522,9 +528,16 @@
           },
           "summary": {
             "additionalProperties": {
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
             },
-            "description": "Claim verification counts by status",
+            "description": "Verification summary: per-status counts plus assessed count and the float overall_confidence.",
             "title": "Summary",
             "type": "object"
           },
@@ -639,7 +652,7 @@
           },
           "task_type": {
             "default": "internal",
-            "description": "Task category: chat | internal | verification | classification | research",
+            "description": "Task category: chat | internal | verification | classification | research. Clients may also pass custom values (e.g. 'gtm_creative', 'agent_phase_2'); unknown values map to safe internal routing.",
             "title": "Task Type",
             "type": "string"
           },
@@ -1201,6 +1214,92 @@
           }
         },
         "summary": "Ingest File",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest/voice-note": {
+      "post": {
+        "description": "Accepts a short audio clip (WAV / WebM / M4A \u2014 anything ffmpeg can decode), transcribes it with the bundled whisper.cpp pipeline, and ingests the transcript as an artifact linked to a voice_note Source.\n\nRecommended clip length: 30 s \u2013 5 min. Larger clips should route through the Meeting Capture pipeline (``/meetings``) instead.",
+        "operationId": "sdk_ingest_voice_note_sdk_v1_ingest_voice_note_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Sdk Ingest Voice Note Sdk V1 Ingest Voice Note Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid audio payload"
+          },
+          "500": {
+            "description": "Transcription pipeline failure"
+          },
+          "501": {
+            "description": "Whisper runtime deps not installed"
+          }
+        },
+        "summary": "Voice-note transcribe + ingest",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest/webhook/{token}": {
+      "post": {
+        "description": "Generic inbound endpoint for any external service. The ``{token}`` path segment identifies a previously-created webhook-kind Source record whose ``config`` carries the matching token + optional HMAC secret. Returns ``202 Accepted`` immediately and queues the payload for async processing.\n\n**Authentication:** the token itself is the credential. For higher assurance, configure an HMAC secret on the source and require ``X-Cerid-Signature: sha256=<hex>`` on every request; mismatched signatures return 401.\n\n**Adapter routing:** payloads can carry the canonical fields directly OR the source's config can declare per-source ``field_mappings`` (Readwise / Pocket / Slack / GitHub-events / etc.) that extract them from a third-party-shaped payload.",
+        "operationId": "sdk_ingest_webhook_sdk_v1_ingest_webhook__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Sdk Ingest Webhook Sdk V1 Ingest Webhook  Token  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "HMAC signature missing or invalid"
+          },
+          "404": {
+            "description": "Unknown webhook token"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Token-gated webhook receiver",
         "tags": [
           "SDK"
         ]

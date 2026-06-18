@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import config
+from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 from core.utils.tracing import get_request_id
 
@@ -152,6 +154,20 @@ def log_verification_metrics(
     except Exception as e:
         logger.warning(f"Failed to log verification metrics: {e}")
 
+    # Phase 4.3 — also feed the time-series MetricsCollector that
+    # /observability/quality aggregates (`verification_accuracy` was declared
+    # in METRIC_NAMES but never recorded). Best-effort; this is the single
+    # chokepoint both verify paths (streaming + non-streaming) flow through.
+    if total > 0:
+        try:
+            from utils.metrics import MetricsCollector
+            MetricsCollector(redis_client).record_metric(
+                "verification_accuracy", accuracy,
+                tags={"model": model or "unknown"},
+            )
+        except Exception as exc:  # noqa: BLE001 — metrics recording must never block verification
+            log_swallowed_error("core.utils.cache.log_verification_metrics.collector", exc)
+
 
 def log_claim_feedback(
     redis_client,
@@ -212,3 +228,83 @@ def log_verification_error(
         redis_client.expire(REDIS_VERIFICATION_ERRORS_KEY, REDIS_VERIFICATION_METRICS_TTL)
     except Exception as e:
         logger.warning(f"Failed to log verification error: {e}")
+
+
+# Per-intent RAGAS faithfulness summary (K-program §9, metric 3). The eval path
+# writes one JSON summary per intent; scripts/k_program_metrics.py::metric_faithfulness
+# reads `cerid:ragas:by_intent:<intent>` during the soak.
+_FAITHFULNESS_BY_INTENT_TTL = 86400 * 40
+
+
+def record_faithfulness_by_intent(
+    redis_client,
+    *,
+    intent: str,
+    faithfulness: float,
+    n: int,
+    now: datetime | None = None,
+) -> None:
+    """Write the per-intent RAGAS faithfulness summary the soak collector reads.
+
+    ``scripts/k_program_metrics.py::metric_faithfulness`` reads
+    ``cerid:ragas:by_intent:<intent>`` as JSON ``{faithfulness, n}``. Best-effort:
+    a no-op when redis is unavailable and never raises into the caller — a metric
+    write must not fail an eval run.
+    """
+    if redis_client is None:
+        return
+    key = f"cerid:ragas:by_intent:{intent}"
+    payload = json.dumps({
+        "faithfulness": round(float(faithfulness), 4),
+        "n": int(n),
+        "updated_at": (now or datetime.now(tz=timezone.utc)).isoformat(),
+    })
+    try:
+        redis_client.set(key, payload)
+        redis_client.expire(key, _FAITHFULNESS_BY_INTENT_TTL)
+    except Exception as exc:  # noqa: BLE001 — metric emit is best-effort
+        log_swallowed_error("core.utils.cache", exc)
+
+
+# Chunks-per-answer soak metric (K-program §9, metric 4). The answer path
+# emits one sample per answer into a daily Redis list; scripts/k_program_metrics.py
+# reads it at days 1/7/14 of the soak. 40-day TTL covers the window (the
+# collector compares week-over-week) with slack.
+_CHUNKS_PER_ANSWER_PREFIX = "cerid:metrics:chunks_per_answer:samples"
+_CHUNKS_PER_ANSWER_TTL = 86400 * 40
+
+
+def chunks_per_answer_stream(intent: str | None) -> str:
+    """Map a surface-router intent to its chunks-per-answer metric stream.
+
+    Compiled-summary answers are the optimization target (a verified wiki
+    summary displaces raw chunks); every other intent forms the baseline
+    arm the reduction % is measured against.
+    """
+    return "compiled_summary" if intent == "compiled_summary" else "baseline"
+
+
+def record_chunks_per_answer(
+    redis_client,
+    *,
+    intent: str | None,
+    chunk_count: int,
+    now: datetime | None = None,
+) -> None:
+    """Append one chunks-per-answer sample to today's Redis list.
+
+    Best-effort: a no-op when redis is unavailable and never raises into
+    the answer path — a metric write must not fail a user query. ``now``
+    is injectable for deterministic tests; the answer path passes nothing
+    and uses the wall clock.
+    """
+    if redis_client is None:
+        return
+    stream = chunks_per_answer_stream(intent)
+    bucket = (now or datetime.now(tz=timezone.utc)).strftime("%Y-%m-%d")
+    key = f"{_CHUNKS_PER_ANSWER_PREFIX}:{stream}:{bucket}"
+    try:
+        redis_client.rpush(key, int(chunk_count))
+        redis_client.expire(key, _CHUNKS_PER_ANSWER_TTL)
+    except Exception as exc:  # noqa: BLE001 — metric emit is best-effort
+        log_swallowed_error("core.utils.cache", exc)

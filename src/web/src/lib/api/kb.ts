@@ -14,6 +14,7 @@ import type {
   CurateResponse,
   TaxonomyResponse,
   SchedulerStatus,
+  SchedulerJobRunResult,
   IngestLogResponse,
   AuditResponse,
   DigestResponse,
@@ -44,6 +45,8 @@ export interface QueryOpts {
   metadataFilter?: Record<string, string>
   /** Skip cross-encoder reranking for faster (but less precise) results. Default true. */
   useReranking?: boolean
+  /** Drop knowledge-pack chunks from retrieval (personal-first). Slice 7.3. */
+  excludePacks?: boolean
   /** AbortSignal to cancel the request (frees browser connection slot). */
   signal?: AbortSignal
 }
@@ -70,6 +73,7 @@ export async function queryKB(
       ...(opts?.strictDomains != null && { strict_domains: opts.strictDomains }),
       ...(opts?.skipCache != null && { skip_cache: opts.skipCache }),
       ...(opts?.metadataFilter != null && { metadata_filter: opts.metadataFilter }),
+      ...(opts?.excludePacks != null && { exclude_packs: opts.excludePacks }),
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))
@@ -343,6 +347,15 @@ export async function fetchSynopsisEstimate(
 export async function fetchSchedulerStatus(): Promise<SchedulerStatus> {
   const res = await fetch(`${MCP_BASE}/scheduler`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Scheduler status failed: ${res.status}`))
+  return res.json()
+}
+
+export async function triggerSchedulerJob(jobId: string): Promise<SchedulerJobRunResult> {
+  const res = await fetch(`${MCP_BASE}/scheduler/jobs/${encodeURIComponent(jobId)}/run`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Run job failed: ${res.status}`))
   return res.json()
 }
 

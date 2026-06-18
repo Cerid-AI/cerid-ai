@@ -54,7 +54,6 @@ export function InfoTip({
     // Missing-term safety: render children as-is so the UI doesn't break,
     // and surface the gap in dev.
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console -- dev-only warning for maintainability
       console.warn(`[InfoTip] unknown glossary term: "${term}" — add it to lib/glossary.ts`)
     }
     return <>{children}</>

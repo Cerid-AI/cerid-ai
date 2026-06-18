@@ -142,6 +142,20 @@ describe("DigestCard", () => {
     expect(screen.getByText("Errors")).toBeInTheDocument()
   })
 
+  // Regression: F-RC2.1-A1.1 — backend may return a partial digest payload
+  // (missing artifacts/relationships fields) when the maintenance pipeline is
+  // degraded. The pane must render an empty state instead of crashing in
+  // PaneErrorBoundary with "Cannot read properties of undefined (reading 'count')".
+  it("renders empty state when digest is missing nested fields (partial payload)", () => {
+    const partial = {
+      period_hours: 24,
+      generated_at: "2026-03-13T12:00:00Z",
+      // artifacts/relationships/recent_events/health intentionally omitted
+    } as unknown as DigestResponse
+    render(<DigestCard digest={partial} isLoading={false} />)
+    expect(screen.getByText(/no activity/i)).toBeInTheDocument()
+  })
+
   it("limits recent artifacts list to 10 items", () => {
     const manyItems = Array.from({ length: 15 }, (_, i) => ({
       id: `a${i}`,

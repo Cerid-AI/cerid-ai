@@ -2,38 +2,45 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RecommendationBanner — surfaces adaptive feature recommendations at the
- * top of the Settings pane (Cycle 3.2 / v0.93.3).
+ * RecommendationBanner — adaptive feature recommendations, hosted by the
+ * settings shell at the top of the detail area (above category content).
  *
- * Polls GET /health every 60s for the `recommended_features` array
- * populated by the ConfigRecommenderJob. Each entry renders as a
- * dismissable card with three actions:
+ * Data source unchanged: polls GET /health every 60s for
+ * `recommended_features` (ConfigRecommenderJob). Actions:
  *
- *   1. Enable now              — PATCH /settings with enable_payload,
- *                                then DELETE /settings/recommendations/{id}
- *                                so the banner closes immediately.
- *   2. Maybe later             — sessionStorage snooze (per-tab, until
- *                                window close).
- *   3. Dismiss permanently     — POST /settings/recommendations/{id}/dismiss
- *                                (server-side, per-tenant).
+ *   1. Enable now — PATCH /settings with enable_payload, then
+ *      DELETE /settings/recommendations/{id}. Failures surface as an
+ *      inline destructive Alert (never silent).
+ *   2. Snooze     — explicitly labeled button; sessionStorage snooze
+ *                   (per-tab, until window close).
+ *   3. X icon     — permanent dismiss (server-side, per-tenant).
  *
- * Amber border keeps the visual vocabulary aligned with the "Custom"
- * preset badge elsewhere in the Settings pane.
+ * When a recommendation's enable_payload maps to a registry-backed control
+ * (a def with `writer: { kind: "settings-patch" }` whose key is in the
+ * payload), "View setting" deep-links to the owning row via the `?setting=`
+ * reveal path.
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Sparkles, X } from "lucide-react"
+import { ChevronDown, Lightbulb, X } from "lucide-react"
 import { useEffect, useState } from "react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
+import { cn } from "@/lib/utils"
+import { useNavigation } from "@/contexts/navigation-context"
 import { fetchHealth } from "@/lib/api/settings"
 import { clearRecommendation, dismissRecommendation } from "@/lib/api/recommendations"
+import { SETTINGS_REGISTRY, type SettingDef } from "@/lib/settings-registry"
+import type { PatchResult } from "./categories/page-props"
 import type { RecommendedFeature, SettingsUpdate } from "@/lib/types"
 import { logSwallowedError } from "@/lib/log-swallowed"
 
 const SNOOZE_PREFIX = "cerid:recommendation-snoozed:"
+const COLLAPSE_KEY = "cerid-settings-recs-collapsed"
 
 function isSnoozed(id: string): boolean {
   try {
@@ -51,9 +58,18 @@ function snooze(id: string): void {
   }
 }
 
+/** Resolve the registry def that owns a recommendation's primary setting. */
+function owningDef(rec: RecommendedFeature): SettingDef | undefined {
+  const payload = (rec.enable_payload ?? {}) as Record<string, unknown>
+  const keys = Object.keys(payload)
+  return SETTINGS_REGISTRY.find(
+    (d) => d.writer.kind === "settings-patch" && keys.includes(d.writer.key),
+  )
+}
+
 export interface RecommendationBannerProps {
-  /** PATCH /settings — wired in from the parent so the banner shares one source of truth. */
-  patch: (body: SettingsUpdate) => Promise<unknown>
+  /** PATCH /settings — wired in from the shell so the banner shares one source of truth. */
+  patch: (body: SettingsUpdate) => Promise<PatchResult>
 }
 
 export function RecommendationBanner({ patch }: RecommendationBannerProps) {
@@ -61,116 +77,166 @@ export function RecommendationBanner({ patch }: RecommendationBannerProps) {
   const { data } = useQuery({
     queryKey: ["health-recommendations"],
     queryFn: fetchHealth,
-    // 60s poll matches GitHub's notification cadence — fresh enough to
-    // matter, slow enough to be invisible.
     refetchInterval: 60_000,
     staleTime: 60_000,
     retry: 1,
   })
   const [dismissedLocally, setDismissedLocally] = useState<Set<string>>(new Set())
 
-  // Refresh dismissedLocally when sessionStorage state changes — e.g.
-  // user clicked "Maybe later" then the banner re-renders and should
-  // suppress that entry until the tab is closed.
   useEffect(() => {
     if (!data?.recommended_features) return
     const snoozed = new Set<string>()
     for (const rec of data.recommended_features) {
       if (isSnoozed(rec.id)) snoozed.add(rec.id)
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     setDismissedLocally(snoozed)
   }, [data?.recommended_features])
+
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === "1"
+    } catch {
+      return false
+    }
+  })
 
   const recs = (data?.recommended_features ?? []).filter(
     (r) => !dismissedLocally.has(r.id),
   )
   if (recs.length === 0) return null
 
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, prev ? "0" : "1")
+      } catch (err) {
+        logSwallowedError(err, "recommendation-banner.collapse")
+      }
+      return !prev
+    })
+  }
+
   return (
-    <div className="mb-4 grid gap-2">
-      {recs.map((rec) => (
-        <RecommendationCard
-          key={rec.id}
-          rec={rec}
-          onEnable={async () => {
-            try {
-              await patch(rec.enable_payload as SettingsUpdate)
-              await clearRecommendation(rec.id)
-              await qc.invalidateQueries({ queryKey: ["health-recommendations"] })
-            } catch (err) {
-              logSwallowedError(err, "recommendation-banner.enable")
-            }
-          }}
-          onSnooze={() => {
-            snooze(rec.id)
-            setDismissedLocally((prev) => new Set(prev).add(rec.id))
-          }}
-          onDismiss={async () => {
-            try {
-              await dismissRecommendation(rec.id)
-              await qc.invalidateQueries({ queryKey: ["health-recommendations"] })
-            } catch (err) {
-              logSwallowedError(err, "recommendation-banner.dismiss")
-            }
-          }}
-        />
-      ))}
-    </div>
+    <Card data-testid="recommendation-banner">
+      <CardContent className="grid gap-1 pt-4">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-md text-left"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+        >
+          <Lightbulb className="h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+          <span className="text-sm font-medium">Recommendations</span>
+          <Badge variant="secondary" className="text-label-xs">{recs.length}</Badge>
+          <span className="flex-1" />
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 text-muted-foreground transition-transform duration-150",
+              collapsed && "-rotate-90",
+            )}
+            aria-hidden="true"
+          />
+        </button>
+        {!collapsed &&
+          recs.map((rec, i) => (
+            <div key={rec.id} className="grid gap-1">
+              {i > 0 && <Separator className="my-1.5" />}
+              <RecommendationRow
+                rec={rec}
+                patch={patch}
+                onSnooze={() => {
+                  snooze(rec.id)
+                  setDismissedLocally((prev) => new Set(prev).add(rec.id))
+                }}
+                onDismiss={async () => {
+                  try {
+                    await dismissRecommendation(rec.id)
+                    await qc.invalidateQueries({ queryKey: ["health-recommendations"] })
+                  } catch (err) {
+                    logSwallowedError(err, "recommendation-banner.dismiss")
+                  }
+                }}
+              />
+            </div>
+          ))}
+      </CardContent>
+    </Card>
   )
 }
 
-interface RecommendationCardProps {
+interface RecommendationRowProps {
   rec: RecommendedFeature
-  onEnable: () => void | Promise<void>
+  patch: (body: SettingsUpdate) => Promise<PatchResult>
   onSnooze: () => void
   onDismiss: () => void | Promise<void>
 }
 
-function RecommendationCard({ rec, onEnable, onSnooze, onDismiss }: RecommendationCardProps) {
+function RecommendationRow({ rec, patch, onSnooze, onDismiss }: RecommendationRowProps) {
+  const qc = useQueryClient()
+  const { goTo } = useNavigation()
+  const [enableError, setEnableError] = useState("")
+  const [enabling, setEnabling] = useState(false)
+  const target = owningDef(rec)
+
+  const enable = async () => {
+    setEnabling(true)
+    setEnableError("")
+    try {
+      const result = await patch(rec.enable_payload as SettingsUpdate)
+      if (!result.ok) {
+        setEnableError(result.error)
+        return
+      }
+      await clearRecommendation(rec.id)
+      await qc.invalidateQueries({ queryKey: ["health-recommendations"] })
+    } catch (err) {
+      setEnableError(err instanceof Error ? err.message : "Failed to enable")
+    } finally {
+      setEnabling(false)
+    }
+  }
+
   return (
-    <Card className="border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20">
-      <CardContent className="grid gap-3 pt-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2">
-            <Sparkles className="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-400" />
-            <div className="grid gap-1">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-sm">{rec.label}</span>
-                <Badge
-                  variant="outline"
-                  className="border-amber-500/40 bg-amber-100/50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
-                >
-                  Recommended
-                </Badge>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">{rec.reason}</p>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0"
-            onClick={onSnooze}
-            aria-label="Snooze for this session"
-            title="Maybe later (snoozed for this tab)"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
+    <div className="grid gap-1.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid min-w-0 gap-0.5">
+          <span className="min-w-0 text-sm font-medium">{rec.label}</span>
+          <p className="text-sm leading-relaxed text-muted-foreground">{rec.reason}</p>
         </div>
-        <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 shrink-0 p-0"
+          onClick={onDismiss}
+          aria-label="Dismiss permanently"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </Button>
+      </div>
+      {enableError && (
+        <Alert variant="destructive">
+          <AlertDescription>Could not enable: {enableError}</AlertDescription>
+        </Alert>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        {target && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={onDismiss}
             className="text-xs text-muted-foreground"
+            onClick={() => goTo("settings", { category: target.category, setting: target.id })}
           >
-            Dismiss permanently
+            View setting
           </Button>
-          <Button size="sm" onClick={onEnable} className="text-xs">
-            Enable now
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        )}
+        <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={onSnooze}>
+          Snooze
+        </Button>
+        <Button size="sm" variant="outline" className="text-xs" onClick={enable} disabled={enabling}>
+          Enable now
+        </Button>
+      </div>
+    </div>
   )
 }

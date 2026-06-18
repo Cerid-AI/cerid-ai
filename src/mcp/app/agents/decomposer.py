@@ -179,9 +179,17 @@ async def multi_domain_query(
     if domains is None:
         domains = DOMAINS
 
-    invalid_domains = [d for d in domains if d not in DOMAINS]
-    if invalid_domains:
-        raise ValueError(f"Invalid domains: {invalid_domains}. Valid: {DOMAINS}")
+    # Custom/client-defined domains are allowed (GA P0.1): external clients
+    # ingest to their own domain names. Unknown domains are queried when their
+    # collection exists and degrade to empty results otherwise (see
+    # query_domain below). Warn, never reject — a hard 400 forces client shims.
+    custom_domains = [d for d in domains if d not in DOMAINS]
+    if custom_domains:
+        logger.warning(
+            "multi_domain_query: non-built-in domain(s) %s — querying as custom "
+            "client domains (built-in: %s)",
+            custom_domains, DOMAINS,
+        )
 
     if chroma_client is None:
         chroma_client = get_chroma()

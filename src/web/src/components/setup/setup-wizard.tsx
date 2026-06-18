@@ -15,15 +15,14 @@ import { CustomProviderInput } from "@/components/setup/custom-provider-input"
 import { HealthDashboard } from "@/components/setup/health-dashboard"
 import { SystemCheckCard } from "@/components/setup/system-check-card"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
-import { OllamaStep } from "@/components/setup/ollama-step"
-import { FirstDocumentStep } from "@/components/setup/first-document-step"
+import { LocalLLMStep } from "@/components/setup/local-llm-step"
+import { FirstDocumentStep, type FirstDocState } from "@/components/setup/first-document-step"
 import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
 import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
 import { QuenchforgeInstallStep } from "@/components/setup/quenchforge-install-step"
 import { TelemetryConsentStep, type TelemetryConsent } from "@/components/setup/telemetry-consent-step"
 import { StepIndicator, type StepDef } from "@/components/setup/step-indicator"
 import { applySetupConfig, fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
-import { useUIMode } from "@/contexts/ui-mode-context"
 import { assessCapabilities, fromWizardState, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import type { CapabilityAssessment, Warning as ProviderWarning } from "@/lib/provider-capabilities"
 import { cn } from "@/lib/utils"
@@ -33,17 +32,27 @@ import type { ProviderCredits, RecommendedLocalBackend, SystemCheckResponse } fr
 // Constants
 // ---------------------------------------------------------------------------
 
-const TOTAL_STEPS = 8
-const SKIPPABLE_STEPS = new Set([2, 3, 6])
+const TOTAL_STEPS = 9
+// 0-indexed steps that show a Skip button. Mapping (post-Cluster-E):
+//   2 → Storage & Archive
+//   3 → Local LLM
+//   6 → Try It Out
+//   7 → Telemetry
+const SKIPPABLE_STEPS = new Set([2, 3, 6, 7])
 const STORAGE_KEY = "cerid-setup-progress"
 /**
- * Persisted-state schema version. Bumped to 2 when the Backend Recommendation,
- * Quenchforge Install, and Telemetry Consent surfaces were added; v1 stores
- * lack `selectedBackend` and `telemetryConsent`, so on load we drop them and
- * restart the wizard rather than running a transform — saves are
- * 24-hour-ephemeral anyway (see `loadProgress`).
+ * Persisted-state schema version. v3 (Cluster E, 2026-05-27) split Step 8
+ * (telemetry + mode) into two distinct steps; index 7 became Telemetry and
+ * index 8 became Mode. v2 stores have a smaller step range so loading them
+ * unchanged would land the user on a now-nonexistent step layout. We drop
+ * them and restart rather than transform — saves are 24-hour-ephemeral
+ * anyway (see `loadProgress`).
+ *
+ * v1 → v2: added Backend Recommendation, Quenchforge Install, Telemetry
+ * Consent surfaces (`selectedBackend`, `telemetryConsent`).
+ * v2 → v3: split Step 8 into Telemetry + Mode, TOTAL_STEPS 8→9.
  */
-const STORAGE_SCHEMA_VERSION = 2
+const STORAGE_SCHEMA_VERSION = 3
 
 // Display-only sentinels the masked API-key input renders when an
 // env-loaded key is already configured. Sending them on the wire would
@@ -63,10 +72,11 @@ const STEP_DEFS: StepDef[] = [
   { label: "Welcome", shortLabel: "Welcome" },
   { label: "API Keys", shortLabel: "Keys" },
   { label: "Storage & Archive", shortLabel: "Storage" },
-  { label: "Ollama", shortLabel: "Ollama" },
+  { label: "Local LLM", shortLabel: "Local LLM" },
   { label: "Review & Apply", shortLabel: "Apply" },
   { label: "Service Health", shortLabel: "Health" },
   { label: "Try It Out", shortLabel: "Try" },
+  { label: "Telemetry", shortLabel: "Telemetry" },
   { label: "Choose Mode", shortLabel: "Mode" },
 ]
 
@@ -102,11 +112,7 @@ interface WizardState {
     model: string | null
     pulling: boolean
   }
-  firstDoc: {
-    ingested: boolean
-    queried: boolean
-    skipped: boolean
-  }
+  firstDoc: FirstDocState
   selectedMode: "simple" | "advanced"
   customProvider: { name: string; baseUrl: string; apiKey: string; modelId: string; valid: boolean } | null
   /** User's chosen local-inference backend. null = follow recommendation. */
@@ -167,6 +173,7 @@ function createInitialState(): WizardState {
       ingested: false,
       queried: false,
       skipped: false,
+      documentCount: 0,
     },
     selectedMode: "simple",
     customProvider: null,
@@ -317,7 +324,6 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   const [showResumePrompt, setShowResumePrompt] = useState(false)
   const [resumeStep, setResumeStep] = useState(0)
   const healthTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
-  const { setMode } = useUIMode()
 
   // Check for saved progress on mount — but only if backend hasn't been reset
   useEffect(() => {
@@ -467,11 +473,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   }, [])
 
   const handleFinish = useCallback(() => {
-    setMode(state.selectedMode)
     clearProgress()
     localStorage.setItem("cerid-onboarding-complete", "true")
     onComplete()
-  }, [state.selectedMode, setMode, onComplete])
+  }, [onComplete])
 
   const goNext = useCallback(() => {
     dispatch({ type: "SET_STEP", step: Math.min(state.step + 1, TOTAL_STEPS - 1) })
@@ -499,8 +504,31 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   // Compute config summary for mode selection step
   const validProviders = Object.entries(state.keys).filter(([, k]) => k.valid)
   const providerCount = validProviders.length
-  const providerNames = validProviders.map(([name]) => name.charAt(0).toUpperCase() + name.slice(1))
+  const providerNames = validProviders.map(([name]) => PROVIDER_LABELS[name] ?? name.charAt(0).toUpperCase() + name.slice(1))
   const domainCount = state.kbConfig.domains.length
+
+  // Chat-model label for the Mode summary. The previous wizard mislabelled
+  // the rerank slot model (`bge-reranker-v2-m3`) as "Local LLM", which is a
+  // category error — rerankers aren't chat LLMs. Pick a sensible chat-slot
+  // alias per backend; for Ollama, surface the user's downloaded chat model.
+  const modeSummaryChatModel: string | null = (() => {
+    if (state.selectedBackend === "quenchforge") return "llama3.1-8b"
+    if (state.selectedBackend === "cloud") return null
+    // Ollama (or null/legacy): use the explicit model the user pulled, but
+    // never the reranker — Quenchforge users on a v2-persisted state can
+    // have `state.ollama.model` set to `bge-reranker-v2-m3` from the prior
+    // wizard's mislabelled flow.
+    if (state.ollama.model && !state.ollama.model.toLowerCase().includes("reranker")) {
+      return state.ollama.model
+    }
+    return null
+  })()
+
+  // Document count for the Mode summary. Single upload sets count=1; sample
+  // pack install sets count=pack.artifact_count. Both flow through
+  // firstDoc.documentCount so the summary doesn't show stale "0 documents"
+  // after a successful pack install (F-04-07).
+  const modeSummaryDocCount: number = state.firstDoc.documentCount
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
@@ -539,7 +567,14 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
               gate). The wrapper only mounts when the resume prompt isn't showing. */}
           {!showResumePrompt && (
             <div key={state.step} className="animate-in fade-in zoom-in-95 duration-300">
-          {/* Step 0: Welcome */}
+          {/* Step 0: Welcome.
+
+              Layout (post-Cluster-E): the Inference Backend selector is the
+              most consequential decision on this page, so it sits at the top
+              the moment system-check completes. The intro/value-prop copy
+              follows below as secondary context. Previously the selector was
+              the LAST card on the page, below 4 value-prop bullets and the
+              system-check card — users routinely scrolled past it. */}
           {state.step === 0 && (
             <>
               <div className="mb-2 flex items-center justify-center">
@@ -547,47 +582,17 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   <Sparkles className="h-5 w-5 text-brand" />
                 </div>
               </div>
-              <h3 className="mb-2 text-center text-lg font-semibold">
+              <h3 className="mb-3 text-center text-lg font-semibold">
                 Welcome to Cerid <span className="text-brand-gradient">AI</span>
               </h3>
-              <div className="space-y-3">
-                <p className="text-center text-sm text-muted-foreground">
-                  Your personal AI knowledge companion. Cerid connects your documents to
-                  powerful language models with RAG-powered retrieval, intelligent agents,
-                  and built-in verification — all running locally on your machine.
-                </p>
-                <div className="mx-auto flex max-w-sm flex-col gap-2 text-left text-xs text-muted-foreground">
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                    <span>Chat with AI grounded in your own documents and notes</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                    <span>Multi-domain knowledge base with smart query routing</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                    <span>Verify every AI response against your source documents</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                    <span>Privacy-first — your data never leaves your machine</span>
-                  </div>
-                </div>
-                <p className="text-center text-xs text-muted-foreground/80">
-                  This wizard will walk you through connecting an LLM provider,
-                  configuring your knowledge base, and ingesting your first document.
-                </p>
-              </div>
+
               <SystemCheckCard onCheckComplete={handleSystemCheckComplete} />
-              {/*
-                Backend Recommendation surfaces as soon as the system check
-                returns — the recommendation is hardware-driven. Quenchforge
-                Install appears only when the user picks quenchforge and the
-                local backend isn't already responding. Both inline in step 0
-                rather than as separate wizard pages so the Welcome page tells
-                a single coherent story without renumbering all later steps.
-              */}
+
+              {/* Backend recommendation immediately follows the system-check
+                  card; the recommendation is hardware-driven, so we need the
+                  check result first. Quenchforge Install appears only when the
+                  user picks quenchforge and the local backend isn't already
+                  responding. */}
               {state.systemCheck && (
                 <div className="mt-4 space-y-4">
                   <BackendRecommendationStep
@@ -607,6 +612,39 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   )}
                 </div>
               )}
+
+              {/* Secondary context: what Cerid is and what's next. Kept below
+                  the actionable decision above — users who already know Cerid
+                  can pick a backend without scrolling. */}
+              <div className="mt-6 space-y-3 border-t pt-4">
+                <p className="text-center text-sm text-muted-foreground">
+                  Your personal AI knowledge companion. Cerid connects your documents to
+                  powerful language models with RAG-powered retrieval, intelligent agents,
+                  and built-in verification &mdash; all running locally on your machine.
+                </p>
+                <div className="mx-auto flex max-w-sm flex-col gap-2 text-left text-xs text-muted-foreground">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
+                    <span>Chat with AI grounded in your own documents and notes</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
+                    <span>Multi-domain knowledge base with smart query routing</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
+                    <span>Verify every AI response against your source documents</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
+                    <span>Privacy-first &mdash; your data never leaves your machine</span>
+                  </div>
+                </div>
+                <p className="text-center text-xs text-muted-foreground/80">
+                  Next: connecting an LLM provider, configuring your knowledge base, and
+                  ingesting your first document.
+                </p>
+              </div>
             </>
           )}
 
@@ -746,13 +784,16 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
             />
           )}
 
-          {/* Step 3: Ollama (Optional) */}
+          {/* Step 3: Local LLM (backend-aware: Ollama / Quenchforge / Cloud-skip) */}
           {!showResumePrompt && state.step === 3 && (
-            <OllamaStep
+            <LocalLLMStep
+              inferenceBackend={state.selectedBackend}
               ollamaDetected={state.ollama.detected}
               ollamaModels={state.systemCheck?.ollama_models ?? []}
               state={state.ollama}
               onChange={(s) => dispatch({ type: "SET_OLLAMA", state: s })}
+              hardwareGpu={state.systemCheck?.gpu ?? null}
+              hardwareGpuAcceleration={state.systemCheck?.gpu_acceleration ?? null}
             />
           )}
 
@@ -812,19 +853,39 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   </div>
                 )}
 
-                {/* Ollama Summary */}
+                {/* Inference Backend (from Welcome step — F-04-05) */}
+                {state.selectedBackend && (
+                  <div className="rounded-lg border bg-card px-3 py-2">
+                    <p className="text-xs font-medium text-muted-foreground">Inference Backend</p>
+                    <p className="mt-0.5 text-xs">
+                      {state.selectedBackend === "quenchforge" && "Quenchforge (local, GPU-accelerated)"}
+                      {state.selectedBackend === "ollama" && "Ollama (local)"}
+                      {state.selectedBackend === "cloud" && "Cloud providers only"}
+                    </p>
+                  </div>
+                )}
+
+                {/* Local LLM Summary (skip the bge-reranker mislabel: hide
+                    the line when only the rerank slot model is set). */}
                 {!state.skippedSteps.has(3) && state.ollama.detected && (
                   <div className="rounded-lg border bg-card px-3 py-2">
-                    <p className="text-xs font-medium text-muted-foreground">Ollama</p>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {state.selectedBackend === "quenchforge" ? "Quenchforge" : "Ollama"}
+                    </p>
                     <p className="mt-0.5 text-xs">
                       {state.ollama.enabled ? "Enabled" : "Disabled"}
-                      {state.ollama.model && ` · ${state.ollama.model}`}
+                      {state.ollama.model && !state.ollama.model.toLowerCase().includes("reranker") && (
+                        ` · ${state.ollama.model}`
+                      )}
                     </p>
                   </div>
                 )}
 
                 {/* Capability Summary */}
-                <CapabilitySummary assessment={assessment} />
+                <CapabilitySummary
+                  assessment={assessment}
+                  inferenceBackend={state.selectedBackend}
+                />
 
                 {!state.applied && (
                   <Button
@@ -887,52 +948,107 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
             />
           )}
 
-          {/* Step 7: Mode Selection (preceded by Telemetry Consent) */}
+          {/* Step 7: Telemetry Consent (own step — was stacked with Mode pre-v3) */}
           {!showResumePrompt && state.step === 7 && (
-            <div className="space-y-6">
-              <TelemetryConsentStep
-                consent={state.telemetryConsent}
-                onChange={(consent) => dispatch({ type: "SET_TELEMETRY", consent })}
-              />
-              <div className="border-t pt-4">
-                <ModeSelectionStep
-                  selectedMode={state.selectedMode}
-                  onSelectMode={(mode) => dispatch({ type: "SET_MODE", mode })}
-                  configSummary={{
-                    providerCount,
-                    providerNames,
-                    domainCount,
-                    ollamaEnabled: state.ollama.enabled,
-                    ollamaModel: state.ollama.model,
-                    documentCount: state.firstDoc.ingested ? 1 : 0,
-                  }}
-                  hardware={state.systemCheck ? {
-                    ram_gb: state.systemCheck.ram_gb,
-                    cpu: state.systemCheck.cpu,
-                    gpu: state.systemCheck.gpu,
-                    gpu_acceleration: state.systemCheck.gpu_acceleration,
-                  } : null}
-                />
-              </div>
-            </div>
+            <TelemetryConsentStep
+              consent={state.telemetryConsent}
+              onChange={(consent) => dispatch({ type: "SET_TELEMETRY", consent })}
+            />
+          )}
+
+          {/* Step 8: Mode Selection */}
+          {!showResumePrompt && state.step === 8 && (
+            <ModeSelectionStep
+              selectedMode={state.selectedMode}
+              onSelectMode={(mode) => dispatch({ type: "SET_MODE", mode })}
+              configSummary={{
+                providerCount,
+                providerNames,
+                domainCount,
+                ollamaEnabled: state.ollama.enabled,
+                ollamaModel: modeSummaryChatModel,
+                documentCount: modeSummaryDocCount,
+                inferenceBackend: state.selectedBackend,
+              }}
+              hardware={state.systemCheck ? {
+                ram_gb: state.systemCheck.ram_gb,
+                cpu: state.systemCheck.cpu,
+                gpu: state.systemCheck.gpu,
+                gpu_acceleration: state.systemCheck.gpu_acceleration,
+              } : null}
+            />
           )}
             </div>
           )}
         </div>
 
-        {/* Footer */}
-        {!showResumePrompt && (
+        {/* Footer — single standardized rhythm: Back? + Skip? + (Next|Action)
+            Each step declares its primary action via STEP_ACTIONS below. This
+            replaces the previous 5+ unique footer patterns that forced users
+            to relearn the affordance at each transition (F-04 footer rhythm). */}
+        {!showResumePrompt && (() => {
+          // Per-step primary action: label + onClick + disabled predicate.
+          // The Back button (always-present except on Welcome) and Skip button
+          // (gated by SKIPPABLE_STEPS) are rendered uniformly.
+          const action = (() => {
+            switch (state.step) {
+              case 0:
+                return { label: "Get Started", onClick: goNext, disabled: false, primary: false }
+              case 1:
+                return { label: "Next", onClick: goNext, disabled: !canProceedFromKeys, primary: false }
+              case 2:
+              case 3:
+                return { label: "Next", onClick: goNext, disabled: false, primary: false }
+              case 4:
+                return {
+                  label: "Next",
+                  onClick: () => dispatch({ type: "SET_STEP", step: 5 }),
+                  disabled: !state.applied,
+                  primary: false,
+                }
+              case 5:
+                return {
+                  label: state.allHealthy ? "Next" : "Continue Anyway",
+                  onClick: goNext,
+                  disabled: !state.allHealthy && !state.healthTimedOut,
+                  primary: false,
+                }
+              case 6:
+                return {
+                  label: "Next",
+                  onClick: goNext,
+                  disabled: !state.firstDoc.ingested && !state.firstDoc.skipped,
+                  primary: false,
+                }
+              case 7:
+                return { label: "Next", onClick: goNext, disabled: false, primary: false }
+              case 8:
+                return {
+                  label: "Open Cerid AI",
+                  onClick: handleFinish,
+                  disabled: false,
+                  primary: true,
+                }
+              default:
+                return { label: "Next", onClick: goNext, disabled: false, primary: false }
+            }
+          })()
+
+          // Back button suppressed on Welcome (no prior step) and on Service
+          // Health (the health probe is async — back-stepping the apply phase
+          // is a sharp edge we'd rather not expose).
+          const showBack = state.step > 0 && state.step !== 5
+
+          return (
           <div className="shrink-0 border-t px-6 pb-5 pt-3 space-y-2">
             <div className="flex items-center justify-end gap-2">
-              {/* Back button (not on welcome or health) */}
-              {state.step > 0 && state.step !== 5 && (
+              {showBack && (
                 <Button variant="ghost" size="sm" onClick={goBack}>
                   <ChevronLeft className="mr-1 h-3 w-3" />
                   Back
                 </Button>
               )}
 
-              {/* Skip button */}
               {SKIPPABLE_STEPS.has(state.step) && (
                 <Button variant="ghost" size="sm" onClick={handleSkip}>
                   <SkipForward className="mr-1 h-3 w-3" />
@@ -940,69 +1056,15 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 </Button>
               )}
 
-              {/* Step 0: Get Started */}
-              {state.step === 0 && (
-                <Button size="sm" onClick={goNext}>
-                  Get Started
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Button>
-              )}
-
-              {/* Step 1: Next (requires OpenRouter key) */}
-              {state.step === 1 && (
-                <Button size="sm" onClick={goNext} disabled={!canProceedFromKeys}>
-                  Next
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Button>
-              )}
-
-              {/* Steps 2, 3: Next */}
-              {(state.step === 2 || state.step === 3) && (
-                <Button size="sm" onClick={goNext}>
-                  Next
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Button>
-              )}
-
-              {/* Step 4: Next (after applied) */}
-              {state.step === 4 && state.applied && (
-                <Button size="sm" onClick={() => dispatch({ type: "SET_STEP", step: 5 })}>
-                  Next
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Button>
-              )}
-
-              {/* Step 5: Next (after healthy or timed out) */}
-              {state.step === 5 && (state.allHealthy || state.healthTimedOut) && (
-                <Button size="sm" onClick={goNext}>
-                  {state.allHealthy ? "Next" : "Continue Anyway"}
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Button>
-              )}
-
-              {/* Step 6: Next (after queried or can skip) */}
-              {state.step === 6 && (
-                <Button
-                  size="sm"
-                  onClick={goNext}
-                  disabled={!state.firstDoc.ingested && !state.firstDoc.skipped}
-                >
-                  Next
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Button>
-              )}
-
-              {/* Step 7: Finish */}
-              {state.step === 7 && (
-                <Button
-                  size="sm"
-                  onClick={handleFinish}
-                  className="bg-brand text-brand-foreground hover:bg-brand/90"
-                >
-                  Open Cerid AI
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Button>
-              )}
+              <Button
+                size="sm"
+                onClick={action.onClick}
+                disabled={action.disabled}
+                className={action.primary ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
+              >
+                {action.label}
+                <ChevronRight className="ml-1 h-3 w-3" />
+              </Button>
             </div>
 
             <StepIndicator
@@ -1023,7 +1085,8 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
               </div>
             )}
           </div>
-        )}
+          )
+        })()}
       </DialogContent>
     </Dialog>
   )
@@ -1059,7 +1122,29 @@ function ProviderWarnings({ warnings }: { warnings: ProviderWarning[] }) {
 }
 
 
-function CapabilitySummary({ assessment }: { assessment: CapabilityAssessment }) {
+function CapabilitySummary({
+  assessment,
+  inferenceBackend,
+}: {
+  assessment: CapabilityAssessment
+  inferenceBackend: RecommendedLocalBackend | null
+}) {
+  // Override the static "Pipeline: Free (Ollama)" string when the user
+  // selected Quenchforge on Step 1 — using "Ollama" misrepresents which
+  // local backend is actually running pipeline tasks (F-04-05).
+  const costLabel = (() => {
+    if (assessment.costProfile === "free-pipeline" && inferenceBackend === "quenchforge") {
+      return "Pipeline: Free (Quenchforge)"
+    }
+    if (assessment.costProfile === "free-pipeline" && inferenceBackend === "cloud") {
+      // costProfile said `free-pipeline` because the live provider snapshot
+      // had ollama_detected true (quenchforge listens on :11434 too), but
+      // the user explicitly chose Cloud — respect their choice in the label.
+      return COST_PROFILE_LABELS["paid-pipeline"]
+    }
+    return COST_PROFILE_LABELS[assessment.costProfile]
+  })()
+
   return (
     <div className="rounded-lg border bg-card px-3 py-2">
       <p className="mb-2 text-xs font-medium text-muted-foreground">System Capabilities</p>
@@ -1083,7 +1168,7 @@ function CapabilitySummary({ assessment }: { assessment: CapabilityAssessment })
         </div>
       )}
       <p className="mt-1.5 text-label-xs text-muted-foreground/80">
-        {COST_PROFILE_LABELS[assessment.costProfile]}
+        {costLabel}
       </p>
     </div>
   )

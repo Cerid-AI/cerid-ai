@@ -5,23 +5,22 @@ import { useState } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { useQuery } from "@tanstack/react-query"
 import {
-  MessageSquare, Database, HeartPulse, BarChart3, Brain, Settings,
+  MessageSquare, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
-  Shield, Activity, BookOpen, Network,
+  Shield, Compass, Files,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { useConversationsContext } from "@/contexts/conversations-context"
-import { useUIMode } from "@/contexts/ui-mode-context"
+import { withViewTransition } from "@/lib/view-transitions"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { fetchModelUpdatesFull } from "@/lib/api"
 import { fetchHealth } from "@/lib/api/settings"
 
-export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities"
+export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities" | "subjects" | "sources"
 
 interface SidebarProps {
   activePane: Pane
@@ -36,15 +35,18 @@ interface SidebarProps {
   activePanes?: Set<Pane>
 }
 
+// Phase A + B + C consolidation history:
+//  - A Day 9: Wiki / Communities / Memories → Subjects pane modes
+//  - B Day 9: Knowledge → Sources pane
+//  - C Day 2: Monitoring / Audit / Agents → Settings Diagnostics tab
+// Legacy goTo("monitoring"|"audit"|"agents"|...) calls resolve via
+// the NavigationProvider redirect map. Pane type retains values for
+// one release window so existing tests + direct programmatic mounts
+// keep working; final 4-pane shape is Chat / Subjects / Sources / Settings.
 const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "chat", icon: MessageSquare, label: "Chat" },
-  { pane: "knowledge", icon: Database, label: "Knowledge" },
-  { pane: "wiki", icon: BookOpen, label: "Wiki" },
-  { pane: "communities", icon: Network, label: "Communities" },
-  { pane: "monitoring", icon: HeartPulse, label: "Health" },
-  { pane: "audit", icon: BarChart3, label: "Analytics" },
-  { pane: "memories", icon: Brain, label: "Memories" },
-  { pane: "agents", icon: Activity, label: "Agents" },
+  { pane: "subjects", icon: Compass, label: "Subjects" },
+  { pane: "sources", icon: Files, label: "Sources" },
   { pane: "settings", icon: Settings, label: "Settings" },
 ]
 
@@ -54,8 +56,6 @@ function readBool(key: string, fallback: boolean): boolean {
     return v !== null ? v === "true" : fallback
   } catch { return fallback }
 }
-
-const SIMPLE_PANES = new Set<Pane>(["chat", "memories", "settings"])
 
 const TIER_CONFIG: Record<string, { label: string; wordmark: string; tierWord: string; tierClass: string; iconColor: string; icon: string }> = {
   community: { label: "AI", wordmark: "CERID", tierWord: "AI", tierClass: "text-muted-foreground", iconColor: "text-brand", icon: "/cerid-core.svg" },
@@ -71,7 +71,6 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
     bulkDelete, bulkArchive, active,
   } = useConversationsContext()
-  const { toggle: toggleMode, isSimple } = useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
   const { data: modelUpdates } = useQuery({
     queryKey: ["model-updates"],
@@ -92,7 +91,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
   })
   const backendVersion = health?.version
 
-  const visibleNav = isSimple ? NAV_ITEMS.filter((n) => SIMPLE_PANES.has(n.pane)) : NAV_ITEMS
+  const visibleNav = NAV_ITEMS
 
   const toggleHistory = () => {
     setHistoryExpanded((prev) => {
@@ -102,19 +101,11 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     })
   }
 
-  // M-A.5: feature-detected View Transition wrapper for active-pane indicator
-  // slide. Browsers without the API (Firefox <129, Safari <18) get the direct
-  // call — no spinner, no slide, but no breakage either.
-  type ViewTransitionDoc = Document & {
-    startViewTransition?: (cb: () => void) => unknown
-  }
+  // Feature-detected View Transition wrapper for active-pane indicator
+  // slide. Centralized in `lib/view-transitions` so all surfaces share
+  // the same reduced-motion + feature-detect behavior.
   const triggerPaneChange = (pane: Pane) => {
-    const doc = document as ViewTransitionDoc
-    if (typeof doc.startViewTransition === "function") {
-      doc.startViewTransition(() => onPaneChange(pane))
-    } else {
-      onPaneChange(pane)
-    }
+    void withViewTransition(() => onPaneChange(pane))
   }
 
   const handleSelectConversation = (id: string) => {
@@ -289,52 +280,6 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
 
         {/* Bottom controls */}
         <div className="space-y-1 border-t p-2">
-          {/* Mode toggle — label unambiguously states CURRENT mode +
-              hover/click affordance for what the toggle does. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "flex w-full items-center rounded-md px-3 py-1.5 text-sm hover:bg-accent",
-                  collapsed && "justify-center px-0"
-                )}
-                onClick={toggleMode}
-                aria-label={`Mode: ${isSimple ? "Simple" : "Advanced"}. Click to switch to ${isSimple ? "Advanced" : "Simple"}.`}
-              >
-                {!collapsed ? (
-                  <>
-                    <span className="flex-1 text-left text-xs text-muted-foreground">
-                      Mode:{" "}
-                      <span className="font-medium text-foreground">
-                        {isSimple ? "Simple" : "Advanced"}
-                      </span>
-                    </span>
-                    <Switch
-                      aria-hidden="true"
-                      tabIndex={-1}
-                      checked={!isSimple}
-                      className="pointer-events-none scale-75"
-                    />
-                  </>
-                ) : (
-                  <span className="text-label-xs font-medium text-muted-foreground">
-                    {isSimple ? "S" : "A"}
-                  </span>
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="max-w-xs text-xs">
-              <p className="font-medium">
-                {isSimple ? "Simple mode" : "Advanced mode"}
-              </p>
-              <p className="mt-1 text-muted-foreground">
-                {isSimple
-                  ? "Hides pipeline internals, verification knobs, and tuning sliders. Click to switch to Advanced."
-                  : "Shows all retrieval, verification, and tuning controls. Click to switch to Simple."}
-              </p>
-            </TooltipContent>
-          </Tooltip>
-
           {/* Theme toggle */}
           <Tooltip>
             <TooltipTrigger asChild>

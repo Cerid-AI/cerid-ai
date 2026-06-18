@@ -10,6 +10,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from typing import Any
 
@@ -78,6 +79,18 @@ def _format_chroma_result(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a standardized result dict from a ChromaDB chunk."""
+    # RAG Phase 1.1 — provenance spine. Every KB vector result carries a
+    # canonical ``source_type`` ("pack" when the chunk originated from an
+    # installed knowledge pack, else "kb") plus a best-effort ``created_at``
+    # (chunk authored/created date, falling back to ingest date) so the
+    # envelope, prompt, ranking, and verifier can all reason about staleness
+    # and source class downstream.
+    pack_id = metadata.get("pack_id", "")
+    created_at = (
+        metadata.get("created_at")
+        or metadata.get("ingested_at")
+        or None
+    )
     return {
         "content": content,
         "relevance": round(relevance, 4),
@@ -87,6 +100,9 @@ def _format_chroma_result(
         "chunk_index": metadata.get("chunk_index", 0),
         "collection": config.collection_name(domain),
         "chunk_id": chunk_id,
+        "source_type": "pack" if pack_id else "kb",
+        "created_at": created_at,
+        "pack_id": pack_id,
         "ingested_at": metadata.get("ingested_at", ""),
         "sub_category": metadata.get("sub_category", ""),
         "tags_json": metadata.get("tags_json", "[]"),
@@ -106,13 +122,31 @@ def _format_chroma_result(
 
 
 def _parent_child_enabled() -> bool:
-    """Return whether the runtime parent-child retrieval flag is set.
+    """Return whether parent-child retrieval is active at runtime.
 
-    The query path reads the flag through this function so tests can flip
-    it via env without re-importing the module. Mirrors
-    ``utils.chunker.parent_child_enabled``.
+    Two gates, both must be True:
+      1. Tier availability via ``is_feature_enabled("parent_child_retrieval")``
+         (community-tier+ since the 2026-05-20 rebalance — RAG quality is
+         plumbing, not a Pro axis, so this is True for all tiers today).
+      2. Deployment opt-in via ``ENABLE_PARENT_CHILD_RETRIEVAL`` env var
+         (default ``false``). Off-by-default because parent-child retrieval
+         can have non-trivial perf implications at large KB sizes; operators
+         turn it on per deployment after validating their corpus.
+
+    Tests can flip either gate independently:
+      - Patch ``config.features.FEATURE_FLAGS["parent_child_retrieval"]``
+        to test tier-gating behaviour.
+      - Patch ``ENABLE_PARENT_CHILD_RETRIEVAL`` env var to test deployment
+        activation.
+
+    Mirrors ``utils.chunker.parent_child_enabled`` for the chunker side of
+    the pipeline.
     """
     import os
+
+    from config.features import is_feature_enabled
+    if not is_feature_enabled("parent_child_retrieval"):
+        return False
     return os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in (
         "true",
         "1",
@@ -361,9 +395,18 @@ async def multi_domain_query(
     if domains is None:
         domains = DOMAINS
 
-    invalid_domains = [d for d in domains if d not in DOMAINS]
-    if invalid_domains:
-        raise ValueError(f"Invalid domains: {invalid_domains}. Valid: {DOMAINS}")
+    # Custom/client-defined domains are allowed: external clients use Cerid as
+    # a backend and ingest to their own domain names. Built-in DOMAINS are the
+    # default set; an unknown domain is queried when its collection exists and
+    # degrades to empty results otherwise (see query_domain below). Warn, never
+    # reject — a hard 400 forces external clients into shims (GA P0.1).
+    custom_domains = [d for d in domains if d not in DOMAINS]
+    if custom_domains:
+        logger.warning(
+            "multi_domain_query: non-built-in domain(s) %s — querying as custom "
+            "client domains (built-in: %s)",
+            custom_domains, DOMAINS,
+        )
 
     if chroma_client is None:
         raise ValueError("chroma_client is required")
@@ -471,7 +514,21 @@ async def multi_domain_query(
                     fused_map: dict[str, float] = {}
 
                     if fusion_mode in {"rrf", "tri_rrf"}:
-                        from core.retrieval.rrf import rrf_fuse
+                        from core.retrieval.rrf import rrf_fuse_by_artifact
+                        # GA P0.5 B1 — artifact-level RRF. Chunk-level fusion let a
+                        # multi-chunk artifact consume several rank slots, both
+                        # compounding its own score and demoting competitors (the
+                        # documented Phase-3a regression). Build chunk→artifact
+                        # from the vector hits (known); bm25/sparse-only chunks
+                        # fall back to chunk-as-artifact (singletons, no inflation).
+                        _chunk_art = {
+                            e["chunk_id"]: (e.get("artifact_id") or e["chunk_id"])
+                            for e in formatted
+                        }
+
+                        def _art_of(cid: str, _m: dict[str, str] = _chunk_art) -> str:
+                            return _m.get(cid, cid)
+
                         vector_ranking = [
                             (entry["chunk_id"], entry["relevance"])
                             for entry in formatted
@@ -486,15 +543,22 @@ async def multi_domain_query(
                             weights.append(
                                 getattr(config, "HYBRID_RRF_SPARSE_WEIGHT", 1.0),
                             )
-                        fused = rrf_fuse(
+                        _art_fused = rrf_fuse_by_artifact(
                             rankings,
+                            _art_of,
                             k=config.HYBRID_RRF_K,
                             weights=weights,
                         )
-                        fused_map = dict(fused)
+                        # Map each artifact's fused score back onto every ranked
+                        # chunk (a chunk inherits its artifact's score).
+                        fused_map = {
+                            cid: _art_fused.get(_art_of(cid), 0.0)
+                            for ranking in rankings
+                            for cid, _ in ranking
+                        }
                         for entry in formatted:
                             entry["relevance"] = round(
-                                fused_map.get(entry["chunk_id"], 0.0), 6,
+                                _art_fused.get(_art_of(entry["chunk_id"]), 0.0), 6,
                             )
                         # Drop entries already represented from bm25_map /
                         # sparse_map so the bm25-only fetch below only
@@ -590,6 +654,30 @@ async def multi_domain_query(
 
     tasks = [query_domain(domain) for domain in domains]
     domain_results = await asyncio.gather(*tasks)
+
+    # Phase I — Custom Smart RAG: apply per-domain multipliers BEFORE
+    # the cross-domain merge so the existing relevance ordering carries
+    # the user's preferences. Pre-fetch the weight map once (zero-cost
+    # when feature off or no weights set).
+    weights: dict[str, float] = {}
+    try:
+        from utils.rag_weights import is_active as _smart_rag_active
+        if _smart_rag_active():
+            from utils.rag_weights import get_weights as _get_weights
+            weights = _get_weights()
+    except ImportError:
+        pass
+
+    if weights:
+        for domain, results in zip(domains, domain_results, strict=True):
+            kb_key = f"kb:{domain}"
+            multiplier = weights.get(kb_key, 1.0)
+            if abs(multiplier - 1.0) > 1e-9:
+                for r in results:
+                    if "relevance" in r:
+                        r["relevance"] = round(
+                            max(0.0, min(1.0, r["relevance"] * multiplier)), 4,
+                        )
 
     all_results = [r for results in domain_results for r in results]
 
@@ -1023,7 +1111,8 @@ async def rerank_results(
         return await _rerank_cross_encoder(results, query)
     if mode == "llm":
         return await _rerank_llm(results, query)
-    # mode == "none" or unknown
+    # mode == "none" or unknown — preserve vector order. Absence of a
+    # reranker_status field means "no degradation"; only failure paths tag.
     return results
 
 
@@ -1073,6 +1162,14 @@ async def _rerank_cross_encoder(
         return results
 
 
+# Quenchforge serves a single rerank slot per machine; firing N concurrent
+# rerank calls at it causes 500-storms that trip the circuit breaker (OPT-5).
+# Serialize at the client so production never overwhelms the daemon — eval
+# harnesses still need their own PACE_S because the semaphore protects the
+# daemon, not batch etiquette.
+_RERANK_QUENCHFORGE_SEM = asyncio.Semaphore(1)
+
+
 async def _maybe_rerank_via_quenchforge(
     results: list[dict[str, Any]],
     query: str,
@@ -1091,17 +1188,27 @@ async def _maybe_rerank_via_quenchforge(
         return None
     if not is_rerank_provider_quenchforge():
         return None
+    from core.utils import inference_health
     try:
         from utils.quenchforge_client import quenchforge_rerank
         documents = [r.get("content", "") for r in results]
         with span("retrieval.rerank", "quenchforge", k=len(results)):
-            scores = await quenchforge_rerank(query, documents)
+            async with _RERANK_QUENCHFORGE_SEM:
+                scores = await quenchforge_rerank(query, documents)
         for r, s in zip(results, scores, strict=False):
             r["relevance"] = float(s)
             r["reranker_status"] = "quenchforge"
+        inference_health.record_success("rerank", provider="quenchforge")
         return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
     except Exception as exc:  # noqa: BLE001 — fall through to sidecar / local ONNX
         log_swallowed_error("core.agents.query_agent.quenchforge_rerank", exc)
+        # Configured for quenchforge GPU rerank but it failed — the chain will
+        # serve from the sidecar or local ONNX. Record the degradation so
+        # /health.inference_routing.rerank reports it instead of advertising a
+        # provider that isn't answering.
+        inference_health.record_fallback(
+            "rerank", configured="quenchforge", served_by="onnx", detail=str(exc),
+        )
         return None
 
 
@@ -1145,6 +1252,8 @@ async def _rerank_llm(
     remainder = results[config.QUERY_RERANK_CANDIDATES:]
 
     if len(candidates) <= 1:
+        for r in results:
+            r.setdefault("reranker_status", "llm_too_few_candidates")
         return results
 
     snippets = []
@@ -1198,10 +1307,16 @@ async def _rerank_llm(
 
     except CircuitOpenError:
         logger.warning("Bifrost rerank circuit open, falling back to embedding sort")
-        return sorted(results, key=lambda x: x["relevance"], reverse=True)
+        fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
+        for r in fallback:
+            r.setdefault("reranker_status", "llm_circuit_open")
+        return fallback
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError, ValueError) as e:
         logger.warning("LLM reranking failed, falling back to embedding sort: %s", e)
-        return sorted(results, key=lambda x: x["relevance"], reverse=True)
+        fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
+        for r in fallback:
+            r.setdefault("reranker_status", "llm_failed")
+        return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -1335,8 +1450,13 @@ def _apply_active_learning_signals(
             chunk["_filtered_reason"] = f"flag:{meta['flag']}"
             continue
         if meta and meta["weight"] != 1.0:
-            old = float(chunk.get("relevance") or 0.0)
-            chunk["relevance"] = round(old * meta["weight"], 4)
+            # Store the endorsement weight; do NOT pre-multiply relevance here.
+            # The cross-encoder rerank (Step 5) overwrites relevance outright on
+            # the quenchforge/sidecar paths (and blends it on the ONNX fallback),
+            # so a value multiplied in here is silently washed out — the reason
+            # endorse/demote was a no-op under the live GPU config. The weight is
+            # re-applied ONCE post-rerank (Step 5.05) so the signal is
+            # provider-independent.
             chunk["_endorsement_weight"] = meta["weight"]
         filtered.append(chunk)
     return filtered
@@ -1526,13 +1646,16 @@ def assemble_context(
     artifact_counts: dict[str, int] = defaultdict(int)
 
     for result in results:
-        artifact_id = result["artifact_id"]
+        # Defensive .get(): surface-injected results (wiki has no filename) and
+        # external results may omit optional display fields — assembly must not
+        # KeyError at this presentation boundary.
+        artifact_id = result.get("artifact_id", "")
 
         # Skip if this artifact already has enough chunks in context
         if artifact_counts[artifact_id] >= max_chunks_per_artifact:
             continue
 
-        content = result["content"]
+        content = result.get("content", "")
         content_len = len(content)
 
         if char_count + content_len > max_chars:
@@ -1541,11 +1664,17 @@ def assemble_context(
         context_parts.append(content)
         included_sources.append({
             "content": content[:200],  # Preview only
-            "relevance": result["relevance"],
+            "relevance": result.get("relevance", 0.0),
             "artifact_id": artifact_id,
-            "filename": result["filename"],
-            "domain": result["domain"],
-            "chunk_index": result["chunk_index"],
+            "filename": result.get("filename", ""),
+            "domain": result.get("domain", ""),
+            "chunk_index": result.get("chunk_index", 0),
+            # RAG Phase 1.1 — preserve provenance onto sources[]. Never
+            # clobber an existing source_type (memory/wiki/external set their
+            # own); default to "kb" only when the result didn't declare one.
+            "source_type": result.get("source_type", "kb"),
+            "created_at": result.get("created_at"),
+            "pack_id": result.get("pack_id", ""),
         })
         char_count += content_len
         artifact_counts[artifact_id] += 1
@@ -1574,6 +1703,7 @@ async def agent_query(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    exclude_packs: bool = False,
 ) -> dict[str, Any]:
     """Budget-gated public entry for multi-domain query.
 
@@ -1603,6 +1733,7 @@ async def agent_query(
                 graph_store=graph_store,
                 skip_cache=skip_cache,
                 metadata_filter=metadata_filter,
+                exclude_packs=exclude_packs,
             ),
             timeout=budget,
         )
@@ -1753,6 +1884,152 @@ async def _augment_with_hype(
         return results
 
 
+def _surface_route_dict(query: str) -> dict[str, Any]:
+    """Compute the knowledge-surface route for a query (GA P0.5 A1a).
+
+    Surfaces *which* intent/surface the query maps to (wiki / vector / graph /
+    memory) so the chosen route is visible end-to-end (API/UI/eval) instead of
+    living only in observability tooling. Behaviour-neutral for now — A1b biases
+    retrieval on this; A2 wires the memory surface. Graceful: never breaks the
+    query path.
+    """
+    try:
+        from core.retrieval.surface_router import route as _surface_route
+
+        sr = _surface_route(query)
+        return {
+            "intent": sr.intent,
+            "primary": sr.primary,
+            "surfaces": list(sr.surfaces),
+            "confidence": round(sr.confidence, 4),
+            "matched_entity_hint": sr.matched_entity_hint,
+        }
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.surface_route", exc)
+        return {}
+
+
+def _should_skip_graph(
+    high_conf_count: int,
+    effective_top_k: int,
+    surface_route: dict[str, Any],
+    biased_enabled: bool,
+) -> bool:
+    """Decide whether to skip graph expansion (GA P0.5 A1b).
+
+    Default rule: skip when vector already returned enough high-confidence hits
+    (saves a Neo4j round-trip). When surface-biased retrieval is enabled, a
+    ``relational`` intent ALWAYS consults the graph surface — the early-exit
+    would otherwise starve the very queries the graph exists to answer. Pure
+    decision function so it's unit-testable without the live stack.
+    """
+    if biased_enabled and surface_route.get("intent") == "relational":
+        return False
+    return high_conf_count >= effective_top_k
+
+
+# GA P0.5 C2 — wiki / compiled-summary surface. Core stays decoupled from the
+# app-layer wiki service via a registered fetcher (mirrors set_data_source_registry
+# / set_entity_extraction_enqueue); app startup wires it. Unwired → no-op.
+_wiki_page_fetcher: Callable[[str], Awaitable[dict[str, Any] | None]] | None = None
+
+
+def set_wiki_page_fetcher(
+    fn: Callable[[str], Awaitable[dict[str, Any] | None]] | None,
+) -> None:
+    """Register the app-layer compiled-wiki-page fetcher (called from app startup)."""
+    global _wiki_page_fetcher
+    _wiki_page_fetcher = fn
+
+
+async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
+    """Fetch the compiled wiki page for an entity and adapt it (GA P0.5 C2).
+
+    Wires the wiki surface into the query path for ``compiled_summary`` queries
+    ("what is X"). Returns [] when no fetcher is wired (app startup didn't
+    register one) or no page exists. Graceful on any fetcher error.
+    """
+    if _wiki_page_fetcher is None or not entity_hint:
+        return []
+    try:
+        page = await _wiki_page_fetcher(entity_hint)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.wiki_surface", exc)
+        return []
+    if not page:
+        return []
+    return [
+        {
+            "content": page.get("content", ""),
+            "relevance": 1.0,  # the compiled summary is authoritative for this intent
+            "domain": "wiki",
+            "artifact_id": page.get("slug", entity_hint),
+            "filename": page.get("slug", entity_hint),
+            "chunk_index": 0,
+            "source_type": "wiki",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # compiled page dict carries no timestamp).
+            "created_at": page.get("updated_at") or page.get("created_at"),
+            "source_authority": "compiled_wiki",
+            "title": page.get("title", ""),
+        }
+    ]
+
+
+async def _recall_memory_surface(
+    query: str,
+    chroma_client: Any,
+    neo4j_driver: Any,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """Recall episodic memories and adapt them to the query-result shape (GA P0.5 A2).
+
+    Wires the dormant memory surface into the query path: for ``personal_context``
+    queries (e.g. "what did we decide"), recall scored memories and merge them so
+    they participate in dedup/rerank/assembly like any other source. Adapts
+    ``recall_memories``' dict shape (text/adjusted_score/memory_id) onto the
+    retrieval contract (content/relevance/artifact_id/source_type). Graceful:
+    returns [] on any failure so the query path never breaks.
+    """
+    try:
+        from core.agents.memory import recall_memories
+
+        mems = await recall_memories(
+            query, chroma_client=chroma_client, neo4j_driver=neo4j_driver, top_k=top_k,
+        )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.memory_surface", exc)
+        return []
+    return [
+        {
+            "content": m.get("text", ""),
+            "relevance": m.get("adjusted_score", 0.0),
+            "domain": "conversations",
+            "artifact_id": m.get("memory_id", ""),
+            "filename": m.get("memory_id", ""),
+            "chunk_index": 0,
+            "source_type": "memory",
+            # RAG Phase 1.1 — best-effort provenance date (None when the
+            # recalled memory dict carries no creation timestamp).
+            "created_at": m.get("created_at"),
+            "source_authority": "user_memory",
+            "memory_type": m.get("memory_type", "fact"),
+        }
+        for m in mems
+    ]
+
+
+def _domains_no_results(requested: list[str], results: list[dict[str, Any]]) -> list[str]:
+    """Requested domains that contributed zero results (GA P0.5 B2b).
+
+    Surfaced so a caller/UI can distinguish "this domain returned nothing"
+    from a generic empty answer — the "my notes vanished" UX the audit flagged
+    as the top retrieval complaint. Behaviour-neutral; pure signal.
+    """
+    hit = {r.get("domain") for r in results}
+    return [d for d in requested if d not in hit]
+
+
 async def _agent_query_impl(
     query: str,
     domains: list[str] | None = None,
@@ -1769,16 +2046,22 @@ async def _agent_query_impl(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    exclude_packs: bool = False,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
+    # GA P0.5 A1a — compute the surface route once and surface it in every
+    # return path so callers/UI/eval can see which surface intent fired.
+    _surface_route = _surface_route_dict(query)
     from config.features import (
         ENABLE_ADAPTIVE_RETRIEVAL,
         ENABLE_INTELLIGENT_ASSEMBLY,
         ENABLE_LATE_INTERACTION,
+        ENABLE_LLM_QUERY_DECOMPOSITION,
         ENABLE_MMR_DIVERSITY,
         ENABLE_QUERY_DECOMPOSITION,
         ENABLE_SEMANTIC_CACHE,
+        ENABLE_SURFACE_BIASED_RETRIEVAL,
     )
 
     # Semantic cache early-return — check before any retrieval work
@@ -1829,6 +2112,7 @@ async def _agent_query_impl(
                 "results": [],
                 "retrieval_skipped": True,
                 "retrieval_reason": decision.reason,
+                "surface_route": _surface_route,
             }
         if decision.action == "light":
             effective_top_k = decision.top_k
@@ -1861,15 +2145,25 @@ async def _agent_query_impl(
                 "results": [],
                 "retrieval_skipped": True,
                 "retrieval_reason": "consumer_domain_restricted",
+                "surface_route": _surface_route,
             }
 
     # Step 0.5: Query decomposition — may split into parallel sub-queries
     _skip_normal_retrieval = False
     with timer.step("vector_search"):
         if ENABLE_QUERY_DECOMPOSITION:
+            # Force LLM decomposition for *implicit* multi-hop analytical queries
+            # (count / date-arithmetic / preference) that carry no conjunction
+            # trigger — but only when the SLO-gated flag is enabled, so the live
+            # query path's latency budget is unchanged by default.
+            from core.agents.answer_synthesis import AnswerMode, classify_answer_mode
             from core.retrieval.query_decomposer import decompose_query, needs_decomposition, parallel_retrieve
-            if needs_decomposition(search_query):
-                sub_queries = await decompose_query(search_query)
+            _analytical = classify_answer_mode(search_query) is not AnswerMode.EXTRACTIVE
+            _force_llm = ENABLE_LLM_QUERY_DECOMPOSITION and _analytical
+            if needs_decomposition(search_query) or _force_llm:
+                sub_queries = await decompose_query(
+                    search_query, use_llm=_force_llm, force_llm=_force_llm,
+                )
                 if len(sub_queries) > 1:
                     logger.info("Decomposed query into %d sub-queries: %s", len(sub_queries), sub_queries)
 
@@ -1893,6 +2187,31 @@ async def _agent_query_impl(
                     metadata_filter=metadata_filter,
                 )
         breadcrumb(f"vector search complete: {len(results)} results", category="retrieval")
+
+    # GA P0.5 A2 — memory surface. For personal-context queries, recall episodic
+    # memories and merge them so they participate in rerank/assembly. Behind the
+    # surface-bias flag ENABLE_SURFACE_BIASED_RETRIEVAL (default ON).
+    if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "personal_context":
+        with timer.step("memory_surface"):
+            _mem = await _recall_memory_surface(
+                search_query, chroma_client, neo4j_driver, effective_top_k,
+            )
+            if _mem:
+                results = results + _mem
+                breadcrumb(f"memory surface: +{len(_mem)} memories", category="retrieval")
+
+    # GA P0.5 C2 — wiki surface. For "what is X" queries, prepend the compiled
+    # wiki/concept page for the matched entity. Behind the surface-bias flag
+    # ENABLE_SURFACE_BIASED_RETRIEVAL (default ON) — a no-op until app startup
+    # registers a wiki fetcher.
+    if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "compiled_summary":
+        _hint = _surface_route.get("matched_entity_hint")
+        if _hint:
+            with timer.step("wiki_surface"):
+                _wiki = await _recall_wiki_surface(_hint)
+                if _wiki:
+                    results = _wiki + results
+                    breadcrumb("wiki surface: +1 compiled page", category="retrieval")
 
     # CRAG quality gate lives at the router layer (app/routers/agents.py).
     # The router owns the single-source-of-truth decision for firing external
@@ -1942,7 +2261,9 @@ async def _agent_query_impl(
         # Early-exit: skip graph expansion when vector search already returned
         # enough high-confidence results (saves a Neo4j round-trip).
         _high_conf = [r for r in results if r.get("relevance", 0) > 0.8]
-        if len(_high_conf) >= effective_top_k:
+        if _should_skip_graph(
+            len(_high_conf), effective_top_k, _surface_route, ENABLE_SURFACE_BIASED_RETRIEVAL,
+        ):
             logger.debug(
                 "Skipping graph expansion: %d/%d results above 0.8 confidence",
                 len(_high_conf), effective_top_k,
@@ -2046,6 +2367,16 @@ async def _agent_query_impl(
         except Exception as exc:  # noqa: BLE001 — observability boundary
             log_swallowed_error("query_agent.active_learning_signals", exc)
 
+    # Step 4.9: Personal-first pack exclusion (Slice 7.3). When the caller opts
+    # out of knowledge packs for this query, drop every pack chunk before
+    # rerank/synthesis — applied here (after all retrieval + graph expansion) so
+    # no pack chunk from any path reaches the answer. Memory/wiki/external chunks
+    # carry no pack_id and are unaffected. (A Chroma where-clause can't express
+    # this: non-pack chunks omit the pack_id key entirely, so $ne/$exists can't
+    # select them — a post-retrieval drop is the robust path.)
+    if exclude_packs and results:
+        results = [r for r in results if not r.get("pack_id")]
+
     # Step 5: Reranking (includes both direct and graph-sourced results)
     with timer.step("reranking"):
         results = await rerank_results(
@@ -2053,6 +2384,18 @@ async def _agent_query_impl(
             query=query,
             use_reranking=use_reranking,
         )
+
+    # Step 5.05: Apply active-learning endorsement AFTER reranking. Step 4.7
+    # stores each artifact's endorsement_weight but no longer pre-multiplies it,
+    # because the reranker overwrites/blends relevance and washed the signal out.
+    # Fold it into the final reranked score here — once, on every provider path —
+    # then re-sort so a promoted (weight>1) / demoted (weight<1) artifact moves.
+    if any(r.get("_endorsement_weight") for r in results):
+        for _r in results:
+            _w = _r.get("_endorsement_weight")
+            if _w and _w != 1.0:
+                _r["relevance"] = round(float(_r.get("relevance") or 0.0) * float(_w), 4)
+        results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
     # Step 5.1: Late interaction refinement — ColBERT-style MaxSim on top candidates
     with timer.step("late_interaction"):
@@ -2090,8 +2433,14 @@ async def _agent_query_impl(
             _nli_pairs = [(r.get("content", "")[:512], query) for r in results[:15]]
             _nli_scores = batch_nli_score(_nli_pairs)
             _nli_filtered = []
-            for r, nli in zip(results[:15], _nli_scores):
-                if nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
+            # results[:15] are already relevance-sorted (Step 5.4). Exempt the
+            # top-K matches from the contradiction drop: NLI on (doc, query)
+            # pairs false-positives on definitional answers, so a noisy
+            # contradiction must not override a strong retrieval rank.
+            _exempt_top_k = getattr(config, "NLI_GATE_EXEMPT_TOP_K", 3)
+            for _idx, (r, nli) in enumerate(zip(results[:15], _nli_scores)):
+                _exempt = _idx < _exempt_top_k
+                if not _exempt and nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
                     logger.debug("NLI gate removed contradictory result: %s", r.get("filename", "")[:40])
                     continue
                 if nli["entailment"] >= 0.5:
@@ -2160,6 +2509,15 @@ async def _agent_query_impl(
         except Exception as e:
             logger.warning(f"Failed to log query: {e}")
 
+    # Reranker status — first non-empty value across `results` so callers can
+    # surface degradation (`onnx_failed_no_fallback`, `llm_circuit_open`,
+    # `disabled`, etc.). Set per-result by `rerank_results`; aggregated here so
+    # the envelope carries the signal without consumers having to iterate.
+    reranker_status = next(
+        (r.get("reranker_status") for r in results if r.get("reranker_status")),
+        None,
+    )
+
     result_dict: dict[str, Any] = {
         "context": context,
         "sources": sources,
@@ -2169,6 +2527,11 @@ async def _agent_query_impl(
         "token_budget_used": char_count,
         "graph_results": graph_results_added,
         "results": results,
+        "surface_route": _surface_route,
+        "reranker_status": reranker_status,
+        "domains_no_results": _domains_no_results(
+            list(effective_domains) if effective_domains else list(DOMAINS), results
+        ),
     }
 
     timings = timer.result()

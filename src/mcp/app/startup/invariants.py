@@ -66,17 +66,31 @@ def _collection_count(c: Any) -> int:
 
 
 def _probe_chroma(chroma: Any) -> dict[str, Any]:
-    """Probe: any collection with count == 0?  Returns the names for
-    dashboards to render."""
+    """Probe Chroma collections for dashboards.
+
+    ``collections_empty`` is scoped to **built-in domain** collections — an
+    empty built-in surface is a real data-gap signal. Custom/client collections
+    (external clients ingesting to their own domain names) are listed separately
+    in ``custom_collections`` so a freshly-created, not-yet-ingested client
+    domain does not read as a built-in gap or trip false alerts. (P5)
+    """
+    import config
+    from config import DOMAINS
+
+    builtin_cols = {config.collection_name(d) for d in DOMAINS}
     empty: list[str] = []
+    custom: list[str] = []
     cols = chroma.list_collections()
     for c in cols:
         name = _collection_name(c)
         if not name:
             continue
+        if name not in builtin_cols:
+            custom.append(name)
+            continue
         if _collection_count(c) == 0:
             empty.append(name)
-    return {"collections_empty": empty}
+    return {"collections_empty": empty, "custom_collections": custom}
 
 
 def _probe_neo4j(neo4j: Any) -> dict[str, Any]:

@@ -84,9 +84,13 @@ detect_gpu() {
             local dgpu
             dgpu=$(system_profiler SPDisplaysDataType 2>/dev/null | grep "Chipset Model" | head -1 | sed 's/.*: //' || echo "")
             if [ -n "$dgpu" ] && echo "$dgpu" | grep -qiE "AMD|Radeon|Vega"; then
-                # Intel Mac + AMD discrete GPU — stock Ollama does NOT
-                # GPU-accelerate (ollama/ollama#1016). Quenchforge carries
-                # patched llama.cpp that does. Recommend it.
+                # Intel Mac + AMD discrete GPU — mainline ollama can't
+                # drive Metal on this hardware (ollama/ollama#1016, open
+                # since 2023). Quenchforge carries the load-bearing
+                # macOS-only llama.cpp patches that work around it —
+                # recommend quenchforge here. Fall back to ollama remains
+                # available via INTERNAL_LLM_PROVIDER=ollama for operators
+                # who want to opt out of quenchforge.
                 gpu_type="amd-mac"
                 local vram_str
                 vram_str=$(system_profiler SPDisplaysDataType 2>/dev/null | grep "VRAM" | head -1 | grep -oE '[0-9]+' || echo "0")

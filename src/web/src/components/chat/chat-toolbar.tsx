@@ -29,10 +29,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldOff, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen } from "lucide-react"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldOff, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen, Menu } from "lucide-react"
 import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 /* ── Reusable menu primitives (replaces ContextMenu items) ── */
 
@@ -200,7 +201,6 @@ function ToolbarButtonWithMenu({
 
 interface ChatToolbarProps {
   isNarrow: boolean
-  isSimple?: boolean
   // KB
   showKB: boolean
   onToggleKB: () => void
@@ -208,6 +208,8 @@ interface ChatToolbarProps {
   toggleAutoInject: () => void
   autoInjectThreshold: number
   setAutoInjectThreshold: (v: number) => void
+  includePacks: boolean
+  toggleIncludePacks: () => void
   // Verification
   hallucinationEnabled: boolean
   toggleHallucinationEnabled: () => void
@@ -228,7 +230,7 @@ interface ChatToolbarProps {
   toggleDashboard: () => void
   // RAG mode
   ragMode: RagMode
-  setRagMode: (mode: RagMode) => void
+  setRagMode: (mode: RagMode) => Promise<unknown>
   // Routing
   routingMode: string
   setRoutingMode: (mode: "manual" | "recommend" | "auto") => void
@@ -248,13 +250,15 @@ interface ChatToolbarProps {
   changePrivateModeLevel: (level: number) => void
   // Actions
   onNewChat: () => void
+  // Mobile navigation
+  onOpenSidebar?: () => void
 }
 
 export function ChatToolbar({
   isNarrow,
-  isSimple,
   showKB, onToggleKB,
   autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
+  includePacks, toggleIncludePacks,
   hallucinationEnabled, toggleHallucinationEnabled,
   inlineMarkups, toggleInlineMarkups, expertVerification, toggleExpertVerification, onVerifyMessage,
   verificationDegraded, verificationUnavailable,
@@ -267,10 +271,11 @@ export function ChatToolbar({
   configuredProviders,
   privateModeEnabled, privateModeLevel, togglePrivateMode, changePrivateModeLevel,
   onNewChat,
+  onOpenSidebar,
 }: ChatToolbarProps) {
   const cycleRagMode = useCallback(() => {
-    const next: RagMode = ragMode === "manual" ? "smart" : ragMode === "smart" ? "custom_smart" : "manual"
-    setRagMode(next)
+    const next: RagMode = ragMode === "off" ? "smart" : ragMode === "smart" ? "always" : "off"
+    setRagMode(next).catch(() => toast.error("Couldn't update RAG mode — the server rejected the change."))
   }, [ragMode, setRagMode])
   // L4 confirmation gate: full-ephemeral wipes the session on close, so
   // we intercept the level change and require an explicit confirm.
@@ -299,6 +304,7 @@ export function ChatToolbar({
       return () => clearTimeout(id)
     }
     if (privateModeLevel < 3 && privatePulse) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setPrivatePulse(false)
     }
   }, [privateModeLevel, privatePulse])
@@ -315,6 +321,24 @@ export function ChatToolbar({
             : "border-amber-500/40 text-amber-500"
   return (
     <div className="flex items-center gap-2 border-b px-4 py-2">
+      {isNarrow && onOpenSidebar && (
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Open navigation"
+                onClick={onOpenSidebar}
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Navigation</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
       <Button variant="ghost" size="sm" onClick={onNewChat}>
         <Plus className="mr-1 h-4 w-4" />
         {!isNarrow && "New chat"}
@@ -443,48 +467,42 @@ export function ChatToolbar({
 
       <div className="flex-1" />
       <TooltipProvider delayDuration={0}>
-        {/* Advanced-only toggles */}
-        {!isSimple && (
-        <>
         {/* RAG mode toggle */}
         <ToolbarButtonWithMenu
           icon={<Layers className="h-4 w-4" />}
-          active={ragMode !== "manual"}
+          active={ragMode !== "off"}
           onClick={cycleRagMode}
           ariaLabel={`RAG mode: ${ragMode}`}
           title="RAG Mode"
           tooltip={
-            ragMode === "manual" ? "Manual: you control which docs are included"
-              : ragMode === "smart" ? "Smart: automatically finds relevant docs + memories + external sources"
-              : "Custom: fine-tune retrieval weights (Pro)"
+            ragMode === "off" ? "Off: no automatic injection — use @mentions to include documents manually"
+              : ragMode === "smart" ? "Smart: injects context only when the query appears to need knowledge"
+              : "Always: injects context into every message"
           }
           menuContent={
             <>
               <MenuLabel>RAG Mode</MenuLabel>
-              <MenuRadioItem checked={ragMode === "manual"} onClick={() => setRagMode("manual")}>
+              <MenuRadioItem checked={ragMode === "off"} onClick={() => void setRagMode("off").catch(() => toast.error("Couldn\u2019t update RAG mode \u2014 the server rejected the change."))}>
                 <div className="flex flex-col gap-0.5">
-                  <span>Manual — you pick docs</span>
+                  <span>Off — @mentions only</span>
                   <span className="text-label-xs font-normal text-muted-foreground">
-                    Only documents you @mention or drag in are included.
+                    No automatic injection — include documents manually via @mention.
                   </span>
                 </div>
               </MenuRadioItem>
-              <MenuRadioItem checked={ragMode === "smart"} onClick={() => setRagMode("smart")}>
+              <MenuRadioItem checked={ragMode === "smart"} onClick={() => void setRagMode("smart").catch(() => toast.error("Couldn\u2019t update RAG mode \u2014 the server rejected the change."))}>
                 <div className="flex flex-col gap-0.5">
                   <span>Smart — auto-retrieval</span>
                   <span className="text-label-xs font-normal text-muted-foreground">
-                    Searches your KB on every message and injects matches.
+                    Injects context only when the query appears to need knowledge.
                   </span>
                 </div>
               </MenuRadioItem>
-              <MenuRadioItem checked={ragMode === "custom_smart"} onClick={() => setRagMode("custom_smart")}>
+              <MenuRadioItem checked={ragMode === "always"} onClick={() => void setRagMode("always").catch(() => toast.error("Couldn\u2019t update RAG mode \u2014 the server rejected the change."))}>
                 <div className="flex flex-col gap-0.5">
-                  <span className="flex items-center gap-1">
-                    Custom
-                    <Badge variant="outline" className="text-label-xxs ml-1 px-1 py-0">Advanced</Badge>
-                  </span>
+                  <span>Always — inject every message</span>
                   <span className="text-label-xs font-normal text-muted-foreground">
-                    Tune source weights + thresholds manually.
+                    Retrieves and injects context on every message.
                   </span>
                 </div>
               </MenuRadioItem>
@@ -504,6 +522,9 @@ export function ChatToolbar({
             <>
               <MenuCheckboxItem checked={autoInject} onCheckedChange={toggleAutoInject}>
                 Auto-inject KB context
+              </MenuCheckboxItem>
+              <MenuCheckboxItem checked={includePacks} onCheckedChange={toggleIncludePacks}>
+                Include knowledge packs
               </MenuCheckboxItem>
               <MenuSeparator />
               <MenuLabel>Injection threshold</MenuLabel>
@@ -653,8 +674,6 @@ export function ChatToolbar({
                 </>
               }
             />
-          </>
-        )}
 
         {/* Narrow viewport: overflow menu */}
         {isNarrow && (
@@ -666,11 +685,11 @@ export function ChatToolbar({
             </PopoverTrigger>
             <PopoverContent className="w-48 p-2">
               <button
-                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", ragMode !== "manual" && "text-brand bg-brand/10")}
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", ragMode !== "off" && "text-brand bg-brand/10")}
                 onClick={cycleRagMode}
               >
                 <Layers className="h-4 w-4" />
-                {ragMode === "manual" ? "RAG: Manual" : ragMode === "smart" ? "RAG: Smart" : "RAG: Custom"}
+                {ragMode === "off" ? "RAG: Off" : ragMode === "smart" ? "RAG: Smart" : "RAG: Always"}
               </button>
               <button
                 className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-brand bg-brand/10")}

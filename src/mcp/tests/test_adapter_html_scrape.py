@@ -102,6 +102,40 @@ def test_extract_html_content_with_content_selector():
     assert "Related links." not in text
 
 
+def test_extract_html_content_selector_survives_nested_same_tag():
+    """A plain nested </div> must NOT close a `div.body` content region.
+
+    Regression: handle_endtag used to decrement the content-subtree counter
+    on every same-named close, so the first inner </div> truncated the rest
+    of the Sphinx/CFPB-style nested DOM (corrupting the shipped pack).
+    """
+    html = """<html><body>
+<div class="body">
+  <h1>Doc Heading</h1>
+  <p>First paragraph before the nested block.</p>
+  <div class="section"><p>Nested section paragraph.</p></div>
+  <p>Last paragraph after the nested block.</p>
+</div>
+</body></html>"""
+    title, text = extract_html_content(html, content_selector="div.body")
+    assert title == "Doc Heading"
+    assert "First paragraph before the nested block." in text
+    assert "Nested section paragraph." in text
+    # The bug dropped everything after the first nested </div>:
+    assert "Last paragraph after the nested block." in text
+
+
+def test_extract_html_content_selector_closes_after_matching_subtree():
+    """Content capture still ends when the matching selector element closes."""
+    html = """<html><body>
+<div class="body"><p>Inside.</p></div>
+<div class="other"><p>Outside.</p></div>
+</body></html>"""
+    _, text = extract_html_content(html, content_selector="div.body")
+    assert "Inside." in text
+    assert "Outside." not in text
+
+
 def test_extract_html_content_falls_back_to_document_title_tag():
     html = """<html><head><title>Doc Title</title></head>
 <body><p>No h1 here.</p></body></html>"""

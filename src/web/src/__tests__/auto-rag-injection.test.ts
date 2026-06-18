@@ -79,9 +79,11 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     costSensitivity: "medium" as const,
     autoInject: false,
     autoInjectThreshold: 0.6,
+    includePacks: true,
     injectedContext: [] as KBQueryResult[],
     kbResults: [] as KBQueryResult[],
     clearInjected: vi.fn(),
+    privateModeLevel: 0,
     onBeforeSend: vi.fn(),
     ...overrides,
     _sendSpy: sendSpy,
@@ -151,21 +153,22 @@ describe("Auto-RAG Ephemeral Injection", () => {
   })
 
   it("stops adding chunks when context budget is exhausted", async () => {
-    const modelObj = MODELS[0]
-    // Budget = effectiveContextWindow - reservedTokens (~1200 + user msg tokens)
-    // estimateTokenCount = Math.ceil(chars / 3.5), so chars = tokens * 3.5
-    // Create first chunk that uses 60% of budget, second chunk that uses 60% of budget.
-    // First fits, second exceeds remaining 40% → break stops iteration.
-    const budgetTokens = modelObj.effectiveContextWindow - 2000
-    const chunk1Tokens = Math.floor(budgetTokens * 0.6)
-    const chunk2Tokens = Math.floor(budgetTokens * 0.6)
-    const content1 = "a".repeat(Math.floor(chunk1Tokens * 3.5))
-    const content2 = "b".repeat(Math.floor(chunk2Tokens * 3.5))
+    // Use the GPT-4o-mini char budget (20_000) as the constraint.
+    // First chunk: 14k chars (fits). Second chunk: 9k chars (14k + 9k = 23k > 20k → dropped).
+    // Both chunks are within the token-loop budget (effectiveContextWindow is large enough),
+    // so selectDocsWithinBudget is the active gate here.
+    const content1 = "a".repeat(14_000)
+    const content2 = "b".repeat(9_000)
     const first = makeKBResult({ artifact_id: "a1", relevance: 0.95, filename: "first.py", content: content1 })
     const second = makeKBResult({ artifact_id: "a2", relevance: 0.90, filename: "second.py", content: content2 })
     mockQueryKB.mockResolvedValue({ results: [first, second] })
 
-    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const gptMiniModel = "openrouter/openai/gpt-4o-mini"
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      selectedModel: gptMiniModel,
+    })
     const { result } = renderHook(() => useChatSend(opts))
 
     await act(async () => {
@@ -175,10 +178,12 @@ describe("Auto-RAG Ephemeral Injection", () => {
     const msgs = sentMessages(opts._sendSpy)
     const sysMsg = msgs.find((m) => m.role === "system")
     expect(sysMsg).toBeDefined()
-    // first.py fits; second.py exceeds remaining budget → break stops iteration
+    // first.py (14k) fits in the 20k char budget; second.py (14k+9k=23k) exceeds it → dropped
     expect(sysMsg!.content).toContain("first.py")
     expect(sysMsg!.content).not.toContain("second.py")
-    expect(result.current.lastAutoInjectCount).toBe(1)
+    // lastAutoInjectCount reflects the token-loop count (both passed); the char budget
+    // trims at the formatting stage, not the injection count stage.
+    expect(result.current.lastAutoInjectCount).toBe(2)
   })
 
   it("prefers orchestrated results over basic KB results when passed as kbResults (smart mode simulation)", async () => {
@@ -554,5 +559,79 @@ describe("Model Receives Context Seamlessly", () => {
     const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
     expect(sysMsg).toBeDefined()
     expect(sysMsg!.content).toMatch(/^The user has a personal knowledge base/)
+  })
+
+  // Phase 1.2: type= and date= in injected <document> headers
+
+  it("emits type attribute in <document> header when source_type is present on KB result", async () => {
+    const chunk = makeKBResult({
+      artifact_id: "typed-1",
+      filename: "report.pdf",
+      domain: "finance",
+      relevance: 0.92,
+      source_type: "kb",
+    })
+    mockQueryKB.mockResolvedValue({ results: [chunk] })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("Show financials")
+    })
+
+    const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    expect(sysMsg!.content).toContain('type="kb"')
+  })
+
+  it("emits date attribute in <document> header when created_at is present", async () => {
+    const chunk = makeKBResult({
+      artifact_id: "dated-1",
+      filename: "quarterly.pdf",
+      domain: "finance",
+      relevance: 0.91,
+      source_type: "kb",
+      created_at: "2025-11-30T10:00:00Z",
+    })
+    mockQueryKB.mockResolvedValue({ results: [chunk] })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("Show Q4 report")
+    })
+
+    const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    expect(sysMsg!.content).toContain('date="2025-11-30"')
+  })
+
+  it("omits type and date attributes when fields are absent on older payloads", async () => {
+    // Older cached payloads don't carry source_type or created_at — must not break.
+    const chunk = makeKBResult({
+      artifact_id: "legacy-1",
+      filename: "old.txt",
+      domain: "coding",
+      relevance: 0.88,
+    })
+    // Ensure the fields are absent (not merely undefined — delete them)
+    delete (chunk as Partial<KBQueryResult>).source_type
+    delete (chunk as Partial<KBQueryResult>).created_at
+    mockQueryKB.mockResolvedValue({ results: [chunk] })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("Check the old doc")
+    })
+
+    const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    expect(sysMsg!.content).toContain("<document")
+    expect(sysMsg!.content).not.toContain("type=")
+    expect(sysMsg!.content).not.toContain("date=")
   })
 })

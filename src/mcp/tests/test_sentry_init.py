@@ -20,7 +20,10 @@ def test_initialises_when_dsn_set(monkeypatch):
     mock_init.assert_called_once()
     kwargs = mock_init.call_args.kwargs
     assert kwargs["traces_sampler"] is not None
-    assert kwargs["profiles_sample_rate"] == 0.1
+    # 2026-05-18: lowered from 0.1 → 0.0 default per Sentry storage audit.
+    # Profiles tier produced no diagnostic value vs storage cost.
+    # Operators wanting profile coverage set SENTRY_PROFILES_SAMPLE_RATE.
+    assert kwargs["profiles_sample_rate"] == 0.0
     assert kwargs["send_default_pii"] is False
     assert "openrouter_api_key" in kwargs["event_scrubber"].denylist
 
@@ -48,6 +51,34 @@ def test_traces_sampler_down_samples_poll_paths():
 
     # Edge case: span_context fallback (child spans on older SDKs)
     assert _traces_sampler({"span_context": {"name": "GET /health"}}) < 0.02
+
+
+def test_traces_sampler_drops_endpoint_styled_health_transactions():
+    """FastApiIntegration with transaction_style='endpoint' emits function-
+    name-styled transactions (e.g. 'app.routers.health.health_ping') that
+    the substring-based filter on URL-styled transactions misses.
+
+    Per the 2026-05-18 Sentry audit, health_ping alone was 412,700
+    transactions in 30 days — biggest single span line item. Drop these
+    entirely (sample_rate = 0.0).
+    """
+    from app.observability.sentry_init import _traces_sampler
+    def ctx(name: str) -> dict:
+        return {"transaction_context": {"name": name}}
+
+    assert _traces_sampler(ctx("app.routers.health.health_ping")) == 0.0
+    assert _traces_sampler(ctx("app.routers.health.health_status_endpoint")) == 0.0
+    assert _traces_sampler(ctx("app.routers.health.liveness_probe")) == 0.0
+    assert _traces_sampler(ctx("app.routers.health.readiness_probe")) == 0.0
+
+
+def test_ignored_loggers_includes_httpx():
+    """httpx INFO logs were ~25% of total Sentry log volume per the
+    2026-05-18 audit. They're dropped at the SDK level via the
+    ignore_logger() integration so WARNING+ httpx events still surface
+    (genuine HTTP failures keep their breadcrumbs)."""
+    from app.observability.sentry_init import _IGNORED_LOGGERS
+    assert "httpx" in _IGNORED_LOGGERS
 
 
 def test_cookies_in_denylist():

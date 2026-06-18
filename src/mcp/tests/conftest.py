@@ -115,6 +115,18 @@ def pytest_configure(config):
     _ensure_stub("apscheduler.triggers.cron", _apscheduler_cron)
 
 
+# Pre-import the real ``core.agents.hallucination`` package at conftest load
+# (before any test module is collected) so test_self_rag's "stub if not already
+# imported" guard skips — otherwise it would install a bare, submodule-less stub
+# into sys.modules that leaks into later tests patching
+# ``core.agents.hallucination.verification`` / ``.streaming``. (Exposed when
+# surface-biased retrieval became default-ON and shifted import timing.)
+try:  # noqa: SIM105
+    import core.agents.hallucination  # noqa: F401
+except Exception:  # noqa: BLE001 — best-effort; real package may be unavailable in some envs
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -149,6 +161,14 @@ def _reset_llm_client():
 
     _llm_mod._client = None
     clear_l1_cache()
+    # GA P0.5: surface-bias retrieval is now default-ON, so the C2 wiki-fetcher
+    # registry must be reset between tests — a fetcher leaked from one test would
+    # otherwise inject wiki results into later compiled_summary queries.
+    try:
+        from core.agents.query_agent import set_wiki_page_fetcher
+        set_wiki_page_fetcher(None)
+    except Exception:  # noqa: BLE001 — best-effort test hygiene
+        pass
     # Reset all circuit breakers to prevent cross-test state leakage.
     # The "bifrost-*" breaker names survive as legacy identifiers for
     # historical call-site categories (rerank/claims/verify/...); Bifrost

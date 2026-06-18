@@ -95,6 +95,8 @@ def test_model_cache_status_handles_probe_exception(monkeypatch):
 
 
 def test_get_models_status_returns_both_models(client, monkeypatch):
+    monkeypatch.setenv("RERANK_PROVIDER", "local")
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "local")
     monkeypatch.setattr(
         "huggingface_hub.try_to_load_from_cache",
         lambda **kwargs: None,  # all uncached
@@ -182,8 +184,11 @@ def test_is_loading_probe_returns_false_on_import_error():
 # ---------------------------------------------------------------------------
 
 
-def test_post_models_preload_loads_both_when_successful(client):
+def test_post_models_preload_loads_both_when_successful(client, monkeypatch):
     """Happy path: both loaders return cleanly → status=ok with timings."""
+    monkeypatch.setenv("RERANK_PROVIDER", "local")
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "local")
+
     def fake_load(*_args, **_kwargs):
         return None
     fake_ef = type("FakeEF", (), {"_load": fake_load})()
@@ -203,10 +208,13 @@ def test_post_models_preload_loads_both_when_successful(client):
     assert "embedder_ms" in body
 
 
-def test_post_models_preload_skips_embedder_when_server_side(client):
+def test_post_models_preload_skips_embedder_when_server_side(client, monkeypatch):
     """When EMBEDDING_MODEL == ChromaDB server default,
     get_embedding_function returns None — that's a valid skip,
     not a failure."""
+    monkeypatch.setenv("RERANK_PROVIDER", "local")
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "local")
+
     def fake_load(*_args, **_kwargs):
         return None
     with patch("core.retrieval.reranker._load_model", fake_load), \
@@ -220,10 +228,13 @@ def test_post_models_preload_skips_embedder_when_server_side(client):
     assert body["embedder_ms"] == 0.0
 
 
-def test_post_models_preload_partial_when_reranker_fails(client):
+def test_post_models_preload_partial_when_reranker_fails(client, monkeypatch):
     """A failed reranker download shouldn't crash the endpoint —
     it should report partial success so the GUI can show a
     targeted error."""
+    monkeypatch.setenv("RERANK_PROVIDER", "local")
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "local")
+
     def _raise_load():
         raise ConnectionError("simulated HuggingFace outage")
 
@@ -244,7 +255,10 @@ def test_post_models_preload_partial_when_reranker_fails(client):
     assert body["embedder_status"] == "loaded"
 
 
-def test_post_models_preload_partial_when_embedder_fails(client):
+def test_post_models_preload_partial_when_embedder_fails(client, monkeypatch):
+    monkeypatch.setenv("RERANK_PROVIDER", "local")
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "local")
+
     def fake_load(*_args, **_kwargs):
         return None
     def _raise_ef():

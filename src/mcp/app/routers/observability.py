@@ -18,6 +18,7 @@ import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.utils.swallowed import log_swallowed_error
@@ -542,3 +543,148 @@ async def get_trust_score() -> dict:
         log_swallowed_error("observability.get_trust_score.neo4j", exc)
     ts = compute_trust_score(neo4j_driver=driver)
     return ts.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# Ingestion Experience surfaces — Phase 1 of the 2026-05-24 plan
+# ---------------------------------------------------------------------------
+
+_KNOWLEDGE_STATS_CACHE_KEY = "cerid:knowledge_stats:cached"
+_KNOWLEDGE_STATS_CACHE_TTL_S = 60
+
+
+@router.get("/knowledge-stats")
+async def get_knowledge_stats() -> dict:
+    """Corpus-growth snapshot — powers the Sources pane F9 hero card.
+
+    Five orthogonal dimensions (nodes / edges / chunks / diversity /
+    growth) returned in a single payload. Redis-cached for 60s so a
+    busy Sources pane refresh doesn't hammer Neo4j. SSE artifact-
+    arrival events invalidate the cache (Phase 2 wiring).
+    """
+    import json as _json
+
+    from app.db.neo4j.stats import fetch_current_stats
+
+    # Try Redis cache first.
+    try:
+        from app.deps import get_redis
+        redis_client = get_redis()
+        if redis_client is not None:
+            cached = redis_client.get(_KNOWLEDGE_STATS_CACHE_KEY)
+            if cached is not None:
+                if isinstance(cached, bytes):
+                    cached = cached.decode("utf-8")
+                return _json.loads(cached)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("observability.knowledge_stats.cache_read", exc)
+
+    # Cache miss — compute fresh.
+    try:
+        from app.deps import get_neo4j
+        driver = get_neo4j()
+        snapshot = fetch_current_stats(driver)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("observability.knowledge_stats.compute", exc)
+        return _empty_knowledge_stats()
+
+    # Warm the cache for the next 60s.
+    try:
+        if redis_client is not None:
+            redis_client.setex(
+                _KNOWLEDGE_STATS_CACHE_KEY,
+                _KNOWLEDGE_STATS_CACHE_TTL_S,
+                _json.dumps(snapshot, default=str),
+            )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("observability.knowledge_stats.cache_warm", exc)
+
+    return snapshot
+
+
+@router.get("/knowledge-stats/history")
+async def get_knowledge_stats_history(
+    days: int = Query(default=30, ge=1, le=365),
+) -> dict:
+    """Daily corpus snapshots for sparkline rendering — powers F9
+    sparklines under each metric. Returns up to ``days`` of daily
+    snapshots, oldest first. Daily granularity is good enough for a
+    60×16 px sparkline — finer resolution would add no signal."""
+    from app.db.neo4j.stats import fetch_stats_history
+
+    try:
+        from app.deps import get_neo4j
+        driver = get_neo4j()
+        snapshots = fetch_stats_history(driver, days=days)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("observability.knowledge_stats.history", exc)
+        snapshots = []
+
+    return {"days": days, "snapshots": snapshots}
+
+
+@router.get("/source-activity")
+async def source_activity_stream(
+    source_id: str | None = Query(default=None, description="Filter to one source"),
+) -> StreamingResponse:
+    """SSE stream of source ingestion events — powers the Sources
+    pane Activity tab and the Constellation particle stream.
+
+    Each event line is a JSON :class:`core.ingest.sources.base.SourceArtifactEvent`
+    payload. The stream stays open indefinitely; clients reconnect
+    via the standard EventSource auto-retry on disconnect.
+
+    Pass ``?source_id=<uuid>`` to scope to a single source (used by
+    the source-detail pane's per-source activity feed).
+
+    Phase 1 ships the endpoint shape. The actual artifact-arrival
+    subscriber wires up in Phase 2 when the connector implementations
+    land — until then this emits keepalive comments so the FE can
+    render the connection-established state.
+    """
+    import asyncio
+    import json as _json
+
+    async def event_generator():
+        # Initial connected event so the FE can confirm subscription.
+        yield (
+            f"data: {_json.dumps({'type': 'connected', 'source_id': source_id})}\n\n"
+        ).encode("utf-8")
+
+        # Phase 1 placeholder loop — emits a keepalive every 15s.
+        # Phase 2 swaps in the real subscriber (Redis pubsub from the
+        # ingestion service publishes artifact-arrival events).
+        try:
+            while True:
+                await asyncio.sleep(15)
+                yield b": keepalive\n\n"
+        except asyncio.CancelledError:
+            return
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _empty_knowledge_stats() -> dict:
+    """Fallback when Neo4j is unreachable — shape-stable zero snapshot."""
+    return {
+        "nodes": {"artifacts": 0, "entities": 0, "memories": 0, "sources": 0},
+        "edges": {
+            "mentions": 0, "relates_to": 0, "wikilinks": 0,
+            "from_source": 0, "has_contradiction": 0,
+        },
+        "chunks": 0,
+        "diversity": {"source_kinds": 0, "domains": 0},
+        "growth": {
+            "artifacts_24h": 0, "artifacts_7d": 0,
+            "first_artifact_at": None, "corpus_age_days": 0,
+        },
+        "captured_at": utcnow_iso(),
+    }

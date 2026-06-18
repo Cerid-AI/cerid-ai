@@ -187,6 +187,27 @@ class EntityExtractionJob(BaseJob):
             stats.get("entities_upserted", 0),
             stats.get("edges_upserted", 0),
         )
+
+        # Phase K1.2 — emit entities_added event. The wiki refresh
+        # subscriber (Phase K1.3) listens on this event and decides
+        # which entities deserve a wiki page refresh based on
+        # debounce + mention-count thresholds.
+        try:
+            from app.processor.event_hooks import emit  # noqa: PLC0415
+
+            entity_slugs = [e.canonical_id for e in entities if getattr(e, "canonical_id", None)]
+            emit("entities_added", {
+                "artifact_id": self._artifact_id,
+                "entity_slugs": entity_slugs,
+                "tenant_id": self._tenant_id,
+            })
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "processor.entity_extraction.emit_event",
+                exc,
+                context={"artifact_id": self._artifact_id},
+            )
+
         return stats
 
     @staticmethod

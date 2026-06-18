@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { addBreadcrumb } from "./sentry"
+
 /**
  * Explicitly log a swallowed error with a named reason.
  *
@@ -13,22 +15,24 @@
  * Contract:
  *   - In dev mode (import.meta.env.DEV): console.warn with the reason
  *     and the error, so engineers see the failure while working.
- *   - In production: no-op console output, but the structured-log shape
- *     is Sentry-ready so the future frontend-Sentry migration is a
- *     one-line change (see TODO below).
- *
- * TODO(sentry): when frontend Sentry lands, replace the dev-mode
- * console.warn with `Sentry.captureException(err, {level: "info",
- * tags: {swallowed_reason: reason}, extra})`. Both dev and prod paths
- * become a single captureException call.
+ *   - In production: addBreadcrumb into Sentry at info level. The
+ *     breadcrumb is keyed by `reason` so swallows can be filtered;
+ *     they don't surface as Sentry issues unless escalated.
  */
 export function logSwallowedError(
   err: unknown,
   reason: string,
   extra?: Record<string, unknown>,
 ): void {
+  const errMessage = err instanceof Error ? err.message : String(err)
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
     console.warn(`[swallowed] ${reason}`, err, extra ?? {})
   }
+  // Always add a breadcrumb (no-op when Sentry isn't initialized).
+  addBreadcrumb(
+    "swallowed",
+    `${reason}: ${errMessage}`,
+    { ...(extra ?? {}), error_name: err instanceof Error ? err.name : "non-error" },
+    "info",
+  )
 }

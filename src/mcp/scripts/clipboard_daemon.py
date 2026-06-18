@@ -54,12 +54,12 @@ ENABLED = os.getenv("CERID_CLIPBOARD_ENABLED", "false").lower() == "true"
 MIN_LENGTH = int(os.getenv("CERID_CLIPBOARD_MIN_LENGTH", "50"))
 MAX_LENGTH = 50_000
 POLL_SECONDS = float(os.getenv("CERID_CLIPBOARD_POLL_SECONDS", "2"))
-MCP_PORT = os.getenv("CERID_PORT_MCP", "8888")
+MCP_PORT = os.getenv("CERID_PORT_MCP", "8888")  # env-capture-allowed: daemon startup config — read once
 API_URL = f"http://localhost:{MCP_PORT}"
-API_KEY = os.getenv("CERID_API_KEY", "")
-WEBHOOK_SECRET = os.getenv("CERID_WEBHOOK_SECRET", "")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+API_KEY = os.getenv("CERID_API_KEY", "")  # env-capture-allowed: daemon startup config — read once
+WEBHOOK_SECRET = os.getenv("CERID_WEBHOOK_SECRET", "")  # env-capture-allowed: daemon startup config — read once
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")  # env-capture-allowed: daemon startup config — read once
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")  # env-capture-allowed: daemon startup config — read once
 
 SEEN_SET_KEY = "cerid:clipboard:seen"
 HEARTBEAT_KEY = "cerid:clipboard:alive"

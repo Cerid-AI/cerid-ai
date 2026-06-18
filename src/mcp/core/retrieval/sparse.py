@@ -64,8 +64,8 @@ def _flag_enabled() -> bool:
 
 
 SPARSE_ENABLED = _flag_enabled()
-SPLADE_MODEL_PATH = os.getenv("SPLADE_MODEL_PATH", "data/models/splade-v3")
-SPLADE_ONNX_FILENAME = os.getenv("SPLADE_ONNX_FILENAME", "model.onnx")
+SPLADE_MODEL_PATH = os.getenv("SPLADE_MODEL_PATH", "data/models/splade-v3")  # env-capture-allowed: SPLADE model path — startup-only model location
+SPLADE_ONNX_FILENAME = os.getenv("SPLADE_ONNX_FILENAME", "model.onnx")  # env-capture-allowed: SPLADE ONNX filename — startup-only model location
 SPLADE_TOP_K_TERMS = int(os.getenv("SPLADE_TOP_K_TERMS", "256"))
 
 

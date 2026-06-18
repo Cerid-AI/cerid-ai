@@ -1,0 +1,157 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Tests for the availability capability flag on source kinds.
+
+The wizard gates kinds that have no working ingestion path; availability is
+derived from the connector registry + OAuth set + the webhook special-case.
+"""
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi import HTTPException
+
+from app.routers.connectors import oauth_connector_kinds
+from app.routers.sources import (
+    CreateSourceRequest,
+    _kind_availability,
+    _kind_providers,
+    create_source,
+)
+
+
+def test_registered_connector_is_available():
+    # rss has a registered SourceConnector
+    assert _kind_availability("rss", oauth_connector_kinds()) == "available"
+    assert _kind_availability("url_watch", oauth_connector_kinds()) == "available"
+
+
+def test_webhook_is_available_without_connector():
+    assert _kind_availability("webhook", oauth_connector_kinds()) == "available"
+
+
+def test_oauth_kind_is_oauth():
+    oauth = oauth_connector_kinds()
+    assert "gmail" in oauth  # guards the fixture
+    assert _kind_availability("gmail", oauth) == "oauth"
+
+
+def test_unimplemented_kind_is_coming_soon():
+    # folder is declared in SOURCE_KINDS but has no connector and no OAuth path
+    assert _kind_availability("folder", oauth_connector_kinds()) == "coming_soon"
+
+
+def test_every_source_kind_classified():
+    from core.ingest.sources.kinds import SOURCE_KINDS
+
+    oauth = oauth_connector_kinds()
+    valid = {"available", "oauth", "coming_soon"}
+    for k in SOURCE_KINDS:
+        assert _kind_availability(k, oauth) in valid
+
+
+# --- webhook-backed kinds (chat_capture / dev_events) ---
+
+
+def test_webhook_backed_kinds_are_available():
+    oauth = oauth_connector_kinds()
+    assert _kind_availability("chat_capture", oauth) == "available"
+    assert _kind_availability("dev_events", oauth) == "available"
+
+
+def test_kind_providers_surfaced_for_webhook_backed_kinds():
+    assert _kind_providers("chat_capture") == ["discord", "matrix", "slack", "teams"]
+    assert _kind_providers("dev_events") == ["github", "linear", "sentry", "stripe"]
+    # The generic webhook kind is raw pass-through (no recipes); pull/file kinds
+    # have no recipes either.
+    assert _kind_providers("webhook") == []
+    assert _kind_providers("rss") == []
+
+
+def _echo_created(_driver, **kw):
+    """Mirror srcdb.create_source(...) return shape from its kwargs."""
+    return {
+        "id": "src_1",
+        "kind": kw["kind"],
+        "family": kw["family"],
+        "display_name": kw["display_name"],
+        "tier": kw["tier"],
+        "status": "connected",
+        "config": kw["config"],
+        "sync_cursor": {},
+    }
+
+
+def _patch_create():
+    return (
+        patch("app.routers.sources.srcdb.create_source", side_effect=_echo_created),
+        patch("app.routers.sources.get_neo4j", return_value=MagicMock()),
+        patch("app.routers.sources.webhook_tokens.generate_token", return_value="tok_x"),
+        patch(
+            "app.routers.sources.webhook_tokens.generate_hmac_secret",
+            return_value="sec_x",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_chat_capture_mints_token_no_hmac():
+    mock_create, p_neo, p_tok, p_sec = _patch_create()
+    with mock_create as create_mock, p_neo, p_tok, p_sec:
+        rec = await create_source(
+            CreateSourceRequest(
+                kind="chat_capture", display_name="Slack", config={"provider": "slack"},
+            ),
+        )
+    cfg = create_mock.call_args.kwargs["config"]
+    assert cfg["token"] == "tok_x"
+    assert cfg["provider"] == "slack"
+    assert "hmac_secret" not in cfg  # slack does not mandate a signature
+    assert rec.kind == "chat_capture"
+
+
+@pytest.mark.asyncio
+async def test_create_dev_events_github_auto_mints_hmac():
+    mock_create, p_neo, p_tok, p_sec = _patch_create()
+    with mock_create as create_mock, p_neo, p_tok, p_sec:
+        await create_source(
+            CreateSourceRequest(
+                kind="dev_events", display_name="GH", config={"provider": "github"},
+            ),
+        )
+    # github sets requires_signature=True → receiver would reject without a secret.
+    assert create_mock.call_args.kwargs["config"]["hmac_secret"] == "sec_x"
+
+
+@pytest.mark.asyncio
+async def test_create_chat_capture_requires_provider():
+    _mc, p_neo, _pt, _ps = _patch_create()
+    with p_neo, pytest.raises(HTTPException) as ei:
+        await create_source(
+            CreateSourceRequest(kind="chat_capture", display_name="x", config={}),
+        )
+    assert ei.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_unknown_provider():
+    _mc, p_neo, _pt, _ps = _patch_create()
+    with p_neo, pytest.raises(HTTPException) as ei:
+        await create_source(
+            CreateSourceRequest(
+                kind="dev_events", display_name="x", config={"provider": "bogus"},
+            ),
+        )
+    assert ei.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_generic_webhook_stays_provider_optional():
+    mock_create, p_neo, p_tok, p_sec = _patch_create()
+    with mock_create, p_neo, p_tok, p_sec:
+        rec = await create_source(
+            CreateSourceRequest(kind="webhook", display_name="hook", config={}),
+        )
+    assert rec.kind == "webhook"

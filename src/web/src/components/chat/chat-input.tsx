@@ -46,9 +46,12 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
     if (activePane !== "chat") return
     const seed = consumeChatSeed()
     if (!seed) return
-    setInput(seed.text)
-    onInputChange?.(seed.text)
+    // Defer setState out of the effect synchronization pass (React
+    // Compiler's set-state-in-effect rule). The seed-consume above is
+    // idempotent so a microtask delay is safe.
     queueMicrotask(() => {
+      setInput(seed.text)
+      onInputChange?.(seed.text)
       const ta = textareaRef.current
       if (ta) {
         ta.focus()

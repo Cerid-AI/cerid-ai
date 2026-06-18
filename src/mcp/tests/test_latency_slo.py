@@ -40,7 +40,7 @@ import pytest
 # Only runs when the MCP stack is available.
 pytestmark = pytest.mark.benchmark_slo
 
-MCP_URL = os.getenv("CERID_MCP_URL", "http://localhost:8888")
+MCP_URL = os.getenv("CERID_MCP_URL", "http://localhost:8888")  # env-capture-allowed: benchmark target URL — set once per CI run
 
 
 def _cold_query_payload() -> dict:
@@ -136,21 +136,30 @@ def test_chat_stream_ttft_under_2s(benchmark):
 # Cross-project SLOs (Workstream A — 2026-04-28-cross-project-slo-hardening)
 # ---------------------------------------------------------------------------
 # These budgets gate the trading-agent SDK paths surfaced in the 2026-04-28
-# soak. They are marked ``xfail(strict=True)`` until Phase 1.2 of the
-# workstream lands the latency fixes — Phase 1.1 only adds observability,
-# so the budgets are expected to FAIL on the live stack until the fix
-# (Neo4j index / per-stage timeout) ships. ``strict=True`` flips the
-# semantics so the ``xfail`` itself fails when the budget unexpectedly
-# passes — that's the signal to remove the marker and treat the budget
-# as a hard gate.
+# soak. Both have been promoted to STRICT (Tier A) hard gates:
+# ``test_memory_extract_under_10s`` since Phase 1.2's per-stage
+# asyncio.wait_for(8s) budgets landed (v0.95.6); the longshot budget
+# followed after the Neo4j composite index migration shipped — the
+# previous strict-xfail marker started failing as XPASS, which is the
+# signal to remove it and promote to a hard gate.
+#
+# The longshot endpoint is trading-agent-only and is not mounted in the
+# public/CI stack. The budget IS a hard gate when the endpoint is
+# reachable; gate execution on ``CERID_TRADING_ENABLED`` so CI doesn't
+# 404 against a route that the public surface intentionally omits.
 
 _LONGSHOT_BUDGET_S = 0.5  # p50 < 500ms target per workstream §A1
 _MEMORY_EXTRACT_BUDGET_S = 10.0  # p99 < 10s target per workstream §A2
 
+_TRADING_AVAILABLE = os.getenv("CERID_TRADING_ENABLED", "").lower() in {"1", "true", "yes"}
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Workstream A Phase 1.1: budget set; fix in Phase 1.2",
+
+@pytest.mark.skipif(
+    not _TRADING_AVAILABLE,
+    reason=(
+        "CERID_TRADING_ENABLED not set — /sdk/v1/trading/longshot-surface is "
+        "trading-agent-only and unavailable in the public/CI stack"
+    ),
 )
 @pytest.mark.benchmark(group="longshot_surface", min_rounds=5, disable_gc=True)
 def test_longshot_surface_under_500ms(benchmark):

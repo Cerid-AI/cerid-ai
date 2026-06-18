@@ -181,14 +181,31 @@ function MessageRow({
     ? messages.slice(0, i).findLast((m) => m.role === "user")
     : undefined
 
+  // When the message is clickable for verification-selection it becomes
+  // an interactive surface; otherwise role="presentation" keeps a11y
+  // tooling from treating the static bubble as actionable.
+  const isInteractive = canSelectForVerification && !isSelected
   return (
     <div
+      role={isInteractive ? "button" : "presentation"}
+      tabIndex={isInteractive ? 0 : undefined}
+      aria-label={isInteractive ? "Select message for verification" : undefined}
       className={cn(
         "transition-all duration-300",
         isSelected && "rounded-xl ring-2 ring-brand/40 bg-brand/3 shadow-[0_0_16px_oklch(0.55_0.12_185/15%)]",
         canSelectForVerification && !isSelected && "cursor-pointer hover:bg-muted/20 rounded-xl",
       )}
-      onClick={!isSelected ? handleBubbleClick : undefined}
+      onClick={isInteractive && handleBubbleClick ? handleBubbleClick : undefined}
+      onKeyDown={
+        isInteractive && handleBubbleClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                handleBubbleClick()
+              }
+            }
+          : undefined
+      }
     >
       {divider}
       <MessageBubble
@@ -347,6 +364,7 @@ function VirtualizedChatMessages(props: ChatMessagesProps) {
   // Resolve the Radix ScrollArea viewport once the wrapper mounts.
   // Setting it into state triggers the virtualizer to re-measure
   // against the real scroll element.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omitted dep; addition would cause infinite loop or unwanted re-fetch
   useEffect(() => {
     const el = scrollRef.current?.querySelector<HTMLDivElement>(
       "[data-radix-scroll-area-viewport]",
@@ -354,6 +372,7 @@ function VirtualizedChatMessages(props: ChatMessagesProps) {
     if (el && el !== scrollEl) setScrollEl(el)
   })
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- third-party API not React-Compiler-compatible (ResizeObserver / IntersectionObserver / similar)
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollEl,

@@ -17,15 +17,16 @@ import type { EntitySummary, WikiEntityPage } from "@/lib/types/wiki"
 // Entity list
 // ---------------------------------------------------------------------------
 
-export function useWikiEntities({ limit = 30 }: { limit?: number } = {}): {
+export function useWikiEntities({ limit = 30, q }: { limit?: number; q?: string } = {}): {
   data: EntitySummary[] | undefined
   isLoading: boolean
   isError: boolean
   refetch: () => Promise<QueryObserverResult<EntitySummary[], Error>>
 } {
+  const search = q?.trim() || undefined
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["wiki-entities", limit],
-    queryFn: () => fetchWikiEntities({ limit }),
+    queryKey: ["wiki-entities", limit, search ?? null],
+    queryFn: () => fetchWikiEntities({ limit, q: search }),
     staleTime: 5 * 60_000,
     refetchInterval: 60_000,
     retry: 1,

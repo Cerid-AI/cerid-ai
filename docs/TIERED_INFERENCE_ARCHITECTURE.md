@@ -2,7 +2,7 @@
 
 > Automatic detection and selection of the fastest available inference provider for embeddings, reranking, and LLM pipeline stages across all supported platforms.
 
-**Version:** 1.0 | **Date:** 2026-04-05 | **Status:** Specification
+**Version:** 1.1 | **Date:** 2026-04-05 · **Updated:** 2026-05-31 | **Status:** Implemented (Quenchforge + ONNX options live; AMD-discrete GPU shipped in Quenchforge v0.8.0-rc2)
 
 ---
 
@@ -65,9 +65,9 @@ Each platform follows a strict priority order. The system tries Option 1 first; 
 | **Option 4** | ONNX in-process | `CPUExecutionProvider` | ~15ms/batch-10 | Always available |
 | **Option 5** | ONNX Docker CPU | `CPUExecutionProvider` | ~20-30ms/batch-10 | Always available |
 
-**Quenchforge** ([github.com/cerid-ai/quenchforge](https://github.com/cerid-ai/quenchforge), Apache-2.0) is the option-1 provider on Intel Mac + AMD discrete (Vega Pro, W6800X, RDNA1, RDNA2). It supervises a patched `llama-server` per workload (chat / embed / rerank) and gates the Metal `simdgroup_reduction` + `bfloat` kernels that miscompile on AMD discrete. As of Quenchforge v0.3.2 the gateway also translates Ollama-wire `/api/chat` and `/api/embeddings` to llama-server's OpenAI wire, so existing Ollama clients work unchanged.
+**Quenchforge** ([github.com/cerid-ai/quenchforge](https://github.com/cerid-ai/quenchforge), Apache-2.0) is the option-1 provider on Intel Mac + AMD discrete (Vega Pro, W6800X, RDNA1, RDNA2). It supervises patched `llama-server` slots per workload (chat / embed / code-embed / rerank) plus a `whisper.cpp` STT slot, fronting both the Ollama and OpenAI HTTP APIs on `127.0.0.1:11434`. **As of Quenchforge v0.8.0-rc2 (2026-05-25), AMD-discrete GPU is the default for all four production slots** — the two Metal-on-AMD crash classes are fixed: the `0002-metal-staging-buffer-pool` kernel patch (a bounded MTLBuffer pool replacing the per-call `newBufferWithBytesNoCopy` that exhausted the AMD IOMMU mapping pool under sustained load) plus `GGML_METAL_CONCURRENCY_DISABLE=1` for deterministic BERT embeddings. Correctness (cos_sim 1.0) and 30-minute sustained-load benches pass on Vega II. The gateway translates Ollama-wire `/api/chat` + `/api/embeddings` to llama-server's OpenAI wire so existing Ollama clients work unchanged. (Quenchforge also ships experimental `sd.cpp` image-gen + `bark.cpp` TTS slots and a `quenchforge pull/list/rm` model registry; cerid does not route to those.)
 
-Three additional hardware-aware flags are applied to the chat slot on AMD profiles to dodge a flash-attention CPU-fallback throttle and the prompt-cache state-save `GGML_ASSERT(buf_dst)` crash (`--flash-attn off --cache-ram 0 --no-cache-prompt`). Embed and rerank slots keep upstream defaults — they don't trip either bug.
+Hardware-aware chat-slot flags on AMD profiles dodge a flash-attention CPU-fallback throttle and the prompt-cache state-save `GGML_ASSERT(buf_dst)` crash (`--flash-attn off --cache-ram 0 --no-cache-prompt`). The embed / code-embed / rerank slots additionally get `GGML_METAL_CONCURRENCY_DISABLE=1` and a 1024 ubatch cap on AMD discrete (v0.8.0) to keep Metal staging-buffer pressure bounded under sustained load.
 
 For vetted GGUF model picks by VRAM tier see [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](AMD_GPU_MODEL_RECOMMENDATIONS.md). Cerid honours the routing via three env vars: `INTERNAL_LLM_PROVIDER=quenchforge`, `EMBEDDINGS_PROVIDER=quenchforge`, `RERANK_PROVIDER=quenchforge` — all live-mutable via `PATCH /settings` as of v0.93.9.
 

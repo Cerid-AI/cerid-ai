@@ -3,10 +3,10 @@
 
 """Task 10: rate-limit breach must return a graceful 429 with Retry-After.
 
-Regression coverage for smoke Test E, where 25 concurrent /agent/query POSTs
-under X-Client-ID=gui (limit 20/min) all showed up as connection errors.
-Graceful backpressure is a 429 with a Retry-After header, never a dropped
-connection.
+Regression coverage for smoke Test E, where concurrent /agent/query POSTs
+under X-Client-ID=gui exceeded the per-window quota and all showed up as
+connection errors. Graceful backpressure is a 429 with a Retry-After
+header, never a dropped connection.
 
 These tests exercise the middleware in isolation against a minimal Starlette
 app so they do not depend on ChromaDB, Neo4j, or OpenRouter.
@@ -21,6 +21,12 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from app.middleware.rate_limit import RateLimitMiddleware
+from config.settings import CLIENT_RATE_LIMITS
+
+# Pull the gui /agent/ limit from settings so this suite tracks ceiling changes.
+_GUI_AGENT_LIMIT, _GUI_AGENT_WINDOW = CLIENT_RATE_LIMITS["gui"]["/agent/"]
+# Burst size guaranteed to trip the limiter regardless of the configured ceiling.
+_AGENT_BURST = _GUI_AGENT_LIMIT + 5
 
 
 async def _ok(request: Request) -> JSONResponse:
@@ -46,10 +52,10 @@ def client() -> TestClient:
 
 
 def test_429_returned_when_gui_quota_exceeded(client: TestClient) -> None:
-    """After GUI's 20/min quota is used, next request returns 429 with Retry-After."""
+    """After GUI's per-window quota is used, next request returns 429 with Retry-After."""
     headers = {"X-Client-ID": "gui"}
     statuses: list[int] = []
-    for _ in range(25):
+    for _ in range(_AGENT_BURST):
         r = client.post(
             "/agent/query",
             json={"query": "probe", "domains": ["general"], "n_results": 3},
@@ -68,7 +74,7 @@ def test_429_body_structure(client: TestClient) -> None:
     """429 body shape: { detail: str, retry_after: int }."""
     headers = {"X-Client-ID": "gui"}
     r = None
-    for _ in range(30):
+    for _ in range(_AGENT_BURST):
         r = client.post(
             "/agent/query",
             json={"query": "probe", "domains": ["general"], "n_results": 3},
@@ -89,7 +95,7 @@ def test_429_body_structure(client: TestClient) -> None:
 def test_rate_limit_does_not_raise(client: TestClient) -> None:
     """Middleware must always produce a response; never drop the connection."""
     headers = {"X-Client-ID": "gui"}
-    for _ in range(40):
+    for _ in range(_AGENT_BURST + 10):
         r = client.post(
             "/agent/query",
             json={"query": "probe", "domains": ["general"], "n_results": 3},
@@ -102,7 +108,7 @@ def test_retry_after_header_matches_body(client: TestClient) -> None:
     """Retry-After header and body retry_after field must agree."""
     headers = {"X-Client-ID": "gui"}
     r = None
-    for _ in range(30):
+    for _ in range(_AGENT_BURST):
         r = client.post(
             "/agent/query",
             json={"query": "probe", "domains": ["general"], "n_results": 3},
@@ -142,9 +148,14 @@ def test_admin_get_is_rate_limited(client: TestClient) -> None:
 
 
 def test_observability_get_is_rate_limited(client: TestClient) -> None:
-    """Audit C-11: GET on /observability/* is a polling surface and must be counted."""
+    """Audit C-11: GET on /observability/* is a polling surface and must be counted.
+
+    OPEN-14 raised the gui budget to 120/60 so the dashboard's read-only polls
+    don't self-throttle into a spurious 429; the surface is still counted (not
+    exempt), so a tight loop past the cap must eventually 429.
+    """
     headers = {"X-Client-ID": "gui"}
-    for _ in range(35):
+    for _ in range(140):
         r = client.get("/observability/health-score", headers=headers)
         if r.status_code == 429:
             return
@@ -154,8 +165,8 @@ def test_observability_get_is_rate_limited(client: TestClient) -> None:
 def test_per_client_isolation_under_breach() -> None:
     """Trading-agent quota is independent of gui breach."""
     client = TestClient(_make_app())
-    # Burn the gui quota (20/min on /agent/).
-    for _ in range(25):
+    # Burn the gui quota on /agent/ (limit pulled from settings).
+    for _ in range(_AGENT_BURST):
         client.post(
             "/agent/query",
             json={"query": "probe", "domains": ["general"], "n_results": 3},

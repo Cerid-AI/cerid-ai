@@ -24,6 +24,7 @@ from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
 import config
+from core.utils.embedding_cache import get_embedding_cache
 from core.utils.onnx_providers import resolve_providers
 
 logger = logging.getLogger("ai-companion.embeddings")
@@ -54,9 +55,26 @@ def l2_distance_to_relevance(distance: float) -> float:
 # client-side embedding and let the server handle it (zero-migration path).
 _SERVER_DEFAULT_MODEL = "all-MiniLM-L6-v2"
 
-# Sentinel used by sentence-transformers models (Snowflake Arctic, etc.)
+# Sentinel used by sentence-transformers models (Snowflake Arctic, etc.).
+# Keys include both the canonical ONNX-loadable id used as `self._model_id`
+# AND any Quenchforge-served model name an operator may set via
+# `QUENCHFORGE_EMBED_MODEL`. The active-prefix lookup checks the actual
+# routing target so a query sent to nomic-embed never picks up Snowflake's
+# prefix (verified 2026-05-17: cross-model prefix routing collapses
+# LongMemEval gpu-embed-only recall to 0/60 — doc embeds skip prefix,
+# query embeds prepend Snowflake's, vector spaces diverge).
 _QUERY_PREFIX_MAP: dict[str, str] = {
     "Snowflake/snowflake-arctic-embed-m-v1.5": "Represent this sentence for searching relevant passages: ",
+    # Nomic-embed-text-v1.5 ships *symmetric* asymmetric prefixes:
+    # `search_document: ` for ingest, `search_query: ` for queries. Adding
+    # only the query side here would create a new asymmetry (queries
+    # prefixed, docs raw) that is just as broken as Snowflake-prefix +
+    # nomic-routing was. The right fix is a doc-side prefix path in
+    # `__call__` plus the query-side entry here, AND ensuring both fire
+    # only when the wrapper is routing to nomic. That's a follow-up;
+    # for now nomic stays absent from this map so both sides are
+    # prefix-less and symmetric — measured-weak (cos_sim 0.34 on
+    # "cat/mat" vs ideal ~0.65) but consistent.
 }
 
 
@@ -143,10 +161,86 @@ class OnnxEmbeddingFunction:
         (timeout, bad response, dim mismatch) silently fall through to
         the local ONNX path so the call still produces an embedding —
         operators don't lose ingest because the GPU sidecar restarted.
+
+        v0.96.1: a process-wide LRU cache wraps the routing chain so
+        identical texts within a session don't re-embed across the
+        network. Namespaced by the active provider+model so a config
+        flip cannot silently mix vector spaces.
         """
         if not input:
             return []
 
+        namespace = self._active_namespace()
+        cache = get_embedding_cache()
+        cached: list[np.ndarray | None] = [cache.get(namespace, t) for t in input]
+        miss_indices = [i for i, v in enumerate(cached) if v is None]
+        if not miss_indices:
+            return [c for c in cached if c is not None]  # type: ignore[misc]
+
+        miss_texts = [input[i] for i in miss_indices]
+        miss_vectors = self._embed_uncached(miss_texts)
+        if len(miss_vectors) != len(miss_indices):
+            # Backend returned wrong cardinality — refuse to cache and
+            # fall through to its result so ChromaDB sees a clean error
+            # if the dim is also wrong.
+            return miss_vectors if not cached or all(c is None for c in cached) else \
+                self._stitch_uncached_only(input, cached, miss_indices, miss_vectors)  # type: ignore[return-value]
+
+        result: list[np.ndarray] = []
+        miss_iter = iter(zip(miss_indices, miss_vectors, strict=True))
+        next_miss = next(miss_iter, None)
+        for i, v in enumerate(cached):
+            if v is not None:
+                result.append(v)
+                continue
+            assert next_miss is not None and next_miss[0] == i
+            vec = np.asarray(next_miss[1], dtype=np.float32)
+            cache.put(namespace, input[i], vec)
+            result.append(vec)
+            next_miss = next(miss_iter, None)
+        return result  # type: ignore[return-value]
+
+    def _active_namespace(self) -> str:
+        """Identify the model that will actually serve this batch.
+
+        Mirrors the routing fast-paths in ``__call__`` so the cache key
+        matches the producing vector space. Quenchforge is checked first
+        because its dispatch is operator-controlled by a single env var;
+        anything else collapses onto the local ONNX model identity.
+        """
+        try:
+            from utils.quenchforge_client import is_embeddings_provider_quenchforge
+            if is_embeddings_provider_quenchforge():
+                qf_model = os.environ.get("QUENCHFORGE_EMBED_MODEL", "")
+                if qf_model:
+                    return f"qf:{qf_model}"
+        except Exception as exc:  # noqa: BLE001 — namespace probe is best-effort
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error(
+                "core.utils.embeddings.namespace_probe", exc,
+            )
+        return f"onnx:{self._model_id}"
+
+    @staticmethod
+    def _stitch_uncached_only(
+        input_texts: list[str],
+        cached: list[np.ndarray | None],
+        miss_indices: list[int],
+        miss_vectors: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        # Degraded path: backend returned fewer vectors than expected.
+        # Don't cache, don't assert — return what we have so the caller
+        # surfaces the dim-mismatch / count-mismatch downstream.
+        _ = input_texts, cached, miss_indices
+        return [np.asarray(v, dtype=np.float32) for v in miss_vectors]
+
+    def _embed_uncached(self, input: list[str]) -> list[np.ndarray]:  # noqa: A002
+        """Run the existing backend chain on a cache-miss subset.
+
+        Identical control flow to the original ``__call__`` body; lifted
+        into a helper so the cache layer can split a batch into hits +
+        misses without duplicating the routing logic.
+        """
         # Quenchforge GPU fast-path (v0.93.8) — opt-in via
         # EMBEDDINGS_PROVIDER=quenchforge.  Targets Intel Mac + AMD
         # where ONNX runtime has no GPU provider and the sidecar path
@@ -231,22 +325,56 @@ class OnnxEmbeddingFunction:
             ``query_text`` instead of ``query_vector``.
 
         The single-vs-batch decision is made on the runtime input type;
-        callers in either protocol get back the shape they expect. The
-        ``_query_prefix`` (e.g. arctic-embed's "Represent this sentence
-        for searching relevant passages: ") applies on this path because
-        that's its purpose: pull queries closer to passages in latent
-        space. Document-side embedding via ``__call__`` gets no prefix.
+        callers in either protocol get back the shape they expect.
+
+        The query prefix is derived from the **active routing target**, not
+        the wrapper's static ``_model_id``. When the operator flips
+        ``EMBEDDINGS_PROVIDER=quenchforge`` and the daemon serves a
+        different model than the wrapper was configured for (e.g. nomic
+        on the GPU side vs Snowflake-Arctic on the local-ONNX fallback),
+        the prefix has to match the model that will actually compute the
+        embedding — otherwise queries land in a different vector space
+        than documents and retrieval collapses (verified 2026-05-17:
+        LongMemEval gpu-embed-only went from recall=0/60 with the wrong
+        prefix to a measurable number once the prefix tracked routing).
+        Document-side embedding via ``__call__`` gets no prefix on any
+        path; the prefix asymmetry is the documented sentence-transformer
+        contract.
         """
+        prefix = self._active_query_prefix()
         if isinstance(input, str):
-            text = self._query_prefix + input if self._query_prefix else input
+            text = prefix + input if prefix else input
             return self.__call__([text])[0]
         if not input:
             return []
         prefixed = (
-            [self._query_prefix + t for t in input]
-            if self._query_prefix else list(input)
+            [prefix + t for t in input]
+            if prefix else list(input)
         )
         return self.__call__(prefixed)
+
+    def _active_query_prefix(self) -> str:
+        """Return the right query prefix for the model that will serve.
+
+        Mirrors ``_active_namespace`` — the routing decision the cache
+        and prefix logic both depend on lives in one place at the
+        active provider. Same trade-off: best-effort fall through to
+        the wrapper's configured ``self._model_id`` prefix when the
+        provider probe fails (the env var probe is the only failure
+        mode and it's swallowed for observability).
+        """
+        try:
+            from utils.quenchforge_client import is_embeddings_provider_quenchforge
+            if is_embeddings_provider_quenchforge():
+                qf_model = os.environ.get("QUENCHFORGE_EMBED_MODEL", "")
+                if qf_model:
+                    return _QUERY_PREFIX_MAP.get(qf_model, "")
+        except Exception as exc:  # noqa: BLE001 — best-effort probe
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error(
+                "core.utils.embeddings.active_query_prefix_probe", exc,
+            )
+        return self._query_prefix
 
     # -- chromadb 1.x EmbeddingFunction contract (forward-compat) -----------
     #
@@ -327,14 +455,24 @@ class OnnxEmbeddingFunction:
         # voided the client cache and added ~1s of TCP-rebuild overhead
         # per call — verified by the 14h vs 75min projected runtime
         # delta on the v0.96.0 LongMemEval canonical baseline.
+        from core.utils import inference_health
         try:
             from core.utils.async_bridge import run_async
             from utils.quenchforge_client import quenchforge_embed
-            return run_async(quenchforge_embed(texts), timeout=60.0)
+            result = run_async(quenchforge_embed(texts), timeout=60.0)
+            inference_health.record_success("embed", provider="quenchforge")
+            return result
         except Exception as exc:  # noqa: BLE001 — observability boundary
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error(
                 "core.utils.embeddings.quenchforge_fallthrough", exc,
+            )
+            # Quenchforge embed was configured but failed — the chain serves
+            # from the sidecar / local ONNX (a DIFFERENT model). Recall stays
+            # consistent because vectors are namespaced per provider+model, but
+            # the GPU path is down: record it so /health reports the degradation.
+            inference_health.record_fallback(
+                "embed", configured="quenchforge", served_by="onnx", detail=str(exc),
             )
             return None
 

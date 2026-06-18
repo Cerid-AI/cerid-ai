@@ -26,6 +26,16 @@ forbidden_modules =
     eval
     stores
     agents
+# Allowlisted pre-existing violations (Phase J + K Pro features). These
+# core/ modules import from app/ today because the abstractions to
+# invert them (data-source registry for inbox; graph adapter for
+# digest) haven't been carved out yet. Tracked in v1.1 polish sprint;
+# documented here so the contract enforces the rule for everything
+# NEW while leaving these standing.
+ignore_imports =
+    core.agents.daily_digest -> app.db.neo4j
+    core.agents.daily_digest -> app.deps
+    core.agents.inbox_triage -> app.data_sources.base
 
 # config contract removed: config.settings legitimately imports utils.model_registry
 # The critical boundary (core must not import app) is enforced above

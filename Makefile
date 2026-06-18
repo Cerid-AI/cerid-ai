@@ -1,6 +1,6 @@
 .PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
-       test test-all test-eval smoke slo help
+       test test-all test-eval ci-local drift-check prepush smoke slo help
 
 # -- Python deps --
 lock-python:
@@ -34,7 +34,7 @@ test-frontend:
 	cd src/web && npx vitest run
 
 typecheck-frontend:
-	cd src/web && npx tsc --noEmit
+	cd src/web && npx tsc -b
 
 build-frontend:
 	cd src/web && npm run build
@@ -51,6 +51,63 @@ test-eval:
 
 # -- Combined --
 check-all: deps-check lint-frontend typecheck-frontend test-frontend
+
+# -- Full local validation (run by the pre-push hook; mirrors PR+merge CI) --
+# Validates locally so Action minutes are only spent at merge time. Excludes
+# preservation/benchmark/integration/eval — all need a live stack (Neo4j/Chroma/Redis)
+# and would hard-fail on a host without it. Mirrors CI's unit-test job, which also runs
+# -m "not benchmark_slo and not integration" (ci.yml). Escape hatch: git push --no-verify
+ci-local: ## Full local validation before push (backend + frontend + guard)
+	@echo "[ci-local] backend · ruff"
+	.venv/bin/ruff check src/mcp/
+	@echo "[ci-local] backend · mypy"
+	.venv/bin/mypy src/mcp/
+	@echo "[ci-local] backend · import contracts"
+	cd src/mcp && ../../.venv/bin/lint-imports
+	@echo "[ci-local] backend · tests"
+	PYTHONPATH=src/mcp .venv/bin/pytest src/mcp/tests/ --ignore=src/mcp/tests/eval \
+	  -m "not benchmark_slo and not preservation and not integration" -x -q -p no:cacheprovider
+	@echo "[ci-local] frontend · eslint + tsc + vitest"
+	cd src/web && npx eslint . && npx tsc -b && npx vitest run
+	@echo "[ci-local] supply-chain guard"
+	bash scripts/guard-no-ai-commits.sh
+	@echo "[ci-local] ✓ all local checks passed"
+
+drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job runs (NOT in ci-local)
+	@echo "[drift] env-example"
+	.venv/bin/python scripts/gen_env_example.py --check
+	@echo "[drift] router-registry"
+	.venv/bin/python scripts/gen_router_registry.py --check
+	@echo "[drift] sdk-openapi"
+	.venv/bin/python scripts/gen_sdk_openapi.py --check
+	@echo "[drift] sync-manifest"
+	@test -f scripts/lint-sync-manifest.py \
+	  && .venv/bin/python scripts/lint-sync-manifest.py \
+	  || echo "  (internal-only gate — not present in this checkout, skipped)"
+	@echo "[drift] silent-catch"
+	.venv/bin/python scripts/lint-no-silent-catch.py src/mcp/
+	@echo "[drift] no-legacy-neo4j-tree"
+	.venv/bin/python scripts/lint-no-legacy-neo4j-tree.py
+	@echo "[drift] import-star-without-all"
+	.venv/bin/python scripts/lint-import-star-without-all.py
+	@echo "[drift] no-module-getenv-mutable"
+	.venv/bin/python scripts/lint-no-module-getenv-mutable.py
+	@echo "[drift] docker-healthcheck-localhost"
+	.venv/bin/python scripts/lint-docker-healthcheck-localhost.py
+	@echo "[drift] web-no-crypto-randomuuid"
+	.venv/bin/python scripts/lint-web-no-crypto-randomuuid.py
+	@echo "[drift] dts-basename-collision"
+	.venv/bin/python scripts/lint-dts-basename-collision.py
+	@echo "[drift] product-story"
+	.venv/bin/python scripts/lint-product-story.py
+	@echo "[drift] mcp-descriptions"
+	.venv/bin/python scripts/lint-mcp-descriptions.py
+	@echo "[drift] no-hardcoded-models"
+	.venv/bin/python scripts/lint-no-hardcoded-models.py --strict src/mcp/
+	@echo "[drift] ✓ drift + lint gates passed"
+
+prepush: ci-local drift-check ## FULL pre-push parity with remote CI (run before every push)
+	@echo "[prepush] ✓ complete — safe to push"
 
 # -- Load testing --
 smoke:
@@ -73,7 +130,7 @@ preservation-check: ## Run capability-preservation invariants (I1-I8) against a 
 
 # -- Latency SLO benchmarks --
 slo: ## Run latency SLO benchmarks against localhost:8888 (requires running stack)
-	cd src/mcp && pytest tests/test_latency_slo.py -m benchmark_slo --benchmark-only -v
+	cd src/mcp && ../../.venv/bin/python -m pytest tests/test_latency_slo.py -m benchmark_slo --benchmark-only -v
 
 help:
 	@echo "Available targets:"

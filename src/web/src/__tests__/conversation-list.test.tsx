@@ -137,4 +137,25 @@ describe("ConversationList", () => {
     )
     expect(screen.getByPlaceholderText("Search conversations...")).toBeInTheDocument()
   })
+
+  // F-02-05: conversation titles are truncated in the sidebar; hovering must
+  // surface the full title via a Radix Tooltip so the user can disambiguate
+  // multiple long-titled conversations without clicking through each one.
+  it("wraps each conversation title in a Tooltip trigger", () => {
+    const longTitle = "What is the standard deduction for a single filer in 2026?"
+    render(
+      <ConversationList
+        conversations={[makeConversation("c1", longTitle)]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        {...defaultProps}
+      />,
+    )
+    const titleSpan = screen.getByText(longTitle)
+    // Radix marks tooltip triggers with data-slot="tooltip-trigger" on the
+    // resolved DOM element. asChild forwards the slot attribute to our span.
+    const trigger = titleSpan.closest("[data-slot='tooltip-trigger']")
+    expect(trigger).not.toBeNull()
+  })
 })

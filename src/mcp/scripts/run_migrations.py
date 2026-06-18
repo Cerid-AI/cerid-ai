@@ -10,6 +10,8 @@ from app.deps import get_neo4j
 MIGRATIONS = [
     "app.db.neo4j.migrations.m0001_backfill_verification_edges",
     "app.db.neo4j.migrations.m0002_cleanup_orphan_verification_reports",
+    "app.db.neo4j.migrations.m0003_source_nodes",
+    "app.db.neo4j.migrations.m0004_fact_nodes",
 ]
 
 

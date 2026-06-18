@@ -290,7 +290,12 @@ def test_f61_malformed_query(client: httpx.Client) -> None:
 
 @pytest.mark.p1
 def test_f62_rate_limit_burst() -> None:
-    """F-62: Rapid-fire requests trigger at least one 429."""
+    """F-62: Rapid-fire requests trigger at least one 429.
+
+    The ``_default`` consumer's ``/agent/`` rate limit is (120, 60) —
+    120 requests per 60-second sliding window. We send 130 in a tight
+    loop so the 121st-onwards crosses the threshold and returns 429.
+    """
     with httpx.Client(
         base_url=MCP_BASE_URL,
         headers={
@@ -300,7 +305,7 @@ def test_f62_rate_limit_burst() -> None:
         timeout=30.0,
     ) as burst_client:
         status_codes: list[int] = []
-        for _ in range(15):
+        for _ in range(130):
             resp = burst_client.post(
                 "/agent/query",
                 json={"query": "rate limit test", "top_k": 1},

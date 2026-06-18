@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 import config
 from app.deps import get_redis
+from config.features import is_tier_met
 
 router = APIRouter(tags=["plugins"])
 logger = logging.getLogger("ai-companion.plugins")
@@ -126,7 +127,7 @@ def _set_plugin_config_redis(name: str, cfg: dict[str, Any]) -> None:
 def _resolve_status(manifest: dict[str, Any], enabled: bool) -> str:
     """Determine the display status for a plugin."""
     tier_required = manifest.get("tier_required", manifest.get("tier", "community"))
-    if tier_required == "pro" and config.FEATURE_TIER != "pro":
+    if tier_required == "pro" and not is_tier_met("pro"):
         return "requires_pro"
     if not enabled:
         return "disabled"
@@ -192,7 +193,7 @@ def enable_plugin(name: str) -> PluginInfo:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")
     manifest = manifests[name]
     tier_required = manifest.get("tier_required", manifest.get("tier", "community"))
-    if tier_required == "pro" and config.FEATURE_TIER != "pro":
+    if tier_required == "pro" and not is_tier_met("pro"):
         raise HTTPException(
             status_code=403,
             detail=f"Plugin '{name}' requires 'pro' tier (current: '{config.FEATURE_TIER}')",

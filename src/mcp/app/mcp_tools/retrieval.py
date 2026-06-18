@@ -826,7 +826,43 @@ async def pkb_answer_with_citations(
 
     from core.agents.hallucination.extraction import extract_claims
     from core.agents.query_agent import agent_query
+    from core.retrieval.surface_router import route as _surface_route
+    from core.utils.cache import record_chunks_per_answer
     from core.utils.internal_llm import call_internal_llm
+
+    # Phase K3.5 — surface routing. When the router classifies the
+    # query as a compiled-summary intent AND we can resolve a wiki
+    # page, we pull the page summary into the context budget as a
+    # high-priority block ahead of chunk citations. The wiki page is
+    # a verified, NLI-gated artifact written by WikiRefreshJob;
+    # treating it as a first-class citation surface lets the answer
+    # path leverage compounding state instead of re-deriving.
+    surface_decision = _surface_route(question)
+    wiki_block: str = ""
+    wiki_page_meta: dict[str, Any] | None = None
+    if (
+        "wiki" in surface_decision.surfaces
+        and surface_decision.matched_entity_hint
+    ):
+        try:
+            from app.services.wiki_pages import get_entity_page  # noqa: PLC0415
+
+            page = await get_entity_page(
+                get_neo4j(), surface_decision.matched_entity_hint,
+            )
+            if page is not None and getattr(page, "summary", None):
+                wiki_page_meta = {
+                    "slug": page.slug,
+                    "name": page.name,
+                    "confidence_band": page.confidence_band,
+                    "last_updated_at": page.last_updated_at,
+                }
+                wiki_block = (
+                    f"[Compiled wiki summary for {page.name} "
+                    f"(confidence={page.confidence_band})]\n{page.summary}\n\n"
+                )
+        except Exception:  # noqa: BLE001 — wiki page is optional context
+            wiki_block = ""
 
     # 1. Retrieve
     retrieval = await agent_query(
@@ -840,7 +876,7 @@ async def pkb_answer_with_citations(
     )
 
     results = retrieval.get("results", [])
-    if not results:
+    if not results and not wiki_block:
         return {
             "answer": "I don't have any sources in the KB matching that question.",
             "citations": [],
@@ -852,22 +888,67 @@ async def pkb_answer_with_citations(
             "question": question,
         }
 
-    # 2. Generate answer grounded in retrieved context
-    context = retrieval.get("context", "")[:8000]
-    answer = await call_internal_llm(
-        _llm_call_messages(
-            system=(
-                "Answer the question using ONLY the provided context. "
-                "If the context is insufficient, say so explicitly. Do "
-                "not invent facts. Cite source identifiers when the "
-                "context provides them. Be direct — no preamble."
-            ),
-            user=f"Question: {question}\n\nContext:\n{context}",
-        ),
-        temperature=0.1,
-        max_tokens=900,
-        stage="mcp_answer_with_citations",
+    # Record chunks-per-answer for the K-program soak collector. Emitted
+    # only on the grounded-answer path (past the no-sources early return),
+    # so a "no sources" reply doesn't deflate the baseline. A wiki-only
+    # answer legitimately records 0 chunks — that is the compiled-summary win.
+    record_chunks_per_answer(
+        get_redis(),
+        intent=surface_decision.intent,
+        chunk_count=len(results),
     )
+
+    # 2. Generate answer grounded in retrieved context.
+    # Reserve up to 2000 chars for the wiki block; remaining budget
+    # goes to chunk context. The wiki block is structurally separate
+    # from chunks so the LLM can cite them differently.
+    chunk_budget = max(2000, 8000 - len(wiki_block))
+    chunk_context = retrieval.get("context", "")[:chunk_budget]
+    context = (wiki_block + chunk_context) if wiki_block else chunk_context
+    # Mode-aware synthesis (shared core primitive): analytical questions
+    # (counting / date arithmetic / preference-application) get a reasoning
+    # prompt instead of the extractive one, so the reader DERIVES the answer
+    # from evidence that is present but not literal instead of abstaining.
+    # Fact-lookup questions keep the concise extractive behaviour unchanged.
+    from core.agents.analytical_ops import (
+        compute_count_answer,
+        compute_temporal_answer,
+    )
+    from core.agents.answer_synthesis import (
+        AnswerMode,
+        build_answer_messages,
+        classify_answer_mode,
+        suggested_max_tokens,
+    )
+
+    _mode = classify_answer_mode(question)
+    # Deterministic analytical operators first: date arithmetic / counting are
+    # extracted as structured facts and computed in code (no LLM mental math),
+    # removing the off-by-one / miscount errors that survive a strong reader.
+    # Returns None when not answerable that way → fall through to synthesis.
+    answer: str | None = None
+    if _mode is AnswerMode.TEMPORAL:
+        from core.utils.time import utcnow_iso
+        # Production has the reference "now" for free — pass today so the
+        # operator can answer relative "how long ago / since" questions.
+        answer = await compute_temporal_answer(
+            question, context, reference_date=utcnow_iso()[:10],
+        )
+    elif _mode is AnswerMode.AGGREGATION:
+        answer = await compute_count_answer(question, context)
+
+    if answer is None:
+        _messages = build_answer_messages(question, context, _mode)
+        # Preserve this tool's citation contract on top of the mode rules.
+        _messages[-1]["content"] += (
+            "\n- Cite the source identifiers from the context when you use them."
+        )
+        answer = await call_internal_llm(
+            _messages,
+            temperature=0.1,
+            max_tokens=max(900, suggested_max_tokens(_mode, 900)),
+            stage="mcp_answer_with_citations",
+        )
     answer = answer.strip()
 
     # 3. Extract claims from the answer + bind each to its source by
@@ -910,6 +991,13 @@ async def pkb_answer_with_citations(
             "domains_searched": retrieval.get("domains_searched", []),
             "total_results": retrieval.get("total_results", 0),
             "retrieval_confidence": retrieval.get("confidence"),
+            "surface_route": {
+                "primary": surface_decision.primary,
+                "surfaces": surface_decision.surfaces,
+                "intent": surface_decision.intent,
+                "confidence": surface_decision.confidence,
+            },
+            "wiki_page": wiki_page_meta,
         },
         "question": question,
     }

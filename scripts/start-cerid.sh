@@ -9,6 +9,8 @@
 #   ./scripts/start-cerid.sh --build   # rebuild images before starting (after code changes)
 #   ./scripts/start-cerid.sh --force   # bypass pre-flight checks
 #   ./scripts/start-cerid.sh --legacy  # use legacy 4-step compose startup
+#   ./scripts/start-cerid.sh --reclaim # take over container names held by a
+#                                      # foreign project/dir (stop+rm them)
 
 set -euo pipefail
 CERID_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,9 +31,10 @@ for arg in "$@"; do
         --build) BUILD_FLAG="--build" ;;
         --force) FORCE_FLAG="1" ;;
         --legacy) LEGACY_FLAG="1" ;;
+        --reclaim) export CERID_RECLAIM="true" ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--build] [--force] [--legacy]"
+            echo "Usage: $0 [--build] [--force] [--legacy] [--reclaim]"
             exit 1
             ;;
     esac
@@ -442,7 +445,7 @@ if [ -z "$OLLAMA_CONFIGURED" ]; then
     echo "  Hardware: ${CERID_GPU_LABEL:-Unknown}"
     if [ "${CERID_OLLAMA_IMAGE:-}" = "native" ]; then
         echo "  Note:     macOS Metal detected — Ollama runs natively (not in Docker)"
-        echo "            Install via: brew install ollama && ollama serve"
+        echo "            Install via: brew install cerid-ai/tap/quenchforge (recommended on AMD-Mac, see https://github.com/Cerid-AI/quenchforge) OR brew install ollama && ollama serve"
     fi
     echo ""
     OLLAMA_ANSWER="n"
@@ -587,6 +590,63 @@ fi
 # (especially ChromaDB's SQLite) fail with write permission errors.
 mkdir -p "$CERID_ROOT/stacks/infrastructure/data/"{chroma,neo4j,neo4j-logs,redis}
 
+# Conflict preflight — a container from a DIFFERENT compose project or working
+# dir (e.g. the public mirror run from its own clone) can hold our exact
+# container_names while RUNNING, which cleanup_zombies (stopped-only) misses and
+# `docker compose up` then dies on with a raw daemon error. Detect + reclaim
+# (or abort with a precise fix) before we ever reach compose.
+# Project identity is the basename of the repo dir — `cerid-ai-internal` here,
+# `cerid-ai` in the public mirror. This file syncs verbatim to both, so it must
+# NOT hardcode a name (see the docker-compose.yml note). Compose derives the same
+# default from the compose file's dir, so OUR_PROJECT stays in step with it.
+EXPECTED_PROJECT="$(basename "$CERID_ROOT")"
+OUR_PROJECT="${COMPOSE_PROJECT_NAME:-$EXPECTED_PROJECT}"
+# Identity assertion — a stale exported COMPOSE_PROJECT_NAME that doesn't match
+# this repo's dir would repoint the whole stack (and its bind mounts) at a
+# foreign project: the 2026-06-07 cross-wiring class. Refuse it.
+if [ "$OUR_PROJECT" != "$EXPECTED_PROJECT" ]; then
+    if [ -n "$FORCE_FLAG" ]; then
+        echo "[identity] --force: launching as project '$OUR_PROJECT' (dir basename is '$EXPECTED_PROJECT')."
+    else
+        echo "Error: COMPOSE_PROJECT_NAME='$OUR_PROJECT' does not match this repo's" >&2
+        echo "       directory ('$EXPECTED_PROJECT'). A mismatched project name repoints" >&2
+        echo "       the stack and its data mounts at a foreign project. Unset" >&2
+        echo "       COMPOSE_PROJECT_NAME or pass --force to override." >&2
+        exit 1
+    fi
+fi
+REQUIRED_NAMES=$(docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" config --format json 2>/dev/null \
+    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(s["container_name"] for s in d.get("services",{}).values() if s.get("container_name")))' 2>/dev/null || true)
+# Fallback to the canonical set if config derivation is unavailable.
+[ -z "$REQUIRED_NAMES" ] && REQUIRED_NAMES="ai-companion-neo4j ai-companion-chroma ai-companion-redis ai-companion-mcp cerid-web"
+if ! detect_conflicts "$OUR_PROJECT" "$CERID_ROOT" $REQUIRED_NAMES; then
+    if [ -n "$FORCE_FLAG" ]; then
+        echo "[conflict] --force set — proceeding anyway (compose up may still fail)."
+    else
+        exit 1
+    fi
+fi
+detect_port_conflicts "${CERID_PORT_GUI}" "${CERID_PORT_MCP}" "${CERID_PORT_NEO4J}" \
+    "${CERID_PORT_NEO4J_BOLT}" "${CERID_PORT_CHROMA}" "${CERID_PORT_REDIS}"
+
+# Data-dir collision preflight — refuse to start if a foreign running container
+# already bind-mounts a store we'd open (two procs on one Redis AOF / Neo4j store
+# corrupt it). This is the corruption half of the 2026-06-07 cross-wiring; the
+# name half is handled by detect_conflicts above.
+DATA_ROOT="$CERID_ROOT/stacks/infrastructure/data"
+if ! detect_datadir_conflicts "$OUR_PROJECT" "$CERID_ROOT" \
+        "$DATA_ROOT/redis" "$DATA_ROOT/neo4j" "$DATA_ROOT/chroma"; then
+    if [ -n "$FORCE_FLAG" ]; then
+        echo "[datadir] --force set — proceeding anyway (data CORRUPTION is likely)."
+    else
+        exit 1
+    fi
+fi
+
+# Redis AOF self-heal — repair a corrupt append-only file before compose up so a
+# crash-loop can't strand mcp/web in `Created` with no signal.
+ensure_redis_aof_healthy "$DATA_ROOT/redis"
+
 # Zombie-container cleanup — any ai-companion-*/cerid-* container in
 # Exited/Dead/Created state holds its name, causing `docker compose up`
 # to fail with an opaque conflict error. Remove them up front.
@@ -665,7 +725,7 @@ else
     wait_for_service "Neo4j" "http://127.0.0.1:${CERID_PORT_NEO4J}" 60 && echo " ready" || echo " timeout"
 fi
 echo -n "  ChromaDB..."
-wait_for_service "ChromaDB" "http://127.0.0.1:${CERID_PORT_CHROMA}/api/v1/heartbeat" 30 && echo " ready" || echo " timeout"
+wait_for_service "ChromaDB" "http://127.0.0.1:${CERID_PORT_CHROMA}/api/v2/heartbeat" 30 && echo " ready" || echo " timeout"
 echo -n "  MCP..."
 wait_for_service "MCP" "http://localhost:${CERID_PORT_MCP}/health" 90 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
 echo -n "  React GUI..."
@@ -736,7 +796,7 @@ else
     check_neo4j ai-companion-neo4j "${NEO4J_USER:-neo4j}" "${NEO4J_PASSWORD:-}" || true
 fi
 
-check_http  "ChromaDB" "http://localhost:${CERID_PORT_CHROMA}/api/v1/heartbeat" || true
+check_http  "ChromaDB" "http://localhost:${CERID_PORT_CHROMA}/api/v2/heartbeat" || true
 check_redis ai-companion-redis "${REDIS_PASSWORD:-}" || true
 
 echo ""

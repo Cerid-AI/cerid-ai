@@ -303,9 +303,15 @@ async def _verify_against_cited_url(
     entail = float(nli_result.get("entailment", 0.0))
     contra = float(nli_result.get("contradiction", 0.0))
 
-    if contra > 0.5:
+    # Use the SAME configured NLI thresholds as every other verification band
+    # (KB-NLI main path, self_rag). Previously hardcoded 0.5/0.6, which made the
+    # cited-URL path simultaneously looser on entailment (>0.6 vs the configured
+    # 0.7) and stricter on contradiction (>0.5 vs 0.6) than the rest of the
+    # system — so a claim entailed at 0.6-0.69 by its own cited source showed
+    # "verified" while the identical score against a KB source showed "uncertain".
+    if contra >= config.NLI_CONTRADICTION_THRESHOLD:
         status = "unverified"
-    elif entail > 0.6:
+    elif entail >= config.NLI_ENTAILMENT_THRESHOLD:
         status = "verified"
     else:
         status = "uncertain"
@@ -746,11 +752,74 @@ async def _query_memories(
                     "content": results["documents"][0][i] if results["documents"] else "",
                     "memory_type": metadata.get("memory_type", ""),
                     "memory_source": True,
+                    "created_at": metadata.get("created_at") or metadata.get("ingested_at") or None,
                 })
         return formatted
     except Exception as e:
         logger.debug("Memory query failed (non-blocking): %s", e)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Temporal evidence staleness (Phase 4.2)
+# ---------------------------------------------------------------------------
+
+def _evidence_is_stale(top_result: dict[str, Any], window_days: int) -> bool:
+    """True when the KB evidence's date is older than the staleness window.
+
+    Reads ``created_at`` (preferred) or ``ingested_at`` from the matched KB
+    chunk (Slice 2 Phase 1.1 threads these through ``_format_chroma_result``).
+
+    Conservative on absence: when no parseable date is present, returns
+    ``False`` — we never manufacture doubt from a missing timestamp, only
+    from a *known-old* one. The staleness downgrade applies on top of the
+    existing temporal-claim escalation, so the worst case of a missing date
+    is the prior behavior (verified), not a regression.
+    """
+    date_str = top_result.get("created_at") or top_result.get("ingested_at")
+    if not date_str:
+        return False
+    from core.utils.time import utcnow
+
+    try:
+        dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+        dt_naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
+        age_days = (utcnow().replace(tzinfo=None) - dt_naive).total_seconds() / 86400.0
+    except (ValueError, TypeError):
+        return False
+    return age_days > window_days
+
+
+def _stale_evidence_verdict(
+    claim: str, top_result: dict[str, Any], similarity: float,
+) -> dict[str, Any]:
+    """Build the ``uncertain`` / ``stale_evidence`` verdict for a temporal
+    claim supported only by KB evidence older than the verification window.
+
+    The UI already renders ``uncertain`` (amber) — no frontend change. The
+    ``reason`` carries ``stale_evidence`` so dashboards / the audit pane can
+    distinguish "we couldn't confirm currency" from "we couldn't find it".
+    """
+    _date = top_result.get("created_at") or top_result.get("ingested_at") or "unknown"
+    return {
+        "claim": claim,
+        "status": "uncertain",
+        "similarity": round(min(similarity, 0.64), 3),
+        "reason": (
+            "stale_evidence: claim is time-sensitive but the only supporting "
+            f"KB evidence is dated {str(_date)[:10]} (older than the "
+            "verification staleness window) and live verification was "
+            "inconclusive — currency cannot be confirmed"
+        ),
+        "stale_evidence": True,
+        "evidence_date": str(_date)[:10] if _date != "unknown" else None,
+        "source_artifact_id": top_result.get("artifact_id", ""),
+        "source_filename": top_result.get("filename", ""),
+        "source_domain": top_result.get("domain", ""),
+        "source_snippet": top_result.get("content", "")[:200],
+        "memory_source": bool(top_result.get("memory_source")),
+        "verification_method": "kb_stale_evidence",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1835,7 +1904,21 @@ async def verify_claim(
                 )
                 if ext_result and ext_result.get("status") in ("verified", "unverified"):
                     return await _cache_result(ext_result)
-                # If web search inconclusive, use NLI entailment verdict below
+                # If web search inconclusive, fall to the staleness gate below
+                # (Phase 4.2) before rubber-stamping NLI-entailed stale data.
+
+            # Phase 4.2 — stale-evidence gate. A temporal claim whose only
+            # support is KB evidence older than the verification window, with
+            # live verification inconclusive, must NOT come back "verified":
+            # NLI entailment confirms the text matches, not that the value is
+            # current. Downgrade to uncertain/stale_evidence. Non-temporal
+            # claims and fresh evidence keep the verified verdict.
+            if _is_temporal and _evidence_is_stale(
+                top_result, config.VERIFICATION_STALENESS_WINDOW_DAYS
+            ):
+                return await _cache_result(
+                    _stale_evidence_verdict(claim, top_result, similarity)
+                )
 
             return await _cache_result({
                 "claim": claim,
@@ -1884,6 +1967,29 @@ async def verify_claim(
                     })
                 # If external verification failed/errored, fall through to the
                 # original terminal-contradiction verdict below as a safety net.
+
+            # Persist to the contradiction ledger (Wiki contradiction surface +
+            # weekly synthesis). Gated + best-effort; the sink is wired from app
+            # startup because core/ cannot import app.services.contradiction_log.
+            if config.ENABLE_CONTRADICTION_LEDGER:
+                from core.agents.hallucination.contradiction_sink import (
+                    get_contradiction_sink,
+                )
+
+                _csink = get_contradiction_sink()
+                if _csink is not None:
+                    try:
+                        await _csink(
+                            claim_text=claim,
+                            source_text=top_result.get("content", "")[:500],
+                            source_artifact_id=top_result.get("artifact_id", ""),
+                            severity="high",
+                        )
+                    except Exception as exc:  # noqa: BLE001 — ledger write must not block verification
+                        log_swallowed_error(
+                            "core.agents.hallucination.verification.contradiction_sink",
+                            exc,
+                        )
 
             return await _cache_result({
                 "claim": claim,
@@ -1948,6 +2054,17 @@ async def verify_claim(
                     })
                 # External inconclusive — fall through to the kb verdict below
                 # as a safety net so we still return something.
+
+            # Phase 4.2 — stale-evidence gate (mirror of the kb_nli path). A
+            # temporal claim resting on KB evidence older than the verification
+            # window, with live verification inconclusive, is downgraded to
+            # uncertain/stale_evidence rather than "verified" on stale data.
+            if _is_temporal and _evidence_is_stale(
+                top_result, config.VERIFICATION_STALENESS_WINDOW_DAYS
+            ):
+                return await _cache_result(
+                    _stale_evidence_verdict(claim, top_result, similarity)
+                )
 
             return await _cache_result({
                 "claim": claim,

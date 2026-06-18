@@ -273,7 +273,25 @@ _datasource_bookmarks = AsyncCircuitBreaker("datasource-bookmarks", failure_thre
 _datasource_email_imap = AsyncCircuitBreaker("datasource-email-imap", failure_threshold=3, recovery_timeout=30)
 _datasource_rss_feeds = AsyncCircuitBreaker("datasource-rss_feeds", failure_threshold=3, recovery_timeout=30)
 
+# Quenchforge local-GPU breakers — one PER WORKLOAD, never shared. The chat,
+# embed, and rerank slots have very different latency/failure profiles (the
+# Vega II chat slot is slow and returns transient 502/loading under concurrent
+# load while embed/rerank stay fast), so a single shared "quenchforge" breaker
+# let one workload's transient 5xx open the circuit for all three and lock out
+# a healthy backend — see tasks/2026-06-06-data-level-audit.md. Tuned for
+# transient tolerance like the datasource breakers above: a higher threshold
+# absorbs short gateway 502 bursts (slot warm-up) and a short recovery re-probes
+# the (usually healthy) local daemon within seconds instead of minutes. Paired
+# with the chat path retrying *inside* breaker.call so one logical request is
+# at most one breaker failure (not one-per-retry).
+_quenchforge_chat = AsyncCircuitBreaker("quenchforge-chat", failure_threshold=5, recovery_timeout=20)
+_quenchforge_embed = AsyncCircuitBreaker("quenchforge-embed", failure_threshold=5, recovery_timeout=20)
+_quenchforge_rerank = AsyncCircuitBreaker("quenchforge-rerank", failure_threshold=5, recovery_timeout=20)
+
 _BREAKER_REGISTRY: dict[str, AsyncCircuitBreaker] = {
+    "quenchforge-chat": _quenchforge_chat,
+    "quenchforge-embed": _quenchforge_embed,
+    "quenchforge-rerank": _quenchforge_rerank,
     "chromadb": _chromadb,
     "datasource-wikipedia": _datasource_wikipedia,
     "datasource-duckduckgo": _datasource_duckduckgo,

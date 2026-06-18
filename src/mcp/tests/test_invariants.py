@@ -46,9 +46,17 @@ def test_invariants_flag_empty_collections():
 
     snap = run_invariants(chroma, redis, neo4j)
     assert "collections_empty" in snap
-    assert "domain_trading" in snap["collections_empty"]
+    # Built-in surface with no data — the real "empty" signal operators act on.
     assert "domain_finance" in snap["collections_empty"]
     assert "domain_general" not in snap["collections_empty"]
+    # A custom/client collection (not a built-in domain) must NOT pollute the
+    # built-in empty signal even when empty (a freshly-created client domain is
+    # normal); it's surfaced separately so operators see client activity. (P5)
+    assert "domain_trading" not in snap["collections_empty"]
+    assert "custom_collections" in snap
+    assert "domain_trading" in snap["custom_collections"]
+    assert "domain_finance" not in snap["custom_collections"]
+    assert "domain_general" not in snap["custom_collections"]
 
 
 def test_invariants_surface_verification_orphans():

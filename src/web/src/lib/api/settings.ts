@@ -53,6 +53,13 @@ export async function fetchHealthStatus(): Promise<HealthStatusResponse> {
 
 export type ModelCacheStatus = {
   repo: string
+  // F-07-01: provider per model so the banner can hide when models are
+  // served remotely (e.g., "quenchforge"). Absent on older server builds;
+  // treat undefined as "local".
+  provider?: string
+  // F-07-01: false when the model is served remotely (no local cache needed).
+  // Absent on older server builds; treat undefined as `true`.
+  needs_local_cache?: boolean
   cached: boolean
   files: Record<string, string | null>
   // Workstream E Phase E.6.6: true when a worker thread is currently
@@ -68,10 +75,12 @@ export type ModelsStatusResponse = {
 
 export type ModelsPreloadResponse = {
   status: "ok" | "partial"
-  reranker_status: "loaded" | "failed" | "skipped_server_side"
+  reranker_status: "loaded" | "failed" | "skipped_server_side" | "remote_provider"
+  reranker_provider?: string
   reranker_ms?: number
   reranker_error?: string
-  embedder_status: "loaded" | "failed" | "skipped_server_side"
+  embedder_status: "loaded" | "failed" | "skipped_server_side" | "remote_provider"
+  embedder_provider?: string
   embedder_ms?: number
   embedder_error?: string
   total_ms: number
@@ -524,10 +533,32 @@ export async function fetchAutomationPresets(): Promise<Record<string, { label: 
 
 // --- Plugins ---
 
+/**
+ * The backend returns `plugins` as a dict keyed by id, and individual plugins
+ * may omit their array fields. Normalize to the declared PluginListResponse
+ * shape (array + guaranteed string[] fields) so every consumer can iterate and
+ * call `.includes()` safely — fixes the Connectors/Plugins render crashes at
+ * the API boundary instead of relying on per-consumer guards.
+ */
+function normalizePluginList(data: { plugins?: unknown; total?: number }): PluginListResponse {
+  const rawList = Array.isArray(data.plugins)
+    ? data.plugins
+    : Object.values((data.plugins ?? {}) as Record<string, unknown>)
+  const plugins = rawList.map((entry) => {
+    const p = entry as Partial<Plugin>
+    return {
+      ...p,
+      file_types: Array.isArray(p.file_types) ? p.file_types : [],
+      capabilities: Array.isArray(p.capabilities) ? p.capabilities : [],
+    } as Plugin
+  })
+  return { plugins, total: typeof data.total === "number" ? data.total : plugins.length }
+}
+
 export async function fetchPlugins(): Promise<PluginListResponse> {
   const res = await fetch(`${MCP_BASE}/plugins`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch plugins failed: ${res.status}`))
-  return res.json()
+  return normalizePluginList(await res.json())
 }
 
 export async function fetchPlugin(name: string): Promise<Plugin> {
@@ -576,7 +607,7 @@ export async function scanPlugins(): Promise<PluginListResponse> {
     headers: mcpHeaders(),
   })
   if (!res.ok) throw new Error(await extractError(res, `Scan plugins failed: ${res.status}`))
-  return res.json()
+  return normalizePluginList(await res.json())
 }
 
 // ---------------------------------------------------------------------------
@@ -864,6 +895,242 @@ export async function testOpenRouterKey(api_key?: string): Promise<OpenRouterKey
 }
 
 // ---------------------------------------------------------------------------
+// HuggingFace token API (Phase E — gates pyannote diarization models)
+// ---------------------------------------------------------------------------
+
+export interface HFTokenStatus {
+  configured: boolean
+  last4: string | null
+  updated_at: string | null
+  model_access: Record<string, boolean> | null
+}
+
+export interface HFTokenTestResult {
+  valid: boolean
+  gated_model_access: Record<string, boolean> | null
+  error: string | null
+}
+
+export async function fetchHFTokenStatus(): Promise<HFTokenStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/hf-token`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch HF token status"))
+  return res.json()
+}
+
+export async function putHFToken(token: string): Promise<HFTokenStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/hf-token`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to save HF token"))
+  return res.json()
+}
+
+export async function testHFToken(token?: string): Promise<HFTokenTestResult> {
+  const res = await fetch(`${MCP_BASE}/settings/hf-token/test`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(token ? { token } : {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to test HF token"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Whisper model download manager API (Phase E Day 3)
+// ---------------------------------------------------------------------------
+
+export interface WhisperModelInfo {
+  id: string
+  filename: string
+  size_mb: number
+  rtf_estimate: number
+  quality: string
+  description: string
+  cached: boolean
+  cached_size_bytes: number | null
+}
+
+export interface WhisperModelList {
+  models: WhisperModelInfo[]
+  cache_dir: string
+  current_default: string
+}
+
+export interface WhisperDownloadStatus {
+  download_id: string
+  model_id: string
+  state: "pending" | "downloading" | "completed" | "failed" | "cancelled"
+  bytes_downloaded: number
+  bytes_total: number | null
+  error: string | null
+}
+
+export async function fetchWhisperModels(): Promise<WhisperModelList> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/models`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch Whisper models"))
+  return res.json()
+}
+
+export async function startWhisperDownload(model_id: string): Promise<{ download_id: string; model_id: string }> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/download`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ model_id }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to start download"))
+  return res.json()
+}
+
+export async function getWhisperDownloadStatus(download_id: string): Promise<WhisperDownloadStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/download/${download_id}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch download status"))
+  return res.json()
+}
+
+export async function cancelWhisperDownload(download_id: string): Promise<WhisperDownloadStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/download/${download_id}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to cancel download"))
+  return res.json()
+}
+
+export async function deleteWhisperModel(model_id: string): Promise<{ deleted: boolean }> {
+  const res = await fetch(`${MCP_BASE}/settings/whisper/models/${model_id}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to delete model"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Custom Smart RAG weights (Phase I)
+// ---------------------------------------------------------------------------
+
+export interface RagWeightMap {
+  weights: Record<string, number>
+  user_scope: string
+  feature_enabled: boolean
+}
+
+export interface RagSource {
+  name: string
+  kind: "data_source" | "kb_domain"
+  description: string
+  default_enabled: boolean
+  current_weight: number
+}
+
+export interface RagSourcesList {
+  sources: RagSource[]
+  min_weight: number
+  max_weight: number
+  default_weight: number
+  feature_enabled: boolean
+}
+
+export async function fetchRagWeights(): Promise<RagWeightMap> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch RAG weights"))
+  return res.json()
+}
+
+export async function fetchRagSources(): Promise<RagSourcesList> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights/sources`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch RAG sources"))
+  return res.json()
+}
+
+export async function putRagWeights(weights: Record<string, number>): Promise<RagWeightMap> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ weights }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to save RAG weights"))
+  return res.json()
+}
+
+export async function resetRagWeights(): Promise<RagWeightMap> {
+  const res = await fetch(`${MCP_BASE}/settings/rag/weights`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to reset RAG weights"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Pro-tier feature automations (UX consolidation)
+// ---------------------------------------------------------------------------
+
+export interface CadencePreset {
+  label: string
+  cron: string
+}
+
+export interface AutomationState {
+  feature: string
+  display_name: string
+  description: string
+  feature_flag: string
+  feature_flag_enabled: boolean
+  enabled: boolean
+  schedule: string
+  default_schedule: string
+  cadence_presets: CadencePreset[]
+}
+
+export interface RunNowResponse {
+  feature: string
+  triggered: boolean
+  detail: string
+  result: Record<string, unknown> | null
+}
+
+export async function listProAutomations(): Promise<AutomationState[]> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch automations"))
+  const body = await res.json()
+  return Array.isArray(body.automations) ? body.automations : []
+}
+
+export async function updateProAutomation(
+  name: string,
+  update: { enabled?: boolean; schedule?: string },
+): Promise<AutomationState> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations/${name}`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to update automation"))
+  return res.json()
+}
+
+export async function resetProAutomation(name: string): Promise<AutomationState> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations/${name}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to reset automation"))
+  return res.json()
+}
+
+export async function runProAutomationNow(name: string): Promise<RunNowResponse> {
+  const res = await fetch(`${MCP_BASE}/settings/pro-automations/${name}/run-now`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to trigger automation"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
 // Brief scheduler settings (RAG C3.4)
 // ---------------------------------------------------------------------------
 
@@ -886,5 +1153,39 @@ export async function updateBriefSettings(body: BriefSettings): Promise<BriefSet
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await extractError(res, "Failed to update brief settings"))
+  return res.json()
+}
+
+// ── Model compatibility doctor (GET /models/doctor) ──────────────────────────
+// Hardware-aware audit: are the configured models the most capable ones that
+// actually run on this platform, and are they current? Consumed by the
+// Settings → Models UX and the setup wizard's backend step.
+
+export interface ModelDoctorFinding {
+  kind: "incompatible" | "dead_pin" | "local_currency"
+  severity: "error" | "warn" | "info"
+  role: string
+  model: string
+  detail: string
+}
+
+export interface ModelDoctorUpgrade {
+  model: string
+  why: string
+  validate: string
+}
+
+export interface ModelDoctorReport {
+  hardware_profile: string
+  ok: boolean
+  findings: ModelDoctorFinding[]
+  known_good_local: Record<string, string>
+  candidate_upgrades: Record<string, ModelDoctorUpgrade[]>
+  catalog_size: number
+}
+
+export async function fetchModelDoctor(): Promise<ModelDoctorReport> {
+  const res = await fetch(`${MCP_BASE}/models/doctor`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`model doctor request failed: ${res.status}`)
   return res.json()
 }

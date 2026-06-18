@@ -722,6 +722,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
                   setCorrectionText("")
                 }
               }}
+              // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
               autoFocus
             />
             <Button

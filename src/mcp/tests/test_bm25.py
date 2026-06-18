@@ -71,6 +71,46 @@ class TestBM25Index:
         idx.add_documents(["c1"], ["hello world again"])  # same ID
         assert idx.size == 1
 
+    def test_remove_documents_clears_index_and_disk(self, tmp_path):
+        idx = BM25Index("test_remove", data_dir=str(tmp_path))
+        idx.add_documents(
+            ["c1", "c2", "c3"],
+            ["alpha beta gamma", "delta epsilon zeta", "eta theta iota"],
+        )
+        removed = idx.remove_documents(["c2"])
+        assert removed == 1
+        assert idx.size == 2
+        # Removed chunk no longer searchable.
+        assert all(cid != "c2" for cid, _ in idx.search("epsilon", top_k=5))
+        # Disk corpus was rewritten (not append-only) — a fresh index agrees.
+        idx2 = BM25Index("test_remove", data_dir=str(tmp_path))
+        assert idx2.size == 2
+        assert "c2" not in idx2._doc_id_set
+
+    def test_remove_then_readd_refreshes_stale_text(self, tmp_path):
+        """Re-ingest path: same chunk_id, new text must replace the old.
+
+        Regression: add_documents dedup-skips known ids, so without an
+        explicit remove the keyword index kept serving pre-edit text.
+        """
+        idx = BM25Index("test_reingest", data_dir=str(tmp_path))
+        idx.add_documents(["c1", "c2"], ["zzz aaa", "filler words here"])
+        # Naive re-add is a no-op (dedup) — proves the bug exists without remove.
+        assert idx.add_documents(["c1"], ["bbb ccc"]) == 0
+        # Remove + re-add refreshes the text under the same id.
+        idx.remove_documents(["c1"])
+        assert idx.add_documents(["c1"], ["bbb ccc"]) == 1
+        assert idx.size == 2
+        # Old term gone, new term present.
+        assert any(cid == "c1" for cid, _ in idx.search("ccc", top_k=5))
+        assert all(cid != "c1" for cid, _ in idx.search("zzz", top_k=5))
+
+    def test_remove_documents_noop_on_unknown_id(self, tmp_path):
+        idx = BM25Index("test_remove_noop", data_dir=str(tmp_path))
+        idx.add_documents(["c1"], ["alpha beta"])
+        assert idx.remove_documents(["does-not-exist"]) == 0
+        assert idx.size == 1
+
     def test_persistence(self, tmp_path):
         # Need 3+ docs so BM25 IDF is non-zero (2-doc corpus gives log(1)=0)
         idx1 = BM25Index("test_persist", data_dir=str(tmp_path))

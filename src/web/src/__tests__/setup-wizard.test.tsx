@@ -34,10 +34,6 @@ vi.mock("@/lib/api", () => ({
   pullOllamaModel: vi.fn(),
 }))
 
-vi.mock("@/contexts/ui-mode-context", () => ({
-  useUIMode: () => ({ mode: "simple", setMode: vi.fn() }),
-}))
-
 vi.mock("@/hooks/use-drag-drop", () => ({
   useDragDrop: () => ({ isDragOver: false, dragHandlers: {} }),
 }))
@@ -136,7 +132,7 @@ describe("SetupWizard", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
         <FirstDocumentStep
-          state={{ ingested: false, queried: false, skipped: false }}
+          state={{ ingested: false, queried: false, skipped: false, documentCount: 0 }}
           onChange={onChange}
         />
       </QueryClientProvider>,
@@ -151,7 +147,7 @@ describe("SetupWizard", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
         <FirstDocumentStep
-          state={{ ingested: false, queried: false, skipped: false }}
+          state={{ ingested: false, queried: false, skipped: false, documentCount: 0 }}
           onChange={onChange}
         />
       </QueryClientProvider>,

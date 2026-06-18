@@ -278,6 +278,31 @@ class TestSDKIngest:
         assert resp.status_code == 200
         assert resp.json()["domain"] == "general"
 
+    @patch("app.routers.sdk.ingest_content")
+    def test_ingest_passes_rich_metadata(self, mock_ingest):
+        """Client-supplied provenance metadata reaches ingest_content rather
+        than being dropped to tags-only. External-client backend, GA P0.2."""
+        mock_ingest.return_value = {
+            "status": "success", "artifact_id": "a1", "chunks": 1, "domain": "my_client",
+        }
+        client = TestClient(_make_app())
+        resp = client.post(
+            "/sdk/v1/ingest",
+            json={
+                "content": "client artifact",
+                "domain": "my_client",
+                "metadata": {"title": "Q3 plan", "provenance": "gtm_pack", "source_file": "x.md"},
+                "tags": "gtm,plan",
+            },
+        )
+        assert resp.status_code == 200
+        md = mock_ingest.call_args.kwargs["metadata"]
+        assert md["title"] == "Q3 plan"
+        assert md["provenance"] == "gtm_pack"
+        assert md["source_file"] == "x.md"
+        # legacy tags preserved alongside rich metadata
+        assert md["tags"] == "gtm,plan"
+
 
 # ---------------------------------------------------------------------------
 # 6. POST /sdk/v1/ingest/file

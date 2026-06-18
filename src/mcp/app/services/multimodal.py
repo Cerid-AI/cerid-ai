@@ -7,7 +7,10 @@ Detects file type and delegates to the appropriate plugin for text extraction,
 then ingests the extracted text into the knowledge base via the standard
 ingestion pipeline.
 
-Requires CERID_TIER=pro (all multi-modal plugins are pro-gated).
+Per-plugin tier gating (post 2026-05-20 rebalance): OCR, plain audio
+transcription, and vision are all community-tier; meeting capture +
+diarization land in their own plugin under the Pro tier and do not flow
+through this dispatcher.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from typing import Any
 
 import config
 from app.services.ingestion import ingest_content
+from config.features import is_feature_enabled
 
 logger = logging.getLogger("ai-companion.multimodal")
 
@@ -145,13 +149,6 @@ async def ingest_multimodal(
     Returns:
         Ingestion result dict with plugin_used and extracted_chars.
     """
-    # Feature gate
-    if config.FEATURE_TIER != "pro":
-        return {
-            "status": "error",
-            "error": "Multi-modal ingestion requires CERID_TIER=pro",
-        }
-
     path = Path(file_path)
     if not path.exists():
         return {"status": "error", "error": f"File not found: {file_path}"}
@@ -160,6 +157,23 @@ async def ingest_multimodal(
         plugin_name = _detect_plugin(file_path, plugin_override)
     except ValueError as e:
         return {"status": "error", "error": str(e)}
+
+    # Per-plugin tier gate. Map dispatcher's plugin name → feature flag.
+    _PLUGIN_FEATURE = {
+        "ocr":    "ocr_parsing",                 # community
+        "audio":  "audio_transcription_plain",   # community
+        "vision": "image_understanding",         # community (BYOK)
+    }
+    required_feature = _PLUGIN_FEATURE.get(plugin_name)
+    if required_feature and not is_feature_enabled(required_feature):
+        return {
+            "status": "error",
+            "error": (
+                f"Feature '{required_feature}' is disabled. "
+                f"Plugin '{plugin_name}' cannot be used. "
+                f"Current tier: {config.FEATURE_TIER}."
+            ),
+        }
 
     logger.info(
         "Multi-modal ingest: %s → plugin=%s, domain=%s",

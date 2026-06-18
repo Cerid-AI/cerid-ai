@@ -30,9 +30,10 @@ PROVIDER_REGISTRY: dict[str, dict] = {
         "models": [
             "openrouter/openai/gpt-4o-mini",
             "openrouter/anthropic/claude-sonnet-4.6",
-            "openrouter/google/gemini-2.5-flash",
+            "openrouter/google/gemini-3.1-flash-lite",
             "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-            "openrouter/x-ai/grok-4.1-fast",
+            "openrouter/x-ai/grok-4.3",
+            "openrouter/x-ai/grok-4.20",
         ],
     },
     "openai": {
@@ -70,9 +71,9 @@ PROVIDER_REGISTRY: dict[str, dict] = {
         "test_endpoint": "/models",
         "requires_api_key": True,
         "models": [
-            "grok-4",
-            "grok-4-mini",
-            "grok-4.1-fast",
+            "grok-4.20",
+            "grok-4.20-multi-agent",
+            "grok-4.3",
         ],
     },
     "ollama": {

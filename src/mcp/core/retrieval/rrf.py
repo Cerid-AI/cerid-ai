@@ -30,7 +30,7 @@ behind a default-off flag. See ``HYBRID_FUSION_MODE`` in settings.py.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 # Standard RRF constant per Cormack/Clarke/Buettcher (SIGIR 2009).
 # Same value used by Elastic, OpenSearch, Azure AI Search, neo4j-graphrag.
@@ -99,3 +99,62 @@ def rrf_fuse(
 
     # Sort by fused score descending; stable on insertion order for ties
     return sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+
+
+def rrf_fuse_by_artifact(
+    rankings: Sequence[Sequence[tuple[str, float]]],
+    artifact_of: Callable[[str], str],
+    *,
+    k: int = DEFAULT_K,
+    weights: Sequence[float] | None = None,
+) -> dict[str, float]:
+    """Artifact-level RRF (Workstream E Phase 4 / GA P0.5 B1).
+
+    Like :func:`rrf_fuse`, but collapses each ranking to ONE entry per artifact
+    (its best/first-ranked chunk) before scoring. Chunk-level RRF lets a
+    multi-chunk artifact occupy several rank slots in a single ranking, which
+    both compounds its own score and pushes competing artifacts to worse ranks
+    — the documented chunk-redundancy regression (see docs/EVAL_BASELINES.md
+    Phase 3a). Counting each artifact once, at its best rank, removes that bias.
+
+    Args:
+        rankings: ranked ``(doc_id, score)`` lists in descending order, exactly
+            as for :func:`rrf_fuse`; here ``doc_id`` is a chunk id.
+        artifact_of: maps a chunk id to its artifact id. A chunk whose artifact
+            is unknown should map to itself (treated as a singleton artifact, so
+            it neither inflates nor is inflated).
+        k: RRF smoothing constant (see :func:`rrf_fuse`).
+        weights: optional per-ranking weights (see :func:`rrf_fuse`).
+
+    Returns:
+        ``{artifact_id: fused_score}`` (unsorted). The caller maps each score
+        back onto the artifact's chunks.
+
+    Raises:
+        ValueError: when ``k`` is non-positive, or ``weights`` length mismatches.
+    """
+    if k <= 0:
+        raise ValueError(f"RRF k must be positive, got {k}")
+
+    n = len(rankings)
+    if weights is None:
+        ws = [1.0] * n
+    else:
+        if len(weights) != n:
+            raise ValueError(
+                f"weights length {len(weights)} != rankings length {n}",
+            )
+        ws = list(weights)
+
+    fused: dict[str, float] = {}
+    for ranking, weight in zip(rankings, ws, strict=True):
+        seen: set[str] = set()
+        rank_idx = 0  # position among DISTINCT artifacts in this ranking
+        for doc_id, _score in ranking:
+            art = artifact_of(doc_id)
+            if art in seen:
+                continue  # extra chunk of an already-counted artifact — skip
+            seen.add(art)
+            fused[art] = fused.get(art, 0.0) + weight / (k + rank_idx + 1)
+            rank_idx += 1
+    return fused

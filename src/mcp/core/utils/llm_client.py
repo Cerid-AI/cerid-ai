@@ -38,6 +38,13 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger("ai-companion.llm_client")
 
+# Free-tier default when no model is supplied and ``INTERNAL_LLM_MODEL`` is
+# unset. Mirrors the smart-router FREE tier (``smart_router.FREE_MODELS``) so
+# the implicit fallback can't drift from the routing tables. Kept as a local
+# constant (not an import) because this module sits below ``core.routing`` in
+# the import graph and loads on the hot path.
+_DEFAULT_INTERNAL_MODEL = "meta-llama/llama-3.3-70b-instruct"  # model-literal-allowed: designated central internal-LLM fallback constant
+
 # ---------------------------------------------------------------------------
 # Singleton connection pool for OpenRouter
 # ---------------------------------------------------------------------------
@@ -297,7 +304,7 @@ async def call_llm(
         )
 
     if not model:
-        model = os.getenv("INTERNAL_LLM_MODEL", "") or "meta-llama/llama-3.3-70b-instruct"
+        model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
 
     model = _strip_openrouter_prefix(model)
 
@@ -343,6 +350,32 @@ async def call_llm(
             )
             if _consecutive_401s >= _POOL_RECYCLE_401_THRESHOLD:
                 await _recycle_client()
+        elif 400 <= exc.response.status_code < 500:
+            # 4xx (other than auth) — diagnose with model name + response body
+            # so Sentry / log captures the actual rejection cause. Without this
+            # the 2026-05-20 audit saw 80 events of bare "HTTPStatusError 400"
+            # in the breadcrumb with no actionable detail. The body usually
+            # names the offending field (deprecated model, bad payload shape).
+            body_preview = ""
+            try:
+                body_preview = exc.response.text[:500]
+            except Exception:  # silent-catch-allowed: diagnostic body capture is best-effort; the outer raise re-fires regardless, so a missed body preview can only reduce diagnostic detail, never mask an error
+                body_preview = "<body capture failed>"
+            _logger.warning(
+                "OpenRouter 4xx %d on model=%s (breaker=%s): %s",
+                exc.response.status_code, model, breaker_name, body_preview,
+            )
+            try:
+                import sentry_sdk  # type: ignore[import-not-found]
+                sentry_sdk.set_tag("openrouter_model", model)
+                sentry_sdk.set_tag("openrouter_status", str(exc.response.status_code))
+                sentry_sdk.set_context(
+                    "openrouter_4xx",
+                    {"model": model, "status": exc.response.status_code,
+                     "response_preview": body_preview},
+                )
+            except ImportError:
+                pass
         raise
 
 
@@ -371,7 +404,7 @@ async def call_llm_raw(
         )
 
     if not model:
-        model = os.getenv("INTERNAL_LLM_MODEL", "") or "meta-llama/llama-3.3-70b-instruct"
+        model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
 
     model = _strip_openrouter_prefix(model)
 
@@ -455,7 +488,18 @@ async def route_and_call(
     """
     from core.routing.smart_router import TaskType, route
 
-    task = TaskType(task_type)
+    # Client-defined task types (external clients use domain-specific labels
+    # like "gtm_creative" or custom agent phases) map to safe INTERNAL routing
+    # rather than raising. Stage-based provider routing (PROVIDER_STAGE_*) is a
+    # separate mechanism keyed on `stage=`, unaffected by this. (GA P0.3)
+    try:
+        task = TaskType(task_type)
+    except ValueError:
+        _logger.warning(
+            "route_and_call: unknown task_type %r — defaulting to internal routing",
+            task_type,
+        )
+        task = TaskType.INTERNAL
     decision = await route(
         query,
         task_type=task,

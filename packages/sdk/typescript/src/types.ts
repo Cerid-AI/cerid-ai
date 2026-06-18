@@ -59,6 +59,12 @@ export interface IngestRequest {
   content: string;
   domain?: string;
   tags?: string;
+  /**
+   * Arbitrary provenance/attribution metadata stored with the artifact and
+   * queryable (e.g. { title, provenance, source_file }). Preserved alongside
+   * `tags`. (External-client backend support.)
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface IngestFileRequest {
@@ -166,5 +172,77 @@ export interface SearchResponse {
 export interface PluginListResponse {
   plugins: Array<Record<string, unknown>>;
   total: number;
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Async memory extract job polling (GET /sdk/v1/memory/extract/jobs/{job_id})
+// ---------------------------------------------------------------------------
+
+export interface MemoryExtractJobStatus {
+  job_id: string;
+  /** queued | started | finished | failed | deferred | scheduled | canceled | unknown */
+  status: string;
+  enqueued_at?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  /** Populated only when status === "finished" */
+  result?: MemoryExtractResponse | null;
+  /** Populated only when status === "failed" */
+  error?: string | null;
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Smart-routed LLM completion (POST /sdk/v1/llm/complete)
+// ---------------------------------------------------------------------------
+
+export interface LLMCompleteRequest {
+  /** OpenAI-format messages: [{role, content}, ...] */
+  messages: Array<{ role: string; content: string }>;
+  /** chat | internal | verification | classification | research */
+  task_type?: string;
+  /** Optional query summary for the router's complexity classifier */
+  query?: string;
+  /** low | medium | high */
+  cost_sensitivity?: string;
+  temperature?: number;
+  max_tokens?: number;
+  /** OpenAI-compatible response format spec (e.g., {"type": "json_object"}) */
+  response_format?: Record<string, unknown>;
+  /** Wall-clock budget in ms; filters tiers by empirical p95 latency. */
+  slo_budget_ms?: number;
+}
+
+export interface LLMCompleteResponse {
+  content: string;
+  model: string;
+  /** ollama | openrouter_free | openrouter_paid */
+  provider: string;
+  reason: string;
+  estimated_cost_per_1k: number;
+  /** Empirical p95 wall-clock for the routed tier; 0 when no profile yet. */
+  tier_p95_ms: number;
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Generic external ingest (POST /sdk/v1/ingest/external)
+// ---------------------------------------------------------------------------
+
+export interface IngestExternalRequest {
+  /** Free-form label (e.g. "readwise", "pocket", "telegram-bot"). */
+  source_type: string;
+  /** Raw JSON payload from the external service. */
+  payload: Record<string, unknown>;
+  /** Mapping config extracting canonical fields from `payload`. */
+  field_mappings: Record<string, unknown>;
+}
+
+export interface IngestExternalResponse {
+  accepted: number;
+  skipped: number;
+  errors: Array<Record<string, unknown>>;
+  source_type: string;
   [key: string]: unknown;
 }

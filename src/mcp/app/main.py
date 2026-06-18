@@ -34,38 +34,52 @@ from app.processor import router as processor_router_module
 from app.routers import (
     a2a,
     agents,
+    analytics,
     artifacts,
+    atlas_views,
     automations,
     brief_settings,
     chat,
+    connectors,
     contradictions,
     digest,
+    digests,
     external_apis,
     feedback,
+    graph_tour,
     health,
     ingestion,
     kb_admin,
     knowledge_packs,
     mcp_sse,
+    meetings,
     memories,
     models,
+    oauth,
     observability,
     ollama_proxy,
     plugins,
+    pro_automations,
     providers,
     query,
+    rag_weights,
     recommendations,
     scanner,
     sdk,
     settings,
     settings_secrets,
     setup,
+    sources,
     sync,
     taxonomy,
     upload,
     user_state,
+    whisper_models,
     wiki,
     workflows,
+)
+from app.routers import (
+    graph as graph_router,
 )
 from app.scheduler import start_scheduler, stop_scheduler
 from config.features import CERID_MULTI_USER
@@ -459,6 +473,26 @@ async def lifespan(app: FastAPI):
     try:
         import config as _cfg
         if _cfg.CERID_MULTI_USER:
+            # Experimental gate: F2 (localStorage tokens) + F3 (missing
+            # tenant filter on get_artifact Cypher) must close before
+            # multi-user is a supported deploy mode. Operators acknowledging
+            # the risk set CERID_MULTI_USER_EXPERIMENTAL=true.
+            if not _cfg.CERID_MULTI_USER_EXPERIMENTAL:
+                raise RuntimeError(
+                    "CERID_MULTI_USER=true is gated as EXPERIMENTAL through "
+                    "v1.0 GA. Two known security gaps (F2 localStorage "
+                    "tokens, F3 missing tenant_id filter on Neo4j artifact "
+                    "reads — see tasks/2026-05-24-rc1-beta-test-report.md) "
+                    "must close first. To proceed at your own risk in a "
+                    "non-production environment, set "
+                    "CERID_MULTI_USER_EXPERIMENTAL=true alongside "
+                    "CERID_MULTI_USER=true."
+                )
+            logger.warning(
+                "Multi-user mode is EXPERIMENTAL in this release — "
+                "F2 + F3 security gaps remain open. See "
+                "tasks/2026-05-24-rc1-beta-test-report.md."
+            )
             from app.db.neo4j.users import ensure_default_tenant
             ensure_default_tenant(driver, _cfg.DEFAULT_TENANT_ID)
             logger.info("Multi-user mode enabled — default tenant ensured")
@@ -493,6 +527,131 @@ async def lifespan(app: FastAPI):
         set_data_source_registry(_data_source_registry)
     except Exception as e:
         logger.warning(f"DataSourceRegistry wiring failed (authoritative verify disabled): {e}")
+
+    # Wire the contradiction-ledger sink into core/verification via DI (same
+    # pattern as above — core/ cannot import app.services.contradiction_log).
+    # When the NLI guard finds a claim contradicting KB evidence, this persists
+    # a ContradictionFinding so the Wiki contradiction surface + weekly synthesis
+    # light up. Stable content-derived IDs make re-detection idempotent.
+    try:
+        from app.services.contradiction_log import ContradictionFinding, log_contradiction
+        from core.agents.hallucination.contradiction_sink import set_contradiction_sink, stable_id
+
+        async def _contradiction_sink(
+            *,
+            claim_text: str,
+            source_text: str,
+            source_artifact_id: str = "",
+            severity: str = "medium",
+            entity_slug: str | None = None,
+            query_ctx_id: str | None = None,
+        ) -> None:
+            # Anchor the contradiction to the most-prominent entity mentioned by
+            # the contradicting source artifact so it surfaces on that entity's
+            # wiki page AND fires the contradiction_detected wiki-refresh event
+            # (record_contradiction only writes the HAS_CONTRADICTION edge — the
+            # signal knowledge-stats counts — when an entity_slug is present).
+            if entity_slug is None and source_artifact_id:
+                try:
+                    from app.deps import get_neo4j
+                    _drv = get_neo4j()
+                    if _drv is not None:
+                        with _drv.session() as _sess:
+                            _row = _sess.run(
+                                "MATCH (a:Artifact {id: $aid})-[:MENTIONS]->(e:Entity) "
+                                "RETURN e.canonical_id AS slug "
+                                "ORDER BY coalesce(e.mention_count, 0) DESC LIMIT 1",
+                                aid=source_artifact_id,
+                            ).single()
+                            if _row and _row.get("slug"):
+                                entity_slug = _row["slug"]
+                except Exception as _exc:  # noqa: BLE001 — anchor lookup is best-effort
+                    log_swallowed_error("app.main.contradiction_sink.entity_lookup", _exc)
+            finding = ContradictionFinding(
+                finding_id=stable_id(claim_text, source_artifact_id),
+                claim_a_id=stable_id(claim_text),
+                claim_b_id=stable_id(source_artifact_id or source_text),
+                claim_a_text=claim_text[:1000],
+                claim_b_text=source_text[:1000],
+                entity_slug=entity_slug,
+                severity=severity,  # type: ignore[arg-type]
+                query_ctx_id=query_ctx_id,
+                source_artifacts=[source_artifact_id] if source_artifact_id else [],
+            )
+            await log_contradiction(finding)
+
+        set_contradiction_sink(_contradiction_sink)
+    except Exception as e:
+        logger.warning(f"Contradiction-ledger sink wiring failed (ledger disabled): {e}")
+
+    # Wire the connector ingest sink into core/ingest via DI (same pattern) so
+    # SourceConnector.fetch_since can persist fetched feed entries via the real
+    # ingest_content without a core→app import. Powers the source_poll worker.
+    try:
+        from app.services.ingestion import ingest_content as _ingest_content
+        from core.ingest.sources.ingest_sink import set_source_ingest_fn
+
+        async def _source_ingest_fn(
+            content: str, *, domain: str = "general", metadata: dict | None = None,
+        ) -> str | None:
+            res = await asyncio.to_thread(
+                _ingest_content, content=content, domain=domain, metadata=metadata or {},
+            )
+            return res.get("artifact_id") if isinstance(res, dict) else None
+
+        set_source_ingest_fn(_source_ingest_fn)
+    except Exception as e:
+        logger.warning(f"Source ingest-sink wiring failed (connector polling disabled): {e}")
+
+    # Phase K2.1 — wire the entity-extraction enqueue callback into
+    # core.agents.memory so freshly-stored memories trigger graph
+    # entity upserts (and the K1.3 wiki refresh chain). Keeps core/
+    # free of app.* imports via DI, same pattern as authoritative_verify.
+    try:
+        from app.db.redis.processor_queue import enqueue_job
+        from app.processor.jobs.entity_extraction import EntityExtractionJob
+        from core.agents.memory import set_entity_extraction_enqueue
+
+        def _enqueue_memory_entity_extraction(artifact_id: str) -> None:
+            val = os.environ.get(
+                "CERID_MEMORY_ENTITY_EXTRACTION_ENABLED", "true",
+            ).strip().lower()
+            if val not in ("true", "1", "yes", "on"):
+                return
+            payload = {"artifact_id": artifact_id, "tenant_id": "default"}
+            enqueue_job(EntityExtractionJob(**payload), payload=payload)
+
+        set_entity_extraction_enqueue(_enqueue_memory_entity_extraction)
+    except Exception as e:
+        logger.warning(f"Memory→entity extraction wiring failed: {e}")
+
+    # GA P0.5 C2 — wire the compiled-wiki fetcher so surface-biased retrieval can
+    # prepend an entity's wiki page for "what is X" (compiled_summary) queries.
+    # Same core↛app DI pattern; the fetcher resolves the entity hint to a slug and
+    # reads the cached summary from Neo4j. Graceful: returns None on miss so C2 is
+    # a no-op when the entity has no page.
+    try:
+        import re as _re
+
+        from app.deps import get_neo4j as _get_neo4j_for_wiki
+        from app.services.wiki_pages import get_entity_page as _get_entity_page
+        from core.agents.query_agent import set_wiki_page_fetcher
+
+        def _slug_for(hint: str) -> str:
+            return _re.sub(r"[^a-z0-9]+", "-", (hint or "").lower()).strip("-")
+
+        async def _fetch_wiki_page(entity_hint: str) -> dict | None:
+            driver = _get_neo4j_for_wiki()
+            if driver is None or not entity_hint:
+                return None
+            page = await _get_entity_page(driver, _slug_for(entity_hint))
+            if page is None or not page.summary:
+                return None
+            return {"content": page.summary, "title": page.name, "slug": page.slug}
+
+        set_wiki_page_fetcher(_fetch_wiki_page)
+    except Exception as e:
+        logger.warning(f"Wiki-page fetcher wiring failed (C2 surface disabled): {e}")
 
     # Load plugins
     try:
@@ -701,6 +860,48 @@ async def lifespan(app: FastAPI):
     _mcp_reaper_task = asyncio.create_task(mcp_sse._session_reaper())
     app.state.mcp_reaper_task = _mcp_reaper_task
 
+    # Register sibling MCP connectors (Phase F). The pool's circuit
+    # breaker handles "server not running yet" gracefully; we register
+    # the URL + bearer here so the first plugin call_tool succeeds
+    # if the connector stack is up.
+    try:
+        from config import settings as _conn_settings
+        from core.mcp_clients.client_pool import get_pool
+
+        if _conn_settings.CERID_CONNECTORS_BEARER:
+            headers = {"Authorization": f"Bearer {_conn_settings.CERID_CONNECTORS_BEARER}"}
+            get_pool().register(
+                "google_workspace",
+                _conn_settings.GOOGLE_WORKSPACE_MCP_URL,
+                headers=headers,
+            )
+            get_pool().register(
+                "ms365",
+                _conn_settings.MS365_MCP_URL,
+                headers=headers,
+            )
+            logger.info(
+                "Registered sibling MCP connectors: google_workspace, ms365",
+            )
+        else:
+            logger.debug(
+                "CERID_CONNECTORS_BEARER unset — Pro cloud connectors not registered",
+            )
+    except Exception as exc:
+        log_swallowed_error("app.main.lifespan.register_sibling_mcp", exc)
+
+    # F-PERF-04: pre-warm the /health cache so the first request after
+    # boot doesn't pay the ~700ms cold-cache cost while concurrent
+    # /agent/query loads compete for the executor's thread pool.
+    try:
+        import app.routers.health as _health_mod
+        from app.routers.health import _build_health_payload
+        _health_mod._health_cache = await asyncio.to_thread(_build_health_payload)
+        _health_mod._health_cache_ts = time.monotonic()
+        logger.info("health cache pre-warmed at startup")
+    except Exception as exc:
+        log_swallowed_error("app.main.lifespan.health_prewarm", exc)
+
     yield
 
     # Cancel SSE reaper before tearing down sessions.
@@ -713,6 +914,14 @@ async def lifespan(app: FastAPI):
     # Disarm watchdog before shutdown tasks run (avoid spurious SIGTERM during
     # intentional slow-shutdown operations like cache flush).
     _watchdog_stop.set()
+
+    # Shutdown: disconnect sibling MCP clients (Phase F).
+    try:
+        from core.mcp_clients.client_pool import get_pool
+
+        await get_pool().disconnect_all()
+    except Exception as exc:
+        logger.warning("MCPClientPool disconnect failed: %s", exc)
 
     # Shutdown: stop background processor worker
     try:
@@ -852,6 +1061,49 @@ app.include_router(processor_router_module)
 # Wiki API — entity pages and contradiction ledger (Phase W)
 app.include_router(contradictions.router)
 app.include_router(wiki.router)
+
+# Graph visualization API — Atlas / Constellation / Timeline data
+# (Cerid v1.0 Phase A — 2026-05-21 systemic plan).
+# Aliased to graph_router because `graph` is already the alias for
+# app.db.neo4j on line 26.
+app.include_router(graph_router.router)
+
+# Atlas saved views — per-user named graph configurations (Phase A Day 12).
+app.include_router(atlas_views.router)
+
+# Constellation tour mode — LLM-narrated camera arc (Phase B Day 7).
+app.include_router(graph_tour.router)
+
+# Whisper model download manager — Phase E Day 3.
+app.include_router(whisper_models.router)
+
+# Meeting capture orchestration — Phase E Day 4.
+app.include_router(meetings.router)
+
+# Cloud connector OAuth + status surface (Phase F.2 cleanup).
+app.include_router(connectors.router)
+
+# Source-management surface backing the F1/F2/F3 wizard flow.
+# Side-effect-imports the connector package so register_connector
+# calls run at process boot.
+import core.ingest.sources.connectors  # noqa: F401, E402
+
+app.include_router(sources.router)
+
+# Phase 3 (B3.2 / B3.3) — Pro connector OAuth entry + callback.
+app.include_router(oauth.router)
+
+# Custom Smart RAG weights surface (Phase I).
+app.include_router(rag_weights.router)
+
+# Daily digest surface (Phase K).
+app.include_router(digests.router)
+
+# Pro-tier feature automation runtime overrides (UX consolidation).
+app.include_router(pro_automations.router)
+
+# Advanced analytics — Phase L (heatmap + sankey + quality timeline).
+app.include_router(analytics.router)
 
 # Brief scheduler settings (RAG C3.4) — vault-write toggle for daily +
 # weekly synthesis jobs.  Lives under /briefs/* so the scheduler is the

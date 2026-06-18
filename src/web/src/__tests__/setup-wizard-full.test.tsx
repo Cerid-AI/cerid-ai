@@ -32,10 +32,6 @@ vi.mock("@/lib/api", () => ({
   pullOllamaModel: vi.fn(),
 }))
 
-vi.mock("@/contexts/ui-mode-context", () => ({
-  useUIMode: () => ({ mode: "simple", setMode: vi.fn() }),
-}))
-
 vi.mock("@/hooks/use-drag-drop", () => ({
   useDragDrop: () => ({ isDragOver: false, dragHandlers: {} }),
 }))
@@ -138,19 +134,19 @@ describe("SetupWizard", () => {
 
   // ---- StepIndicator ----
 
-  it("StepIndicator renders 8 step labels", () => {
+  it("StepIndicator renders 9 step labels (post-Cluster-E split)", () => {
     render(<SetupWizard open={true} onComplete={noop} />)
     // The StepIndicator renders shortLabels inside spans with "hidden sm:inline".
     // Check for distinctive labels that don't collide with step content.
     expect(screen.getByText("Welcome")).toBeInTheDocument()
     expect(screen.getByText("Keys")).toBeInTheDocument()
     expect(screen.getByText("Storage")).toBeInTheDocument()
+    expect(screen.getByText("Local LLM")).toBeInTheDocument()
     expect(screen.getByText("Apply")).toBeInTheDocument()
     expect(screen.getByText("Health")).toBeInTheDocument()
     expect(screen.getByText("Try")).toBeInTheDocument()
+    expect(screen.getByText("Telemetry")).toBeInTheDocument()
     expect(screen.getByText("Mode")).toBeInTheDocument()
-    // "Ollama" appears in both StepIndicator and SystemCheckCard — verify at least 2
-    expect(screen.getAllByText("Ollama").length).toBeGreaterThanOrEqual(2)
   })
 
   // ---- Dialog behavior ----

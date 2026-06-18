@@ -53,6 +53,16 @@ ALLOWLIST: set[tuple[str, str]] = {
     # in the same function declares method:"POST" explicitly and is
     # picked up by the scanner normally.
     ("GET", "/settings/private-mode/session-wipe"),
+    # billing.ts fetches /billing/capabilities. The billing backend lives in the
+    # internal-only `routers/` package (stripped wholesale from the public
+    # mirror), so this resolves to a real route internally (also discovered via
+    # the routers/ entry in _build_route_set) but is intentionally not locally
+    # served in the public/community edition — billing is hosted there.
+    ("GET", "/billing/capabilities"),
+    # openBillingPortal() POSTs /billing/portal. Same open-core split as
+    # /billing/capabilities: served by the internal-only billing router, hosted
+    # (not locally served) in the public/community edition.
+    ("POST", "/billing/portal"),
 }
 
 
@@ -79,6 +89,12 @@ def _build_route_set() -> set[tuple[str, str]]:
     discovery: list[tuple[Path, str]] = [
         (base / "routers", "app.routers"),
         (base / "processor", "app.processor"),
+        # Billing lives in the top-level `routers/` package (not `app/routers/`)
+        # because that dir is stripped wholesale from the public mirror. The
+        # frontend's `lib/api/billing.ts` legitimately fetches these routes, so
+        # discover them here too. `.exists()` guard keeps this a no-op in the
+        # public tree where the dir is absent.
+        (base.parent / "routers", "routers"),
     ]
     for routers_dir, module_prefix in discovery:
         if not routers_dir.exists():

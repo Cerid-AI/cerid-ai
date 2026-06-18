@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChevronRight, ChevronDown, FolderOpen, Folder, Loader2, Plus, X } from "lucide-react"
 import { fetchTaxonomy, createDomain, createSubCategory } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -169,6 +170,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
             value={newDomainName}
             onChange={(e) => setNewDomainName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleCreateDomain(); if (e.key === "Escape") setAddingDomain(false) }}
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
             autoFocus
             disabled={saving}
           />
@@ -244,7 +246,12 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                     ) : (
                       <Folder className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_TEXT_COLORS[domain])} />
                     )}
-                    <span className="flex-1 truncate capitalize">{domain}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="flex-1 truncate capitalize">{domain}</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{domain}</TooltipContent>
+                    </Tooltip>
                     {domainCount !== undefined && (
                       <Badge variant="secondary" className="h-4 px-1 text-label-xxs">
                         {domainCount}
@@ -284,7 +291,12 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                           )}
                           onClick={() => handleSubCategoryClick(domain, label)}
                         >
-                          <span className="flex-1 truncate capitalize">{label}</span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="flex-1 truncate capitalize">{label}</span>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">{label}</TooltipContent>
+                          </Tooltip>
                           {count !== undefined && count > 0 && (
                             <Badge variant="secondary" className="h-3.5 px-1 text-label-xxs">
                               {count}
@@ -302,6 +314,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                           value={newSubName}
                           onChange={(e) => setNewSubName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") handleCreateSubCategory(domain); if (e.key === "Escape") setAddingSubTo(null) }}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
                           autoFocus
                           disabled={saving}
                         />

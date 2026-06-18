@@ -50,6 +50,15 @@ CATEGORIZE_MODELS = {
 # Max chars of document text sent to AI for classification (~400 tokens).
 AI_SNIPPET_MAX_CHARS = 1500
 
+# Phase 5.2 — classifier confidence floor. When ai_categorize returns a
+# confidence below this, the domain is forced to DEFAULT_DOMAIN and a
+# `needs-review` tag is attached instead of committing a confident-wrong
+# domain (which would mis-route the artifact's chunks + skew every graph
+# lens). The needs-review queue drives Track B domain corrections.
+CATEGORIZE_CONFIDENCE_THRESHOLD = float(
+    os.getenv("CATEGORIZE_CONFIDENCE_THRESHOLD", "0.55")
+)
+
 # ---------------------------------------------------------------------------
 # LLM timeout (seconds)
 # ---------------------------------------------------------------------------
@@ -153,6 +162,39 @@ SPARSE_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "sparse")
 # at sub-cron interval it can't deadlock with ingest.
 SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * * *")
 
+# Graph/memory freshness sweeps (Cerid v1.0 enablement). Each is gated — set the
+# env var empty to disable the in-process cron (operators may prefer host cron).
+# Cadences are GPU/cost-conscious on a single-GPU host:
+#  - Community re-detection (GDS Leiden, cheap) + summaries (LLM, but
+#    skip-existing bounds it) — weekly, Sunday 02:00 UTC.
+#  - Constellation 3D coords (fallback layout, no LLM) — nightly 03:30 UTC.
+#  - Memory archival sweep (safe, no LLM re-abstraction) — weekly, Sunday 05:00.
+SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0")
+SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
+# Entity trust_state derivation — 1 min after compute_umap_3d.
+SCHEDULE_COMPUTE_TRUST_STATE = os.getenv("SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *")
+# Domain backbone derivation — 1 min after compute_trust_state.
+# Independent of umap: runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
+SCHEDULE_DERIVE_DOMAINS = os.getenv("SCHEDULE_DERIVE_DOMAINS", "32 3 * * *")
+SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0")
+# Cap LLM summaries generated per community-refresh run so a first run on a
+# large corpus can't issue an unbounded GPU batch. skip-existing already bounds
+# steady state; this bounds the cold-start. 0 / unset = no cap.
+COMMUNITY_SUMMARY_MAX_PER_RUN = int(os.getenv("COMMUNITY_SUMMARY_MAX_PER_RUN", "200"))
+
+# Webhook-inbox drain: the receiver (POST /sdk/v1/ingest/webhook/{token}) returns
+# 202 and rpush'es normalized artifacts onto cerid:webhook_inbox:{source_id};
+# this consumer routes them into the KB (without it, payloads were stranded).
+# Every 2 min so inbound webhooks land promptly. Empty disables.
+SCHEDULE_WEBHOOK_DRAIN = os.getenv("SCHEDULE_WEBHOOK_DRAIN", "*/2 * * * *")
+WEBHOOK_DRAIN_MAX_PER_RUN = int(os.getenv("WEBHOOK_DRAIN_MAX_PER_RUN", "200"))
+
+# Connector polling: drives SourceConnector.fetch_since on a cadence for active
+# pollable sources (rss, url_watch, …), advancing the sync cursor only after a
+# successful ingest (crash-safe resume). Empty disables.
+SCHEDULE_SOURCE_POLL = os.getenv("SCHEDULE_SOURCE_POLL", "*/15 * * * *")
+SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE = int(os.getenv("SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE", "50"))
+
 # Contextual retrieval per-tenant monthly USD budget (Workstream E
 # Phase 3). When breached, the circuit breaker disables further
 # contextual generation for that tenant for the rest of the calendar
@@ -166,6 +208,23 @@ CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH = float(
 # threshold after initial retrieval, supplement with external sources before
 # proceeding to expensive reranking/generation.
 RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
+
+# Staleness window for current/recency-intent queries — when the query asks
+# about "current/now/today" and the freshest KB result is older than this,
+# fire external regardless of relevance score (Phase 3.2 — answerability over
+# relevance for time-scoped queries).
+CRAG_STALENESS_WINDOW_DAYS = int(os.getenv("CRAG_STALENESS_WINDOW_DAYS", "7"))
+
+# Staleness window for claim VERIFICATION (Phase 4.2). When a temporal
+# (recency / current-event) claim is supported only by KB evidence older
+# than this window AND external web verification was inconclusive, the
+# verdict is downgraded to ``uncertain`` with reason ``stale_evidence``
+# rather than rubber-stamped ``verified`` on stale data. Defaults to the
+# CRAG window (same staleness notion, different surface) but is separately
+# tunable for operators who want verification stricter/looser than retrieval.
+VERIFICATION_STALENESS_WINDOW_DAYS = int(
+    os.getenv("VERIFICATION_STALENESS_WINDOW_DAYS", str(CRAG_STALENESS_WINDOW_DAYS))
+)
 
 # Wall-clock ceiling for a single agent_query() call. Two competing
 # constraints pick this value:
@@ -223,7 +282,7 @@ def get_context_budget_for_model(model: str | None) -> int:
         if model_lower.startswith(prefix):
             return budget
     return QUERY_CONTEXT_MAX_CHARS
-QUERY_RERANK_CANDIDATES = 15        # max candidates sent to reranker
+QUERY_RERANK_CANDIDATES = int(os.getenv("QUERY_RERANK_CANDIDATES", "15"))  # max candidates sent to reranker (GA P0.5 B2c: eval-tunable; default unchanged)
 QUERY_CONTEXT_MESSAGES = 5          # max conversation messages used for query enrichment
 
 # ---------------------------------------------------------------------------
@@ -246,6 +305,14 @@ RERANK_CROSS_ENCODER_MODEL = os.getenv(
 #   onnx/model_quint8_avx2.onnx (23 MB, int8, requires AVX2)
 RERANK_ONNX_FILENAME = os.getenv("RERANK_ONNX_FILENAME", "onnx/model.onnx")
 RERANK_MODEL_CACHE_DIR = os.getenv("RERANK_MODEL_CACHE_DIR", "")
+# Max (query, chunk) pair length the cross-encoder tokenizer keeps before
+# truncating. Must NOT exceed the model's positional limit: ms-marco-MiniLM
+# caps at 512 (the default — safe for the shipped fallback model), while
+# bge-reranker-v2-m3 reads up to 1024 without clipping a full 512-token parent
+# chunk. Bump this to 1024 ONLY alongside RERANK_CROSS_ENCODER_MODEL=bge-…;
+# raising it past a model's limit makes ONNX inference fail on out-of-range
+# position ids.
+RERANK_MAX_LENGTH = int(os.getenv("RERANK_MAX_LENGTH", "512"))
 
 # ---------------------------------------------------------------------------
 # NLI Entailment (Natural Language Inference)
@@ -255,6 +322,14 @@ NLI_ONNX_FILENAME = os.getenv("NLI_ONNX_FILENAME", "onnx/model.onnx")
 NLI_MODEL_CACHE_DIR = os.getenv("NLI_MODEL_CACHE_DIR", "")
 NLI_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ENTAILMENT_THRESHOLD", "0.7"))
 NLI_CONTRADICTION_THRESHOLD = float(os.getenv("NLI_CONTRADICTION_THRESHOLD", "0.6"))
+# The retrieval NLI contradiction gate (query_agent Step 5.65) runs NLI on
+# (doc, query) pairs — but a query is a question, not a declarative hypothesis,
+# so DeBERTa-MNLI false-positives "contradiction" on definitional answers (it
+# dropped a 0.93-relevance "Photosynthesis is…" doc for "what is photosynthesis",
+# zeroing recall). The top-K retrieval matches are EXEMPT from the contradiction
+# drop: a noisy (doc, question) signal must never override a strong retrieval
+# rank. 0 disables the exemption (legacy behaviour). Eval-tunable.
+NLI_GATE_EXEMPT_TOP_K = int(os.getenv("NLI_GATE_EXEMPT_TOP_K", "3"))
 
 # Phase 6: decompose multi-fact heuristic claims into atomic sub-claims via
 # an LLM call before scoring each independently against the premise. The
@@ -301,6 +376,12 @@ EXPERT_VERIFY_MAX_SOURCES = int(os.getenv("EXPERT_VERIFY_MAX_SOURCES", "3"))
 RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.4"))
 RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.4"))
 RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.6"))
+# Personal-first knowledge-pack ranking (Slice 7.2). Multiplier applied to the
+# blended rerank score of chunks carrying a pack_id, AFTER the cross-encoder
+# blend — a stable policy knob, not entangled with model scores. <1.0 makes
+# personal data win ties; packs still surface when clearly the best answer.
+# Operator-tunable at runtime via PATCH /settings (advanced/SERVER scope).
+PACK_RELEVANCE_WEIGHT = float(os.getenv("PACK_RELEVANCE_WEIGHT", "0.7"))
 
 # ---------------------------------------------------------------------------
 # Knowledge Graph Traversal
@@ -391,10 +472,24 @@ VERIFICATION_COMPLEX_MODEL = os.getenv(
 
 # Expert-tier verification model — high-capability reasoning model for
 # users who want maximum verification quality at higher cost.
-# Grok 4: $3/$15 per 1M tokens (vs $0.15/$0.60 for GPT-4o-mini pool).
+# Catalog-refreshed 2026-05-20: grok-4 was removed from OpenRouter;
+# grok-4.20 is the current expert-tier xAI model ($1.25/$2.50 per 1M
+# tokens, 2M context window) vs the prior grok-4 at $3/$15 per 1M.
+# Note: this default is for non-online (no web search) expert
+# verification; smart_router.VERIFICATION_EXPERT branch uses
+# grok-4.20:online when web search is desired.
 VERIFICATION_EXPERT_MODEL = os.getenv(
     "VERIFICATION_EXPERT_MODEL",
-    "openrouter/x-ai/grok-4",
+    "openrouter/x-ai/grok-4.20",
+)
+
+# Web-search-enabled expert verification model (the `:online` variant) used by
+# the smart_router VERIFICATION_EXPERT branch when live search is desired. Kept
+# separate from VERIFICATION_EXPERT_MODEL (non-online) so the router has an
+# env-overridable, catalog-visible default instead of a hardcoded literal.
+VERIFICATION_EXPERT_WEB_MODEL = os.getenv(
+    "VERIFICATION_EXPERT_WEB_MODEL",
+    "openrouter/x-ai/grok-4.20:online",
 )
 
 # ---------------------------------------------------------------------------
@@ -491,7 +586,14 @@ SYNOPSIS_MODEL = CATEGORIZE_MODELS["smart"]   # free Llama model via Bifrost
 SYNOPSIS_MAX_INPUT_CHARS = 2000
 SYNOPSIS_MAX_TOKENS = 100
 
-# Synopsis model options — user-selectable, with cost and throttle info
+# Synopsis model options — user-selectable, with cost and throttle info.
+# Catalog-refreshed 2026-05-20 against OpenRouter live pricing.
+# gemini-2.5-flash → gemini-3.1-flash-lite (newer + cheaper).
+# gpt-5-nano removed: reasoning model — max_tokens consumed as reasoning
+# budget, yielding 0 output chars (OPT-14). Old non-broken IDs kept as
+# legacy entries because operators may have them pinned in their persisted
+# Settings doc and a sudden removal would break their synopsis route on
+# next regenerate.
 SYNOPSIS_MODEL_OPTIONS = {
     "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
         "label": "Llama 3.3 (Free)",
@@ -501,14 +603,21 @@ SYNOPSIS_MODEL_OPTIONS = {
         "throttle": 8.0,
     },
     "openrouter/openai/gpt-4o-mini": {
-        "label": "GPT-4o Mini",
+        "label": "GPT-4o Mini (legacy)",
         "input_per_1m": 0.15,
         "output_per_1m": 0.60,
         "rpm": 1000,
         "throttle": 0.5,
     },
+    "openrouter/google/gemini-3.1-flash-lite": {
+        "label": "Gemini 3.1 Flash Lite",
+        "input_per_1m": 0.25,
+        "output_per_1m": 1.50,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
     "openrouter/google/gemini-2.5-flash": {
-        "label": "Gemini 2.5 Flash",
+        "label": "Gemini 2.5 Flash (legacy)",
         "input_per_1m": 0.30,
         "output_per_1m": 2.50,
         "rpm": 1000,
@@ -542,7 +651,12 @@ MEMORY_MIN_RECALL_BY_TYPE: dict[str, float] = {
 }
 
 # Memory Salience — per-type stability and scoring
-# Stability = base half-life in days for decay. Higher = slower fade.
+# Stability (S) = decay scale in days. Higher = slower fade.
+# NOTE on the effective half-life (the age at which decay = 0.5):
+#   - exponential types (2^(-t/S)):           half-life = S days exactly.
+#   - power-law types ((1 + t/(9S))^-0.5):     half-life = 27·S days (solve
+#     (1+t/(9S))^-0.5 = 0.5 → t = 27S). So "decision" S=90 ≈ a 2430-day
+#     half-life, not 90. Tune power-law S with the 27× factor in mind.
 # "empirical" uses float("inf") — permanent facts never decay.
 MEMORY_TYPE_STABILITY: dict[str, float] = {
     "empirical": float("inf"),       # "Python has a GIL" — no decay
@@ -595,6 +709,47 @@ SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
 SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
+# Phase S4 of the unified GA program — K-program metrics snapshot.
+# Default midnight UTC. Empty string disables (operator may prefer a
+# host-side cron / launchd plist over the in-process scheduler).
+# Six metrics emitted: wiki coverage, p95 staleness, faithfulness,
+# chunks-per-answer, memory→entity linkage, contradiction p95 — each
+# appended to tasks/<monday>-k-program-metrics.md via --cron.
+SCHEDULE_K_PROGRAM_METRICS = os.getenv("SCHEDULE_K_PROGRAM_METRICS", "0 0 * * *")
+# Daily Knowledge Stats snapshot for the Sources pane hero card's
+# sparklines. Default midnight UTC. One MERGE per day; idempotent
+# across reruns.
+SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT = os.getenv(
+    "SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT", "0 0 * * *",
+)
+
+# Nightly per-source retention enforcement. Walks every (:Source)
+# and applies its retention_policy. Default 2 AM UTC.
+SCHEDULE_RETENTION_ENFORCE = os.getenv(
+    "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *",
+)
+
+# Auto-adopt the latest in-family model per role from the OpenRouter catalog.
+# MODEL_AUTO_UPDATE_ENABLED gates the scheduler job; set "false" to keep the
+# pinned assignments. Same-family + must-exist-in-catalog bounds the drift;
+# model_config.json stays revertible via PUT /models/assignments.
+MODEL_AUTO_UPDATE_ENABLED = os.getenv("MODEL_AUTO_UPDATE_ENABLED", "true").lower() in ("true", "1")
+SCHEDULE_MODEL_AUTO_UPDATE = os.getenv("SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * 1")  # Mon 6 AM
+
+# Routing-tiers overlay: a JSON map {original_tier_id: resolved_id} written by
+# the weekly model_auto_update job (app/routers/models.py::apply_latest_assignments)
+# after the role-assignment pass. The smart_router reads it lazily at lookup time
+# to keep the FREE/CHEAP/CAPABLE/RESEARCH/EXPERT tier ids current without editing
+# the source tables. Lives next to model_config.json (app/data/) by default;
+# env-overridable. core/ reads this path from config — it never imports app/.
+# Missing/invalid overlay → tier tables are used as-is (fail soft).
+ROUTING_TIERS_OVERLAY_PATH = os.getenv(
+    "ROUTING_TIERS_OVERLAY_PATH",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "app", "data", "routing_tiers.json",
+    ),
+)
 
 # ---------------------------------------------------------------------------
 # Folder Scanning
@@ -604,7 +759,24 @@ SCAN_MIN_QUALITY = float(os.getenv("SCAN_MIN_QUALITY", "0.4"))  # min quality sc
 SCAN_MAX_FILE_SIZE_MB = int(os.getenv("SCAN_MAX_FILE_SIZE_MB", "50"))
 SCAN_EXCLUDE_PATTERNS = [p for p in os.getenv("SCAN_EXCLUDE_PATTERNS", "").split(",") if p]
 SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty=disabled
+# Phase J — inbox triage cadence. Default every 15 minutes; empty disables.
+# Also gated by CERID_INBOX_TRIAGE_ENABLED so the operator opts in
+# explicitly. Set INBOX_TRIAGE_MAX_PER_SOURCE to cap LLM cost.
+SCHEDULE_INBOX_TRIAGE = os.getenv("SCHEDULE_INBOX_TRIAGE", "*/15 * * * *")
+# Phase K — daily digest cadence. Default 7 AM UTC; empty disables.
+# Also gated by CERID_DAILY_DIGEST_ENABLED so operator opts in.
+# Per-user timezone resolution tracked for Phase K.2 (currently
+# everyone gets server-UTC-7am).
+SCHEDULE_DAILY_DIGEST = os.getenv("SCHEDULE_DAILY_DIGEST", "0 7 * * *")
 SCHEDULE_WATCHED_RESCAN = os.getenv("SCHEDULE_WATCHED_RESCAN", "")  # cron expr, e.g. "0 */6 * * *"=every 6h, empty=disabled
+# Phase 5.3 — Track A enrichment backfill. Gated OFF by default: the job
+# calls the classifier per artifact, so the operator opts in once after
+# Slice 5.1/5.2 land (CERID_BACKFILL_ENRICHMENT_ENABLED=true). Nightly until
+# the bare-tag backlog drains, then it self-idles (scan returns 0). Pace +
+# batch size cap LLM cost; metadata-only writes (no domain/collection moves).
+SCHEDULE_BACKFILL_ENRICHMENT = os.getenv("SCHEDULE_BACKFILL_ENRICHMENT", "0 3 * * *")  # 3 AM UTC
+BACKFILL_ENRICHMENT_BATCH = int(os.getenv("BACKFILL_ENRICHMENT_BATCH", "100"))
+BACKFILL_ENRICHMENT_PACE_S = float(os.getenv("BACKFILL_ENRICHMENT_PACE_S", "0.5"))
 SCHEDULE_MODEL_CATALOG = os.getenv("SCHEDULE_MODEL_CATALOG", "")  # cron expr, e.g. "0 6 * * *"=daily 6 AM, empty=disabled
 ENABLE_AI_TRIAGE = os.getenv("ENABLE_AI_TRIAGE", "").lower() in ("true", "1", "yes")  # Ollama content triage scoring
 
@@ -731,6 +903,60 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 #   or a specific model ID
 INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
+# Display default surfaced by /providers when INTERNAL_LLM_MODEL is unset
+# (Slice 2.2 — model ids live in config, never as call-site literals).
+INTERNAL_LLM_MODEL_DEFAULT = os.getenv(
+    "INTERNAL_LLM_MODEL_DEFAULT", "meta-llama/llama-3.3-70b-instruct"
+)
+# JSON-mode fallback model for internal-LLM calls that must return strict JSON.
+INTERNAL_LLM_JSON_FALLBACK_MODEL = os.getenv(
+    "INTERNAL_LLM_JSON_FALLBACK_MODEL", "openai/gpt-4o-mini"
+)
+# Chat fallback pool — models tried when the primary chat model hits a
+# retryable error. Comma-separated env override; defaults to the v1 chain.
+CHAT_FALLBACK_POOL = [
+    m.strip()
+    for m in os.getenv(
+        "CHAT_FALLBACK_POOL",
+        "openai/gpt-4o-mini,google/gemini-2.5-flash,x-ai/grok-4.3,anthropic/claude-sonnet-4.6",
+    ).split(",")
+    if m.strip()
+]
+
+# Retry budget + backoff for the `_call_ollama` transient-back-pressure
+# loop (5xx / 429 / timeout / ConnectError). Mirrors the embed-side
+# retry pattern that shipped in 51d7cc9 — eliminates the 10-15%
+# Quenchforge fall-through rate observed during sustained-load ablations.
+INTERNAL_LLM_MAX_RETRIES = int(os.getenv("INTERNAL_LLM_MAX_RETRIES", "3"))
+INTERNAL_LLM_RETRY_BACKOFF = float(os.getenv("INTERNAL_LLM_RETRY_BACKOFF", "0.5"))
+
+# Per-stage provider override pattern: setting
+# PROVIDER_STAGE_<NORMALIZED_STAGE> (e.g.
+# `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`) routes that specific
+# call site to a different provider, leaving privacy-sensitive stages
+# (`memory_resolution`, `claim_extraction`) on the global default.
+# Wildcard env pattern — declared here for .env.example surfacing only;
+# the actual lookup happens in `core.utils.internal_llm._resolve_stage_provider`.
+# Example below uses the LongMemEval scorer stage:
+_PROVIDER_STAGE_EXAMPLE = os.getenv("PROVIDER_STAGE_LONGMEMEVAL_SCORE", "")
+
+# ---------------------------------------------------------------------------
+# Embedding cache
+#   Bounded in-process LRU keyed on (namespace, sha256(text)). Optional
+#   SQLite disk tier when CERID_EMBED_CACHE_PATH is set. Both layers are
+#   namespace-isolated so a config flip cannot mix vector spaces.
+# ---------------------------------------------------------------------------
+CERID_EMBED_CACHE_SIZE = int(os.getenv("CERID_EMBED_CACHE_SIZE", "50000"))
+CERID_EMBED_CACHE_PATH = os.getenv("CERID_EMBED_CACHE_PATH", "")
+
+# ---------------------------------------------------------------------------
+# LongMemEval runtime knobs
+#   Declared here for .env.example surfacing; the eval CLI re-reads
+#   them via os.environ.get so an operator can toggle without restarting
+#   the MCP server.
+# ---------------------------------------------------------------------------
+LONGMEMEVAL_INGEST_PARALLEL = int(os.getenv("LONGMEMEVAL_INGEST_PARALLEL", "4"))
+LONGMEMEVAL_SCORER = os.getenv("LONGMEMEVAL_SCORER", "llm")
 
 # Default Ollama model for pipeline tasks — lightweight, runs on CPU or GPU
 OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
@@ -743,6 +969,22 @@ QUENCHFORGE_URL = os.getenv(
     "QUENCHFORGE_URL",
     os.getenv("OLLAMA_URL", "http://host.docker.internal:11434"),
 )
+
+# Model names the Quenchforge client sends in /v1/embeddings + /v1/rerank
+# requests (the gateway dispatches to the matching slot by this name). Only
+# read when EMBEDDINGS_PROVIDER / RERANK_PROVIDER = quenchforge.
+#
+# QUENCHFORGE_EMBED_MODEL has NO default ON PURPOSE: it must match the model
+# your corpus was embedded with (see EMBEDDING_MODEL above). Matching the output
+# dimension is necessary but NOT sufficient — e.g. nomic-embed-text-v1.5 and
+# Snowflake/snowflake-arctic-embed-m-v1.5 are both 768-dim but live in different
+# vector spaces; querying one against a corpus embedded by the other silently
+# collapses retrieval. Switching the embed model requires re-embedding the corpus.
+# Leaving it empty makes the client raise + fall back to the ONNX embedder.
+QUENCHFORGE_EMBED_MODEL = os.getenv("QUENCHFORGE_EMBED_MODEL", "")
+# Rerank is a cross-encoder score (no stored vectors), so a sensible default is
+# safe. Must be a reranking model Quenchforge serves.
+QUENCHFORGE_RERANK_MODEL = os.getenv("QUENCHFORGE_RERANK_MODEL", "bge-reranker-v2-m3")
 
 # Cached hardware-profile token, populated by scripts/detect-gpu.sh and read
 # by the setup wizard / /system-check endpoint. One of:
@@ -948,15 +1190,19 @@ if CATEGORIZE_MODE not in ("manual", "smart", "pro"):
 CONSUMER_REGISTRY: dict[str, dict] = {
     "gui": {
         "rate_limits": {
-            "/agent/": (20, 60),
-            "/sdk/": (20, 60),
+            "/agent/": (120, 60),
+            "/sdk/": (120, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
             # Audit C-11: state-mutating setup + polling admin/observability surfaces
             # were previously unthrottled. Bound them to prevent abuse / tight loops.
             "/setup/": (20, 60),
             "/admin/": (20, 60),
-            "/observability/": (30, 60),
+            # OPEN-14: the Diagnostics → Status pane polls several read-only
+            # /observability/ endpoints across 4 time windows with periodic
+            # refetch; 30/min self-throttled into a spurious "LLM 429". These
+            # are cheap idempotent reads — give the dashboard headroom.
+            "/observability/": (120, 60),
         },
         "allowed_domains": None,     # Full access to all domains
         "strict_domains": False,     # Cross-domain affinity enabled
@@ -1012,13 +1258,18 @@ CONSUMER_REGISTRY: dict[str, dict] = {
     },
     "_default": {
         "rate_limits": {
-            "/agent/": (30, 60),
-            "/sdk/": (30, 60),
+            "/agent/": (120, 60),
+            "/sdk/": (120, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
             "/setup/": (20, 60),
             "/admin/": (20, 60),
-            "/observability/": (30, 60),
+            "/observability/": (120, 60),  # OPEN-14: read-only dashboard polls
+            # Auth endpoints (only mounted when CERID_MULTI_USER=true). Tight
+            # 5-per-60s budget stops brute-force credential guessing before
+            # the password-equality work runs. /refresh shares the bucket so
+            # a leaked refresh token can't be replayed at high rate either.
+            "/auth/": (5, 60),
         },
         "allowed_domains": None,
         "strict_domains": False,
@@ -1062,6 +1313,32 @@ WS_HEARTBEAT_INTERVAL_S = 30
 WS_PRESENCE_TIMEOUT_S = 90
 WS_MAX_CONNECTIONS = 50
 SYNC_CRDT_ENABLED = True
+
+# ---------------------------------------------------------------------------
+# Pro-tier MCP cloud connectors (Phase F)
+# ---------------------------------------------------------------------------
+# Static bearer token shared between the Cerid backend and the sibling MCP
+# servers (google-workspace-mcp, ms365-mcp). Both servers expect this in
+# the inbound Authorization header.
+CERID_CONNECTORS_BEARER = os.getenv("CERID_CONNECTORS_BEARER", "")
+# Streamable-HTTP URLs for the sibling MCP servers. Defaults point at the
+# Docker network DNS names that stacks/connectors/docker-compose.yml creates.
+GOOGLE_WORKSPACE_MCP_URL = os.getenv(
+    "GOOGLE_WORKSPACE_MCP_URL", "http://cerid-google-workspace-mcp:8000/mcp",
+)
+MS365_MCP_URL = os.getenv("MS365_MCP_URL", "http://cerid-ms365-mcp:3000/mcp")
+# OAuth client credentials for Google Workspace MCP single-user mode.
+# Operator obtains these from Google Cloud Console → APIs & Services →
+# Credentials → "Desktop app" OAuth client. The MCP server owns the OAuth
+# flow + refresh-token rotation; Cerid backend never touches them.
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+
+# Microsoft / Outlook OAuth. ``MICROSOFT_OAUTH_TENANT`` is ``common``
+# for personal MSA accounts or a specific tenant GUID for org-only flows.
+MICROSOFT_OAUTH_CLIENT_ID = os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "")
+MICROSOFT_OAUTH_CLIENT_SECRET = os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET", "")
+MICROSOFT_OAUTH_TENANT = os.getenv("MICROSOFT_OAUTH_TENANT", "common")
 
 if not NEO4J_PASSWORD:
     _config_logger.warning(

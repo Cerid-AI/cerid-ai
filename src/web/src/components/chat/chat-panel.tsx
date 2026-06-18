@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { AlertTriangle, Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
+import { AlertTriangle, Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck, Menu } from "lucide-react"
 import { CreditBanner } from "./credit-banner"
 import { DegradationBanner } from "./degradation-banner"
 import { ChatToolbar } from "./chat-toolbar"
@@ -31,7 +31,6 @@ import { useModelRouter } from "@/hooks/use-model-router"
 import { useModelSwitch } from "@/hooks/use-model-switch"
 import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
 import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrator"
-import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
 import { fetchSetupStatus } from "@/lib/api/settings"
@@ -72,9 +71,12 @@ function OllamaCopyRow({ os, cmd, accent }: { os: string; cmd: string; accent: "
   )
 }
 
-export function ChatPanel() {
+interface ChatPanelProps {
+  onOpenSidebar?: () => void
+}
+
+export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
   const isNarrow = useSyncExternalStore(narrowSubscribe, getIsNarrow)
-  const { isSimple } = useUIMode()
   const {
     active,
     activeId,
@@ -95,6 +97,7 @@ export function ChatPanel() {
     ragMode, setRagMode,
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
+    includePacks, toggleIncludePacks,
     costSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
     memoryExtraction, toggleMemoryExtraction,
@@ -150,6 +153,7 @@ export function ChatPanel() {
     const providers = configuredProviders.map((id) => ({ id, configured: true }))
     const derived = deriveDefaultModel(providers)
     if (derived && derived !== selectedModel) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setSelectedModel(derived)
     }
   }, [setupStatusForDefault, selectedModel])
@@ -309,11 +313,11 @@ export function ChatPanel() {
   const { injectedContext, clearInjected } = kbContext
 
   // Merge orchestrated results into KB results pool for auto-inject.
-  // In smart/custom_smart modes, orchestrated results are conversation-aware
+  // In smart/always modes, orchestrated results are conversation-aware
   // and higher quality — prefer them over basic KB results.
-  // In manual mode, orchestrated results are ignored (user controls injection).
+  // In off mode, orchestrated results are ignored (user injects via @mentions).
   const effectiveKBResults = useMemo(() => {
-    if (ragMode === "manual") return kbContext.results
+    if (ragMode === "off") return kbContext.results
     const r = orchestratedContext.results
     if (r.length > 0) return r
     // Degraded path (F-2 remediation): if the orchestrator returned no KB
@@ -354,6 +358,7 @@ export function ChatPanel() {
   // Sync model selector and reset router when switching conversations
   const activeModel = active?.model
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
     if (activeModel) setSelectedModel(activeModel)
     resetDismiss()
     setVerificationRecBanner(null)
@@ -384,9 +389,11 @@ export function ChatPanel() {
     costSensitivity,
     autoInject,
     autoInjectThreshold,
+    includePacks,
     injectedContext,
     kbResults: effectiveKBResults,
     clearInjected,
+    privateModeLevel,
     degradedReason: orchestratedContext.degradedReason,
     onBeforeSend: () => setVerificationRecBanner(null),
   })
@@ -477,7 +484,18 @@ export function ChatPanel() {
 
   if (!active) {
     return (
-      <div className="flex h-full items-center justify-center bg-background bg-brand-gradient bg-hero-glow">
+      <div className="relative flex h-full items-center justify-center bg-background bg-brand-gradient bg-hero-glow">
+        {isNarrow && onOpenSidebar && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-2 left-2 h-8 w-8"
+            aria-label="Open navigation"
+            onClick={onOpenSidebar}
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        )}
         <div className="relative flex max-w-md flex-col items-center gap-6 px-6 text-center">
           {/* Subtle pulsing brand glow */}
           <div className="pointer-events-none absolute -top-12 h-32 w-32 animate-pulse rounded-full bg-brand/10 blur-2xl" />
@@ -532,13 +550,15 @@ export function ChatPanel() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <ChatToolbar
         isNarrow={isNarrow}
-        isSimple={isSimple}
+        onOpenSidebar={onOpenSidebar}
         showKB={showKB}
         onToggleKB={() => setShowKB(!showKB)}
         autoInject={autoInject}
         toggleAutoInject={toggleAutoInject}
         autoInjectThreshold={autoInjectThreshold}
         setAutoInjectThreshold={setAutoInjectThreshold}
+        includePacks={includePacks}
+        toggleIncludePacks={toggleIncludePacks}
         hallucinationEnabled={hallucinationEnabled}
         toggleHallucinationEnabled={toggleHallucinationEnabled}
         inlineMarkups={inlineMarkups}
@@ -575,8 +595,8 @@ export function ChatPanel() {
       {/* Service degradation banner */}
       <DegradationBanner />
 
-      {/* Dashboard metrics bar (advanced only) */}
-      {!isSimple && showDashboard && (
+      {/* Dashboard metrics bar */}
+      {showDashboard && (
         <ChatDashboard
           model={selectedModel}
           messages={active?.messages ?? []}
@@ -584,8 +604,8 @@ export function ChatPanel() {
         />
       )}
 
-      {/* Model recommendation banner (advanced only, recommend mode) */}
-      {!isSimple && recommendation && routingMode === "recommend" && (
+      {/* Model recommendation banner (recommend mode) */}
+      {recommendation && routingMode === "recommend" && (
         <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-1.5 text-xs">
           <Zap className="h-3.5 w-3.5 text-yellow-500" />
           <span className="flex-1">{recommendation.reasoning}</span>
@@ -606,8 +626,8 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* V1b: Proactive switch banner (advanced only) */}
-      {!isSimple && verificationRecBanner && (
+      {/* V1b: Proactive switch banner */}
+      {verificationRecBanner && (
         <div className="flex items-center gap-2 border-b bg-blue-500/10 px-4 py-1.5 text-xs">
           <Zap className="h-3.5 w-3.5 text-blue-500" />
           <span className="flex-1">{verificationRecBanner.reason}</span>
@@ -647,7 +667,7 @@ export function ChatPanel() {
       )}
 
       {/* Expert verification cost indicator */}
-      {!isSimple && expertVerification && hallucinationEnabled && verification.phase !== "idle" && verification.phase !== "done" && (
+      {expertVerification && hallucinationEnabled && verification.phase !== "idle" && verification.phase !== "done" && (
         <div className="flex items-center gap-2 px-3 py-1 text-label-sm text-amber-500 bg-amber-500/5 border-b border-amber-500/10">
           <ShieldCheck className="h-3 w-3" />
           Expert verification active — ~15× standard cost
@@ -698,7 +718,7 @@ export function ChatPanel() {
       )}
 
       {/* Ollama recommendation — shown when no local stages and user has chatted */}
-      {!isSimple && !ollamaSetupActive && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
+      {!ollamaSetupActive && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
         ollamaShowSetup ? (
           <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
             <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
@@ -786,8 +806,8 @@ export function ChatPanel() {
         }}
       />
 
-      {/* Smart KB suggestions (advanced only) */}
-      {!isSimple && smartSuggestions.suggestions.length > 0 && !isStreaming && (
+      {/* Smart KB suggestions */}
+      {smartSuggestions.suggestions.length > 0 && !isStreaming && (
         <div className="flex items-center gap-1.5 overflow-x-auto border-t bg-muted/30 px-4 py-1.5">
           <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground" />
           {smartSuggestions.suggestions.map((s) => (
@@ -815,8 +835,8 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* Verification status bar (advanced only) */}
-      {!isSimple && <VerificationStatusBar
+      {/* Verification status bar */}
+      <VerificationStatusBar
         report={halReport}
         loading={halLoading}
         featureEnabled={hallucinationEnabled}
@@ -836,10 +856,10 @@ export function ChatPanel() {
           retestServices().catch(() => {})
           handleVerifyMessage()
         }}
-      />}
+      />
 
-      {/* Auto-route notice (advanced only) */}
-      {!isSimple && autoRouteNotice && (
+      {/* Auto-route notice */}
+      {autoRouteNotice && (
         <div className="flex items-center gap-1.5 border-t bg-yellow-500/10 px-4 py-1">
           <Zap className="h-3 w-3 shrink-0 text-yellow-500" />
           <span className="text-xs text-muted-foreground">{autoRouteNotice}</span>
@@ -854,8 +874,8 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* Auto-inject indicator (advanced only) */}
-      {!isSimple && lastAutoInjectCount > 0 && isStreaming && (
+      {/* Auto-inject indicator */}
+      {lastAutoInjectCount > 0 && isStreaming && (
         <div className="flex items-center gap-1.5 border-t bg-primary/5 px-4 py-1">
           <Database className="h-3 w-3 shrink-0 text-primary" />
           <span className="text-xs text-muted-foreground">
@@ -922,7 +942,7 @@ export function ChatPanel() {
       </Panel>
       <PanelSeparator className="h-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />
       <Panel defaultSize={67} minSize={20}>
-        {ragMode === "manual" ? (
+        {ragMode === "off" ? (
           <KBContextPanel
             {...kbContext}
             onClose={() => setShowKB(false)}
@@ -945,9 +965,6 @@ export function ChatPanel() {
       </Panel>
     </Group>
   )
-
-  // Simple mode: no right column at all
-  if (isSimple) return chatArea
 
   // On narrow viewports, show KB as a bottom drawer instead of split pane
   if (isNarrow) {

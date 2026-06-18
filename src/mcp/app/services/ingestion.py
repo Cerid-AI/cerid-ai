@@ -44,7 +44,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -268,6 +267,46 @@ def _flip_chunks_committed(collection: Any, chunk_ids: list[str]) -> None:
         log_swallowed_error("app.services.ingestion.flip_committed", e)
 
 
+def _enqueue_entity_extraction_if_enabled(artifact_id: str) -> None:
+    """Enqueue an EntityExtractionJob post-commit when the flag is on.
+
+    Phase K1.1.  Called from ``ingest_content`` after Neo4j commit and
+    Chroma flip succeed.  Non-blocking — the job runs at LOW priority
+    in the processor queue.  When the job completes it emits an
+    ``entities_added`` event which the wiki-refresh subscriber consumes
+    (Phase K1.2/K1.3).
+
+    Defaults to ON for new ingests; operators can disable via
+    ``CERID_ENTITY_EXTRACTION_ENABLED=false`` to revert to backfill-only
+    behaviour.  Lazy imports keep the cost at zero when disabled.
+    """
+    import os
+    val = os.environ.get("CERID_ENTITY_EXTRACTION_ENABLED", "true").strip().lower()
+    if val not in ("true", "1", "yes", "on"):
+        return
+
+    try:
+        from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+        from app.processor.jobs.entity_extraction import EntityExtractionJob  # noqa: PLC0415
+    except ImportError as e:
+        logger.debug("entity_extraction.enqueue: import failed (non-fatal): %s", e)
+        return
+
+    try:
+        payload: dict[str, Any] = {
+            "artifact_id": artifact_id,
+            "tenant_id": "default",
+        }
+        job = EntityExtractionJob(**payload)
+        enqueue_job(job, payload=payload)
+        logger.debug("entity_extraction.enqueued artifact_id=%s", artifact_id)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.entity_extraction_enqueue", e,
+            context={"artifact_id": artifact_id},
+        )
+
+
 def _enqueue_hype_jobs_if_enabled(
     chunk_ids: list[str],
     chunks: list[str],
@@ -368,6 +407,25 @@ def _reingest_artifact(
             collection.delete(ids=old_chunk_ids)
         except Exception as e:
             logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
+        # BM25 + sparse indexes dedup-skip known chunk_ids, so without an
+        # explicit removal they keep serving the PRE-edit text while ChromaDB
+        # now holds the new text — a silent corpus divergence that survives
+        # restarts (the JSONL keeps the first/old line). Drop the old chunks
+        # from both before the re-index below re-adds the fresh text.
+        try:
+            from core.retrieval.bm25 import remove_chunks as _bm25_remove
+            _bm25_remove(domain, old_chunk_ids)
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.services.ingestion.bm25_remove_reingest", e,
+            )
+        try:
+            from core.retrieval.sparse_index import remove_chunks as _sparse_remove
+            _sparse_remove(domain, old_chunk_ids)
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.services.ingestion.sparse_remove_reingest", e,
+            )
 
     # Create new chunks with contextual header
     filename = metadata.get("filename", "") if metadata else ""
@@ -452,7 +510,9 @@ def _reingest_artifact(
         }
         for i, rec in enumerate(chunk_records)
     ]
-    collection.add(
+    # upsert (not add): content-addressed chunk IDs make re-delivery of identical
+    # content overwrite the same rows instead of duplicating them (idempotent).
+    collection.upsert(
         ids=chunk_ids,
         documents=chunk_documents,
         metadatas=chunk_metadatas,
@@ -484,29 +544,22 @@ def _reingest_artifact(
             "app.services.ingestion.sparse_index_reingest", e,
         )
 
-    # Compute quality_score for re-ingested content
-    _summary = base_meta.get("summary", "")
-    _tags = base_meta.get("tags_json", "[]")
-    _sub_cat = base_meta.get("sub_category", "")
-    _qscore = 0.0
-    if _summary and _summary != content[:200]:
-        _qscore += 0.20
-    try:
-        _tag_list = json.loads(_tags) if _tags else []
-    except (json.JSONDecodeError, TypeError):
-        _tag_list = []
-    if _tag_list:
-        _qscore += 0.15
-    if len(chunks) > 1:
-        _qscore += 0.15
-    if len(content) > 500:
-        _qscore += 0.15
-    if domain:
-        _qscore += 0.10
-    if _sub_cat and _sub_cat != config.DEFAULT_SUB_CATEGORY:
-        _qscore += 0.10
-    _qscore += 0.15  # dedup passed
-    quality_score = round(min(_qscore, 1.0), 2)
+    # Compute quality_score with the canonical 6-dimension scorer (same as the
+    # fresh-ingest path) so re-ingested artifacts aren't scored by a divergent
+    # simplified formula.
+    from core.utils.quality import compute_quality_score as _compute_quality
+
+    quality_score = _compute_quality(
+        summary=base_meta.get("summary", ""),
+        keywords=base_meta.get("keywords_json", "[]"),
+        tags=base_meta.get("tags_json", "[]"),
+        sub_category=base_meta.get("sub_category", ""),
+        default_sub_category=config.DEFAULT_SUB_CATEGORY,
+        ingested_at=base_meta.get("ingested_at"),
+        content=content,
+        domain=domain,
+        source_type=base_meta.get("source_type", "upload"),
+    )
 
     # Update Neo4j artifact (preserves relationships)
     try:
@@ -542,6 +595,7 @@ def ingest_content(
     *,
     skip_quality: bool = False,
     pre_chunked: list[dict[str, Any]] | None = None,
+    enrich: bool = True,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
 
@@ -559,13 +613,31 @@ def ingest_content(
     retrieval can filter by structural shape. ``content`` is still the
     canonical artifact text used for content_hash / AI categorization /
     Neo4j summary — ``pre_chunked`` only overrides the chunk-write step.
+
+    ``enrich`` (Phase 5.1 — the enrichment seam) auto-classifies
+    ``sub_category`` + ``tags`` via ``ai_categorize`` when the caller
+    supplied neither. This makes enrichment opt-OUT at the single ingest
+    chokepoint: the memory / connector / digest / text_input paths that
+    historically passed a hardcoded domain and never tagged now get the
+    same wiki-granularity + tag-sorting metadata as file uploads. Triage
+    passes ``enrich=False`` because it already classified before calling.
+    Enrichment NEVER changes ``domain`` — the Chroma collection was chosen
+    from ``domain`` above, so domain corrections go through ``recategorize()``
+    (Track B), never here. Classifier failure logs + proceeds untagged;
+    ingest never blocks on it.
     """
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
 
-    artifact_id = str(uuid.uuid4())
     content_hash = _content_hash(content)
+    # Content-addressed artifact_id → the chunker derives chunk IDs as
+    # ``{artifact_id}_chunk_{i}`` etc., so identical content re-delivered (e.g. a
+    # connector replays within the pending window before the Neo4j node commits)
+    # upserts the SAME rows instead of creating duplicates — idempotent ingest.
+    # content_hash is globally UNIQUE, so a content-addressed id is consistent
+    # with the one-artifact-per-content model the DB already enforces.
+    artifact_id = content_hash
 
     existing = _check_duplicate(content_hash, domain)
     if existing:
@@ -631,10 +703,15 @@ def ingest_content(
     # ``tags`` merges into the Neo4j Tag taxonomy; reserved scalars +
     # ``cerid:*`` custom keys land as Artifact node properties.
     frontmatter: dict[str, Any] = {}
+    # Zero-text, metadata-only edge markers. WikilinkEdge is consumed by the
+    # graph-commit below; EmailThreadEdge is the email_strategy's analogue.
+    # Neither must reach ChromaDB — an empty document pollutes retrieval
+    # (empty/garbage zero-vector row) or errors the embedder.
+    _edge_marker_types = {"WikilinkEdge", "EmailThreadEdge"}
     if pre_chunked:
         text_pre_chunked = [
             c for c in pre_chunked
-            if c.get("metadata", {}).get("element_type") != "WikilinkEdge"
+            if c.get("metadata", {}).get("element_type") not in _edge_marker_types
         ]
         wikilink_edge_chunks = [
             c for c in pre_chunked
@@ -804,6 +881,40 @@ def ingest_content(
         base_meta["near_duplicate_of"] = near_dup["artifact_id"]
         base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
 
+    # Phase 5.1 — enrichment seam. Fill sub_category + tags via the classifier
+    # when the caller supplied neither (memory / connector / digest /
+    # text_input paths). Opt-out via enrich=False (triage already classified).
+    # Runs AFTER caller + frontmatter tags are merged so those win. NEVER
+    # touches domain — the collection was chosen from `domain` above; domain
+    # corrections are Track B (recategorize). For domain=="conversations" this
+    # naturally yields sub_category + tags only, satisfying the isolation
+    # constraint without a special case.
+    if enrich:
+        _existing_tags_json = base_meta.get("tags_json", "[]") or "[]"
+        try:
+            _has_tags = bool(json.loads(_existing_tags_json))
+        except (json.JSONDecodeError, TypeError):
+            _has_tags = False
+        _has_subcat = bool(base_meta.get("sub_category"))
+        if not _has_tags or not _has_subcat:
+            try:
+                from core.utils.contextual import _run_coro_isolated
+
+                # Module-level ai_categorize (imported above) so tests can
+                # patch app.services.ingestion.ai_categorize.
+                _enr = _run_coro_isolated(ai_categorize(content, fname)) or {}
+                if not _has_subcat and _enr.get("sub_category"):
+                    base_meta["sub_category"] = _enr["sub_category"]
+                if not _has_tags and isinstance(_enr.get("tags"), list) and _enr["tags"]:
+                    base_meta["tags_json"] = json.dumps([
+                        t.strip().lower()
+                        for t in _enr["tags"]
+                        if isinstance(t, str) and t.strip()
+                    ])
+                # domain intentionally NOT adopted (see docstring + note above).
+            except Exception as exc:  # noqa: BLE001 — enrichment is best-effort; ingest never blocks on it
+                log_swallowed_error("app.services.ingestion.enrich", exc)
+
     # Phase O.1 — idempotency key: SHA-256(content + source_uri + tenant).
     # source_uri comes from metadata["filename"] if available.
     _source_uri = base_meta.get("filename", base_meta.get("source_uri", ""))
@@ -841,7 +952,54 @@ def ingest_content(
                 "parent_chunk_id": rec["parent_id"],
             }
             chunk_metadatas.append(md)
-    collection.add(
+
+    # Compute quality_score using the weighted 6-dimension formula (skip in fast
+    # paths where summary/keywords haven't been populated — curator re-scores
+    # later; neutral 0.5 lets retrieval work in the meantime).
+    if skip_quality:
+        quality_score = 0.5
+    else:
+        from core.utils.quality import compute_quality_score as _compute_quality
+
+        quality_score = _compute_quality(
+            summary=base_meta.get("summary", ""),
+            keywords=base_meta.get("keywords_json", "[]"),
+            tags=base_meta.get("tags_json", "[]"),
+            sub_category=base_meta.get("sub_category", ""),
+            default_sub_category=config.DEFAULT_SUB_CATEGORY,
+            ingested_at=base_meta.get("ingested_at"),
+            # Thread the in-scope signals the scorer weights but previously
+            # received as defaults: content drives the richness dimension (25%
+            # weight — collapsed to 0 without it), domain enables domain-adaptive
+            # scoring, source_type carries authority. retrieval_count stays 0
+            # (nothing has been retrieved at ingest time — correct).
+            content=content,
+            domain=domain,
+            source_type=base_meta.get("source_type", "upload"),
+        )
+        # Phase 0.5 #10 — per-source quality floor. Apply the drop gate BEFORE
+        # any chunk is staged so a drop is fully atomic (no Chroma/Neo4j write
+        # to roll back, no embedding cost incurred). No-op unless an operator
+        # set this source's quality_floor > 0 (scores clamp at QUALITY_MIN_FLOOR).
+        from app.services.quality_floors import should_drop
+
+        if should_drop(base_meta.get("source_id"), quality_score):
+            logger.info(
+                "Dropped below source quality floor: source=%s score=%.3f",
+                base_meta.get("source_id"), quality_score,
+            )
+            return {
+                "status": "dropped",
+                "reason": "below_source_quality_floor",
+                "quality_score": quality_score,
+                "domain": domain,
+                "chunks": 0,
+                "timestamp": utcnow_iso(),
+            }
+
+    # upsert (not add): content-addressed chunk IDs make re-delivery of identical
+    # content overwrite the same rows instead of duplicating them (idempotent).
+    collection.upsert(
         ids=chunk_ids,
         documents=chunk_documents,
         metadatas=chunk_metadatas,
@@ -883,22 +1041,8 @@ def ingest_content(
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error("app.services.ingestion.sparse_index", e)
 
-    # Compute quality_score using weighted 4-dimension formula (skip in fast
-    # paths where summary/keywords haven't been populated — curator re-scores
-    # later; neutral 0.5 lets retrieval work in the meantime).
-    if skip_quality:
-        quality_score = 0.5
-    else:
-        from core.utils.quality import compute_quality_score as _compute_quality
-
-        quality_score = _compute_quality(
-            summary=base_meta.get("summary", ""),
-            keywords=base_meta.get("keywords_json", "[]"),
-            tags=base_meta.get("tags_json", "[]"),
-            sub_category=base_meta.get("sub_category", ""),
-            default_sub_category=config.DEFAULT_SUB_CATEGORY,
-            ingested_at=base_meta.get("ingested_at"),
-        )
+    # quality_score was computed + the per-source floor gate applied above,
+    # before chunk staging (Phase 0.5 #10), so the drop stays atomic.
 
     artifact_created = False
     try:
@@ -950,6 +1094,33 @@ def ingest_content(
                         "app.services.ingestion.frontmatter_props", e,
                     )
 
+        # Tephra Cycle-2 — authored_at coalesce writer.
+        # Persist the best available authored timestamp so the Timeline axis
+        # toggle can surface content-time vs ingest-time once coverage
+        # exceeds the deferred toggle threshold (>15% of windowed artifacts).
+        # Priority: frontmatter 'created' > email_date > published_date >
+        # date_added > null.  No axis toggle shipped in v1 — this is write-
+        # only so coverage compounds from first ingest forward.
+        _authored_at = (
+            base_meta.get("created_at")          # frontmatter override (already coerced)
+            or base_meta.get("email_date")        # email IMAP source
+            or base_meta.get("published_date")    # RSS feed source
+            or base_meta.get("date_added")        # bookmark source
+            or None
+        )
+        if _authored_at:
+            try:
+                graph.set_artifact_properties(
+                    driver=driver,
+                    artifact_id=artifact_id,
+                    properties={"authored_at": str(_authored_at)},
+                )
+            except Exception as e:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "app.services.ingestion.authored_at_write", e,
+                    context={"artifact_id": artifact_id},
+                )
+
         # Phase R.3 — HyPE: enqueue background indexing job per chunk.
         # Only fires when RETRIEVAL_HYPE_ENABLED=true (off by default until
         # eval gate is cleared).  Non-blocking — HyPE runs asynchronously
@@ -962,6 +1133,12 @@ def ingest_content(
             coll_name=coll_name,
             artifact_id=artifact_id,
         )
+
+        # Phase K1.1 — Entity extraction on ingest. Closes the wiki orphan
+        # loop by feeding the entity graph (which the wiki refresh
+        # subscriber reads in K1.3). Non-blocking, LOW priority. Default ON;
+        # operators revert to backfill-only via CERID_ENTITY_EXTRACTION_ENABLED=false.
+        _enqueue_entity_extraction_if_enabled(artifact_id=artifact_id)
     except Exception as e:
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:

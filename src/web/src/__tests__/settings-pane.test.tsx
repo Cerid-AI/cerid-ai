@@ -1,334 +1,281 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Settings shell (SEXTANT) — state matrix, sidebar IA, U-1 mode toggle,
+ * search, deep links, and the legacy tab redirect map.
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import SettingsPane from "@/components/settings/settings-pane"
-import { UIModeProvider } from "@/contexts/ui-mode-context"
+import { AdvancedDisclosure } from "@/components/settings/settings-primitives"
+
+vi.mock("@/components/settings/diagnostics-section", () => ({
+  DiagnosticsSection: ({ initialTab }: { initialTab: string }) => (
+    <div data-testid="diagnostics-console">diagnostics:{initialTab}</div>
+  ),
+}))
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return (
-    <UIModeProvider>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </UIModeProvider>
-  )
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 }
 
 const mockSettings = {
-  categorize_mode: "smart",
-  chunk_max_tokens: 400,
-  chunk_overlap: 0.2,
-  cost_sensitivity: "medium",
-  enable_encryption: false,
-  enable_feedback_loop: false,
-  enable_hallucination_check: true,
-  enable_memory_extraction: false,
-  enable_model_router: false,
-  hallucination_threshold: 0.75,
-  enable_auto_inject: false,
-  auto_inject_threshold: 0.82,
   feature_tier: "community",
-  feature_flags: { hallucination_check: true, feedback_loop: false },
-  domains: ["coding", "finance", "projects", "personal", "general", "conversations"],
-  taxonomy: {
-    coding: { description: "Code artifacts", icon: "code", sub_categories: ["python", "javascript"] },
-    finance: { description: "Financial docs", icon: "dollar", sub_categories: ["budgets", "taxes"] },
-  },
+  feature_flags: {},
+  enable_hallucination_check: true,
+  enable_feedback_loop: false,
+  enable_memory_extraction: false,
   storage_mode: "extract_only",
-  sync_backend: "local",
   machine_id: "test-machine",
-  version: "0.8.0",
-  ollama_enabled: false,
-  ollama_url: "http://localhost:11434",
-  internal_llm_provider: "openrouter",
-  internal_llm_model: "llama3.2:3b",
+  version: "1.0.0",
 }
 
-function mockFetch(data: unknown, status = 200) {
+function mockFetch(settingsData: unknown = mockSettings) {
   return vi.fn().mockImplementation((url: string) => {
-    // KB stats endpoint gets a default empty response
-    if (typeof url === "string" && url.includes("/admin/kb/stats")) {
+    const u = typeof url === "string" ? url : ""
+    if (u.includes("/billing/capabilities")) {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ total_artifacts: 0, total_chunks: 0, domains: {} }),
+        json: () => Promise.resolve({ tier: "community", features: {}, buckets: {} }),
         text: () => Promise.resolve("{}"),
       })
     }
-    // Ollama status endpoint
-    if (typeof url === "string" && url.includes("/providers/ollama/status")) {
+    if (u.includes("/health")) {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ enabled: false, url: "http://localhost:11434", reachable: false, models: [], default_model: "llama3.2:3b", default_model_installed: false }),
+        json: () => Promise.resolve({ status: "healthy", services: {}, recommended_features: [] }),
         text: () => Promise.resolve("{}"),
       })
     }
-    // Storage metrics endpoint (needed for StorageBar on System tab)
-    if (typeof url === "string" && url.includes("/system/storage")) {
+    if (u.includes("/providers/credits")) {
       return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve({
-          chromadb: { disk_mb: 10, collections: 2, chunks: 100 },
-          neo4j: { disk_mb: 5, nodes: 50, relationships: 20 },
-          redis: { memory_mb: 2, keys: 30, peak_mb: 3 },
-          bm25: { disk_mb: 1, index_count: 2 },
-          total_mb: 18, limit_mb: 1000, usage_pct: 1.8, status: "healthy",
-        }),
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ balance: null, limit: null, used: null }),
         text: () => Promise.resolve("{}"),
       })
     }
-    // Catch-all for other endpoints used by System tab sub-components
-    if (typeof url === "string" && (
-      url.includes("/health/status") || url.includes("/data-sources") ||
-      url.includes("/admin/watched-folders") || url.includes("/providers/models/updates") ||
-      url.includes("/providers/credits") || url.includes("/providers/ollama/recommendations")
-    )) {
+    if (u.includes("/settings")) {
       return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(url.includes("/data-sources") || url.includes("/watched-folders") ? [] : {}),
-        text: () => Promise.resolve("{}"),
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(settingsData),
+        text: () => Promise.resolve(JSON.stringify(settingsData)),
       })
     }
     return Promise.resolve({
-      ok: status >= 200 && status < 300,
-      status,
-      json: () => Promise.resolve(data),
-      text: () => Promise.resolve(JSON.stringify(data)),
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({}),
+      text: () => Promise.resolve("{}"),
     })
   })
-}
-
-/** Click a Radix tab trigger by its name */
-async function clickTab(name: string) {
-  const user = userEvent.setup()
-  await user.click(screen.getByRole("tab", { name }))
 }
 
 beforeEach(() => {
-  vi.restoreAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
+  window.history.replaceState({}, "", "/")
+  Element.prototype.scrollIntoView = vi.fn()
 })
 
-describe("SettingsPane", () => {
-  it("shows loading state initially", () => {
-    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {}))) // never resolves
+describe("SettingsPane shell — state matrix", () => {
+  it("loading: renders skeleton group cards", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})))
     render(<SettingsPane />, { wrapper })
-    // Component shows "Loading settings..." with Loader2 spinner
-    expect(screen.getByText(/loading settings/i)).toBeInTheDocument()
+    expect(screen.getByTestId("settings-loading")).toBeInTheDocument()
   })
 
-  it("renders settings after loading", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
+  it("error: renders destructive alert with working retry", async () => {
+    const failing = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/settings")) {
+        return Promise.reject(new Error("boom"))
+      }
+      return mockFetch()(url)
+    })
+    vi.stubGlobal("fetch", failing)
     render(<SettingsPane />, { wrapper })
-    expect(await screen.findByText("Knowledge & Ingestion")).toBeInTheDocument()
+    expect(await screen.findByText("boom")).toBeInTheDocument()
+
+    vi.stubGlobal("fetch", mockFetch())
+    await userEvent.click(screen.getByRole("button", { name: /Retry/ }))
+    expect(await screen.findByRole("button", { name: /Models/ })).toBeInTheDocument()
   })
 
-  it("shows version number on System tab", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
+  it("success: renders all 8 categories plus the Diagnostics console entry", async () => {
+    vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    await clickTab("System")
-    expect(await screen.findByText("0.8.0")).toBeInTheDocument()
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    for (const label of [
+      "Models",
+      "Knowledge",
+      "Retrieval & Answers",
+      "Privacy",
+      "Extensions",
+      "Appearance",
+      "Plan & Billing",
+      "System",
+      "Diagnostics",
+    ]) {
+      expect(within(nav).getByRole("button", { name: new RegExp(label) })).toBeInTheDocument()
+    }
   })
 
-  it("shows machine ID on System tab", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    await clickTab("System")
-    expect(await screen.findByText("test-machine")).toBeInTheDocument()
+  it("success: is axe-clean (D.3)", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    const { container } = render(<SettingsPane />, { wrapper })
+    await screen.findByRole("navigation", { name: "Settings categories" })
+    expect(await axe(container)).toHaveNoViolations()
   })
 
-  it("shows feature tier badge on System tab", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
+  it("Appearance category renders its registry-driven rows and is axe-clean", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    const { container } = render(<SettingsPane />, { wrapper })
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    await userEvent.click(within(nav).getByRole("button", { name: /Appearance/ }))
+    expect(await screen.findByRole("radiogroup", { name: "Theme" })).toBeInTheDocument()
+    expect(screen.getByRole("radiogroup", { name: "Density" })).toBeInTheDocument()
+    expect(screen.getByRole("radiogroup", { name: "Reduce motion" })).toBeInTheDocument()
+    expect(localStorage.getItem("cerid-settings-category")).toBe("appearance")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe("SettingsPane shell — U-1 mode toggle", () => {
+  it("defaults to Simple and persists flips to cerid-settings-mode", async () => {
+    vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    await clickTab("System")
-    expect(await screen.findByText("community")).toBeInTheDocument()
+    await screen.findByRole("navigation", { name: "Settings categories" })
+    const group = screen.getByRole("radiogroup", { name: "Settings detail level" })
+    expect(within(group).getByRole("radio", { name: "Simple" })).toHaveAttribute("aria-checked", "true")
+
+    await userEvent.click(within(group).getByRole("radio", { name: "Advanced" }))
+    expect(localStorage.getItem("cerid-settings-mode")).toBe("advanced")
+    expect(within(group).getByRole("radio", { name: "Advanced" })).toHaveAttribute("aria-checked", "true")
   })
 
-  it("shows storage mode in select", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
+  it("AdvancedDisclosure defaults follow the mode; explicit toggles persist per group", async () => {
+    localStorage.setItem("cerid-settings-mode", "simple")
+    const { unmount } = render(
+      <AdvancedDisclosure category="models" group="testgroup" count={3}>
+        <div data-testid="advanced-content" />
+      </AdvancedDisclosure>,
+    )
+    expect(screen.queryByTestId("advanced-content")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Advanced — 3 settings/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: /Advanced — 3 settings/ }))
+    expect(screen.getByTestId("advanced-content")).toBeInTheDocument()
+    expect(localStorage.getItem("cerid-settings-disclosure:models.testgroup")).toBe("open")
+    unmount()
+
+    localStorage.removeItem("cerid-settings-disclosure:models.testgroup")
+    localStorage.setItem("cerid-settings-mode", "advanced")
+    render(
+      <AdvancedDisclosure category="models" group="testgroup" count={3}>
+        <div data-testid="advanced-content-2" />
+      </AdvancedDisclosure>,
+    )
+    expect(screen.getByTestId("advanced-content-2")).toBeInTheDocument()
+  })
+})
+
+describe("SettingsPane shell — search", () => {
+  it("shows a flat result list and reveals the clicked setting", async () => {
+    vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    // Storage mode is shown via a Select component on Essentials tab
-    expect(screen.getByText(/Extract Only/i)).toBeInTheDocument()
+    await screen.findByRole("navigation", { name: "Settings categories" })
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "dark mode")
+    const results = await screen.findByRole("list", { name: "Search results" })
+    const themeResult = within(results).getByRole("listitem")
+    expect(themeResult).toHaveTextContent("Appearance › theme")
+
+    await userEvent.click(within(themeResult).getByRole("button"))
+    expect(await screen.findByRole("radiogroup", { name: "Theme" })).toBeInTheDocument()
+    expect(window.location.search).toContain("setting=appearance.theme.mode")
+    expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveValue("")
   })
 
-  it("displays Essentials tab section headings by default", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
+  it("renders EmptyState on no match with a clear button", async () => {
+    vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    // Essentials tab shows Knowledge & Ingestion and AI Features
-    expect(screen.getByText("Knowledge & Ingestion")).toBeInTheDocument()
-    expect(screen.getByText("AI Features")).toBeInTheDocument()
-  })
+    await screen.findByRole("navigation", { name: "Settings categories" })
 
-  it("shows error state when fetch fails", async () => {
-    vi.stubGlobal("fetch", mockFetch({ detail: "Server error" }, 500))
-    render(<SettingsPane />, { wrapper })
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "zzznomatch")
+    expect(await screen.findByText(/No settings match/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear search" }))
     await waitFor(() => {
-      expect(screen.getByText(/server error/i)).toBeInTheDocument()
+      expect(screen.queryByText(/No settings match/)).not.toBeInTheDocument()
     })
   })
 
-  it("shows hallucination check toggle", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
+  it("'/' focuses the search input", async () => {
+    vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    // Appears in AI Features toggle on Essentials tab
-    expect(screen.getAllByText(/Hallucination Check/i).length).toBeGreaterThanOrEqual(1)
-  })
+    await screen.findByRole("navigation", { name: "Settings categories" })
 
-  it("shows domains in taxonomy section on System tab", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    const user = userEvent.setup()
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    await clickTab("System")
-    // Taxonomy section defaults to collapsed — expand it first
-    const taxonomyHeading = await screen.findByText("Taxonomy")
-    await user.click(taxonomyHeading)
-    expect(await screen.findByText("coding")).toBeInTheDocument()
-  })
-
-  it("renders Switch components for feature toggles", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    // Switch components render as role=switch buttons
-    const switches = screen.getAllByRole("switch")
-    expect(switches.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it("shows Retrieval Pipeline on Pipeline tab (advanced mode)", async () => {
-    localStorage.setItem("cerid-ui-mode", "advanced")
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    await clickTab("Pipeline")
-    expect(await screen.findByText("Retrieval Pipeline")).toBeInTheDocument()
-  })
-
-  it("shows Connection section on System tab", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    await clickTab("System")
-    expect(await screen.findByText("Connection")).toBeInTheDocument()
-    expect(await screen.findByText("Platform Capabilities")).toBeInTheDocument()
-  })
-
-  it("renders Essentials and System tab triggers in simple mode (Pipeline/Governance/Plugins hidden)", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    // Default wrapper → simple mode (no onboarding-complete set)
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    expect(screen.getByRole("tab", { name: "Essentials" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "System" })).toBeInTheDocument()
-    // Advanced-only tabs must not be present in simple mode
-    expect(screen.queryByRole("tab", { name: "Pipeline" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("tab", { name: "Governance" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("tab", { name: "Plugins" })).not.toBeInTheDocument()
-  })
-
-  it("renders Pipeline, Governance, and Plugins tab triggers in advanced mode", async () => {
-    localStorage.setItem("cerid-ui-mode", "advanced")
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    expect(screen.getByRole("tab", { name: "Pipeline" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Governance" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Plugins" })).toBeInTheDocument()
-  })
-
-  it("shows 'Show advanced surfaces' toggle on Essentials tab", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    expect(screen.getByText("Show advanced surfaces")).toBeInTheDocument()
-  })
-
-  it("renders preset buttons", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    // Emoji and label are in separate spans; check for labels only
-    expect(screen.getByText("Quick")).toBeInTheDocument()
-    expect(screen.getByText("Balanced")).toBeInTheDocument()
-    expect(screen.getByText("Maximum")).toBeInTheDocument()
-  })
-
-  it("shows Self-RAG toggle in AI Features section", async () => {
-    vi.stubGlobal("fetch", mockFetch({ ...mockSettings, enable_self_rag: true }))
-    render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    expect(screen.getByText("Self-RAG Validation")).toBeInTheDocument()
+    await userEvent.keyboard("/")
+    expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus()
   })
 })
 
-// ---------------------------------------------------------------------------
-// D.2: four-state matrix
-// ---------------------------------------------------------------------------
-
-describe("SettingsPane — four-state matrix (D.2)", () => {
-  it("idle/loading: shows loading spinner while fetching", () => {
-    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
+describe("SettingsPane shell — deep links + redirects", () => {
+  it("?setting= lands on the owning category and anchors the row", async () => {
+    window.history.replaceState({}, "", "/?setting=appearance.theme.mode")
+    vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
-    expect(screen.getByText(/loading settings/i)).toBeInTheDocument()
-  })
-
-  it("loaded: renders settings after successful fetch", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
-    expect(await screen.findByText("Knowledge & Ingestion")).toBeInTheDocument()
-  })
-
-  it("empty/idle: no special empty state — settings always returns data on success", () => {
-    // Settings always has data when loaded; the empty state is N/A for this pane.
-    // This test confirms no crash on initial render before fetch resolves.
-    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
-    expect(() => render(<SettingsPane />, { wrapper })).not.toThrow()
-  })
-
-  it("error: shows error message and Retry button on fetch failure", async () => {
-    vi.stubGlobal("fetch", mockFetch({ detail: "Internal Server Error" }, 500))
-    render(<SettingsPane />, { wrapper })
+    expect(await screen.findByRole("radiogroup", { name: "Theme" })).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+      expect(document.getElementById("appearance.theme.mode")).toBeInTheDocument()
     })
   })
-})
 
-// ---------------------------------------------------------------------------
-// D.3: axe-clean
-// ---------------------------------------------------------------------------
-
-describe("SettingsPane — axe-clean (D.3)", () => {
-  it("is axe-clean (D.3) in loading state", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
-    const { container } = render(<SettingsPane />, { wrapper })
-    expect(await axe(container)).toHaveNoViolations()
+  it("?diagnostics_tab= lands on the Diagnostics console entry unchanged", async () => {
+    window.history.replaceState({}, "", "/?diagnostics_tab=analytics")
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    expect(await screen.findByTestId("diagnostics-console")).toHaveTextContent("diagnostics:analytics")
   })
 
-  it("is axe-clean (D.3) in error state", async () => {
-    vi.stubGlobal("fetch", mockFetch({ detail: "fail" }, 500))
-    const { container } = render(<SettingsPane />, { wrapper })
-    await waitFor(() => screen.getByRole("button", { name: /retry/i }))
-    expect(await axe(container)).toHaveNoViolations()
+  it("redirects legacy cerid-settings-tab values through the J-4 map", async () => {
+    localStorage.setItem("cerid-settings-tab", "governance")
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    await waitFor(() => {
+      expect(within(nav).getByRole("button", { name: /Extensions/ })).toHaveAttribute(
+        "aria-current",
+        "page",
+      )
+    })
   })
 
-  it("is axe-clean (D.3) in populated state (Essentials tab)", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    const { container } = render(<SettingsPane />, { wrapper })
-    await screen.findByText("Knowledge & Ingestion")
-    expect(await axe(container)).toHaveNoViolations()
+  it("prefers the new cerid-settings-category key over the legacy tab key", async () => {
+    localStorage.setItem("cerid-settings-tab", "governance")
+    localStorage.setItem("cerid-settings-category", "privacy")
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    await waitFor(() => {
+      expect(within(nav).getByRole("button", { name: /Privacy/ })).toHaveAttribute(
+        "aria-current",
+        "page",
+      )
+    })
   })
 })

@@ -286,3 +286,212 @@ cleanup_zombies() {
         fi
     done <<< "$zombies"
 }
+
+# ── detect_conflicts ─────────────────────────────────────────────────────────
+# Defensive preflight for the cross-project/cross-dir squatter class that
+# cleanup_zombies MISSES — it only reaps *stopped* containers and treats every
+# ai-companion-*/cerid-* as ours. A *running* container from a DIFFERENT compose
+# project or working dir that holds one of our exact container_names makes
+# `docker compose up` die with a raw daemon "name is already in use" error and
+# zero remediation hint.
+#
+# Real trigger (2026-06-06): the public-mirror repo's compose (same hardcoded
+# container_names + ports) was run from ~/Develop/cerid-ai, creating project
+# "cerid-ai" that held the personal names while running; the personal rebuild
+# (project "cerid-ai-internal") then collided.
+#
+# Usage: detect_conflicts <our_project> <our_dir> <name1> [name2 ...]
+# Returns non-zero (caller aborts) if unresolved foreign holders remain.
+#   CERID_RECLAIM=true  → stop+rm the foreign holders and continue
+#   interactive TTY     → prompt to reclaim
+#   non-interactive     → abort with a precise message + the one-liner fix
+#                         (never auto-destroys another instance unprompted)
+detect_conflicts() {
+    local our_project="$1" our_dir="$2"; shift 2
+    local foreign=()
+    local name cid proj dir state
+    for name in "$@"; do
+        [ -z "$name" ] && continue
+        cid=$(docker ps -aq --filter "name=^/${name}$" 2>/dev/null | head -1)
+        [ -z "$cid" ] && continue
+        proj=$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project" }}' 2>/dev/null || true)
+        dir=$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null || true)
+        state=$(docker inspect "$cid" --format '{{.State.Status}}' 2>/dev/null || true)
+        # Ours iff same project AND (no dir label OR same dir). Else foreign.
+        if [ "$proj" = "$our_project" ] && { [ -z "$dir" ] || [ "$dir" = "$our_dir" ]; }; then
+            continue
+        fi
+        foreign+=("${name}|${proj:-<none>}|${dir:-<none>}|${state}")
+    done
+
+    [ "${#foreign[@]}" -eq 0 ] && return 0
+
+    {
+        echo ""
+        echo "[conflict] Container names needed by THIS instance are held by a"
+        echo "[conflict] different instance (project/dir mismatch) — 'docker compose"
+        echo "[conflict] up' would fail with a raw name-conflict. This instance:"
+        echo "             project=${our_project}  dir=${our_dir}"
+        local entry n p d s
+        for entry in "${foreign[@]}"; do
+            IFS='|' read -r n p d s <<< "$entry"
+            echo "  - ${n}  ←  project=${p}  dir=${d}  (${s})"
+        done
+    } >&2
+
+    local reclaim=false
+    if [ "${CERID_RECLAIM:-}" = "true" ]; then
+        reclaim=true
+    elif [ -t 0 ]; then
+        local ans=""
+        read -r -p "[conflict] Reclaim these names for this instance (stop+rm them)? [y/N]: " ans </dev/tty 2>/dev/null || ans="n"
+        case "${ans}" in y|Y|yes|YES) reclaim=true ;; *) reclaim=false ;; esac
+    fi
+
+    if [ "$reclaim" != "true" ]; then
+        {
+            echo "[conflict] Aborting — refusing to silently take over another instance's"
+            echo "[conflict] containers. To take them over for this instance, re-run with:"
+            echo "             CERID_RECLAIM=true \"\$0\"   (or: ./scripts/start-cerid.sh --reclaim)"
+            echo "[conflict] Or stop the other instance first (e.g. \`docker compose -p <project> down\`)."
+        } >&2
+        return 1
+    fi
+
+    local entry n p d s
+    for entry in "${foreign[@]}"; do
+        IFS='|' read -r n p d s <<< "$entry"
+        if docker rm -f "$n" >/dev/null 2>&1; then
+            echo "[conflict] Reclaimed ${n} (removed foreign container from project=${p})." >&2
+        else
+            echo "[conflict] ERROR: failed to remove ${n}" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
+# ── detect_port_conflicts ────────────────────────────────────────────────────
+# Reports host ports that are already bound by something that is NOT one of our
+# containers, before `docker compose up` fails with a bind error. Best-effort:
+# uses lsof (present on macOS/most Linux); silent no-op if lsof is unavailable.
+# Usage: detect_port_conflicts <port1> [port2 ...]   (warn-only, never aborts)
+detect_port_conflicts() {
+    command -v lsof >/dev/null 2>&1 || return 0
+    local port pids hits=0
+    for port in "$@"; do
+        [ -z "$port" ] && continue
+        pids=$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true)
+        [ -z "$pids" ] && continue
+        # If the listener is com.docker.backend / vpnkit (a published container
+        # port), we can't easily attribute it here — leave conflict reclaim to
+        # detect_conflicts. Only warn for clearly-foreign non-docker listeners.
+        local cmd
+        cmd=$(ps -o comm= -p "$(echo "$pids" | head -1)" 2>/dev/null || true)
+        case "$cmd" in
+            *docker*|*vpnkit*|*com.docker*) : ;;  # docker-published; handled by detect_conflicts
+            *) warn "Port ${port} already in use by '${cmd:-pid $pids}' — Cerid needs it; stop that process or change the CERID_PORT_* override."; hits=$((hits+1)) ;;
+        esac
+    done
+    return 0
+}
+
+# ── detect_datadir_conflicts ─────────────────────────────────────────────────
+# THE guard against the silent data-CORRUPTION class, which detect_conflicts
+# (a container-NAME guard) does not cover: two containers from DIFFERENT
+# instances bind-mounting the SAME host data dir. Redis (AOF) and Neo4j are not
+# multi-process-safe on one store — the second opener corrupts the first's data
+# and crash-loops. The name and the mount are independent: different container
+# names can still point at the same dir, so this check is separate.
+#
+# Real trigger (2026-06-07): the public mirror's docker-compose.yml (which had
+# drifted to name: cerid-ai-internal) was run from ~/Develop/cerid-ai, mounting
+# cerid-ai/stacks/.../data/redis — the SAME dir the cerid-public-sandbox redis
+# already held → AOF corruption + an opaque crash-loop.
+#
+# Usage: detect_datadir_conflicts <our_project> <our_dir> <abs_data_dir...>
+# Returns non-zero (caller aborts) if a foreign RUNNING container mounts one of
+# our data dirs. Never auto-destroys — corrupting the held instance's live data
+# is exactly what we're preventing, so the caller is told to stop it explicitly.
+detect_datadir_conflicts() {
+    local our_project="$1" our_dir="$2"; shift 2
+    [ "$#" -eq 0 ] && return 0
+    local clashes=()
+    local cid proj wdir cname srcs src ddir
+    for cid in $(docker ps -q 2>/dev/null); do
+        proj=$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project" }}' 2>/dev/null || true)
+        wdir=$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null || true)
+        # Ours iff same project AND (no dir label OR same dir) — mirror detect_conflicts.
+        if [ "$proj" = "$our_project" ] && { [ -z "$wdir" ] || [ "$wdir" = "$our_dir" ]; }; then
+            continue
+        fi
+        cname=$(docker inspect "$cid" --format '{{.Name}}' 2>/dev/null | sed 's#^/##')
+        srcs=$(docker inspect "$cid" --format '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}{{"\n"}}{{end}}{{end}}' 2>/dev/null || true)
+        for ddir in "$@"; do
+            [ -z "$ddir" ] && continue
+            while IFS= read -r src; do
+                [ -z "$src" ] && continue
+                [ "$src" = "$ddir" ] && clashes+=("${ddir}|${cname}|${proj:-<none>}|${wdir:-<none>}")
+            done <<< "$srcs"
+        done
+    done
+
+    [ "${#clashes[@]}" -eq 0 ] && return 0
+
+    {
+        echo ""
+        echo "[datadir] ABORT — a DIFFERENT running instance is already bind-mounting a"
+        echo "[datadir] data directory THIS instance needs. Starting now would put two"
+        echo "[datadir] processes on one store (Redis AOF / Neo4j) and CORRUPT it."
+        echo "[datadir]   this instance: project=${our_project} dir=${our_dir}"
+        local e dd cn p w
+        for e in "${clashes[@]}"; do
+            IFS='|' read -r dd cn p w <<< "$e"
+            echo "  - ${dd}"
+            echo "        held by: ${cn}  (project=${p}  dir=${w})"
+        done
+        echo "[datadir] Fix: stop the other instance first (e.g. \`docker compose -p <project> down\`)"
+        echo "[datadir] or point it at its own data dir. Not auto-resolved — that would risk"
+        echo "[datadir] the other instance's live data."
+    } >&2
+    return 1
+}
+
+# ── ensure_redis_aof_healthy ─────────────────────────────────────────────────
+# Self-heal for the opaque redis crash-loop class: a corrupt/truncated AOF (from
+# an unclean shutdown or a past double-mount) makes redis exit during load and
+# crash-loop, which strands mcp/web in `Created` (they gate on redis health)
+# with no obvious signal. Validate the AOF before compose up; on corruption,
+# back up the appendonlydir and repair in place — redis-check-aof --fix truncates
+# only the trailing bad record (the fix the error message itself prescribes).
+#
+# Uses a throwaway redis container so it works without a host redis-server.
+# Usage: ensure_redis_aof_healthy <redis_data_dir>   (warn-only; never aborts)
+ensure_redis_aof_healthy() {
+    local data_dir="$1"
+    local aof_dir="$data_dir/appendonlydir"
+    # Keep this in step with the redis image pinned in docker-compose.yml.
+    local redis_image="redis:7.4.8-alpine"
+    [ -f "$aof_dir/appendonly.aof.manifest" ] || return 0   # no multi-part AOF yet
+    command -v docker >/dev/null 2>&1 || return 0
+
+    if docker run --rm -v "$aof_dir":/aof "$redis_image" \
+        sh -c 'cd /aof && redis-check-aof appendonly.aof.manifest' >/dev/null 2>&1; then
+        return 0                                            # valid → fast path
+    fi
+
+    warn "Redis AOF at $aof_dir looks corrupt — repairing before start (prevents a crash-loop)."
+    local backup
+    backup="${aof_dir}.bak-$(date +%Y%m%d-%H%M%S)"
+    if ! cp -R "$aof_dir" "$backup" 2>/dev/null; then
+        echo "[redis] WARN: could not back up the AOF; skipping repair to avoid data loss." >&2
+        return 0
+    fi
+    echo "[redis] Backed up corrupt AOF → $backup"
+    if docker run --rm -v "$aof_dir":/aof "$redis_image" \
+        sh -c 'cd /aof && printf "y\n" | redis-check-aof --fix appendonly.aof.manifest' >/dev/null 2>&1; then
+        pass "Redis AOF repaired (backup at $backup)"
+    else
+        echo "[redis] WARN: redis-check-aof --fix failed; restore from $backup if redis won't start." >&2
+    fi
+}

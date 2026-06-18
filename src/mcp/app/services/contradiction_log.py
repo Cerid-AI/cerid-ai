@@ -149,10 +149,53 @@ async def log_contradiction(finding: ContradictionFinding) -> str:
 
     driver = get_neo4j()
     try:
-        return _neo4j_adapter.record_contradiction(driver, finding)
+        result = _neo4j_adapter.record_contradiction(driver, finding)
     except Exception as exc:
         log_swallowed_error("contradiction_log", exc, context={"finding_id": finding.finding_id})
         raise
+
+    # Tephra Cycle-2 — write 'contradict' KnowledgeLog entry so the ledger
+    # is unified and the event shows on the Timeline event-horizon strip.
+    # The writer is one line; the action "contradict" is already declared in
+    # the KnowledgeLog schema docstring but had no write path until now.
+    try:
+        from app.db.neo4j.knowledge_log import append_log_entry as _append_klog  # noqa: PLC0415
+
+        _append_klog(
+            driver,
+            action="contradict",
+            entity_slug=finding.entity_slug or "",
+            summary=(finding.claim_a_text[:120] + " ↔ " + finding.claim_b_text[:120])[:200],
+            source_artifact_id=(finding.source_artifacts[0] if finding.source_artifacts else None),
+        )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "contradiction_log.knowledge_log_write",
+            exc,
+            context={"finding_id": finding.finding_id},
+        )
+
+    # Phase K2.3 — emit contradiction_detected event so the wiki refresh
+    # subscriber can fire immediately (force=True bypasses debounce —
+    # when the corpus disagrees with itself, the user deserves a fresh
+    # summary now). No-op when no entity slug is attached.
+    if finding.entity_slug:
+        try:
+            from app.processor.event_hooks import emit  # noqa: PLC0415
+
+            emit("contradiction_detected", {
+                "finding_id": finding.finding_id,
+                "entity_slug": finding.entity_slug,
+                "severity": finding.severity,
+            })
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "contradiction_log.emit_event",
+                exc,
+                context={"finding_id": finding.finding_id},
+            )
+
+    return result
 
 
 async def list_recent(

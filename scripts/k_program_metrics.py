@@ -1,0 +1,494 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Knowledge-architecture success-metrics collector.
+
+Six metrics: wiki_coverage_pct, wiki_p95_staleness_hours,
+faithfulness_compiled, chunks_per_answer_reduction_pct,
+memory_entity_linkage_pct, contradiction_surfacing_p95_hours.
+
+Usage::
+
+    python scripts/k_program_metrics.py [--output PATH] [--cron]
+
+``--cron`` appends a timestamped row to the current week's
+``tasks/<monday>-k-program-metrics.md``. Reads from Neo4j
+($NEO4J_*) and Redis ($REDIS_URL); silently emits ``available:
+false`` when env unset.
+
+Two run contexts:
+
+* **Inside docker** (`docker exec ai-companion-mcp python
+  scripts/k_program_metrics.py --cron`) — env vars are seeded by
+  ``compose`` so hostnames like ``ai-companion-neo4j`` resolve via
+  the bridge network.
+* **From the host** — the script auto-loads repo-root ``.env`` so
+  ``NEO4J_PASSWORD`` etc. are picked up. Override the docker-network
+  hostnames to ``localhost`` (preserve auth in the Redis URL)::
+
+      NEO4J_URI=bolt://localhost:7687 \
+      REDIS_URL="redis://:${REDIS_PASSWORD}@localhost:6379/0" \
+        .venv/bin/python scripts/k_program_metrics.py --cron
+
+Recommended schedule for the S4 soak: a daily cron at midnight UTC
+during the 14-day window, writing into a single Monday-rooted
+weekly file under ``tasks/``.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+# Add src/mcp to path so we can reuse the app's deps
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / "src" / "mcp"))
+
+
+def _load_dotenv_into_environ() -> None:
+    """Best-effort load of repo-root .env so the operator can run this
+    script outside Docker without exporting credentials by hand. Lines
+    already in os.environ win (Docker / CI context). Quoted values are
+    stripped. Lines starting with '#' or blank are skipped.
+
+    Silent on missing file — the metrics functions already report
+    available: false when credentials aren't reachable.
+    """
+    env_path = _REPO_ROOT / ".env"
+    if not env_path.exists():
+        return
+    try:
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key in os.environ:  # caller-set env wins
+                continue
+            value = value.strip().strip('"').strip("'")
+            os.environ[key] = value
+    except OSError:
+        return
+
+
+def _get_neo4j():
+    """Get a Neo4j driver. Returns None when env not configured.
+
+    Notification filters silence the property-key-does-not-exist warnings
+    the driver emits when a fresh corpus hasn't materialized fields like
+    ``summary_updated_at`` yet — those are diagnosis, not failure modes,
+    and they would otherwise pollute the JSON payload on stdout.
+    """
+    try:
+        from neo4j import GraphDatabase
+
+        uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+        user = os.environ.get("NEO4J_USER", "neo4j")
+        password = os.environ.get("NEO4J_PASSWORD")
+        if not password:
+            return None
+        return GraphDatabase.driver(
+            uri,
+            auth=(user, password),
+            notifications_disabled_classifications=["UNRECOGNIZED"],
+        )
+    except Exception:  # noqa: BLE001 — driver-side error surfaces in JSON "error" field
+        return None
+
+
+def _get_redis():
+    """Get a Redis client. Returns None when env not configured."""
+    try:
+        import redis
+
+        url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        return redis.from_url(url)
+    except Exception:  # noqa: BLE001 — driver-side error surfaces in JSON "error" field
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Metric 1 — wiki coverage (active entities with summary)
+# ---------------------------------------------------------------------------
+
+
+def metric_wiki_coverage(driver) -> dict[str, Any]:
+    """% active entities with summary. Active = mention_count >= 5."""
+    if driver is None:
+        return {"available": False, "reason": "neo4j_unavailable"}
+    try:
+        with driver.session() as session:
+            row = session.run(
+                """
+                MATCH (e:Entity)
+                WHERE coalesce(e.mention_count, 0) >= 5
+                WITH count(e) AS active,
+                     sum(CASE WHEN e.summary IS NOT NULL THEN 1 ELSE 0 END) AS with_summary
+                RETURN active, with_summary
+                """
+            ).single()
+            active = int(row["active"]) if row else 0
+            with_summary = int(row["with_summary"]) if row else 0
+        return {
+            "available": True,
+            "target_pct": 80.0,
+            "actual_pct": round(100.0 * with_summary / active, 2) if active else 0.0,
+            "denominator": active,
+            "numerator": with_summary,
+            "meets_target": (with_summary / active >= 0.80) if active else False,
+        }
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
+        return {"available": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Metric 2 — p95 wiki staleness (active entities)
+# ---------------------------------------------------------------------------
+
+
+def metric_wiki_staleness(driver) -> dict[str, Any]:
+    """p95 hours since summary_updated_at for entities with mention_count >= 10."""
+    if driver is None:
+        return {"available": False, "reason": "neo4j_unavailable"}
+    try:
+        now = datetime.now(tz=timezone.utc)
+        with driver.session() as session:
+            rows = session.run(
+                """
+                MATCH (e:Entity)
+                WHERE coalesce(e.mention_count, 0) >= 10
+                  AND e.summary_updated_at IS NOT NULL
+                RETURN e.summary_updated_at AS ts
+                """
+            )
+            ages_hours: list[float] = []
+            for r in rows:
+                ts = r["ts"]
+                try:
+                    dt = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    delta_h = (now - dt).total_seconds() / 3600.0
+                    if delta_h >= 0:
+                        ages_hours.append(delta_h)
+                except (ValueError, TypeError):
+                    continue
+        if not ages_hours:
+            return {"available": True, "target_hours": 168, "actual_hours": None, "denominator": 0}
+        ages_hours.sort()
+        idx = max(0, int(0.95 * len(ages_hours)) - 1)
+        p95 = ages_hours[idx]
+        return {
+            "available": True,
+            "target_hours": 168,  # 7 days
+            "actual_hours": round(p95, 2),
+            "denominator": len(ages_hours),
+            "meets_target": p95 <= 168,
+        }
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
+        return {"available": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Metric 3 — faithfulness on compiled-summary intent (placeholder — RAGAS path)
+# ---------------------------------------------------------------------------
+
+
+def metric_faithfulness(redis_client) -> dict[str, Any]:
+    """RAGAS faithfulness on compiled_summary intent class.
+
+    Reads from the nightly RAGAS run output, keyed by intent class.
+    The CI ragas-eval job writes results into Redis under
+    ``cerid:ragas:by_intent:<intent>`` as a JSON-encoded summary.
+    """
+    if redis_client is None:
+        return {"available": False, "reason": "redis_unavailable"}
+    try:
+        raw = redis_client.get("cerid:ragas:by_intent:compiled_summary")
+        if not raw:
+            return {
+                "available": True,
+                "target": 0.92,
+                "actual": None,
+                "denominator": 0,
+                "note": "no RAGAS by-intent data yet; runs nightly via ragas-eval CI",
+            }
+        data = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+        faithfulness = data.get("faithfulness")
+        n = data.get("n", 0)
+        return {
+            "available": True,
+            "target": 0.92,
+            "actual": round(float(faithfulness), 3) if faithfulness is not None else None,
+            "denominator": n,
+            "meets_target": float(faithfulness or 0) >= 0.92,
+        }
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
+        return {"available": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Metric 4 — chunks per answer reduction (compiled-summary class)
+# ---------------------------------------------------------------------------
+
+
+def _median(values: list[float]) -> float | None:
+    """Median of a list, or None when empty. Even length → mean of the two
+    middle samples."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2:
+        return float(ordered[mid])
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _read_chunks_samples(redis_client, stream: str, bucket: str) -> list[float]:
+    """Read one day's chunks-per-answer samples for a stream as floats."""
+    key = f"cerid:metrics:chunks_per_answer:samples:{stream}:{bucket}"
+    out: list[float] = []
+    for v in redis_client.lrange(key, 0, -1) or []:
+        try:
+            out.append(float(v if isinstance(v, str) else v.decode()))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def metric_chunks_per_answer(redis_client, now: datetime | None = None) -> dict[str, Any]:
+    """Median chunks fetched per answer for the compiled-summary class.
+
+    Compares today's compiled-summary arm against the baseline arm a week
+    ago — a stable denominator unaffected by today's traffic mix. Both arms
+    are populated per-answer by ``core.utils.cache.record_chunks_per_answer``
+    on the ``pkb_answer_with_citations`` path, keyed by
+    ``cerid:metrics:chunks_per_answer:samples:<stream>:<bucket>``. ``now`` is
+    injectable for tests.
+    """
+    if redis_client is None:
+        return {"available": False, "reason": "redis_unavailable"}
+    try:
+        now = now or datetime.now(tz=timezone.utc)
+        bucket = now.strftime("%Y-%m-%d")
+        prev_week = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        cur = _median(_read_chunks_samples(redis_client, "compiled_summary", bucket))
+        baseline = _median(_read_chunks_samples(redis_client, "baseline", prev_week))
+        if cur is None or baseline is None:
+            return {
+                "available": True,
+                "target_reduction_pct": 30.0,
+                "actual_reduction_pct": None,
+                "note": "needs a week of data; daily buckets accumulate post-deploy",
+            }
+        reduction = 100.0 * (baseline - cur) / baseline if baseline else 0.0
+        return {
+            "available": True,
+            "target_reduction_pct": 30.0,
+            "actual_reduction_pct": round(reduction, 1),
+            "current_median": round(cur, 2),
+            "baseline_median": round(baseline, 2),
+            "meets_target": reduction >= 30.0,
+        }
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
+        return {"available": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Metric 5 — memory → entity linkage rate
+# ---------------------------------------------------------------------------
+
+
+def metric_memory_entity_linkage(driver) -> dict[str, Any]:
+    """% of memory artifacts with at least one MENTIONS edge."""
+    if driver is None:
+        return {"available": False, "reason": "neo4j_unavailable"}
+    try:
+        with driver.session() as session:
+            row = session.run(
+                """
+                MATCH (m:Artifact)
+                WHERE m.memory_type IS NOT NULL
+                  AND coalesce(m.archived, false) = false
+                WITH count(m) AS total,
+                     sum(CASE WHEN exists((m)-[:MENTIONS]->(:Entity)) THEN 1 ELSE 0 END) AS linked
+                RETURN total, linked
+                """
+            ).single()
+            total = int(row["total"]) if row else 0
+            linked = int(row["linked"]) if row else 0
+        return {
+            "available": True,
+            "target_pct": 70.0,
+            "actual_pct": round(100.0 * linked / total, 2) if total else 0.0,
+            "denominator": total,
+            "numerator": linked,
+            "meets_target": (linked / total >= 0.70) if total else False,
+        }
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
+        return {"available": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Metric 6 — contradiction surfacing p95
+# ---------------------------------------------------------------------------
+
+
+def metric_contradiction_surfacing(driver) -> dict[str, Any]:
+    """p95(detected_at -> first_user_view_of_entity).
+
+    Approximation: takes the Sunday-cron drift-lint enqueues as the
+    "first surface" event since the wiki refresh that follows actually
+    shows the contradiction in the UI. The exact "first user view"
+    metric requires UI telemetry not yet wired.
+    """
+    if driver is None:
+        return {"available": False, "reason": "neo4j_unavailable"}
+    try:
+        with driver.session() as session:
+            rows = session.run(
+                """
+                MATCH (f:ContradictionFinding)<-[:HAS_CONTRADICTION]-(e:Entity)
+                WHERE f.detected_at IS NOT NULL
+                  AND e.summary_updated_at IS NOT NULL
+                  AND e.summary_updated_at > f.detected_at
+                RETURN f.detected_at AS detected, e.summary_updated_at AS surfaced
+                """
+            )
+            deltas_hours: list[float] = []
+            for r in rows:
+                try:
+                    d = datetime.fromisoformat(r["detected"])
+                    s = datetime.fromisoformat(r["surfaced"])
+                    if d.tzinfo is None:
+                        d = d.replace(tzinfo=timezone.utc)
+                    if s.tzinfo is None:
+                        s = s.replace(tzinfo=timezone.utc)
+                    delta_h = (s - d).total_seconds() / 3600.0
+                    if delta_h >= 0:
+                        deltas_hours.append(delta_h)
+                except (ValueError, TypeError):
+                    continue
+        if not deltas_hours:
+            return {"available": True, "target_hours": 24, "actual_hours": None, "denominator": 0}
+        deltas_hours.sort()
+        idx = max(0, int(0.95 * len(deltas_hours)) - 1)
+        p95 = deltas_hours[idx]
+        return {
+            "available": True,
+            "target_hours": 24,
+            "actual_hours": round(p95, 2),
+            "denominator": len(deltas_hours),
+            "meets_target": p95 <= 24,
+            "note": "approximation via summary_updated_at; exact UI-view metric requires telemetry wiring",
+        }
+    except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
+        return {"available": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
+def collect_all() -> dict[str, Any]:
+    driver = _get_neo4j()
+    redis_client = _get_redis()
+    snapshot = {
+        "captured_at": datetime.now(tz=timezone.utc).isoformat(),
+        "metrics": {
+            "wiki_coverage": metric_wiki_coverage(driver),
+            "wiki_staleness": metric_wiki_staleness(driver),
+            "faithfulness_compiled": metric_faithfulness(redis_client),
+            "chunks_per_answer_reduction": metric_chunks_per_answer(redis_client),
+            "memory_entity_linkage": metric_memory_entity_linkage(driver),
+            "contradiction_surfacing": metric_contradiction_surfacing(driver),
+        },
+    }
+    # Top-level meets_target summary
+    targets_met = 0
+    targets_eval = 0
+    for name, m in snapshot["metrics"].items():
+        if m.get("available") and "meets_target" in m:
+            targets_eval += 1
+            if m["meets_target"]:
+                targets_met += 1
+    snapshot["targets_met"] = targets_met
+    snapshot["targets_evaluated"] = targets_eval
+    if driver is not None:
+        driver.close()
+    return snapshot
+
+
+def append_to_weekly_log(snapshot: dict[str, Any]) -> Path:
+    """Append a one-line summary to tasks/2026-MM-DD-k-program-metrics.md.
+
+    Auto-creates the weekly file (Monday-of-week dated) so each S5 soak
+    week gets its own row of snapshots. Markdown table format keeps it
+    diff-friendly and human-readable.
+    """
+    now = datetime.now(tz=timezone.utc)
+    # Monday of the current ISO week
+    monday = now - timedelta(days=now.weekday())
+    week_path = Path(__file__).resolve().parent.parent / "tasks" / f"{monday.strftime('%Y-%m-%d')}-k-program-metrics.md"
+    is_new = not week_path.exists()
+    with week_path.open("a") as f:
+        if is_new:
+            f.write("# K-program metrics — week of " + monday.strftime("%Y-%m-%d") + "\n\n")
+            f.write("Generated by `scripts/k_program_metrics.py --cron` during the S5 14-day soak.\n\n")
+            f.write("| Captured at | Coverage % | Staleness p95 h | Faithfulness | Chunks reduction % | Memory linkage % | Contradiction p95 h | Targets met |\n")
+            f.write("|---|---|---|---|---|---|---|---|\n")
+        def _fmt(value: Any) -> str:
+            """Render a metric value for the markdown table — em-dash for
+            unavailable or pre-data states so rows scan cleanly."""
+            if value is None:
+                return "—"
+            return str(value)
+
+        m = snapshot["metrics"]
+        row = (
+            f"| {snapshot['captured_at']} "
+            f"| {_fmt(m['wiki_coverage'].get('actual_pct'))} "
+            f"| {_fmt(m['wiki_staleness'].get('actual_hours'))} "
+            f"| {_fmt(m['faithfulness_compiled'].get('actual'))} "
+            f"| {_fmt(m['chunks_per_answer_reduction'].get('actual_reduction_pct'))} "
+            f"| {_fmt(m['memory_entity_linkage'].get('actual_pct'))} "
+            f"| {_fmt(m['contradiction_surfacing'].get('actual_hours'))} "
+            f"| {snapshot.get('targets_met', 0)}/{snapshot.get('targets_evaluated', 0)} |\n"
+        )
+        f.write(row)
+    return week_path
+
+
+def main() -> None:
+    # Load repo-root .env here (CLI/scheduler path) — NOT at import — so that
+    # exec-loading this module in a test never mutates the global os.environ.
+    _load_dotenv_into_environ()
+    parser = argparse.ArgumentParser(description="K-program §9 metrics collector")
+    parser.add_argument("--output", type=str, default=None, help="Write JSON to this path (default: stdout)")
+    parser.add_argument("--cron", action="store_true", help="Append weekly markdown row")
+    args = parser.parse_args()
+
+    snapshot = collect_all()
+    payload = json.dumps(snapshot, indent=2, default=str)
+
+    if args.output:
+        Path(args.output).write_text(payload, encoding="utf-8")
+        print(f"Wrote {args.output}", file=sys.stderr)
+    else:
+        print(payload)
+
+    if args.cron:
+        path = append_to_weekly_log(snapshot)
+        print(f"Appended row to {path}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
