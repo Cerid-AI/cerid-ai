@@ -252,12 +252,29 @@ def _parse_atom_entries(root: ET.Element) -> list[dict[str, str]]:
 _USER_AGENT = "CeridAI-RSS/1.0"
 
 
+_MAX_REDIRECTS = 5
+
+
+class _BlockedURLError(OSError):
+    """Raised when a fetch URL (or a redirect hop) fails the SSRF guard.
+
+    Subclasses :class:`OSError` so every existing caller (poll, validate,
+    article fetch) catches it through their current ``OSError`` handler and
+    degrades gracefully instead of surfacing an SSRF as an unhandled error.
+    """
+
+
 def _fetch_url(url: str, timeout: float = 10.0, etag: str | None = None,
                last_modified: str | None = None) -> tuple[bytes | None, dict[str, str]]:
     """Fetch a URL using httpx. Returns (body_bytes, response_headers).
 
     Returns ``(None, {})`` for 304 Not Modified.
     Raises on network/HTTP errors.
+
+    SSRF-safe: the initial URL **and every redirect hop** are checked with
+    :func:`guard_or_log`. Redirects are followed manually (``follow_redirects``
+    is off) so a public feed cannot ``302`` us onto an internal address —
+    cloud metadata (169.254.169.254), loopback, or private-range services.
     """
     headers: dict[str, str] = {"User-Agent": _USER_AGENT}
     if etag:
@@ -265,7 +282,25 @@ def _fetch_url(url: str, timeout: float = 10.0, etag: str | None = None,
     if last_modified:
         headers["If-Modified-Since"] = last_modified
 
-    resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+    current = httpx.URL(url)
+    resp: httpx.Response | None = None
+    for _hop in range(_MAX_REDIRECTS + 1):
+        if not guard_or_log(str(current), source_name="rss_feed"):
+            raise _BlockedURLError(f"SSRF-blocked URL: {current}")
+        resp = httpx.get(
+            current, headers=headers, timeout=timeout, follow_redirects=False
+        )
+        if resp.is_redirect:
+            location = resp.headers.get("location")
+            if not location:
+                break
+            current = current.join(location)
+            continue
+        break
+    else:
+        raise _BlockedURLError(f"Too many redirects following {url}")
+
+    assert resp is not None  # loop runs at least once
     if resp.status_code == 304:
         return None, {}
     resp.raise_for_status()

@@ -23,8 +23,18 @@ import secrets
 from typing import Any
 
 from app.db.neo4j import sources as srcdb
+from core.ingest.sources.kinds import KIND_FAMILY
 
 logger = logging.getLogger("ai-companion.services.webhook_tokens")
+
+# Every source kind routed through the inbound webhook receiver, derived
+# from the family map so this lookup agrees with the create-time
+# _is_webhook_backed() check (KIND_FAMILY == "webhook"). Without this,
+# chat_capture/dev_events sources are minted a token but 404 on every
+# inbound POST because only kind="webhook" was ever queried.
+_WEBHOOK_FAMILY_KINDS: tuple[str, ...] = tuple(
+    k for k, fam in KIND_FAMILY.items() if fam == "webhook"
+)
 
 
 def generate_token() -> str:
@@ -47,23 +57,26 @@ def generate_hmac_secret() -> str:
 
 
 def find_webhook_source(driver, token: str) -> dict[str, Any] | None:
-    """Look up the (:Source {kind: 'webhook'}) record whose config
-    carries this token. Returns the source record dict (with config
-    deserialized) or None if no match.
+    """Look up the webhook-family (:Source) record whose config carries
+    this token. Returns the source record dict (with config deserialized)
+    or None if no match.
 
-    Implementation: list all webhook-kind sources (typically <20)
-    and filter Python-side on the deserialized config. Cypher string
-    matching against the JSON blob is fragile because Python's
-    ``json.dumps`` adds whitespace inside object literals which
-    won't appear in a hand-built needle. A v1.1 optimization could
-    break the token out into a separate indexed property if the
-    webhook-source count grows substantially.
+    Resolves across every webhook-family kind (webhook, chat_capture,
+    dev_events) — not just kind='webhook' — so the three kinds the create
+    wizard mints tokens for are all reachable on the inbound path.
+
+    Implementation: list webhook-family sources (typically <20) and filter
+    Python-side on the deserialized config. Cypher string matching against
+    the JSON blob is fragile because Python's ``json.dumps`` adds whitespace
+    inside object literals which won't appear in a hand-built needle. A v1.1
+    optimization could break the token out into a separate indexed property
+    if the webhook-source count grows substantially.
     """
-    candidates = srcdb.list_sources(driver, kind="webhook")
-    for src in candidates:
-        config = src.get("config") or {}
-        if isinstance(config, dict) and config.get("token") == token:
-            return src
+    for kind in _WEBHOOK_FAMILY_KINDS:
+        for src in srcdb.list_sources(driver, kind=kind):
+            config = src.get("config") or {}
+            if isinstance(config, dict) and config.get("token") == token:
+                return src
     return None
 
 

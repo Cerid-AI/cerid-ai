@@ -407,6 +407,25 @@ def _reingest_artifact(
             collection.delete(ids=old_chunk_ids)
         except Exception as e:
             logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
+        # BM25 + sparse indexes dedup-skip known chunk_ids, so without an
+        # explicit removal they keep serving the PRE-edit text while ChromaDB
+        # now holds the new text — a silent corpus divergence that survives
+        # restarts (the JSONL keeps the first/old line). Drop the old chunks
+        # from both before the re-index below re-adds the fresh text.
+        try:
+            from core.retrieval.bm25 import remove_chunks as _bm25_remove
+            _bm25_remove(domain, old_chunk_ids)
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.services.ingestion.bm25_remove_reingest", e,
+            )
+        try:
+            from core.retrieval.sparse_index import remove_chunks as _sparse_remove
+            _sparse_remove(domain, old_chunk_ids)
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.services.ingestion.sparse_remove_reingest", e,
+            )
 
     # Create new chunks with contextual header
     filename = metadata.get("filename", "") if metadata else ""
@@ -684,10 +703,15 @@ def ingest_content(
     # ``tags`` merges into the Neo4j Tag taxonomy; reserved scalars +
     # ``cerid:*`` custom keys land as Artifact node properties.
     frontmatter: dict[str, Any] = {}
+    # Zero-text, metadata-only edge markers. WikilinkEdge is consumed by the
+    # graph-commit below; EmailThreadEdge is the email_strategy's analogue.
+    # Neither must reach ChromaDB — an empty document pollutes retrieval
+    # (empty/garbage zero-vector row) or errors the embedder.
+    _edge_marker_types = {"WikilinkEdge", "EmailThreadEdge"}
     if pre_chunked:
         text_pre_chunked = [
             c for c in pre_chunked
-            if c.get("metadata", {}).get("element_type") != "WikilinkEdge"
+            if c.get("metadata", {}).get("element_type") not in _edge_marker_types
         ]
         wikilink_edge_chunks = [
             c for c in pre_chunked

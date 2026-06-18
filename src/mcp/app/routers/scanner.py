@@ -13,6 +13,7 @@ import os
 import time
 import uuid
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -135,9 +136,13 @@ def _validate_scan_path(path: str) -> None:
         raise HTTPException(status_code=400, detail=f"Path does not exist or is not a directory: {path}")
 
     allowed = config.SCAN_PATHS.split(":") if hasattr(config, "SCAN_PATHS") else [config.ARCHIVE_PATH]
-    real_path = os.path.realpath(path)
+    real_path = Path(path).resolve()
     for allowed_path in allowed:
-        if real_path.startswith(os.path.realpath(allowed_path)):
+        root = Path(allowed_path).resolve()
+        # Boundary-aware containment. A raw string startswith lets a
+        # sibling-prefix path escape the allowlist (``/archive-secrets``
+        # startswith ``/archive``); require an exact match or a true parent.
+        if real_path == root or root in real_path.parents:
             return
     raise HTTPException(status_code=403, detail=f"Path not within allowed SCAN_PATHS: {path}")
 

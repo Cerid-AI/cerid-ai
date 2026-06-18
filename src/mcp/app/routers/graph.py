@@ -214,17 +214,30 @@ async def _query_neighborhood(
     if filter:
         type_filter = "AND (e.entity_type = $filter OR n.entity_type = $filter)"
 
+    # Partition reachable entities by CO_MENTIONED degree in a single pass:
+    # keep those under the cap as `related`, and surface `truncated` when any
+    # reachable entity was dropped by the cap. This replaces a Python-side
+    # check that compared the wrong property (mention_count vs CO_MENTIONED
+    # degree) over only the surviving nodes, so it never fired. No extra
+    # expansion cost — the cap previously just discarded already-expanded
+    # endpoints in the WHERE.
     cypher = f"""
         MATCH (n:Entity {{canonical_id: $entity}})
-        OPTIONAL MATCH path = (n)-[:CO_MENTIONED*1..{hops}]-(e:Entity)
+        OPTIONAL MATCH (n)-[:CO_MENTIONED*1..{hops}]-(e:Entity)
         WHERE e.canonical_id IS NOT NULL {type_filter}
-          AND COUNT {{ (e)-[:CO_MENTIONED]-() }} < $max_degree
-        WITH n, collect(DISTINCT e) AS related
+        WITH n, e, COUNT {{ (e)-[:CO_MENTIONED]-() }} AS deg
+        WITH n,
+             collect(DISTINCT CASE WHEN deg < $max_degree THEN e END) AS related_raw,
+             sum(CASE WHEN deg >= $max_degree THEN 1 ELSE 0 END) AS dropped_count
+        WITH n,
+             [x IN related_raw WHERE x IS NOT NULL] AS related,
+             dropped_count > 0 AS truncated
         UNWIND ([n] + related) AS node
         OPTIONAL MATCH (node)-[r]-(other:Entity)
         WHERE other IN ([n] + related)
         WITH DISTINCT
             node,
+            truncated,
             collect(DISTINCT {{
                 from: startNode(r).canonical_id,
                 to:   endNode(r).canonical_id,
@@ -242,7 +255,8 @@ async def _query_neighborhood(
             node.trust_state AS trust_state,
             node.recency_score AS recency_score,
             node.primary_domain AS primary_domain,
-            edges_for_node AS edges
+            edges_for_node AS edges,
+            truncated AS truncated
     """
 
     try:
@@ -294,10 +308,9 @@ async def _query_neighborhood(
                     contradiction=bool(e.get("contradiction")),
                 )
 
-    # Truncation signal: degree cap was hit somewhere in the expansion
-    truncated = any(
-        n.mention_count > _MAX_DEGREE for n in nodes
-    )
+    # Truncation signal computed at query time: True iff a reachable entity
+    # was dropped by the CO_MENTIONED degree cap (same value on every row).
+    truncated = bool(rows and rows[0].get("truncated"))
 
     return nodes, list(edges_map.values()), truncated
 

@@ -69,6 +69,41 @@ def test_find_webhook_source_tolerates_empty_or_missing_config():
         assert match["id"] == "c"
 
 
+def test_find_webhook_source_resolves_all_webhook_family_kinds():
+    """Tokens minted for chat_capture / dev_events must resolve too.
+
+    Regression: the receiver only listed kind="webhook", so chat_capture
+    and dev_events sources (also KIND_FAMILY == "webhook") were minted a
+    token at create time but 404'd on every inbound POST — dead on arrival.
+    """
+    by_kind = {
+        "webhook": [{"id": "w", "kind": "webhook", "config": {"token": "tok-w"}}],
+        "chat_capture": [
+            {"id": "c", "kind": "chat_capture", "config": {"token": "tok-c"}}
+        ],
+        "dev_events": [
+            {"id": "d", "kind": "dev_events", "config": {"token": "tok-d"}}
+        ],
+    }
+
+    def _list(driver, *, kind=None):
+        return by_kind.get(kind, [])
+
+    with patch.object(webhook_tokens.srcdb, "list_sources", side_effect=_list):
+        for token, expected_id in [("tok-c", "c"), ("tok-d", "d"), ("tok-w", "w")]:
+            match = webhook_tokens.find_webhook_source(None, token)
+            assert match is not None
+            assert match["id"] == expected_id
+        assert webhook_tokens.find_webhook_source(None, "nope") is None
+
+    # The lookup must cover exactly the webhook-family kinds, derived from
+    # the same family map the create path uses (no hardcoded kind list).
+    from core.ingest.sources.kinds import KIND_FAMILY
+
+    expected = {k for k, fam in KIND_FAMILY.items() if fam == "webhook"}
+    assert set(webhook_tokens._WEBHOOK_FAMILY_KINDS) == expected
+
+
 def test_verify_hmac_signature_accepts_prefixed_and_bare():
     secret = "test-secret"  # pragma: allowlist secret
     body = b'{"hello":"world"}'

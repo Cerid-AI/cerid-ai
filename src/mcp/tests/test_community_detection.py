@@ -109,3 +109,24 @@ def test_co_mention_cypher_in_module(fragment):
     import app.db.neo4j.community_detection as mod
     src = inspect.getsource(mod)
     assert fragment in src
+
+
+def test_detection_preserves_community_summaries():
+    """Re-detection must NOT blanket-delete Community nodes.
+
+    Regression: the old code deleted every Community node up front, wiping
+    the cached LLM `.summary` each run and defeating the summary cost-guard
+    (community_summaries: WHERE c.summary IS NULL). The fix keeps recurring
+    communities (MERGE preserves .summary) and prunes only stale ids AFTER
+    the rebuild.
+    """
+    import inspect
+
+    import app.db.neo4j.community_detection as mod
+    src = inspect.getsource(mod)
+    # The unconditional pre-rebuild node wipe must be gone (the labelled
+    # `(c:Community)` form — the tiny-community cleanup keeps an unlabelled
+    # `(c)` variant, which is fine).
+    assert "MATCH (c:Community) WHERE NOT (c)<-[:IN_COMMUNITY]-() DELETE c" not in src
+    # The stale-only prune (scoped to ids absent from this run) must exist.
+    assert "WHERE NOT c.id IN $seen DETACH DELETE c" in src

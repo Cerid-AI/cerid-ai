@@ -114,14 +114,46 @@ def _node_name(node: Any, source: bytes) -> str:
 
 
 def _walk_python(source: bytes, root: Any, file_path: str) -> list[ParsedElement]:
-    """Walk a Python module's AST, emit one element per top-level def/class/import.
+    """Walk a Python module's AST, emit one element per top-level def/class/
+    import, plus an ``Other`` element for each contiguous run of remaining
+    top-level source.
 
-    Top-level only — nested functions/classes stay inside their
-    parent's chunk so the parent's body remains coherent.
+    The residual capture covers everything the def/class/import switch used
+    to silently drop: the module docstring, top-level constants/assignments,
+    decorated defs (``decorated_definition`` nodes), ``if __name__ ==
+    "__main__"`` blocks, type aliases, and other bare statements. Without it,
+    script-style and config-heavy modules contributed nothing to retrieval.
+
+    Top-level only — nested functions/classes stay inside their parent's
+    chunk so the parent's body remains coherent.
     """
     elements: list[ParsedElement] = []
+    residual: list[Any] = []
+
+    def _flush_residual() -> None:
+        # Skip whitespace/comment-only runs (no embeddable signal).
+        if not residual:
+            return
+        first, last = residual[0], residual[-1]
+        text = source[first.start_byte : last.end_byte].decode("utf-8", errors="replace")
+        if text.strip():
+            elements.append(
+                {
+                    "text": text,
+                    "element_type": "Other",
+                    "metadata": {
+                        "file": file_path,
+                        "language": "python",
+                        "start_line": first.start_point[0] + 1,
+                        "end_line": last.end_point[0] + 1,
+                    },
+                },
+            )
+        residual.clear()
+
     for child in root.children:
         if child.type in _PY_DEF_NODES:
+            _flush_residual()
             kind: Literal["CodeFunction", "CodeClass"] = (
                 "CodeFunction" if child.type in _PY_FUNCTION_NODES else "CodeClass"
             )
@@ -142,6 +174,7 @@ def _walk_python(source: bytes, root: Any, file_path: str) -> list[ParsedElement
                 },
             )
         elif child.type in _PY_IMPORT_NODES:
+            _flush_residual()
             text = _node_text(source, child)
             elements.append(
                 {
@@ -155,6 +188,12 @@ def _walk_python(source: bytes, root: Any, file_path: str) -> list[ParsedElement
                     },
                 },
             )
+        else:
+            # Top-level content that isn't a bare def/class/import — buffer it
+            # into a contiguous residual run, flushed as one ``Other`` element.
+            residual.append(child)
+
+    _flush_residual()
     return elements
 
 

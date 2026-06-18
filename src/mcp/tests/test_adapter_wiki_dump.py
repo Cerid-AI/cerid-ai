@@ -73,6 +73,18 @@ def test_iter_pages_yields_each_page_with_namespace():
     assert pages[0].is_redirect is False
 
 
+def test_iter_pages_many_pages_all_parsed_in_order():
+    """Root-element clearing (bounded-memory fix) must not drop, duplicate,
+    or reorder pages across a large dump."""
+    specs = [
+        {"title": f"Page{i}", "namespace": 0, "text": f"body {i} " * 5}
+        for i in range(50)
+    ]
+    pages = list(iter_pages_from_dump(BytesIO(_xml_dump(specs).encode("utf-8"))))
+    assert [p.title for p in pages] == [f"Page{i}" for i in range(50)]
+    assert all(f"body {i}" in pages[i].text for i in range(50))
+
+
 def test_iter_pages_marks_redirect():
     xml = _xml_dump([
         {"title": "Wien", "namespace": 0, "text": "redirected", "redirect": True},

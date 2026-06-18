@@ -9,9 +9,11 @@ nightly by the scheduler (``SCHEDULE_RETENTION_ENFORCE``).
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
+import config
 from app.db.neo4j import sources as srcdb
 from app.deps import get_neo4j
 from core.ingest.retention import ArtifactRef, RetentionDecision, plan_for_source
@@ -57,31 +59,60 @@ def apply_retention_plan(driver, decision: RetentionDecision) -> int:
     purged = 0
     for artifact_id in decision.purge:
         try:
+            # Capture the artifact's chunk ids + domain BEFORE deleting the
+            # node — DETACH DELETE removes the only record of which Chroma
+            # vectors belong to it. WITH binds the values so they survive
+            # the delete and come back on the RETURN row.
             with driver.session() as session:
-                session.run(
+                row = session.run(
                     """
                     MATCH (a:Artifact {id: $aid})
+                    WITH a, a.chunk_ids AS chunk_ids_json, a.domain AS domain
                     DETACH DELETE a
+                    RETURN chunk_ids_json, domain
                     """,
                     aid=artifact_id,
-                )
-            # Chroma cleanup: best-effort. We attempt to delete the
-            # artifact from every domain collection; safe even when
-            # the artifact is only present in one of them.
-            try:
-                from app.deps import get_chroma
+                ).single()
 
-                chroma = get_chroma()
-                for collection in chroma.list_collections():
+            chunk_ids: list[str] = []
+            domain: str | None = None
+            if row is not None:
+                domain = row.get("domain")
+                raw = row.get("chunk_ids_json")
+                if raw:
                     try:
-                        collection.delete(ids=[artifact_id])
-                    except Exception as exc:  # noqa: BLE001
-                        # Per-collection failure is fine; Chroma raises
-                        # on missing-id deletes for some backends. Log so
-                        # the failure is visible in /health.swallowed_errors_last_hour.
-                        log_swallowed_error("retention.chroma_per_collection_delete", exc)
-            except Exception as exc:  # noqa: BLE001
-                log_swallowed_error("retention.chroma_delete", exc)
+                        chunk_ids = json.loads(raw)
+                    except (ValueError, TypeError) as exc:
+                        log_swallowed_error("retention.chunk_ids_parse", exc)
+
+            # Chroma cleanup: chunks are stored under per-chunk ids
+            # (``{artifact_id}_chunk_{i}``), never the bare artifact id, so
+            # we must delete the captured chunk ids. Prefer the artifact's
+            # own domain collection; fall back to every collection when the
+            # domain is missing (chunk ids are globally unique, so safe).
+            if chunk_ids:
+                try:
+                    from app.deps import get_chroma
+
+                    chroma = get_chroma()
+                    if domain:
+                        collections = [
+                            chroma.get_or_create_collection(
+                                name=config.collection_name(domain)
+                            )
+                        ]
+                    else:
+                        collections = chroma.list_collections()
+                    for collection in collections:
+                        try:
+                            collection.delete(ids=chunk_ids)
+                        except Exception as exc:  # noqa: BLE001
+                            # Per-collection failure is fine; Chroma raises
+                            # on missing-id deletes for some backends. Log so
+                            # the failure is visible in /health.swallowed_errors_last_hour.
+                            log_swallowed_error("retention.chroma_per_collection_delete", exc)
+                except Exception as exc:  # noqa: BLE001
+                    log_swallowed_error("retention.chroma_delete", exc)
             purged += 1
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("retention.apply_one", exc, context={"artifact_id": artifact_id})
