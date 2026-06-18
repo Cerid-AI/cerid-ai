@@ -324,6 +324,15 @@ ENABLE_SELF_CONSISTENCY = os.getenv("ENABLE_SELF_CONSISTENCY", "false").lower() 
 SELF_CONSISTENCY_SAMPLES = int(os.getenv("SELF_CONSISTENCY_SAMPLES", "5"))
 SELF_CONSISTENCY_TEMPERATURE = float(os.getenv("SELF_CONSISTENCY_TEMPERATURE", "0.7"))
 
+# Time-anchored retrieval (LongMemEval authors: +11.3% recall): an LLM extracts
+# the date RANGE a question is about and dated chunks recorded in/near that range
+# get an ADDITIVE proximity boost (never a hard filter, so a wrong window can't
+# drop recall). Default-OFF pending the full-500 A/B; the weight is on the same
+# scale as the temporal strategy's coarse year-boost (+1.0 in-window).
+ENABLE_TEMPORAL_PROXIMITY_BOOST = os.getenv("ENABLE_TEMPORAL_PROXIMITY_BOOST", "false").lower() == "true"
+TEMPORAL_PROXIMITY_WEIGHT = float(os.getenv("TEMPORAL_PROXIMITY_WEIGHT", "1.0"))
+TEMPORAL_PROXIMITY_HALFLIFE_DAYS = float(os.getenv("TEMPORAL_PROXIMITY_HALFLIFE_DAYS", "30"))
+
 ENABLE_MMR_DIVERSITY = os.getenv("ENABLE_MMR_DIVERSITY", "true").lower() == "true"
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
 
@@ -401,6 +410,7 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_query_decomposition": ENABLE_QUERY_DECOMPOSITION,
     "enable_llm_query_decomposition": ENABLE_LLM_QUERY_DECOMPOSITION,
     "enable_self_consistency": ENABLE_SELF_CONSISTENCY,
+    "enable_temporal_proximity_boost": ENABLE_TEMPORAL_PROXIMITY_BOOST,
     "enable_mmr_diversity": ENABLE_MMR_DIVERSITY,
     "enable_intelligent_assembly": ENABLE_INTELLIGENT_ASSEMBLY,
     "enable_late_interaction": ENABLE_LATE_INTERACTION,
