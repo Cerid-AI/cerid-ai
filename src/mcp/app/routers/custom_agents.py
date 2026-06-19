@@ -170,6 +170,15 @@ async def query_agent(agent_id: str, body: AgentQueryRequest):
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # This endpoint returns a single retrieval result, not an SSE stream.
+    # Reject stream=True rather than silently ignoring it (contract honesty);
+    # streaming custom-agent queries can be wired here later if needed.
+    if body.stream:
+        raise HTTPException(
+            status_code=501,
+            detail="Streaming is not supported on custom-agent queries; use stream=false.",
+        )
+
     # Delegate to the query agent with the custom agent's configuration
     from core.agents.query_agent import agent_query
 
@@ -177,7 +186,7 @@ async def query_agent(agent_id: str, body: AgentQueryRequest):
         query=body.query,
         domains=agent.get("domains") or None,
         model=agent.get("model_override") or None,
-        top_k=body.top_k if hasattr(body, "top_k") else 10,
+        top_k=10,
     )
     # Attach agent context so the caller can apply system_prompt/temperature
     result["agent_config"] = {

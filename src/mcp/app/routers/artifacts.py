@@ -68,7 +68,26 @@ def recategorize(
             meta["tags"] = tags
         updated_metadatas.append(meta)
 
-    # Update Neo4j first — if this fails, ChromaDB remains consistent
+    # Move the chunks in ChromaDB FIRST — the failure-prone cross-collection
+    # op — and verify they landed before deleting the originals. The Neo4j
+    # domain flip (a single-property update) happens LAST, so a ChromaDB
+    # failure leaves BOTH stores on the old domain instead of drifting into a
+    # Neo4j-new / ChromaDB-old split where the detail view shows empty content.
+    dest_collection.add(
+        ids=fetched["ids"],
+        documents=fetched["documents"],
+        metadatas=updated_metadatas,
+    )
+    verify = dest_collection.get(ids=fetched["ids"])
+    if set(verify["ids"]) != set(fetched["ids"]):
+        raise RuntimeError(
+            f"ChromaDB recategorize verify failed for {artifact_id}: "
+            f"{len(verify['ids'])}/{len(fetched['ids'])} chunks present in "
+            f"'{new_domain}'; leaving stores on '{old_domain}'"
+        )
+    source_collection.delete(ids=chunk_ids)
+
+    # Stores moved and verified — now flip Neo4j last.
     domains = graph.recategorize_artifact(driver, artifact_id, new_domain)
 
     # Update taxonomy if sub_category or tags provided
@@ -85,13 +104,6 @@ def recategorize(
             sub_category=sub_category or config.DEFAULT_SUB_CATEGORY,
             tags_json=tags_json,
         )
-
-    dest_collection.add(
-        ids=fetched["ids"],
-        documents=fetched["documents"],
-        metadatas=updated_metadatas,
-    )
-    source_collection.delete(ids=chunk_ids)
 
     try:
         cache.log_event(

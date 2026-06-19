@@ -12,6 +12,7 @@ MIGRATIONS = [
     "app.db.neo4j.migrations.m0002_cleanup_orphan_verification_reports",
     "app.db.neo4j.migrations.m0003_source_nodes",
     "app.db.neo4j.migrations.m0004_fact_nodes",
+    "app.db.neo4j.migrations.m0005_tenant_scoping",
 ]
 
 

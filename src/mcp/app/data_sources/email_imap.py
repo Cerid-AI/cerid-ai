@@ -191,9 +191,17 @@ def _imap_fetch_unseen(
     user: str,
     password: str,
     folder: str,
-    last_uid: str | None,
+    processed_uids: set[str],
 ) -> list[dict[str, Any]]:
     """Connect via IMAP4_SSL, fetch UNSEEN messages, return parsed dicts.
+
+    Dedup is driven entirely by the ``processed_uids`` set (the Redis processed
+    set), NOT by a UID high-water mark. The mailbox is opened read-only, so the
+    server never marks a fetched message ``\\Seen``; a UID floor would
+    permanently skip any message that was ``\\Seen`` when first polled and later
+    flagged unread again (it would fall below the advancing watermark). Filtering
+    on the processed set instead catches those, and skips the expensive RFC822
+    fetch for UIDs already ingested.
 
     This is a synchronous function — call via ``asyncio.to_thread()``.
     """
@@ -204,13 +212,8 @@ def _imap_fetch_unseen(
         if status != "OK":
             raise RuntimeError(f"Failed to select folder '{folder}': {status}")
 
-        # Build search criteria
-        criteria = "(UNSEEN)"
-        if last_uid:
-            criteria = f"(UNSEEN UID {int(last_uid) + 1}:*)"
-
-        # Use UID SEARCH
-        status, msg_nums = conn.uid("search", None, criteria)  # type: ignore[arg-type]
+        # Search every unseen message; the processed set decides what's new.
+        status, msg_nums = conn.uid("search", None, "(UNSEEN)")  # type: ignore[arg-type]
         if status != "OK" or not msg_nums or not msg_nums[0]:
             return []
 
@@ -218,8 +221,8 @@ def _imap_fetch_unseen(
         results: list[dict[str, Any]] = []
         for uid_bytes in uids:
             uid_str = uid_bytes.decode() if isinstance(uid_bytes, bytes) else str(uid_bytes)
-            # Skip UIDs we already processed (belt-and-suspenders with Redis set)
-            if last_uid and int(uid_str) <= int(last_uid):
+            # Already ingested — skip before the costly RFC822 fetch.
+            if uid_str in processed_uids:
                 continue
 
             status, msg_data = conn.uid("fetch", uid_str, "(RFC822)")
@@ -319,6 +322,8 @@ async def poll_email() -> dict[str, Any]:
 
     try:
 
+        processed_uids = await _load_processed_uids()
+
         async def _do_poll() -> list[dict[str, Any]]:
             return await asyncio.to_thread(
                 _imap_fetch_unseen,
@@ -327,7 +332,7 @@ async def poll_email() -> dict[str, Any]:
                 config["user"],
                 config["password"],
                 config["folder"],
-                config.get("last_uid"),
+                processed_uids,
             )
 
         messages = await breaker.call(_do_poll)
@@ -350,9 +355,7 @@ async def poll_email() -> dict[str, Any]:
     for msg_data in messages:
         try:
             uid = msg_data["uid"]
-            # Skip already-processed UIDs
-            if await _is_uid_processed(uid):
-                continue
+            # _imap_fetch_unseen already filtered out processed UIDs.
 
             # Build content for ingestion
             content = _format_email_for_ingestion(msg_data)
@@ -376,11 +379,6 @@ async def poll_email() -> dict[str, Any]:
         except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             errors.append(f"UID {msg_data.get('uid', '?')}: {exc}")
             logger.error("Failed to ingest email UID %s: %s", msg_data.get("uid"), exc)
-
-    # Update last UID watermark
-    if messages:
-        max_uid = max(int(m["uid"]) for m in messages)
-        await _set_last_uid(str(max_uid))
 
     await _update_poll_status(ingested, errors)
 
@@ -436,10 +434,7 @@ async def _load_email_config() -> dict[str, Any]:
         r = get_redis()
         stored = r.get(_REDIS_CONFIG_KEY)
         if stored:
-            cfg = json.loads(stored)
-            # Also load the last UID watermark
-            cfg["last_uid"] = r.get(_REDIS_LAST_UID_KEY)
-            return cfg
+            return json.loads(stored)
     except (OSError, RuntimeError):
         pass
 
@@ -454,7 +449,6 @@ async def _load_email_config() -> dict[str, Any]:
         "password": os.getenv("CERID_EMAIL_IMAP_PASSWORD", ""),
         "folder": os.getenv("CERID_EMAIL_FOLDER", "INBOX"),
         "poll_interval": int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15")),
-        "last_uid": None,
     }
 
 
@@ -509,19 +503,15 @@ async def get_email_status() -> dict[str, Any]:
     return {"last_poll": None, "messages_ingested": 0, "errors": []}
 
 
-async def _set_last_uid(uid: str) -> None:
-    from deps import get_redis
-    r = get_redis()
-    r.set(_REDIS_LAST_UID_KEY, uid)
-
-
-async def _is_uid_processed(uid: str) -> bool:
+async def _load_processed_uids() -> set[str]:
+    """Return the set of already-ingested UIDs (the dedup source of truth)."""
     try:
         from deps import get_redis
         r = get_redis()
-        return r.sismember(_REDIS_PROCESSED_KEY, uid)
+        raw = r.smembers(_REDIS_PROCESSED_KEY)
+        return {m.decode() if isinstance(m, bytes) else str(m) for m in raw}
     except (OSError, RuntimeError):
-        return False
+        return set()
 
 
 async def _mark_uid_processed(uid: str) -> None:

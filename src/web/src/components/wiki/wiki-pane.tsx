@@ -48,6 +48,9 @@ function titleCase(s: string): string {
 
 const RAIL_OPEN_KEY = "cerid-wiki-rail-open"
 
+// Backend /wiki/entities caps `limit` at 200; request the full cap for the rail.
+const WIKI_RAIL_LIMIT = 200
+
 function readRailOpen(): boolean {
   try {
     const v = localStorage.getItem(RAIL_OPEN_KEY)
@@ -103,7 +106,11 @@ export default function WikiPane() {
   const [entityName, setEntityName] = useState<string | null>(null)
   const [conceptLabel, setConceptLabel] = useState<string | null>(null)
 
-  const { data: entities, isLoading, isError, refetch } = useWikiEntities({ limit: 100 })
+  // 200 is the backend max for /wiki/entities. When the result fills the cap
+  // there may be more, so the header labels it "Showing first N" rather than
+  // claiming an exact corpus size. (Full pagination/virtualization with a
+  // backend total is a deferred enhancement — see audit follow-ups.)
+  const { data: entities, isLoading, isError, refetch } = useWikiEntities({ limit: WIKI_RAIL_LIMIT })
   const { data: domainCounts } = useQuery({
     queryKey: ["graph-domains"],
     queryFn: fetchDomainCounts,
@@ -310,7 +317,9 @@ export default function WikiPane() {
         {!isLoading && !isError && view.kind === "landing" && (
           <>
             <span className="text-xs text-muted-foreground">
-              {entityCount} {entityCount === 1 ? "entity" : "entities"}
+              {entityCount === WIKI_RAIL_LIMIT
+                ? `Showing first ${WIKI_RAIL_LIMIT}`
+                : `${entityCount} ${entityCount === 1 ? "entity" : "entities"}`}
             </span>
             {relativeUpdated && (
               <span className="ml-auto text-xs text-muted-foreground">

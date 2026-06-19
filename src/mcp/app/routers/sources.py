@@ -120,6 +120,7 @@ class SourceRecord(BaseModel):
     last_sync_at: str | None = None
     created_at: str | None = None
     last_error: str | None = None
+    quality_floor: float = 0.0
 
 
 class HealthProbeResult(BaseModel):
@@ -168,6 +169,7 @@ def _to_record(src: dict[str, Any]) -> SourceRecord:
         last_sync_at=src.get("last_sync_at"),
         created_at=src.get("created_at"),
         last_error=src.get("last_error"),
+        quality_floor=float(src.get("quality_floor", 0.0) or 0.0),
     )
 
 

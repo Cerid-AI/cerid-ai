@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ConversationList } from "@/components/chat/conversation-list"
 import type { Conversation } from "@/lib/types"
@@ -81,7 +81,7 @@ describe("ConversationList", () => {
     expect(onSelect).toHaveBeenCalledWith("c1")
   })
 
-  it("calls onDelete when delete button is clicked", async () => {
+  it("confirms before calling onDelete when a delete button is clicked", async () => {
     const user = userEvent.setup()
     const onDelete = vi.fn()
     const onSelect = vi.fn()
@@ -90,8 +90,25 @@ describe("ConversationList", () => {
     )
     const deleteButtons = screen.getAllByLabelText("Delete conversation")
     await user.click(deleteButtons[0])
+    // Per-row delete is now gated behind a confirmation dialog — onDelete must
+    // not fire on the bare click (audit: irreversible loss on one misclick).
+    expect(onDelete).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
     expect(onDelete).toHaveBeenCalledWith("c1")
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("does not call onDelete when the delete confirmation is cancelled", async () => {
+    const user = userEvent.setup()
+    const onDelete = vi.fn()
+    render(
+      <ConversationList conversations={mockConversations} activeId={null} onSelect={vi.fn()} onDelete={onDelete} {...defaultProps} />,
+    )
+    await user.click(screen.getAllByLabelText("Delete conversation")[0])
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    expect(onDelete).not.toHaveBeenCalled()
   })
 
   it("renders all conversations in order", () => {

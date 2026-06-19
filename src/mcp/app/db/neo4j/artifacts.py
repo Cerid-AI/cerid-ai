@@ -334,6 +334,63 @@ def list_artifacts(
         ]
 
 
+def list_duplicate_artifacts(driver) -> list[dict[str, Any]]:
+    """Return artifacts that share a ``content_hash`` with at least one other
+    artifact (exact duplicates), across all domains, in a single grouped
+    aggregation.
+
+    Replaces a per-domain ``list_artifacts(..., limit=10000)`` scan that
+    pulled every artifact into memory just to find the few duplicates — this
+    returns ONLY duplicate members. Each row carries the fields the duplicates
+    view needs.
+    """
+    cypher = """
+        MATCH (a:Artifact)
+        WHERE a.content_hash IS NOT NULL AND a.content_hash <> ''
+        WITH a.content_hash AS ch, collect(a) AS arts
+        WHERE size(arts) >= 2
+        UNWIND arts AS a
+        RETURN ch AS content_hash, a.id AS id, a.filename AS filename,
+               a.domain AS domain, a.summary AS summary,
+               a.quality_score AS quality_score, a.ingested_at AS ingested_at,
+               a.chunk_count AS chunk_count
+        ORDER BY ch
+    """
+    with driver.session() as session:
+        return [dict(r) for r in session.run(cypher).data()]
+
+
+def domain_artifact_stats(driver) -> dict[str, dict[str, Any]]:
+    """Per-domain artifact count, average quality, and truncated-summary
+    (synopsis-candidate) count via a single grouped aggregation — replaces a
+    per-domain 10k-row in-memory scan.
+
+    The truncated-summary predicate mirrors
+    ``core.agents.curator._is_truncated_summary`` exactly: empty / under 50
+    chars / no terminal sentence punctuation (``.!?``). Keep the two in sync.
+    """
+    cypher = """
+        MATCH (a:Artifact)
+        WITH a.domain AS domain, trim(coalesce(a.summary, '')) AS s, a.quality_score AS q
+        RETURN domain,
+               count(*) AS artifacts,
+               avg(q) AS avg_quality,
+               sum(CASE WHEN s = '' OR size(s) < 50 OR NOT s =~ '(?s).*[.!?]'
+                        THEN 1 ELSE 0 END) AS synopsis_candidates
+    """
+    out: dict[str, dict[str, Any]] = {}
+    with driver.session() as session:
+        for r in session.run(cypher).data():
+            dom = r.get("domain") or "unknown"
+            avg_q = r.get("avg_quality")
+            out[dom] = {
+                "artifacts": int(r.get("artifacts") or 0),
+                "avg_quality": round(float(avg_q), 4) if avg_q is not None else 0.0,
+                "synopsis_candidates": int(r.get("synopsis_candidates") or 0),
+            }
+    return out
+
+
 def get_quality_scores(
     driver,
     artifact_ids: list[str],

@@ -69,10 +69,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._hits: dict[str, list[float]] = defaultdict(list)
         # Per-key locks to avoid blocking unrelated endpoints
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._last_sweep: float = 0.0
 
     # Prefixes whose GETs must still be rate-limited (polling / admin surfaces).
     # Anything outside these prefixes keeps the read-only GET exemption.
     _GET_LIMITED_PREFIXES: tuple[str, ...] = ("/admin/", "/observability/")
+
+    # Idle-bucket reclamation. Without this, every distinct rate-limit key
+    # lingers forever — a slow memory leak. We prune timestamps older than the
+    # largest sane window and drop now-empty, unlocked buckets.
+    _SWEEP_INTERVAL: float = 60.0
+    _MAX_WINDOW: float = 3600.0
+
+    def _sweep_idle_buckets(self, now: float) -> None:
+        stale: list[str] = []
+        for key, hits in list(self._hits.items()):
+            fresh = [t for t in hits if now - t < self._MAX_WINDOW]
+            if fresh:
+                self._hits[key] = fresh
+                continue
+            lock = self._locks.get(key)
+            if lock is None or not lock.locked():
+                stale.append(key)
+        for key in stale:
+            self._hits.pop(key, None)
+            self._locks.pop(key, None)
 
     async def dispatch(self, request: Request, call_next):
         from config.settings import CLIENT_RATE_LIMITS
@@ -94,15 +115,29 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path.startswith(("/mcp/", "/health")):
             return await call_next(request)
 
-        # Per-client isolation via X-Client-ID (set by RequestIDMiddleware)
+        # Opportunistic reclamation of idle buckets (bounds memory growth).
+        now_sweep = time.time()
+        if now_sweep - self._last_sweep > self._SWEEP_INTERVAL:
+            self._sweep_idle_buckets(now_sweep)
+            self._last_sweep = now_sweep
+
+        # Per-client isolation via X-Client-ID (set by RequestIDMiddleware).
+        # Only KNOWN clients get their own budget; unknown / attacker-supplied
+        # ids all collapse onto the shared "_default" bucket so rotating the
+        # header cannot spawn unbounded per-key state. The resolved client IP
+        # is folded into the key so header rotation cannot bypass the limit.
         client_id = request.headers.get("x-client-id", "gui")
-        client_limits = CLIENT_RATE_LIMITS.get(
-            client_id, CLIENT_RATE_LIMITS.get("_default", {}),
-        )
+        if client_id in CLIENT_RATE_LIMITS:
+            client_limits = CLIENT_RATE_LIMITS[client_id]
+            key_id = client_id
+        else:
+            client_limits = CLIENT_RATE_LIMITS.get("_default", {})
+            key_id = "_default"
+        client_ip = get_client_ip(request)
 
         for prefix, (max_req, window) in client_limits.items():
             if path.startswith(prefix):
-                key = f"client:{client_id}:{prefix}"
+                key = f"client:{key_id}:ip:{client_ip}:{prefix}"
                 async with self._locks[key]:
                     now = time.time()
                     self._hits[key] = [t for t in self._hits[key] if now - t < window]

@@ -187,17 +187,18 @@ class TestDeleteArtifact:
 
 class TestKBStats:
     def test_stats_success(self, client: TestClient):
-        mock_artifacts = [
-            {"id": "a1", "filename": "f1.py", "summary": "A good summary for this test.", "quality_score": 0.8},
-            {"id": "a2", "filename": "f2.py", "summary": "", "quality_score": 0.4},
-        ]
+        # kb_stats now reads a single grouped Cypher aggregation via the
+        # domain_artifact_stats helper (no per-domain 10k row pull).
+        dom_stats = {
+            "code": {"artifacts": 2, "avg_quality": 0.6, "synopsis_candidates": 1},
+        }
         mock_collection = MagicMock()
         mock_collection.count.return_value = 10
 
         with (
             patch("app.routers.kb_admin.get_neo4j"),
             patch("app.routers.kb_admin.get_chroma") as mock_chroma_fn,
-            patch("app.routers.kb_admin.list_artifacts", return_value=mock_artifacts),
+            patch("app.routers.kb_admin.domain_artifact_stats", return_value=dom_stats),
             patch("app.routers.kb_admin.config") as mock_config,
         ):
             mock_config.DOMAINS = ["code"]
@@ -212,3 +213,63 @@ class TestKBStats:
         assert "code" in data["domains"]
         assert data["domains"]["code"]["artifacts"] == 2
         assert data["domains"]["code"]["chunks"] == 10
+        assert data["domains"]["code"]["synopsis_candidates"] == 1
+
+
+class TestKBAggregationHelpers:
+    """The perf fix: kb duplicates/stats compute via grouped Cypher
+    aggregation instead of per-domain 10k-row in-memory scans."""
+
+    @staticmethod
+    def _driver(rows, capture):
+        drv = MagicMock()
+        sess = MagicMock()
+
+        def _run(cypher, **kw):
+            capture["cypher"] = cypher
+            res = MagicMock()
+            res.data.return_value = rows
+            return res
+
+        sess.run.side_effect = _run
+        drv.session.return_value.__enter__.return_value = sess
+        return drv
+
+    def test_list_duplicate_artifacts_returns_only_groups(self):
+        from app.db.neo4j.artifacts import list_duplicate_artifacts
+
+        cap: dict = {}
+        rows = [
+            {"content_hash": "h1", "id": "a1", "filename": "f1"},
+            {"content_hash": "h1", "id": "a2", "filename": "f2"},
+        ]
+        out = list_duplicate_artifacts(self._driver(rows, cap))
+        assert out == rows
+        # Aggregates + filters to dupes in-DB, not a per-domain row pull.
+        assert "collect(a)" in cap["cypher"]
+        assert "size(arts) >= 2" in cap["cypher"]
+
+    def test_domain_artifact_stats_aggregates_and_mirrors_heuristic(self):
+        from app.db.neo4j.artifacts import domain_artifact_stats
+
+        cap: dict = {}
+        rows = [
+            {"domain": "code", "artifacts": 5, "avg_quality": 0.6123, "synopsis_candidates": 2},
+        ]
+        out = domain_artifact_stats(self._driver(rows, cap))
+        assert out["code"]["artifacts"] == 5
+        assert out["code"]["avg_quality"] == 0.6123
+        assert out["code"]["synopsis_candidates"] == 2
+        # In-DB aggregation + the truncated-summary predicate (mirrors
+        # core.agents.curator._is_truncated_summary: empty / <50 / no .!?).
+        assert "count(*)" in cap["cypher"]
+        assert "avg(q)" in cap["cypher"]
+        assert "size(s) < 50" in cap["cypher"]
+        assert "[.!?]" in cap["cypher"]
+
+    def test_domain_artifact_stats_null_avg_defaults_zero(self):
+        from app.db.neo4j.artifacts import domain_artifact_stats
+
+        rows = [{"domain": "code", "artifacts": 0, "avg_quality": None, "synopsis_candidates": 0}]
+        out = domain_artifact_stats(self._driver(rows, {}))
+        assert out["code"]["avg_quality"] == 0.0

@@ -144,6 +144,36 @@ def app_with_mocks(mock_redis, fake_driver_factory):
 # ── /graph/timeline/strata tests ─────────────────────────────────────────────
 
 
+def test_strata_honors_aggregated_mention_count(mock_redis, fake_driver_factory):
+    """Perf fix: the strata Cypher now returns one row per (entity, day) with
+    a count(*); totals must reflect the count, not 1-per-row."""
+    from app.routers import graph as graph_router
+
+    rows = [
+        {**_make_mention_row(ts="2026-05-20T10:00:00+00:00"), "mentions": 5},
+        {
+            **_make_mention_row(ts="2026-05-21T10:00:00+00:00", canonical_id="e2", name="E2"),
+            "mentions": 3,
+        },
+    ]
+    mock_redis._state["cerid:graph:map:communities"] = json.dumps(_SAMPLE_COMMUNITY_ARTIFACT)
+    driver = fake_driver_factory(rows)
+
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=driver):
+        r = TestClient(app).get(
+            "/graph/timeline/strata?from=2026-05-19&to=2026-05-23&granularity=day"
+        )
+
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["totals"]["mentions"] == 8  # 5 + 3, not 2 rows
+    series_total = sum(sum(s["buckets"]) for s in payload["series"])
+    assert series_total == 8
+
+
 def test_strata_happy_path_shape(mock_redis, fake_driver_factory):
     """200, bucket_dates aligned, series present, totals.mentions matches."""
     from app.routers import graph as graph_router

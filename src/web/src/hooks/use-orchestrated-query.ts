@@ -97,29 +97,22 @@ export function useOrchestratedQuery(
 
   const { data, isLoading, isError, error, refetch } = useQuery<AgentQueryResponse>({
     queryKey: ["orchestrated-query", effectiveQuery, ragMode, domainKey, contextMsgCount, sourcesKey],
-    queryFn: async ({ signal }) => {
-      try {
-        return await queryKBOrchestrated(
-          effectiveQuery,
-          ragMode,
-          activeDomains.size > 0 ? [...activeDomains] : undefined,
-          10,
-          conversationMessages,
-          undefined,
-          contextSources,
-          { signal },
-        )
-      } catch {
-        // Return a safe empty response so the error state doesn't block the console
-        return {
-          results: [],
-          confidence: 0,
-          total_results: 0,
-          execution_time_ms: 0,
-          source_breakdown: null,
-        } as unknown as AgentQueryResponse
-      }
-    },
+    // Let failures propagate to react-query so `isError` drives the
+    // console's error + Retry state. Swallowing here (returning an empty
+    // response) made that UI permanently dead — a backend outage read as
+    // "no results". TanStack treats signal-abort as a cancellation, not an
+    // error, so query-key churn won't flash the error state.
+    queryFn: ({ signal }) =>
+      queryKBOrchestrated(
+        effectiveQuery,
+        ragMode,
+        activeDomains.size > 0 ? [...activeDomains] : undefined,
+        10,
+        conversationMessages,
+        undefined,
+        contextSources,
+        { signal },
+      ),
     enabled: !!effectiveQuery && effectiveQuery.length > 2,
     staleTime: 15_000,
     retry: 1,

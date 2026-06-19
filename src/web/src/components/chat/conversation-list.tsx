@@ -141,6 +141,9 @@ export function ConversationList({
   }, [filtered])
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  // Per-row delete is irreversible; gate it behind the same confirmation
+  // the bulk path uses rather than firing on a single misclick.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   // Ref for the scrollable list region so FLIP can snapshot every visible
   // row before a removal commits and slide the survivors into place.
@@ -175,6 +178,13 @@ export function ConversationList({
     setConfirmDeleteOpen(false)
     exitEditMode()
   }, [selectedIds, onBulkDelete, exitEditMode, withFlip])
+
+  const handleConfirmSingleDelete = useCallback(() => {
+    if (!pendingDeleteId) return
+    const id = pendingDeleteId
+    withFlip(() => onDelete(id))
+    setPendingDeleteId(null)
+  }, [pendingDeleteId, onDelete, withFlip])
 
   const handleBulkArchive = useCallback(() => {
     const ids = Array.from(selectedIds)
@@ -396,7 +406,7 @@ export function ConversationList({
                       className="h-7 w-7"
                       onClick={(e) => {
                         e.stopPropagation()
-                        withFlip(() => onDelete(convo.id))
+                        setPendingDeleteId(convo.id)
                       }}
                     >
                       <Trash2 className="h-3 w-3" />
@@ -438,6 +448,30 @@ export function ConversationList({
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleBulkDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Single-row delete confirmation dialog */}
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteId(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The conversation will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleConfirmSingleDelete}
             >
               Delete
             </AlertDialogAction>

@@ -56,7 +56,7 @@ async def get_taxonomy_endpoint():
         return graph.get_taxonomy(driver)
     except Exception as e:
         logger.error(f"Get taxonomy error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
 @router.post("/taxonomy/domain")
@@ -88,7 +88,7 @@ async def create_domain_endpoint(req: CreateDomainRequest):
         return result
     except Exception as e:
         logger.error(f"Create domain error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
 @router.post("/taxonomy/subcategory")
@@ -116,7 +116,7 @@ async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Create sub-category error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
 @router.get("/tags")
@@ -129,7 +129,7 @@ async def list_tags_endpoint(
         return graph.list_tags(driver, limit=limit)
     except Exception as e:
         logger.error(f"List tags error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
 @router.post("/taxonomy/artifact")
@@ -148,7 +148,7 @@ async def update_artifact_taxonomy_endpoint(req: UpdateArtifactTaxonomyRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Update artifact taxonomy error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
 @router.get("/tags/suggest")
@@ -271,4 +271,4 @@ async def merge_tags_endpoint(req: MergeTagsRequest):
         return {"status": "success", "source": source, "target": target, "artifacts_updated": updated}
     except Exception as e:
         logger.error(f"Merge tags error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")

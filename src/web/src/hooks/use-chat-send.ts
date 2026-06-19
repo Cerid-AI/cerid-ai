@@ -182,8 +182,12 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           if (freshKB?.results?.length) {
             freshResults = freshKB.results
           }
-          // Merge memories into the candidate pool as pseudo-KB results
+          // Merge memories into the candidate pool as pseudo-KB results.
+          // Clone first — when the KB query returned nothing, freshResults
+          // still aliases the caller's kbResults state array (mirrors the
+          // warm-cache branch below); mutating it duplicates memory entries.
           if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+            freshResults = [...(freshResults ?? [])]
             for (const mem of freshMemories) {
               freshResults.push(memoryToKBResult(mem))
             }
