@@ -13,6 +13,8 @@ import functools
 import logging
 from typing import Any, Callable
 
+from fastapi import HTTPException
+
 from errors import CeridError, RoutingError
 
 __all__ = ["handle_errors"]
@@ -36,7 +38,9 @@ def handle_errors(
 
     def decorator(fn: Callable) -> Callable:
         def _handle_exception(exc: Exception, func_name: str) -> Any:
-            if isinstance(exc, CeridError):
+            # HTTPException is an intentional HTTP response — never swallow it
+            # into a fallback/RoutingError; let FastAPI render the status code.
+            if isinstance(exc, (CeridError, HTTPException)):
                 raise
             log_fn = getattr(logger, log_level, logger.error)
             log_fn(
@@ -50,8 +54,10 @@ def handle_errors(
                     from core.utils.circuit_breaker import get_breaker
 
                     get_breaker(breaker_name)._on_failure_sync(exc)
-                except Exception as _cb_err:
-                    logger.debug("Circuit breaker update failed: %s", _cb_err)
+                except Exception:
+                    # Breaker bookkeeping must not mask the original error
+                    # (re-raised below); surface the bookkeeping failure itself.
+                    logger.exception("Circuit breaker update failed")
             if fallback is not None:
                 return fallback
             raise RoutingError(

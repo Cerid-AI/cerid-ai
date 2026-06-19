@@ -480,16 +480,21 @@ async def get_timeline(
             total_entities_introduced=0,
         )
 
+    # Aggregate per DAY in Cypher (count(*)) rather than returning one row
+    # per MENTIONS edge. The result then scales with the number of days in
+    # the window (<= 730), not the number of mention edges (millions on a
+    # mature corpus) — the per-edge form materialised the whole edge set in
+    # memory. Python rolls the day buckets up to the requested granularity.
     if entity:
         # Per-entity timeline: count mentions FROM Artifact TO this entity
         cypher = (
             "MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity {canonical_id: $entity}) "
             "WHERE m.created_at >= $start AND m.created_at <= $end "
-            "RETURN m.created_at AS ts, false AS is_birth "
+            "RETURN substring(m.created_at, 0, 10) AS ts, false AS is_birth, count(*) AS c "
             "UNION ALL "
             "MATCH (e:Entity {canonical_id: $entity}) "
             "WHERE e.created_at >= $start AND e.created_at <= $end "
-            "RETURN e.created_at AS ts, true AS is_birth"
+            "RETURN substring(e.created_at, 0, 10) AS ts, true AS is_birth, count(*) AS c"
         )
         params = {
             "entity": entity,
@@ -501,11 +506,11 @@ async def get_timeline(
         cypher = (
             "MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity) "
             "WHERE m.created_at >= $start AND m.created_at <= $end "
-            "RETURN m.created_at AS ts, false AS is_birth "
+            "RETURN substring(m.created_at, 0, 10) AS ts, false AS is_birth, count(*) AS c "
             "UNION ALL "
             "MATCH (e:Entity) "
             "WHERE e.created_at >= $start AND e.created_at <= $end "
-            "RETURN e.created_at AS ts, true AS is_birth"
+            "RETURN substring(e.created_at, 0, 10) AS ts, true AS is_birth, count(*) AS c"
         )
         params = {
             "start": start_dt.isoformat(),
@@ -531,7 +536,9 @@ async def get_timeline(
             total_entities_introduced=0,
         )
 
-    # Bucket
+    # Bucket. ``c`` is the per-day count from the aggregated query; it
+    # defaults to 1 so a per-edge row shape (used in tests / legacy callers)
+    # still tallies one mention each.
     by_bucket: dict[str, dict[str, int]] = {}
     for row in rows:
         ts = row.get("ts")
@@ -540,11 +547,12 @@ async def get_timeline(
         key = _bucket_key(str(ts), gran)
         if not key:
             continue
+        c = int(row.get("c", 1) or 1)
         bucket = by_bucket.setdefault(key, {"mention_count": 0, "entities_introduced": 0})
         if row.get("is_birth"):
-            bucket["entities_introduced"] += 1
+            bucket["entities_introduced"] += c
         else:
-            bucket["mention_count"] += 1
+            bucket["mention_count"] += c
 
     buckets = [
         TimelineBucket(
@@ -1491,20 +1499,28 @@ async def get_timeline_strata(
     start_iso = start_dt.isoformat()
     end_iso = end_dt.isoformat()
 
+    # Aggregate per (entity, DAY) with count(*) instead of returning one row
+    # per MENTIONS edge. An entity mentioned N times collapses to <= its
+    # active-day count rather than N identical-metadata rows, so the result
+    # scales with active-entity-days, not total edges (which exploded memory
+    # on a mature corpus). Sums are unchanged — the Python loop adds the
+    # per-row ``mentions`` count instead of incrementing by 1.
     mention_cypher = """
         MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity)
         WHERE m.created_at >= $start AND m.created_at <= $end
+        WITH e, substring(m.created_at, 0, 10) AS day, count(*) AS mentions
         RETURN
             coalesce(e.community_id, '__null__') AS community_id,
             coalesce(e.entity_type, e.type, 'unknown') AS entity_type,
             coalesce(e.primary_domain, 'other') AS domain,
-            m.created_at AS ts,
+            day AS ts,
             coalesce(e.trust_state, 'unknown') AS trust_state,
             e.canonical_id AS canonical_id,
             coalesce(e.name, e.canonical_id) AS name,
             coalesce(e.mention_count, 0) AS mention_count,
             e.created_at AS entity_created_at,
-            e.primary_domain AS primary_domain
+            e.primary_domain AS primary_domain,
+            mentions AS mentions
     """
     try:
         rows = await asyncio.to_thread(
@@ -1557,6 +1573,9 @@ async def get_timeline_strata(
         name = str(row.get("name") or canon)
         entity_created_at = str(row.get("entity_created_at") or "")
         primary_domain_val = row.get("primary_domain")
+        # Per-(entity, day) mention count from the aggregated query; defaults
+        # to 1 so a per-edge row shape (tests / legacy) tallies one each.
+        mentions = int(row.get("mentions", 1) or 1)
 
         bkey = _bucket_key(ts, gran)
         bidx = bucket_index.get(bkey, -1)
@@ -1574,20 +1593,20 @@ async def get_timeline_strata(
                 "buckets": [0] * n_buckets,
                 "unverified_buckets": [0] * n_buckets,
             }
-        series_acc[sk]["buckets"][bidx] += 1
+        series_acc[sk]["buckets"][bidx] += mentions
         if trust == "unverified":
-            series_acc[sk]["unverified_buckets"][bidx] += 1
+            series_acc[sk]["unverified_buckets"][bidx] += mentions
 
         # Community total (community lens rollup; amendment #1: keep for community lens)
-        community_total[cid] = community_total.get(cid, 0) + 1
+        community_total[cid] = community_total.get(cid, 0) + mentions
 
         # Global bucket mentions for ingest_burst marker
-        global_bucket_mentions[bidx] += 1
+        global_bucket_mentions[bidx] += mentions
 
         # Per-domain bucket mentions for per-lane marker attribution
         if domain not in domain_bucket_mentions:
             domain_bucket_mentions[domain] = [0] * n_buckets
-        domain_bucket_mentions[domain][bidx] += 1
+        domain_bucket_mentions[domain][bidx] += mentions
 
         # Per-(lane, bucket) entity accumulation for top_entities
         lb_key = (domain, bkey)
@@ -1611,8 +1630,8 @@ async def get_timeline_strata(
                     "last_bucket_idx": 0,
                 }
             ea = entity_acc[canon]
-            ea["buckets"][bidx] += 1
-            ea["total"] += 1
+            ea["buckets"][bidx] += mentions
+            ea["total"] += mentions
             ea["last_bucket_idx"] = max(ea["last_bucket_idx"], bidx)
 
         # Birth tracking: count entity born (created_at) in this bucket

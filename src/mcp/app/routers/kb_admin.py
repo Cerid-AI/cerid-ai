@@ -12,8 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import config
-from app.agents.curator import _is_truncated_summary, curate
-from app.db.neo4j.artifacts import delete_artifact, list_artifacts
+from app.agents.curator import curate
+from app.db.neo4j.artifacts import (
+    delete_artifact,
+    domain_artifact_stats,
+    list_artifacts,
+    list_duplicate_artifacts,
+)
 from app.deps import get_chroma, get_neo4j
 from config.features import CERID_MULTI_USER
 from core.retrieval.bm25 import rebuild_all as rebuild_bm25_all
@@ -641,15 +646,18 @@ class DismissDuplicatesRequest(BaseModel):
 @router.get("/admin/kb/duplicates", response_model=DuplicatesResponse)
 async def list_duplicates(min_similarity: float = 0.85):
     """Group artifacts by exact ``content_hash``. Sprint 2 will add fuzzy similarity."""
+    import asyncio
     from collections import defaultdict
 
     neo4j = get_neo4j()
+    # Single grouped aggregation off the event loop — returns only duplicate
+    # members, not every artifact per domain.
+    rows = await asyncio.to_thread(list_duplicate_artifacts, neo4j)
     by_hash: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for domain in config.DOMAINS:
-        for art in list_artifacts(neo4j, domain=domain, limit=10000):
-            ch = art.get("content_hash") or ""
-            if ch:
-                by_hash[ch].append(art)
+    for art in rows:
+        ch = art.get("content_hash") or ""
+        if ch:
+            by_hash[ch].append(art)
 
     groups: list[DuplicateGroup] = []
     for ch, arts in by_hash.items():
@@ -702,6 +710,8 @@ async def dismiss_duplicates(req: DismissDuplicatesRequest):
 @router.get("/admin/kb/stats", response_model=KBStatsResponse)
 async def kb_stats():
     """Get KB statistics: artifact counts, chunk counts, per-domain breakdown."""
+    import asyncio
+
     try:
         neo4j = get_neo4j()
         chroma = get_chroma()
@@ -710,9 +720,17 @@ async def kb_stats():
         total_chunks = 0
         domain_stats: dict[str, Any] = {}
 
+        # Per-domain artifact count / avg-quality / synopsis-candidate count
+        # via a single grouped Cypher aggregation off the event loop, instead
+        # of pulling up to 10k full records per domain into memory.
+        dom_stats = await asyncio.to_thread(domain_artifact_stats, neo4j)
+
         for domain in config.DOMAINS:
-            artifacts = list_artifacts(neo4j, domain=domain, limit=10000)
-            artifact_count = len(artifacts)
+            ds = dom_stats.get(
+                domain,
+                {"artifacts": 0, "avg_quality": 0.0, "synopsis_candidates": 0},
+            )
+            artifact_count = ds["artifacts"]
             total_artifacts += artifact_count
 
             chunk_count = 0
@@ -726,20 +744,11 @@ async def kb_stats():
                 )
             total_chunks += chunk_count
 
-            # Count synopsis candidates
-            synopsis_candidates = sum(
-                1 for a in artifacts if _is_truncated_summary(a.get("summary", ""))
-            )
-
-            # Avg quality score
-            scores = [a.get("quality_score", 0) for a in artifacts if a.get("quality_score") is not None]
-            avg_quality = round(sum(scores) / len(scores), 4) if scores else 0.0
-
             domain_stats[domain] = {
                 "artifacts": artifact_count,
                 "chunks": chunk_count,
-                "avg_quality": avg_quality,
-                "synopsis_candidates": synopsis_candidates,
+                "avg_quality": ds["avg_quality"],
+                "synopsis_candidates": ds["synopsis_candidates"],
             }
 
         return KBStatsResponse(

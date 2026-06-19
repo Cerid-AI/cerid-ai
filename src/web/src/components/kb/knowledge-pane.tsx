@@ -32,6 +32,7 @@ import { ActivityFeed } from "./ActivityFeed"
 import { TagManager } from "./tag-manager"
 import { DuplicateDetector } from "./duplicate-detector"
 import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
+import { notifyError } from "@/lib/query-client"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { KBQueryResult, Artifact } from "@/lib/types"
@@ -402,27 +403,43 @@ export function KnowledgePane() {
   const domainList = useMemo(() => [...domainCounts.keys()].sort(), [domainCounts])
 
   const handleRecategorize = useCallback(async (artifactId: string, newDomain: string) => {
-    await recategorizeArtifact(artifactId, newDomain)
-    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-    queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+    try {
+      await recategorizeArtifact(artifactId, newDomain)
+      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+      queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+    } catch (err) {
+      notifyError(err, { op: "artifact.recategorize", artifactId })
+    }
   }, [queryClient])
 
   const handleDelete = useCallback(async (artifactId: string) => {
-    await adminDeleteArtifact(artifactId)
-    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-    queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
-    queryClient.invalidateQueries({ queryKey: ["kb-search"] })
+    try {
+      await adminDeleteArtifact(artifactId)
+      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+      queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+      queryClient.invalidateQueries({ queryKey: ["kb-search"] })
+    } catch (err) {
+      notifyError(err, { op: "artifact.delete", artifactId })
+    }
   }, [queryClient])
 
   const handleUpdateTags = useCallback(async (artifactId: string, tags: string[]) => {
-    await updateArtifactTags(artifactId, tags)
-    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-    queryClient.invalidateQueries({ queryKey: ["kb-search"] })
+    try {
+      await updateArtifactTags(artifactId, tags)
+      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+      queryClient.invalidateQueries({ queryKey: ["kb-search"] })
+    } catch (err) {
+      notifyError(err, { op: "artifact.updateTags", artifactId })
+    }
   }, [queryClient])
 
   const handleReIngest = useCallback(async (artifactId: string) => {
-    await reIngestArtifact(artifactId)
-    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+    try {
+      await reIngestArtifact(artifactId)
+      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+    } catch (err) {
+      notifyError(err, { op: "artifact.reIngest", artifactId })
+    }
   }, [queryClient])
 
   const availableTags = useMemo(() => {

@@ -36,6 +36,7 @@ import { useQuery } from "@tanstack/react-query"
 import { fetchSetupStatus } from "@/lib/api/settings"
 import { deriveDefaultModel } from "@/lib/derive-defaults"
 import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices, MCP_BASE, mcpHeaders } from "@/lib/api"
+import { notifyError } from "@/lib/query-client"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { externalToKBResult } from "@/lib/kb-utils"
@@ -417,7 +418,9 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       for (const file of files) {
         try {
           await uploadFile(file, { domain: options.domain, categorizeMode: options.categorize_mode })
-        } catch { /* upload errors handled by API */ }
+        } catch (err) {
+          notifyError(err, { op: "chat.fileUpload", file: file.name })
+        }
       }
     },
     [pendingChatFiles],

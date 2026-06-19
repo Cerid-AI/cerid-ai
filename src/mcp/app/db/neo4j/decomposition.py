@@ -149,6 +149,7 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
     sub_by_domain: dict[str, dict[str, int]] = {}  # domain → {sub → count}
     unclustered_by_domain: dict[str, int] = {}
     derived_at: str | None = None
+    uncategorized_count = 0
 
     try:
         with driver.session() as s:
@@ -159,6 +160,15 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
             )
             for row in rows:
                 entity_domain_counts[str(row["domain"])] = int(row["cnt"])
+
+            # Entities with no primary_domain — the actual uncategorized set.
+            # (Counting falsy keys of entity_domain_counts is always 0: those
+            # keys are NOT-NULL domain strings, all truthy.)
+            urow = s.run(
+                "MATCH (e:Entity) WHERE e.primary_domain IS NULL "
+                "RETURN count(e) AS cnt"
+            ).single()
+            uncategorized_count = int(urow["cnt"]) if urow else 0
 
             # 3b. Entity community membership (level 0) + domain + sub + degree
             rows = s.run(
@@ -365,12 +375,7 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
 
         domain_nodes.append(node)
 
-    # uncategorized_count: entities with no primary_domain
-    uncategorized_count = sum(
-        1 for d in entity_domain_counts
-        if not d
-    )
-
+    # uncategorized_count computed in the session block above.
     return {
         "no_communities_computed": no_communities_computed,
         "domains": domain_nodes,

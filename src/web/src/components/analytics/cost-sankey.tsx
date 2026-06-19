@@ -106,13 +106,19 @@ export function CostSankey({ windowDays = 30, tier = "community" }: CostSankeyPr
   // Build recharts Sankey nodes + links from the edge list. Nodes need
   // to be unique by name; we collect them in order so the column
   // visualization is stable (providers on the left, stages on the right).
+  // Namespace node keys by column so a name appearing as BOTH a source and a
+  // target (e.g. the default "other") maps to two distinct nodes instead of
+  // collapsing onto one index — which would render a zero-width self-loop.
   const providers = Array.from(new Set(data.edges.map((e) => e.source)))
   const stages = Array.from(new Set(data.edges.map((e) => e.target)))
-  const nodeList = [...providers, ...stages].map((name) => ({ name }))
-  const nodeIndex = new Map(nodeList.map((n, i) => [n.name, i]))
+  const nodeList = [
+    ...providers.map((name) => ({ name, key: `src:${name}` })),
+    ...stages.map((name) => ({ name, key: `dst:${name}` })),
+  ]
+  const nodeIndex = new Map(nodeList.map((n, i) => [n.key, i]))
   const links = data.edges.map((e) => ({
-    source: nodeIndex.get(e.source) ?? 0,
-    target: nodeIndex.get(e.target) ?? 0,
+    source: nodeIndex.get(`src:${e.source}`) ?? 0,
+    target: nodeIndex.get(`dst:${e.target}`) ?? 0,
     value: e.value,
   }))
 
