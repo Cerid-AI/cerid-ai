@@ -65,22 +65,25 @@ export function ProvenanceSankey({
 
     if (groups.size === 0) return null
 
+    // Namespace node keys by column (src / mid / dst) so a group name that
+    // collides with "Sources" or the terminal entity name maps to a distinct
+    // node instead of collapsing onto one index (zero-width self-loop).
     const terminalName = entityName ?? entitySlug
     const nodes = [
-      { name: "Sources" },
-      ...Array.from(groups.keys()).map((g) => ({ name: g })),
-      { name: terminalName },
+      { name: "Sources", key: "src:Sources" },
+      ...Array.from(groups.keys()).map((g) => ({ name: g, key: `mid:${g}` })),
+      { name: terminalName, key: `dst:${terminalName}` },
     ]
-    const nodeIndex = new Map(nodes.map((n, i) => [n.name, i]))
+    const nodeIndex = new Map(nodes.map((n, i) => [n.key, i]))
     const links = [
       ...Array.from(groups.entries()).map(([group, stats]) => ({
-        source: nodeIndex.get("Sources") ?? 0,
-        target: nodeIndex.get(group) ?? 0,
+        source: nodeIndex.get("src:Sources") ?? 0,
+        target: nodeIndex.get(`mid:${group}`) ?? 0,
         value: stats.count,
       })),
       ...Array.from(groups.entries()).map(([group, stats]) => ({
-        source: nodeIndex.get(group) ?? 0,
-        target: nodeIndex.get(terminalName) ?? 0,
+        source: nodeIndex.get(`mid:${group}`) ?? 0,
+        target: nodeIndex.get(`dst:${terminalName}`) ?? 0,
         value: stats.count,
         avgConfidence: stats.totalConf / stats.count,
       })),

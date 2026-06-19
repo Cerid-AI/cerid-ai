@@ -581,4 +581,34 @@ describe("useChatSend — KB query deduplication (Task 3)", () => {
     expect(mockRecallMemories).toHaveBeenCalledTimes(1)
     expect(mockQueryKB).not.toHaveBeenCalled()
   })
+
+  it("does NOT mutate the caller's kbResults array on the cold-cache path", async () => {
+    // Cold cache + KB returns nothing + a memory comes back: the merge must
+    // clone before pushing, or it pollutes the caller's React state array
+    // (audit: stale/duplicated memory entries).
+    mockQueryKB.mockResolvedValue({ results: [] })
+    mockRecallMemories.mockResolvedValue([
+      {
+        memory_id: "mem-x",
+        memory_type: "fact",
+        summary: "a recalled fact",
+        content: "a recalled fact",
+        relevance: 0.8,
+      },
+    ])
+    const callerKbResults = [] as KBQueryResult[]
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      kbResults: callerKbResults,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("tell me something")
+    })
+
+    expect(callerKbResults).toHaveLength(0)
+  })
 })

@@ -3,6 +3,7 @@
 
 import { useState, useCallback } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
+import { safeHttpUrl } from "@/lib/kb-utils"
 import { useQuery } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -163,8 +164,8 @@ function ExternalSourceCard({ result }: { result: ExternalSourceResult }) {
           </span>
         </div>
         <p className="mt-0.5 text-label-xs text-muted-foreground line-clamp-2">{result.content}</p>
-        {result.source_url && (
-          <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-label-xs text-primary hover:underline">
+        {safeHttpUrl(result.source_url) && (
+          <a href={safeHttpUrl(result.source_url)!} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-label-xs text-primary hover:underline">
             Source &rarr;
           </a>
         )}

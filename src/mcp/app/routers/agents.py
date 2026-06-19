@@ -300,7 +300,7 @@ async def compress_history_endpoint(req: CompressRequest):
         }
     except Exception as e:
         logger.error("Compress history error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/query")
@@ -523,7 +523,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Agent query error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/triage")
@@ -560,7 +560,7 @@ async def triage_file_endpoint(req: TriageFileRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Triage error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/triage/batch")
@@ -607,7 +607,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
         }
     except Exception as e:
         logger.error(f"Batch triage error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/hallucination")
@@ -716,7 +716,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
         return result
     except Exception as e:
         logger.error(f"Hallucination check error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.get("/agent/hallucination/{conversation_id}")
@@ -731,7 +731,7 @@ async def hallucination_report_endpoint(conversation_id: str):
         raise
     except Exception as e:
         logger.error(f"Hallucination report error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 class ClaimFeedbackRequest(BaseModel):
@@ -776,7 +776,7 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
         raise
     except Exception as e:
         logger.error(f"Claim feedback error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/memory/extract")
@@ -814,7 +814,7 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
                 "exc_type": type(e).__name__,
             },
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/memory/archive")
@@ -827,7 +827,7 @@ async def memory_archive_endpoint(req: MemoryArchiveRequest):
         )
     except Exception as e:
         logger.error(f"Memory archive error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 class MemoryRecallRequest(BaseModel):
@@ -1109,7 +1109,7 @@ async def save_verification_report(req: SaveVerificationRequest):
         return {"status": "saved", "report_id": report_id}
     except Exception as e:
         logger.error("Failed to save verification report: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.get("/verification/{conversation_id}")
@@ -1126,7 +1126,7 @@ async def get_verification_report(conversation_id: str):
         raise
     except Exception as e:
         logger.error("Failed to get verification report: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/rectify")
@@ -1143,7 +1143,7 @@ async def rectify_endpoint(req: RectifyRequest):
         )
     except Exception as e:
         logger.error(f"Rectify error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/audit")
@@ -1157,7 +1157,7 @@ async def audit_endpoint(req: AuditRequest):
         )
     except Exception as e:
         logger.error(f"Audit error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/maintain")
@@ -1174,7 +1174,7 @@ async def maintain_endpoint(req: MaintenanceRequest):
         )
     except Exception as e:
         logger.error(f"Maintenance error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/curate")
@@ -1192,7 +1192,7 @@ async def curate_endpoint(req: CurateRequest):
         )
     except Exception as e:
         logger.error(f"Curate error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
 @router.post("/agent/curate/estimate")
@@ -1208,4 +1208,4 @@ async def curate_estimate_endpoint(req: CurateEstimateRequest):
         )
     except Exception as e:
         logger.error(f"Curate estimate error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error processing request")

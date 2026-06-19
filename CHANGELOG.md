@@ -2,6 +2,54 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Production audit remediation (2026-06-17 → 06-19)
+
+A comprehensive multi-agent production-readiness audit (84 findings) followed by
+staged remediation. All highs + every medium fixed across both repos; no critical
+defects were found. Single-user-GA-aligned (multi-tenant work deferred post-GA).
+
+### Security
+
+- **XML hardening** — untrusted RSS/Atom feed parsing routed through `defusedxml`
+  (`core/utils/safe_xml.py`), neutralizing billion-laughs entity expansion and XXE.
+- **XSS guard** — `safeHttpUrl()` scheme-allowlist on every external-reference
+  link; `javascript:`/`data:` URLs from a spoofed adapter render inert.
+- **SSRF** — RSS validate/article fetch guard the URL before I/O and disable
+  redirect-following (re-validated per hop).
+- **Rate limiter** — keyed on the resolved client IP with unknown `X-Client-ID`
+  values collapsed onto a shared bucket (header rotation no longer bypasses the
+  limit or grows unbounded state); idle buckets are swept.
+- **Error disclosure** — 500 handlers return static client messages; exception
+  text stays in server logs only.
+
+### Data integrity
+
+- **recategorize** moves and verifies ChromaDB chunks before flipping the Neo4j
+  domain, so a store failure can't split the two.
+- **Retention purge** deletes the artifact's Chroma chunks (no orphaned vectors).
+- **Leiden re-run** preserves community summaries instead of wiping them.
+- **IMAP poller** dedups via the processed-UID set instead of a UID high-water
+  mark — mail that was read then re-flagged unread is no longer dropped.
+- **Source quality floor** is surfaced end-to-end and seeds the editor, so
+  "Apply policy" stops silently resetting a non-zero floor.
+
+### Correctness & UX
+
+- Swallowed frontend errors now surface through a shared mutation-error toast;
+  destructive deletes (single conversation, source disconnect) require
+  confirmation; a previously dead query error+retry state is now reachable.
+- `data-sources` endpoints return 404/422 instead of 200-with-error; the
+  custom-agent query rejects unsupported streaming with 501; `uncategorized_count`
+  reports the real count.
+- Visualization fixes: Sankey self-loop (node-key namespacing), CartographerMap
+  reciprocal-edge crash/undercount, HTML-scraper truncation, wiki-rail honest
+  count.
+
+### Schema
+
+- Tenant-scoping foundation: `m0005` adds a per-label `tenant_id` index + default
+  backfill (non-breaking; enforcement deferred until multi-tenant is enabled).
+
 ## Unreleased — RAG Quality Program (2026-06-12 → 06-13)
 
 Systemic response to the 2026-06-11 chat/RAG qualitative eval — 6 root-cause

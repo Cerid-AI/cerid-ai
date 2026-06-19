@@ -228,3 +228,19 @@ function safeHostname(url: string): string | null {
     return null
   }
 }
+
+/**
+ * Return `url` only if it is a safe http(s) link, else `null`. Guards against
+ * `javascript:` / `data:` / `vbscript:` hrefs — a spoofed adapter could put
+ * one in an external-reference field and turn it into one-click XSS. Use the
+ * result as `href={safeHttpUrl(u) ?? undefined}` so unsafe links render inert.
+ */
+export function safeHttpUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    const protocol = new URL(url, window.location.origin).protocol
+    return protocol === "http:" || protocol === "https:" ? url : null
+  } catch {
+    return null
+  }
+}

@@ -25,6 +25,7 @@ import {
   FolderKanban,
 } from "lucide-react"
 import { fetchMemories, updateMemory, deleteMemory, archiveMemories } from "@/lib/api"
+import { notifyError } from "@/lib/query-client"
 import type { Memory } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -142,7 +143,7 @@ export default function MemoriesPane() {
       setEditingId(null)
       setEditText("")
     } catch (err) {
-      console.error("Failed to update memory:", err)
+      notifyError(err, { op: "memory.update", memoryId: editingId })
     } finally {
       setSaving(false)
     }
@@ -160,7 +161,7 @@ export default function MemoriesPane() {
       setMemories((prev) => prev.filter((m) => m.id !== id))
       setDeletingId(null)
     } catch (err) {
-      console.error("Failed to delete memory:", err)
+      notifyError(err, { op: "memory.delete", memoryId: id })
     } finally {
       setSaving(false)
     }

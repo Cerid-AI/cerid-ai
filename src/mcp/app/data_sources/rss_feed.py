@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from app.reliability.url_safety import guard_or_log
+from core.utils.safe_xml import safe_fromstring
 from errors import CeridError, IngestionError
 
 from .base import DataSource, DataSourceResult
@@ -402,7 +403,7 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
 
     # Parse XML
     try:
-        root = ET.fromstring(body)  # nosec B314 — RSS sync, user-configured feeds only
+        root = safe_fromstring(body)
     except ET.ParseError as exc:
         summary["errors"].append(f"XML parse error: {exc}")
         _logger.warning("RSS XML parse error for feed id=%s: %s", feed_id, exc)
@@ -559,7 +560,7 @@ def validate_feed_url(url: str) -> tuple[bool, str]:
         body, _headers = _fetch_url(url, timeout=10.0)
         if body is None:
             return False, "URL returned 304 Not Modified (no body)"
-        root = ET.fromstring(body)  # nosec B314 — RSS validation, user-configured feeds only
+        root = safe_fromstring(body)
         ftype = _detect_feed_type(root)
         if ftype == "rss":
             items = _parse_rss_items(root)

@@ -17,6 +17,7 @@
 import { ExternalLink } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import type { ExternalReference } from "@/lib/types/wiki"
+import { safeHttpUrl } from "@/lib/kb-utils"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -79,12 +80,14 @@ function ReferenceCard({ reference }: ReferenceCardProps) {
     </>
   )
 
-  // V-P2.6: when the reference has a URL, the entire card is the tap target
-  // (44×44+ minimum). Without a URL we fall back to a plain non-interactive div.
-  if (reference.url) {
+  // V-P2.6: when the reference has a safe http(s) URL, the entire card is the
+  // tap target (44×44+ minimum). Without one we fall back to a plain
+  // non-interactive div — a javascript:/data: URL is treated as no URL.
+  const safeUrl = safeHttpUrl(reference.url)
+  if (safeUrl) {
     return (
       <a
-        href={reference.url}
+        href={safeUrl}
         target="_blank"
         rel="noopener noreferrer"
         className={`group ${cardClasses} hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1`}

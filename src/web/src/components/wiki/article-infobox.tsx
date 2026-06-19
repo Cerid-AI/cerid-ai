@@ -9,6 +9,7 @@ import { DomainBadge } from "@/components/ui/domain-badge"
 import { TrustBandBadge, type TrustState } from "@/components/ui/trust-band-badge"
 import { MiniGraph } from "./mini-graph"
 import type { WikiEntityPage, ConfidenceBand } from "@/lib/types/wiki"
+import { safeHttpUrl } from "@/lib/kb-utils"
 
 // ---------------------------------------------------------------------------
 // Article infobox — Wikipedia-style data summary card.
@@ -236,21 +237,24 @@ export function ArticleInfobox({
               </InfoboxRow>
             )}
 
-            {/* Row 7: External — only when at least one external ref with a URL */}
-            {page.external_references.length > 0 && page.external_references[0].url && (
-              <InfoboxRow label="External">
-                <a
-                  href={page.external_references[0].url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-brand hover:underline"
-                  aria-label={`${page.external_references[0].source_display} (opens in new tab)`}
-                >
-                  {page.external_references[0].source_display}
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                </a>
-              </InfoboxRow>
-            )}
+            {/* Row 7: External — only when the first ref has a safe http(s) URL */}
+            {page.external_references[0] && (() => {
+              const extUrl = safeHttpUrl(page.external_references[0].url)
+              return extUrl ? (
+                <InfoboxRow label="External">
+                  <a
+                    href={extUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-brand hover:underline"
+                    aria-label={`${page.external_references[0].source_display} (opens in new tab)`}
+                  >
+                    {page.external_references[0].source_display}
+                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                  </a>
+                </InfoboxRow>
+              ) : null
+            })()}
 
             {/* Row 8: Sources — only when source_artifacts are present */}
             {page.source_artifacts.length > 0 && (

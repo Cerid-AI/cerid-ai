@@ -42,6 +42,7 @@ export interface SourceRecord {
   last_sync_at: string | null
   created_at: string | null
   last_error: string | null
+  quality_floor?: number
 }
 
 export interface CreateSourceRequest {

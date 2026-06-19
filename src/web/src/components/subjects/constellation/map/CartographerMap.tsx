@@ -328,23 +328,37 @@ export function CartographerMap({
       })
     }
 
-    // Edge budget: sort by weight descending, apply cap
+    // Edge budget: sort by weight descending, dedupe, then apply cap.
     const allLinks = [...data.links]
     allLinks.sort((a, b) => b[2] - a[2])
+
+    // Dedupe reciprocal pairs BEFORE the budget slice — A→B and B→A are the
+    // same edge in this undirected graph, so keeping both wastes budget and
+    // makes graphology throw "edge already exists" mid-build.
+    const seenPairs = new Set<string>()
+    const dedupedLinks = allLinks.filter(([si, ti]) => {
+      const canonical = si < ti ? `${si}--${ti}` : `${ti}--${si}`
+      if (seenPairs.has(canonical)) return false
+      seenPairs.add(canonical)
+      return true
+    })
+
     let budget: number
     if (config.edgeBudget === "off") budget = 0
     else if (config.edgeBudget === "2k") budget = 2000
-    else if (config.edgeBudget === "all") budget = allLinks.length
+    else if (config.edgeBudget === "all") budget = dedupedLinks.length
     else budget = 8000  // "8k" default
 
-    const links = allLinks.slice(0, budget)
+    const links = dedupedLinks.slice(0, budget)
 
     for (const [si, ti, weight] of links) {
       const src = data.entities[si]
       const tgt = data.entities[ti]
       if (!src || !tgt) continue
       if (!graph.hasNode(src.id) || !graph.hasNode(tgt.id)) continue
-      const key = `${src.id}::${tgt.id}`
+      // Canonical (direction-independent) key so the undirected edge can't be
+      // added twice under two different directional keys.
+      const key = src.id < tgt.id ? `${src.id}::${tgt.id}` : `${tgt.id}::${src.id}`
       if (graph.hasEdge(key)) continue
       graph.addEdgeWithKey(key, src.id, tgt.id, {
         size: edgeWidth(weight),

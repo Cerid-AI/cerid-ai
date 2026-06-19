@@ -128,6 +128,44 @@ class TestEndpointSurface:
         assert day1["mention_count"] == 1
         assert day1["entities_introduced"] == 0
 
+    def test_aggregated_day_count_is_honored(self, client):
+        """The Cypher now returns one row per day with a count(*); the bucket
+        must reflect that count, not 1-per-row (the perf fix)."""
+        rows = [
+            {"ts": "2026-05-20", "is_birth": False, "c": 5},
+            {"ts": "2026-05-20", "is_birth": True, "c": 2},
+            {"ts": "2026-05-21", "is_birth": False, "c": 3},
+        ]
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.routers.graph._run_timeline_cypher", return_value=rows),
+            patch("app.deps.get_redis", return_value=None),
+        ):
+            resp = client.get("/graph/timeline?period=7d")
+        body = resp.json()
+        day0 = next(b for b in body["buckets"] if b["date"] == "2026-05-20")
+        assert day0["mention_count"] == 5
+        assert day0["entities_introduced"] == 2
+        assert body["total_mentions"] == 8  # 5 + 3
+
+    def test_timeline_cypher_aggregates_in_db(self, client):
+        """Guard the perf fix: the query must count(*) per day, not return a
+        row per MENTIONS edge."""
+        captured: dict = {}
+
+        def _capture(_driver, cypher, _params):
+            captured["cypher"] = cypher
+            return []
+
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.routers.graph._run_timeline_cypher", side_effect=_capture),
+            patch("app.deps.get_redis", return_value=None),
+        ):
+            client.get("/graph/timeline?period=7d")
+        assert "count(*)" in captured["cypher"]
+        assert "substring(m.created_at, 0, 10)" in captured["cypher"]
+
     def test_entity_filter_passes_through(self, client):
         captured: dict = {}
 

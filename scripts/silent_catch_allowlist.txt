@@ -56,7 +56,6 @@ src/mcp/tests/integration/test_w4_contradiction_preservation.py:83
 src/mcp/tests/test_memory_metrics.py:285
 src/mcp/tests/test_session_changes.py:315
 src/mcp/utils/agent_events.py:50
-src/mcp/utils/error_handler.py:53
 src/mcp/utils/inference_sidecar_client.py:78
 src/mcp/utils/inference_sidecar_client.py:131
 src/mcp/utils/inference_sidecar_client.py:192

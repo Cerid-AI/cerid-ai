@@ -35,6 +35,28 @@ export function extractMessage(err: unknown): string {
 }
 
 /**
+ * Imperative error surface for write paths that bypass the MutationCache —
+ * raw `await api()` calls and `queryFn` fallbacks that aren't react-query
+ * mutations and therefore never reach the global `onError` below. Mirrors
+ * that handler: a visible toast + structured console log + Sentry capture,
+ * so every user-triggered failure is surfaced exactly once.
+ */
+export function notifyError(err: unknown, context?: Record<string, unknown>): void {
+  const fullMessage = extractMessage(err)
+  const displayMessage =
+    fullMessage.length > MAX_TOAST_LEN
+      ? fullMessage.slice(0, MAX_TOAST_LEN - 1) + "…"
+      : fullMessage
+  try {
+    toast.error(displayMessage)
+  } catch (toastErr) {
+    console.error("client.error.toast_threw", toastErr)
+  }
+  console.error("client.error", { err, ...context, fullMessage })
+  captureException(err, { ...context, fullMessage })
+}
+
+/**
  * Singleton QueryClient with cache-level error handlers so every
  * useMutation failure produces a visible toast without per-hook wiring.
  * Exported separately from main.tsx so tests can import it in isolation.

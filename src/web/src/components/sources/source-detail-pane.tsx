@@ -27,6 +27,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
@@ -92,8 +102,11 @@ function SourceDetailInner({
   const [retentionMax, setRetentionMax] = useState<number>(
     retentionMaxFromSource(source),
   )
-  const [qualityFloor, setQualityFloor] = useState<number>(0)
+  // Seed from the persisted floor so "Apply policy" doesn't silently reset a
+  // non-zero floor to 0 (the slider's previous hard-coded initial value).
+  const [qualityFloor, setQualityFloor] = useState<number>(source.quality_floor ?? 0)
   const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null)
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false)
 
   const patchMut = useMutation({
     mutationFn: () => {
@@ -229,7 +242,7 @@ function SourceDetailInner({
           <Button
             size="sm"
             variant="destructive"
-            onClick={() => deleteMut.mutate()}
+            onClick={() => setConfirmDisconnect(true)}
             disabled={deleteMut.isPending}
             className="cerid-press"
           >
@@ -238,6 +251,30 @@ function SourceDetailInner({
           </Button>
         </Section>
       </div>
+
+      <AlertDialog open={confirmDisconnect} onOpenChange={setConfirmDisconnect}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect this source?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the source connection. Already-ingested content stays
+              in your knowledge base, but no new items will be pulled.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setConfirmDisconnect(false)
+                deleteMut.mutate()
+              }}
+            >
+              Disconnect
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
