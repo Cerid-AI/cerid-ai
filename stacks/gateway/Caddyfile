@@ -8,7 +8,13 @@
 }
 
 :443 {
-	tls internal
+	# Issue self-signed certs on demand for whatever host/IP the client uses
+	# (localhost, 127.0.0.1, or the box's LAN address) — the site is bound to
+	# :443 with no fixed hostname, so without on_demand there is no cert to
+	# serve and the TLS handshake is reset.
+	tls internal {
+		on_demand
+	}
 
 	# Security headers
 	header {
