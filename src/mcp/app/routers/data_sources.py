@@ -150,9 +150,24 @@ class EmailConfigRequest(BaseModel):
 @handle_errors(breaker_name="email-imap")
 async def configure_email(config: EmailConfigRequest):
     """Configure IMAP connection — validates connectivity before saving."""
+    import imaplib
+
     from app.data_sources.email_imap import save_email_config
 
-    await save_email_config(config.model_dump())
+    try:
+        await save_email_config(config.model_dump())
+    except (imaplib.IMAP4.error, OSError, RuntimeError) as exc:
+        # Unreachable host / bad port / wrong credentials / missing folder is
+        # user input, not a server fault — return 422 instead of 500.
+        # @handle_errors re-raises HTTPException without recording a breaker
+        # failure, so a fat-fingered config doesn't trip the email-imap breaker.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Could not validate the IMAP connection to {config.host}:{config.port} — "
+                "check the host, port, credentials, and folder."
+            ),
+        ) from exc
     return {"status": "configured", "host": config.host, "user": config.user}
 
 

@@ -196,6 +196,14 @@ API key auth is **opt-in**. When `CERID_API_KEY` is set in `.env`, all non-exemp
 
 **Exempt paths:** `/health`, `/`, `/docs`, `/openapi.json`, `/redoc`, `/mcp/*`
 
+**LAN exposure:** by default services bind to `127.0.0.1`. To reach the service
+from another machine on the network, set `CERID_LAN_MODE=true` — the start
+script then binds the API and GUI to all interfaces but **requires
+`CERID_API_KEY`** (it refuses to start without one) and defaults the Caddy HTTPS
+gateway on. The datastores always stay on `127.0.0.1`. The start script forwards
+the key to the web UI as `VITE_CERID_API_KEY` so the served client can
+authenticate.
+
 ### Key Rotation
 
 1. Generate a new key: `openssl rand -hex 32`

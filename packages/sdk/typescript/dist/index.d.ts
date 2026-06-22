@@ -46,6 +46,12 @@ interface IngestRequest {
     content: string;
     domain?: string;
     tags?: string;
+    /**
+     * Arbitrary provenance/attribution metadata stored with the artifact and
+     * queryable (e.g. { title, provenance, source_file }). Preserved alongside
+     * `tags`. (External-client backend support.)
+     */
+    metadata?: Record<string, unknown>;
 }
 interface IngestFileRequest {
     file_path: string;
@@ -138,6 +144,64 @@ interface PluginListResponse {
     total: number;
     [key: string]: unknown;
 }
+interface MemoryExtractJobStatus {
+    job_id: string;
+    /** queued | started | finished | failed | deferred | scheduled | canceled | unknown */
+    status: string;
+    enqueued_at?: string | null;
+    started_at?: string | null;
+    ended_at?: string | null;
+    /** Populated only when status === "finished" */
+    result?: MemoryExtractResponse | null;
+    /** Populated only when status === "failed" */
+    error?: string | null;
+    [key: string]: unknown;
+}
+interface LLMCompleteRequest {
+    /** OpenAI-format messages: [{role, content}, ...] */
+    messages: Array<{
+        role: string;
+        content: string;
+    }>;
+    /** chat | internal | verification | classification | research */
+    task_type?: string;
+    /** Optional query summary for the router's complexity classifier */
+    query?: string;
+    /** low | medium | high */
+    cost_sensitivity?: string;
+    temperature?: number;
+    max_tokens?: number;
+    /** OpenAI-compatible response format spec (e.g., {"type": "json_object"}) */
+    response_format?: Record<string, unknown>;
+    /** Wall-clock budget in ms; filters tiers by empirical p95 latency. */
+    slo_budget_ms?: number;
+}
+interface LLMCompleteResponse {
+    content: string;
+    model: string;
+    /** ollama | openrouter_free | openrouter_paid */
+    provider: string;
+    reason: string;
+    estimated_cost_per_1k: number;
+    /** Empirical p95 wall-clock for the routed tier; 0 when no profile yet. */
+    tier_p95_ms: number;
+    [key: string]: unknown;
+}
+interface IngestExternalRequest {
+    /** Free-form label (e.g. "readwise", "pocket", "telegram-bot"). */
+    source_type: string;
+    /** Raw JSON payload from the external service. */
+    payload: Record<string, unknown>;
+    /** Mapping config extracting canonical fields from `payload`. */
+    field_mappings: Record<string, unknown>;
+}
+interface IngestExternalResponse {
+    accepted: number;
+    skipped: number;
+    errors: Array<Record<string, unknown>>;
+    source_type: string;
+    [key: string]: unknown;
+}
 
 declare class BaseResource {
     protected readonly _baseUrl: string;
@@ -156,6 +220,13 @@ declare class KBResource extends BaseResource {
     ingest(params: IngestRequest): Promise<IngestResponse>;
     /** Ingest a file from the archive or an absolute path. */
     ingestFile(params: IngestFileRequest): Promise<IngestResponse>;
+    /**
+     * Adapter-shaped ingest for external services (Readwise, Pocket,
+     * Telegram-bot, …). The caller supplies a `field_mappings` config that
+     * declares how to extract canonical fields from the raw `payload`.
+     * See `docs/INTEGRATION_GUIDE.md` for per-service mapping examples.
+     */
+    ingestExternal(params: IngestExternalRequest): Promise<IngestExternalResponse>;
     /** List all knowledge base collections. */
     collections(): Promise<CollectionsResponse>;
     /** Get the domain taxonomy tree. */
@@ -168,6 +239,24 @@ declare class VerifyResource extends BaseResource {
 declare class MemoryResource extends BaseResource {
     /** Extract memories from conversation text and store as KB artifacts. */
     extract(params: MemoryExtractRequest): Promise<MemoryExtractResponse>;
+    /**
+     * Poll an async memory_extract job by `job_id`. When the server is in
+     * `MEMORY_QUEUE_MODE=async`, `extract()` may return a 202 Accepted
+     * envelope with a `job_id`; use this method to poll for completion.
+     * Status transitions: queued → started → finished | failed.
+     */
+    getJob(jobId: string): Promise<MemoryExtractJobStatus>;
+}
+declare class LLMResource extends BaseResource {
+    /**
+     * Smart-routed LLM completion. The server's `smart_router` selects a
+     * model tier (FREE / CHEAP / CAPABLE / RESEARCH / EXPERT) based on
+     * `task_type`, `query` complexity, and `cost_sensitivity`. When
+     * `slo_budget_ms` is set, tiers whose empirical p95 exceeds the budget
+     * are filtered out — if none fits, the response is HTTP 503 with a
+     * `Retry-After` header carrying the floor p95.
+     */
+    complete(params: LLMCompleteRequest): Promise<LLMCompleteResponse>;
 }
 declare class SystemResource extends BaseResource {
     /** Service health with feature flags. */
@@ -184,6 +273,7 @@ declare class CeridClient {
     readonly verify: VerifyResource;
     readonly memory: MemoryResource;
     readonly system: SystemResource;
+    readonly llm: LLMResource;
     constructor(options: CeridClientOptions);
 }
 
@@ -218,4 +308,4 @@ declare class ServiceUnavailableError extends CeridSDKError {
  */
 declare function raiseForStatus(response: Response): Promise<void>;
 
-export { AuthenticationError, CeridClient, type CeridClientOptions, CeridSDKError, type CollectionsResponse, type DetailedHealthResponse, type HallucinationCheckRequest, type HallucinationResponse, type HealthResponse, type IngestFileRequest, type IngestRequest, type IngestResponse, KBResource, type MemoryExtractRequest, type MemoryExtractResponse, MemoryResource, NotFoundError, type PluginListResponse, type QueryRequest, type QueryResponse, RateLimitError, type SearchRequest, type SearchResponse, ServiceUnavailableError, type SettingsResponse, SystemResource, type TaxonomyResponse, ValidationError, VerifyResource, raiseForStatus };
+export { AuthenticationError, CeridClient, type CeridClientOptions, CeridSDKError, type CollectionsResponse, type DetailedHealthResponse, type HallucinationCheckRequest, type HallucinationResponse, type HealthResponse, type IngestExternalRequest, type IngestExternalResponse, type IngestFileRequest, type IngestRequest, type IngestResponse, KBResource, type LLMCompleteRequest, type LLMCompleteResponse, LLMResource, type MemoryExtractJobStatus, type MemoryExtractRequest, type MemoryExtractResponse, MemoryResource, NotFoundError, type PluginListResponse, type QueryRequest, type QueryResponse, RateLimitError, type SearchRequest, type SearchResponse, ServiceUnavailableError, type SettingsResponse, SystemResource, type TaxonomyResponse, ValidationError, VerifyResource, raiseForStatus };

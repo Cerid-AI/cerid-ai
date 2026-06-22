@@ -32,6 +32,7 @@ import { fetchExternalAPIs, toggleExternalAPI, fetchExternalAPIHealth } from "@/
 import type { ExternalAPISummary, ExternalAPIHealth } from "@/lib/types/external-apis"
 import type { Plugin } from "@/lib/types"
 import { AppleConnectorsSection } from "./apple-connectors-section"
+import { EmailImapSection } from "./email-imap-section"
 
 type SourceKind = "folder" | "external_api" | "plugin"
 
@@ -422,6 +423,10 @@ export function SourcesConnectors() {
             />
           ))}
         </ul>
+        {/* Email IMAP (server-side; shows in both browser and desktop) */}
+        <div className="mt-4 border-t pt-3">
+          <EmailImapSection />
+        </div>
         {/* Apple connectors (desktop-only; renders null in browser builds) */}
         <div className="mt-4 border-t pt-3">
           <AppleConnectorsSection />

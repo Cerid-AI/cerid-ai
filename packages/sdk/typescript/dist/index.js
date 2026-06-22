@@ -110,6 +110,15 @@ var KBResource = class extends BaseResource {
   async ingestFile(params) {
     return this._post("/sdk/v1/ingest/file", params);
   }
+  /**
+   * Adapter-shaped ingest for external services (Readwise, Pocket,
+   * Telegram-bot, …). The caller supplies a `field_mappings` config that
+   * declares how to extract canonical fields from the raw `payload`.
+   * See `docs/INTEGRATION_GUIDE.md` for per-service mapping examples.
+   */
+  async ingestExternal(params) {
+    return this._post("/sdk/v1/ingest/external", params);
+  }
   /** List all knowledge base collections. */
   async collections() {
     return this._get("/sdk/v1/collections");
@@ -129,6 +138,28 @@ var MemoryResource = class extends BaseResource {
   /** Extract memories from conversation text and store as KB artifacts. */
   async extract(params) {
     return this._post("/sdk/v1/memory/extract", params);
+  }
+  /**
+   * Poll an async memory_extract job by `job_id`. When the server is in
+   * `MEMORY_QUEUE_MODE=async`, `extract()` may return a 202 Accepted
+   * envelope with a `job_id`; use this method to poll for completion.
+   * Status transitions: queued → started → finished | failed.
+   */
+  async getJob(jobId) {
+    return this._get(`/sdk/v1/memory/extract/jobs/${encodeURIComponent(jobId)}`);
+  }
+};
+var LLMResource = class extends BaseResource {
+  /**
+   * Smart-routed LLM completion. The server's `smart_router` selects a
+   * model tier (FREE / CHEAP / CAPABLE / RESEARCH / EXPERT) based on
+   * `task_type`, `query` complexity, and `cost_sensitivity`. When
+   * `slo_budget_ms` is set, tiers whose empirical p95 exceeds the budget
+   * are filtered out — if none fits, the response is HTTP 503 with a
+   * `Retry-After` header carrying the floor p95.
+   */
+  async complete(params) {
+    return this._post("/sdk/v1/llm/complete", params);
   }
 };
 var SystemResource = class extends BaseResource {
@@ -154,6 +185,7 @@ var CeridClient = class {
   verify;
   memory;
   system;
+  llm;
   constructor(options) {
     const baseUrl = options.baseUrl.replace(/\/+$/, "");
     const fetchFn = options.fetch ?? globalThis.fetch;
@@ -167,6 +199,7 @@ var CeridClient = class {
     this.verify = new VerifyResource(baseUrl, headers, fetchFn);
     this.memory = new MemoryResource(baseUrl, headers, fetchFn);
     this.system = new SystemResource(baseUrl, headers, fetchFn);
+    this.llm = new LLMResource(baseUrl, headers, fetchFn);
   }
 };
 export {
@@ -174,6 +207,7 @@ export {
   CeridClient,
   CeridSDKError,
   KBResource,
+  LLMResource,
   MemoryResource,
   NotFoundError,
   RateLimitError,
