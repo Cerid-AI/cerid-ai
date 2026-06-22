@@ -50,7 +50,7 @@ PyStemmer>=3.0.0
 apscheduler>=3.10,<4
 
 # Queue (Workstream E Phase 5a — opt-in via INGEST_QUEUE_MODE=async; reuses Redis already in stack)
-rq>=2.0,<3
+rq>=2.10.0,<3
 
 # Markdown header-hierarchy chunker (Workstream E Phase 2b.2). Bumped
 # 2026-05-24 to clear PYSEC-2026-77; the only call site is
