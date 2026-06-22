@@ -491,16 +491,24 @@ async def delete_email_config() -> None:
 
 
 async def get_email_status() -> dict[str, Any]:
-    """Return current email polling status from Redis."""
+    """Return current email polling status, including whether a mailbox is
+    configured (Redis config or env vars) so the UI reflects state on reload."""
+    status: dict[str, Any] = {"last_poll": None, "messages_ingested": 0, "errors": []}
     try:
         from deps import get_redis
         r = get_redis()
         raw = r.get(_REDIS_STATUS_KEY)
         if raw:
-            return json.loads(raw)
+            status = json.loads(raw)
     except (OSError, RuntimeError):
         pass
-    return {"last_poll": None, "messages_ingested": 0, "errors": []}
+    # `configured` drives the connected/disconnect UI even before the first poll.
+    try:
+        cfg = await _load_email_config()
+        status["configured"] = bool(cfg.get("host"))
+    except (OSError, RuntimeError):
+        status.setdefault("configured", False)
+    return status
 
 
 async def _load_processed_uids() -> set[str]:

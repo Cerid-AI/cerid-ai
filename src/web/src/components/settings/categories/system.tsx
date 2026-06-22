@@ -25,6 +25,7 @@ import {
   fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain,
 } from "@/lib/api"
 import { logSwallowedError } from "@/lib/log-swallowed"
+import { ConnectionSection } from "@/components/settings/connection-section"
 import type { SettingsCategoryPageProps } from "./page-props"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -567,6 +568,7 @@ function KBMaintenanceSection() {
 export default function SystemCategory({ settings }: SettingsCategoryPageProps) {
   return (
     <div className="density-stack">
+      <ConnectionSection />
       <ServerInfoSection settings={settings} />
       <PlatformSection />
       <StorageSection />

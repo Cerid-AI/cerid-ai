@@ -294,6 +294,11 @@ services:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
     environment:
       - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+      # Injected into the served UI's window.__ENV__ by docker-entrypoint.sh so
+      # the browser sends X-API-Key. Required when the MCP enforces auth (LAN
+      # mode); empty by default for local single-host use. start-cerid.sh derives
+      # it from CERID_API_KEY.
+      - VITE_CERID_API_KEY=${VITE_CERID_API_KEY:-}
       # Frontend Sentry (GA_CHECKLIST P0). Empty by default — the SDK
       # no-ops without a DSN. Set in .env or the host shell to start
       # shipping FE errors to the cerid-ai-web Sentry project. Re-read

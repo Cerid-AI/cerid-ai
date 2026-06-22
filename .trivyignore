@@ -89,3 +89,13 @@ CVE-2026-45447
 # in the container runs perl, let alone on untrusted archives. No fixed
 # version published as of 2026-06-10. Re-evaluate: 2026-06-30.
 CVE-2026-48959
+
+# SQLite memory corruption / heap-based buffer overflow (SQLite before
+# 3.53.2). libsqlite3-0 ships with the Debian 13 base image; exploitation
+# requires parsing an attacker-controlled SQLite database or crafted SQL.
+# The container never opens untrusted .sqlite files — Chroma/Neo4j/Redis
+# are the datastores; sqlite3 is only a transitive OS/stdlib dependency.
+# No fixed version (3.53.2) published for Debian 13 as of 2026-06-21.
+# Re-evaluate: 2026-07-31.
+CVE-2026-11822
+CVE-2026-11824

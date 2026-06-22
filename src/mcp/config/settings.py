@@ -17,6 +17,23 @@ from utils.model_registry import get_model
 ENABLE_SENTRY = os.getenv("ENABLE_SENTRY", "false").lower() in ("true", "1", "yes")
 
 # ---------------------------------------------------------------------------
+# Network / auth (LAN exposure) — see docs/LAN_REMOTE_ACCESS.md
+# ---------------------------------------------------------------------------
+# Surfaced here so they appear in the generated .env.example. The values are
+# read dynamically at their call sites (app/middleware/auth.py and the CORS
+# middleware in app/main.py call os.getenv directly, so changes apply without
+# re-import); these mirror the defaults for documentation + drift coverage.
+#
+# Shared API key. Empty = auth disabled (localhost-only). start-cerid.sh
+# hard-requires this in LAN mode and forwards it to the web UI as
+# VITE_CERID_API_KEY so the browser/desktop client can send X-API-Key.
+CERID_API_KEY = os.getenv("CERID_API_KEY", "")
+# Allowed CORS origins (comma-separated). Same-origin access via the nginx /
+# Caddy "/api/mcp" proxy needs no change; set this only for cross-origin browser
+# access. "*" disables credentialed CORS.
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:8888")
+
+# ---------------------------------------------------------------------------
 # PDF Parsing (memory-safe chunked extraction)
 # ---------------------------------------------------------------------------
 PDF_MAX_PAGES = int(os.getenv("PDF_MAX_PAGES", "200"))
@@ -195,6 +212,11 @@ WEBHOOK_DRAIN_MAX_PER_RUN = int(os.getenv("WEBHOOK_DRAIN_MAX_PER_RUN", "200"))
 SCHEDULE_SOURCE_POLL = os.getenv("SCHEDULE_SOURCE_POLL", "*/15 * * * *")
 SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE = int(os.getenv("SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE", "50"))
 
+# IMAP mailbox polling: drives poll_email() on a cadence to ingest new unseen
+# mail. Self-skips when no mailbox is configured (legacy /data-sources/email).
+# Empty disables.
+SCHEDULE_EMAIL_POLL = os.getenv("SCHEDULE_EMAIL_POLL", "*/15 * * * *")
+
 # Contextual retrieval per-tenant monthly USD budget (Workstream E
 # Phase 3). When breached, the circuit breaker disables further
 # contextual generation for that tenant for the rest of the calendar
@@ -222,8 +244,13 @@ CRAG_STALENESS_WINDOW_DAYS = int(os.getenv("CRAG_STALENESS_WINDOW_DAYS", "7"))
 # rather than rubber-stamped ``verified`` on stale data. Defaults to the
 # CRAG window (same staleness notion, different surface) but is separately
 # tunable for operators who want verification stricter/looser than retrieval.
+# `or CRAG_STALENESS_WINDOW_DAYS` (not a getenv default) so an *empty* env value
+# falls back too — a getenv default only applies when the var is unset. CI seeds
+# .env from .env.example, where this lands blank (its default is the non-literal
+# str(CRAG_STALENESS_WINDOW_DAYS), which the generator can't resolve), and a bare
+# int("") would crash MCP startup.
 VERIFICATION_STALENESS_WINDOW_DAYS = int(
-    os.getenv("VERIFICATION_STALENESS_WINDOW_DAYS", str(CRAG_STALENESS_WINDOW_DAYS))
+    os.getenv("VERIFICATION_STALENESS_WINDOW_DAYS") or CRAG_STALENESS_WINDOW_DAYS
 )
 
 # Wall-clock ceiling for a single agent_query() call. Two competing

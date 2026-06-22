@@ -2,6 +2,7 @@
 fastapi>=0.136.1,!=0.136.3,<0.137  # 0.136.3 excluded — OSV MAL-2026-4750 (malicious `fastar` dep in [standard] extra)
 sentry-sdk[fastapi]>=2.62.0
 uvicorn[standard]>=0.49.0,<1
+starlette>=1.3.1  # security: CVE-2026-54283 (HIGH) — fastapi transitive, pin the fix
 pydantic>=2.13.4,<3
 
 # MCP protocol
@@ -66,7 +67,7 @@ langchain-text-splitters>=1.1.2,<2
 urllib3>=2.7.0
 idna>=3.15
 langchain-core>=1.3.3
-langsmith>=0.8.0
+langsmith>=0.8.18  # 0.8.18 fixes GHSA-f4xh-w4cj-qxq8 (HIGH)
 
 # Code AST chunker (Workstream E Phase 2b.3) — Python grammar today;
 # tree-sitter-{javascript,typescript,go,rust} added per future sub-phase.
@@ -85,7 +86,7 @@ quotequail>=0.4,<1
 # optional: bcrypt>=4.0,<6
 
 # Utilities
-cryptography>=48.0.0,<49
+cryptography>=48.0.1,<49  # 48.0.1 fixes GHSA-537c-gmf6-5ccf (HIGH)
 python-multipart>=0.0.27,<1
 
 # Plugins (Pro tier — system deps: tesseract-ocr, ffmpeg in Dockerfile)

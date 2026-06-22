@@ -6,7 +6,7 @@ API key authentication middleware.
 
 Checks X-API-Key header against CERID_API_KEY env var.
 When no key is configured, all requests pass through (backward compatible).
-Exempt paths: /health, /, /docs, /openapi.json, /redoc, /mcp/*
+Exempt paths: /health, /health/* (probes), /, /docs, /openapi.json, /redoc, /mcp/*
 """
 from __future__ import annotations
 
@@ -24,7 +24,9 @@ from config.features import DEFAULT_TENANT_ID
 logger = logging.getLogger("ai-companion.auth")
 
 EXEMPT_PATHS = {"/health", "/", "/docs", "/openapi.json", "/redoc", "/.well-known/agent.json"}
-EXEMPT_PREFIXES = ("/mcp/", "/auth/", "/a2a/")
+# /health/* covers liveness/readiness/ping probes (Docker healthcheck hits
+# /health/ping) — probes must reach the app without the API key.
+EXEMPT_PREFIXES = ("/health/", "/mcp/", "/auth/", "/a2a/")
 
 
 def _redact_ip(ip: str) -> str:

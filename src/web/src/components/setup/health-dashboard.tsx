@@ -6,10 +6,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Loader2, Info, Copy, RefreshCw, Server, Cpu, Sparkles } from "lucide-react"
-import { fetchSetupHealth } from "@/lib/api"
+import { fetchSetupHealth, MCP_BASE, mcpHeaders } from "@/lib/api"
 import type { SetupHealth, SetupServiceHealth } from "@/lib/types"
-
-const MCP_BASE = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
 
 interface HealthDashboardProps {
   polling?: boolean
@@ -172,7 +170,7 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy,
   const handleRetestVerification = useCallback(async () => {
     setRetesting(true)
     try {
-      await fetch(`${MCP_BASE}/setup/retest-verification`, { method: "POST" })
+      await fetch(`${MCP_BASE}/setup/retest-verification`, { method: "POST", headers: mcpHeaders() })
       await checkHealth()
     } catch {
       // Next poll will update

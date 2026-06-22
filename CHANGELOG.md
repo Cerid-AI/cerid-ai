@@ -2,6 +2,40 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — LAN/remote access + thin desktop client + mail auto-poll (2026-06-19)
+
+Run the service on one machine and connect from another on the LAN (e.g. service
+on a desktop, client on a laptop), and finish wiring the IMAP mail source.
+
+### Added
+
+- **LAN / remote access** (opt-in, authenticated). `CERID_LAN_MODE=true` binds
+  the MCP API + GUI to `0.0.0.0` while datastores stay on `127.0.0.1`. The start
+  script hard-requires `CERID_API_KEY` in LAN mode and enables the Caddy HTTPS
+  gateway by default. New guide: `docs/LAN_REMOTE_ACCESS.md`.
+- **Desktop remote mode.** Settings → System → Server Connection lets the desktop
+  app connect to a remote Cerid instance instead of running a local stack. It
+  loads the remote UI same-origin (no CORS, server-managed key), skips local
+  Docker startup, and falls back to the local UI if the remote is unreachable.
+  Connection target stored locally; the API key lives in the OS keychain.
+- **Email (IMAP) is now end-to-end.** A `SCHEDULE_EMAIL_POLL` scheduler job polls
+  the configured mailbox automatically (self-skips when unconfigured), and a new
+  Sources → Connectors → Email panel configures credentials, shows poll status,
+  triggers an immediate poll, and disconnects behind a confirmation.
+
+### Changed
+
+- Web API base resolution adds a `window.cerid.env` source (desktop preload
+  injection) ahead of `window.__ENV__`, so the desktop can target a backend
+  without a rebuild. In LAN mode the served UI uses the relative `/api/mcp`
+  proxy path for same-origin calls.
+- The Caddy gateway honors `CERID_BIND_ADDR` (localhost-only unless LAN mode).
+
+### Fixed
+
+- `health-dashboard.tsx` no longer hardcodes `http://localhost:8888`; it uses the
+  shared API base + auth headers, so it works under remote/LAN configs.
+
 ## Unreleased — Production audit remediation (2026-06-17 → 06-19)
 
 A comprehensive multi-agent production-readiness audit (84 findings) followed by

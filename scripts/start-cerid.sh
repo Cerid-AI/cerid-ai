@@ -528,21 +528,65 @@ else
 fi
 echo "[net] CERID_HOST=$CERID_HOST (source: $_host_source)"
 
-# When LAN access is enabled, bind to all interfaces (requires explicit opt-in)
+# LAN access is an explicit opt-in. Materialize the relevant settings from .env
+# (the script reads specific keys; it does not source the whole file) so that
+# `CERID_LAN_MODE=true` in .env actually takes effect.
+for _k in CERID_LAN_MODE CERID_API_KEY CERID_GATEWAY; do
+  if [ -z "${!_k:-}" ] && [ -f "$ENV_FILE" ]; then
+    printf -v "$_k" '%s' "$(grep -s "^${_k}=" "$ENV_FILE" | head -1 | cut -d'=' -f2- || echo "")"
+  fi
+done
+
+# When LAN access is enabled, bind the host-facing services (MCP + GUI) to all
+# interfaces. The datastores (Neo4j/Chroma/Redis) stay pinned to 127.0.0.1 in
+# docker-compose.yml regardless — clients only ever need the MCP API + GUI.
 if [[ -n "$CERID_HOST" && "$CERID_HOST" != "localhost" && "$CERID_HOST" != "127.0.0.1" ]]; then
   if [[ "${CERID_LAN_MODE:-}" == "true" ]]; then
+    # SECURITY GATE: never expose the knowledge base to the network without auth.
+    if [[ -z "${CERID_API_KEY:-}" ]]; then
+      echo "[FATAL] CERID_LAN_MODE=true requires CERID_API_KEY to be set."
+      echo "        Refusing to expose an unauthenticated knowledge base on the LAN."
+      echo "        Generate a key:  openssl rand -hex 32"
+      echo "        Then add to .env: CERID_API_KEY=<key>   (and set it in the desktop client)"
+      exit 1
+    fi
     export CERID_BIND_ADDR="${CERID_BIND_ADDR:-0.0.0.0}"
-    echo "[WARNING] LAN mode enabled — binding ALL services to 0.0.0.0"
-    echo "    Exposed ports: Neo4j(7474/7687), ChromaDB(8001), Redis(6379), MCP(8888), GUI(3000)"
-    echo "    Ensure your network is trusted or set up the Caddy HTTPS gateway."
+    export CERID_API_KEY
+    # HTTPS on by default for LAN (Caddy self-signed); set CERID_GATEWAY=false to opt out.
+    if [[ -z "${CERID_GATEWAY:-}" ]]; then
+      export CERID_GATEWAY="true"
+    fi
+    echo "[net] LAN mode ON — MCP(${CERID_PORT_MCP}) + GUI(${CERID_PORT_GUI}) bind to 0.0.0.0."
+    echo "      Datastores stay on 127.0.0.1. Auth: X-API-Key required (CERID_API_KEY set)."
+    if [[ "${CERID_GATEWAY:-}" == "true" ]]; then
+      echo "      HTTPS: Caddy gateway at https://${CERID_HOST} (self-signed; trust its CA on clients)."
+    else
+      echo "      HTTPS disabled (CERID_GATEWAY=false) — traffic + API key travel in cleartext."
+    fi
   else
     echo "    LAN IP detected ($CERID_HOST) but CERID_LAN_MODE is not set."
     echo "    Services will bind to 127.0.0.1 only. Set CERID_LAN_MODE=true in .env to enable LAN access."
   fi
 fi
 
-# Set runtime URLs for web container based on CERID_HOST
-export VITE_MCP_URL="http://${CERID_HOST}:${CERID_PORT_MCP}"
+# Runtime MCP URL for the web container. In LAN mode use the relative proxy
+# path ("/api/mcp", served by nginx and the Caddy gateway) so the UI calls the
+# API SAME-ORIGIN — no CORS, works over HTTPS, and the desktop remote client
+# (which loads this same served UI) inherits it. Single-host runs keep the
+# absolute host:port for direct access.
+if [[ "${CERID_LAN_MODE:-}" == "true" ]]; then
+    export VITE_MCP_URL="/api/mcp"
+else
+    export VITE_MCP_URL="http://${CERID_HOST}:${CERID_PORT_MCP}"
+fi
+# Absolute MCP URL for the LAN reachability probe below (the MCP port is bound
+# to 0.0.0.0 in LAN mode; /health is auth-exempt so no key is needed).
+_MCP_LAN_HEALTH_URL="http://${CERID_HOST}:${CERID_PORT_MCP}/health"
+
+# Surface the API key to the web container so the served UI carries X-API-Key.
+# Without this, every browser/remote-client API call 401s when auth is on.
+# Empty when no key is configured (local single-host use needs none).
+export VITE_CERID_API_KEY="${CERID_API_KEY:-}"
 
 # Force-recreate web container if VITE_MCP_URL changed (prevents stale IP bug)
 WEB_RECREATE=""
@@ -761,12 +805,12 @@ fi
 # Validate LAN reachability (the bug that prompted Phase 27)
 if [ "$CERID_HOST" != "localhost" ]; then
     echo -n "  MCP (LAN)..."
-    if wait_for_service "MCP-LAN" "$VITE_MCP_URL/health" 10 2; then
+    if wait_for_service "MCP-LAN" "${_MCP_LAN_HEALTH_URL}" 10 2; then
         echo " ready"
     else
         echo " UNREACHABLE"
         echo ""
-        echo "  WARNING: MCP is healthy on localhost but not at $VITE_MCP_URL"
+        echo "  WARNING: MCP is healthy on localhost but not at ${_MCP_LAN_HEALTH_URL}"
         echo "  The React GUI will show 'Checking...' on other devices."
         echo "  Possible causes:"
         echo "    - macOS firewall blocking port $CERID_PORT_MCP"

@@ -407,6 +407,38 @@ async def _run_folder_scan() -> None:
         logger.error(f"Folder scan failed: {e}")
 
 
+async def _run_email_poll() -> None:
+    """Scheduled IMAP poll — ingest new unseen mail when a mailbox is configured.
+
+    A no-op (logged "skipped") when no mailbox is configured, so the job is safe
+    to register unconditionally. Dedup (processed-UID set) and circuit-breaking
+    live in ``poll_email()``; this wrapper only drives the cadence + logging.
+    """
+    start = time.time()
+    try:
+        from app.data_sources.email_imap import poll_email
+
+        result = await poll_email()
+        duration = time.time() - start
+        status = result.get("status", "")
+        if status == "not_configured":
+            _log_execution("email_poll", "skipped", duration, "no mailbox configured")
+            return
+        if status == "circuit_open":
+            _log_execution("email_poll", "skipped", duration, "circuit open")
+            return
+        if status == "error":
+            _log_execution("email_poll", "error", duration, str(result.get("error", "")))
+            return
+        detail = f"ingested={result.get('messages', 0)}"
+        _log_execution("email_poll", "success", duration, detail)
+        if result.get("messages"):
+            logger.info("email_poll: %s in %.1fs", detail, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        _log_execution("email_poll", "error", time.time() - start, str(e))
+        logger.error("email_poll scheduled job failed: %s", e)
+
+
 async def _run_ingest_recovery() -> None:
     """Phase O.1 — scan for stale pending Chroma chunks and heal them.
 
@@ -1523,6 +1555,21 @@ def start_scheduler() -> AsyncIOScheduler:
             ),
             id="source_poll",
             name="Connector polling (fetch_since)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # IMAP mailbox polling — ingest new unseen mail on a cadence. Self-skips
+    # when no mailbox is configured. Every 15 min by default; gated, empty
+    # SCHEDULE_EMAIL_POLL disables.
+    if getattr(config, "SCHEDULE_EMAIL_POLL", "*/15 * * * *"):
+        _scheduler.add_job(
+            _run_email_poll,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_EMAIL_POLL", "*/15 * * * *"),
+            ),
+            id="email_poll",
+            name="IMAP mailbox polling",
             replace_existing=True,
             max_instances=1,
         )

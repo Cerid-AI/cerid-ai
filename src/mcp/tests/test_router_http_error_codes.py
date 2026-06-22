@@ -5,16 +5,48 @@
 envelope (FE then shows success while nothing changed)."""
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+_EMAIL_CFG = {
+    "host": "imap.example.com",
+    "port": 993,
+    "user": "u",
+    "password": "p",  # pragma: allowlist secret
+    "folder": "INBOX",
+    "poll_interval": 15,
+}
 
 
 def _client(router) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=False)
+
+
+def test_configure_email_unreachable_host_returns_422() -> None:
+    """A bad host/port/credentials (validation failure) is user input → 422,
+    not a 500, and it must not trip the email-imap circuit breaker."""
+    from app.routers.data_sources import router
+
+    with patch(
+        "app.data_sources.email_imap.save_email_config",
+        new=AsyncMock(side_effect=OSError("[Errno 8] nodename nor servname provided")),
+    ):
+        resp = _client(router).post("/data-sources/email/configure", json=_EMAIL_CFG)
+    assert resp.status_code == 422
+    assert "IMAP" in resp.json()["detail"]
+
+
+def test_configure_email_success_returns_configured() -> None:
+    from app.routers.data_sources import router
+
+    with patch("app.data_sources.email_imap.save_email_config", new=AsyncMock(return_value=None)):
+        resp = _client(router).post("/data-sources/email/configure", json=_EMAIL_CFG)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "configured"
 
 
 # ── data-sources: not-found → 404 (not 200 + error) ─────────────────────────
