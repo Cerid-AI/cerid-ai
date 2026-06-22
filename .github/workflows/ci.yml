@@ -429,6 +429,14 @@ jobs:
           # loopback-only. Mirrors the pip-audit ignore in the security job.
           # Re-eval 2026-09-30 (chromadb patch cadence).
           CVE-2026-45829
+          # libsqlite3-0 memory corruption / heap overflow (SQLite before
+          # 3.53.2). Exploitation requires parsing an attacker-controlled
+          # SQLite database or crafted SQL; the container never opens untrusted
+          # .sqlite files (Chroma/Neo4j/Redis are the datastores, sqlite3 is a
+          # transitive OS/stdlib dep). No Debian 13 fix as of 2026-06-21.
+          # Re-eval 2026-07-31.
+          CVE-2026-11822
+          CVE-2026-11824
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
