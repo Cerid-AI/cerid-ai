@@ -122,7 +122,7 @@ async def test_create_dev_events_github_auto_mints_hmac():
             ),
         )
     # github sets requires_signature=True → receiver would reject without a secret.
-    assert create_mock.call_args.kwargs["config"]["hmac_secret"] == "sec_x"
+    assert create_mock.call_args.kwargs["config"]["hmac_secret"] == "sec_x"  # pragma: allowlist secret
 
 
 @pytest.mark.asyncio
