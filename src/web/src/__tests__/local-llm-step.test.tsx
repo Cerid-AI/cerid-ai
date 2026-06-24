@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+
+const fetchOllamaRecommendations = vi.fn().mockResolvedValue({ hardware: null, models: [] })
 
 vi.mock("@/lib/api", () => ({
   pullOllamaModel: vi.fn().mockResolvedValue(new Response()),
-  fetchOllamaRecommendations: vi.fn().mockResolvedValue({ hardware: null, models: [] }),
+  fetchOllamaRecommendations: (...args: unknown[]) => fetchOllamaRecommendations(...args),
 }))
 
 import { LocalLLMStep } from "@/components/setup/local-llm-step"
@@ -28,8 +30,9 @@ interface OllamaState {
 const onChange = vi.fn<(state: OllamaState) => void>()
 
 beforeEach(() => {
-  vi.restoreAllMocks()
   onChange.mockClear()
+  fetchOllamaRecommendations.mockReset()
+  fetchOllamaRecommendations.mockResolvedValue({ hardware: null, models: [] })
 })
 
 // ---- Default (Ollama) backend ----
@@ -115,6 +118,41 @@ describe("LocalLLMStep — Ollama backend (default)", () => {
     expect(screen.getByText("Installed Models")).toBeInTheDocument()
     expect(screen.getByText("llama3.2:3b")).toBeInTheDocument()
     expect(screen.getByText("mistral:7b")).toBeInTheDocument()
+  })
+
+  it("marks a recommended colon-tag model as Installed when the dash-alias is present (SW2)", async () => {
+    // Bug SW2: recommendation ids use Ollama colon tags (`llama3.2:3b`)
+    // while local Quenchforge aliases use dashes (`llama3.2-3b`). The
+    // cross-match must normalize `:`<->`-` so the installed recommended
+    // model shows its "Installed" badge instead of an orphaned "Pull".
+    fetchOllamaRecommendations.mockResolvedValue({
+      hardware: null,
+      models: [
+        {
+          id: "llama3.2:3b",
+          name: "Llama 3.2 3B",
+          origin: "Meta",
+          size_gb: 2.0,
+          description: "Balanced pipeline model",
+          strengths: "speed",
+          compatible: true,
+          recommended: true,
+        },
+      ],
+    })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={["llama3.2-3b"]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText("Llama 3.2 3B")).toBeInTheDocument())
+    expect(screen.getByText("Installed")).toBeInTheDocument()
+    // And no Pull button for an already-installed model.
+    expect(screen.queryByText("Pull")).not.toBeInTheDocument()
   })
 
   it("does not show install link when detected", () => {

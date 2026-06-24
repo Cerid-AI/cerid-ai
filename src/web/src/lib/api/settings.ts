@@ -341,11 +341,22 @@ export async function fetchOllamaRecommendations(): Promise<import("../types").O
 }
 
 export async function pullOllamaModel(model: string): Promise<Response> {
-  return fetch(`${MCP_BASE}/ollama/pull`, {
+  const res = await fetch(`${MCP_BASE}/ollama/pull`, {
     method: "POST",
     headers: { ...mcpHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ model }),
   })
+  // The backend returns HTTP 200 with an SSE/JSON body even when pull is
+  // unsupported (e.g. Quenchforge: {"status":"not_implemented","error":...}).
+  // Surface that as a thrown error so callers don't treat it as success.
+  const text = await res.clone().text()
+  if (text.includes('"status":"not_implemented"') || text.includes('"status": "not_implemented"')) {
+    let message = "Model pull is not supported by this backend."
+    const match = text.match(/"error"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+    if (match?.[1]) message = match[1].replace(/\\"/g, '"')
+    throw new Error(message)
+  }
+  return res
 }
 
 export async function disableOllama(): Promise<{ status: string; provider: string }> {

@@ -312,6 +312,9 @@ def degradation_status() -> dict:
         "topic_extraction": provider if is_local else "openrouter",
         "memory_resolution": provider if is_local else "openrouter",
         "reranking": provider if is_local else "openrouter",
+        "verification_simple": provider if is_local else "openrouter",
+        "verification_complex": provider if is_local else "openrouter",
+        "chat_generation": provider if is_local else "openrouter",
     }
     try:
         base["can_retrieve"] = mgr.can_retrieve()

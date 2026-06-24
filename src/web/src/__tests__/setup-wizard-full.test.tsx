@@ -134,7 +134,7 @@ describe("SetupWizard", () => {
 
   // ---- StepIndicator ----
 
-  it("StepIndicator renders 9 step labels (post-Cluster-E split)", () => {
+  it("StepIndicator renders 8 step labels", () => {
     render(<SetupWizard open={true} onComplete={noop} />)
     // The StepIndicator renders shortLabels inside spans with "hidden sm:inline".
     // Check for distinctive labels that don't collide with step content.
@@ -145,8 +145,8 @@ describe("SetupWizard", () => {
     expect(screen.getByText("Apply")).toBeInTheDocument()
     expect(screen.getByText("Health")).toBeInTheDocument()
     expect(screen.getByText("Try")).toBeInTheDocument()
-    expect(screen.getByText("Telemetry")).toBeInTheDocument()
     expect(screen.getByText("Mode")).toBeInTheDocument()
+    expect(screen.queryByText("Telemetry")).not.toBeInTheDocument()
   })
 
   // ---- Dialog behavior ----

@@ -35,6 +35,11 @@ const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
 // only enters memory when the user actually picks 3D mode.
 const Constellation = lazy(() => import("./constellation/Constellation"))
 const Timeline = lazy(() => import("./timeline/Timeline"))
+const EntityAnalysisDrawer = lazy(() =>
+  import("./constellation/entity-analysis-drawer").then((m) => ({
+    default: m.EntityAnalysisDrawer,
+  })),
+)
 
 export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki"
 
@@ -120,6 +125,13 @@ export default function SubjectsPane() {
   // Phase K — ?since=ISO scopes Subjects to artifacts ingested after the timestamp.
   const [sinceFilter, setSinceFilter] = useState<string | null>(() => readQueryParam("since"))
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // CN2 — Constellation node click opens a right-anchored analysis drawer.
+  // This is a sibling OVERLAY (Radix portal), so opening/closing it never
+  // remounts or resizes the sigma map container. `null` = drawer closed.
+  const [analysisSlug, setAnalysisSlug] = useState<string | null>(null)
+  // Keep the drawer mounted after the first open so the Sheet's close
+  // animation can run (unmounting on close would cut the exit transition).
+  const [drawerMounted, setDrawerMounted] = useState(false)
   const navigation = useNavigation()
 
   // Atlas sub-mode: overview (decomposition icicle) or neighborhood (sigma ego view).
@@ -191,6 +203,14 @@ export default function SubjectsPane() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleInspect = useCallback((_entityId: string) => {
     // intentional no-op at pane level — pin is internal to the graph surface
+  }, [])
+
+  // CN2 — Constellation node click. Opens the analysis drawer for the clicked
+  // entity. Re-clicking a different node just updates the slug, re-targeting
+  // the drawer in place (no remount of the constellation map).
+  const handleConstellationNodeClick = useCallback((entityId: string) => {
+    setDrawerMounted(true)
+    setAnalysisSlug(entityId)
   }, [])
 
   // Explicit refocus: re-center neighborhood on a different entity (Make focal).
@@ -373,12 +393,12 @@ export default function SubjectsPane() {
               </div>
             }
           >
-            {/* onNodeClick → handleInspect: pin only, no mode switch (Cycle 4 contract).
-                CartographerMap already has onFocusEntity reserved; Constellation will
-                thread it through in a follow-up once Agent C's outer props are extended. */}
+            {/* CN2 — onNodeClick opens the analysis drawer (sibling overlay below),
+                NOT a mode switch and NOT a map remount. The drawer is portalled,
+                so the sigma map container is untouched when it opens/closes. */}
             <Constellation
               focalEntity={focalEntity ?? undefined}
-              onNodeClick={handleInspect}
+              onNodeClick={handleConstellationNodeClick}
             />
           </Suspense>
         )}
@@ -416,6 +436,22 @@ export default function SubjectsPane() {
         onOpenChange={setPaletteOpen}
         onPick={handleEntityPick}
       />
+
+      {/* CN2 — entity analysis drawer. Sibling overlay (portalled), never a
+          child of the constellation container, so the sigma map never remounts
+          or resizes when it opens/closes. Mounted only after the first node
+          click (drawerMounted) so its markdown/chart deps stay out of the
+          initial bundle; once mounted it stays mounted and the Sheet's `open`
+          prop drives the open/close animation. */}
+      {drawerMounted && (
+        <Suspense fallback={null}>
+          <EntityAnalysisDrawer
+            slug={analysisSlug}
+            onClose={() => setAnalysisSlug(null)}
+            onSelectRelated={(s) => setAnalysisSlug(s)}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

@@ -195,6 +195,32 @@ def delete_source(driver, source_id: str, *, cascade: bool = False) -> None:
         )
 
 
+def update_source_config(
+    driver,
+    source_id: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist an updated config dict for a Source. Returns the refreshed record.
+
+    Called from ``POST /sources/{id}/config`` after the connector re-validates
+    the merged config. The caller is responsible for merging and dropping any
+    redaction-mask values before passing ``config`` here.
+    """
+    with driver.session() as session:
+        session.run(
+            """
+            MATCH (s:Source {id: $id})
+            SET s.config = $config
+            """,
+            id=source_id,
+            config=json.dumps(config),
+        )
+    refreshed = get_source(driver, source_id)
+    if refreshed is None:
+        raise RuntimeError(f"update_source_config: source {source_id!r} disappeared after write")
+    return refreshed
+
+
 def link_artifact(driver, artifact_id: str, source_id: str) -> None:
     """Create the (:Artifact)-[:FROM_SOURCE]->(:Source) edge. Idempotent."""
     with driver.session() as session:

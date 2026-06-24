@@ -47,6 +47,8 @@ export interface QueryOpts {
   useReranking?: boolean
   /** Drop knowledge-pack chunks from retrieval (personal-first). Slice 7.3. */
   excludePacks?: boolean
+  /** Restrict which context surfaces feed retrieval (kb / memory / external). */
+  contextSources?: ContextSources
   /** AbortSignal to cancel the request (frees browser connection slot). */
   signal?: AbortSignal
 }
@@ -74,6 +76,7 @@ export async function queryKB(
       ...(opts?.skipCache != null && { skip_cache: opts.skipCache }),
       ...(opts?.metadataFilter != null && { metadata_filter: opts.metadataFilter }),
       ...(opts?.excludePacks != null && { exclude_packs: opts.excludePacks }),
+      ...(opts?.contextSources != null && { context_sources: opts.contextSources }),
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))
@@ -123,9 +126,14 @@ export async function recallMemories(
   return res.json()
 }
 
-export async function fetchArtifacts(domain?: string, limit = 50): Promise<Artifact[]> {
+export async function fetchArtifacts(
+  domain?: string,
+  limit = 50,
+  subCategory?: string,
+): Promise<Artifact[]> {
   const params = new URLSearchParams()
   if (domain) params.set("domain", domain)
+  if (subCategory) params.set("sub_category", subCategory)
   params.set("limit", String(limit))
   const res = await fetch(`${MCP_BASE}/artifacts?${params}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Artifacts fetch failed: ${res.status}`))

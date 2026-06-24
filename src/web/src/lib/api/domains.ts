@@ -50,8 +50,11 @@ export interface DomainCountsResponse {
 // Fetch
 // ---------------------------------------------------------------------------
 
-export async function fetchDomainCounts(): Promise<DomainCountsResponse> {
+export async function fetchDomainCounts(
+  opts: { includeInternal?: boolean } = {},
+): Promise<DomainCountsResponse> {
   const url = mcpUrl("/graph/domains")
+  if (opts.includeInternal) url.searchParams.set("include_internal", "true")
   const res = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!res.ok) {
     throw new Error(`Domain counts fetch failed (${res.status})`)

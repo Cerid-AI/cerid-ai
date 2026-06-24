@@ -29,12 +29,37 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.graph.wiki")
+
+# ---------------------------------------------------------------------------
+# WK2 — client/internal domains hidden from the default wiki browse view.
+# ---------------------------------------------------------------------------
+# These are the clearly-client data domains. The default wiki list excludes
+# them; an "advanced/show internal" toggle (include_internal=True) reveals
+# them. Overridable via the WIKI_HIDDEN_DOMAINS env var (comma-separated).
+CLIENT_INTERNAL_DOMAINS: frozenset[str] = frozenset(
+    {"boardroom_foundation", "canary_client_domain"}
+)
+
+
+def _hidden_domains() -> set[str]:
+    """The set of primary_domain values hidden from the default browse view.
+
+    Reads ``WIKI_HIDDEN_DOMAINS`` (comma-separated) when set; otherwise falls
+    back to :data:`CLIENT_INTERNAL_DOMAINS`. An empty/whitespace-only env value
+    is treated as unset (use the default), not as "hide nothing".
+    """
+    raw = os.environ.get("WIKI_HIDDEN_DOMAINS")
+    if raw is None:
+        return set(CLIENT_INTERNAL_DOMAINS)
+    parsed = {part.strip() for part in raw.split(",") if part.strip()}
+    return parsed or set(CLIENT_INTERNAL_DOMAINS)
 
 # ---------------------------------------------------------------------------
 # Value objects (lightweight dicts; Pydantic models live in the service)
@@ -124,7 +149,11 @@ def _thirty_days_ago_iso() -> str:
 
 
 def list_top_entities(
-    driver: Any, *, limit: int = 30, search: str | None = None
+    driver: Any,
+    *,
+    limit: int = 30,
+    search: str | None = None,
+    include_internal: bool = False,
 ) -> list[dict[str, Any]]:
     """Return up to ``limit`` entities ordered by recent activity score.
 
@@ -144,6 +173,11 @@ def list_top_entities(
     This rank is absent (no WITH-stage CASE) on the no-search browse path
     so the browse ordering stays byte-identical.
 
+    WK2: when ``include_internal`` is False (default) the client-data domains
+    (:data:`CLIENT_INTERNAL_DOMAINS`, overridable via ``WIKI_HIDDEN_DOMAINS``)
+    are excluded via a ``WHERE NOT e.primary_domain IN $hidden`` predicate.
+    Passing ``include_internal=True`` drops the exclusion entirely.
+
     Returns a list of property dicts with keys:
         canonical_id, name, entity_type, mention_count,
         recent_activity_score, summary, summary_updated_at
@@ -153,28 +187,53 @@ def list_top_entities(
     since = _thirty_days_ago_iso()
     search_lc = (search or "").strip().lower()
 
+    # WK2: hidden-domain predicate (default-on); dropped when include_internal.
+    hidden: set[str] | None = None if include_internal else _hidden_domains()
+
+    where_clauses: list[str] = []
     if search_lc:
-        where = (
-            "WHERE toLower(e.name) CONTAINS $search "
-            "OR toLower(e.canonical_id) CONTAINS $search"
+        where_clauses.append(
+            "(toLower(e.name) CONTAINS $search "
+            "OR toLower(e.canonical_id) CONTAINS $search "
+            "OR toLower(coalesce(e.summary, '')) CONTAINS $search)"
         )
+    if hidden is not None:
+        where_clauses.append("NOT e.primary_domain IN $hidden")
+    where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    if search_lc:
         # rank_clause is injected as an extra WITH projection, preceded by a
         # comma so it separates cleanly from recent_activity_score.
+        # Rank ordering (lower = better):
+        #   0 = exact name or canonical_id match
+        #   1 = name prefix match
+        #   2 = name substring match
+        #   3 = body-only match (summary CONTAINS, name/id did not match) — WK1
+        #   4 = canonical_id-only match (name did not match, summary did not match)
         rank_with_clause = """,
                      CASE
                        WHEN toLower(e.name) = $search
                             OR toLower(e.canonical_id) = $search THEN 0
                        WHEN toLower(e.name) STARTS WITH $search THEN 1
                        WHEN toLower(e.name) CONTAINS $search THEN 2
-                       ELSE 3
+                       WHEN toLower(coalesce(e.summary, '')) CONTAINS $search THEN 3
+                       ELSE 4
                      END AS match_rank"""
         order_clause = "ORDER BY match_rank ASC, recent_activity_score DESC, mention_count DESC"
         rank_return = "match_rank,"
     else:
-        where = ""
+        # `where` already built above (may carry the hidden-domain predicate).
         rank_with_clause = ""
         order_clause = "ORDER BY recent_activity_score DESC, mention_count DESC"
         rank_return = ""
+
+    params: dict[str, Any] = {
+        "since": since,
+        "limit": effective_limit,
+        "search": search_lc,
+    }
+    if hidden is not None:
+        params["hidden"] = sorted(hidden)
 
     try:
         with driver.session() as session:
@@ -200,9 +259,7 @@ def list_top_entities(
                 {order_clause}
                 LIMIT $limit
                 """,
-                since=since,
-                limit=effective_limit,
-                search=search_lc,
+                **params,
             )
             return [dict(r) for r in result]
     except Exception as exc:
@@ -241,6 +298,7 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
                     e.community_id        AS community_id,
                     e.summary             AS summary,
                     e.summary_updated_at  AS summary_updated_at,
+                    e.summary_edited_by   AS summary_edited_by,
                     e.updated_at          AS updated_at,
                     e.primary_domain      AS primary_domain,
                     e.domain_mix          AS domain_mix,
@@ -330,26 +388,40 @@ def write_entity_summary(
     slug: str,
     summary: str,
     summary_updated_at: str,
+    *,
+    edited_by: str = "",
 ) -> None:
     """Persist a generated summary on the entity node.
 
     Creates ``summary`` and ``summary_updated_at`` properties.  Safe to
     call repeatedly — always overwrites.  Does NOT touch any other field.
 
+    When ``edited_by="user"`` the write also sets ``summary_edited_by``
+    to ``"user"``, marking this entity as human-edited and suppressing
+    automatic re-summarisation from the stale-sweep and grew-trigger
+    (except contradiction-forced refreshes which always run).
+
+    When ``edited_by`` is empty (the default — job-generated summaries)
+    ``summary_edited_by`` is cleared to ``None`` so the protection window
+    does not persist after the next job refresh.
+
     Raises if the entity does not exist (MATCH returns 0 rows); the job
     caller is expected to validate before writing.
     """
+    edited_by_val: str | None = edited_by if edited_by else None
     try:
         with driver.session() as session:
             session.run(
                 """
                 MATCH (e:Entity {canonical_id: $slug})
                 SET e.summary            = $summary,
-                    e.summary_updated_at = $summary_updated_at
+                    e.summary_updated_at = $summary_updated_at,
+                    e.summary_edited_by  = $summary_edited_by
                 """,
                 slug=slug,
                 summary=summary,
                 summary_updated_at=summary_updated_at,
+                summary_edited_by=edited_by_val,
             )
     except Exception as exc:
         log_swallowed_error("wiki.write_entity_summary", exc, context={"slug": slug})
@@ -362,48 +434,28 @@ def write_entity_summary(
 
 
 def get_confidence_band(driver: Any, slug: str) -> str:
-    """Return the confidence band for an entity based on its claims.
+    """Return the entity's confidence band from its computed trust_state.
 
-    Band logic:
-        >= 80% verified  → "high"
-        50–79% verified  → "medium"
-        < 50% verified   → "low"
-        no claims        → "unknown"
-
-    A (:Claim) node is considered associated with the entity when it has
-    an ``entity_slug`` property matching ``slug``.
+    `e.trust_state` is maintained nightly by ComputeTrustStateJob from
+    VerificationReport evidence. Mapping: verified→high, partial→medium,
+    unverified→low, null/absent→unknown.
     """
     try:
         with driver.session() as session:
-            result = session.run(
-                """
-                MATCH (c:Claim)
-                  WHERE c.entity_slug = $slug
-                WITH
-                    count(c) AS total,
-                    count(CASE WHEN c.status = 'verified' THEN 1 END) AS verified_count
-                RETURN total, verified_count
-                """,
+            row = session.run(
+                "MATCH (e:Entity {canonical_id: $slug}) RETURN e.trust_state AS trust_state",
                 slug=slug,
-            )
-            row = result.single()
-            if row is None:
-                return "unknown"
-            total = int(row["total"])
-            verified = int(row["verified_count"])
-
-        if total == 0:
+            ).single()
+        if row is None:
             return "unknown"
-        ratio = verified / total
-        if ratio >= 0.80:
-            return "high"
-        if ratio >= 0.50:
-            return "medium"
-        return "low"
-
-    except Exception as exc:
-        log_swallowed_error("wiki.get_confidence_band", exc, context={"slug": slug})
-        raise
+        return {
+            "verified": "high",
+            "partial": "medium",
+            "unverified": "low",
+        }.get(row["trust_state"], "unknown")
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("wiki.get_confidence_band", exc)
+        return "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +532,152 @@ def write_external_references(
 # ---------------------------------------------------------------------------
 # get_external_references (called by wiki_pages service)
 # ---------------------------------------------------------------------------
+
+
+def get_backlinks(
+    driver: Any,
+    slug: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return entities that reference the entity identified by ``slug``.
+
+    Three ``via`` sources, in precedence order (wikilink > mention > related):
+
+    - ``wikilink``: Entity nodes whose ``summary`` field contains a wikilink to
+      the target.  Wikilinks in summaries are stored in ``[[name]]`` or
+      ``[[slug]]`` form by the WikiRefreshJob.  We match
+      ``CONTAINS '[[' + target.name``.  This is the most intentional signal.
+
+    - ``mention``: Entities that are co-mentioned via a shared Artifact node
+      (``(:Artifact)-[:MENTIONS]->(src)`` and ``(:Artifact)-[:MENTIONS]->(target)``
+      on the *same* artifact).  Captures incidental co-occurrence.
+
+    - ``related``: Direct ``CO_MENTIONED`` edges between entities (built by
+      the community-detection job from high co-mention counts).
+
+    All three sources are fetched in a single session, de-duplicated in Python
+    (higher-priority ``via`` wins when a slug appears in multiple sources), and
+    capped at ``limit``.  Returns ``[]`` when ``driver`` is ``None`` or an error
+    occurs.
+
+    Returns
+    -------
+    list[dict] — each with: ``slug``, ``name``, ``entity_type``, ``via``.
+    """
+    if not driver or not slug:
+        return []
+
+    _VIA_PRIORITY: dict[str, int] = {"wikilink": 0, "mention": 1, "related": 2}
+
+    try:
+        with driver.session() as session:
+            # Resolve the target entity's name so we can build the wikilink
+            # CONTAINS predicate.  If the entity doesn't exist we return [].
+            target_row = session.run(
+                "MATCH (e:Entity {canonical_id: $slug}) RETURN e.name AS name LIMIT 1",
+                slug=slug,
+            ).single()
+            if target_row is None:
+                return []
+            target_name: str = target_row["name"] or ""
+
+            # Guard: an empty name would produce the token "[[", which
+            # CONTAINS-matches every entity summary that has any wikilink at
+            # all.  Skip the wikilink branch entirely in that case.
+            has_valid_name = bool(target_name)
+            wikilink_token = f"[[{target_name}" if has_valid_name else ""
+
+            if has_valid_name:
+                result = session.run(
+                    """
+                    // via:wikilink — summaries that contain a [[target_name wikilink
+                    MATCH (src:Entity)
+                    WHERE src.canonical_id <> $slug
+                      AND src.summary IS NOT NULL
+                      AND src.summary CONTAINS $wikilink_token
+                    RETURN src.canonical_id AS slug,
+                           src.name         AS name,
+                           src.entity_type  AS entity_type,
+                           'wikilink'        AS via
+
+                    UNION
+
+                    // via:mention — entities co-mentioned in the same artifact
+                    MATCH (a:Artifact)-[:MENTIONS]->(target:Entity {canonical_id: $slug})
+                    MATCH (a)-[:MENTIONS]->(src:Entity)
+                    WHERE src.canonical_id <> $slug
+                    RETURN src.canonical_id AS slug,
+                           src.name         AS name,
+                           src.entity_type  AS entity_type,
+                           'mention'         AS via
+
+                    UNION
+
+                    // via:related — direct CO_MENTIONED edges
+                    MATCH (src:Entity)-[:CO_MENTIONED]-(target:Entity {canonical_id: $slug})
+                    WHERE src.canonical_id <> $slug
+                    RETURN src.canonical_id AS slug,
+                           src.name         AS name,
+                           src.entity_type  AS entity_type,
+                           'related'         AS via
+                    """,
+                    slug=slug,
+                    wikilink_token=wikilink_token,
+                )
+            else:
+                # No valid name — run mention + related branches only.
+                result = session.run(
+                    """
+                    // via:mention — entities co-mentioned in the same artifact
+                    MATCH (a:Artifact)-[:MENTIONS]->(target:Entity {canonical_id: $slug})
+                    MATCH (a)-[:MENTIONS]->(src:Entity)
+                    WHERE src.canonical_id <> $slug
+                    RETURN src.canonical_id AS slug,
+                           src.name         AS name,
+                           src.entity_type  AS entity_type,
+                           'mention'         AS via
+
+                    UNION
+
+                    // via:related — direct CO_MENTIONED edges
+                    MATCH (src:Entity)-[:CO_MENTIONED]-(target:Entity {canonical_id: $slug})
+                    WHERE src.canonical_id <> $slug
+                    RETURN src.canonical_id AS slug,
+                           src.name         AS name,
+                           src.entity_type  AS entity_type,
+                           'related'         AS via
+                    """,
+                    slug=slug,
+                )
+
+            # De-duplicate: keep highest-priority (lowest rank) via per slug.
+            seen: dict[str, dict[str, Any]] = {}
+            for row in result:
+                r = dict(row)
+                src_slug = r.get("slug") or ""
+                if not src_slug:
+                    continue
+                via = r.get("via", "related")
+                if src_slug not in seen:
+                    seen[src_slug] = r
+                else:
+                    current_priority = _VIA_PRIORITY.get(seen[src_slug]["via"], 99)
+                    new_priority = _VIA_PRIORITY.get(via, 99)
+                    if new_priority < current_priority:
+                        seen[src_slug] = r
+
+            # Sort wikilink first, then mention, then related; cap at limit.
+            ordered = sorted(
+                seen.values(),
+                key=lambda r: _VIA_PRIORITY.get(r.get("via", "related"), 99),
+            )
+            return ordered[:limit]
+
+    except Exception as exc:
+        log_swallowed_error(
+            "wiki.get_backlinks", exc, context={"slug": slug}
+        )
+        return []
 
 
 def get_external_references(driver: Any, entity_slug: str) -> list[dict[str, Any]]:

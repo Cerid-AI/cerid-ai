@@ -44,7 +44,7 @@ export function SubjectsSearchPalette({ open, onOpenChange, onPick }: SubjectsSe
   // /graph/domains for section ordering and counts
   const { data: domainCounts } = useQuery({
     queryKey: ["graph-domains"],
-    queryFn: fetchDomainCounts,
+    queryFn: () => fetchDomainCounts(),
     staleTime: 10 * 60_000,
     retry: 1,
   })

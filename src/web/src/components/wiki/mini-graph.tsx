@@ -40,10 +40,17 @@ export interface MiniGraphProps {
   entitySlug: string
   /** Entity display name (for ARIA labels) */
   entityName: string
+  /**
+   * Render the graph panel expanded on mount instead of behind the
+   * disclosure toggle. Used by the article infobox, where the graph is
+   * a permanent card rather than an opt-in widget. The user can still
+   * collapse it via the toggle.
+   */
+  defaultExpanded?: boolean
 }
 
-export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
-  const [expanded, setExpanded] = useState(false)
+export function MiniGraph({ entitySlug, entityName, defaultExpanded = false }: MiniGraphProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const [hops, setHops] = useState<1 | 2 | 3>(1)
   const [neighbors, setNeighbors] = useState<GraphNode[]>([])
   const navigation = useNavigation()
@@ -105,6 +112,7 @@ export function MiniGraph({ entitySlug, entityName }: MiniGraphProps) {
       {expanded && (
         <div
           id="wiki-minigraph-panel"
+          data-testid="wiki-minigraph-panel"
           className="h-72 overflow-hidden rounded-lg border border-border bg-card/40"
         >
           {/* SR-only 1-hop neighbor list for assistive technology */}

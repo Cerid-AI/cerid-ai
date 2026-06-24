@@ -86,6 +86,23 @@ describe("fetchArtifacts", () => {
     expect(url).toContain("limit=100")
   })
 
+  it("includes sub_category filter when provided", async () => {
+    vi.stubGlobal("fetch", mockFetch([]))
+
+    await fetchArtifacts("coding", 100, "algorithms")
+    const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(url).toContain("domain=coding")
+    expect(url).toContain("sub_category=algorithms")
+  })
+
+  it("omits sub_category when not provided", async () => {
+    vi.stubGlobal("fetch", mockFetch([]))
+
+    await fetchArtifacts("coding", 100)
+    const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(url).not.toContain("sub_category")
+  })
+
   it("normalizes string tags to arrays", async () => {
     const artifacts = [
       { id: "1", filename: "test.py", domain: "coding", tags: '["python", "api"]', keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" },

@@ -511,7 +511,10 @@ async def _run_wiki_drift_lint() -> None:
     start = time.time()
     try:
         from app.deps import get_neo4j  # noqa: PLC0415
-        from app.processor.subscribers.wiki_refresh import enqueue_refresh  # noqa: PLC0415
+        from app.processor.subscribers.wiki_refresh import (  # noqa: PLC0415
+            HUMAN_EDIT_PROTECT_WINDOW_S,
+            enqueue_refresh,
+        )
 
         limit = int(os.environ.get("WIKI_DRIFT_LINT_LIMIT", "50"))
         threshold = int(os.environ.get("WIKI_DRIFT_LINT_MIN_MENTIONS", "10"))
@@ -537,17 +540,29 @@ async def _run_wiki_drift_lint() -> None:
                 )
                 contradiction_slugs = [r["slug"] for r in contra_rows if r["slug"]]
 
-                # Coverage gaps: high mention, no summary
+                # Coverage gaps: high mention, no summary.
+                # Respect human-edit protection: skip entities whose
+                # summary was last written by a user within the window.
+                # (Contradiction slugs bypass this via force=True.)
+                human_edit_cutoff = (
+                    datetime.now(tz=timezone.utc)
+                    - timedelta(seconds=HUMAN_EDIT_PROTECT_WINDOW_S)
+                ).isoformat()
                 gap_rows = session.run(
                     """
                     MATCH (e:Entity)
                     WHERE e.summary IS NULL
                       AND coalesce(e.mention_count, 0) >= $threshold
+                      AND NOT (
+                        e.summary_edited_by = 'user'
+                        AND e.summary_updated_at >= $human_edit_cutoff
+                      )
                     RETURN e.canonical_id AS slug
                     ORDER BY e.mention_count DESC
                     LIMIT $lim
                     """,
                     threshold=threshold,
+                    human_edit_cutoff=human_edit_cutoff,
                     lim=limit,
                 )
                 gap_slugs = [r["slug"] for r in gap_rows if r["slug"]]
@@ -595,7 +610,10 @@ async def _run_wiki_stale_sweep() -> None:
     start = time.time()
     try:
         from app.deps import get_neo4j  # noqa: PLC0415
-        from app.processor.subscribers.wiki_refresh import enqueue_refresh  # noqa: PLC0415
+        from app.processor.subscribers.wiki_refresh import (  # noqa: PLC0415
+            HUMAN_EDIT_PROTECT_WINDOW_S,
+            enqueue_refresh,
+        )
 
         limit = int(os.environ.get("WIKI_STALE_SWEEP_LIMIT", "100"))
         driver = get_neo4j()
@@ -612,14 +630,22 @@ async def _run_wiki_stale_sweep() -> None:
                 result = session.run(
                     """
                     MATCH (e:Entity)
-                    WHERE e.summary IS NULL
+                    WHERE (e.summary IS NULL
                        OR e.summary_updated_at IS NULL
-                       OR e.summary_updated_at < $cutoff
+                       OR e.summary_updated_at < $cutoff)
+                      AND NOT (
+                        e.summary_edited_by = 'user'
+                        AND e.summary_updated_at >= $human_edit_cutoff
+                      )
                     RETURN e.canonical_id AS slug
                     ORDER BY coalesce(e.mention_count, 0) DESC
                     LIMIT $lim
                     """,
                     cutoff=cutoff_iso,
+                    human_edit_cutoff=(
+                        datetime.now(tz=timezone.utc)
+                        - timedelta(seconds=HUMAN_EDIT_PROTECT_WINDOW_S)
+                    ).isoformat(),
                     lim=limit,
                 )
                 return [row["slug"] for row in result if row["slug"]]

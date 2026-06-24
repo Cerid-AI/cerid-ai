@@ -150,3 +150,29 @@ class TestPluginsEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert "plugins" in data
+
+
+class TestPipelineProviders:
+    """ST11a — degradation_status must emit all 8 pipeline stages.
+
+    The frontend observability dashboard's ALL_STAGES expects 8 keys; a
+    backend that only returns 5 makes the GUI render "0/8 local".
+    """
+
+    EXPECTED_STAGES = {
+        "claim_extraction",
+        "query_decomposition",
+        "topic_extraction",
+        "memory_resolution",
+        "reranking",
+        "verification_simple",
+        "verification_complex",
+        "chat_generation",
+    }
+
+    @patch("app.routers.health.health_check", return_value={})
+    def test_emits_all_eight_stages(self, _mock_health):
+        from app.routers.health import degradation_status
+
+        payload = degradation_status()
+        assert set(payload["pipeline_providers"].keys()) == self.EXPECTED_STAGES

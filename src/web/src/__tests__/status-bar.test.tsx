@@ -77,4 +77,21 @@ describe("StatusBar", () => {
     render(<StatusBar />, { wrapper })
     expect(await screen.findByText("Some services degraded")).toBeInTheDocument()
   })
+
+  // CH-CREDITS: a recovered "ok" credits status must not render the stale
+  // "Credits exhausted" footer.
+  it("does not show 'Credits exhausted' when provider credits status is ok", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        const body = url.includes("/credits") || url.includes("provider")
+          ? { configured: true, provider: "openrouter", balance: 39.84, status: "ok" }
+          : mockHealthy
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) })
+      }),
+    )
+    render(<StatusBar />, { wrapper })
+    expect(await screen.findByText("$39.84")).toBeInTheDocument()
+    expect(screen.queryByText("Credits exhausted")).not.toBeInTheDocument()
+  })
 })

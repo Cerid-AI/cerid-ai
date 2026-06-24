@@ -73,6 +73,19 @@ _MEMORY_WAIT_MAX_SECONDS = 5.0
 _URL_IN_CLAIM_RE = re.compile(r"https?://[^\s<>\"')\]}]+")
 
 
+def _per_claim_base_timeout(expert_mode: bool, needs_web: bool) -> float:
+    """Per-claim verification timeout (seconds) by strategy. Cross-model verifies
+    run on OpenRouter via call_llm_raw; the cross-model + web caps are env-tunable
+    because cloud latency under the verify semaphore can exceed a tight bound,
+    causing timeouts + regeneration (CH5). The global STREAMING_TOTAL_TIMEOUT and
+    the remaining-budget clamp at the call site still bound total runtime."""
+    if expert_mode:
+        return config.STREAMING_EXPERT_CLAIM_TIMEOUT
+    if needs_web:
+        return getattr(config, "STREAMING_WEB_CLAIM_TIMEOUT", 25.0)
+    return getattr(config, "STREAMING_CROSS_MODEL_CLAIM_TIMEOUT", 18.0)
+
+
 def _extract_source_urls_from_claim(claim_text: str) -> list[str]:
     """Pull any http(s) URLs the LLM cited inline in the claim text.
 
@@ -815,12 +828,7 @@ async def verify_response_streaming(
             ct in ("recency", "evasion", "citation", "ignorance")
             or _is_current_event_claim(claim_text)
         )
-        if expert_mode:
-            per_claim_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT  # 30s
-        elif needs_web:
-            per_claim_timeout = 25.0  # web search + reasoning
-        else:
-            per_claim_timeout = 12.0  # cross-model is fast
+        per_claim_timeout = _per_claim_base_timeout(expert_mode, needs_web)
         # Cap per-claim timeout to remaining global budget (leave 2s buffer for summary)
         remaining = stream_deadline - time.monotonic()
         claim_timeout = min(per_claim_timeout, max(remaining - 2.0, 3.0))

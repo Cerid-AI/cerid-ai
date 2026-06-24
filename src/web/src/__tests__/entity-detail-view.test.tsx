@@ -30,6 +30,16 @@ vi.mock("@/lib/api/graph", () => ({
   fetchTimeline: vi.fn().mockResolvedValue({ entity: "elon-musk", from_date: "", to_date: "", granularity: "day", buckets: [], total_mentions: 0, total_entities_introduced: 0, cached: false }),
 }))
 
+// Mock wiki API clients so mutation tests don't hit the network.
+const mockRefreshEntity = vi.fn().mockResolvedValue(undefined)
+const mockUpdateEntitySummary = vi.fn()
+vi.mock("@/lib/api/wiki", () => ({
+  fetchWikiEntity: vi.fn(),
+  fetchWikiEntities: vi.fn(),
+  refreshEntity: (...args: unknown[]) => mockRefreshEntity(...args),
+  updateEntitySummary: (...args: unknown[]) => mockUpdateEntitySummary(...args),
+}))
+
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
 import { EntityDetailView } from "@/components/wiki/entity-detail-view"
 
@@ -95,6 +105,14 @@ function createWrapper() {
   return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   )
+}
+
+function createWrapperWithClient() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  )
+  return { qc, wrapper }
 }
 
 beforeEach(() => {
@@ -372,5 +390,151 @@ describe("EntityDetailView — axe-clean", () => {
     )
     const results = await axe(container)
     expect(results).toHaveNoViolations()
+  })
+
+  it("backlinks outer wrapper is a div, not a labeled section landmark (no axe landmark-unique violation)", () => {
+    // Regression guard: the outer #wiki-section-backlinks must be a <div> so
+    // it does not duplicate the <section aria-labelledby="wiki-what-links-here-heading">
+    // that WhatLinksHere renders as its own root.
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    const { container } = render(
+      <EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />,
+      { wrapper: createWrapper() },
+    )
+    const wrapper = container.querySelector("#wiki-section-backlinks")
+    expect(wrapper).not.toBeNull()
+    expect(wrapper?.tagName.toLowerCase()).toBe("div")
+    expect(wrapper?.hasAttribute("aria-labelledby")).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WK4: Manual Refresh button
+// ---------------------------------------------------------------------------
+
+describe("EntityDetailView — WK4 Refresh button", () => {
+  beforeEach(() => {
+    mockRefreshEntity.mockResolvedValue(undefined)
+  })
+
+  it("renders a Refresh button in the settled state", () => {
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    expect(screen.getByRole("button", { name: /Refresh/i })).toBeTruthy()
+  })
+
+  it("calls refreshEntity with the entity slug when Refresh is clicked", async () => {
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    await user.click(screen.getByRole("button", { name: /Refresh/i }))
+    await waitFor(() => {
+      expect(mockRefreshEntity).toHaveBeenCalledWith("elon-musk")
+    })
+  })
+
+  it("disables the Refresh button while the mutation is pending", async () => {
+    let resolveRefresh!: () => void
+    mockRefreshEntity.mockReturnValue(new Promise<void>((res) => { resolveRefresh = res }))
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    const btn = screen.getByRole("button", { name: /Refresh/i })
+    await user.click(btn)
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Refresh queued/i })).toBeTruthy()
+    })
+    resolveRefresh()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WK4: Inline editable summary
+// ---------------------------------------------------------------------------
+
+describe("EntityDetailView — WK4 editable summary", () => {
+  beforeEach(() => {
+    mockUpdateEntitySummary.mockResolvedValue(makeEntityPage({ summary: "Updated summary." }))
+  })
+
+  it("renders an Edit summary button in the settled state with a summary", () => {
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    expect(screen.getByRole("button", { name: /Edit summary/i })).toBeTruthy()
+  })
+
+  it("clicking Edit reveals a textarea seeded with the current summary", async () => {
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    await user.click(screen.getByRole("button", { name: /Edit summary/i }))
+    const textarea = screen.getByRole("textbox", { name: /Edit summary/i })
+    expect(textarea).toBeTruthy()
+    expect((textarea as HTMLTextAreaElement).value).toContain("Elon Musk")
+  })
+
+  it("clicking Cancel hides the textarea and restores the original summary", async () => {
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    await user.click(screen.getByRole("button", { name: /Edit summary/i }))
+    expect(screen.getByRole("textbox", { name: /Edit summary/i })).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /Cancel/i }))
+    expect(screen.queryByRole("textbox", { name: /Edit summary/i })).toBeNull()
+    expect(screen.getByText(/technology entrepreneur/)).toBeTruthy()
+  })
+
+  it("clicking Save calls updateEntitySummary with the edited text", async () => {
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    await user.click(screen.getByRole("button", { name: /Edit summary/i }))
+    const textarea = screen.getByRole("textbox", { name: /Edit summary/i }) as HTMLTextAreaElement
+    await user.clear(textarea)
+    await user.type(textarea, "New summary text.")
+    await user.click(screen.getByRole("button", { name: /Save/i }))
+    await waitFor(() => {
+      expect(mockUpdateEntitySummary).toHaveBeenCalledWith("elon-musk", "New summary text.")
+    })
+  })
+
+  it("Save exits edit mode after success", async () => {
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    await user.click(screen.getByRole("button", { name: /Edit summary/i }))
+    await user.click(screen.getByRole("button", { name: /Save/i }))
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: /Edit summary/i })).toBeNull()
+    })
+  })
+
+  it("Save success invalidates the entity query", async () => {
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    const { qc, wrapper } = createWrapperWithClient()
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries")
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper })
+    await user.click(screen.getByRole("button", { name: /Edit summary/i }))
+    await user.click(screen.getByRole("button", { name: /Save/i }))
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ["wiki-entity", "elon-musk"] }),
+      )
+    })
+  })
+
+  it("WK4 settled+edit state is axe-clean", async () => {
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    const { container } = render(
+      <EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />,
+      { wrapper: createWrapper() },
+    )
+    await user.click(screen.getByRole("button", { name: /Edit summary/i }))
+    await waitFor(async () => {
+      const results = await axe(container)
+      expect(results).toHaveNoViolations()
+    })
   })
 })

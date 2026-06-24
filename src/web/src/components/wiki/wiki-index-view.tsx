@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Badge } from "@/components/ui/badge"
-import { fetchWikiIndex } from "@/lib/api/wiki-browse"
+import { fetchWikiIndex, type WikiIndexEntry } from "@/lib/api/wiki-browse"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,6 +19,27 @@ function firstLetter(name: string): string {
   if (!ch) return "#"
   const up = ch.toUpperCase()
   return /[A-Z]/.test(up) ? up : "#"
+}
+
+/** Derive the visual completeness class from the index entry.
+ *  Falls back to has_summary for older backends that don't send completeness. */
+function resolveCompleteness(entry: WikiIndexEntry): "stub" | "start" | "full" {
+  if (entry.completeness === "start" || entry.completeness === "full" || entry.completeness === "stub") {
+    return entry.completeness
+  }
+  return entry.has_summary ? "full" : "stub"
+}
+
+const COMPLETENESS_NAME_CLASS: Record<"stub" | "start" | "full", string> = {
+  stub: "text-sm font-medium text-muted-foreground [text-decoration:underline_dashed] underline-offset-2",
+  start: "text-sm font-medium text-foreground [text-decoration:underline_dashed] underline-offset-2",
+  full: "text-sm font-medium text-foreground",
+}
+
+const COMPLETENESS_PENDING_LABEL: Record<"stub" | "start" | "full", string | null> = {
+  stub: "Summary pending nightly refresh",
+  start: "Summary in progress",
+  full: null,
 }
 
 function entityTypeLabel(t: string): string {
@@ -52,14 +73,16 @@ export function WikiIndexView({ onSelectEntity }: WikiIndexViewProps) {
   })
 
   // Client-side search filter while debounce is not needed here (sync)
+  // WK1: also match on one_liner (article body excerpt) so body-only hits surface
   const filtered = useMemo(() => {
     if (!data) return []
     const q = search.trim().toLowerCase()
-    if (!q) return data.entries
-    return data.entries.filter(
+    if (!q) return data.entries ?? []
+    return (data.entries ?? []).filter(
       (e) =>
         e.name.toLowerCase().includes(q) ||
-        e.slug.toLowerCase().includes(q),
+        e.slug.toLowerCase().includes(q) ||
+        (e.one_liner != null && e.one_liner.toLowerCase().includes(q)),
     )
   }, [data, search])
 
@@ -175,37 +198,38 @@ export function WikiIndexView({ onSelectEntity }: WikiIndexViewProps) {
                 <ul className="divide-y rounded-md border">
                   {entries.map((entry) => (
                     <li key={entry.slug}>
-                      <button
-                        type="button"
-                        onClick={() => onSelectEntity(entry.slug)}
-                        className="flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label={`${entry.name}${entry.has_summary ? "" : " — summary pending"}`}
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span
-                            className={
-                              entry.has_summary
-                                ? "text-sm font-medium text-foreground"
-                                : "text-sm font-medium text-muted-foreground [text-decoration:underline_dashed] underline-offset-2"
-                            }
+                      {(() => {
+                        const completeness = resolveCompleteness(entry)
+                        const pendingLabel = COMPLETENESS_PENDING_LABEL[completeness]
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => onSelectEntity(entry.slug)}
+                            className="flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-label={`${entry.name}${completeness === "full" ? "" : ` — ${pendingLabel ?? "summary pending"}`}`}
+                            data-completeness={completeness}
                           >
-                            {entry.name}
-                          </span>
-                          {entry.one_liner && (
-                            <span className="mt-0.5 block text-xs text-muted-foreground line-clamp-1">
-                              {entry.one_liner}
+                            <span className="min-w-0 flex-1">
+                              <span className={COMPLETENESS_NAME_CLASS[completeness]}>
+                                {entry.name}
+                              </span>
+                              {entry.one_liner && (
+                                <span className="mt-0.5 block text-xs text-muted-foreground line-clamp-1">
+                                  {entry.one_liner}
+                                </span>
+                              )}
+                              {pendingLabel && (
+                                <span className="mt-0.5 block text-label-xs text-muted-foreground/70 italic">
+                                  {pendingLabel}
+                                </span>
+                              )}
                             </span>
-                          )}
-                          {!entry.has_summary && (
-                            <span className="mt-0.5 block text-label-xs text-muted-foreground/70 italic">
-                              Summary pending nightly refresh
-                            </span>
-                          )}
-                        </span>
-                        <Badge variant="outline" className="shrink-0 text-label-xs mt-0.5">
-                          {entityTypeLabel(entry.entity_type)}
-                        </Badge>
-                      </button>
+                            <Badge variant="outline" className="shrink-0 text-label-xs mt-0.5">
+                              {entityTypeLabel(entry.entity_type)}
+                            </Badge>
+                          </button>
+                        )
+                      })()}
                     </li>
                   ))}
                 </ul>

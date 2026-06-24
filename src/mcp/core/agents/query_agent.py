@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
+import re
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -252,9 +254,75 @@ def _get_adjacent_domains(requested: list[str]) -> dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Follow-up retrieval budget guards (CH4)
+# ---------------------------------------------------------------------------
+#
+# A chat follow-up enriches the query with conversation terms and fans out
+# across every domain (all but "conversations"). On CPU inference the
+# multi-domain rerank of that longer query blows the wall-clock budget, and the
+# budget guard then discards *everything* (ungrounded answer). Two non-arbitrary
+# levers keep follow-ups within budget while staying coherent:
+#   * prioritize the most-likely domains first and cap the *tail* — so a capped
+#     retrieval keeps the most-relevant domains, never an arbitrary subset;
+#   * trim per-domain candidate depth (fewer rerank candidates per collection).
+
+
+@functools.lru_cache(maxsize=1)
+def _domain_keyword_index() -> dict[str, frozenset[str]]:
+    """Per-domain lowercase keyword set from the taxonomy (name + description
+    words + sub-categories). Cached — the taxonomy is static after import."""
+    from config.taxonomy import TAXONOMY
+
+    idx: dict[str, frozenset[str]] = {}
+    for name, meta in TAXONOMY.items():
+        words = set(re.findall(r"[a-z]{3,}", name.lower()))
+        words.update(re.findall(r"[a-z]{3,}", str(meta.get("description", "")).lower()))
+        words.update(re.findall(r"[a-z]{3,}", " ".join(meta.get("sub_categories", [])).lower()))
+        words.discard("general")  # too generic to discriminate between domains
+        idx[name] = frozenset(words)
+    return idx
+
+
+def _prioritize_domains(query: str, domains: list[str], cap: int) -> list[str]:
+    """Order ``domains`` most-likely-first for ``query`` via a cheap lexical
+    match against the taxonomy, then keep the top ``cap`` *only when a relevance
+    signal exists*. This bounds a follow-up's all-domain fan-out while keeping
+    partial retrieval coherent — the dropped domains are the least relevant, and
+    nothing is dropped when there is no basis to choose (no match, or cap<=0).
+    Ties and unmatched domains preserve their original relative order.
+    """
+    idx = _domain_keyword_index()
+    q_words = set(re.findall(r"[a-z]{3,}", query.lower()))
+    scored = sorted(
+        ((len(q_words & idx.get(d, frozenset())), -i, d) for i, d in enumerate(domains)),
+        reverse=True,
+    )
+    ranked = [d for _, _, d in scored]
+    top_score = scored[0][0] if scored else 0
+    if cap > 0 and top_score > 0 and len(ranked) > cap:
+        return ranked[:cap]
+    return ranked
+
+
+def _followup_retrieval_top_k(
+    base_top_k: int,
+    conversation_messages: list[dict[str, str]] | None,
+    explicit_domains: list[str] | None,
+) -> int:
+    """Trim per-domain candidate depth on a follow-up (all-domain enriched)
+    query so the multi-domain rerank stays within budget. No-op when an explicit
+    domain filter already bounds the fan-out, when it isn't a follow-up, or when
+    the configured cap is disabled / not below the base depth."""
+    if conversation_messages and explicit_domains is None:
+        cap = getattr(config, "AGENT_QUERY_FOLLOWUP_TOP_K", 0)
+        if cap and cap < base_top_k:
+            return cap
+    return base_top_k
+
+
+# ---------------------------------------------------------------------------
 # Conversation-aware query enrichment
 # ---------------------------------------------------------------------------
-
 
 
 def _enrich_query(
@@ -2124,7 +2192,20 @@ async def _agent_query_impl(
     # creating circular noise (same pattern as hallucination.py:87-89).
     effective_domains = domains
     if effective_domains is None and conversation_messages:
-        effective_domains = [d for d in config.DOMAINS if d != "conversations"]
+        _followup_domains = [d for d in config.DOMAINS if d != "conversations"]
+        # CH4: keep the most-likely domains first and cap the tail so the
+        # all-domain follow-up fan-out stays within the wall-clock budget
+        # without losing coherence (least-relevant domains drop, not arbitrary).
+        effective_domains = _prioritize_domains(
+            search_query, _followup_domains,
+            getattr(config, "AGENT_QUERY_FOLLOWUP_MAX_DOMAINS", 0),
+        )
+        if len(effective_domains) < len(_followup_domains):
+            logger.info(
+                "Follow-up retrieval: %d → %d domains (most-likely-first cap)",
+                len(_followup_domains), len(effective_domains),
+            )
+        effective_top_k = _followup_retrieval_top_k(effective_top_k, conversation_messages, domains)
 
     # Consumer domain isolation: restrict to allowed domains if configured
     if allowed_domains is not None:

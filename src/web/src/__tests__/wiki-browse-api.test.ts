@@ -103,6 +103,28 @@ describe("fetchWikiLog", () => {
     expect(entries[0].source_artifact_id).toBeNull()
   })
 
+  it("normalizes object-envelope { entries, total } response (WK5)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        entries: [
+          {
+            log_id: "env1",
+            ts: "2026-06-11T03:39:53Z",
+            action: "refresh",
+            entity_slug: "other:python",
+            summary: "Python is…",
+            source_artifact_id: null,
+          },
+        ],
+        total: 1,
+      }),
+    })
+    const entries = await fetchWikiLog()
+    expect(entries).toHaveLength(1)
+    expect(entries[0].log_id).toBe("env1")
+  })
+
   it("passes entity_slug param when scoped", async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] })
     await fetchWikiLog({ entitySlug: "other:python" })

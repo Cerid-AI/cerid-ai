@@ -606,8 +606,8 @@ export function HallucinationPanel({
   return (
     <div className="flex h-full flex-col">
       <PanelHeader onClose={onClose} expertVerification={expertVerification} toggleExpertVerification={toggleExpertVerification} inlineMarkups={inlineMarkups} toggleInlineMarkups={toggleInlineMarkups} />
-      {/* Filter buttons — click to toggle category visibility */}
-      <div className="flex flex-wrap gap-1.5 px-4 py-2">
+      {/* Filter buttons — single horizontally-scrollable row so pill overflow never steals ScrollArea height */}
+      <div className="flex items-center gap-1.5 overflow-x-auto px-4 py-2 shrink-0" data-testid="claim-category-filter">
         {verified > 0 && (
           <button
             onClick={() => toggleCategory("verified")}

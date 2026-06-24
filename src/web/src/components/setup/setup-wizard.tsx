@@ -17,10 +17,10 @@ import { SystemCheckCard } from "@/components/setup/system-check-card"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
 import { LocalLLMStep } from "@/components/setup/local-llm-step"
 import { FirstDocumentStep, type FirstDocState } from "@/components/setup/first-document-step"
+import { BuildKnowledgeStep } from "@/components/setup/build-knowledge-step"
 import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
 import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
 import { QuenchforgeInstallStep } from "@/components/setup/quenchforge-install-step"
-import { TelemetryConsentStep, type TelemetryConsent } from "@/components/setup/telemetry-consent-step"
 import { StepIndicator, type StepDef } from "@/components/setup/step-indicator"
 import { applySetupConfig, fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
 import { assessCapabilities, fromWizardState, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
@@ -33,26 +33,26 @@ import type { ProviderCredits, RecommendedLocalBackend, SystemCheckResponse } fr
 // ---------------------------------------------------------------------------
 
 const TOTAL_STEPS = 9
-// 0-indexed steps that show a Skip button. Mapping (post-Cluster-E):
+// 0-indexed steps that show a Skip button. Mapping:
 //   2 → Storage & Archive
 //   3 → Local LLM
-//   6 → Try It Out
-//   7 → Telemetry
+//   6 → Build Knowledge
+//   7 → Try It Out
 const SKIPPABLE_STEPS = new Set([2, 3, 6, 7])
 const STORAGE_KEY = "cerid-setup-progress"
 /**
- * Persisted-state schema version. v3 (Cluster E, 2026-05-27) split Step 8
- * (telemetry + mode) into two distinct steps; index 7 became Telemetry and
- * index 8 became Mode. v2 stores have a smaller step range so loading them
- * unchanged would land the user on a now-nonexistent step layout. We drop
- * them and restart rather than transform — saves are 24-hour-ephemeral
- * anyway (see `loadProgress`).
+ * Persisted-state schema version. v4 (2026-06-22) removed the Telemetry
+ * Consent step; index 7 is now Mode (was 8). Stores from older versions
+ * have a different step layout, so loading them unchanged would land the
+ * user on a now-nonexistent step. We drop them and restart rather than
+ * transform — saves are 24-hour-ephemeral anyway (see `loadProgress`).
  *
- * v1 → v2: added Backend Recommendation, Quenchforge Install, Telemetry
- * Consent surfaces (`selectedBackend`, `telemetryConsent`).
+ * v1 → v2: added Backend Recommendation, Quenchforge Install surfaces.
  * v2 → v3: split Step 8 into Telemetry + Mode, TOTAL_STEPS 8→9.
+ * v3 → v4: removed Telemetry Consent step, TOTAL_STEPS 9→8.
+ * v4 → v5: added Build Knowledge step (index 6), TOTAL_STEPS 8→9.
  */
-const STORAGE_SCHEMA_VERSION = 3
+const STORAGE_SCHEMA_VERSION = 5
 
 // Display-only sentinels the masked API-key input renders when an
 // env-loaded key is already configured. Sending them on the wire would
@@ -75,8 +75,8 @@ const STEP_DEFS: StepDef[] = [
   { label: "Local LLM", shortLabel: "Local LLM" },
   { label: "Review & Apply", shortLabel: "Apply" },
   { label: "Service Health", shortLabel: "Health" },
+  { label: "Build Knowledge", shortLabel: "Knowledge" },
   { label: "Try It Out", shortLabel: "Try" },
-  { label: "Telemetry", shortLabel: "Telemetry" },
   { label: "Choose Mode", shortLabel: "Mode" },
 ]
 
@@ -113,12 +113,12 @@ interface WizardState {
     pulling: boolean
   }
   firstDoc: FirstDocState
+  /** Pack ids installed via the Build Knowledge step (SW5). */
+  installedPackIds: string[]
   selectedMode: "simple" | "advanced"
   customProvider: { name: string; baseUrl: string; apiKey: string; modelId: string; valid: boolean } | null
   /** User's chosen local-inference backend. null = follow recommendation. */
   selectedBackend: RecommendedLocalBackend | null
-  /** Opt-in telemetry toggles; both default false. */
-  telemetryConsent: TelemetryConsent
 }
 
 type WizardAction =
@@ -135,10 +135,10 @@ type WizardAction =
   | { type: "SET_KB_CONFIG"; config: WizardState["kbConfig"] }
   | { type: "SET_OLLAMA"; state: WizardState["ollama"] }
   | { type: "SET_FIRST_DOC"; state: WizardState["firstDoc"] }
+  | { type: "SET_BUILD_KNOWLEDGE"; installedPackIds: string[]; firstDoc: WizardState["firstDoc"] }
   | { type: "SET_MODE"; mode: "simple" | "advanced" }
   | { type: "SET_CUSTOM_PROVIDER"; provider: WizardState["customProvider"] }
   | { type: "SET_BACKEND"; backend: RecommendedLocalBackend }
-  | { type: "SET_TELEMETRY"; consent: TelemetryConsent }
 
 function createInitialState(): WizardState {
   return {
@@ -175,10 +175,10 @@ function createInitialState(): WizardState {
       skipped: false,
       documentCount: 0,
     },
+    installedPackIds: [],
     selectedMode: "simple",
     customProvider: null,
     selectedBackend: null,
-    telemetryConsent: { sendPerformance: false, sendBenchmark: false },
   }
 }
 
@@ -232,14 +232,14 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, ollama: action.state }
     case "SET_FIRST_DOC":
       return { ...state, firstDoc: action.state }
+    case "SET_BUILD_KNOWLEDGE":
+      return { ...state, installedPackIds: action.installedPackIds, firstDoc: action.firstDoc }
     case "SET_MODE":
       return { ...state, selectedMode: action.mode }
     case "SET_CUSTOM_PROVIDER":
       return { ...state, customProvider: action.provider }
     case "SET_BACKEND":
       return { ...state, selectedBackend: action.backend }
-    case "SET_TELEMETRY":
-      return { ...state, telemetryConsent: action.consent }
     default:
       return state
   }
@@ -257,7 +257,6 @@ interface PersistedProgress {
   ollama: WizardState["ollama"]
   selectedMode: WizardState["selectedMode"]
   selectedBackend: WizardState["selectedBackend"]
-  telemetryConsent: WizardState["telemetryConsent"]
   applied: boolean
   ts: number
 }
@@ -272,7 +271,6 @@ function saveProgress(state: WizardState) {
       ollama: state.ollama,
       selectedMode: state.selectedMode,
       selectedBackend: state.selectedBackend,
-      telemetryConsent: state.telemetryConsent,
       applied: state.applied,
       ts: Date.now(),
     }
@@ -940,19 +938,21 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
             </>
           )}
 
-          {/* Step 6: First Document */}
+          {/* Step 6: Build Knowledge */}
           {!showResumePrompt && state.step === 6 && (
-            <FirstDocumentStep
-              state={state.firstDoc}
-              onChange={(s) => dispatch({ type: "SET_FIRST_DOC", state: s })}
+            <BuildKnowledgeStep
+              state={{ installedPackIds: state.installedPackIds, firstDoc: state.firstDoc }}
+              onChange={(s) =>
+                dispatch({ type: "SET_BUILD_KNOWLEDGE", installedPackIds: s.installedPackIds, firstDoc: s.firstDoc })
+              }
             />
           )}
 
-          {/* Step 7: Telemetry Consent (own step — was stacked with Mode pre-v3) */}
+          {/* Step 7: Try It Out */}
           {!showResumePrompt && state.step === 7 && (
-            <TelemetryConsentStep
-              consent={state.telemetryConsent}
-              onChange={(consent) => dispatch({ type: "SET_TELEMETRY", consent })}
+            <FirstDocumentStep
+              state={state.firstDoc}
+              onChange={(s) => dispatch({ type: "SET_FIRST_DOC", state: s })}
             />
           )}
 
@@ -1014,14 +1014,15 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   primary: false,
                 }
               case 6:
+                // Build Knowledge — always continuable (skippable step)
+                return { label: "Next", onClick: goNext, disabled: false, primary: false }
+              case 7:
                 return {
                   label: "Next",
                   onClick: goNext,
                   disabled: !state.firstDoc.ingested && !state.firstDoc.skipped,
                   primary: false,
                 }
-              case 7:
-                return { label: "Next", onClick: goNext, disabled: false, primary: false }
               case 8:
                 return {
                   label: "Open Cerid AI",

@@ -15,7 +15,7 @@
  * values are read once through a one-release redirect map (J-4).
  */
 
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { fetchSettings, updateSettings, fetchProviderCredits } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate, ProviderCredits } from "@/lib/types"
@@ -27,12 +27,13 @@ import { SegmentedControl } from "@/components/ui/segmented-control"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { Activity, ChevronLeft, RefreshCw, Settings, X } from "lucide-react"
+import { Activity, BarChart3, ChevronLeft, LayoutDashboard, RefreshCw, Settings, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useNavigation } from "@/contexts/navigation-context"
 import {
   CATEGORY_META,
   getDef,
+  modifiedSettingIds,
   searchSettings,
   SETTINGS_REGISTRY,
   type CategoryId,
@@ -42,8 +43,11 @@ import { setSettingsMode, useSettingsMode, type SettingsMode } from "@/lib/setti
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { DiagnosticsSection, type DiagnosticsSubTab } from "./diagnostics-section"
+import { AnalyticsSection } from "./analytics-section"
+import { SettingsOverview } from "./settings-overview"
 import { RecommendationBanner } from "./recommendation-banner"
 import { SettingsRevealProvider, type RevealTarget } from "./reveal-context"
+import { ModifiedSettingsProvider } from "./modified-context"
 import { SettingsSearchInput, SettingsSearchResults } from "./settings-search"
 import type { PatchResult, SettingsCategoryPageProps } from "./categories/page-props"
 import AppearanceCategory from "./categories/appearance"
@@ -56,7 +60,7 @@ import PlanBillingCategory from "./categories/plan-billing"
 import SystemCategory from "./categories/system"
 
 type LoadState = "loading" | "error" | "ready"
-type Selected = CategoryId | "diagnostics"
+type Selected = CategoryId | "diagnostics" | "overview" | "analytics"
 
 const CATEGORY_KEY = "cerid-settings-category"
 const LEGACY_TAB_KEY = "cerid-settings-tab"
@@ -84,7 +88,12 @@ const CATEGORY_PAGES: Record<CategoryId, ComponentType<SettingsCategoryPageProps
 }
 
 function isSelected(value: string | null): value is Selected {
-  return value === "diagnostics" || CATEGORY_META.some((c) => c.id === value)
+  return (
+    value === "diagnostics" ||
+    value === "overview" ||
+    value === "analytics" ||
+    CATEGORY_META.some((c) => c.id === value)
+  )
 }
 
 function readUrlParam(key: string): string | null {
@@ -106,9 +115,13 @@ function writeUrlParam(key: string, value: string | null) {
 }
 
 function initialCategory(): Selected {
-  // Legacy cross-pane contract: a diagnostics deep link always lands on the
-  // Diagnostics console entry.
-  if (readUrlParam("diagnostics_tab")) return "diagnostics"
+  // Legacy cross-pane contract: a diagnostics deep link lands on the
+  // Diagnostics console entry — except `analytics`, which is now its own
+  // top-level section (ST9). Old `?diagnostics_tab=analytics` bookmarks route
+  // there too.
+  const diagnosticsTab = readUrlParam("diagnostics_tab")
+  if (diagnosticsTab === "analytics") return "analytics"
+  if (diagnosticsTab) return "diagnostics"
   const fromUrl = readUrlParam("category")
   if (isSelected(fromUrl)) return fromUrl
   const fromSetting = readUrlParam("setting")
@@ -124,7 +137,7 @@ function initialCategory(): Selected {
   } catch (err) {
     logSwallowedError(err, "localStorage.getItem", { key: CATEGORY_KEY })
   }
-  return "models"
+  return "overview"
 }
 
 export default function SettingsPane() {
@@ -182,6 +195,22 @@ export default function SettingsPane() {
       return { ok: false, error: message }
     }
   }, [load])
+
+  const resetSetting = useCallback(
+    (def: SettingDef) => {
+      if (def.writer.kind !== "settings-patch" || def.default === undefined) return
+      void patch({ [def.writer.key]: def.default } as SettingsUpdate)
+    },
+    [patch],
+  )
+
+  const modifiedValue = useMemo(() => {
+    const tierForCtx = (settings?.feature_tier as FeatureTier) ?? "community"
+    return {
+      ids: modifiedSettingIds(settings as unknown as Record<string, unknown> | null, { tier: tierForCtx }),
+      reset: resetSetting,
+    }
+  }, [settings, resetSetting])
 
   const selectCategory = useCallback((next: Selected) => {
     setSelected(next)
@@ -303,8 +332,13 @@ export default function SettingsPane() {
     )
   }
 
-  const meta = selected === "diagnostics" ? null : CATEGORY_META.find((c) => c.id === selected)
-  const Page = selected === "diagnostics" ? null : CATEGORY_PAGES[selected]
+  const isConsole =
+    selected === "diagnostics" || selected === "overview" || selected === "analytics"
+  const meta = isConsole ? null : CATEGORY_META.find((c) => c.id === selected)
+  const Page =
+    selected === "diagnostics" || selected === "overview" || selected === "analytics"
+      ? null
+      : CATEGORY_PAGES[selected]
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -338,6 +372,21 @@ export default function SettingsPane() {
             <div className="pb-2">
               <SettingsSearchInput value={searchInput} onChange={setSearchInput} inputRef={searchInputRef} />
             </div>
+            <button
+              type="button"
+              aria-current={!searching && selected === "overview" ? "page" : undefined}
+              onClick={() => selectCategory("overview")}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/60",
+                !searching && selected === "overview"
+                  ? "bg-muted font-medium"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <LayoutDashboard className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Overview
+            </button>
+            <Separator className="my-2" />
             {CATEGORY_META.map(({ id, label, description, icon: Icon }) => (
               <button
                 key={id}
@@ -363,6 +412,20 @@ export default function SettingsPane() {
             <Separator className="my-2" />
             <button
               type="button"
+              aria-current={!searching && selected === "analytics" ? "page" : undefined}
+              onClick={() => selectCategory("analytics")}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/60",
+                !searching && selected === "analytics"
+                  ? "bg-muted font-medium"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <BarChart3 className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Analytics
+            </button>
+            <button
+              type="button"
               aria-current={!searching && selected === "diagnostics" ? "page" : undefined}
               onClick={() => selectCategory("diagnostics")}
               className={cn(
@@ -386,6 +449,7 @@ export default function SettingsPane() {
             )}
           >
             <SettingsRevealProvider target={reveal}>
+             <ModifiedSettingsProvider value={modifiedValue}>
               {searching ? (
                 <div className="min-h-0 flex-1 overflow-y-auto p-4">
                   <SettingsSearchResults
@@ -399,11 +463,39 @@ export default function SettingsPane() {
                     }}
                   />
                 </div>
+              ) : selected === "overview" ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-4" data-density-scope="settings">
+                  <DetailHeading
+                    title="Overview"
+                    description="A snapshot of your configuration"
+                    onBack={() => setMobileDetail(false)}
+                  />
+                  <PaneErrorBoundary label="Overview" queryClient={queryClient}>
+                    <SettingsOverview
+                      settings={settings}
+                      patch={patch}
+                      tier={tier}
+                      onRevealSetting={revealSetting}
+                      onSelectCategory={selectCategory}
+                    />
+                  </PaneErrorBoundary>
+                </div>
+              ) : selected === "analytics" ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <DetailHeading
+                    title="Analytics"
+                    description="Usage, cost, and answer-quality reporting"
+                    onBack={() => setMobileDetail(false)}
+                  />
+                  <PaneErrorBoundary label="Analytics" queryClient={queryClient}>
+                    <AnalyticsSection tier={tier} />
+                  </PaneErrorBoundary>
+                </div>
               ) : selected === "diagnostics" ? (
                 <div className="flex min-h-0 flex-1 flex-col p-4">
                   <DetailHeading
                     title="Diagnostics"
-                    description="Status, analytics, and activity consoles"
+                    description="Health status and agent activity consoles"
                     onBack={() => setMobileDetail(false)}
                   />
                   <div className="min-h-0 flex-1">
@@ -439,6 +531,7 @@ export default function SettingsPane() {
                   </div>
                 </div>
               )}
+             </ModifiedSettingsProvider>
             </SettingsRevealProvider>
           </div>
         </div>

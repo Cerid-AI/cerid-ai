@@ -20,6 +20,12 @@ vi.mock("@/components/settings/diagnostics-section", () => ({
   ),
 }))
 
+vi.mock("@/components/settings/analytics-section", () => ({
+  AnalyticsSection: ({ tier }: { tier: string }) => (
+    <div data-testid="analytics-console">analytics:{tier}</div>
+  ),
+}))
+
 function wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -109,7 +115,8 @@ describe("SettingsPane shell — state matrix", () => {
 
     vi.stubGlobal("fetch", mockFetch())
     await userEvent.click(screen.getByRole("button", { name: /Retry/ }))
-    expect(await screen.findByRole("button", { name: /Models/ })).toBeInTheDocument()
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    expect(within(nav).getByRole("button", { name: /Models/ })).toBeInTheDocument()
   })
 
   it("success: renders all 8 categories plus the Diagnostics console entry", async () => {
@@ -125,10 +132,31 @@ describe("SettingsPane shell — state matrix", () => {
       "Appearance",
       "Plan & Billing",
       "System",
+      "Analytics",
       "Diagnostics",
     ]) {
       expect(within(nav).getByRole("button", { name: new RegExp(label) })).toBeInTheDocument()
     }
+  })
+
+  it("Analytics sidebar entry selects the promoted Analytics section (ST9)", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    await userEvent.click(within(nav).getByRole("button", { name: /Analytics/ }))
+    expect(await screen.findByTestId("analytics-console")).toBeInTheDocument()
+    expect(localStorage.getItem("cerid-settings-category")).toBe("analytics")
+  })
+
+  it("defaults to the Overview tab and renders the active-config snapshot", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    expect(within(nav).getByRole("button", { name: /Overview/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    )
+    expect(await screen.findByRole("navigation", { name: /jump to a category/i })).toBeInTheDocument()
   })
 
   it("success: is axe-clean (D.3)", async () => {
@@ -246,10 +274,24 @@ describe("SettingsPane shell — deep links + redirects", () => {
   })
 
   it("?diagnostics_tab= lands on the Diagnostics console entry unchanged", async () => {
+    window.history.replaceState({}, "", "/?diagnostics_tab=status")
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    expect(await screen.findByTestId("diagnostics-console")).toHaveTextContent("diagnostics:status")
+  })
+
+  it("legacy ?diagnostics_tab=analytics routes to the promoted Analytics section (ST9)", async () => {
     window.history.replaceState({}, "", "/?diagnostics_tab=analytics")
     vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
-    expect(await screen.findByTestId("diagnostics-console")).toHaveTextContent("diagnostics:analytics")
+    expect(await screen.findByTestId("analytics-console")).toBeInTheDocument()
+  })
+
+  it("?category=analytics selects the Analytics section", async () => {
+    window.history.replaceState({}, "", "/?category=analytics")
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    expect(await screen.findByTestId("analytics-console")).toBeInTheDocument()
   })
 
   it("redirects legacy cerid-settings-tab values through the J-4 map", async () => {

@@ -92,7 +92,7 @@ const NEEDS_SETTINGS_DEEP_LINK: Record<Category, string> = {
     "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
 }
 
-// The Window.cerid global is shared with apple-connectors-section.tsx,
+// The Window.cerid global is shared with apple-detail.tsx,
 // where the appleConnectors shape lives. Both declarations merge into the
 // same global Window.cerid, so we only declare the permissions surface
 // here and use a local type-narrow cast when reaching into permissions.

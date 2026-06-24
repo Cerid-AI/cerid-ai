@@ -107,8 +107,35 @@ export async function patchSourcePolicy(
   return r.json()
 }
 
+export async function patchSourceConfig(
+  sourceId: string,
+  config: Record<string, unknown>,
+): Promise<SourceRecord> {
+  const r = await fetch(mcpUrl(`/sources/${sourceId}/config`).toString(), {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ config }),
+  })
+  if (!r.ok) throw new Error(`patchSourceConfig failed: ${r.status}`)
+  return r.json()
+}
+
 export async function deleteSource(sourceId: string, cascade = false): Promise<void> {
   const url = mcpUrl(`/sources/${sourceId}`, { cascade: cascade ? "true" : undefined })
   const r = await fetch(url.toString(), { method: "DELETE", headers: mcpHeaders() })
   if (!r.ok) throw new Error(`deleteSource failed: ${r.status}`)
+}
+
+export const INGESTION_KINDS: readonly string[] = [
+  "folder", "rss", "url_watch", "webhook", "bookmarks", "clipboard",
+  "chat_capture", "dev_events", "voice_note", "knowledge_pack",
+  "gmail", "outlook", "google_calendar", "outlook_calendar",
+  "apple_calendar", "apple_photos", "apple_reminders", "apple_mail",
+  "apple_notes", "imessage", "meeting_audio", "email",
+]
+
+export async function listIngestionSources(): Promise<SourceRecord[]> {
+  const all = await listSources()
+  const allowed = new Set(INGESTION_KINDS)
+  return all.filter((s) => allowed.has(s.kind))
 }

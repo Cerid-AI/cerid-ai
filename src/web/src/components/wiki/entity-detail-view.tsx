@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { BookOpen, RefreshCw } from "lucide-react"
+import { BookOpen, Pencil, RefreshCw } from "lucide-react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PaneError } from "@/components/ui/pane-error"
 import { Badge } from "@/components/ui/badge"
@@ -23,7 +25,9 @@ import { ContradictionLink } from "./contradiction-link"
 import { ArticleInfobox } from "./article-infobox"
 import { ArticleToc, type TocEntry } from "./article-toc"
 import { PageHistory } from "./page-history"
+import { WhatLinksHere } from "./what-links-here"
 import { buildLinkifyComponents } from "./linkify"
+import { refreshEntity, updateEntitySummary } from "@/lib/api/wiki"
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
 import { useNavigation } from "@/contexts/navigation-context"
 import { communitySlot } from "@/components/subjects/timeline/stratigraph/strata-layout"
@@ -188,6 +192,49 @@ export function EntityDetailView({
 }: EntityDetailViewProps) {
   const { data, isLoading, isError, isNotFound, refetch } = useWikiEntity(slug)
   const navigation = useNavigation()
+  const queryClient = useQueryClient()
+
+  // WK4: inline summary editing state — must be above early returns (Rules of Hooks).
+  const [editingMode, setEditingMode] = useState(false)
+  const [draftSummary, setDraftSummary] = useState("")
+
+  const refreshMutation = useMutation({
+    mutationFn: () => refreshEntity(slug),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["wiki-entity", slug] })
+      toast.success("Refresh queued")
+    },
+    onError: () => {
+      toast.error("Refresh failed")
+    },
+  })
+
+  const summaryMutation = useMutation({
+    mutationFn: (summary: string) => updateEntitySummary(slug, summary),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["wiki-entity", slug], updated)
+      void queryClient.invalidateQueries({ queryKey: ["wiki-entity", slug] })
+      setEditingMode(false)
+      toast.success("Summary updated")
+    },
+    onError: () => {
+      toast.error("Failed to save summary")
+    },
+  })
+
+  function handleEditSummary() {
+    setDraftSummary(data?.summary ?? "")
+    setEditingMode(true)
+  }
+
+  function handleCancelEdit() {
+    setEditingMode(false)
+    setDraftSummary("")
+  }
+
+  function handleSaveSummary() {
+    summaryMutation.mutate(draftSummary)
+  }
 
   // These useMemo calls must be above all early returns (Rules of Hooks).
   const linkifyEntities = useMemo(
@@ -273,6 +320,7 @@ export function EntityDetailView({
     tocEntries.push({ id: "wiki-section-contradictions", label: "Contradictions" })
   }
   tocEntries.push({ id: "wiki-section-history", label: "Page history" })
+  tocEntries.push({ id: "wiki-section-backlinks", label: "What links here" })
 
   function handleNavigateToDomain(domain: string) {
     if (onSelectDomain) {
@@ -340,6 +388,21 @@ export function EntityDetailView({
               Refresh due
             </span>
           )}
+          {/* WK4: manual refresh trigger */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 gap-1 px-2 text-xs"
+            onClick={() => refreshMutation.mutate()}
+            disabled={refreshMutation.isPending || refreshStatus === "running"}
+            aria-label={refreshMutation.isPending ? "Refresh queued" : "Refresh this entity"}
+          >
+            <RefreshCw
+              className={`h-3 w-3 ${refreshMutation.isPending ? "animate-spin" : ""}`}
+              aria-hidden="true"
+            />
+            {refreshMutation.isPending ? "Queued" : "Refresh"}
+          </Button>
         </div>
       </div>
 
@@ -387,14 +450,60 @@ export function EntityDetailView({
                   <span className="capitalize">{data.confidence_band}</span>
                 </p>
               )}
-              <div className="prose prose-sm dark:prose-invert max-w-prose">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={linkifyComponents}
-                >
-                  {leadParagraph}
-                </ReactMarkdown>
-              </div>
+              {/* WK4: inline editable summary */}
+              {editingMode ? (
+                <div className="space-y-2">
+                  <label htmlFor="wiki-summary-textarea" className="sr-only">
+                    Edit summary
+                  </label>
+                  <textarea
+                    id="wiki-summary-textarea"
+                    aria-label="Edit summary"
+                    className="w-full rounded-md border border-border bg-background p-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    rows={6}
+                    value={draftSummary}
+                    onChange={(e) => setDraftSummary(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleSaveSummary}
+                      disabled={summaryMutation.isPending}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleCancelEdit}
+                      disabled={summaryMutation.isPending}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="group/summary relative">
+                  <div className="prose prose-sm dark:prose-invert max-w-prose">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={linkifyComponents}
+                    >
+                      {leadParagraph}
+                    </ReactMarkdown>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 h-6 gap-1 px-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover/summary:opacity-100 focus-visible:opacity-100"
+                    onClick={handleEditSummary}
+                    aria-label="Edit summary"
+                  >
+                    <Pencil className="h-3 w-3" aria-hidden="true" />
+                    Edit
+                  </Button>
+                </div>
+              )}
             </section>
           ) : (
             /* Stub article state — entity exists, summary not yet generated */
@@ -654,6 +763,16 @@ export function EntityDetailView({
             </h2>
             <PageHistory entitySlug={data.slug} />
           </section>
+
+          {/* --------------------------------------------------------------- */}
+          {/* What links here (WK1 backlinks)                                 */}
+          {/* --------------------------------------------------------------- */}
+          <div id="wiki-section-backlinks" className="mt-6">
+            <WhatLinksHere
+              entitySlug={data.slug}
+              onSelectEntity={onSelectRelated}
+            />
+          </div>
 
           {/* --------------------------------------------------------------- */}
           {/* Categories footer                                                */}

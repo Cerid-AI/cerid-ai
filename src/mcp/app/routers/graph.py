@@ -2277,7 +2277,7 @@ class DomainsResponse(BaseModel):
 
 
 @router.get("/domains", response_model=DomainsResponse)
-async def get_domains() -> DomainsResponse:
+async def get_domains(include_internal: bool = Query(default=False)) -> DomainsResponse:
     """Per-domain entity/artifact counts — the taxonomy-aware spine endpoint.
 
     Sorted by entity_count desc. ``derived_at: null`` signals that the
@@ -2306,8 +2306,16 @@ async def get_domains() -> DomainsResponse:
         log_swallowed_error("app.routers.graph.domains_query", exc)
         return _empty
 
+    # WK2: hide client/internal domains from the default wiki view (the
+    # category + browse-by-domain chips read this endpoint). Reuse the same
+    # hidden set the wiki entity list uses; reveal via ?include_internal=true.
+    from app.db.neo4j.wiki import _hidden_domains  # noqa: PLC0415
+    hidden = set() if include_internal else _hidden_domains()
+
     domains_out: list[DomainSummary] = []
     for d in raw.get("domains") or []:
+        if d.get("name") in hidden:
+            continue
         sub_cats = [
             DomainSubCategory(
                 name=sc["name"],

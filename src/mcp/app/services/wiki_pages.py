@@ -35,6 +35,51 @@ logger = logging.getLogger("ai-companion.wiki_pages")
 
 ConfidenceBand = Literal["high", "medium", "low", "unknown"]
 RefreshStatus = Literal["idle", "due", "running"]
+Completeness = Literal["stub", "start", "full"]
+
+# ---------------------------------------------------------------------------
+# WK3 — article completeness thresholds
+# ---------------------------------------------------------------------------
+# A summary must be at least START_CHARS characters long AND the entity must
+# have at least START_MENTIONS corpus mentions to escape "start" status.
+# "full" requires both thresholds to be met simultaneously.
+START_CHARS: int = 200
+START_MENTIONS: int = 3
+FULL_CHARS: int = START_CHARS  # alias kept for the spec; logic uses START_CHARS
+
+
+def compute_completeness(
+    summary: str | None,
+    mention_count: int,
+    band: str,
+) -> Completeness:
+    """Classify an entity's article completeness as stub / start / full.
+
+    Parameters
+    ----------
+    summary:
+        The entity's generated prose summary (or None / empty string when
+        no summary has been written yet).
+    mention_count:
+        Total corpus mention count for the entity.
+    band:
+        Confidence band string ("high" | "medium" | "low" | "unknown").
+        Accepted for the call signature (may drive future weighting) but
+        does not alter the current stub/start/full boundaries.
+
+    Rules
+    -----
+    - No / empty summary            → "stub"
+    - len(summary) < START_CHARS    → "start"
+    - mention_count < START_MENTIONS → "start"
+    - Both thresholds met           → "full"
+    """
+    _ = band  # reserved for future weighting; not used in current logic
+    if not summary or not summary.strip():
+        return "stub"
+    if len(summary) < START_CHARS or mention_count < START_MENTIONS:
+        return "start"
+    return "full"
 
 # Redis key constants (must match processor_queue.py)
 _PROC_RUNNING_KEY = "cerid:proc:running"
@@ -214,6 +259,10 @@ class WikiEntityPage(BaseModel):
     top_tags: list[str] | None = None
     primary_subcategory: str | None = None
     summary: str | None = None
+    # WK4 — tracks whether the summary was last written by a human ("user")
+    # or by the automated refresh job (None).  Exposed so the frontend can
+    # show an "edited by you" badge and suppress the auto-refresh indicator.
+    summary_edited_by: str | None = None
     related_entities: list[RelatedEntity] = []
     source_artifacts: list[SourceCitation] = []
     contradictions: list[dict[str, Any]] = []
@@ -224,6 +273,8 @@ class WikiEntityPage(BaseModel):
     confidence_band: ConfidenceBand = "unknown"
     # Tri-state driven by actual job state, not timestamp heuristics.
     refresh_status: RefreshStatus = "idle"
+    # WK3 — article completeness class derived at assembly time.
+    completeness: Completeness = "stub"
 
 
 # ---------------------------------------------------------------------------
@@ -232,19 +283,30 @@ class WikiEntityPage(BaseModel):
 
 
 async def list_entities(
-    neo4j_driver: Any, *, limit: int = 30, search: str | None = None
+    neo4j_driver: Any,
+    *,
+    limit: int = 30,
+    search: str | None = None,
+    include_internal: bool = False,
 ) -> list[EntitySummary]:
     """Return up to ``limit`` entity summaries ordered by recent activity.
 
     When ``search`` is given it filters by name/canonical_id server-side
     (before the limit), so the palette can search the full corpus.
 
+    WK2: by default the client-data domains are hidden from the browse view;
+    pass ``include_internal=True`` to reveal them (the advanced toggle).
+
     Wraps the Neo4j adapter call in ``asyncio.to_thread`` so the sync
     driver does not block the event loop.
     """
     try:
         rows = await asyncio.to_thread(
-            _neo4j_adapter.list_top_entities, neo4j_driver, limit=limit, search=search
+            _neo4j_adapter.list_top_entities,
+            neo4j_driver,
+            limit=limit,
+            search=search,
+            include_internal=include_internal,
         )
     except Exception as exc:
         log_swallowed_error("wiki.list_entities", exc)
@@ -433,19 +495,26 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
 
     primary_subcategory: str | None = raw.get("primary_subcategory")
 
+    _summary = raw.get("summary")
+    _mention_count = int(raw.get("mention_count") or 0)
+    _completeness: Completeness = compute_completeness(
+        _summary, _mention_count, confidence_band
+    )
+
     return WikiEntityPage(
         slug=slug,
         name=raw.get("name", ""),
         entity_type=raw.get("entity_type", "OTHER"),
         community_id=raw.get("community_id"),
         community_label=community_label,
-        mention_count=int(raw.get("mention_count") or 0),
+        mention_count=_mention_count,
         primary_domain=primary_domain,
         domain_mix=domain_mix,
         domain_salience=domain_salience,
         top_tags=top_tags,
         primary_subcategory=primary_subcategory,
-        summary=raw.get("summary"),
+        summary=_summary,
+        summary_edited_by=raw.get("summary_edited_by") or None,
         related_entities=related,
         source_artifacts=source_artifacts,
         contradictions=contradictions,
@@ -455,6 +524,7 @@ async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None
         next_refresh_due=next_refresh_due,
         confidence_band=confidence_band,
         refresh_status=refresh_status,
+        completeness=_completeness,
     )
 
 

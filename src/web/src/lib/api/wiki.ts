@@ -17,6 +17,9 @@ import { MCP_BASE, mcpHeaders, mcpUrl, extractError } from "./common"
 import type { WatchedFolder } from "./settings"
 import { fetchWatchedFolders } from "./settings"
 import type {
+  BacklinkItem,
+  BacklinksResponse,
+  Completeness,
   EntitySummary,
   ExternalReference,
   WikiEntityPage,
@@ -210,7 +213,13 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
     top_tags,
     primary_subcategory: raw.primary_subcategory != null ? String(raw.primary_subcategory) : null,
     episodic_memories: episodicMemories.length > 0 ? episodicMemories : undefined,
+    completeness: _normalizeCompleteness(raw.completeness),
   }
+}
+
+function _normalizeCompleteness(raw: unknown): Completeness | undefined {
+  if (raw === "stub" || raw === "start" || raw === "full") return raw
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -225,8 +234,15 @@ function normalizeEntityPage(raw: Record<string, unknown>): WikiEntityPage {
 export async function fetchWikiEntities({
   limit = 30,
   q,
-}: { limit?: number; q?: string } = {}): Promise<EntitySummary[]> {
-  const url = mcpUrl("/wiki/entities", { limit, q: q?.trim() || undefined })
+  includeInternal = false,
+}: { limit?: number; q?: string; includeInternal?: boolean } = {}): Promise<EntitySummary[]> {
+  const url = mcpUrl("/wiki/entities", {
+    limit,
+    q: q?.trim() || undefined,
+    // WK2: only send the param when the advanced toggle is on; otherwise
+    // the server applies its default client-domain hiding.
+    include_internal: includeInternal ? "true" : undefined,
+  })
   const res = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!res.ok) {
     throw new Error(`Wiki entities fetch failed (${res.status})`)
@@ -371,6 +387,89 @@ export async function fetchWikiLog({
   if (!res.ok) {
     throw new Error(`Wiki log fetch failed (${res.status})`)
   }
-  const rows = (await res.json()) as Record<string, unknown>[]
+  const body = (await res.json()) as unknown
+  // The backend returns { entries: [...], total: N }; tolerate a bare array too.
+  const rows = Array.isArray(body)
+    ? (body as Record<string, unknown>[])
+    : Array.isArray((body as Record<string, unknown>).entries)
+      ? ((body as Record<string, unknown>).entries as Record<string, unknown>[])
+      : []
   return rows.map(normalizeWikiLogEntry)
+}
+
+// ---------------------------------------------------------------------------
+// WK1 — "What links here" backlinks
+// ---------------------------------------------------------------------------
+
+function normalizeBacklinkItem(raw: Record<string, unknown>): BacklinkItem {
+  const via = raw.via as string
+  const safeVia: BacklinkItem["via"] =
+    via === "wikilink" || via === "mention" || via === "related" ? via : "related"
+  return {
+    slug: String(raw.slug ?? ""),
+    name: String(raw.name ?? ""),
+    entity_type: String(raw.entity_type ?? "OTHER"),
+    via: safeVia,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WK4 — manual refresh + editable summary
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /wiki/entities/{slug}/refresh
+ *
+ * Enqueues a background refresh for the entity. The backend responds 202
+ * Accepted; callers invalidate the entity query key to pick up the new
+ * refresh_status field as it transitions.
+ */
+export async function refreshEntity(slug: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/wiki/entities/${encodeURIComponent(slug)}/refresh`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) {
+    throw new Error(await extractError(res, `Refresh failed (${res.status})`))
+  }
+}
+
+/**
+ * PATCH /wiki/entities/{slug}
+ *
+ * Updates the stored summary text for the entity. Returns the full updated
+ * WikiEntityPage so the caller can optimistically set it in the cache.
+ */
+export async function updateEntitySummary(slug: string, summary: string): Promise<WikiEntityPage> {
+  const res = await fetch(`${MCP_BASE}/wiki/entities/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ summary }),
+  })
+  if (!res.ok) {
+    throw new Error(await extractError(res, `Summary update failed (${res.status})`))
+  }
+  const data = (await res.json()) as Record<string, unknown>
+  return normalizeEntityPage(data)
+}
+
+/**
+ * GET /wiki/entities/{slug}/backlinks
+ *
+ * Returns up to 50 entities that reference this entity, with a `via`
+ * discriminator indicating how they link (wikilink / mention / related).
+ */
+export async function fetchBacklinks(slug: string): Promise<BacklinksResponse> {
+  const res = await fetch(
+    `${MCP_BASE}/wiki/entities/${encodeURIComponent(slug)}/backlinks`,
+    { headers: mcpHeaders() },
+  )
+  if (!res.ok) {
+    throw new Error(`Backlinks fetch failed (${res.status})`)
+  }
+  const data = (await res.json()) as Record<string, unknown>
+  const raw = Array.isArray(data.backlinks)
+    ? (data.backlinks as Record<string, unknown>[])
+    : []
+  return { backlinks: raw.map(normalizeBacklinkItem) }
 }

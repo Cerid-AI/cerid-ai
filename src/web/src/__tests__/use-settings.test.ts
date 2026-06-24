@@ -27,7 +27,10 @@ describe("useSettings", () => {
     expect(result.current.showDashboard).toBe(false)
     expect(result.current.routingMode).toBe("manual")
     expect(result.current.autoInject).toBe(false)
-    expect(result.current.autoInjectThreshold).toBe(0.55)
+    // CH8: default must be one of the toolbar dropdown options so the radio
+    // group shows a selected item. 0.15 is the "Standard" option.
+    expect(result.current.autoInjectThreshold).toBe(0.15)
+    expect([0.10, 0.15, 0.25, 0.40]).toContain(result.current.autoInjectThreshold)
     expect(result.current.costSensitivity).toBe("medium")
     expect(result.current.hallucinationEnabled).toBe(false)
   })

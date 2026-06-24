@@ -72,6 +72,7 @@ from app.routers import (
     sources,
     sync,
     taxonomy,
+    updates,
     upload,
     user_state,
     whisper_models,
@@ -1117,6 +1118,9 @@ app.include_router(recommendations.router)
 
 # External public-API adapter management (Phase API.1 + API.2)
 app.include_router(external_apis.router)
+
+# App-version update check (ST10)
+app.include_router(updates.router)
 
 # Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
 app.include_router(ollama_proxy.router)

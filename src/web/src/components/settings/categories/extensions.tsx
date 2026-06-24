@@ -37,11 +37,24 @@ import { logSwallowedError } from "@/lib/log-swallowed"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: React.ReactNode
+}) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <span className="text-label-xs uppercase text-muted-foreground tracking-wider">{title}</span>
+        {description && (
+          <p className="text-label-sm leading-snug text-muted-foreground normal-case tracking-normal">
+            {description}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="density-stack">{children}</CardContent>
     </Card>
@@ -212,7 +225,10 @@ function PluginsSection() {
   const plugins = data?.plugins ?? []
 
   return (
-    <SectionCard title="Plugins">
+    <SectionCard
+      title="Plugins"
+      description="Local capability packs installed on this server. Lowest-friction way to add tools and connectors."
+    >
       {isLoading && (
         <div className="density-stack">
           {[1, 2].map((i) => <Skeleton key={i} className="h-14 w-full rounded-md" />)}
@@ -539,7 +555,10 @@ function McpSection() {
   const servers = data?.servers ?? []
 
   return (
-    <SectionCard title="MCP Servers">
+    <SectionCard
+      title="MCP Servers"
+      description="External tool providers connected over the Model Context Protocol. Governance-gated and available to agents."
+    >
       <SettingRow def={modeDef}>
         <ReadOnlyEnvHint envVar="MCP_CLIENT_MODE" />
       </SettingRow>
@@ -613,7 +632,10 @@ function ExternalApisSection() {
   }
 
   return (
-    <SectionCard title="External APIs">
+    <SectionCard
+      title="External Knowledge Providers"
+      description="Read-only knowledge sources (Wikipedia, arXiv, GitHub, and more) the retrieval pipeline can search. Not tool servers."
+    >
       {isLoading && (
         <div className="density-stack">
           {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-md" />)}
@@ -777,7 +799,10 @@ function AutomationsSection() {
   const automations = data ?? []
 
   return (
-    <SectionCard title="Pro Automations">
+    <SectionCard
+      title="Pro Automations"
+      description="Scheduled background tasks (inbox triage, daily digest) that run on a cadence you set."
+    >
       {entInfo.state === "locked" && (
         <Alert>
           <AlertTriangle className="h-4 w-4" />
@@ -820,6 +845,16 @@ function AutomationsSection() {
 export default function ExtensionsCategory() {
   return (
     <div className="density-stack">
+      <Card>
+        <CardContent className="py-3">
+          <p className="text-label-sm leading-relaxed text-muted-foreground">
+            Extend Cerid four ways — local capability packs installed on the server,
+            external tool providers connected over MCP for agents to call, read-only
+            knowledge sources the retrieval pipeline can search, and scheduled
+            background automations. Each has its own section below.
+          </p>
+        </CardContent>
+      </Card>
       <PluginsSection />
       <McpSection />
       <ExternalApisSection />

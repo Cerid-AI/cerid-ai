@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 349
+**Total routes:** 354
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -300,6 +300,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/kinds` | `list_source_kinds` | `src/mcp/app/routers/sources.py` | sources |  |
 | DELETE | `/{source_id}` | `delete_source` | `src/mcp/app/routers/sources.py` | sources |  |
 | GET | `/{source_id}` | `get_source` | `src/mcp/app/routers/sources.py` | sources |  |
+| POST | `/{source_id}/config` | `update_source_config` | `src/mcp/app/routers/sources.py` | sources |  |
 | POST | `/{source_id}/policy` | `update_source_policy` | `src/mcp/app/routers/sources.py` | sources |  |
 | POST | `/{source_id}/test` | `test_source` | `src/mcp/app/routers/sources.py` | sources |  |
 | GET | `/{source_id}/webhook-url` | `get_webhook_url` | `src/mcp/app/routers/sources.py` | sources |  |
@@ -315,6 +316,7 @@ not documented here; see the internal repo for the full registry.
 | POST | `/taxonomy/artifact` | `update_artifact_taxonomy_endpoint` | `src/mcp/app/routers/taxonomy.py` |  |  |
 | POST | `/taxonomy/domain` | `create_domain_endpoint` | `src/mcp/app/routers/taxonomy.py` |  |  |
 | POST | `/taxonomy/subcategory` | `create_subcategory_endpoint` | `src/mcp/app/routers/taxonomy.py` |  |  |
+| GET | `/check` | `check_for_updates` | `src/mcp/app/routers/updates.py` | updates |  |
 | GET | `/archive/files` | `list_archive_files` | `src/mcp/app/routers/upload.py` |  |  |
 | POST | `/upload` | `upload_file_endpoint` | `src/mcp/app/routers/upload.py` |  |  |
 | GET | `/upload/supported` | `supported_extensions_endpoint` | `src/mcp/app/routers/upload.py` |  |  |
@@ -350,6 +352,9 @@ not documented here; see the internal repo for the full registry.
 | GET | `/concepts/{community_id:path}` | `get_concept_wiki_page` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/entities` | `list_entity_pages` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/entities/{slug}` | `get_entity_wiki_page` | `src/mcp/app/routers/wiki.py` | wiki |  |
+| PATCH | `/entities/{slug}` | `edit_entity_summary` | `src/mcp/app/routers/wiki.py` | wiki |  |
+| GET | `/entities/{slug}/backlinks` | `get_entity_backlinks` | `src/mcp/app/routers/wiki.py` | wiki |  |
+| POST | `/entities/{slug}/refresh` | `manual_refresh_entity` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/index` | `list_knowledge_index` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `/log` | `list_knowledge_log` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | POST | `/write_note` | `write_note_endpoint` | `src/mcp/app/routers/wiki.py` | wiki |  |

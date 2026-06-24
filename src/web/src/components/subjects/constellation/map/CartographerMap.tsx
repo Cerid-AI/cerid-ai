@@ -15,7 +15,7 @@
 //   - Static positions from API — no client physics.
 //   - hideEdgesOnMove: true.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Sigma from "sigma"
 import Graph from "graphology"
 import { Loader2, X } from "lucide-react"
@@ -282,6 +282,17 @@ export function CartographerMap({
   const pulseRafRef = useRef<number | null>(null)
   const pulseEntriesRef = useRef<PulseEntry[]>([])
 
+  // Stable identity of the node SET (ids only, order-independent). The sigma
+  // rebuild keys on this instead of `data` so a layout-preset switch — same
+  // nodes, new x/y — does NOT reconstruct Sigma. Reconstructing on every layout
+  // switch hits a sigma v3 bug: the second `new Sigma` in the same container
+  // drops its node-program registration ("could not find a suitable program for
+  // node type circle"). Positions are applied in place by a separate effect.
+  const dataNodeKey = useMemo(
+    () => (data ? data.entities.map((e) => e.id).slice().sort().join(",") : ""),
+    [data],
+  )
+
   // Re-read tokens when theme changes (watch for .dark class toggle)
   // Value-compare before setState to avoid unnecessary sigma rebuilds.
   useEffect(() => {
@@ -535,10 +546,32 @@ export function CartographerMap({
       sigmaRef.current?.kill()
       sigmaRef.current = null
     }
-    // Only rebuild when data or core config changes.
+    // Rebuild only when the node SET (dataNodeKey) or core styling changes —
+    // NOT on a layout-preset switch (same nodes, new x/y), which is applied in
+    // place by the position-sync effect below. This avoids the sigma v3
+    // second-construction program-registration bug (see dataNodeKey above).
     // Lens/filter changes are handled by the reducer effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, config.edgeBudget, tokens])
+  }, [dataNodeKey, config.edgeBudget, tokens])
+
+  // ---------------------------------------------------------------------------
+  // Layout-preset switch (force/wells/domain): same nodes, new coordinates.
+  // Update x/y in place on the live graph and refresh — no Sigma reconstruction.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const sigma = sigmaRef.current
+    if (!sigma || !data) return
+    const graph = sigma.getGraph()
+    let moved = false
+    for (const e of data.entities) {
+      if (graph.hasNode(e.id)) {
+        graph.setNodeAttribute(e.id, "x", e.x)
+        graph.setNodeAttribute(e.id, "y", e.y)
+        moved = true
+      }
+    }
+    if (moved) sigma.refresh({ skipIndexation: false })
+  }, [data])
 
   // ---------------------------------------------------------------------------
   // Node/edge reducers for lens + filter + hover dimming (installed ONCE per
@@ -613,8 +646,10 @@ export function CartographerMap({
           ...attrs,
           color: currentTokens.dim,
           label: "",
-          // Enforce minimum interactive hit size even when dimmed
-          size: Math.max(HIT_SIZE_MIN, attrs.size * 0.7),
+          // Enforce minimum interactive hit size even when dimmed.
+          // Soft de-emphasis (0.85x) keeps non-focus nodes clearly
+          // perceptible rather than near-vanishing.
+          size: Math.max(HIT_SIZE_MIN, attrs.size * 0.85),
         }
       }
 
@@ -670,7 +705,10 @@ export function CartographerMap({
       if (srcInFocus && tgtInFocus) {
         return { ...attrs, color: tokensRef.current.edge, hidden: false }
       }
-      return { ...attrs, hidden: true }
+      // Non-neighborhood edges stay visible but recede to the dim token
+      // instead of vanishing — soft de-emphasis, not a blackout of the
+      // whole edge layer.
+      return { ...attrs, color: tokensRef.current.dim, hidden: false }
     })
 
     sigma.refresh()

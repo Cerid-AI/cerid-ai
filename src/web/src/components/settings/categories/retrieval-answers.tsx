@@ -14,6 +14,7 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   SettingRow,
   AdvancedDisclosure,
@@ -500,7 +501,23 @@ export default function RetrievalAnswersCategory({ settings, patch }: SettingsCa
       {/* Smart RAG */}
       <Card>
         <CardContent className="pt-4 space-y-4">
-          <h3 className="text-label-xs font-medium tracking-wide text-muted-foreground uppercase">Smart RAG</h3>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-label-xs font-medium tracking-wide text-muted-foreground uppercase">Smart RAG</h3>
+              <Badge variant="secondary" className="text-label-xxs">Pro</Badge>
+            </div>
+            <p className="text-label-sm leading-relaxed text-muted-foreground">
+              Tune how much each knowledge source counts when Cerid retrieves
+              context. Boost a source (up to 2.0) to favour domains your library
+              is strong in, or demote one (down to 0.0) when its results are
+              consistently off-topic. Weighting reorders results only — it
+              doesn&apos;t add latency.
+            </p>
+            <p className="text-label-xs text-muted-foreground/80">
+              Recommended: leave every source at <span className="font-mono">1.0</span> and
+              adjust one at a time only if a domain keeps surfacing irrelevant matches.
+            </p>
+          </div>
           <SmartRagPanel />
         </CardContent>
       </Card>

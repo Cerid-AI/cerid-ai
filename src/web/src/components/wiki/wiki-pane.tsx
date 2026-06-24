@@ -113,7 +113,7 @@ export default function WikiPane() {
   const { data: entities, isLoading, isError, refetch } = useWikiEntities({ limit: WIKI_RAIL_LIMIT })
   const { data: domainCounts } = useQuery({
     queryKey: ["graph-domains"],
-    queryFn: fetchDomainCounts,
+    queryFn: () => fetchDomainCounts(),
     staleTime: 10 * 60_000,
     retry: 1,
   })

@@ -19,6 +19,8 @@ _LEAKABLE_ENV_VARS = (
     "RERANK_PROVIDER",
     "QUENCHFORGE_EMBED_MODEL",
     "QUENCHFORGE_RERANK_MODEL",
+    "RETRIEVAL_HYPE_ENABLED",
+    "PARENT_CHILD_ENABLED",
 )
 
 
@@ -179,3 +181,32 @@ def test_patch_all_three_gpu_flags_together(client, monkeypatch):
     assert set(r.json()["updated"]) >= {
         "embeddings_provider", "rerank_provider", "quenchforge_embed_model",
     }
+
+
+# ---------------------------------------------------------------------------
+# ST3 — recommendation "Enable" payloads: enable_hype + parent_child.
+# The recommender (core/config/recommendations.py) emits these keys; the
+# PATCH handler must accept them so clicking "Enable" doesn't 400.
+# ---------------------------------------------------------------------------
+
+def test_patch_enable_hype(client):
+    r = client.patch("/settings", json={"enable_hype": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated"]["enable_hype"] is True
+    assert os.environ.get("RETRIEVAL_HYPE_ENABLED", "").lower() in {"true", "1"}
+
+
+def test_patch_disable_hype(client):
+    r = client.patch("/settings", json={"enable_hype": False})
+    assert r.status_code == 200
+    assert r.json()["updated"]["enable_hype"] is False
+    assert os.environ.get("RETRIEVAL_HYPE_ENABLED", "").lower() == "false"
+
+
+def test_patch_enable_parent_child_retrieval(client):
+    r = client.patch("/settings", json={"enable_parent_child_retrieval": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated"]["enable_parent_child_retrieval"] is True
+    assert os.environ.get("PARENT_CHILD_ENABLED", "").lower() in {"true", "1"}

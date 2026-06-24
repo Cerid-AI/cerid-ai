@@ -25,9 +25,9 @@ function wrap(ui: React.ReactNode) {
 
 const SAMPLE_ENTRIES: Awaited<ReturnType<typeof fetchWikiIndex>> = {
   entries: [
-    { slug: "other:python", name: "Python", entity_type: "OTHER", one_liner: "A high-level language.", last_updated_at: "2026-06-08T04:07:53Z", activity_score: 52, has_summary: true },
-    { slug: "org:acme", name: "Acme", entity_type: "ORG", one_liner: null, last_updated_at: null, activity_score: 5, has_summary: false },
-    { slug: "other:rust", name: "Rust", entity_type: "OTHER", one_liner: "A systems language.", last_updated_at: null, activity_score: 10, has_summary: true },
+    { slug: "other:python", name: "Python", entity_type: "OTHER", one_liner: "A high-level language.", last_updated_at: "2026-06-08T04:07:53Z", activity_score: 52, has_summary: true, completeness: "full" },
+    { slug: "org:acme", name: "Acme", entity_type: "ORG", one_liner: null, last_updated_at: null, activity_score: 5, has_summary: false, completeness: "stub" },
+    { slug: "other:rust", name: "Rust", entity_type: "OTHER", one_liner: "A systems language.", last_updated_at: null, activity_score: 10, has_summary: true, completeness: "start" },
   ],
   total: null,
 }
@@ -106,6 +106,42 @@ describe("WikiIndexView — success", () => {
     expect(acmeEl.className).toContain("text-muted-foreground")
   })
 
+  // WK3: 3-class completeness marker
+  it("WK3: sets data-completeness=full on fully-complete entry buttons", async () => {
+    render(wrap(<WikiIndexView onSelectEntity={vi.fn()} />))
+    await waitFor(() => screen.getByText("Python"))
+    const btn = screen.getByRole("button", { name: /Python/ })
+    expect(btn.getAttribute("data-completeness")).toBe("full")
+  })
+
+  it("WK3: sets data-completeness=stub on stub entry buttons", async () => {
+    render(wrap(<WikiIndexView onSelectEntity={vi.fn()} />))
+    await waitFor(() => screen.getByText("Acme"))
+    const btn = screen.getByRole("button", { name: /Acme/ })
+    expect(btn.getAttribute("data-completeness")).toBe("stub")
+  })
+
+  it("WK3: sets data-completeness=start on start entry buttons", async () => {
+    render(wrap(<WikiIndexView onSelectEntity={vi.fn()} />))
+    await waitFor(() => screen.getByText("Rust"))
+    const btn = screen.getByRole("button", { name: /Rust/ })
+    expect(btn.getAttribute("data-completeness")).toBe("start")
+  })
+
+  it("WK3: shows 'Summary in progress' hint for start-class entries", async () => {
+    render(wrap(<WikiIndexView onSelectEntity={vi.fn()} />))
+    await waitFor(() => screen.getByText("Rust"))
+    expect(screen.getByText("Summary in progress")).toBeInTheDocument()
+  })
+
+  it("WK3: no pending hint inside a full-class entry's button", async () => {
+    render(wrap(<WikiIndexView onSelectEntity={vi.fn()} />))
+    await waitFor(() => screen.getByText("Python"))
+    const pythonBtn = screen.getByRole("button", { name: /Python/ })
+    // The Python entry is "full" — its own button should contain no pending text
+    expect(pythonBtn.querySelector(".italic")).toBeNull()
+  })
+
   it("calls onSelectEntity when a row is clicked", async () => {
     const onSelectEntity = vi.fn()
     render(wrap(<WikiIndexView onSelectEntity={onSelectEntity} />))
@@ -131,6 +167,23 @@ describe("WikiIndexView — success", () => {
     render(wrap(<WikiIndexView onSelectEntity={vi.fn()} />))
     await waitFor(() => {
       expect(screen.getByText("3 entities")).toBeInTheDocument()
+    })
+  })
+
+  // WK1: article-body search
+  it("WK1: body-only search surfaces entity whose one_liner matches but name does not", async () => {
+    const user = userEvent.setup()
+    render(wrap(<WikiIndexView onSelectEntity={vi.fn()} />))
+    await waitFor(() => screen.getByText("Rust"))
+
+    const input = screen.getByRole("searchbox")
+    // "systems" appears in Rust's one_liner but not in the name "Rust" or slug "other:rust"
+    await user.type(input, "systems")
+
+    await waitFor(() => {
+      expect(screen.getByText("Rust")).toBeInTheDocument()
+      expect(screen.queryByText("Python")).not.toBeInTheDocument()
+      expect(screen.queryByText("Acme")).not.toBeInTheDocument()
     })
   })
 })

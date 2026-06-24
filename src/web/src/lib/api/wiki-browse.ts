@@ -29,6 +29,8 @@ export interface WikiIndexEntry {
   last_updated_at: string | null
   activity_score: number
   has_summary: boolean
+  /** WK3 article completeness class ("stub" | "start" | "full"). Absent on older backends — treat as "stub". */
+  completeness?: "stub" | "start" | "full"
 }
 
 /** Response envelope from GET /wiki/index */
@@ -149,15 +151,20 @@ export async function fetchWikiIndex({
   q,
   order,
   limit,
+  includeInternal = false,
 }: {
   q?: string
   order?: "name" | "activity"
   limit?: number
+  includeInternal?: boolean
 } = {}): Promise<WikiIndexResponse> {
   const url = mcpUrl("/wiki/index", {
     q: q?.trim() || undefined,
     order: order ?? undefined,
     limit: limit ?? undefined,
+    // WK2: only send when the advanced toggle is on; default omits it so the
+    // server excludes the client-data domains.
+    include_internal: includeInternal ? "true" : undefined,
   })
   const res = await fetch(url.toString(), { headers: mcpHeaders() })
   if (!res.ok) {
@@ -221,6 +228,12 @@ export async function fetchWikiLog({
   if (!res.ok) {
     throw new Error(`Wiki log fetch failed (${res.status})`)
   }
-  const rows = (await res.json()) as Record<string, unknown>[]
+  const body = (await res.json()) as unknown
+  // The backend returns { entries: [...], total: N }; tolerate a bare array too.
+  const rows = Array.isArray(body)
+    ? (body as Record<string, unknown>[])
+    : Array.isArray((body as Record<string, unknown>).entries)
+      ? ((body as Record<string, unknown>).entries as Record<string, unknown>[])
+      : []
   return rows.map(normalizeLogEntry)
 }

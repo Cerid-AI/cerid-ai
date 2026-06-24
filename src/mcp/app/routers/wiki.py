@@ -31,9 +31,13 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.db.neo4j.knowledge_log import append_log_entry
+from app.db.neo4j.wiki import get_backlinks, write_entity_summary
+from app.processor.subscribers.wiki_refresh import enqueue_refresh
 from app.services.wiki_pages import (
     EntitySummary,
     WikiEntityPage,
+    compute_completeness,
     get_entity_page,
     list_entities,
 )
@@ -79,12 +83,20 @@ async def list_entity_pages(
         description="Optional name/canonical_id search, applied server-side "
         "before the limit so it spans the whole entity set.",
     ),
+    include_internal: bool = Query(
+        default=False,
+        description="WK2 advanced toggle. When False (default) the client-data "
+        "domains (boardroom_foundation, canary_client_domain) are hidden. Set "
+        "True to reveal them.",
+    ),
 ) -> list[EntitySummary]:
     from app.deps import get_neo4j
 
     driver = get_neo4j()
     try:
-        return await list_entities(driver, limit=limit, search=q)
+        return await list_entities(
+            driver, limit=limit, search=q, include_internal=include_internal
+        )
     except Exception as exc:
         log_swallowed_error("wiki.list_entity_pages", exc)
         raise HTTPException(status_code=500, detail="Failed to retrieve entity list") from exc
@@ -115,6 +127,222 @@ async def get_entity_wiki_page(slug: str) -> WikiEntityPage:
         raise HTTPException(status_code=404, detail=f"Entity {slug!r} not found")
 
     return page
+
+
+# ---------------------------------------------------------------------------
+# WK1 — "What links here" backlinks
+# ---------------------------------------------------------------------------
+
+
+class BacklinkItem(BaseModel):
+    """One entry in the backlinks list."""
+
+    slug: str = Field(description="Canonical ID of the linking entity.")
+    name: str = Field(description="Display name of the linking entity.")
+    entity_type: str = Field(description="Entity type (PERSON, ORG, …).")
+    via: Literal["wikilink", "mention", "related"] = Field(
+        description=(
+            "How this entity links to the target. "
+            "``wikilink`` — the entity's summary contains a ``[[...]]`` wikilink; "
+            "``mention`` — both entities appear in the same source artifact; "
+            "``related`` — a direct CO_MENTIONED edge exists between them."
+        )
+    )
+
+
+class BacklinksResponse(BaseModel):
+    """Response body for ``GET /wiki/entities/{slug}/backlinks``."""
+
+    backlinks: list[BacklinkItem] = Field(
+        description=(
+            "Entities that reference this entity, de-duplicated and ordered by "
+            "via-source precedence (wikilink > mention > related), capped at 50."
+        )
+    )
+
+
+@router.get(
+    "/entities/{slug}/backlinks",
+    response_model=BacklinksResponse,
+    summary="What links here — entity backlinks (WK1)",
+    description=(
+        "Returns up to 50 entities that reference the entity identified by "
+        "``slug``, grouped by how they link (``via``). "
+        "``wikilink`` — the entity's generated summary contains a ``[[...]]`` "
+        "wikilink to this entity; "
+        "``mention`` — both appear in the same source artifact; "
+        "``related`` — a direct CO_MENTIONED graph edge connects them. "
+        "De-duplicated by slug; precedence wikilink > mention > related."
+    ),
+)
+async def get_entity_backlinks(
+    slug: str,
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=200,
+        description="Maximum number of backlinks to return (1–200, default 50).",
+    ),
+) -> BacklinksResponse:
+    import asyncio as _asyncio
+
+    from app.deps import get_neo4j
+
+    driver = get_neo4j()
+    if driver is None:
+        raise HTTPException(status_code=503, detail="Neo4j unavailable")
+    try:
+        rows = await _asyncio.to_thread(get_backlinks, driver, slug, limit)
+    except Exception as exc:
+        log_swallowed_error("wiki.get_entity_backlinks", exc, context={"slug": slug})
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve backlinks"
+        ) from exc
+
+    items = [
+        BacklinkItem(
+            slug=r.get("slug", ""),
+            name=r.get("name", ""),
+            entity_type=r.get("entity_type", "OTHER"),
+            via=r.get("via", "related"),  # type: ignore[arg-type]
+        )
+        for r in rows
+    ]
+    return BacklinksResponse(backlinks=items)
+
+
+# ---------------------------------------------------------------------------
+# WK4 — manual refresh + summary edit
+# ---------------------------------------------------------------------------
+
+
+class ManualRefreshResponse(BaseModel):
+    """Response body for ``POST /wiki/entities/{slug}/refresh``."""
+
+    slug: str = Field(description="Canonical ID of the entity.")
+    enqueued: bool = Field(description="True if the refresh job was enqueued.")
+
+
+class EntitySummaryEditRequest(BaseModel):
+    """Request body for ``PATCH /wiki/entities/{slug}``."""
+
+    summary: str = Field(
+        ...,
+        description=(
+            "New human-authored summary for the entity.  Replaces the "
+            "generated summary and marks the entity as human-edited, "
+            "suppressing automatic re-summarisation for the protection window."
+        ),
+    )
+
+
+@router.post(
+    "/entities/{slug}/refresh",
+    response_model=ManualRefreshResponse,
+    status_code=202,
+    summary="Manually trigger a wiki refresh for an entity (WK4)",
+    description=(
+        "Enqueues a forced ``WikiRefreshJob`` for the entity identified by "
+        "``slug``.  The ``force=True`` flag bypasses the per-entity debounce "
+        "and the human-edit protection window so a user can always trigger a "
+        "fresh summary on demand.  Returns 202 Accepted when enqueued, 404 if "
+        "the entity does not exist."
+    ),
+)
+async def manual_refresh_entity(slug: str) -> ManualRefreshResponse:
+    from app.deps import get_neo4j
+
+    driver = get_neo4j()
+    page = await get_entity_page(driver, slug)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"Entity {slug!r} not found")
+
+    try:
+        enqueued = await asyncio.to_thread(enqueue_refresh, slug, force=True)
+    except Exception as exc:
+        log_swallowed_error(
+            "wiki.manual_refresh_entity",
+            exc,
+            context={"slug": slug},
+        )
+        raise HTTPException(status_code=500, detail="Failed to enqueue refresh") from exc
+
+    return ManualRefreshResponse(slug=slug, enqueued=enqueued)
+
+
+@router.patch(
+    "/entities/{slug}",
+    response_model=WikiEntityPage,
+    summary="Manually edit the entity wiki summary (WK4)",
+    description=(
+        "Persists a human-authored summary on the entity identified by ``slug``. "
+        "Sets ``summary_edited_by='user'`` on the node, which suppresses automatic "
+        "re-summarisation from the stale-sweep and grew-trigger for the protection "
+        "window (7 days).  Contradiction-forced refreshes always bypass the "
+        "protection.  Appends a ``manual_edit`` log entry to the knowledge log. "
+        "Returns the updated ``WikiEntityPage``.  404 if the entity does not exist."
+    ),
+)
+async def edit_entity_summary(slug: str, body: EntitySummaryEditRequest) -> WikiEntityPage:
+    from datetime import datetime, timezone
+
+    from app.deps import get_neo4j
+
+    driver = get_neo4j()
+
+    # Existence check
+    page = await get_entity_page(driver, slug)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"Entity {slug!r} not found")
+
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    try:
+        await asyncio.to_thread(
+            write_entity_summary,
+            driver,
+            slug,
+            body.summary,
+            now_iso,
+            edited_by="user",
+        )
+    except Exception as exc:
+        log_swallowed_error(
+            "wiki.edit_entity_summary.write",
+            exc,
+            context={"slug": slug},
+        )
+        raise HTTPException(status_code=500, detail="Failed to persist summary edit") from exc
+
+    try:
+        await asyncio.to_thread(
+            append_log_entry,
+            driver,
+            action="manual_edit",
+            entity_slug=slug,
+            summary=body.summary[:200] if body.summary else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — log failure must not fail the edit
+        log_swallowed_error(
+            "wiki.edit_entity_summary.log",
+            exc,
+            context={"slug": slug},
+        )
+
+    # Re-fetch the updated page so the response reflects the written state.
+    try:
+        updated = await get_entity_page(driver, slug)
+    except Exception as exc:
+        log_swallowed_error(
+            "wiki.edit_entity_summary.refetch",
+            exc,
+            context={"slug": slug},
+        )
+        raise HTTPException(status_code=500, detail="Failed to retrieve updated page") from exc
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Entity {slug!r} not found after edit")
+
+    return updated
 
 
 @router.get(
@@ -212,6 +440,8 @@ class KnowledgeIndexEntry(BaseModel):
     last_updated_at: str | None = None
     activity_score: int = 0
     has_summary: bool = False
+    # WK3 — article completeness class: "stub" | "start" | "full"
+    completeness: Literal["stub", "start", "full"] = "stub"
 
 
 class KnowledgeIndexResponse(BaseModel):
@@ -283,6 +513,12 @@ async def list_knowledge_index(
         default=None,
         description="Sort order: 'name' for A-Z; omit for activity-score descending.",
     ),
+    include_internal: bool = Query(
+        default=False,
+        description="WK2 advanced toggle. When False (default) the client-data "
+        "domains (boardroom_foundation, canary_client_domain) are excluded from "
+        "the index. Set True to include them.",
+    ),
 ) -> KnowledgeIndexResponse:
     from app.deps import get_neo4j
 
@@ -296,7 +532,9 @@ async def list_knowledge_index(
     from app.services.wiki_pages import list_entities  # noqa: PLC0415
 
     try:
-        summaries = await list_entities(driver, limit=limit, search=q or None)
+        summaries = await list_entities(
+            driver, limit=limit, search=q or None, include_internal=include_internal
+        )
     except Exception as exc:
         log_swallowed_error("wiki.knowledge_index.list", exc)
         raise HTTPException(status_code=500, detail="Failed to load index") from exc
@@ -313,6 +551,7 @@ async def list_knowledge_index(
             last_updated_at=s.summary_updated_at,
             activity_score=int(s.recent_activity_score),
             has_summary=bool(s.summary),
+            completeness=compute_completeness(s.summary, s.mention_count, "unknown"),
         )
         for s in summaries
     ]

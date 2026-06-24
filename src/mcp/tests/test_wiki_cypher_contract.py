@@ -166,6 +166,11 @@ _PHANTOM_ALLOWLIST: dict[str, str] = {
     "confidence": "m.confidence on MENTIONS edge — written by entity extraction",
     # chunk_ids (the final list after JSON parse) maps to m.chunk_ids.
     "chunk_ids": "m.chunk_ids on MENTIONS edge — written by entity extraction",
+    # slug is an alias for e.canonical_id / src.canonical_id in the backlinks query.
+    "slug": "alias for e.canonical_id / src.canonical_id — written by entity extraction job",
+    # via is a string literal ('wikilink', 'mention', 'related') projected inline
+    # by the UNION branches of get_backlinks — not a stored property.
+    "via": "Cypher literal projection in get_backlinks UNION branches — not a stored property",
     # source_type is written via set_artifact_properties which builds a dynamic
     # SET clause: f"a.{k} = $prop_{k}" — not a literal triple-quoted Cypher string,
     # so static grep cannot detect it. See app/services/ingestion.py:542,907.
@@ -497,3 +502,241 @@ class TestGetRefreshStatusLogic:
             status = _get_refresh_status("test:slug", future)
 
         assert status == "idle"
+
+
+# ---------------------------------------------------------------------------
+# Test 4: WK1 — article-body search Cypher contract
+# ---------------------------------------------------------------------------
+
+
+class TestWK1ArticleBodySearchCypher:
+    """Static assertion that the list_top_entities WHERE clause in wiki.py
+    includes e.summary so body-only searches are matched.
+
+    This test is the canonical RED gate for WK1: it fails until the
+    implementation widens the WHERE clause to cover e.summary.
+    """
+
+    def test_list_top_entities_where_includes_summary(self) -> None:
+        """The WHERE clause that handles the search param must reference e.summary
+        inside a CONTAINS predicate — not just in the RETURN projection."""
+        source = _WIKI_NEO4J.read_text(encoding="utf-8")
+        fn_start = source.find("def list_top_entities(")
+        assert fn_start != -1, "list_top_entities not found in wiki.py"
+        next_fn = source.find("\ndef ", fn_start + 10)
+        fn_block = source[fn_start:next_fn] if next_fn != -1 else source[fn_start:]
+        # The WHERE clause string is built from where_clauses list; the search
+        # predicate must include e.summary with CONTAINS.
+        assert "e.summary" in fn_block and "CONTAINS $search" in fn_block, (
+            "list_top_entities WHERE clause does not combine e.summary with CONTAINS — "
+            "WK1 body-search predicate is missing. "
+            "Add 'toLower(e.summary) CONTAINS $search' to the where_clauses list."
+        )
+        # Specifically, the summary CONTAINS must appear together in one string
+        assert re.search(r"e\.summary.*CONTAINS|CONTAINS.*e\.summary", fn_block), (
+            "list_top_entities WHERE string does not pair e.summary with CONTAINS — "
+            "WK1 body-search predicate is missing."
+        )
+
+    def test_match_rank_case_has_body_only_branch(self) -> None:
+        """The match_rank CASE expression must have a branch that explicitly
+        assigns a rank to summary-only hits, so name/slug matches sort first."""
+        source = _WIKI_NEO4J.read_text(encoding="utf-8")
+        fn_start = source.find("def list_top_entities(")
+        next_fn = source.find("\ndef ", fn_start + 10)
+        fn_block = source[fn_start:next_fn] if next_fn != -1 else source[fn_start:]
+        # The CASE block in rank_with_clause must reference e.summary so that
+        # body-only hits get a distinct rank (not just the catch-all ELSE).
+        rank_case_start = fn_block.find("rank_with_clause")
+        assert rank_case_start != -1, "rank_with_clause not found in list_top_entities"
+        rank_block = fn_block[rank_case_start: rank_case_start + 600]
+        assert "e.summary" in rank_block, (
+            "match_rank CASE expression does not reference e.summary — "
+            "body-only matches fall into the ELSE (canonical_id-only rank) rather "
+            "than getting their own explicit rank. Add a WHEN clause for e.summary."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 5: WK1 — get_backlinks Cypher contract (static + unit mock)
+# ---------------------------------------------------------------------------
+
+
+class TestGetBacklinksContract:
+    """Verifies that get_backlinks exists in wiki.py and returns the correct shape."""
+
+    def test_get_backlinks_function_exists(self) -> None:
+        """get_backlinks must be defined in wiki.py."""
+        source = _WIKI_NEO4J.read_text(encoding="utf-8")
+        assert "def get_backlinks(" in source, (
+            "get_backlinks not found in wiki.py — WK1 backlinks query is missing."
+        )
+
+    def test_get_backlinks_uses_parameterized_cypher(self) -> None:
+        """The backlinks query must use $slug (parameterized), not f-string injection."""
+        source = _WIKI_NEO4J.read_text(encoding="utf-8")
+        fn_start = source.find("def get_backlinks(")
+        assert fn_start != -1
+        next_fn = source.find("\ndef ", fn_start + 10)
+        fn_block = source[fn_start:next_fn] if next_fn != -1 else source[fn_start:]
+        # Must use a $slug param, not string interpolation
+        assert "$slug" in fn_block, (
+            "get_backlinks Cypher does not use $slug parameter — injection risk."
+        )
+
+    def test_get_backlinks_queries_mentions_edge(self) -> None:
+        """The backlinks query must traverse the MENTIONS relationship."""
+        source = _WIKI_NEO4J.read_text(encoding="utf-8")
+        fn_start = source.find("def get_backlinks(")
+        assert fn_start != -1
+        next_fn = source.find("\ndef ", fn_start + 10)
+        fn_block = source[fn_start:next_fn] if next_fn != -1 else source[fn_start:]
+        assert "MENTIONS" in fn_block, (
+            "get_backlinks does not traverse the :MENTIONS relationship — "
+            "mention-via backlinks will be empty."
+        )
+
+    def _make_session_mock(
+        self,
+        union_rows: list[dict],
+        entity_name: str = "Elon Musk",
+    ) -> "MagicMock":
+        """Build a mock session that handles the two-call pattern in get_backlinks.
+
+        Call 1: ``session.run(name_lookup).single()`` → returns {name: entity_name}
+        Call 2: ``session.run(union_query)`` → returns union_rows
+        """
+        from unittest.mock import MagicMock
+
+        name_result = MagicMock()
+        name_result.single.return_value = {"name": entity_name}
+
+        call_count = {"n": 0}
+
+        def _run(*args: object, **kwargs: object) -> object:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return name_result
+            return union_rows
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = lambda s: s
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_session.run.side_effect = _run
+        return mock_session
+
+    def test_get_backlinks_returns_via_field(self) -> None:
+        """Result dicts from get_backlinks must include the 'via' discriminator."""
+        from unittest.mock import MagicMock
+
+        from app.db.neo4j.wiki import get_backlinks
+
+        union_rows = [
+            {"slug": "org:tesla", "name": "Tesla", "entity_type": "ORG", "via": "wikilink"},
+        ]
+        mock_session = self._make_session_mock(union_rows)
+        mock_driver = MagicMock()
+        mock_driver.session.return_value = mock_session
+
+        results = get_backlinks(mock_driver, "person:elon-musk")
+        assert isinstance(results, list)
+        # Each row must carry a 'via' key
+        for row in results:
+            assert "via" in row, f"Row missing 'via': {row}"
+            assert row["via"] in {"wikilink", "mention", "related"}
+
+    def test_get_backlinks_empty_driver_returns_empty(self) -> None:
+        """get_backlinks must return [] gracefully when driver is None."""
+        from app.db.neo4j.wiki import get_backlinks
+
+        result = get_backlinks(None, "person:elon-musk")
+        assert result == []
+
+    def test_get_backlinks_dedup_prefers_wikilink(self) -> None:
+        """When the same slug appears via both wikilink and mention, wikilink wins."""
+        from unittest.mock import MagicMock
+
+        from app.db.neo4j.wiki import get_backlinks
+
+        # The Cypher UNION query returns the same slug twice with different via values.
+        # The Python dedup layer in get_backlinks must keep the higher-priority one.
+        union_rows = [
+            {"slug": "org:tesla", "name": "Tesla", "entity_type": "ORG", "via": "mention"},
+            {"slug": "org:tesla", "name": "Tesla", "entity_type": "ORG", "via": "wikilink"},
+        ]
+        mock_session = self._make_session_mock(union_rows)
+        mock_driver = MagicMock()
+        mock_driver.session.return_value = mock_session
+
+        results = get_backlinks(mock_driver, "person:elon-musk")
+        tesla_rows = [r for r in results if r["slug"] == "org:tesla"]
+        assert len(tesla_rows) == 1, "Dedup failed — same slug appears multiple times"
+        assert tesla_rows[0]["via"] == "wikilink", (
+            f"Dedup should prefer wikilink over mention, got {tesla_rows[0]['via']!r}"
+        )
+
+    def test_get_backlinks_respects_limit(self) -> None:
+        """get_backlinks must not return more rows than the limit."""
+        from unittest.mock import MagicMock
+
+        from app.db.neo4j.wiki import get_backlinks
+
+        # Build 100 distinct slugs
+        union_rows = [
+            {"slug": f"org:entity-{i}", "name": f"Entity {i}", "entity_type": "ORG", "via": "mention"}
+            for i in range(100)
+        ]
+        mock_session = self._make_session_mock(union_rows)
+        mock_driver = MagicMock()
+        mock_driver.session.return_value = mock_session
+
+        results = get_backlinks(mock_driver, "person:elon-musk", limit=10)
+        assert len(results) <= 10, (
+            f"get_backlinks returned {len(results)} rows for limit=10"
+        )
+
+    def test_get_backlinks_empty_name_skips_wikilink_branch(self) -> None:
+        """When the target entity has an empty name, the wikilink branch must not run.
+
+        An empty name would produce the token '[[', which matches ANY entity summary
+        containing any wikilink at all — a dangerous over-match.  The guard must
+        skip the wikilink CONTAINS predicate entirely and run only mention + related.
+        """
+        from unittest.mock import MagicMock
+
+        from app.db.neo4j.wiki import get_backlinks
+
+        # Session mock: name lookup returns empty string, UNION query returns nothing.
+        name_result = MagicMock()
+        name_result.single.return_value = {"name": ""}
+
+        call_count: dict[str, int] = {"n": 0}
+        cypher_calls: list[str] = []
+
+        def _run(*args: object, **kwargs: object) -> object:
+            call_count["n"] += 1
+            if args:
+                cypher_calls.append(str(args[0]))
+            if call_count["n"] == 1:
+                return name_result
+            return []
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = lambda s: s
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_session.run.side_effect = _run
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value = mock_session
+
+        results = get_backlinks(mock_driver, "person:empty-name")
+
+        # Result must be a list (no crash, no over-match).
+        assert isinstance(results, list)
+
+        # The wikilink CONTAINS predicate must NOT appear in any Cypher sent to Neo4j.
+        union_cypher = " ".join(cypher_calls[1:])  # skip the name-lookup call
+        assert "CONTAINS $wikilink_token" not in union_cypher, (
+            "Empty entity name triggered the wikilink CONTAINS branch — "
+            "this would over-match every entity summary containing any [[wikilink."
+        )

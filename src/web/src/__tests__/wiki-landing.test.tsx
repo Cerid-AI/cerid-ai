@@ -156,6 +156,49 @@ describe("WikiLanding — per-block degradation (amendment #4)", () => {
 })
 
 // ---------------------------------------------------------------------------
+// WK2: show-internal toggle (default OFF)
+// ---------------------------------------------------------------------------
+
+describe("WikiLanding — show-internal toggle (WK2)", () => {
+  it("defaults the toggle OFF — fetchers omit internal data", async () => {
+    render(wrap(<WikiLanding onSelectEntity={vi.fn()} onSelectDomain={vi.fn()} />))
+
+    const toggle = await screen.findByRole("switch", { name: /internal/i })
+    expect(toggle).not.toBeChecked()
+
+    // Most-active block queries with includeInternal: false by default.
+    await waitFor(() => {
+      expect(mockedUseWikiEntities).toHaveBeenCalledWith(
+        expect.objectContaining({ includeInternal: false }),
+      )
+    })
+    // Index browse query never asks for internal data while toggle is off.
+    expect(mockedFetchWikiIndex).not.toHaveBeenCalledWith(
+      expect.objectContaining({ includeInternal: true }),
+    )
+  })
+
+  it("turning the toggle ON re-queries with includeInternal: true", async () => {
+    render(wrap(<WikiLanding onSelectEntity={vi.fn()} onSelectDomain={vi.fn()} />))
+
+    const toggle = await screen.findByRole("switch", { name: /internal/i })
+    await userEvent.click(toggle)
+
+    expect(toggle).toBeChecked()
+    await waitFor(() => {
+      expect(mockedUseWikiEntities).toHaveBeenCalledWith(
+        expect.objectContaining({ includeInternal: true }),
+      )
+    })
+    await waitFor(() => {
+      expect(mockedFetchWikiIndex).toHaveBeenCalledWith(
+        expect.objectContaining({ includeInternal: true }),
+      )
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // axe accessibility
 // ---------------------------------------------------------------------------
 

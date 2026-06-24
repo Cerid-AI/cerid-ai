@@ -268,7 +268,7 @@ class TestWikiIndexEndpoint:
         """
         captured: list[dict] = []
 
-        async def _mock_list_entities(driver, *, limit=100, search=None):
+        async def _mock_list_entities(driver, *, limit=100, search=None, include_internal=False):
             captured.append({"limit": limit, "search": search})
             return []
 
@@ -291,7 +291,7 @@ class TestWikiIndexEndpoint:
     def test_order_name_sorts_alphabetically(self, client: TestClient) -> None:
         summaries = self._make_summaries()
 
-        async def _mock_list_entities(driver, *, limit=100, search=None):
+        async def _mock_list_entities(driver, *, limit=100, search=None, include_internal=False):
             return summaries
 
         with (
@@ -310,7 +310,7 @@ class TestWikiIndexEndpoint:
         """Without order=name the sort is activity-score — not alphabetical."""
         summaries = self._make_summaries()
 
-        async def _mock_list_entities(driver, *, limit=100, search=None):
+        async def _mock_list_entities(driver, *, limit=100, search=None, include_internal=False):
             return summaries
 
         with (
@@ -347,7 +347,7 @@ class TestWikiIndexEndpoint:
             ),
         ]
 
-        async def _mock_list_entities(driver, *, limit=100, search=None):
+        async def _mock_list_entities(driver, *, limit=100, search=None, include_internal=False):
             return filtered
 
         with (
