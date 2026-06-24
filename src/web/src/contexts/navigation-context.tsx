@@ -64,12 +64,21 @@ function applyRedirect(target: Pane): Pane {
   if (!redirect) return target
   if (typeof window !== "undefined") {
     const params = new URLSearchParams(window.location.search)
-    const paramName = PARAM_BY_PANE[redirect.pane] ?? "mode"
-    params.set(paramName, redirect.mode)
-    // When redirecting to settings/Diagnostics, also pre-select the
-    // settings category so the user lands on the Diagnostics console entry.
     if (redirect.pane === "settings") {
-      try { localStorage.setItem("cerid-settings-category", "diagnostics") } catch { /* SSR */ }
+      // ST9 — Analytics is its own top-level settings section now; the legacy
+      // audit redirect (mode "analytics") lands there via ?category=. The
+      // Status / Activity modes still resolve to the Diagnostics console.
+      if (redirect.mode === "analytics") {
+        params.delete("diagnostics_tab")
+        params.set("category", "analytics")
+        try { localStorage.setItem("cerid-settings-category", "analytics") } catch { /* SSR */ }
+      } else {
+        params.set("diagnostics_tab", redirect.mode)
+        try { localStorage.setItem("cerid-settings-category", "diagnostics") } catch { /* SSR */ }
+      }
+    } else {
+      const paramName = PARAM_BY_PANE[redirect.pane] ?? "mode"
+      params.set(paramName, redirect.mode)
     }
     const next = params.toString()
     const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`

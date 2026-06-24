@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   FolderOpen, Database,
   Plus, Scan, Trash2, AlertTriangle, CheckCircle,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, RefreshCw,
 } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ import {
   updateWatchedFolder,
   fetchDataSources, enableDataSource, disableDataSource,
   fetchBriefSettings, updateBriefSettings,
+  fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain,
   type WatchedFolder, type VaultConfig,
 } from "@/lib/api"
 import { logSwallowedError } from "@/lib/log-swallowed"
@@ -34,9 +35,9 @@ import type { SettingsCategoryPageProps } from "./page-props"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader className="pb-2">
         <span className="text-label-xs uppercase text-muted-foreground tracking-wider">{title}</span>
       </CardHeader>
@@ -656,6 +657,179 @@ function BriefsGroup() {
   )
 }
 
+// ── KB Maintenance / Danger Zone (relocated from System, ST12) ────────────────
+
+function KBMaintenanceGroup() {
+  const qc = useQueryClient()
+  const rebuildDef = getDef("knowledge.maintenance.rebuildIndexes")!
+  const rescoreDef = getDef("knowledge.maintenance.rescore")!
+  const regenDef = getDef("knowledge.maintenance.regenerateSummaries")!
+  const clearDomainDef = getDef("knowledge.maintenance.clearDomain")!
+
+  const { data: kbStats, isLoading: statsLoading, isError: statsError, refetch: refetchStats } = useQuery({
+    queryKey: ["kb-stats"],
+    queryFn: fetchKBStats,
+    staleTime: 30_000,
+  })
+
+  const [rebuildResult, setRebuildResult] = useState<string | null>(null)
+  const [rescoreResult, setRescoreResult] = useState<string | null>(null)
+  const [regenResult, setRegenResult] = useState<string | null>(null)
+  const [clearDomainInput, setClearDomainInput] = useState("")
+  const [clearError, setClearError] = useState("")
+
+  return (
+    <SectionCard title="KB Maintenance" className="border-red-500/30">
+      <div className="flex items-center gap-2 pb-1">
+        <AlertTriangle className="h-4 w-4 text-destructive" />
+        <p className="text-xs text-destructive font-medium">
+          Danger Zone — these operations modify or delete knowledge base data.
+        </p>
+      </div>
+
+      {/* Stats */}
+      {statsLoading && <Skeleton className="h-16 w-full" />}
+      {statsError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-label-xs">
+            Failed to load KB stats.{" "}
+            <button type="button" onClick={() => void refetchStats()} className="underline">Retry</button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {kbStats && (
+        <div className="rounded-md border p-3 text-xs text-muted-foreground density-stack">
+          <div className="flex gap-4">
+            <span><strong>{kbStats.total_artifacts}</strong> artifacts</span>
+            <span><strong>{kbStats.total_chunks}</strong> chunks</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void refetchStats()}
+              className="h-6 text-xs ml-auto gap-1"
+              aria-label="Refresh KB stats"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Refresh Stats
+            </Button>
+          </div>
+          {Object.keys(kbStats.domains ?? {}).length > 0 && (
+            <div className="divide-y divide-border rounded border mt-1">
+              {Object.entries(kbStats.domains ?? {}).map(([domain, stats]) => (
+                <div key={domain} className="flex items-center justify-between px-2 py-1">
+                  <span className="font-medium">{domain}</span>
+                  <span>{stats.artifacts} / {stats.chunks}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <SettingRow def={rebuildDef}>
+        <div className="density-stack w-full">
+          <ConfirmActionButton
+            danger="confirm"
+            title="Rebuild indexes?"
+            description="Rebuilds BM25 keyword indexes for all domains. Takes 1–5 minutes. No data is deleted."
+            actionLabel="Rebuild Indexes"
+            onConfirm={async () => {
+              const result = await adminRebuildIndexes()
+              setRebuildResult(`${result.message} (${result.domains_rebuilt} domains)`)
+            }}
+            variant="outline"
+            size="sm"
+          >
+            Rebuild Indexes
+          </ConfirmActionButton>
+          {rebuildResult && <p className="text-xs text-muted-foreground">{rebuildResult}</p>}
+        </div>
+      </SettingRow>
+
+      <SettingRow def={rescoreDef}>
+        <div className="density-stack w-full">
+          <ConfirmActionButton
+            danger="confirm"
+            title="Rescore all artifacts?"
+            description="Re-computes quality scores for all artifacts. Takes 2–10 minutes. Does not change stored content."
+            actionLabel="Rescore All"
+            onConfirm={async () => {
+              const result = await adminRescore()
+              setRescoreResult(`${result.message} (${result.artifacts_scored} artifacts, avg quality ${result.avg_quality_score.toFixed(2)})`)
+            }}
+            variant="outline"
+            size="sm"
+          >
+            Rescore All
+          </ConfirmActionButton>
+          {rescoreResult && <p className="text-xs text-muted-foreground">{rescoreResult}</p>}
+        </div>
+      </SettingRow>
+
+      <SettingRow def={regenDef}>
+        <div className="density-stack w-full">
+          <ConfirmActionButton
+            danger="confirm"
+            title="Regenerate summaries?"
+            description="Re-runs LLM synopsis generation for all artifacts. Takes 5–20 minutes."
+            actionLabel="Regenerate Summaries"
+            onConfirm={async () => {
+              const result = await adminRegenerateSummaries()
+              setRegenResult(`${result.message} (${result.synopses_generated} generated)`)
+            }}
+            variant="outline"
+            size="sm"
+          >
+            Regenerate Summaries
+          </ConfirmActionButton>
+          {regenResult && <p className="text-xs text-muted-foreground">{regenResult}</p>}
+        </div>
+      </SettingRow>
+
+      <SettingRow def={clearDomainDef}>
+        <div className="density-stack w-full">
+          <p className="text-xs text-destructive">
+            Permanently deletes ALL chunks, embeddings, and artifacts in a domain. Cannot be undone.
+          </p>
+          <ConfirmActionButton
+            danger="type-to-confirm"
+            title="Clear domain — permanently delete all data?"
+            description="Type the domain name exactly to confirm this irreversible deletion."
+            confirmPhrase={clearDomainInput.trim() || "domain"}
+            actionLabel="Delete domain data"
+            onConfirm={async () => {
+              if (!clearDomainInput.trim()) throw new Error("Enter a domain name")
+              setClearError("")
+              try {
+                await adminClearDomain(clearDomainInput.trim())
+                setClearDomainInput("")
+                await qc.invalidateQueries({ queryKey: ["kb-stats"] })
+              } catch (err) {
+                setClearError(err instanceof Error ? err.message : "Clear failed")
+                logSwallowedError(err, "knowledge.clearDomain")
+                throw err
+              }
+            }}
+            variant="destructive"
+            size="sm"
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Clear domain
+          </ConfirmActionButton>
+          <Input
+            value={clearDomainInput}
+            onChange={(e) => setClearDomainInput(e.target.value)}
+            placeholder="Enter domain name to clear"
+            className="h-8 max-w-xs text-sm"
+            aria-label="Domain to clear"
+          />
+          {clearError && <p className="text-xs text-destructive">{clearError}</p>}
+        </div>
+      </SettingRow>
+    </SectionCard>
+  )
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function KnowledgeCategory({ settings, patch }: SettingsCategoryPageProps) {
@@ -665,6 +839,7 @@ export default function KnowledgeCategory({ settings, patch }: SettingsCategoryP
       <DataSourcesGroup />
       <IngestionGroup settings={settings} patch={patch} />
       <BriefsGroup />
+      <KBMaintenanceGroup />
     </div>
   )
 }

@@ -168,6 +168,219 @@ class TestWikiRefreshSubscriber:
 
         assert wiki_refresh.enqueue_refresh("") is False
 
+    # WK4 --- grew-trigger tests -------------------------------------------------
+
+    def test_grew_trigger_enqueues_debounced_for_existing_entity(self, monkeypatch):
+        """_on_entities_added enqueues a DEBOUNCED refresh for an entity that
+        already has a summary (existing entity, not just new ones)."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        # NX acquired — not already debounced
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+        # Simulate the entity already has a summary (get_entity returns non-None
+        # with a summary field); the subscriber does NOT call get_entity today,
+        # but the trigger must fire unconditionally for entities in the event.
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            wiki_refresh._on_entities_added({
+                "artifact_id": "a1",
+                "entity_slugs": ["org:existing-entity"],
+            })
+
+        # Debounced (force=False) so Redis set was attempted
+        mock_redis.set.assert_called_once_with(
+            "cerid:wiki:debounce:org:existing-entity", "1", nx=True, ex=300,
+        )
+        mock_enqueue.assert_called_once()
+
+    def test_grew_trigger_debounce_blocks_storm(self, monkeypatch):
+        """When debounce is active, the grew-trigger does NOT enqueue again."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = False  # debounce key exists
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            wiki_refresh._on_entities_added({
+                "artifact_id": "a1",
+                "entity_slugs": ["org:existing-entity"],
+            })
+
+        mock_enqueue.assert_not_called()
+
+    def test_human_edit_protected_entity_skipped_by_grew_trigger(self, monkeypatch):
+        """_on_entities_added SKIPS entities whose summary_edited_by=="user" within
+        the protection window. The check is done via _human_edit_protected_slugs()."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+
+        # Patch the batch protection guard to return the slug as protected
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch.object(wiki_refresh, "_human_edit_protected_slugs", return_value={"org:human-edited"}),
+        ):
+            wiki_refresh._on_entities_added({
+                "artifact_id": "a1",
+                "entity_slugs": ["org:human-edited"],
+            })
+
+        mock_enqueue.assert_not_called()
+
+    def test_contradiction_force_overrides_human_edit_protection(self, monkeypatch):
+        """contradiction_detected always enqueues force=True even for human-edited entities."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=MagicMock()),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+            patch.object(wiki_refresh, "_is_human_edit_protected", return_value=True),
+        ):
+            wiki_refresh._on_contradiction_detected({"entity_slug": "org:human-edited"})
+
+        # force=True must bypass both debounce AND human-edit protection
+        mock_enqueue.assert_called_once()
+
+    def test_tz_naive_summary_updated_at_treated_as_protected(self):
+        """A tz-naive ISO timestamp in summary_updated_at (legacy node) is
+        assumed UTC and compared correctly — not silently fail-open."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.processor.subscribers import wiki_refresh
+
+        # Recent timestamp, no UTC offset (legacy bare ISO format)
+        recent_naive_ts = (
+            datetime.now(tz=timezone.utc) - timedelta(hours=1)
+        ).replace(tzinfo=None).isoformat()  # e.g. "2026-06-24T11:00:00"
+
+        mock_driver = MagicMock()
+        mock_session = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_session.run.return_value.single.return_value = {
+            "summary_edited_by": "user",
+            "summary_updated_at": recent_naive_ts,
+        }
+
+        with patch("app.deps.get_neo4j", return_value=mock_driver):
+            result = wiki_refresh._is_human_edit_protected("org:some-entity")
+
+        assert result is True, (
+            "A tz-naive recent summary_updated_at must be treated as protected "
+            "(assumed UTC), not fail-open as unprotected"
+        )
+
+
+class TestBatchHumanEditProtectedSlugs:
+    """WK4: _human_edit_protected_slugs issues ONE query and returns the protected subset."""
+
+    def _make_driver(self, rows: list[dict]) -> MagicMock:
+        """Return a mock Neo4j driver whose session.run().data() returns ``rows``."""
+        mock_driver = MagicMock()
+        mock_session = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_session.run.return_value.data.return_value = rows
+        return mock_driver, mock_session
+
+    def test_returns_protected_subset_in_one_query(self):
+        """Only slugs within the protection window are returned; one Cypher call total."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.processor.subscribers import wiki_refresh
+
+        recent_ts = (datetime.now(tz=timezone.utc) - timedelta(hours=1)).isoformat()
+        old_ts = (datetime.now(tz=timezone.utc) - timedelta(days=30)).isoformat()
+
+        rows = [
+            {"canonical_id": "org:recent", "summary_updated_at": recent_ts},
+            {"canonical_id": "org:old", "summary_updated_at": old_ts},
+        ]
+        driver, mock_session = self._make_driver(rows)
+
+        result = wiki_refresh._human_edit_protected_slugs(driver, ["org:recent", "org:old", "org:unrelated"])
+
+        assert result == {"org:recent"}
+        # Exactly one Cypher query was issued
+        assert mock_session.run.call_count == 1
+
+    def test_tz_naive_timestamp_treated_as_utc(self):
+        """A tz-naive ISO timestamp in the batch result is assumed UTC — not fail-open."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.processor.subscribers import wiki_refresh
+
+        naive_ts = (datetime.now(tz=timezone.utc) - timedelta(hours=2)).replace(tzinfo=None).isoformat()
+        rows = [{"canonical_id": "org:naive", "summary_updated_at": naive_ts}]
+        driver, _ = self._make_driver(rows)
+
+        result = wiki_refresh._human_edit_protected_slugs(driver, ["org:naive"])
+        assert "org:naive" in result
+
+    def test_unparseable_timestamp_skips_slug(self):
+        """A malformed timestamp is skipped (fail-open for that slug — not protected)."""
+        from app.processor.subscribers import wiki_refresh
+
+        rows = [{"canonical_id": "org:bad-ts", "summary_updated_at": "not-a-date"}]
+        driver, _ = self._make_driver(rows)
+
+        result = wiki_refresh._human_edit_protected_slugs(driver, ["org:bad-ts"])
+        assert "org:bad-ts" not in result
+
+    def test_empty_slugs_returns_empty_without_querying(self):
+        """No Cypher query is issued when the slug list is empty."""
+        from app.processor.subscribers import wiki_refresh
+
+        driver, mock_session = self._make_driver([])
+        result = wiki_refresh._human_edit_protected_slugs(driver, [])
+
+        assert result == set()
+        mock_session.run.assert_not_called()
+
+    def test_on_entities_added_skips_protected_batch(self, monkeypatch):
+        """_on_entities_added calls the batch function once and skips protected slugs."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch.object(
+                wiki_refresh,
+                "_human_edit_protected_slugs",
+                return_value={"org:protected"},
+            ) as mock_batch,
+        ):
+            wiki_refresh._on_entities_added({
+                "artifact_id": "a1",
+                "entity_slugs": ["org:protected", "org:free"],
+            })
+
+        # Batch called exactly once
+        mock_batch.assert_called_once()
+        # Only org:free was enqueued — org:protected was skipped
+        assert mock_enqueue.call_count == 1
+        job_payload = mock_enqueue.call_args.kwargs.get("payload") or mock_enqueue.call_args.args[1] if len(mock_enqueue.call_args.args) > 1 else mock_enqueue.call_args.args[0]
+        assert "org:protected" not in str(job_payload)
+
 
 # ---------------------------------------------------------------------------
 # constellation_refresh subscriber (living Constellation — recompute on ingest)

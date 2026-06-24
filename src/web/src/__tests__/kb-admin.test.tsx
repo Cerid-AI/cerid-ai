@@ -96,12 +96,12 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-describe("KB Maintenance Section (system category)", () => {
+describe("KB Maintenance Section (knowledge category, ST12)", () => {
   it("renders KB Maintenance section heading", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
-    await clickTab("System")
+    await clickTab("Knowledge")
     expect(await screen.findByText("KB Maintenance")).toBeInTheDocument()
   })
 
@@ -109,7 +109,7 @@ describe("KB Maintenance Section (system category)", () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
-    await clickTab("System")
+    await clickTab("Knowledge")
     await screen.findByText("KB Maintenance")
     expect(await screen.findByText("42")).toBeInTheDocument()
     expect(await screen.findByText("150")).toBeInTheDocument()
@@ -119,7 +119,7 @@ describe("KB Maintenance Section (system category)", () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
-    await clickTab("System")
+    await clickTab("Knowledge")
     await screen.findByText("KB Maintenance")
     expect(await screen.findByText("code")).toBeInTheDocument()
     expect(await screen.findByText("finance")).toBeInTheDocument()
@@ -132,7 +132,7 @@ describe("KB Maintenance Section (system category)", () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
-    await clickTab("System")
+    await clickTab("Knowledge")
     await screen.findByText("KB Maintenance")
     expect(await screen.findByText("Rebuild Indexes")).toBeInTheDocument()
     expect(screen.getByText("Rescore All")).toBeInTheDocument()
@@ -145,7 +145,7 @@ describe("KB Maintenance Section (system category)", () => {
     const user = userEvent.setup()
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
-    await clickTab("System")
+    await clickTab("Knowledge")
 
     const rebuildBtn = await screen.findByText("Rebuild Indexes")
     await user.click(rebuildBtn)
@@ -161,7 +161,7 @@ describe("KB Maintenance Section (system category)", () => {
     const user = userEvent.setup()
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
-    await clickTab("System")
+    await clickTab("Knowledge")
 
     const rebuildBtn = await screen.findByText("Rebuild Indexes")
     await user.click(rebuildBtn)
@@ -194,7 +194,7 @@ describe("KB Maintenance Section (system category)", () => {
     const user = userEvent.setup()
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
-    await clickTab("System")
+    await clickTab("Knowledge")
 
     await screen.findByText("KB Maintenance")
     // Pick the action button (no aria-label attribute), not the help-popover trigger ("About Clear domain")

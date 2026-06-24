@@ -3,7 +3,6 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import SystemCategory from "@/components/settings/categories/system"
@@ -162,35 +161,8 @@ describe("SystemCategory — sync", () => {
   })
 })
 
-describe("SystemCategory — KB maintenance", () => {
-  it("shows KB Maintenance section with total counts", async () => {
-    vi.stubGlobal("fetch", mockApis())
-    render(<SystemCategory {...defaultProps} />, { wrapper })
-    expect(await screen.findByText("KB Maintenance")).toBeInTheDocument()
-    expect(await screen.findByText("20")).toBeInTheDocument()
-    expect(await screen.findByText("80")).toBeInTheDocument()
-  })
-
-  it("Rebuild Indexes button opens confirm dialog", async () => {
-    vi.stubGlobal("fetch", mockApis())
-    const user = userEvent.setup()
-    render(<SystemCategory {...defaultProps} />, { wrapper })
-    const btn = await screen.findByText("Rebuild Indexes")
-    await user.click(btn)
-    expect(await screen.findByText("Rebuild indexes?")).toBeInTheDocument()
-  })
-
-  it("Clear domain button opens type-to-confirm dialog", async () => {
-    vi.stubGlobal("fetch", mockApis())
-    const user = userEvent.setup()
-    render(<SystemCategory {...defaultProps} />, { wrapper })
-    await screen.findByText("KB Maintenance")
-    const clearBtns = await screen.findAllByRole("button", { name: /clear domain/i })
-    const clearBtn = clearBtns.find((b) => !b.getAttribute("aria-label"))!
-    await user.click(clearBtn)
-    expect(await screen.findByText(/Clear domain.*permanently delete/i)).toBeInTheDocument()
-  })
-})
+// KB Maintenance moved to the Knowledge category (ST12) — see
+// knowledge-category.test.tsx "Knowledge — KB maintenance".
 
 describe("SystemCategory — accessibility", () => {
   it("is axe-clean", async () => {

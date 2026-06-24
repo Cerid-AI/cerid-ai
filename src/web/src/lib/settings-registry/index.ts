@@ -31,6 +31,14 @@ export type {
   Writer,
 } from "./types"
 
+export {
+  isSettingModified,
+  modifiedSettings,
+  modifiedSettingIds,
+  settingCurrentValue,
+  type ModifiedSetting,
+} from "./active"
+
 /** Category display order = sidebar order (frequency descending, dangerous last). */
 export const SETTINGS_REGISTRY: SettingDef[] = [
   ...MODELS_DEFS,

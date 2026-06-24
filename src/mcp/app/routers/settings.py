@@ -158,6 +158,22 @@ class SettingsUpdateRequest(BaseModel):
             "the corpus crosses CERID_RECOMMEND_SPARSE_AT documents."
         ),
     )
+    enable_hype: bool | None = Field(
+        None,
+        description=(
+            "Toggle HyPE (Hypothetical Prompt Embeddings) retrieval. "
+            "Backed by env RETRIEVAL_HYPE_ENABLED. Surfaced via the "
+            "recommender's Enable payload."
+        ),
+    )
+    enable_parent_child_retrieval: bool | None = Field(
+        None,
+        description=(
+            "Toggle parent-child (small-to-big) chunk retrieval. Backed "
+            "by env PARENT_CHILD_ENABLED. Surfaced via the recommender's "
+            "Enable payload."
+        ),
+    )
     # v0.93.8 — per-workload GPU routing for Quenchforge (AMD Mac).
     embeddings_provider: str | None = Field(
         None,
@@ -505,6 +521,22 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         except Exception as _exc:  # noqa: BLE001 — observability boundary
             logger.warning("sparse module reload failed: %s", _exc)
         updated["enable_sparse_retrieval"] = req.enable_sparse_retrieval
+
+    # ST3 — HyPE + parent-child are env-var flags (mirrors sparse above).
+    # The recommender emits {"enable_hype": True} / {"enable_parent_child_
+    # retrieval": True}; accepting them here is what makes the GUI "Enable"
+    # button succeed instead of 400ing.
+    if req.enable_hype is not None:
+        os.environ["RETRIEVAL_HYPE_ENABLED"] = (
+            "true" if req.enable_hype else "false"
+        )
+        updated["enable_hype"] = req.enable_hype
+
+    if req.enable_parent_child_retrieval is not None:
+        os.environ["PARENT_CHILD_ENABLED"] = (
+            "true" if req.enable_parent_child_retrieval else "false"
+        )
+        updated["enable_parent_child_retrieval"] = req.enable_parent_child_retrieval
 
     if req.hybrid_fusion_mode is not None:
         valid_modes = ("weighted_sum", "rrf", "tri_rrf")

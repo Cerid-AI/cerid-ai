@@ -195,4 +195,54 @@ describe("VerificationStatusBar", () => {
     )
     expect(screen.getByText("1 refuted")).toBeInTheDocument()
   })
+
+  it("responsive layout: core metrics in min-w-0 group; session metrics in shrink-0 group; all data present", () => {
+    // Report with all claim types present to stress the metrics row
+    const report = makeReport({
+      claims: [
+        makeClaim({ claim: "Verified claim 1", status: "verified", similarity: 0.95 }),
+        makeClaim({ claim: "Verified claim 2", status: "verified", similarity: 0.92 }),
+        makeClaim({ claim: "Verified claim 3", status: "verified", similarity: 0.88 }),
+        makeClaim({ claim: "Refuted claim", status: "unverified", similarity: 0.2, verification_method: "cross_model" }),
+        makeClaim({ claim: "Unverified claim", status: "unverified", similarity: 0.3, verification_method: "kb" }),
+        makeClaim({ claim: "Uncertain claim", status: "uncertain", similarity: 0.5 }),
+      ],
+      summary: { total: 6, verified: 3, unverified: 2, uncertain: 1 },
+      extraction_method: "llm",
+    })
+
+    const { container } = render(
+      <VerificationStatusBar
+        report={report}
+        loading={false}
+        featureEnabled={true}
+        sessionClaimsChecked={42}
+        sessionEstCost={0.0123}
+      />,
+    )
+
+    // All core metrics must be present in the DOM (no silent drop)
+    expect(screen.getByText(/3 verified/)).toBeInTheDocument()
+    expect(screen.getByText(/1 refuted/)).toBeInTheDocument()
+    expect(screen.getByText(/1 unverified/)).toBeInTheDocument()
+    expect(screen.getByText(/1 uncertain/)).toBeInTheDocument()
+    // Accuracy and coherence
+    expect(screen.getByText(/Accuracy:/)).toBeInTheDocument()
+    expect(screen.getByText(/%/)).toBeInTheDocument()
+    expect(screen.getByText(/Coherence:/)).toBeInTheDocument()
+    // Session metrics must be present
+    expect(screen.getByText(/Session:/)).toBeInTheDocument()
+    expect(screen.getByText(/42 facts/)).toBeInTheDocument()
+    expect(screen.getByText(/\$0\.0123/)).toBeInTheDocument()
+
+    // Responsive layout: core metrics group has min-w-0 (flex child that can shrink)
+    const coreGroup = container.querySelector("[data-metrics='core']")
+    expect(coreGroup).not.toBeNull()
+    expect(coreGroup!.className).toMatch(/min-w-0/)
+
+    // Session metrics group has shrink-0 (anchored at end, never expands)
+    const sessionGroup = container.querySelector("[data-metrics='session']")
+    expect(sessionGroup).not.toBeNull()
+    expect(sessionGroup!.className).toMatch(/shrink-0/)
+  })
 })

@@ -27,6 +27,7 @@ from app.services.wiki_pages import (
     SourceCitation,
     WikiEntityPage,
     _compute_next_refresh,
+    compute_completeness,
     get_entity_page,
     list_entities,
 )
@@ -155,6 +156,74 @@ class TestListEntities:
 
         assert results[0].top_tags == ["python", "docker"]
         assert results[1].top_tags is None
+
+    # WK1 — article-body search tests
+    @pytest.mark.asyncio
+    async def test_body_only_match_is_returned(self):
+        """WK1: an entity whose NAME does not match q but whose summary CONTAINS q
+        must be returned by list_top_entities (adapter mock simulates the widened WHERE)."""
+        driver = _make_driver()
+        body_only_row = {
+            "canonical_id": "person:jane-doe",
+            "name": "Jane Doe",
+            "entity_type": "PERSON",
+            "mention_count": 5,
+            "recent_activity_score": 2,
+            "summary": "An expert in quantum computing and cryptography.",
+            "summary_updated_at": None,
+            # match_rank 3 = body-only hit (new rank assigned by WK1 CASE)
+            "match_rank": 3,
+        }
+        with patch(
+            "app.services.wiki_pages._neo4j_adapter.list_top_entities",
+            return_value=[body_only_row],
+        ):
+            results = await list_entities(driver, search="quantum")
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.canonical_id == "person:jane-doe"
+        assert result.name == "Jane Doe"
+        # match_rank 3 = body-only hit
+        assert result.match_rank == 3
+
+    @pytest.mark.asyncio
+    async def test_name_match_ranks_above_body_only_match(self):
+        """WK1: a name match (match_rank 0-2) sorts before a body-only match
+        (match_rank 3) when the adapter returns both rows ordered by rank."""
+        driver = _make_driver()
+        name_match_row = {
+            "canonical_id": "tech:quantum-corp",
+            "name": "Quantum Corp",
+            "entity_type": "ORG",
+            "mention_count": 20,
+            "recent_activity_score": 8,
+            "summary": "A computing company.",
+            "summary_updated_at": None,
+            "match_rank": 2,  # name CONTAINS match
+        }
+        body_only_row = {
+            "canonical_id": "person:jane-doe",
+            "name": "Jane Doe",
+            "entity_type": "PERSON",
+            "mention_count": 5,
+            "recent_activity_score": 2,
+            "summary": "An expert in quantum computing.",
+            "summary_updated_at": None,
+            "match_rank": 3,  # body-only hit
+        }
+        # Adapter returns rows pre-ordered by match_rank ASC (as the Cypher ORDER BY does)
+        with patch(
+            "app.services.wiki_pages._neo4j_adapter.list_top_entities",
+            return_value=[name_match_row, body_only_row],
+        ):
+            results = await list_entities(driver, search="quantum")
+
+        assert len(results) == 2
+        assert results[0].canonical_id == "tech:quantum-corp"
+        assert results[0].match_rank == 2
+        assert results[1].canonical_id == "person:jane-doe"
+        assert results[1].match_rank == 3
 
 
 # ---------------------------------------------------------------------------
@@ -355,3 +424,102 @@ class TestComputeNextRefresh:
     def test_unparseable_returns_current_time(self):
         result = _compute_next_refresh("not-a-date")
         assert result  # Just ensure a non-empty string is returned
+
+
+# ---------------------------------------------------------------------------
+# compute_completeness (WK3)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeCompleteness:
+    """Boundary tests for the WK3 completeness helper."""
+
+    # --- stub ---------------------------------------------------------------
+
+    def test_none_summary_is_stub(self):
+        assert compute_completeness(None, 10, "high") == "stub"
+
+    def test_empty_summary_is_stub(self):
+        assert compute_completeness("", 10, "high") == "stub"
+
+    def test_whitespace_only_summary_is_stub(self):
+        assert compute_completeness("   ", 10, "high") == "stub"
+
+    # --- start via short summary --------------------------------------------
+
+    def test_one_char_below_start_threshold_is_start(self):
+        from app.services.wiki_pages import START_CHARS
+        short = "x" * (START_CHARS - 1)
+        assert compute_completeness(short, 10, "high") == "start"
+
+    def test_exactly_at_start_chars_boundary_is_not_start_from_length(self):
+        """At exactly START_CHARS with sufficient mentions → not downgraded to start."""
+        from app.services.wiki_pages import START_CHARS, START_MENTIONS
+        summary = "x" * START_CHARS
+        assert compute_completeness(summary, START_MENTIONS, "high") == "full"
+
+    # --- start via low mentions ---------------------------------------------
+
+    def test_zero_mentions_with_long_summary_is_start(self):
+        from app.services.wiki_pages import START_CHARS
+        long_summary = "x" * (START_CHARS + 1)
+        assert compute_completeness(long_summary, 0, "high") == "start"
+
+    def test_one_below_start_mentions_is_start(self):
+        from app.services.wiki_pages import START_CHARS, START_MENTIONS
+        long_summary = "x" * (START_CHARS + 1)
+        assert compute_completeness(long_summary, START_MENTIONS - 1, "high") == "start"
+
+    def test_exactly_at_start_mentions_boundary_is_full(self):
+        from app.services.wiki_pages import START_CHARS, START_MENTIONS
+        long_summary = "x" * (START_CHARS + 1)
+        assert compute_completeness(long_summary, START_MENTIONS, "high") == "full"
+
+    # --- full ---------------------------------------------------------------
+
+    def test_long_summary_and_many_mentions_is_full(self):
+        from app.services.wiki_pages import START_CHARS, START_MENTIONS
+        long_summary = "x" * (START_CHARS + 50)
+        assert compute_completeness(long_summary, START_MENTIONS + 5, "medium") == "full"
+
+    def test_band_does_not_affect_classification(self):
+        """confidence_band is passed through but must not change stub/start/full logic."""
+        from app.services.wiki_pages import START_CHARS, START_MENTIONS
+        long_summary = "x" * (START_CHARS + 1)
+        for band in ("high", "medium", "low", "unknown"):
+            assert compute_completeness(long_summary, START_MENTIONS, band) == "full"
+
+    # --- page assembles completeness ----------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_get_entity_page_sets_completeness_stub(self):
+        """No summary → completeness=stub on the assembled page."""
+        raw = _full_entity_raw()
+        raw["summary"] = None
+        raw["mention_count"] = 0
+        driver = _make_driver()
+        with (
+            patch("app.services.wiki_pages._neo4j_adapter.get_entity", return_value=raw),
+            patch("app.services.wiki_pages._neo4j_adapter.get_confidence_band", return_value="unknown"),
+            patch("app.services.contradiction_log.list_recent", new=AsyncMock(return_value=[])),
+        ):
+            page = await get_entity_page(driver, "person:elon-musk")
+        assert page is not None
+        assert page.completeness == "stub"
+
+    @pytest.mark.asyncio
+    async def test_get_entity_page_sets_completeness_full(self):
+        """Long summary + many mentions → completeness=full on the assembled page."""
+        from app.services.wiki_pages import START_CHARS, START_MENTIONS
+        raw = _full_entity_raw()
+        raw["summary"] = "A " * (START_CHARS // 2 + 10)  # well above START_CHARS
+        raw["mention_count"] = START_MENTIONS + 5
+        driver = _make_driver()
+        with (
+            patch("app.services.wiki_pages._neo4j_adapter.get_entity", return_value=raw),
+            patch("app.services.wiki_pages._neo4j_adapter.get_confidence_band", return_value="high"),
+            patch("app.services.contradiction_log.list_recent", new=AsyncMock(return_value=[])),
+        ):
+            page = await get_entity_page(driver, "person:elon-musk")
+        assert page is not None
+        assert page.completeness == "full"

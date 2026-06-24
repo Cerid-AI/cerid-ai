@@ -31,6 +31,14 @@ from pydantic import BaseModel, Field
 from app.db.neo4j import sources as srcdb
 from app.deps import get_neo4j, get_redis
 from app.services import sync_cursor, webhook_tokens
+from app.services.watched_folders_bridge import (
+    create_folder_source,
+    delete_folder_source,
+    folder_health,
+    get_folder_source,
+    list_folder_sources,
+    update_folder_source,
+)
 from core.ingest.sources.kinds import (
     KIND_FAMILY,
     KIND_TIER,
@@ -83,10 +91,15 @@ def _kind_availability(kind: str, oauth_kinds: set[str]) -> str:
     """Capability flag for a source kind, so the wizard can gate kinds that
     have no working ingestion path (rather than letting POST /sources 501).
 
-    - ``available``   — a SourceConnector is registered, or a webhook-backed kind.
+    - ``available``   — a SourceConnector is registered, a webhook-backed kind,
+                        or the ``folder`` kind (bridge-backed via watched-folders).
     - ``oauth``       — connectable via the /connectors OAuth flow (Gmail, etc.).
     - ``coming_soon`` — declared in SOURCE_KINDS but not yet implemented.
     """
+    # folder is bridge-backed (watched-folders store); no connector registered.
+    if kind == "folder":
+        return "available"
+
     import core.ingest.sources.connectors as _conns  # noqa: F401 — registers connectors
     from core.ingest.sources.registry import get_connector
 
@@ -135,6 +148,7 @@ class HealthProbeResult(BaseModel):
 
 
 _REDACT_KEYS = {"token", "hmac_secret", "client_secret", "api_key", "password", "refresh_token"}
+_REDACT_MASK = "***redacted***"
 
 
 def _redact_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -146,7 +160,7 @@ def _redact_config(config: dict[str, Any]) -> dict[str, Any]:
     redacts. Keeps logs and FE state free of long-lived secrets.
     """
     return {
-        k: ("***redacted***" if k in _REDACT_KEYS else v)
+        k: (_REDACT_MASK if k in _REDACT_KEYS else v)
         for k, v in config.items()
     }
 
@@ -203,12 +217,19 @@ async def list_sources(kind: str | None = None):
     """List every Source, newest first. Optional ?kind= filter."""
     if kind is not None and kind not in SOURCE_KINDS:
         raise HTTPException(status_code=422, detail=f"Unknown source kind: {kind}")
-    rows = srcdb.list_sources(get_neo4j(), kind=kind)
-    return [_to_record(r) for r in rows]
+    rows = [_to_record(r) for r in srcdb.list_sources(get_neo4j(), kind=kind)]
+    if kind in (None, "folder"):
+        rows += [SourceRecord(**s) for s in list_folder_sources(get_redis())]
+    return rows
 
 
 @router.get("/{source_id}", response_model=SourceRecord)
 async def get_source(source_id: str):
+    if source_id.startswith("folder:"):
+        proj = get_folder_source(get_redis(), source_id)
+        if proj is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+        return SourceRecord(**proj)
     src = srcdb.get_source(get_neo4j(), source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -228,6 +249,20 @@ async def create_source(body: CreateSourceRequest):
     kind = body.kind
     if kind not in SOURCE_KINDS:
         raise HTTPException(status_code=422, detail=f"Unknown source kind: {kind}")
+
+    # Folder kind: delegate to the watched-folders store (preserves path
+    # validation + _ALLOWED_ROOTS + vault_write Redis coupling).
+    if kind == "folder":
+        try:
+            proj = await create_folder_source(get_redis(), body.display_name, body.config)
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            log_swallowed_error("sources.create_source.folder", exc)
+            raise HTTPException(status_code=502, detail=f"Folder creation failed: {exc}") from exc
+        return SourceRecord(**proj)
 
     tier = KIND_TIER[kind]
     family = KIND_FAMILY[kind]
@@ -357,6 +392,10 @@ def _check_clipboard_daemon() -> HealthProbeResult:
 @router.post("/{source_id}/test", response_model=HealthProbeResult)
 async def test_source(source_id: str):
     """Re-run the connector's ``health_check`` against the live source."""
+    if source_id.startswith("folder:"):
+        fprobe = await folder_health(get_redis(), source_id)
+        return HealthProbeResult(**fprobe)
+
     src = srcdb.get_source(get_neo4j(), source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -413,6 +452,80 @@ async def get_webhook_url(source_id: str, request: Request):
     }
 
 
+class ConfigPatch(BaseModel):
+    """Payload for ``POST /sources/{id}/config`` — inline config editing
+    from the source-detail pane. Any value equal to ``"***redacted***"``
+    is treated as a no-op placeholder and dropped before merging so
+    callers never overwrite a stored secret with the display mask.
+    """
+
+    config: dict[str, Any]
+
+
+@router.post("/{source_id}/config", response_model=SourceRecord)
+async def update_source_config(source_id: str, body: ConfigPatch):
+    """Patch a source's config; re-runs the connector validation lifecycle.
+
+    Folder sources are handled by Stage C2; this endpoint returns 501 for
+    them so C2 can replace the branch with the real write when it lands.
+
+    For all other kinds:
+    1. Load the stored source (404 if missing).
+    2. Merge the incoming patch, dropping any field whose value equals the
+       redaction mask ``"***redacted***"`` so callers can echo back the
+       FE-safe view without overwriting real secrets.
+    3. Re-validate by running the connector's ``connect()`` lifecycle (for
+       connector-backed kinds) — invalid edits are rejected as 422 before
+       any write. Webhook-backed kinds skip connect (no external system to
+       probe) but still persist the merge.
+    4. Persist via ``srcdb.update_source_config`` and return the
+       re-redacted record.
+    """
+    if source_id.startswith("folder:"):
+        proj = await update_folder_source(get_redis(), source_id, body.config)
+        return SourceRecord(**proj)
+
+    src = srcdb.get_source(get_neo4j(), source_id)
+    if src is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    stored_config: dict[str, Any] = src.get("config") or {}
+    # Drop any value equal to the redaction mask — never overwrite a real
+    # credential with the display placeholder.
+    incoming = {k: v for k, v in body.config.items() if v != _REDACT_MASK}
+    merged = {**stored_config, **incoming}
+
+    kind: str = src["kind"]
+
+    if _is_webhook_backed(kind):
+        # Webhook-backed kinds have no remote system to probe; skip connect.
+        # Preserve the minted token and hmac_secret from the stored config —
+        # callers cannot replace them via this endpoint (they're redacted).
+        updated = srcdb.update_source_config(get_neo4j(), source_id, merged)
+        return _to_record(updated)
+
+    connector = get_connector(kind)  # type: ignore[arg-type]
+    if connector is None:
+        raise HTTPException(
+            status_code=501,
+            detail=f"Connector for kind={kind!r} not yet implemented",
+        )
+
+    try:
+        result = await connector.connect(merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        log_swallowed_error("sources.update_source_config.connect", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Connector failed to re-validate: {exc}",
+        ) from exc
+
+    updated = srcdb.update_source_config(get_neo4j(), source_id, result.config)
+    return _to_record(updated)
+
+
 class PolicyPatch(BaseModel):
     """Payload for ``POST /sources/{id}/policy`` — retention + quality-
     floor editing from the source-detail pane sliders.
@@ -429,7 +542,16 @@ async def update_source_policy(source_id: str, body: PolicyPatch):
     Drives the F4 detail-pane sliders. Both fields are optional;
     callers send only what changed. Validates retention_policy
     against the modes core.ingest.retention knows about.
+
+    For folder sources: folders carry no retention policy in Plan 1 —
+    return the projected record unchanged (no-op).
     """
+    if source_id.startswith("folder:"):
+        proj = get_folder_source(get_redis(), source_id)
+        if proj is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+        return SourceRecord(**proj)
+
     src = srcdb.get_source(get_neo4j(), source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -483,6 +605,10 @@ async def update_source_policy(source_id: str, body: PolicyPatch):
 async def delete_source(source_id: str, cascade: bool = False):
     """Remove a Source node. ``?cascade=true`` also drops FROM_SOURCE
     edges; artifact nodes themselves survive."""
+    if source_id.startswith("folder:"):
+        delete_folder_source(get_redis(), source_id)
+        return None
+
     src = srcdb.get_source(get_neo4j(), source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")

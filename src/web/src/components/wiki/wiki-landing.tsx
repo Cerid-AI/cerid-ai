@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react"
+import { useId, useMemo, useState } from "react"
 import {
   BookOpen,
   RefreshCw,
@@ -10,12 +10,15 @@ import {
   FileWarning,
   AlertCircle,
   List,
+  ShieldAlert,
 } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { EmptyState } from "@/components/ui/empty-state"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 import { fetchDomainCounts } from "@/lib/api/domains"
 import { fetchWikiIndex, fetchWikiLog } from "@/lib/api/wiki-browse"
 import { domainIcon } from "@/lib/graph/domain-icons"
@@ -96,12 +99,13 @@ function BlockError({ message, onRetry }: { message: string; onRetry: () => void
 
 interface DomainCardsBlockProps {
   onSelectDomain: (domain: string) => void
+  includeInternal: boolean
 }
 
-function DomainCardsBlock({ onSelectDomain }: DomainCardsBlockProps) {
+function DomainCardsBlock({ onSelectDomain, includeInternal }: DomainCardsBlockProps) {
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["graph-domains"],
-    queryFn: fetchDomainCounts,
+    queryKey: ["graph-domains", includeInternal],
+    queryFn: () => fetchDomainCounts({ includeInternal }),
     staleTime: 10 * 60_000,
     retry: 1,
   })
@@ -223,10 +227,11 @@ function RecentChangesBlock({ onSelectEntity }: RecentChangesBlockProps) {
 
 interface MostActiveBlockProps {
   onSelectEntity: (slug: string) => void
+  includeInternal: boolean
 }
 
-function MostActiveBlock({ onSelectEntity }: MostActiveBlockProps) {
-  const { data, isLoading, isError, refetch } = useWikiEntities({ limit: 10 })
+function MostActiveBlock({ onSelectEntity, includeInternal }: MostActiveBlockProps) {
+  const { data, isLoading, isError, refetch } = useWikiEntities({ limit: 10, includeInternal })
 
   if (isLoading) return <BlockSkeleton />
   if (isError) {
@@ -285,12 +290,13 @@ function MostActiveBlock({ onSelectEntity }: MostActiveBlockProps) {
 interface IndexBlocksProps {
   onSelectEntity: (slug: string) => void
   onOpenIndex?: () => void
+  includeInternal: boolean
 }
 
-function IndexBlocks({ onSelectEntity, onOpenIndex }: IndexBlocksProps) {
+function IndexBlocks({ onSelectEntity, onOpenIndex, includeInternal }: IndexBlocksProps) {
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["wiki-index-browse"],
-    queryFn: () => fetchWikiIndex({ order: "activity", limit: 200 }),
+    queryKey: ["wiki-index-browse", includeInternal],
+    queryFn: () => fetchWikiIndex({ order: "activity", limit: 200, includeInternal }),
     staleTime: 5 * 60_000,
     retry: 1,
   })
@@ -408,9 +414,32 @@ export interface WikiLandingProps {
 }
 
 export function WikiLanding({ onSelectEntity, onSelectDomain, onOpenIndex }: WikiLandingProps) {
+  // WK2: default-OFF toggle. When off, the entity-list + index queries send
+  // nothing and the server hides the client-data domains; when on, they pass
+  // include_internal=true to reveal them.
+  const [includeInternal, setIncludeInternal] = useState(false)
+  const toggleId = useId()
+
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-2xl space-y-6 px-4 py-6">
+
+        {/* WK2: advanced "show internal / client data" toggle */}
+        <div className="flex items-center justify-end gap-2">
+          <ShieldAlert className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <Label
+            htmlFor={toggleId}
+            className="text-label-xs font-medium text-muted-foreground"
+          >
+            Show internal / client data
+          </Label>
+          <Switch
+            id={toggleId}
+            checked={includeInternal}
+            onCheckedChange={setIncludeInternal}
+            aria-label="Show internal / client data"
+          />
+        </div>
 
         {/* Domain cards */}
         <section aria-labelledby="landing-domains-heading">
@@ -425,7 +454,7 @@ export function WikiLanding({ onSelectEntity, onSelectDomain, onOpenIndex }: Wik
               </h2>
             </CardHeader>
             <CardContent className="pb-2 px-0">
-              <DomainCardsBlock onSelectDomain={onSelectDomain} />
+              <DomainCardsBlock onSelectDomain={onSelectDomain} includeInternal={includeInternal} />
             </CardContent>
           </Card>
         </section>
@@ -461,7 +490,10 @@ export function WikiLanding({ onSelectEntity, onSelectDomain, onOpenIndex }: Wik
                 </h2>
               </CardHeader>
               <CardContent className="px-0 pb-2">
-                <MostActiveBlock onSelectEntity={onSelectEntity} />
+                <MostActiveBlock
+                  onSelectEntity={onSelectEntity}
+                  includeInternal={includeInternal}
+                />
               </CardContent>
             </Card>
           </section>
@@ -469,7 +501,11 @@ export function WikiLanding({ onSelectEntity, onSelectDomain, onOpenIndex }: Wik
 
         {/* Awaiting summaries + random article + index link */}
         <section aria-label="Index actions" className="space-y-4">
-          <IndexBlocks onSelectEntity={onSelectEntity} onOpenIndex={onOpenIndex} />
+          <IndexBlocks
+            onSelectEntity={onSelectEntity}
+            onOpenIndex={onOpenIndex}
+            includeInternal={includeInternal}
+          />
         </section>
       </div>
     </div>

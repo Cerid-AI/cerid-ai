@@ -132,6 +132,28 @@ function CloudBackendStep() {
 // actual quenchforge slot aliases (llama3.1-8b, bge-reranker-v2-m3, etc).
 // ---------------------------------------------------------------------------
 
+// GGUF quant suffix, case-insensitive: ".Q8_0", "-q4_K_M", "_Q5_0", etc.
+const QUANT_SUFFIX_RE = /[._-]q\d+(?:_[a-z0-9]+)*$/i
+
+/**
+ * Normalize a model name for cross-matching recommended (Ollama colon-tag,
+ * e.g. `llama3.2:3b`) against installed (local Quenchforge dash-alias, e.g.
+ * `llama3.2-3b`) forms. Collapses `:`/`-` to a single separator and strips
+ * any trailing GGUF quant suffix so quant variants match the base model.
+ */
+function normalizeModelId(name: string): string {
+  return name.replace(QUANT_SUFFIX_RE, "").replace(/[:-]/g, "-").toLowerCase()
+}
+
+/** True when an installed model corresponds to a recommended model id. */
+function isModelInstalled(recommendedId: string, installed: string[]): boolean {
+  const target = normalizeModelId(recommendedId)
+  return installed.some((om) => {
+    const norm = normalizeModelId(om)
+    return norm === target || norm.startsWith(`${target}-`)
+  })
+}
+
 function gpuLooksAccelerated(gpu: string | null | undefined, accel: string | null | undefined): boolean {
   if (accel && accel !== "none") return true
   if (!gpu) return false
@@ -329,8 +351,12 @@ function OllamaBackendStep({
       await pullOllamaModel(RECOMMENDED_MODEL)
       onChange({ ...state, pulling: false, model: RECOMMENDED_MODEL })
       setPullProgress(null)
-    } catch {
-      setPullError("Failed to pull model — check Ollama is running")
+    } catch (err) {
+      setPullError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Failed to pull model — check Ollama is running",
+      )
       onChange({ ...state, pulling: false })
       setPullProgress(null)
     }
@@ -414,13 +440,12 @@ function OllamaBackendStep({
               <div className="space-y-1.5">
                 <p className="text-label-sm font-medium text-muted-foreground">Recommended Models</p>
                 {modelRecs.map((m) => {
-                  // Match the full tag (`llama3.2:1b`) — not the base name —
-                  // so installing `llama3.2:3b` doesn't make `llama3.2:1b`
-                  // also show as "Installed". Trailing variant suffixes
-                  // (e.g. `llama3.1:8b-instruct-q4_K_M`) still match.
-                  const installed = ollamaModels.some(
-                    (om) => om === m.id || om.startsWith(`${m.id}-`),
-                  )
+                  // Cross-match recommended (colon-tag, `llama3.2:3b`) against
+                  // installed (Quenchforge dash-alias, `llama3.2-3b`) by
+                  // normalizing `:`<->`-` and stripping GGUF quant suffixes.
+                  // Still tag-specific: installing `llama3.2:3b` doesn't make
+                  // `llama3.2:1b` show as Installed.
+                  const installed = isModelInstalled(m.id, ollamaModels)
                   return (
                     <div key={m.id} className={`rounded-lg border bg-card p-3 ${!m.compatible ? "opacity-50" : ""}`}>
                       <div className="flex items-start justify-between gap-2">

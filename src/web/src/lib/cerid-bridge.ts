@@ -6,7 +6,7 @@
  * shared web UI consumes for server-connection management. The full bridge is
  * defined in packages/desktop/src/preload/preload.ts.
  *
- * No `declare global` here on purpose — apple-connectors-section.tsx already
+ * No `declare global` here on purpose — apple-detail.tsx already
  * augments `Window.cerid`, and a second differently-typed declaration would
  * conflict. Consumers read the bridge through `getConnectionBridge()`, which
  * narrows `window` with a local cast.

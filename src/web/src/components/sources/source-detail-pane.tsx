@@ -46,6 +46,7 @@ import {
   type SourceRecord,
 } from "@/lib/api/sources"
 import { descriptorFor } from "./source-kind-icons"
+import { SourceConfigForm, EDITABLE_CONFIG_KINDS } from "./source-config-form"
 
 type RetentionMode = "keep_all" | "days" | "count"
 
@@ -122,14 +123,14 @@ function SourceDetailInner({
       })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["sources"] })
+      queryClient.invalidateQueries({ queryKey: ["ingestion-sources"] })
     },
   })
 
   const deleteMut = useMutation({
     mutationFn: () => deleteSource(source.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["sources"] })
+      queryClient.invalidateQueries({ queryKey: ["ingestion-sources"] })
       onDeleted?.(source.id)
       onClose()
     },
@@ -212,29 +213,45 @@ function SourceDetailInner({
           )}
         </Section>
 
-        {/* Policy — retention + quality floor */}
-        <Section title="Policy">
-          <div className="space-y-3">
-            <RetentionPicker
-              mode={retentionMode}
-              days={retentionDays}
-              max={retentionMax}
-              onMode={setRetentionMode}
-              onDays={setRetentionDays}
-              onMax={setRetentionMax}
+        {/* Configuration — inline edit form for data-source kinds (gated to editable kinds) */}
+        {EDITABLE_CONFIG_KINDS.includes(source.kind as typeof EDITABLE_CONFIG_KINDS[number]) && (
+          <Section title="Configuration">
+            <SourceConfigForm
+              source={source}
+              onSaved={() => { /* invalidation handled by SourceConfigForm.saveMut.onSuccess */ }}
             />
-            <FloorSlider value={qualityFloor} onChange={setQualityFloor} />
-            <div className="flex justify-end gap-2 pt-1">
-              <Button
-                size="sm"
-                onClick={() => patchMut.mutate()}
-                disabled={patchMut.isPending}
-                className="cerid-press"
-              >
-                {patchMut.isPending ? "Saving…" : "Apply policy"}
-              </Button>
+          </Section>
+        )}
+
+        {/* Policy — retention + quality floor (not applicable for folder sources) */}
+        <Section title="Policy">
+          {source.kind === "folder" ? (
+            <p className="text-label-xs text-muted-foreground">
+              Retention and quality-floor settings aren&apos;t available for watched folders yet.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <RetentionPicker
+                mode={retentionMode}
+                days={retentionDays}
+                max={retentionMax}
+                onMode={setRetentionMode}
+                onDays={setRetentionDays}
+                onMax={setRetentionMax}
+              />
+              <FloorSlider value={qualityFloor} onChange={setQualityFloor} />
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  size="sm"
+                  onClick={() => patchMut.mutate()}
+                  disabled={patchMut.isPending}
+                  className="cerid-press"
+                >
+                  {patchMut.isPending ? "Saving…" : "Apply policy"}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </Section>
 
         {/* Danger zone */}

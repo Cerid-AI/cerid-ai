@@ -53,6 +53,15 @@ class CustomApiSource(DataSource):
         self.result_title_field = result_title_field
         self.result_content_field = result_content_field
 
+    def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
+        """User custom APIs get the full in-context query, not a keyword bag.
+
+        The base DataSource.adapt_query joins keywords (optimal for curated
+        adapters like Wikipedia/Wolfram), but user-configured external APIs
+        expect the natural-language query and lose context when keyword-only.
+        """
+        return raw_query
+
     def _build_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {"Accept": "application/json"}
         if self.auth_type == "bearer":

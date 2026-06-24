@@ -336,11 +336,14 @@ export function VerificationStatusBar({
           inside it. Nested <button>s are invalid HTML and trip the React 19
           dev runtime warning. Enter/Space activate the row; the dedicated
           expand <button> at the end has its own onClick (stopPropagation
-          would be overkill — both routes toggle the same state). */}
+          would be overkill — both routes toggle the same state).
+          CH2: the row uses two flex children — a min-w-0 core group that
+          can shrink, and a shrink-0 trailing group for session metrics +
+          expand toggle — so no child forces horizontal overflow. */}
       <TooltipProvider delayDuration={300}>
       <div
         className={cn(
-          "flex w-full items-center gap-3 px-4 py-1 text-left text-xs",
+          "flex w-full min-w-0 items-center gap-2 px-4 py-1 text-left text-xs",
           hasClaims ? "cursor-pointer" : "cursor-default",
         )}
         onClick={() => hasClaims && setExpanded(!expanded)}
@@ -357,106 +360,111 @@ export function VerificationStatusBar({
         aria-label={hasClaims ? "Verification summary" : undefined}
         aria-disabled={!hasClaims}
       >
-        <ShieldIcon className={cn("h-3 w-3 shrink-0", shieldColor)} />
+        {/* Core metrics group — shrinks to fit; text children truncate rather than overflow */}
+        <div data-metrics="core" className="flex min-w-0 items-center gap-3">
+          <ShieldIcon className={cn("h-3 w-3 shrink-0", shieldColor)} />
 
-        {/* Claim count — show assessed vs total when some are uncertain */}
-        <span className="text-muted-foreground">
-          {uncertain > 0 ? `${verified + unverified} of ${total}` : `${total}`} claims assessed
-        </span>
-
-        {verified > 0 && (
-          <Tooltip><TooltipTrigger asChild>
-            <span className="text-green-700 dark:text-green-400">{verified} verified</span>
-          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims confirmed by cross-model check or KB evidence</p></TooltipContent></Tooltip>
-        )}
-        {refutedCount > 0 && (
-          <Tooltip><TooltipTrigger asChild>
-            <span className="text-red-700 dark:text-red-400">{refutedCount} refuted</span>
-          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims actively contradicted by another model or web search</p></TooltipContent></Tooltip>
-        )}
-        {evasionCount > 0 && (
-          <Tooltip><TooltipTrigger asChild>
-            <span className="text-orange-600 dark:text-orange-400">{evasionCount} evaded</span>
-          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Model deflected or avoided answering directly</p></TooltipContent></Tooltip>
-        )}
-        {softUnverifiedCount > 0 && (
-          <Tooltip><TooltipTrigger asChild>
-            <span className="text-amber-600 dark:text-yellow-400">{softUnverifiedCount} unverified</span>
-          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">No matching evidence found in KB (not necessarily wrong)</p></TooltipContent></Tooltip>
-        )}
-        {uncertain > 0 && (
-          <Tooltip><TooltipTrigger asChild>
-            <span className="text-muted-foreground">{uncertain} uncertain</span>
-          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Checked but inconclusive — insufficient evidence to confirm or deny</p></TooltipContent></Tooltip>
-        )}
-
-        <div className="h-3 w-px shrink-0 bg-border" />
-
-        {/* Accuracy bar */}
-        <Tooltip><TooltipTrigger asChild>
-        <div className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">Accuracy:</span>
-          <ProgressBar
-            pct={accuracyPct}
-            fillClassName={accuracyTier.barColor}
-            className="w-12"
-          />
-          <span className={cn("tabular-nums", accuracyTier.textColor)}>
-            {accuracyPct}%
+          {/* Claim count — show assessed vs total when some are uncertain */}
+          <span className="shrink-0 text-muted-foreground">
+            {uncertain > 0 ? `${verified + unverified} of ${total}` : `${total}`} claims assessed
           </span>
-        </div>
-        </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Verified claims / (verified + refuted). Unverified claims are excluded.</p></TooltipContent></Tooltip>
 
-        <div className="h-3 w-px shrink-0 bg-border" />
-
-        {/* Coherence */}
-        <Tooltip><TooltipTrigger asChild>
-        <span className="flex items-center gap-1">
-          <span className="text-muted-foreground">Coherence:</span>
-          <span className={accuracyTier.textColor}>{accuracyTier.label}</span>
-        </span>
-        </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Excellent: 95%+ accuracy. Good: 80-94%. Fair: 60-79%. Poor: below 60%.</p></TooltipContent></Tooltip>
-
-        {/* Extraction method */}
-        {report.extraction_method && (
-          <>
-            <div className="h-3 w-px shrink-0 bg-border" />
-            <span className="text-muted-foreground">via {report.extraction_method}</span>
-          </>
-        )}
-
-        {/* Session metrics */}
-        {sessionClaimsChecked > 0 && (
-          <>
-            <div className="h-3 w-px shrink-0 bg-border" />
+          {verified > 0 && (
             <Tooltip><TooltipTrigger asChild>
-            <span className="text-muted-foreground">
-              Session: {sessionClaimsChecked} facts &bull; ~${sessionEstCost.toFixed(4)}
-            </span>
-            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Total claims checked this session and estimated LLM verification cost</p></TooltipContent></Tooltip>
-          </>
-        )}
+              <span className="shrink-0 text-green-700 dark:text-green-400">{verified} verified</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims confirmed by cross-model check or KB evidence</p></TooltipContent></Tooltip>
+          )}
+          {refutedCount > 0 && (
+            <Tooltip><TooltipTrigger asChild>
+              <span className="shrink-0 text-red-700 dark:text-red-400">{refutedCount} refuted</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims actively contradicted by another model or web search</p></TooltipContent></Tooltip>
+          )}
+          {evasionCount > 0 && (
+            <Tooltip><TooltipTrigger asChild>
+              <span className="shrink-0 text-orange-600 dark:text-orange-400">{evasionCount} evaded</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Model deflected or avoided answering directly</p></TooltipContent></Tooltip>
+          )}
+          {softUnverifiedCount > 0 && (
+            <Tooltip><TooltipTrigger asChild>
+              <span className="shrink-0 text-amber-600 dark:text-yellow-400">{softUnverifiedCount} unverified</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">No matching evidence found in KB (not necessarily wrong)</p></TooltipContent></Tooltip>
+          )}
+          {uncertain > 0 && (
+            <Tooltip><TooltipTrigger asChild>
+              <span className="shrink-0 text-muted-foreground">{uncertain} uncertain</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Checked but inconclusive — insufficient evidence to confirm or deny</p></TooltipContent></Tooltip>
+          )}
 
-        {/* Expand toggle — dedicated <button> at the end of the row.
-            V-P0.1 + V-P2.4: this is the only true interactive descendant
-            kept neutral (text-muted-foreground) rather than amber so it
-            doesn't impersonate the "uncertain claim" warning color. */}
-        <div className="flex-1" />
-        {hasClaims && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              setExpanded(!expanded)
-            }}
-            aria-expanded={expanded}
-            aria-label="Toggle verified claims"
-            className="flex items-center gap-1 rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span className="text-label-sm font-medium">{expanded ? "Less" : "More"}</span>
-            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </button>
-        )}
+          <div className="h-3 w-px shrink-0 bg-border" />
+
+          {/* Accuracy bar */}
+          <Tooltip><TooltipTrigger asChild>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="text-muted-foreground">Accuracy:</span>
+            <ProgressBar
+              pct={accuracyPct}
+              fillClassName={accuracyTier.barColor}
+              className="w-12"
+            />
+            <span className={cn("tabular-nums", accuracyTier.textColor)}>
+              {accuracyPct}%
+            </span>
+          </div>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Verified claims / (verified + refuted). Unverified claims are excluded.</p></TooltipContent></Tooltip>
+
+          <div className="h-3 w-px shrink-0 bg-border" />
+
+          {/* Coherence */}
+          <Tooltip><TooltipTrigger asChild>
+          <span className="flex shrink-0 items-center gap-1">
+            <span className="text-muted-foreground">Coherence:</span>
+            <span className={accuracyTier.textColor}>{accuracyTier.label}</span>
+          </span>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Excellent: 95%+ accuracy. Good: 80-94%. Fair: 60-79%. Poor: below 60%.</p></TooltipContent></Tooltip>
+
+          {/* Extraction method — label hides at narrow widths, value stays */}
+          {report.extraction_method && (
+            <>
+              <div className="h-3 w-px shrink-0 bg-border" />
+              <span className="shrink-0 text-muted-foreground">
+                <span className="hidden sm:inline">via </span>{report.extraction_method}
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* Session metrics + expand toggle — never shrink, anchored at trailing edge */}
+        <div data-metrics="session" className="ml-auto flex shrink-0 items-center gap-2">
+          {sessionClaimsChecked > 0 && (
+            <>
+              <div className="h-3 w-px shrink-0 bg-border" />
+              <Tooltip><TooltipTrigger asChild>
+              <span className="text-muted-foreground" title={`Session: ${sessionClaimsChecked} facts • ~$${sessionEstCost.toFixed(4)}`}>
+                <span className="hidden sm:inline">Session: </span>{sessionClaimsChecked} facts &bull; ~${sessionEstCost.toFixed(4)}
+              </span>
+              </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Total claims checked this session and estimated LLM verification cost</p></TooltipContent></Tooltip>
+            </>
+          )}
+
+          {/* Expand toggle — dedicated <button> at the end of the row.
+              V-P0.1 + V-P2.4: kept neutral (text-muted-foreground) rather
+              than amber so it doesn't impersonate the "uncertain claim" color. */}
+          {hasClaims && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setExpanded(!expanded)
+              }}
+              aria-expanded={expanded}
+              aria-label="Toggle verified claims"
+              className="flex items-center gap-1 rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="text-label-sm font-medium">{expanded ? "Less" : "More"}</span>
+              {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+          )}
+        </div>
       </div>
       </TooltipProvider>
 

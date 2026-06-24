@@ -38,9 +38,14 @@ def test_oauth_kind_is_oauth():
     assert _kind_availability("gmail", oauth) == "oauth"
 
 
+def test_folder_kind_is_available():
+    # folder is bridge-backed via the watched-folders store; no connector needed
+    assert _kind_availability("folder", oauth_connector_kinds()) == "available"
+
+
 def test_unimplemented_kind_is_coming_soon():
-    # folder is declared in SOURCE_KINDS but has no connector and no OAuth path
-    assert _kind_availability("folder", oauth_connector_kinds()) == "coming_soon"
+    # voice_note has no connector and no OAuth path — use it as the coming_soon example
+    assert _kind_availability("voice_note", oauth_connector_kinds()) == "coming_soon"
 
 
 def test_every_source_kind_classified():

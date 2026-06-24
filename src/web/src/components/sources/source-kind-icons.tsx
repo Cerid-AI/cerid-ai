@@ -61,6 +61,9 @@ export const KIND_DESCRIPTORS: Record<string, SourceKindDescriptor> = {
   apple_calendar: { kind: "apple_calendar", label: "Apple Calendar", icon: Calendar, blurb: "Local EventKit calendar" },
   apple_photos: { kind: "apple_photos", label: "Apple Photos", icon: Image, blurb: "Local PhotoKit library" },
   apple_reminders: { kind: "apple_reminders", label: "Apple Reminders", icon: Calendar, blurb: "Local EventKit reminders" },
+
+  // Email IMAP (Stage B)
+  email: { kind: "email", label: "Email (IMAP)", icon: Mail, blurb: "IMAP mailbox" },
 }
 
 export function descriptorFor(kind: string): SourceKindDescriptor {

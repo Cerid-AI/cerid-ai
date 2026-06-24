@@ -222,7 +222,7 @@ export function InstancedNodes({
     for (let i = 0; i < entities.length; i++) {
       let v = visibility?.[i] ?? 1
       if (hoveredIndex !== null && hoveredIndex !== undefined) {
-        v = i === hoveredIndex ? 1.8 : hood?.has(i) ? Math.min(v * 1.2, 1.2) : Math.min(v, 0.12)
+        v = i === hoveredIndex ? 1.8 : hood?.has(i) ? Math.min(v * 1.2, 1.2) : Math.min(v, 0.4)
       }
       arr[i] = v
     }
@@ -281,7 +281,7 @@ export function InstancedNodes({
       let brightness = visibility?.[i] ?? 1
       if (hoveredIndex !== null && hoveredIndex !== undefined) {
         if (i === hoveredIndex) scale *= 1.35
-        else if (!hood?.has(i)) brightness = Math.min(brightness, 0.22)
+        else if (!hood?.has(i)) brightness = Math.min(brightness, 0.4)
       }
       dummy.position.set(ent.x, ent.y, ent.z)
       dummy.scale.set(scale, scale, scale)

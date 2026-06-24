@@ -20,12 +20,13 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { AlertTriangle, ChevronRight, Info, Loader2, Lock } from "lucide-react"
+import { AlertTriangle, ChevronRight, Info, Loader2, Lock, RotateCcw } from "lucide-react"
 import { useNavigation } from "@/contexts/navigation-context"
 import { useEntitlements, type EntitlementInfo } from "@/hooks/use-entitlements"
 import { defsForGroup, type SettingDef } from "@/lib/settings-registry"
 import { useSettingsMode } from "@/lib/settings-mode"
 import { useSettingsReveal } from "./reveal-context"
+import { useIsModified, useResetSetting } from "./modified-context"
 import { logSwallowedError } from "@/lib/log-swallowed"
 
 import { Badge } from "@/components/ui/badge"
@@ -293,6 +294,8 @@ export function SettingRow({
   const locked = entitlement.state === "locked"
   const flagOff = entitlement.state === "flag-off"
   const isTarget = reveal?.id === def.id
+  const modified = useIsModified(def.id)
+  const reset = useResetSetting()
 
   useEffect(() => {
     if (!isTarget) return
@@ -310,9 +313,11 @@ export function SettingRow({
       ref={ref}
       id={def.id}
       data-setting-row={def.id}
+      data-modified={modified || undefined}
       className={cn(
         "density-row scroll-mt-16 rounded-md transition-shadow",
         highlighted && "ring-2 ring-ring/50",
+        modified && "border-l-2 border-brand/50 pl-2",
         className,
       )}
     >
@@ -352,6 +357,25 @@ export function SettingRow({
             )}
             {def.writer.kind === "env" && <ReadOnlyEnvHint envVar={def.writer.envVar} />}
             <SettingInfoPopover def={def} />
+            {modified && (
+              <Badge variant="outline" className="gap-1 border-brand/50 text-label-xs text-brand">
+                Modified
+              </Badge>
+            )}
+            {modified && reset && (
+              <button
+                type="button"
+                onClick={() => reset(def)}
+                aria-label={`Reset ${def.label} to default`}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-label-xs text-muted-foreground hover:text-foreground",
+                  FOCUS_RING,
+                )}
+              >
+                <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                Reset
+              </button>
+            )}
           </div>
           <p className="text-label-sm leading-snug text-muted-foreground">{def.helpText}</p>
           <p className="text-label-xs text-muted-foreground/80">{def.scopeOfEffect.display}</p>

@@ -329,8 +329,9 @@ export function KnowledgePane() {
     error: browseErrorDetail,
     refetch: refetchArtifacts,
   } = useQuery({
-    queryKey: ["artifacts", activeDomain ?? "all"],
-    queryFn: () => fetchArtifacts(activeDomain ?? undefined, 200),
+    queryKey: ["artifacts", activeDomain ?? "all", taxonomyFilter.subCategory ?? "all"],
+    queryFn: () =>
+      fetchArtifacts(activeDomain ?? undefined, 200, taxonomyFilter.subCategory ?? undefined),
     enabled: !activeSearch,
     staleTime: 30_000,
     retry: 1,
@@ -517,49 +518,6 @@ export function KnowledgePane() {
       <div className="border-b px-4 py-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Knowledge Base</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            disabled={uploadStatus === "uploading"}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {uploadStatus === "uploading" ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-            ) : (
-              <Upload className="mr-1 h-3 w-3" />
-            )}
-            Upload
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setShowImportDialog((v) => !v)}
-          >
-            <FolderOpen className="mr-1 h-3 w-3" />
-            Import
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setShowDuplicates(true)}
-            title="Find duplicate artifacts"
-          >
-            <Copy className="mr-1 h-3 w-3" />
-            Duplicates
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setShowKnowledgeLibrary(true)}
-            title="Browse and install optional baseline knowledge packs"
-          >
-            <Library className="mr-1 h-3 w-3" />
-            Library
-          </Button>
           <input
             ref={fileInputRef}
             type="file"
@@ -624,6 +582,63 @@ export function KnowledgePane() {
           setSearchInput("")
         }}
       />
+
+      {/* Add to Knowledge — prominent drop zone + actions (SR4) */}
+      <div className="space-y-2 border-b px-4 py-3">
+        <div
+          className="group flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/20 px-4 py-5 text-center transition-colors hover:border-primary/50 hover:bg-primary/5 cursor-pointer"
+          onClick={() => fileInputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          aria-label="Add files to your knowledge base"
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click() } }}
+        >
+          <FileUp className="h-6 w-6 text-muted-foreground transition-colors group-hover:text-primary" />
+          <div>
+            <p className="text-sm font-medium text-foreground">Drop files to add to your knowledge base</p>
+            <p className="text-xs text-muted-foreground">or use the actions below</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={uploadStatus === "uploading"}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploadStatus === "uploading" ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="mr-1 h-3.5 w-3.5" />
+            )}
+            Upload
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setShowImportDialog((v) => !v)}>
+            <FolderOpen className="mr-1 h-3.5 w-3.5" />
+            Import folder
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowKnowledgeLibrary(true)}
+            title="Browse and install optional baseline knowledge packs"
+          >
+            <Library className="mr-1 h-3.5 w-3.5" />
+            Library
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowDuplicates(true)}
+            title="Find duplicate artifacts"
+          >
+            <Copy className="mr-1 h-3.5 w-3.5" />
+            Duplicates
+          </Button>
+        </div>
+        {ingestionLog.length > 0 && (
+          <RecentUploads entries={ingestionLog} />
+        )}
+      </div>
 
       {/* Search + filters */}
       <div className="space-y-2 border-b px-4 py-3">
@@ -822,23 +837,6 @@ export function KnowledgePane() {
           </div>
         </div>
       )}
-
-      {/* Drop zone + ingestion log */}
-      <div className="border-b px-4 py-2 space-y-2">
-        <div
-          className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-3 text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
-          onClick={() => fileInputRef.current?.click()}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click() } }}
-        >
-          <FileUp className="h-4 w-4 shrink-0" />
-          <span className="text-xs">Drop files here or click to upload</span>
-        </div>
-        {ingestionLog.length > 0 && (
-          <RecentUploads entries={ingestionLog} />
-        )}
-      </div>
 
       {/* Main content: taxonomy sidebar + cards */}
       <div className="flex min-h-0 flex-1 overflow-hidden">

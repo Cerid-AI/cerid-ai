@@ -16,6 +16,13 @@
 export type ConfidenceBand = "high" | "medium" | "low" | "unknown"
 
 // ---------------------------------------------------------------------------
+// Article completeness class (WK3)
+// ---------------------------------------------------------------------------
+
+/** WK3 curation class. "stub" = no summary; "start" = short or few mentions; "full" = both thresholds met. */
+export type Completeness = "stub" | "start" | "full"
+
+// ---------------------------------------------------------------------------
 // Contradiction severity
 // ---------------------------------------------------------------------------
 
@@ -247,4 +254,37 @@ export interface WikiEntityPage {
    * Normalized in v1; section render deferred to v1.1 pending non-empty live data.
    */
   episodic_memories?: EpisodicMemory[]
+  /**
+   * WK3 article completeness class.
+   * "stub"  = no summary generated yet.
+   * "start" = summary present but below length or mention thresholds.
+   * "full"  = both length and mention thresholds met.
+   * Absent on older backend versions (treat as "stub").
+   */
+  completeness?: Completeness
+}
+
+// ---------------------------------------------------------------------------
+// WK1 — Backlinks ("what links here")
+// ---------------------------------------------------------------------------
+
+/** How a source entity links to the target. */
+export type BacklinkVia = "wikilink" | "mention" | "related"
+
+/** One row in the backlinks list. */
+export interface BacklinkItem {
+  slug: string
+  name: string
+  entity_type: string
+  /**
+   * "wikilink"  — the source entity's summary contains a [[…]] wikilink to this entity.
+   * "mention"   — both entities appear in the same source artifact.
+   * "related"   — a direct CO_MENTIONED graph edge connects them.
+   */
+  via: BacklinkVia
+}
+
+/** Response shape from GET /wiki/entities/{slug}/backlinks */
+export interface BacklinksResponse {
+  backlinks: BacklinkItem[]
 }

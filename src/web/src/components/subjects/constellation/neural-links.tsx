@@ -213,7 +213,7 @@ export function NeuralLinks({
       const [si, ti] = links[i]
       let v = Math.min(visibility?.[si] ?? 1, visibility?.[ti] ?? 1)
       if (hoveredIndex !== null && hoveredIndex !== undefined) {
-        v = (si === hoveredIndex || ti === hoveredIndex) ? Math.max(v, 1) * 3.0 : Math.min(v, 0.12)
+        v = (si === hoveredIndex || ti === hoveredIndex) ? Math.max(v, 1) * 3.0 : Math.min(v, 0.4)
       }
       arr[i * 2] = v
       arr[i * 2 + 1] = v

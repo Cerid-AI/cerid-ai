@@ -15,7 +15,7 @@ Coverage:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -145,7 +145,11 @@ class TestListEntityPages:
         captured: list[Any] = []
 
         async def _mock_list(
-            driver: Any, *, limit: int = 30, search: str | None = None
+            driver: Any,
+            *,
+            limit: int = 30,
+            search: str | None = None,
+            include_internal: bool = False,
         ) -> list[EntitySummary]:
             captured.append(limit)
             return []
@@ -163,7 +167,11 @@ class TestListEntityPages:
         captured: list[Any] = []
 
         async def _mock_list(
-            driver: Any, *, limit: int = 30, search: str | None = None
+            driver: Any,
+            *,
+            limit: int = 30,
+            search: str | None = None,
+            include_internal: bool = False,
         ) -> list[EntitySummary]:
             captured.append(search)
             return []
@@ -289,3 +297,244 @@ class TestGetEntityWikiPage404:
             resp = client.get("/wiki/entities/nonexistent:slug")
 
         assert "nonexistent:slug" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# GET /wiki/entities/{slug}/backlinks — WK1
+# ---------------------------------------------------------------------------
+
+
+class TestGetEntityBacklinks:
+    """Tests for the 'what links here' backlinks endpoint."""
+
+    def test_returns_200_with_backlinks(self, client: TestClient):
+        backlinks = [
+            {"slug": "org:tesla", "name": "Tesla", "entity_type": "ORG", "via": "wikilink"},
+            {"slug": "org:spacex", "name": "SpaceX", "entity_type": "ORG", "via": "mention"},
+        ]
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch(
+                "app.routers.wiki.get_backlinks",
+                return_value=backlinks,
+            ),
+        ):
+            resp = client.get("/wiki/entities/person:elon-musk/backlinks")
+
+        assert resp.status_code == 200
+
+    def test_response_shape(self, client: TestClient):
+        backlinks = [
+            {"slug": "org:tesla", "name": "Tesla", "entity_type": "ORG", "via": "wikilink"},
+        ]
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch(
+                "app.routers.wiki.get_backlinks",
+                return_value=backlinks,
+            ),
+        ):
+            resp = client.get("/wiki/entities/person:elon-musk/backlinks")
+
+        data = resp.json()
+        assert "backlinks" in data
+        assert isinstance(data["backlinks"], list)
+        item = data["backlinks"][0]
+        assert item["slug"] == "org:tesla"
+        assert item["name"] == "Tesla"
+        assert item["entity_type"] == "ORG"
+        assert item["via"] == "wikilink"
+
+    def test_empty_returns_empty_list(self, client: TestClient):
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch(
+                "app.routers.wiki.get_backlinks",
+                return_value=[],
+            ),
+        ):
+            resp = client.get("/wiki/entities/person:nobody/backlinks")
+
+        data = resp.json()
+        assert resp.status_code == 200
+        assert data["backlinks"] == []
+
+    def test_via_values_are_valid(self, client: TestClient):
+        backlinks = [
+            {"slug": "a:b", "name": "B", "entity_type": "OTHER", "via": "wikilink"},
+            {"slug": "a:c", "name": "C", "entity_type": "OTHER", "via": "mention"},
+            {"slug": "a:d", "name": "D", "entity_type": "OTHER", "via": "related"},
+        ]
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch(
+                "app.routers.wiki.get_backlinks",
+                return_value=backlinks,
+            ),
+        ):
+            resp = client.get("/wiki/entities/a:target/backlinks")
+
+        data = resp.json()
+        valid_via = {"wikilink", "mention", "related"}
+        for item in data["backlinks"]:
+            assert item["via"] in valid_via
+
+    def test_slug_is_forwarded_to_get_backlinks(self, client: TestClient):
+        captured: list[Any] = []
+
+        def _mock_get_backlinks(driver: Any, slug: str, limit: int = 50) -> list[dict[str, Any]]:
+            captured.append(slug)
+            return []
+
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_backlinks", side_effect=_mock_get_backlinks),
+        ):
+            client.get("/wiki/entities/person:test-entity/backlinks")
+
+        assert captured == ["person:test-entity"]
+
+    def test_neo4j_unavailable_returns_503(self, client: TestClient):
+        with patch("app.deps.get_neo4j", return_value=None):
+            resp = client.get("/wiki/entities/person:elon-musk/backlinks")
+        assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# POST /wiki/entities/{slug}/refresh — WK4 manual refresh
+# ---------------------------------------------------------------------------
+
+
+class TestManualRefresh:
+    def test_returns_202_on_success(self, client: TestClient):
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(return_value=_make_wiki_page())),
+            patch("app.routers.wiki.enqueue_refresh", return_value=True),
+        ):
+            resp = client.post("/wiki/entities/person:elon-musk/refresh")
+        assert resp.status_code == 202
+
+    def test_enqueues_with_force_true(self, client: TestClient):
+        captured: list[Any] = []
+
+        def _mock_enqueue(slug: str, *, force: bool = False) -> bool:
+            captured.append({"slug": slug, "force": force})
+            return True
+
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(return_value=_make_wiki_page())),
+            patch("app.routers.wiki.enqueue_refresh", side_effect=_mock_enqueue),
+        ):
+            client.post("/wiki/entities/person:elon-musk/refresh")
+
+        assert captured == [{"slug": "person:elon-musk", "force": True}]
+
+    def test_returns_404_when_entity_missing(self, client: TestClient):
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(return_value=None)),
+        ):
+            resp = client.post("/wiki/entities/nonexistent:slug/refresh")
+        assert resp.status_code == 404
+
+    def test_response_body_shape(self, client: TestClient):
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(return_value=_make_wiki_page())),
+            patch("app.routers.wiki.enqueue_refresh", return_value=True),
+        ):
+            resp = client.post("/wiki/entities/person:elon-musk/refresh")
+        data = resp.json()
+        assert "enqueued" in data
+        assert data["enqueued"] is True
+
+
+# ---------------------------------------------------------------------------
+# PATCH /wiki/entities/{slug} — WK4 manual summary edit
+# ---------------------------------------------------------------------------
+
+
+class TestManualSummaryEdit:
+    def test_returns_updated_page(self, client: TestClient):
+        updated_page = _make_wiki_page()
+        updated_page.summary = "User-edited summary."
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(side_effect=[
+                _make_wiki_page(),  # existence check
+                updated_page,       # after write
+            ])),
+            patch("app.routers.wiki.write_entity_summary"),
+            patch("app.routers.wiki.append_log_entry"),
+        ):
+            resp = client.patch(
+                "/wiki/entities/person:elon-musk",
+                json={"summary": "User-edited summary."},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"] == "User-edited summary."
+
+    def test_write_entity_summary_called_with_edited_by(self, client: TestClient):
+        captured: list[Any] = []
+
+        def _mock_write(driver: Any, slug: str, summary: str, summary_updated_at: str, *, edited_by: str = "") -> None:
+            captured.append({"slug": slug, "edited_by": edited_by})
+
+        updated_page = _make_wiki_page()
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(side_effect=[
+                _make_wiki_page(),
+                updated_page,
+            ])),
+            patch("app.routers.wiki.write_entity_summary", side_effect=_mock_write),
+            patch("app.routers.wiki.append_log_entry"),
+        ):
+            client.patch(
+                "/wiki/entities/person:elon-musk",
+                json={"summary": "Edited."},
+            )
+
+        assert len(captured) == 1
+        assert captured[0]["slug"] == "person:elon-musk"
+        assert captured[0]["edited_by"] == "user"
+
+    def test_append_log_entry_called_with_manual_edit(self, client: TestClient):
+        captured: list[Any] = []
+
+        def _mock_log(driver: Any, *, action: str, entity_slug: str | None, **kwargs: Any) -> str:
+            captured.append({"action": action, "entity_slug": entity_slug})
+            return "log-id"
+
+        updated_page = _make_wiki_page()
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(side_effect=[
+                _make_wiki_page(),
+                updated_page,
+            ])),
+            patch("app.routers.wiki.write_entity_summary"),
+            patch("app.routers.wiki.append_log_entry", side_effect=_mock_log),
+        ):
+            client.patch(
+                "/wiki/entities/person:elon-musk",
+                json={"summary": "Edited."},
+            )
+
+        assert len(captured) == 1
+        assert captured[0]["action"] == "manual_edit"
+        assert captured[0]["entity_slug"] == "person:elon-musk"
+
+    def test_returns_404_when_entity_missing(self, client: TestClient):
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.wiki.get_entity_page", new=AsyncMock(return_value=None)),
+        ):
+            resp = client.patch(
+                "/wiki/entities/nonexistent:slug",
+                json={"summary": "Hello."},
+            )
+        assert resp.status_code == 404

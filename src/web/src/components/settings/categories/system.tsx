@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import {
-  RefreshCw, Download, Upload, Trash2, AlertTriangle,
+  Download, Upload, AlertTriangle, RefreshCw,
 } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -22,8 +21,9 @@ import { getDef } from "@/lib/settings-registry"
 import {
   fetchSystemCheck, fetchStorageMetrics,
   triggerSyncExport, triggerSyncImport,
-  fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain,
 } from "@/lib/api"
+import { checkForUpdates } from "@/lib/api/updates"
+import type { UpdateCheckResult } from "@/lib/api/updates"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { ConnectionSection } from "@/components/settings/connection-section"
 import type { SettingsCategoryPageProps } from "./page-props"
@@ -38,6 +38,77 @@ function SectionCard({ title, children, className }: { title: string; children: 
       </CardHeader>
       <CardContent className="density-stack">{children}</CardContent>
     </Card>
+  )
+}
+
+// ── Update check ─────────────────────────────────────────────────────────────
+
+type UpdateState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "up-to-date" }
+  | { status: "available"; version: string; url: string | null }
+  | { status: "error"; message: string }
+
+function UpdateCheckButton() {
+  const [state, setState] = useState<UpdateState>({ status: "idle" })
+
+  const isDesktop =
+    typeof window !== "undefined" &&
+    !!(window as unknown as { cerid?: { app?: { checkUpdate?: unknown } } }).cerid?.app?.checkUpdate
+
+  const handleCheck = async () => {
+    setState({ status: "checking" })
+    try {
+      if (isDesktop) {
+        const bridge = (window as unknown as { cerid: { app: { checkUpdate: () => Promise<{ success: boolean }> } } }).cerid.app
+        await bridge.checkUpdate()
+        // Desktop updater handles its own UI (tray/dialog). Just show feedback.
+        setState({ status: "up-to-date" })
+        return
+      }
+      const result: UpdateCheckResult = await checkForUpdates(true)
+      if (result.error && !result.update_available) {
+        setState({ status: "error", message: result.error })
+      } else if (result.update_available) {
+        setState({ status: "available", version: result.latest ?? "", url: result.release_url ?? null })
+      } else {
+        setState({ status: "up-to-date" })
+      }
+    } catch (err) {
+      logSwallowedError(err, "system.checkForUpdates")
+      setState({ status: "error", message: err instanceof Error ? err.message : "Unknown error" })
+    }
+  }
+
+  return (
+    <div className="density-stack w-full">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => void handleCheck()}
+        disabled={state.status === "checking"}
+        className="gap-1.5 w-fit"
+        aria-label="Check for updates"
+      >
+        <RefreshCw className={cn("h-4 w-4", state.status === "checking" && "animate-spin")} />
+        {state.status === "checking" ? "Checking…" : "Check for updates"}
+      </Button>
+      {state.status === "up-to-date" && (
+        <p className="text-xs text-muted-foreground">Up to date</p>
+      )}
+      {state.status === "available" && (
+        <p className="text-xs text-emerald-600 dark:text-emerald-400">
+          Update available: v{state.version}
+          {state.url && (
+            <>{" — "}<a href={state.url} target="_blank" rel="noopener noreferrer" className="underline">Release notes</a></>
+          )}
+        </p>
+      )}
+      {state.status === "error" && (
+        <p className="text-xs text-muted-foreground">Could not check: {state.message}</p>
+      )}
+    </div>
   )
 }
 
@@ -59,6 +130,7 @@ function ServerInfoSection({ settings }: Pick<SettingsCategoryPageProps, "settin
       <SettingRow def={tierDef}>
         <ReadOnlyEnvHint envVar="CERID_TIER" />
       </SettingRow>
+      <UpdateCheckButton />
     </SectionCard>
   )
 }
@@ -387,182 +459,6 @@ function TogglesSection() {
   )
 }
 
-// ── KB Maintenance / Danger Zone ──────────────────────────────────────────────
-
-function KBMaintenanceSection() {
-  const qc = useQueryClient()
-  const rebuildDef = getDef("system.danger.rebuildIndexes")!
-  const rescoreDef = getDef("system.danger.rescore")!
-  const regenDef = getDef("system.danger.regenerateSummaries")!
-  const clearDomainDef = getDef("system.danger.clearDomain")!
-
-  const { data: kbStats, isLoading: statsLoading, isError: statsError, refetch: refetchStats } = useQuery({
-    queryKey: ["kb-stats"],
-    queryFn: fetchKBStats,
-    staleTime: 30_000,
-  })
-
-  const [rebuildResult, setRebuildResult] = useState<string | null>(null)
-  const [rescoreResult, setRescoreResult] = useState<string | null>(null)
-  const [regenResult, setRegenResult] = useState<string | null>(null)
-  const [clearDomainInput, setClearDomainInput] = useState("")
-  const [clearError, setClearError] = useState("")
-
-  return (
-    <SectionCard
-      title="KB Maintenance"
-      className="border-red-500/30"
-    >
-      <div className="flex items-center gap-2 pb-1">
-        <AlertTriangle className="h-4 w-4 text-destructive" />
-        <p className="text-xs text-destructive font-medium">
-          Danger Zone — these operations modify or delete knowledge base data.
-        </p>
-      </div>
-
-      {/* Stats */}
-      {statsLoading && <Skeleton className="h-16 w-full" />}
-      {statsError && (
-        <Alert variant="destructive">
-          <AlertDescription className="text-label-xs">
-            Failed to load KB stats.{" "}
-            <button type="button" onClick={() => void refetchStats()} className="underline">Retry</button>
-          </AlertDescription>
-        </Alert>
-      )}
-      {kbStats && (
-        <div className="rounded-md border p-3 text-xs text-muted-foreground density-stack">
-          <div className="flex gap-4">
-            <span><strong>{kbStats.total_artifacts}</strong> artifacts</span>
-            <span><strong>{kbStats.total_chunks}</strong> chunks</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void refetchStats()}
-              className="h-6 text-xs ml-auto gap-1"
-              aria-label="Refresh KB stats"
-            >
-              <RefreshCw className="h-3 w-3" />
-              Refresh Stats
-            </Button>
-          </div>
-          {Object.keys(kbStats.domains).length > 0 && (
-            <div className="divide-y divide-border rounded border mt-1">
-              {Object.entries(kbStats.domains).map(([domain, stats]) => (
-                <div key={domain} className="flex items-center justify-between px-2 py-1">
-                  <span className="font-medium">{domain}</span>
-                  <span>{stats.artifacts} / {stats.chunks}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <SettingRow def={rebuildDef}>
-        <div className="density-stack w-full">
-          <ConfirmActionButton
-            danger="confirm"
-            title="Rebuild indexes?"
-            description="Rebuilds BM25 keyword indexes for all domains. Takes 1–5 minutes. No data is deleted."
-            actionLabel="Rebuild Indexes"
-            onConfirm={async () => {
-              const result = await adminRebuildIndexes()
-              setRebuildResult(`${result.message} (${result.domains_rebuilt} domains)`)
-            }}
-            variant="outline"
-            size="sm"
-          >
-            Rebuild Indexes
-          </ConfirmActionButton>
-          {rebuildResult && <p className="text-xs text-muted-foreground">{rebuildResult}</p>}
-        </div>
-      </SettingRow>
-
-      <SettingRow def={rescoreDef}>
-        <div className="density-stack w-full">
-          <ConfirmActionButton
-            danger="confirm"
-            title="Rescore all artifacts?"
-            description="Re-computes quality scores for all artifacts. Takes 2–10 minutes. Does not change stored content."
-            actionLabel="Rescore All"
-            onConfirm={async () => {
-              const result = await adminRescore()
-              setRescoreResult(`${result.message} (${result.artifacts_scored} artifacts, avg quality ${result.avg_quality_score.toFixed(2)})`)
-            }}
-            variant="outline"
-            size="sm"
-          >
-            Rescore All
-          </ConfirmActionButton>
-          {rescoreResult && <p className="text-xs text-muted-foreground">{rescoreResult}</p>}
-        </div>
-      </SettingRow>
-
-      <SettingRow def={regenDef}>
-        <div className="density-stack w-full">
-          <ConfirmActionButton
-            danger="confirm"
-            title="Regenerate summaries?"
-            description="Re-runs LLM synopsis generation for all artifacts. Takes 5–20 minutes."
-            actionLabel="Regenerate Summaries"
-            onConfirm={async () => {
-              const result = await adminRegenerateSummaries()
-              setRegenResult(`${result.message} (${result.synopses_generated} generated)`)
-            }}
-            variant="outline"
-            size="sm"
-          >
-            Regenerate Summaries
-          </ConfirmActionButton>
-          {regenResult && <p className="text-xs text-muted-foreground">{regenResult}</p>}
-        </div>
-      </SettingRow>
-
-      <SettingRow def={clearDomainDef}>
-        <div className="density-stack w-full">
-          <p className="text-xs text-destructive">
-            Permanently deletes ALL chunks, embeddings, and artifacts in a domain. Cannot be undone.
-          </p>
-          <ConfirmActionButton
-            danger="type-to-confirm"
-            title="Clear domain — permanently delete all data?"
-            description="Type the domain name exactly to confirm this irreversible deletion."
-            confirmPhrase={clearDomainInput.trim() || "domain"}
-            actionLabel="Delete domain data"
-            onConfirm={async () => {
-              if (!clearDomainInput.trim()) throw new Error("Enter a domain name")
-              setClearError("")
-              try {
-                await adminClearDomain(clearDomainInput.trim())
-                setClearDomainInput("")
-                await qc.invalidateQueries({ queryKey: ["kb-stats"] })
-              } catch (err) {
-                setClearError(err instanceof Error ? err.message : "Clear failed")
-                logSwallowedError(err, "system.clearDomain")
-                throw err
-              }
-            }}
-            variant="destructive"
-            size="sm"
-          >
-            <Trash2 className="h-4 w-4 mr-1" />
-            Clear domain
-          </ConfirmActionButton>
-          <Input
-            value={clearDomainInput}
-            onChange={(e) => setClearDomainInput(e.target.value)}
-            placeholder="Enter domain name to clear"
-            className="h-8 max-w-xs text-sm"
-            aria-label="Domain to clear"
-          />
-          {clearError && <p className="text-xs text-destructive">{clearError}</p>}
-        </div>
-      </SettingRow>
-    </SectionCard>
-  )
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SystemCategory({ settings }: SettingsCategoryPageProps) {
@@ -575,7 +471,6 @@ export default function SystemCategory({ settings }: SettingsCategoryPageProps) 
       <SyncSection />
       <InfraSection />
       <TogglesSection />
-      <KBMaintenanceSection />
     </div>
   )
 }

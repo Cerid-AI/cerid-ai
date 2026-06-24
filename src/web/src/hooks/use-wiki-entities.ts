@@ -17,7 +17,11 @@ import type { EntitySummary, WikiEntityPage } from "@/lib/types/wiki"
 // Entity list
 // ---------------------------------------------------------------------------
 
-export function useWikiEntities({ limit = 30, q }: { limit?: number; q?: string } = {}): {
+export function useWikiEntities({
+  limit = 30,
+  q,
+  includeInternal = false,
+}: { limit?: number; q?: string; includeInternal?: boolean } = {}): {
   data: EntitySummary[] | undefined
   isLoading: boolean
   isError: boolean
@@ -25,8 +29,8 @@ export function useWikiEntities({ limit = 30, q }: { limit?: number; q?: string 
 } {
   const search = q?.trim() || undefined
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["wiki-entities", limit, search ?? null],
-    queryFn: () => fetchWikiEntities({ limit, q: search }),
+    queryKey: ["wiki-entities", limit, search ?? null, includeInternal],
+    queryFn: () => fetchWikiEntities({ limit, q: search, includeInternal }),
     staleTime: 5 * 60_000,
     refetchInterval: 60_000,
     retry: 1,

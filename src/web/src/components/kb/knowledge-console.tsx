@@ -26,8 +26,11 @@ import {
   ToggleRight,
   AlertCircle,
   Settings2,
+  Search,
 } from "lucide-react"
 import { Plus } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { DomainFilter } from "./domain-filter"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { cn } from "@/lib/utils"
 import { fetchDataSources, enableDataSource, disableDataSource, updateSettings } from "@/lib/api"
@@ -388,6 +391,12 @@ export function KnowledgeConsole({
   toggleMemory,
   toggleExternal,
   executionTime,
+  activeDomains,
+  toggleDomain,
+  manualQuery,
+  setManualQuery,
+  executeManualSearch,
+  clearManualSearch,
   onClose,
 }: KnowledgeConsoleProps) {
   const confidencePct = Math.round(confidence * 100)
@@ -414,6 +423,34 @@ export function KnowledgeConsole({
 
       {/* Live ingestion progress — appears when files are being ingested */}
       <IngestionProgress />
+
+      {/* CH7: domain filter + manual search (state already plumbed via props) */}
+      <div className="space-y-2 border-b px-3 py-2">
+        <div role="group" aria-label="Domain filter">
+          <DomainFilter activeDomains={activeDomains} onToggle={toggleDomain} />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Input
+            value={manualQuery}
+            onChange={(e) => setManualQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") executeManualSearch()
+              if (e.key === "Escape") clearManualSearch()
+            }}
+            placeholder="Search knowledge…"
+            aria-label="Manual knowledge search"
+            className="h-8"
+          />
+          <Button size="sm" variant="ghost" onClick={executeManualSearch} aria-label="Run search">
+            <Search className="h-4 w-4" />
+          </Button>
+          {manualQuery && (
+            <Button size="sm" variant="ghost" onClick={clearManualSearch} aria-label="Clear search">
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      </div>
 
       {/* Loading / error state */}
       {isLoading && (

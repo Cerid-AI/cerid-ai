@@ -731,6 +731,11 @@ export function Atlas({
     }
 
     const sigma = new Sigma(graph, container, {
+      // Tolerate a container that has no measured width yet at mount (e.g. the
+      // MiniGraph embedded in the narrow wiki infobox column before layout
+      // settles) — sigma renders once the container resizes. No-op for the
+      // full-width Atlas tab. Without this it throws "Container has no width".
+      allowInvalidContainer: true,
       renderLabels: true,
       labelSize: config.labelDensity === "dense" ? 13 : config.labelDensity === "sparse" ? 9 : 11,
       labelWeight: "500",

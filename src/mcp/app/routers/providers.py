@@ -408,16 +408,18 @@ async def get_provider_credits():
             result["usage_monthly"] = round(key_data.get("usage_monthly", 0), 2)
             result["is_free_tier"] = key_data.get("is_free_tier", False)
 
-            # Warning thresholds
-            balance = result.get("balance", 0)
-            if balance <= 0:
-                result["status"] = "exhausted"
-                result["warning"] = "Credits exhausted — add credits to continue using paid models"
-            elif balance < 5:
-                result["status"] = "low"
-                result["warning"] = f"Low credits (${balance:.2f} remaining)"
-            else:
-                result["status"] = "ok"
+        # CH-CREDITS: status/warning derive from balance unconditionally.
+        # Hoisted out of the /auth/key block so a /credits-200 +
+        # /auth/key-failure path still reports a deterministic status.
+        balance = result.get("balance", 0)
+        if balance <= 0:
+            result["status"] = "exhausted"
+            result["warning"] = "Credits exhausted — add credits to continue using paid models"
+        elif balance < 5:
+            result["status"] = "low"
+            result["warning"] = f"Low credits (${balance:.2f} remaining)"
+        else:
+            result["status"] = "ok"
     except Exception as e:
         logger.warning("OpenRouter credit check failed: %s", e)
         result["error"] = str(e)

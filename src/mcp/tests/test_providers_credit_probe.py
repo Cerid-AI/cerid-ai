@@ -96,3 +96,77 @@ async def test_close_openrouter_client_tears_down_shared_instance():
 
     mock_client.aclose.assert_awaited_once()
     assert providers_mod._openrouter_http_client is None
+
+
+@pytest.mark.asyncio
+async def test_status_set_when_auth_key_fails_but_credits_ok(monkeypatch):
+    """CH-CREDITS: /credits 200 but /auth/key non-200 must still set status.
+
+    Previously `status` was assigned only inside the /auth/key 200 block, so
+    a partial-success path left the field undefined. Status must derive from
+    balance unconditionally.
+    """
+    from app.routers import providers as providers_mod
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-123")
+
+    def _fake_client_factory(**kwargs):
+        client = MagicMock()
+        client.is_closed = False
+
+        async def _get(url, **kw):
+            resp = MagicMock()
+            if url.endswith("/credits"):
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "data": {"total_credits": 10.0, "total_usage": 2.0}
+                }
+            else:  # /auth/key fails
+                resp.status_code = 500
+                resp.json.return_value = {}
+            return resp
+
+        client.get = AsyncMock(side_effect=_get)
+        client.aclose = AsyncMock()
+        return client
+
+    with patch.object(providers_mod.httpx, "AsyncClient", side_effect=_fake_client_factory):
+        result = await providers_mod.get_provider_credits()
+
+    assert result["balance"] == 8.0
+    assert "status" in result
+    assert result["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_status_exhausted_when_balance_zero_and_auth_key_fails(monkeypatch):
+    """Zero balance + /auth/key failure must still report 'exhausted'."""
+    from app.routers import providers as providers_mod
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-123")
+
+    def _fake_client_factory(**kwargs):
+        client = MagicMock()
+        client.is_closed = False
+
+        async def _get(url, **kw):
+            resp = MagicMock()
+            if url.endswith("/credits"):
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "data": {"total_credits": 5.0, "total_usage": 5.0}
+                }
+            else:
+                resp.status_code = 503
+                resp.json.return_value = {}
+            return resp
+
+        client.get = AsyncMock(side_effect=_get)
+        client.aclose = AsyncMock()
+        return client
+
+    with patch.object(providers_mod.httpx, "AsyncClient", side_effect=_fake_client_factory):
+        result = await providers_mod.get_provider_credits()
+
+    assert result["balance"] == 0.0
+    assert result["status"] == "exhausted"

@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/sources"
 import { descriptorFor } from "./source-kind-icons"
 import { WebhookShareCard } from "./webhook-share-card"
+import { KindSpecificFields } from "./source-config-form"
 
 type WizardStep = "pick" | "configure" | "result"
 
@@ -300,97 +301,6 @@ function ConfigureStep({
           )}
         </Button>
       </div>
-    </div>
-  )
-}
-
-function KindSpecificFields({
-  kind,
-  providers,
-  config,
-  onConfig,
-}: {
-  kind: string
-  providers: string[]
-  config: Record<string, unknown>
-  onConfig: (v: Record<string, unknown>) => void
-}) {
-  // Webhook-backed typed kinds (chat_capture / dev_events): pick the provider
-  // whose recipe normalizes the inbound payload. A token is minted on create;
-  // the receiver URL is shown on the result step (WebhookShareCard).
-  if (providers.length > 0) {
-    return (
-      <div className="space-y-2">
-        <label className="text-xs font-medium text-foreground" htmlFor="provider">
-          Provider
-        </label>
-        <select
-          id="provider"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          value={String(config.provider ?? "")}
-          onChange={(e) => onConfig({ ...config, provider: e.target.value })}
-        >
-          <option value="" disabled>
-            Select a provider…
-          </option>
-          {providers.map((p) => (
-            <option key={p} value={p}>
-              {p.charAt(0).toUpperCase() + p.slice(1)}
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          A unique webhook token is minted automatically. The receiver URL
-          appears after the source is created — point {String(config.provider) || "the provider"}
-          ’s outgoing webhook at it.
-        </p>
-      </div>
-    )
-  }
-
-  if (kind === "rss" || kind === "url_watch") {
-    return (
-      <div>
-        <label className="text-xs font-medium text-foreground" htmlFor="url">
-          Feed URL
-        </label>
-        <input
-          id="url"
-          type="url"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          placeholder="https://example.com/feed.xml"
-          value={String(config.url ?? "")}
-          onChange={(e) => onConfig({ ...config, url: e.target.value })}
-        />
-      </div>
-    )
-  }
-
-  if (kind === "webhook") {
-    return (
-      <div className="space-y-2">
-        <p className="text-xs text-muted-foreground">
-          A unique token is minted automatically. The receiver URL appears
-          after the source is created.
-        </p>
-        <label className="flex cursor-pointer items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={Boolean(config.require_hmac)}
-            onChange={(e) =>
-              onConfig({ ...config, require_hmac: e.target.checked })
-            }
-          />
-          Require HMAC signature on inbound requests
-        </label>
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-md border border-dashed border-border/60 px-3 py-3 text-xs text-muted-foreground">
-      Configuration for this source kind ships in a follow-up phase. The
-      source will be created with default settings.
     </div>
   )
 }

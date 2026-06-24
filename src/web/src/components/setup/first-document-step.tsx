@@ -148,7 +148,15 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     try {
       // Scope query to the just-uploaded document only.
       // Skip reranking and use small top_k for speed — wizard just needs proof-of-life.
-      const wizardOpts = { queryScope: "document" as const, scopeRef: fileName ?? undefined, useReranking: false, skipCache: true }
+      // Pin retrieval to the uploaded doc: disable external (web/CRAG) and
+      // memory so the wizard proves KB retrieval, not a Wikipedia fallback.
+      const wizardOpts = {
+        queryScope: "document" as const,
+        scopeRef: fileName ?? undefined,
+        useReranking: false,
+        skipCache: true,
+        contextSources: { kb: true, memory: false, external: false },
+      }
       let result = await queryKB(text.trim(), ["general"], 3, undefined, wizardOpts)
       if (!result.results?.length) {
         for (const delay of [300, 800]) {

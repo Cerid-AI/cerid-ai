@@ -55,12 +55,21 @@ function ok(data: unknown) {
   })
 }
 
+const mockKBStats = {
+  total_artifacts: 20,
+  total_chunks: 80,
+  domains: {
+    code: { artifacts: 20, chunks: 80, avg_quality: 0.78, synopsis_candidates: 2 },
+  },
+}
+
 function mockApis() {
   return vi.fn().mockImplementation((url: string) => {
     if (url.includes("/watched-folders")) return ok({ folders: [], total: 0 })
     if (url.includes("/data-sources")) return ok({ sources: [], total: 0 })
     if (url.includes("/briefs/settings")) return ok({ write_to_vault: false, vault_id: null, vault_folder: "_briefs" })
     if (url.includes("/billing/capabilities")) return ok({ tier: "community", features: {}, buckets: {} })
+    if (url.includes("/admin/kb/stats")) return ok(mockKBStats)
     return ok({})
   })
 }
@@ -158,6 +167,36 @@ describe("KnowledgeCategory — data sources", () => {
     }))
     render(<KnowledgeCategory {...defaultProps} />, { wrapper })
     expect(await screen.findByText("Confluence")).toBeInTheDocument()
+  })
+})
+
+describe("KnowledgeCategory — KB maintenance (relocated from System, ST12)", () => {
+  it("shows KB Maintenance section with total counts", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<KnowledgeCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText("KB Maintenance")).toBeInTheDocument()
+    expect(await screen.findByText("20")).toBeInTheDocument()
+    expect(await screen.findByText("80")).toBeInTheDocument()
+  })
+
+  it("Rebuild Indexes button opens confirm dialog", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    const user = userEvent.setup()
+    render(<KnowledgeCategory {...defaultProps} />, { wrapper })
+    const btn = await screen.findByText("Rebuild Indexes")
+    await user.click(btn)
+    expect(await screen.findByText("Rebuild indexes?")).toBeInTheDocument()
+  })
+
+  it("Clear domain button opens type-to-confirm dialog", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    const user = userEvent.setup()
+    render(<KnowledgeCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("KB Maintenance")
+    const clearBtns = await screen.findAllByRole("button", { name: /clear domain/i })
+    const clearBtn = clearBtns.find((b) => !b.getAttribute("aria-label"))!
+    await user.click(clearBtn)
+    expect(await screen.findByText(/Clear domain.*permanently delete/i)).toBeInTheDocument()
   })
 })
 

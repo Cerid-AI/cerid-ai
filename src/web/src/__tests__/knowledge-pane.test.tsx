@@ -250,7 +250,17 @@ describe("KnowledgePane", () => {
 
   it("renders import button", () => {
     render(<KnowledgePane />, { wrapper: createWrapper() })
-    expect(screen.getByText("Import")).toBeInTheDocument()
+    expect(screen.getByText("Import folder")).toBeInTheDocument()
+  })
+
+  // ---- SR4: prominent add-data drop zone ----
+
+  it("renders the prominent add-data drop zone", () => {
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    expect(
+      screen.getByRole("button", { name: /add files to your knowledge base/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/drop files to add to your knowledge base/i)).toBeInTheDocument()
   })
 
   // ---- Duplicates button ----

@@ -1,14 +1,13 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef } from "react"
 import { ExternalLink, Network } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { TrustBandBadge, type TrustState } from "@/components/ui/trust-band-badge"
 import { MiniGraph } from "./mini-graph"
-import type { WikiEntityPage, ConfidenceBand } from "@/lib/types/wiki"
+import type { WikiEntityPage, ConfidenceBand, Completeness } from "@/lib/types/wiki"
 import { safeHttpUrl } from "@/lib/kb-utils"
 
 // ---------------------------------------------------------------------------
@@ -47,6 +46,18 @@ function formatRelativeTime(iso: string | null): string | null {
   } catch {
     return null
   }
+}
+
+const COMPLETENESS_LABEL: Record<Completeness, string> = {
+  stub: "Stub",
+  start: "Start",
+  full: "Full",
+}
+
+const COMPLETENESS_CLASS: Record<Completeness, string> = {
+  stub: "text-muted-foreground",
+  start: "text-warning-foreground",
+  full: "text-success-foreground",
 }
 
 function titleCase(s: string): string {
@@ -91,16 +102,6 @@ export function ArticleInfobox({
   onNavigateToConcept,
   onOpenAtlas,
 }: ArticleInfoboxProps) {
-  const activitySectionRef = useRef<HTMLElement | null>(null)
-
-  function scrollToActivity() {
-    if (typeof document === "undefined") return
-    const target = document.getElementById("wiki-section-activity")
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "start" })
-    }
-  }
-
   const trustState = confidenceBandToTrust(page.confidence_band)
   const relativeUpdated = formatRelativeTime(page.last_updated_at)
   const relativeRefreshDue = page.refresh_status === "due" && page.next_refresh_due
@@ -121,37 +122,15 @@ export function ArticleInfobox({
       className="gap-0 py-0 text-sm"
       aria-label={`${page.name} — article infobox`}
     >
-      {/* MiniGraph thumbnail — infobox image slot (amendment #3) */}
-      <div
-        className="relative cursor-pointer overflow-hidden rounded-t-xl border-b border-border/40"
-        onClick={scrollToActivity}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault()
-            scrollToActivity()
-          }
-        }}
-        role="button"
-        tabIndex={0}
-        aria-label={`Open ${page.name} activity graph`}
-        // drift-allowed: fixed height for the thumbnail slot
-        style={{ height: "140px" }}
-        ref={(el) => {
-          activitySectionRef.current = el as unknown as HTMLElement
-        }}
-      >
-        <div className="pointer-events-none h-full w-full">
-          <MiniGraph
-            entitySlug={page.slug}
-            entityName={page.name}
-          />
-        </div>
-        <div
-          className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-card/80 py-1 text-label-xs text-muted-foreground"
-          aria-hidden="true"
-        >
-          <span>Activity graph — click to expand</span>
-        </div>
+      {/* Graph context — infobox card slot (amendment #3), expanded by
+          default so the 1-hop neighborhood renders as a card without a
+          click. MiniGraph owns its own header + "Open in Atlas" affordance. */}
+      <div className="overflow-hidden rounded-t-xl border-b border-border/40 px-3 pt-3 pb-2">
+        <MiniGraph
+          entitySlug={page.slug}
+          entityName={page.name}
+          defaultExpanded
+        />
       </div>
 
       <CardContent className="px-3 py-2">
@@ -210,6 +189,18 @@ export function ArticleInfobox({
             {typeof page.mention_count === "number" && page.mention_count > 0 && (
               <InfoboxRow label="Mentions">
                 {page.mention_count.toLocaleString()}
+              </InfoboxRow>
+            )}
+
+            {/* Row 4b: Completeness (WK3) — always rendered when present */}
+            {page.completeness != null && (
+              <InfoboxRow label="Article">
+                <span
+                  className={COMPLETENESS_CLASS[page.completeness]}
+                  aria-label={`Article completeness: ${COMPLETENESS_LABEL[page.completeness]}`}
+                >
+                  {COMPLETENESS_LABEL[page.completeness]}
+                </span>
               </InfoboxRow>
             )}
 

@@ -588,6 +588,40 @@ async def retest_services() -> dict:
 # ---------------------------------------------------------------------------
 
 
+# GGUF quant suffix, case-insensitive: ".Q8_0", "-q4_K_M", "_Q5_0", etc.
+# The possessive `*+` makes the repetition non-backtracking, so this is
+# ReDoS-safe (the underscore-delimited groups can't backtrack ambiguously and
+# the suffix is `$`-anchored). dlint's DUO138 heuristic doesn't recognise
+# possessive quantifiers, so suppress it here — the construct is provably linear.
+_QUANT_SUFFIX_RE = re.compile(r"[._-]q\d+(?:_[a-z0-9]+)*+$", re.IGNORECASE)  # noqa: DUO138
+
+
+def _strip_quant_suffix(name: str) -> str:
+    """Strip a trailing GGUF quant tag so quant variants collapse onto the
+    real model name (``nomic-embed-text-v1.5.Q8_0`` -> ``nomic-embed-text-v1.5``)."""
+    return _QUANT_SUFFIX_RE.sub("", name)
+
+
+def _clean_ollama_models(raw_names: list[str]) -> list[str]:
+    """Reduce a raw ``/api/tags`` name list to real, de-duplicated models.
+
+    Drops ``sha256-...`` blob digests (internal content-addressed layers)
+    and collapses GGUF quant-variant duplicates (``*.Q8_0``, ``*-q4_K_M``)
+    onto their base model name. Order of first appearance is preserved.
+    """
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for name in raw_names:
+        if not name or name.startswith("sha256-"):
+            continue
+        base = _strip_quant_suffix(name)
+        if base in seen:
+            continue
+        seen.add(base)
+        cleaned.append(base)
+    return cleaned
+
+
 def _recommend_backend_from_hw(hw: "object") -> str:
     """Pick a sensible local-inference backend when start-cerid.sh did not
     propagate ``HOST_RECOMMENDED_LOCAL_BACKEND`` (e.g. dev-mode container
@@ -658,7 +692,8 @@ async def system_check(response: Response) -> dict:
                 resp = await client.get(f"{ollama_url}/api/tags")
                 if resp.status_code == 200:
                     data = resp.json()
-                    ollama_models = [m.get("name", "") for m in data.get("models", [])]
+                    raw_names = [m.get("name", "") for m in data.get("models", [])]
+                    ollama_models = _clean_ollama_models(raw_names)
                     ollama_detected = len(ollama_models) > 0
                 break
         except Exception:

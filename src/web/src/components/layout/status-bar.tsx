@@ -43,9 +43,16 @@ export function StatusBar({
   const { data: credits } = useQuery({
     queryKey: ["provider-credits"],
     queryFn: fetchProviderCredits,
-    refetchInterval: 60_000,
+    // CH-CREDITS: keep this responsive so a recovered backend status
+    // ("ok") clears a previously-cached "exhausted" footer promptly.
+    // Short stale window + frequent refetch + refetch on focus/reconnect;
+    // a successful fetch replaces the cached value (no placeholderData),
+    // so the indicator never sticks on a stale "exhausted" state.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     retry: 1,
-    staleTime: 30_000,
+    staleTime: 5_000,
   })
 
   const status = isLoading ? "loading" : isError ? "error" : health?.status ?? "unknown"

@@ -44,12 +44,19 @@ describe("ExtensionsCategory — 4-state matrix", () => {
     expect(document.querySelectorAll("[data-slot='skeleton']").length).toBeGreaterThanOrEqual(1)
   })
 
-  it("success: Plugins, MCP Servers, External APIs sections render", async () => {
+  it("success: Plugins, MCP Servers, External Knowledge Providers sections render", async () => {
     vi.stubGlobal("fetch", mockApis())
     render(<ExtensionsCategory />, { wrapper })
     expect(await screen.findByText("Plugins")).toBeInTheDocument()
     expect(screen.getByText("MCP Servers")).toBeInTheDocument()
-    expect(screen.getByText("External APIs")).toBeInTheDocument()
+    // ST7 — "External APIs" renamed to the clearer "External Knowledge Providers"
+    expect(screen.getByText("External Knowledge Providers")).toBeInTheDocument()
+  })
+
+  it("ST7: renders an intro that distinguishes the four extension types", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<ExtensionsCategory />, { wrapper })
+    expect(await screen.findByText(/Extend Cerid/i)).toBeInTheDocument()
   })
 
   it("error: plugins fetch failure shows retry link", async () => {

@@ -142,6 +142,34 @@ describe("HallucinationPanel", () => {
 })
 
 // ---------------------------------------------------------------------------
+// CH2: category-filter row layout constraint
+// ---------------------------------------------------------------------------
+
+describe("HallucinationPanel — category-filter row (CH2)", () => {
+  it("category-filter row is single-row (overflow-x-auto, no flex-wrap) and claim list still renders", () => {
+    const report = makeReport({
+      claims: [
+        makeClaim({ claim: "Verified claim", status: "verified", similarity: 0.95 }),
+        makeClaim({ claim: "Unverified claim", status: "unverified", similarity: 0.3 }),
+        makeClaim({ claim: "Uncertain claim", status: "uncertain", similarity: 0.6 }),
+        makeClaim({ claim: "Error claim", status: "error", similarity: 0.1 }),
+      ],
+      summary: { total: 4, verified: 1, unverified: 1, uncertain: 1, error: 1 },
+    })
+    render(<HallucinationPanel report={report} loading={false} featureEnabled={true} />)
+
+    const filterRow = document.querySelector('[data-testid="claim-category-filter"]')
+    expect(filterRow).not.toBeNull()
+    expect(filterRow!.className).toContain("overflow-x-auto")
+    expect(filterRow!.className).not.toContain("flex-wrap")
+
+    expect(screen.getByText("Verified claim")).toBeInTheDocument()
+    expect(screen.getByText("Unverified claim")).toBeInTheDocument()
+    expect(screen.getByText("Uncertain claim")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // D.2: four-state matrix
 // ---------------------------------------------------------------------------
 

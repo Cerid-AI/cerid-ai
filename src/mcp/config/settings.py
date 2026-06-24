@@ -274,6 +274,15 @@ VERIFICATION_STALENESS_WINDOW_DAYS = int(
 # your hardware is slow enough that this isn't enough budget.
 AGENT_QUERY_BUDGET_SECONDS = float(os.getenv("AGENT_QUERY_BUDGET_SECONDS", "20.0"))
 
+# CH4: follow-up (conversation) retrieval fans out across every domain with a
+# conversation-enriched query; on CPU inference that all-domain rerank blows the
+# budget above. Cap the fan-out to the most-likely domains and trim per-domain
+# candidate depth so follow-ups stay within budget while partial retrieval stays
+# coherent. Both apply ONLY to follow-ups with no explicit domain filter; set to
+# 0 to disable. Fresh (non-conversation) queries still search all domains.
+AGENT_QUERY_FOLLOWUP_MAX_DOMAINS = int(os.getenv("AGENT_QUERY_FOLLOWUP_MAX_DOMAINS", "6"))
+AGENT_QUERY_FOLLOWUP_TOP_K = int(os.getenv("AGENT_QUERY_FOLLOWUP_TOP_K", "5"))
+
 # ---------------------------------------------------------------------------
 # Storage Monitoring
 # ---------------------------------------------------------------------------
@@ -549,6 +558,12 @@ VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35
 STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "15"))
 # Extended timeout for expert-tier models (Grok 4 with :online web search)
 STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "30"))
+# CH5: cross-model + web claim verification run on OpenRouter (call_llm_raw).
+# The old hardcoded 12s cross-model cap was too tight for cloud latency under
+# the verify semaphore — claims timed out and were regenerated. More generous
+# and env-tunable; STREAMING_TOTAL_TIMEOUT below still backstops total runtime.
+STREAMING_CROSS_MODEL_CLAIM_TIMEOUT = float(os.getenv("STREAMING_CROSS_MODEL_CLAIM_TIMEOUT", "18"))
+STREAMING_WEB_CLAIM_TIMEOUT = float(os.getenv("STREAMING_WEB_CLAIM_TIMEOUT", "25"))
 # Total deadline for the entire streaming verification loop (all claims).
 STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
 # Fewer LLM retries on 429 during streaming to avoid compounding delays
