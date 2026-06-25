@@ -50,6 +50,10 @@ CVE-2026-3833
 # code). No upstream fix yet.
 # Re-evaluate: 2026-06-30.
 CVE-2026-7598
+# libssh2 out-of-bounds write via unchecked length (libssh2-1t64 1.11.1-1,
+# no fixed version published as of 2026-06-24) — same unused-SSH-surface
+# rationale as above. Re-evaluate: 2026-06-30.
+CVE-2026-55200
 
 # GnuTLS authentication bypass via NUL character in cert names — we
 # don't perform certificate subject-name matching against attacker-
