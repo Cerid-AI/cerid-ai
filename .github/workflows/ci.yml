@@ -377,6 +377,10 @@ jobs:
           # libssh2 vuln — pulled in transitively by base image; no SSH client ever invoked
           # from application code. No upstream fix; re-eval 2026-06-30.
           CVE-2026-7598
+          # libssh2 out-of-bounds write via unchecked length (libssh2-1t64 1.11.1-1) —
+          # same unused-SSH-surface rationale as CVE-2026-7598; no SSH from application
+          # code. No upstream fix in Debian 13; re-eval 2026-06-30.
+          CVE-2026-55200
           # libcurl wrong file transfer via incorrect SMB handling — application code
           # uses httpx for all HTTP I/O; the SMB protocol is never invoked. libcurl is
           # pulled in transitively by the Debian 13 base. No upstream Debian fix yet;
