@@ -49,6 +49,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import config
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
@@ -414,18 +415,28 @@ class ComputeUmap3DJob(BaseJob):
     # -----------------------------------------------------------------
 
     def _fetch_edges(self, driver: Any) -> list[tuple[str, str, float]]:
-        """CO_MENTIONED pairs + weight — the springs of the force layout."""
+        """CO_MENTIONED + SIMILAR_TO pairs + weight — the springs of the force layout.
+
+        SIMILAR_TO edges are down-weighted by SEMANTIC_EDGE_SPRING_SCALE (default 0.6)
+        so co-mention co-occurrence structure stays dominant.
+        """
         cypher = f"""
-            MATCH (a:Entity)-[r:CO_MENTIONED]->(b:Entity)
+            MATCH (a:Entity)-[r:CO_MENTIONED|SIMILAR_TO]->(b:Entity)
             WHERE a.canonical_id IS NOT NULL AND b.canonical_id IS NOT NULL
             RETURN a.canonical_id AS s, b.canonical_id AS t,
-                   coalesce(r.weight, 1.0) AS w
+                   coalesce(r.weight, r.score, 1.0) AS w,
+                   type(r) AS rel_type
             LIMIT {_MAX_EDGES}
         """
+        spring_scale = config.SEMANTIC_EDGE_SPRING_SCALE
         try:
             with driver.session() as session:
                 return [
-                    (row["s"], row["t"], float(row["w"]))
+                    (
+                        row["s"],
+                        row["t"],
+                        float(row["w"]) * (spring_scale if row["rel_type"] == "SIMILAR_TO" else 1.0),
+                    )
                     for row in session.run(cypher).data()
                 ]
         except (OSError, RuntimeError, ValueError) as exc:

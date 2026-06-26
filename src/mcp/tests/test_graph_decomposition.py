@@ -480,7 +480,10 @@ def _make_map_driver():
 
     def _run(query, **kwargs):
         result = MagicMock()
-        if "CO_MENTIONED" in query:
+        if "count(e)" in query:
+            result.data = lambda: [{"isolated_count": 0}]
+        elif ")-[r:" in query:
+            # link query: MATCH (a:Entity)-[r:CO_MENTIONED|SIMILAR_TO]->
             result.data = lambda: []
         else:
             result.data = lambda: [
@@ -522,7 +525,7 @@ def test_map_unknown_layout_returns_422():
 
 
 def test_map_force_layout_uses_force_cache_key():
-    """?layout=force → cache key is cerid:graph:emb3d:v3:map:force."""
+    """?layout=force → cache key is cerid:graph:emb3d:v5:map:force."""
     from app.routers import graph as graph_router
 
     redis = _make_redis()
@@ -534,7 +537,7 @@ def test_map_force_layout_uses_force_cache_key():
         r = TestClient(app).get("/graph/map?layout=force")
 
     assert r.status_code == 200
-    assert "cerid:graph:emb3d:v3:map:force" in redis._state
+    assert "cerid:graph:emb3d:v5:map:force" in redis._state
 
 
 def test_map_omit_layout_same_as_force():
@@ -555,7 +558,7 @@ def test_map_omit_layout_same_as_force():
     assert r1.status_code == 200
     assert r2.status_code == 200
     # Both should end up in the same cache key
-    assert "cerid:graph:emb3d:v3:map:force" in redis._state
+    assert "cerid:graph:emb3d:v5:map:force" in redis._state
 
 
 def test_map_non_default_layout_fallback_when_no_artifact():

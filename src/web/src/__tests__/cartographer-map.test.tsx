@@ -136,8 +136,8 @@ function makeGraphMapData(overrides: Partial<GraphMapResponse> = {}): GraphMapRe
       },
     ],
     links: [
-      [0, 1, 3.0],
-      [1, 2, 1.5],
+      [0, 1, 3.0, "co_mention"],
+      [1, 2, 1.5, "co_mention"],
     ],
     communities: [
       {
@@ -161,6 +161,7 @@ function makeGraphMapData(overrides: Partial<GraphMapResponse> = {}): GraphMapRe
     silhouette: 0.72,
     computed_at: "2026-06-09T00:00:00Z",
     cached: false,
+    isolated_count: 0,
     ...overrides,
   }
 }

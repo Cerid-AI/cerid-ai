@@ -2,17 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Neural linkage renderer for Constellation. One LineSegments draw call
-// for all CO_MENTIONED edges, with a custom additive shader that gives
-// the graph its nervous-system quality:
+// for all edges, with a custom additive shader that gives the graph its
+// nervous-system quality:
 //
-//   - Base lines: faint community-tinted strands (gradient from source
-//     community color to target community color along each edge).
+//   - Base lines: community-tinted strands (gradient from source community
+//     color to target community color along each edge). co_mention edges
+//     render brighter (teal-neutral); similar edges render dimmer/cooler.
 //   - Synaptic pulses: a bright teal-white band travels source→target
 //     on each edge, phase-offset per edge so the whole graph shimmers
 //     with asynchronous firing instead of strobing in lockstep.
 //   - Organic growth: each edge draws itself in source→target after its
 //     birth time. New edges arriving on a corpus refetch get fresh birth
 //     times, so the web visibly grows where the knowledge grew.
+//
+// Kind distinction: aIsSimilar=0 → co_mention (base alpha × 1.0, full
+// weight floor); aIsSimilar=1 → similar (dimmer, cooler tone). Passed as
+// a per-vertex float attribute so the shader can branch without a uniform
+// change per-draw.
 //
 // Perf: ~16K edges = 32K vertices, ONE draw call, zero per-frame CPU
 // work (the only mutation is the uTime uniform). Additive blending +
@@ -32,8 +38,8 @@ import { communityRgb, hash01 } from "./palette"
 
 export interface NeuralLinksProps {
   entities: EntityEmbedding3D[]
-  /** [sourceIdx, targetIdx, weight] triples indexing into entities */
-  links: [number, number, number][]
+  /** [sourceIdx, targetIdx, weight, kind] 4-tuples indexing into entities; kind is "co_mention" or "similar" */
+  links: [number, number, number, string][]
   /** When false (reduced motion), edges render fully grown and pulses freeze. */
   animate?: boolean
   /** Quality toggle: synaptic pulse animation on/off (growth unaffected). */
@@ -57,6 +63,7 @@ const VERTEX_SHADER = /* glsl */ `
   attribute float aWeight;
   attribute float aBirth;
   attribute float aDim;
+  attribute float aIsSimilar;
 
   varying vec3 vColor;
   varying float vT;
@@ -64,6 +71,7 @@ const VERTEX_SHADER = /* glsl */ `
   varying float vWeight;
   varying float vBirth;
   varying float vDim;
+  varying float vIsSimilar;
 
   void main() {
     vColor = aColor;
@@ -72,6 +80,7 @@ const VERTEX_SHADER = /* glsl */ `
     vWeight = aWeight;
     vBirth = aBirth;
     vDim = aDim;
+    vIsSimilar = aIsSimilar;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
@@ -87,6 +96,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   varying float vWeight;
   varying float vBirth;
   varying float vDim;
+  varying float vIsSimilar;
 
   void main() {
     // Growth: the edge draws in from source (t=0) to target (t=1) over
@@ -96,24 +106,58 @@ const FRAGMENT_SHADER = /* glsl */ `
     float drawn = 1.0 - smoothstep(grow - 0.12, grow, vT);
     if (drawn <= 0.001) discard;
 
+    // Kind-aware weight floor: co_mention edges are the relational signal
+    // so they get a higher floor (0.5). similar edges are secondary and
+    // read as a calm cooler/dimmer secondary tone (floor 0.35, scale 0.55).
+    float weightFloor = mix(0.5, 0.35, vIsSimilar);
+    float weightScale = mix(0.5, 0.65, vIsSimilar);
+    float kindAlphaScale = mix(1.0, 0.55, vIsSimilar);
+
     // Base strand: stronger edges are more present, but everything stays
-    // calm — the pulses carry the energy. vDim implements neighborhood
+    // legible — the pulses carry the energy. vDim implements neighborhood
     // focus: 1 = neutral, >1 = highlighted (hover), <1 = receded.
-    float alpha = uBaseAlpha * (0.35 + 0.65 * vWeight) * drawn * vDim;
+    float alpha = uBaseAlpha * (weightFloor + weightScale * vWeight) * drawn * vDim * kindAlphaScale;
+
+    // Clamp max alpha so hub nodes with many edges don't smear into a blob.
+    alpha = min(alpha, 0.72);
 
     // Synaptic pulse: a narrow band travels 0→1, speed and phase vary
     // per edge. Brighter + whiter at the band's core.
+    // Cap: pulse never exceeds the base alpha it rides on (capped at alpha).
     float speed = 0.10 + 0.14 * vSeed;
     float p = fract(uTime * speed + vSeed * 7.31);
     float band = 1.0 - smoothstep(0.0, 0.055, abs(vT - p));
-    float pulse = band * band * uPulseAmp * (0.45 + 0.55 * vWeight) * min(vDim, 1.6);
+    float rawPulse = band * band * uPulseAmp * (0.45 + 0.55 * vWeight) * min(vDim, 1.6);
+    float pulse = min(rawPulse, alpha);
 
-    vec3 pulseColor = mix(vColor, vec3(0.55, 1.0, 0.88), 0.75);
+    // similar edges get a cooler/dimmer pulse color (cooler teal-blue tone);
+    // co_mention gets the warm teal-white pulse.
+    vec3 coMentionPulseColor = mix(vColor, vec3(0.55, 1.0, 0.88), 0.75);
+    vec3 similarPulseColor   = mix(vColor, vec3(0.45, 0.72, 0.95), 0.60);
+    vec3 pulseColor = mix(coMentionPulseColor, similarPulseColor, vIsSimilar);
+
     vec3 color = vColor * alpha + pulseColor * pulse;
 
     gl_FragColor = vec4(color, min(alpha + pulse, 1.0));
   }
 `
+
+/**
+ * aDim value applied to edges that are NOT connected to the hovered/selected
+ * node. Decisive fade so the focal-node subgraph pops clearly.
+ * Exported for unit tests.
+ */
+export const NON_NEIGHBOR_EDGE_DIM = 0.06
+
+/**
+ * Maps a link `kind` string to the per-vertex `aIsSimilar` shader attribute
+ * value: 0.0 for co_mention (primary, brighter), 1.0 for similar (secondary,
+ * dimmer/cooler). Pure function — extracted so tests can verify the mapping
+ * without spinning up WebGL geometry.
+ */
+export function kindToIsSimilar(kind: string): number {
+  return kind === "similar" ? 1.0 : 0.0
+}
 
 export function NeuralLinks({
   entities,
@@ -142,13 +186,14 @@ export function NeuralLinks({
     const seeds = new Float32Array(n * 2)
     const weights = new Float32Array(n * 2)
     const births = new Float32Array(n * 2)
+    const isSimilarArr = new Float32Array(n * 2)
 
     let maxW = 1
     for (const [, , w] of links) maxW = Math.max(maxW, w)
 
     let newEdgeRank = 0
     for (let i = 0; i < n; i++) {
-      const [si, ti, w] = links[i]
+      const [si, ti, w, kind] = links[i]
       const s = entities[si]
       const t = entities[ti]
       if (!s || !t) continue
@@ -180,6 +225,10 @@ export function NeuralLinks({
       const wNorm = Math.log1p(w) / Math.log1p(maxW)
       weights[v] = wNorm; weights[v + 1] = wNorm
 
+      // Kind attribute: 0 = co_mention (primary), 1 = similar (secondary/dimmer).
+      const isSimilar = kindToIsSimilar(kind)
+      isSimilarArr[v] = isSimilar; isSimilarArr[v + 1] = isSimilar
+
       // Birth: previously seen edges are born in the past (instantly
       // grown); new edges stagger in over ~2.5s in discovery order,
       // anchored to the CURRENT shader clock so mid-session corpus
@@ -199,6 +248,11 @@ export function NeuralLinks({
     geom.setAttribute("aWeight", new BufferAttribute(weights, 1))
     geom.setAttribute("aBirth", new BufferAttribute(births, 1))
     geom.setAttribute("aDim", new BufferAttribute(new Float32Array(n * 2).fill(1), 1))
+    geom.setAttribute("aIsSimilar", new BufferAttribute(isSimilarArr, 1))
+    // Required for frustumCulled=true: computes a tight bounding sphere over
+    // all line endpoints so the renderer can skip the draw call when the graph
+    // is scrolled fully off-screen.
+    geom.computeBoundingSphere()
     return geom
   }, [entities, links, lensColors])
 
@@ -213,7 +267,7 @@ export function NeuralLinks({
       const [si, ti] = links[i]
       let v = Math.min(visibility?.[si] ?? 1, visibility?.[ti] ?? 1)
       if (hoveredIndex !== null && hoveredIndex !== undefined) {
-        v = (si === hoveredIndex || ti === hoveredIndex) ? Math.max(v, 1) * 3.0 : Math.min(v, 0.4)
+        v = (si === hoveredIndex || ti === hoveredIndex) ? Math.max(v, 1) * 3.0 : Math.min(v, NON_NEIGHBOR_EDGE_DIM)
       }
       arr[i * 2] = v
       arr[i * 2 + 1] = v
@@ -227,8 +281,11 @@ export function NeuralLinks({
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
         uTime: { value: animate ? 0 : 1000 },
-        uPulseAmp: { value: animate ? 1.0 : 0.0 },
-        uBaseAlpha: { value: 0.12 },
+        // Cap at 0.7 so pulses never exceed the base alpha they ride on
+        // (the fragment shader clamps pulse to alpha, but lowering uPulseAmp
+        // prevents over-bright bursts on already-bright hub edges).
+        uPulseAmp: { value: animate ? 0.7 : 0.0 },
+        uBaseAlpha: { value: 0.28 },
       },
       transparent: true,
       depthWrite: false,
@@ -248,7 +305,7 @@ export function NeuralLinks({
 
   // Quality tier can flip pulses without remounting the geometry.
   useEffect(() => {
-    material.uniforms.uPulseAmp.value = animate && pulses ? 1.0 : 0.0
+    material.uniforms.uPulseAmp.value = animate && pulses ? 0.7 : 0.0
   }, [material, animate, pulses])
 
   // Single uniform tick — the GPU does everything else.
@@ -261,5 +318,5 @@ export function NeuralLinks({
 
   if (links.length === 0) return null
 
-  return <lineSegments ref={lineRef} args={[geometry, material]} frustumCulled={false} />
+  return <lineSegments ref={lineRef} args={[geometry, material]} />
 }

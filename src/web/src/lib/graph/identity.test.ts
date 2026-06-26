@@ -39,6 +39,7 @@ const TOKENS: MapTokens = {
   trustVerified:   "#004488", // drift-allowed: test stub only
   trustPartial:    "#884400", // drift-allowed: test stub only
   trustUnverified: "#880000", // drift-allowed: test stub only
+  graphite:        "#6b7080", // drift-allowed: test stub only
   grid:          "#EEEEEE", // drift-allowed: test stub only
   fontSans:      "system-ui, sans-serif", // drift-allowed: test stub only
 }

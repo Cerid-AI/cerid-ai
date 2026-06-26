@@ -11,6 +11,7 @@ Tests:
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 
@@ -295,6 +296,84 @@ def test_hash01_range_and_determinism():
     v2 = ComputeUmap3DJob._hash01("test-community")
     assert v1 == v2
     assert 0.0 <= v1 < 1.0
+
+
+# ---- _fetch_edges: SIMILAR_TO edges included and down-weighted ---------------
+
+
+class _MockRow(dict):
+    """Minimal stand-in for a Neo4j result row."""
+
+
+def _make_mock_driver(rows: list[dict]) -> Any:
+    """Build a mock Neo4j driver whose session().run().data() returns *rows*."""
+    from unittest.mock import MagicMock
+
+    row_objects = [_MockRow(r) for r in rows]
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+    mock_session.run.return_value.data.return_value = row_objects
+
+    mock_driver = MagicMock()
+    mock_driver.session.return_value = mock_session
+    return mock_driver
+
+
+def test_fetch_edges_includes_similar_to_edges():
+    """_fetch_edges must return SIMILAR_TO edges in addition to CO_MENTIONED."""
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    rows = [
+        {"s": "entity-a", "t": "entity-b", "w": 3.0, "rel_type": "CO_MENTIONED"},
+        {"s": "entity-c", "t": "entity-d", "w": 0.9, "rel_type": "SIMILAR_TO"},
+    ]
+    driver = _make_mock_driver(rows)
+    job = ComputeUmap3DJob()
+    edges = job._fetch_edges(driver)
+
+    ids = {(s, t) for s, t, _ in edges}
+    assert ("entity-a", "entity-b") in ids, "CO_MENTIONED edge missing"
+    assert ("entity-c", "entity-d") in ids, "SIMILAR_TO edge missing"
+
+
+def test_fetch_edges_similar_to_downweighted():
+    """SIMILAR_TO edge weight must be scaled by SEMANTIC_EDGE_SPRING_SCALE (default 0.6)."""
+    import config
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    scale = config.SEMANTIC_EDGE_SPRING_SCALE
+    raw_score = 0.9
+    rows = [
+        {"s": "entity-c", "t": "entity-d", "w": raw_score, "rel_type": "SIMILAR_TO"},
+    ]
+    driver = _make_mock_driver(rows)
+    job = ComputeUmap3DJob()
+    edges = job._fetch_edges(driver)
+
+    assert len(edges) == 1
+    s, t, w = edges[0]
+    assert s == "entity-c"
+    assert t == "entity-d"
+    expected = raw_score * scale
+    assert abs(w - expected) < 1e-9, f"Expected weight {expected}, got {w}"
+
+
+def test_fetch_edges_co_mentioned_not_downweighted():
+    """CO_MENTIONED edge weight must NOT be scaled — only SIMILAR_TO edges are."""
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    raw_weight = 5.0
+    rows = [
+        {"s": "entity-a", "t": "entity-b", "w": raw_weight, "rel_type": "CO_MENTIONED"},
+    ]
+    driver = _make_mock_driver(rows)
+    job = ComputeUmap3DJob()
+    edges = job._fetch_edges(driver)
+
+    assert len(edges) == 1
+    _, _, w = edges[0]
+    assert abs(w - raw_weight) < 1e-9, f"CO_MENTIONED weight altered: expected {raw_weight}, got {w}"
 
 
 # ---- module-level import needed for test ----

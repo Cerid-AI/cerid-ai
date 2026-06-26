@@ -72,7 +72,8 @@ class TestExtractEntities:
         assert len(result) == 2
         assert isinstance(result[0], Entity)
         assert result[0].canonical_id == "person:elon-musk"
-        assert result[1].canonical_id == "org:apple-inc"
+        # Tier-B normalization strips "Inc." → org:apple (correct post-resolution canonical)
+        assert result[1].canonical_id == "org:apple"
 
     async def test_unknown_type_dropped(self):
         caller = _llm_caller_returning({
@@ -104,7 +105,8 @@ class TestExtractEntities:
                 {"name": "Y", "type": "ORG", "confidence": -0.3},
             ]
         })
-        result = await extract_entities_from_text("test", llm_caller=caller)
+        # min_confidence=0.0 disables the floor so we can test clamping in isolation.
+        result = await extract_entities_from_text("test", llm_caller=caller, min_confidence=0.0)
         # Both pass canonicalisation with non-empty slugs.
         confidences = {e.canonical_id: e.confidence for e in result}
         assert confidences["org:x"] == 1.0
@@ -146,3 +148,38 @@ class TestExtractEntities:
         caller = _llm_caller_returning({"wrong_shape": True})  # type: ignore[arg-type]
         # parse_llm_json returns the dict; missing "entities" key → empty.
         assert await extract_entities_from_text("test", llm_caller=caller) == []
+
+    async def test_confidence_floor_drops_low_confidence_entity(self):
+        """Entities below min_confidence are filtered out at extraction time."""
+        caller = _llm_caller_returning({
+            "entities": [
+                {"name": "Apple Inc.", "type": "ORG", "confidence": 0.9},
+                {"name": "Some Junk", "type": "ORG", "confidence": 0.3},
+            ]
+        })
+        result = await extract_entities_from_text(
+            "test", llm_caller=caller, min_confidence=0.5
+        )
+        assert len(result) == 1
+        # Tier-B normalization strips "Inc." → org:apple (correct post-resolution canonical)
+        assert result[0].canonical_id == "org:apple"
+
+    async def test_confidence_floor_default_applied(self):
+        """Default threshold (ENTITY_MIN_CONFIDENCE = 0.5) is applied when not overridden."""
+        from config.settings import ENTITY_MIN_CONFIDENCE
+
+        caller_low = _llm_caller_returning({
+            "entities": [
+                {"name": "Below Floor", "type": "ORG", "confidence": ENTITY_MIN_CONFIDENCE - 0.01},
+            ]
+        })
+        result_low = await extract_entities_from_text("test", llm_caller=caller_low)
+        assert result_low == [], "entity below default floor must be dropped"
+
+        caller_high = _llm_caller_returning({
+            "entities": [
+                {"name": "Above Floor", "type": "ORG", "confidence": ENTITY_MIN_CONFIDENCE},
+            ]
+        })
+        result_high = await extract_entities_from_text("test", llm_caller=caller_high)
+        assert len(result_high) == 1, "entity at or above default floor must survive"

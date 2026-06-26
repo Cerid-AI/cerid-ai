@@ -33,14 +33,17 @@ export interface Embeddings3DResponse {
   count: number
   entities: EntityEmbedding3D[]
   /**
-   * CO_MENTIONED linkage as [sourceIdx, targetIdx, weight] triples
-   * indexing into `entities`. Drives the neural-net edge layer.
+   * CO_MENTIONED and SIMILAR_TO linkage as [sourceIdx, targetIdx, weight, kind]
+   * 4-tuples indexing into `entities`. kind is "co_mention" or "similar".
+   * Drives the neural-net edge layer.
    */
-  links: [number, number, number][]
+  links: [number, number, number, string][]
   /** Whether served from cache */
   cached: boolean
   /** ISO timestamp the projection was last computed */
   computed_at: string | null
+  /** Number of isolated (degree-0) entities excluded from the graph when include_isolated=false */
+  isolated_count: number
 }
 
 export interface FetchEmbeddings3DOptions {
@@ -48,6 +51,8 @@ export interface FetchEmbeddings3DOptions {
   entities?: string[]
   /** Restrict by entity type */
   filter?: string | null
+  /** When true, include isolated (degree-0) entities in the response */
+  includeIsolated?: boolean
   signal?: AbortSignal
 }
 
@@ -57,6 +62,8 @@ export async function fetchEmbeddings3D(
   const url = mcpUrl("/graph/embeddings/3d", {
     entities: options.entities && options.entities.length > 0 ? options.entities.join(",") : undefined,
     filter: options.filter ?? undefined,
+    // Omit the param when false to keep default URLs cache-stable.
+    ...(options.includeIsolated ? { include_isolated: "true" } : {}),
   })
   const res = await fetch(url.toString(), { headers: mcpHeaders(), signal: options.signal })
   if (!res.ok) throw new Error(await extractError(res, `3D embeddings fetch failed: ${res.status}`))

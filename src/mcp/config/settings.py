@@ -187,6 +187,8 @@ SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * 
 #  - Constellation 3D coords (fallback layout, no LLM) — nightly 03:30 UTC.
 #  - Memory archival sweep (safe, no LLM re-abstraction) — weekly, Sunday 05:00.
 SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0")
+# Per-entity embeddings — 15 min before compute_umap_3d so layout picks up fresh vectors.
+SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS = os.getenv("SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *")
 SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
 # Entity trust_state derivation — 1 min after compute_umap_3d.
 SCHEDULE_COMPUTE_TRUST_STATE = os.getenv("SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *")
@@ -198,6 +200,19 @@ SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 
 # large corpus can't issue an unbounded GPU batch. skip-existing already bounds
 # steady state; this bounds the cold-start. 0 / unset = no cap.
 COMMUNITY_SUMMARY_MAX_PER_RUN = int(os.getenv("COMMUNITY_SUMMARY_MAX_PER_RUN", "200"))
+
+# Semantic kNN edges (SIMILAR_TO) — Task 3.2.
+# Runs inside the nightly compute_umap_3d cadence after entity embeddings
+# are computed but before layout so force-layout springs include semantic edges.
+SEMANTIC_EDGE_ENABLED: bool = os.getenv("SEMANTIC_EDGE_ENABLED", "true").lower() in ("1", "true")
+SEMANTIC_EDGE_K: int = int(os.getenv("SEMANTIC_EDGE_K", "10"))
+SEMANTIC_EDGE_THRESHOLD: float = float(os.getenv("SEMANTIC_EDGE_THRESHOLD", "0.66"))
+# Down-weight factor applied to SIMILAR_TO edge weights in the force layout so
+# co-mention co-occurrence structure stays dominant over semantic similarity.
+SEMANTIC_EDGE_SPRING_SCALE: float = float(os.getenv("SEMANTIC_EDGE_SPRING_SCALE", "0.6"))
+# Cron schedule for the SIMILAR_TO kNN edge materialisation job (runs between
+# entity-embeddings at 3:15 and compute_umap_3d at 3:30). Empty string disables.
+SCHEDULE_BUILD_SIMILARITY_EDGES = os.getenv("SCHEDULE_BUILD_SIMILARITY_EDGES", "22 3 * * *")
 
 # Webhook-inbox drain: the receiver (POST /sdk/v1/ingest/webhook/{token}) returns
 # 202 and rpush'es normalized artifacts onto cerid:webhook_inbox:{source_id};
@@ -436,6 +451,22 @@ GRAPH_RELATIONSHIP_TYPES = [
     "EMBEDS",           # Obsidian-style ![[embed]] / transclusion (C2.1)
     "HAS_ATTACHMENT",   # parent email → child artifact extracted from attachment (C2.4)
 ]
+
+# ---------------------------------------------------------------------------
+# Entity Extraction Quality
+# ---------------------------------------------------------------------------
+# Minimum LLM-reported confidence for an extracted entity to be persisted.
+# Entities below this threshold are silently dropped by _normalise_entities
+# before any graph write. Raising this reduces single-mention noise;
+# lowering it recovers more entities at the cost of graph pollution.
+ENTITY_MIN_CONFIDENCE: float = float(os.getenv("ENTITY_MIN_CONFIDENCE", "0.5"))
+
+# Alias-aware entity resolution (Task 2.2).
+# ENTITY_RESOLUTION_EMBED: when True, Tier-C embedding comparison is run during
+# ingestion (expensive — enable only for the reprocess job or targeted re-indexing).
+# ENTITY_RESOLUTION_SIM: cosine similarity threshold for Tier-C merge (0.0–1.0).
+ENTITY_RESOLUTION_EMBED: bool = os.getenv("ENTITY_RESOLUTION_EMBED", "false").lower() in ("true", "1", "yes")
+ENTITY_RESOLUTION_SIM: float = float(os.getenv("ENTITY_RESOLUTION_SIM", "0.92"))
 
 # Validate relationship type names are safe for Cypher injection
 for _rt in GRAPH_RELATIONSHIP_TYPES:

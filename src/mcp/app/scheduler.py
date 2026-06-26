@@ -905,6 +905,86 @@ async def _run_community_refresh() -> None:
         logger.error("community_refresh scheduled job failed: %s", e)
 
 
+async def _run_compute_entity_embeddings() -> None:
+    """Nightly per-entity embedding compute (mean-pool mention chunk vectors).
+
+    Runs BEFORE compute_umap_3d so semantic kNN edges and layout both pick up
+    fresh embeddings. Gated via SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS.
+    """
+    start = time.time()
+    try:
+        from app.processor.jobs.compute_entity_embeddings import ComputeEntityEmbeddingsJob  # noqa: PLC0415
+
+        try:
+            from app.main import app as _app  # type: ignore[import]
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        job = ComputeEntityEmbeddingsJob()
+        if queue is not None:
+            record = job.new_record()
+            await queue.enqueue(record)
+            _log_execution("compute_entity_embeddings", "enqueued", time.time() - start)
+        else:
+            async def _noop(_pct: float) -> None:
+                return None
+
+            result = await job.run(_noop)
+            _log_execution(
+                "compute_entity_embeddings",
+                "success",
+                time.time() - start,
+                f"written={result.metadata.get('written', 0)} skipped={result.metadata.get('skipped', 0)}",
+            )
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("compute_entity_embeddings", "error", duration, str(e))
+        logger.error("compute_entity_embeddings scheduled job failed: %s", e)
+
+
+async def _run_build_similarity_edges() -> None:
+    """Nightly SIMILAR_TO kNN edge materialisation.
+
+    Runs AFTER compute_entity_embeddings and BEFORE compute_umap_3d so the
+    force layout springs pick up fresh semantic edges.  Gated via both
+    SEMANTIC_EDGE_ENABLED and SCHEDULE_BUILD_SIMILARITY_EDGES; empty string
+    or False disables.  Best-effort — failure is logged but does not block
+    compute_umap_3d.
+    """
+    if not config.SEMANTIC_EDGE_ENABLED:
+        _log_execution("build_similarity_edges", "skipped", 0.0, "disabled")
+        return
+
+    start = time.time()
+    try:
+        from app.db.neo4j.semantic_edges import build_similarity_edges
+        from app.deps import get_neo4j
+
+        driver = get_neo4j()
+        if driver is None:
+            _log_execution("build_similarity_edges", "skipped", time.time() - start, "neo4j unavailable")
+            return
+
+        result = await asyncio.to_thread(
+            build_similarity_edges,
+            driver,
+            k=config.SEMANTIC_EDGE_K,
+            threshold=config.SEMANTIC_EDGE_THRESHOLD,
+        )
+        duration = time.time() - start
+        detail = (
+            f"edges_created={result.get('edges_created', '?')} "
+            f"entities={result.get('entities_with_embeddings', '?')}"
+        )
+        _log_execution("build_similarity_edges", "success", duration, detail)
+        logger.info("build_similarity_edges: %s in %.1fs", detail, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("build_similarity_edges", "error", duration, str(e))
+        logger.error("build_similarity_edges scheduled job failed: %s", e)
+
+
 async def _run_compute_umap_3d() -> None:
     """Nightly Constellation 3D-coordinate compute.
 
@@ -1494,6 +1574,37 @@ def start_scheduler() -> AsyncIOScheduler:
             ),
             id="community_refresh",
             name="Leiden community re-detection + summaries",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Per-entity embeddings — nightly, 15 min before compute_umap_3d so semantic
+    # kNN edges and layout both pick up fresh embeddings. Gated via
+    # SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS; empty string disables.
+    if getattr(config, "SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *"):
+        _scheduler.add_job(
+            _run_compute_entity_embeddings,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *"),
+            ),
+            id="compute_entity_embeddings",
+            name="Per-entity embedding compute (mean-pooled mention chunks)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Semantic kNN edge materialisation — nightly, between entity-embeddings (3:15)
+    # and compute_umap_3d (3:30) so the layout picks up fresh SIMILAR_TO edges.
+    # Also gated by SEMANTIC_EDGE_ENABLED; empty SCHEDULE_BUILD_SIMILARITY_EDGES
+    # disables cron independently (flag takes precedence in the job body).
+    if getattr(config, "SCHEDULE_BUILD_SIMILARITY_EDGES", "22 3 * * *"):
+        _scheduler.add_job(
+            _run_build_similarity_edges,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_BUILD_SIMILARITY_EDGES", "22 3 * * *"),
+            ),
+            id="build_similarity_edges",
+            name="Semantic kNN edge materialisation (SIMILAR_TO)",
             replace_existing=True,
             max_instances=1,
         )

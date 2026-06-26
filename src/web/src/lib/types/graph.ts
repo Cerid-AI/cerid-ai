@@ -50,6 +50,8 @@ export interface NeighborhoodResponse {
   truncated: boolean
   /** True if the response was served from Redis LRU (debug/observability signal) */
   cached: boolean
+  /** Number of isolated (degree-0) entities excluded when include_isolated=false */
+  isolated_count: number
 }
 
 /** /graph/health response */

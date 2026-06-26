@@ -100,7 +100,7 @@ def test_neighborhood_unknown_entity_returns_404(client):
 
 
 def _stub_rows():
-    """Two-node, one-edge fake graph."""
+    """Two-node, one-edge fake graph. degree_co >= 1 marks them as connected."""
     return [
         {
             "id": "alex",
@@ -110,6 +110,7 @@ def _stub_rows():
             "mention_count": 47,
             "trust_state": "verified",
             "recency_score": 0.92,
+            "degree_co": 2,
             "edges": [{
                 "from": "alex",
                 "to": "api_redesign",
@@ -127,6 +128,7 @@ def _stub_rows():
             "mention_count": 23,
             "trust_state": "verified",
             "recency_score": 0.85,
+            "degree_co": 2,
             "edges": [{
                 "from": "alex",
                 "to": "api_redesign",

@@ -172,6 +172,7 @@ export function generateSyntheticGraph({
     edges,
     truncated: false,
     cached: false,
+    isolated_count: 0,
   }
 }
 

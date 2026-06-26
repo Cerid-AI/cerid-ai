@@ -53,6 +53,11 @@ _NEIGHBORHOOD_TTL_SECONDS = int(os.getenv("GRAPH_NEIGHBORHOOD_CACHE_TTL", "60"))
 _MAX_DEGREE = int(os.getenv("GRAPH_MAX_NODE_DEGREE", "500"))
 _MAX_HOPS = 3
 
+# 60s for the topology aggregate — cheap to poll, matches neighborhood TTL.
+# Override via env for test infra.
+_TOPOLOGY_TTL_SECONDS = int(os.getenv("GRAPH_TOPOLOGY_CACHE_TTL", "60"))
+_TOPOLOGY_CACHE_KEY = "cerid:graph:health:topology"
+
 # 24h for the 3D projection — recomputed nightly by the
 # compute_umap_3d job. Override for tests.
 _EMBEDDINGS_3D_TTL_SECONDS = int(os.getenv("GRAPH_EMBEDDINGS_3D_CACHE_TTL", "86400"))
@@ -94,10 +99,16 @@ class NeighborhoodResponse(BaseModel):
     edges: list[GraphEdge]
     truncated: bool = False       # true if hit MAX_DEGREE or hop limit
     cached: bool = False          # true if served from Redis LRU
+    isolated_count: int = 0       # degree-0 nodes hidden when include_isolated=False
 
 
-def _cache_key(entity: str, hops: int, filter_str: str) -> str:
-    """Stable cache key from query params. filter_str hashed to bound length."""
+def _cache_key(entity: str, hops: int, filter_str: str, include_isolated: bool = False) -> str:
+    """Stable cache key from query params. filter_str hashed to bound length.
+
+    v2: folds include_isolated into the key so a toggle flip never serves a
+    stale cached payload.
+    """
+    iso_suffix = ":iso" if include_isolated else ""
     if filter_str:
         # SHA1 here is a *cache-key hash*, not a security primitive.
         # usedforsecurity=False disables bandit B324 + signals intent.
@@ -105,8 +116,8 @@ def _cache_key(entity: str, hops: int, filter_str: str) -> str:
             filter_str.encode("utf-8"),
             usedforsecurity=False,
         ).hexdigest()[:8]
-        return f"cerid:graph:nbhd:{entity}:{hops}:{h}"
-    return f"cerid:graph:nbhd:{entity}:{hops}"
+        return f"cerid:graph:nbhd:{entity}:{hops}:{h}{iso_suffix}"
+    return f"cerid:graph:nbhd:{entity}:{hops}{iso_suffix}"
 
 
 def _safe_int_props(record: dict, key: str, default: int = 0) -> int:
@@ -125,6 +136,7 @@ async def get_neighborhood(
     entity: str = Query(..., description="Focal entity ID (canonical_id from KB)"),
     hops: int = Query(2, ge=1, le=_MAX_HOPS, description="Hop depth (1-3)"),
     filter: str | None = Query(None, description="Optional entity-type filter (Person|Project|Topic|...)"),
+    include_isolated: bool = Query(False, description="Include degree-0 isolated nodes"),
 ) -> NeighborhoodResponse:
     """K-hop neighborhood of an entity, shaped for Atlas WebGL renderer.
 
@@ -144,7 +156,7 @@ async def get_neighborhood(
         raise HTTPException(status_code=400, detail="entity is required")
 
     redis = get_redis()
-    cache_key = _cache_key(entity, hops, filter or "")
+    cache_key = _cache_key(entity, hops, filter or "", include_isolated)
 
     # 1. Cache fast-path
     if redis:
@@ -164,7 +176,9 @@ async def get_neighborhood(
             logger.info("graph.cache_read_miss: %s", exc)
 
     # 2. Cache miss → query Neo4j
-    nodes, edges, truncated = await _query_neighborhood(entity, hops, filter)
+    nodes, edges, truncated, isolated_count = await _query_neighborhood(
+        entity, hops, filter, include_isolated,
+    )
     if not nodes:
         raise HTTPException(status_code=404, detail=f"entity '{entity}' not found")
 
@@ -175,7 +189,12 @@ async def get_neighborhood(
             break
 
     response = NeighborhoodResponse(
-        focal_entity=entity, nodes=nodes, edges=edges, truncated=truncated, cached=False,
+        focal_entity=entity,
+        nodes=nodes,
+        edges=edges,
+        truncated=truncated,
+        cached=False,
+        isolated_count=isolated_count,
     )
 
     # 3. Populate cache (best-effort)
@@ -196,9 +215,14 @@ async def get_neighborhood(
 
 
 async def _query_neighborhood(
-    entity: str, hops: int, filter: str | None,
-) -> tuple[list[GraphNode], list[GraphEdge], bool]:
-    """Run the Cypher neighborhood expansion. Pure I/O — split out for testability."""
+    entity: str, hops: int, filter: str | None, include_isolated: bool = False,
+) -> tuple[list[GraphNode], list[GraphEdge], bool, int]:
+    """Run the Cypher neighborhood expansion. Pure I/O — split out for testability.
+
+    Returns (nodes, edges, truncated, isolated_count).
+    isolated_count is the number of nodes with graph degree 0 that were
+    excluded because include_isolated=False.
+    """
     driver = get_neo4j()
     if driver is None:
         raise HTTPException(status_code=503, detail="Neo4j unavailable")
@@ -221,22 +245,28 @@ async def _query_neighborhood(
     # degree) over only the surviving nodes, so it never fired. No extra
     # expansion cost — the cap previously just discarded already-expanded
     # endpoints in the WHERE.
+    #
+    # degree_co is the CO_MENTIONED + SIMILAR_TO combined degree, used to
+    # identify isolated (degree-0) nodes for the include_isolated filter.
     cypher = f"""
         MATCH (n:Entity {{canonical_id: $entity}})
         OPTIONAL MATCH (n)-[:CO_MENTIONED*1..{hops}]-(e:Entity)
         WHERE e.canonical_id IS NOT NULL {type_filter}
-        WITH n, e, COUNT {{ (e)-[:CO_MENTIONED]-() }} AS deg
+        WITH n, e, COUNT {{ (e)-[:CO_MENTIONED]-() }} AS deg,
+             COUNT {{ (e)-[:CO_MENTIONED|SIMILAR_TO]-() }} AS degree_co
         WITH n,
-             collect(DISTINCT CASE WHEN deg < $max_degree THEN e END) AS related_raw,
+             collect(DISTINCT CASE WHEN deg < $max_degree THEN {{node: e, degree_co: degree_co}} END) AS related_raw,
              sum(CASE WHEN deg >= $max_degree THEN 1 ELSE 0 END) AS dropped_count
         WITH n,
              [x IN related_raw WHERE x IS NOT NULL] AS related,
              dropped_count > 0 AS truncated
-        UNWIND ([n] + related) AS node
+        UNWIND ([{{node: n, degree_co: COUNT {{ (n)-[:CO_MENTIONED|SIMILAR_TO]-() }} }}] + related) AS entry
+        WITH entry.node AS node, entry.degree_co AS degree_co, truncated
         OPTIONAL MATCH (node)-[r]-(other:Entity)
-        WHERE other IN ([n] + related)
+        WHERE other IN ([n] + [x IN related | x.node])
         WITH DISTINCT
             node,
+            degree_co,
             truncated,
             collect(DISTINCT {{
                 from: startNode(r).canonical_id,
@@ -256,7 +286,8 @@ async def _query_neighborhood(
             node.recency_score AS recency_score,
             node.primary_domain AS primary_domain,
             edges_for_node AS edges,
-            truncated AS truncated
+            truncated AS truncated,
+            degree_co AS degree_co
     """
 
     try:
@@ -274,10 +305,17 @@ async def _query_neighborhood(
 
     nodes: list[GraphNode] = []
     edges_map: dict[tuple[str, str, str], GraphEdge] = {}
+    isolated_count = 0
 
     for row in rows:
         node_id = row.get("id")
         if not node_id:
+            continue
+        degree_co = int(row.get("degree_co") or 0)
+        if not include_isolated and degree_co == 0 and node_id != entity:
+            # Exclude isolated (degree-0) non-focal nodes from the result.
+            # The focal entity itself is always included even if isolated.
+            isolated_count += 1
             continue
         nodes.append(GraphNode(
             id=node_id,
@@ -312,7 +350,7 @@ async def _query_neighborhood(
     # was dropped by the CO_MENTIONED degree cap (same value on every row).
     truncated = bool(rows and rows[0].get("truncated"))
 
-    return nodes, list(edges_map.values()), truncated
+    return nodes, list(edges_map.values()), truncated, isolated_count
 
 
 # ── Phase M Day 1-2 — timeline endpoint ─────────────────────────────
@@ -629,17 +667,102 @@ def _run_timeline_cypher(driver: Any, cypher: str, params: dict) -> list[dict]:
         return []
 
 
+def _fetch_topology(driver: Any) -> dict[str, Any] | None:
+    """Run a single-pass Cypher aggregate and return the topology dict.
+
+    Counts both CO_MENTIONED and SIMILAR_TO relationships so the metric
+    remains correct after the SIMILAR_TO phase lands.  Returns None on
+    any failure so the caller can degrade gracefully.
+    """
+    _TOPOLOGY_CYPHER = """
+    MATCH (e:Entity)
+    WITH
+        count(e)                                          AS total,
+        sum(CASE WHEN NOT (e)-[:CO_MENTIONED|SIMILAR_TO]-() THEN 1 ELSE 0 END)
+                                                          AS orphan_count,
+        sum(CASE WHEN (e)-[:CO_MENTIONED|SIMILAR_TO]-()
+                 THEN size([(e)-[:CO_MENTIONED|SIMILAR_TO]-() | 1])
+                 ELSE 0 END)                              AS sum_degree,
+        sum(CASE WHEN (e)-[:CO_MENTIONED|SIMILAR_TO]-() THEN 1 ELSE 0 END)
+                                                          AS connected_count,
+        count(DISTINCT e.community_id)                   AS community_count,
+        sum(CASE WHEN e.mention_count = 1 OR e.mention_count IS NULL
+                 THEN 1 ELSE 0 END)                      AS single_mention_count
+    OPTIONAL MATCH ()-[r:CO_MENTIONED|SIMILAR_TO]->()
+    WITH total, orphan_count, sum_degree, connected_count,
+         community_count, single_mention_count,
+         count(r) AS edges
+    RETURN total, edges, orphan_count, sum_degree,
+           connected_count, community_count, single_mention_count
+    """
+    try:
+        with driver.session() as session:
+            rows = list(session.run(_TOPOLOGY_CYPHER))
+            if not rows:
+                return None
+            row = dict(rows[0])
+            total: int = int(row.get("total") or 0)
+            edges: int = int(row.get("edges") or 0)
+            orphan_count: int = int(row.get("orphan_count") or 0)
+            sum_degree: float = float(row.get("sum_degree") or 0.0)
+            connected_count: int = int(row.get("connected_count") or 0)
+            community_count: int = int(row.get("community_count") or 0)
+            single_mention_count: int = int(row.get("single_mention_count") or 0)
+            return {
+                "nodes": total,
+                "edges": edges,
+                "orphan_count": orphan_count,
+                "orphan_pct": round(orphan_count / total * 100, 2) if total else 0.0,
+                "connected_mean_degree": round(sum_degree / connected_count, 4) if connected_count else 0.0,
+                "community_count": community_count,
+                "nodes_per_community": round(total / community_count, 4) if community_count else 0.0,
+                "single_mention_pct": round(single_mention_count / total * 100, 2) if total else 0.0,
+            }
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.graph.health_topology", exc)
+        return None
+
+
 @router.get("/health")
 async def graph_health() -> dict[str, Any]:
-    """Lightweight liveness probe for the graph subsystem. Returns config
-    + dep readiness without running an actual graph query."""
+    """Lightweight liveness probe for the graph subsystem. Returns config,
+    dep readiness, and a topology aggregate (orphan ratio, mean degree,
+    community count). Topology is cached in Redis for 60 s."""
     driver = get_neo4j()
+    redis = get_redis()
+
+    topology: dict[str, Any] | None = None
+
+    # Fast-path: topology from Redis cache
+    if redis:
+        try:
+            cached_raw = redis.get(_TOPOLOGY_CACHE_KEY)
+            if cached_raw:
+                topology = json.loads(
+                    cached_raw if isinstance(cached_raw, str)
+                    else cached_raw.decode("utf-8"),
+                )
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
+            # silent-catch-allowed: stale/corrupt cache row is non-fatal.
+            logger.info("graph.health_topology.cache_read_miss: %s", exc)
+
+    # Cache miss → compute from Neo4j
+    if topology is None and driver is not None:
+        topology = _fetch_topology(driver)
+        if topology is not None and redis:
+            try:
+                redis.setex(_TOPOLOGY_CACHE_KEY, _TOPOLOGY_TTL_SECONDS, json.dumps(topology))
+            except OSError as exc:
+                # silent-catch-allowed: Redis write failure is non-fatal.
+                logger.info("graph.health_topology.cache_write_miss: %s", exc)
+
     return {
         "neo4j_available": driver is not None,
         "cache_ttl_seconds": _NEIGHBORHOOD_TTL_SECONDS,
         "max_node_degree": _MAX_DEGREE,
         "max_hops": _MAX_HOPS,
         "visualization_enabled": is_feature_enabled("live_metrics"),
+        "topology": topology,
     }
 
 
@@ -666,32 +789,43 @@ class EntityEmbedding3D(BaseModel):
 class Embeddings3DResponse(BaseModel):
     count: int
     entities: list[EntityEmbedding3D]
-    # CO_MENTIONED linkage as compact [source_idx, target_idx, weight]
-    # triples indexing into ``entities``. Index-based (not id-based) to keep
-    # the payload small at 16K+ edges; safe because the response is built and
-    # cached atomically, so indices can't drift from the entity list.
-    links: list[tuple[int, int, float]] = []
+    # CO_MENTIONED and SIMILAR_TO linkage as compact
+    # [source_idx, target_idx, weight, kind] 4-tuples indexing into
+    # ``entities``.  kind is "co_mention" or "similar".  Index-based (not
+    # id-based) to keep the payload small at 16K+ edges; safe because the
+    # response is built and cached atomically, so indices can't drift from
+    # the entity list.
+    links: list[tuple[int, int, float, str]] = []
     cached: bool = False
     computed_at: str | None = None
+    isolated_count: int = 0       # degree-0 nodes hidden when include_isolated=False
 
 
-def _embeddings_3d_cache_key(filter_str: str, entities_csv: str) -> str:
-    # v3 suffix: payload gained `primary_domain` (Cycle 1 domain backbone) —
-    # versioning prevents a Domain lens showing all-"other" silently for 24 h.
+def _embeddings_3d_cache_key(
+    filter_str: str,
+    entities_csv: str,
+    include_isolated: bool = False,
+) -> str:
+    # v5 suffix: links changed from 3-tuple to 4-tuple (added kind tag) —
+    # versioning prevents a stale v4 payload with 3-tuple links masking the
+    # new field for 24 h.  Also folding include_isolated into the hash
+    # prevents a toggle flip serving a stale cached payload.
     # The shared bust pattern cerid:graph:emb3d:* still matches.
+    iso_tag = ":iso" if include_isolated else ""
     if filter_str or entities_csv:
         h = hashlib.sha1(  # noqa: S324
             f"{filter_str}|{entities_csv}".encode("utf-8"),
             usedforsecurity=False,
         ).hexdigest()[:12]
-        return f"cerid:graph:emb3d:v3:{h}"
-    return "cerid:graph:emb3d:v3:all"
+        return f"cerid:graph:emb3d:v5:{h}{iso_tag}"
+    return f"cerid:graph:emb3d:v5:all{iso_tag}"
 
 
 @router.get("/embeddings/3d", response_model=Embeddings3DResponse)
 async def get_embeddings_3d(
     entities: str | None = Query(None, description="Comma-separated subset of canonical_ids"),
     filter: str | None = Query(None, description="Optional entity-type filter"),
+    include_isolated: bool = Query(False, description="Include degree-0 isolated nodes"),
 ) -> Embeddings3DResponse:
     """3D-projected entity coordinates for Constellation rendering.
 
@@ -704,7 +838,7 @@ async def get_embeddings_3d(
     """
     redis = get_redis()
     entities_csv = entities or ""
-    cache_key = _embeddings_3d_cache_key(filter or "", entities_csv)
+    cache_key = _embeddings_3d_cache_key(filter or "", entities_csv, include_isolated)
 
     # Cache fast-path
     if redis:
@@ -727,7 +861,7 @@ async def get_embeddings_3d(
         if entities_csv else None
     )
 
-    rows = await _query_embeddings_3d(filter, entity_ids)
+    rows, isolated_count = await _query_embeddings_3d(filter, entity_ids, include_isolated)
 
     computed_at_values: list[str] = [
         str(r["computed_at"]) for r in rows if r.get("computed_at")
@@ -761,6 +895,7 @@ async def get_embeddings_3d(
         links=links,
         cached=False,
         computed_at=computed_at,
+        isolated_count=isolated_count,
     )
 
     if redis:
@@ -777,14 +912,21 @@ async def get_embeddings_3d(
     return response
 
 
+_KIND_MAP: dict[str, str] = {
+    "CO_MENTIONED": "co_mention",
+    "SIMILAR_TO": "similar",
+}
+
+
 async def _query_embeddings_3d_links(
     scope_ids: list[str],
-) -> list[tuple[int, int, float]]:
-    """CO_MENTIONED edges between in-scope entities, as index triples.
+) -> list[tuple[int, int, float, str]]:
+    """CO_MENTIONED and SIMILAR_TO edges between in-scope entities, as index 4-tuples.
 
-    Pulls the strongest edges (ORDER BY weight DESC, capped) where both
-    endpoints carry umap coords, then keeps only pairs whose endpoints are
-    in ``scope_ids`` and maps ids → indices into the caller's entity list.
+    Each tuple is (src_idx, tgt_idx, weight, kind) where kind is "co_mention"
+    for CO_MENTIONED edges and "similar" for SIMILAR_TO edges.  Indices into
+    the caller's entity list.
+
     One unparameterized-shape query — scoping happens in Python so the
     filtered/subset variants reuse it unchanged.
     """
@@ -793,12 +935,13 @@ async def _query_embeddings_3d_links(
         return []
 
     cypher = """
-        MATCH (a:Entity)-[r:CO_MENTIONED]->(b:Entity)
+        MATCH (a:Entity)-[r:CO_MENTIONED|SIMILAR_TO]->(b:Entity)
         WHERE a.umap_x IS NOT NULL AND b.umap_x IS NOT NULL
         RETURN
             a.canonical_id AS s,
             b.canonical_id AS t,
-            coalesce(r.weight, 1.0) AS w
+            coalesce(r.weight, r.score, 1.0) AS w,
+            type(r) AS kind
         ORDER BY w DESC
         LIMIT $max_links
     """
@@ -816,27 +959,36 @@ async def _query_embeddings_3d_links(
         return []
 
     index_of = {eid: i for i, eid in enumerate(scope_ids)}
-    links: list[tuple[int, int, float]] = []
+    links: list[tuple[int, int, float, str]] = []
     for row in edge_rows:
         si = index_of.get(str(row.get("s") or ""))
         ti = index_of.get(str(row.get("t") or ""))
         if si is None or ti is None or si == ti:
             continue
-        links.append((si, ti, float(row.get("w") or 1.0)))
+        neo4j_kind = str(row.get("kind") or "CO_MENTIONED")
+        kind = _KIND_MAP.get(neo4j_kind, "co_mention")
+        links.append((si, ti, float(row.get("w") or 1.0), kind))
     return links
 
 
 async def _query_embeddings_3d(
     filter: str | None,
     entity_ids: list[str] | None,
-) -> list[dict[str, Any]]:
+    include_isolated: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
     """Read entity 3D coords from Neo4j. Entities without umap_* fields
     are excluded — the compute_umap_3d job populates them.
 
-    Returns each row as a plain dict with x/y/z/method/computed_at."""
+    When include_isolated=False (default), entities with graph degree 0
+    (no CO_MENTIONED or SIMILAR_TO edges) are excluded from the main result.
+    isolated_count is always computed so the caller can surface it in the UI.
+
+    Returns (rows, isolated_count) where each row is a plain dict with
+    x/y/z/method/computed_at.
+    """
     driver = get_neo4j()
     if driver is None:
-        return []
+        return [], 0
 
     where_clauses = ["e.canonical_id IS NOT NULL"]
     params: dict[str, Any] = {"max_entities": _EMBEDDINGS_3D_MAX}
@@ -846,6 +998,11 @@ async def _query_embeddings_3d(
     if entity_ids:
         where_clauses.append("e.canonical_id IN $entity_ids")
         params["entity_ids"] = entity_ids
+
+    # When not including isolated nodes, restrict to entities that have at
+    # least one CO_MENTIONED or SIMILAR_TO relationship.
+    if not include_isolated:
+        where_clauses.append("(e)-[:CO_MENTIONED|SIMILAR_TO]-()")
 
     where = " AND ".join(where_clauses)
 
@@ -868,19 +1025,46 @@ async def _query_embeddings_3d(
         LIMIT $max_entities
     """
 
-    def _run() -> list[dict[str, Any]]:
+    # Sibling COUNT query for isolated_count — entities with coords but degree 0.
+    # Always computed (regardless of include_isolated) so the UI can label the toggle.
+    isolated_where_clauses = [
+        "e.canonical_id IS NOT NULL",
+        "e.umap_x IS NOT NULL",
+        "e.umap_y IS NOT NULL",
+        "e.umap_z IS NOT NULL",
+        "NOT (e)-[:CO_MENTIONED|SIMILAR_TO]-()",
+    ]
+    if filter:
+        isolated_where_clauses.append("(e.entity_type = $filter OR e.type = $filter)")
+    if entity_ids:
+        isolated_where_clauses.append("e.canonical_id IN $entity_ids")
+    isolated_where = " AND ".join(isolated_where_clauses)
+    isolated_cypher = f"""
+        MATCH (e:Entity)
+        WHERE {isolated_where}
+        RETURN count(e) AS isolated_count
+    """
+
+    def _run() -> tuple[list[dict[str, Any]], int]:
         with driver.session() as session:
-            return list(session.run(cypher, **params).data())
+            rows = list(session.run(cypher, **params).data())
+            iso_rows = list(session.run(isolated_cypher, **params).data())
+            iso_cnt = int(iso_rows[0]["isolated_count"]) if iso_rows else 0
+            return rows, iso_cnt
 
     try:
-        rows = await asyncio.to_thread(_run)
+        rows, isolated_count = await asyncio.to_thread(_run)
     except (OSError, RuntimeError, ValueError) as exc:
         logger.exception("emb3d query failed: %s", exc)
         raise HTTPException(status_code=500, detail="Embedding query failed") from exc
 
     # Drop rows where the projection job hasn't computed coords yet.
     # Constellation renders only entities with valid coords.
-    return [r for r in rows if r.get("x") is not None and r.get("y") is not None and r.get("z") is not None]
+    valid_rows = [
+        r for r in rows
+        if r.get("x") is not None and r.get("y") is not None and r.get("z") is not None
+    ]
+    return valid_rows, isolated_count
 
 
 # ---------------------------------------------------------------------------
@@ -888,7 +1072,6 @@ async def _query_embeddings_3d(
 # ---------------------------------------------------------------------------
 
 _COMMUNITY_MAP_REDIS_KEY = "cerid:graph:map:communities"
-_GRAPH_MAP_CACHE_KEY = "cerid:graph:emb3d:v3:map"
 
 
 class MapCommunity(BaseModel):
@@ -906,25 +1089,28 @@ class MapCommunity(BaseModel):
 class GraphMapResponse(BaseModel):
     """Shape returned by GET /graph/map.
 
-    Bundles entity positions, CO_MENTIONED links, and precomputed community
-    artifacts into a single cached payload for the Constellation renderer.
+    Bundles entity positions, CO_MENTIONED and SIMILAR_TO links, and
+    precomputed community artifacts into a single cached payload for the
+    Constellation renderer.
     """
 
     count: int
     entities: list[EntityEmbedding3D]
-    links: list[tuple[int, int, float]]
+    links: list[tuple[int, int, float, str]]
     communities: list[MapCommunity]
     silhouette: float | None = None
     computed_at: str | None = None
     cached: bool = False
     layout_fallback: bool = False
+    isolated_count: int = 0       # degree-0 nodes hidden when include_isolated=False
 
 
 # Per-layout cache keys — keyed under the emb3d wildcard bust pattern
 # cerid:graph:emb3d:* so the nightly job invalidates all of them.
 # Omitting the ?layout param is byte-identical to ?layout=force.
+# v5: links changed from 3-tuple to 4-tuple (added kind tag).
 _VALID_LAYOUTS = frozenset({"force", "wells", "domain"})
-_LAYOUT_MAP_CACHE_KEY_TMPL = "cerid:graph:emb3d:v3:map:{layout}"
+_LAYOUT_MAP_CACHE_KEY_TMPL = "cerid:graph:emb3d:v5:map:{layout}{iso}"
 _LAYOUT_COMMUNITY_REDIS_KEY_TMPL = "cerid:graph:map:communities:{layout}"
 
 
@@ -935,6 +1121,7 @@ async def get_graph_map(
         description="Layout basis: force (default), wells, or domain. "
                     "Omitting is byte-identical to force. Unknown value → 422.",
     ),
+    include_isolated: bool = Query(False, description="Include degree-0 isolated nodes"),
 ) -> GraphMapResponse:
     """Full cartographic map payload for Constellation.
 
@@ -975,8 +1162,9 @@ async def get_graph_map(
     effective_layout = layout or "force"
     is_non_default = effective_layout != "force"
     layout_fallback = False
+    iso_suffix = ":iso" if include_isolated else ""
 
-    cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout=effective_layout)
+    cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout=effective_layout, iso=iso_suffix)
     community_redis_key = _LAYOUT_COMMUNITY_REDIS_KEY_TMPL.format(
         layout=effective_layout
     )
@@ -1001,7 +1189,7 @@ async def get_graph_map(
     # For non-default layouts: check if per-layout position artifact exists in
     # Redis. If missing, fall back to the force layout with layout_fallback=True.
     if is_non_default and redis:
-        layout_pos_key = f"cerid:graph:emb3d:v3:layout_positions:{effective_layout}"
+        layout_pos_key = f"cerid:graph:emb3d:v4:layout_positions:{effective_layout}"
         try:
             has_layout_pos = redis.exists(layout_pos_key)
         except Exception as exc:  # noqa: BLE001
@@ -1010,7 +1198,7 @@ async def get_graph_map(
         if not has_layout_pos:
             layout_fallback = True
             # Fall through to force layout positions
-            cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout="force")
+            cache_key = _LAYOUT_MAP_CACHE_KEY_TMPL.format(layout="force", iso=iso_suffix)
             community_redis_key = _LAYOUT_COMMUNITY_REDIS_KEY_TMPL.format(layout="force")
             # Try the force cache first
             if redis:
@@ -1028,7 +1216,7 @@ async def get_graph_map(
                     logger.info("graph.map.fallback_cache_read_miss: %s", exc)
 
     # Entity positions and links.
-    rows = await _query_embeddings_3d(None, None)
+    rows, isolated_count = await _query_embeddings_3d(None, None, include_isolated)
 
     computed_at_values = [str(r["computed_at"]) for r in rows if r.get("computed_at")]
     computed_at: str | None = max(computed_at_values) if computed_at_values else None
@@ -1037,7 +1225,7 @@ async def get_graph_map(
     layout_pos_override: dict[str, list[float]] = {}
     if is_non_default and not layout_fallback and redis:
         try:
-            pos_raw = redis.get(f"cerid:graph:emb3d:v3:layout_positions:{effective_layout}")
+            pos_raw = redis.get(f"cerid:graph:emb3d:v4:layout_positions:{effective_layout}")
             if pos_raw:
                 layout_pos_override = json.loads(
                     pos_raw if isinstance(pos_raw, str) else pos_raw.decode("utf-8")
@@ -1098,6 +1286,7 @@ async def get_graph_map(
         computed_at=computed_at,
         cached=False,
         layout_fallback=layout_fallback,
+        isolated_count=isolated_count,
     )
 
     if redis:

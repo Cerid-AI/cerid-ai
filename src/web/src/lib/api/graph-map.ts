@@ -34,8 +34,8 @@ export interface GraphMapResponse {
   count: number
   /** Entities with x/y as precomputed map coordinates (z ignored in 2D) */
   entities: EntityEmbedding3D[]
-  /** [sourceIdx, targetIdx, weight] — index into entities array */
-  links: [number, number, number][]
+  /** [sourceIdx, targetIdx, weight, kind] — index into entities array; kind is "co_mention" or "similar" */
+  links: [number, number, number, string][]
   communities: CommunityHull[]
   /** silhouette score from the quality gate (null if not yet computed) */
   silhouette: number | null
@@ -52,29 +52,24 @@ export interface GraphMapResponse {
    * and the server fell back to "force". Absent/undefined when not applicable.
    */
   layout_fallback?: boolean
+  /** Number of isolated (degree-0) entities excluded when include_isolated=false */
+  isolated_count: number
 }
 
 export async function fetchGraphMap(
-  layoutOrSignal?: MapLayout | AbortSignal,
+  layout?: MapLayout,
+  includeIsolated?: boolean,
   signal?: AbortSignal,
 ): Promise<GraphMapResponse> {
-  let layout: MapLayout | undefined
-  let abortSignal: AbortSignal | undefined
-
-  if (typeof layoutOrSignal === "string") {
-    layout = layoutOrSignal
-    abortSignal = signal
-  } else {
-    abortSignal = layoutOrSignal
-  }
-
   const params: Record<string, string> = {}
   if (layout && layout !== "force") params.layout = layout
+  // Omit the param when false/undefined to keep default URLs cache-stable.
+  if (includeIsolated) params.include_isolated = "true"
 
   const url = mcpUrl("/graph/map", params)
   const res = await fetch(url.toString(), {
     headers: mcpHeaders(),
-    signal: abortSignal,
+    signal,
   })
   if (!res.ok) {
     throw new Error(await extractError(res, `Graph map fetch failed: ${res.status}`))

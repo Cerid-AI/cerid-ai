@@ -4,27 +4,28 @@
 // Shared visual encoding for Constellation renderers. Nodes
 // (instanced-nodes) and links (neural-links) must agree on community
 // color so an edge reads as belonging to its endpoints' clusters.
+//
+// Pure, dependency-free helpers (communityRgb, nodeBaseAlpha, GRAPHITE, …)
+// live in palette-pure.ts so they can be unit-tested without the
+// @/lib/graph/identity dependency chain.
 
 import type { MapTokens } from "./map/community-layer"
 import { domainColor } from "@/lib/graph/identity"
+import {
+  COMMUNITY_PALETTE_RGB,
+  GRAPHITE,
+  ISOLATED_COMMUNITY_ID,
+  communityRgb,
+  nodeBaseAlpha,
+} from "./palette-pure"
 
-export const COMMUNITY_PALETTE_RGB = [
-  [0.898, 0.518, 0.478], [0.898, 0.659, 0.478], [0.898, 0.784, 0.478], [0.831, 0.686, 0.216],
-  [0.784, 0.898, 0.478], [0.659, 0.898, 0.478], [0.478, 0.898, 0.784], [0.478, 0.784, 0.898],
-  [0.478, 0.659, 0.898], [0.659, 0.478, 0.898], [0.784, 0.478, 0.898], [0.898, 0.478, 0.784],
-] as const
-
-export const GRAPHITE: readonly [number, number, number] = [0.36, 0.40, 0.50]
-
-export function communityRgb(communityId: string | null): readonly [number, number, number] {
-  if (!communityId) return GRAPHITE
-  let h = 0
-  for (let i = 0; i < communityId.length; i++) {
-    h = ((h << 5) - h) + communityId.charCodeAt(i)
-    h |= 0
-  }
-  const idx = Math.abs(h) % COMMUNITY_PALETTE_RGB.length
-  return COMMUNITY_PALETTE_RGB[idx]
+// Re-export pure helpers so all consumers keep a single import path.
+export {
+  COMMUNITY_PALETTE_RGB,
+  GRAPHITE,
+  ISOLATED_COMMUNITY_ID,
+  communityRgb,
+  nodeBaseAlpha,
 }
 
 export function nodeRadius(mentionCount: number): number {

@@ -50,6 +50,9 @@ export interface MapTokens {
   trustVerified: string
   trustPartial: string
   trustUnverified: string
+  /** Isolated-node sentinel: fixed neutral graphite, distinct from community colors.
+   *  Used when community_id === "isolated" in the cluster lens. */
+  graphite: string
   /** Optional dot-grid underlay color */
   grid: string
   /** Resolved font-family string for canvas 2D (var() stripped).
@@ -103,6 +106,7 @@ export function resolveMapTokens(root: Element): MapTokens {
     trustVerified: get("--color-map-trust-verified"),
     trustPartial: get("--color-map-trust-partial"),
     trustUnverified: get("--color-map-trust-unverified"),
+    graphite: get("--color-map-graphite"),
     grid: get("--color-map-grid"),
     fontSans,
   }

@@ -10,7 +10,7 @@
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
 import { Canvas } from "@react-three/fiber"
-import { OrbitControls, Stars } from "@react-three/drei"
+import { AdaptiveDpr, OrbitControls, PerformanceMonitor, Stars } from "@react-three/drei"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
 import { fetchEmbeddings3D } from "@/lib/api/embeddings-3d"
@@ -19,8 +19,8 @@ import { NeuralLinks } from "./neural-links"
 import { HubLabels } from "./hub-labels"
 import { AmbientParticles } from "./ambient-particles"
 import { TourCameraAnimator, TourControlPanel, useTourState } from "./tour-controller"
-import { QUALITY_SETTINGS, QUALITY_TIERS, loadQuality, saveQuality, type QualityTier } from "./quality"
-import { communityRgb, trustRgb, typeRgb, domainRgb } from "./palette"
+import { QUALITY_SETTINGS, QUALITY_TIERS, degradeTier, upgradeTier, loadQuality, saveQuality, type QualityTier } from "./quality"
+import { communityRgb, trustRgb, typeRgb, domainRgb, nodeBaseAlpha } from "./palette"
 import { CartographerMap } from "./map/CartographerMap"
 import { useGraphMap } from "./map/use-graph-map"
 import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
@@ -82,9 +82,15 @@ export interface ConstellationProps {
 function MapConfigPanel({
   config,
   onChange,
+  includeIsolated,
+  onIncludeIsolatedChange,
+  isolatedCount,
 }: {
   config: MapConfig
   onChange: (patch: Partial<MapConfig>) => void
+  includeIsolated: boolean
+  onIncludeIsolatedChange: (v: boolean) => void
+  isolatedCount: number
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -157,6 +163,19 @@ function MapConfigPanel({
               />
               Show community regions
             </label>
+
+            {/* Show isolated toggle — hidden when count is 0 */}
+            {isolatedCount > 0 && (
+              <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={includeIsolated}
+                  onChange={(e) => onIncludeIsolatedChange(e.target.checked)}
+                  className="rounded border-border/60"
+                />
+                Show isolated ({isolatedCount})
+              </label>
+            )}
           </div>
         </div>
       )}
@@ -200,6 +219,11 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   const [layout, setLayout] = useState<MapLayout>("force")
   const handleLayout = useCallback((next: MapLayout) => setLayout(next), [])
 
+  // ---------------------------------------------------------------------------
+  // Isolated-node toggle — off by default (graph shows connected core)
+  // ---------------------------------------------------------------------------
+  const [includeIsolated, setIncludeIsolated] = useState(false)
+
   // Ambient toggle — opt-in glow/neon mode, forced off under reduced-motion
   const [ambientMode, setAmbientMode] = useState(false)
 
@@ -212,7 +236,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     isError: mapError,
     error: mapErrorObj,
     drainNewIds,
-  } = useGraphMap(layout)
+  } = useGraphMap(layout, includeIsolated)
 
   // ---------------------------------------------------------------------------
   // Community card state (shown when a hull/community label is clicked)
@@ -227,8 +251,8 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   // 3D mode: existing R3F data query (still needed when viewMode === "3d")
   // ---------------------------------------------------------------------------
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["constellation-embeddings-3d", focalEntity ?? null, filter ?? null],
-    queryFn: ({ signal }) => fetchEmbeddings3D({ filter, signal }),
+    queryKey: ["constellation-embeddings-3d", focalEntity ?? null, filter ?? null, includeIsolated],
+    queryFn: ({ signal }) => fetchEmbeddings3D({ filter, includeIsolated, signal }),
     // The corpus is alive: the on-ingest subscriber + manual Run-now both
     // recompute the projection and bust the server cache. Poll cheaply
     // (Redis cache hit when nothing changed) and keep the previous frame
@@ -288,6 +312,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
       trustVerified: "#555555", // drift-allowed: SSR fallback only
       trustPartial: "#777777", // drift-allowed: SSR fallback only
       trustUnverified: "#999999", // drift-allowed: SSR fallback only
+      graphite: "#6b7080", // drift-allowed: SSR fallback only
       grid: "#eeeeee", // drift-allowed: SSR fallback only
     }
   )
@@ -343,13 +368,17 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
 
   // Type filter fades (not hides) non-matching nodes — fade keeps the
   // structural context visible (yWorks KG-demo pattern).
+  // Confidence alpha (nodeBaseAlpha) is applied as a base multiplier so
+  // low-mention nodes render softer even before type-filter dimming. The
+  // type-filter 0.06 replaces the base alpha entirely (it is the dominant
+  // visual signal when active), while the base alpha is used on all nodes
+  // that pass the filter, giving meaning to node transparency.
   const visibility = useMemo(() => {
     const ents = data?.entities ?? []
-    const arr = new Float32Array(ents.length).fill(1)
-    if (typeFilter.size > 0) {
-      for (let i = 0; i < ents.length; i++) {
-        if (!typeFilter.has(ents[i].type)) arr[i] = 0.06
-      }
+    const arr = new Float32Array(ents.length)
+    for (let i = 0; i < ents.length; i++) {
+      const filtered = typeFilter.size > 0 && !typeFilter.has(ents[i].type)
+      arr[i] = filtered ? 0.06 : nodeBaseAlpha(ents[i].mention_count ?? 1)
     }
     return arr
   }, [data?.entities, typeFilter])
@@ -378,10 +407,18 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
 
   // Quality tier — Low (flat 2D) → Ultra (AAA bloom). Persisted per machine.
   const [quality, setQuality] = useState<QualityTier>(loadQuality)
-  const settings = QUALITY_SETTINGS[quality]
+  // Effective (runtime) quality: starts at the persisted tier and is
+  // auto-adjusted per-session by PerformanceMonitor. Never touches
+  // localStorage — a reload restores the user's chosen tier.
+  const [effectiveQuality, setEffectiveQuality] = useState<QualityTier>(loadQuality)
+  const settings = QUALITY_SETTINGS[effectiveQuality]
   const pickQuality = useCallback((tier: QualityTier) => {
     saveQuality(tier)
     setQuality(tier)
+    // When the user manually picks a tier, also snap the effective quality to it
+    // so the selection is immediately visible (PerformanceMonitor may later
+    // auto-degrade from the new ceiling if the GPU can't sustain it).
+    setEffectiveQuality(tier)
   }, [])
 
   // Low tier reads the same force layout as a flat 2D knowledge graph.
@@ -562,7 +599,13 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           </div>
 
           {/* Map config popover */}
-          <MapConfigPanel config={mapConfig} onChange={handleMapConfig} />
+          <MapConfigPanel
+            config={mapConfig}
+            onChange={handleMapConfig}
+            includeIsolated={includeIsolated}
+            onIncludeIsolatedChange={setIncludeIsolated}
+            isolatedCount={mapData?.isolated_count ?? 0}
+          />
 
           {/* View mode toggle */}
           <div
@@ -637,7 +680,10 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
       aria-label={`Constellation view of ${data.count} entities`}
     >
       <Canvas
-        // Remount on tier change: dpr/antialias are GL-context options.
+        // Remount on persisted tier change: dpr/antialias are GL-context options.
+        // effectiveQuality drives rendering; key uses quality (persisted) so a
+        // manual tier switch still remounts the context, but auto-degradation
+        // adjusts rendering without a remount.
         key={quality}
         // Start outside the structure (force layout spans ~±10 units)
         // so the whole cathedral is in frame on load; users orbit in.
@@ -649,8 +695,37 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           far: 1000,
         }}
         gl={{ antialias: settings.antialias, alpha: false }}
+        // Set the ceiling DPR from the persisted quality tier; AdaptiveDpr
+        // will reduce it under load and restore it when the GPU has headroom.
         dpr={settings.dpr}
       >
+        {/*
+          AdaptiveDpr drops the pixel ratio under sustained GPU load and
+          restores it when the frame budget recovers. The tier's dpr range
+          acts as the ceiling; the minimum is always 1.
+        */}
+        <AdaptiveDpr pixelated />
+
+        {/*
+          PerformanceMonitor tracks rolling FPS and fires onDecline after
+          `flipflops` consecutive below-threshold windows and onIncline after
+          consecutive above-threshold windows. It steps the EFFECTIVE quality
+          tier (not localStorage) so a reload restores the user's chosen tier.
+          Adaptation is purely per-session and introduces no new motion.
+        */}
+        <PerformanceMonitor
+          ms={500}
+          iterations={5}
+          threshold={0.9}
+          flipflops={3}
+          onDecline={() =>
+            setEffectiveQuality((prev) => degradeTier(prev))
+          }
+          onIncline={() =>
+            setEffectiveQuality((prev) => upgradeTier(prev, quality))
+          }
+        />
+
         <color attach="background" args={[tokens3D.background]} />
         {/* Fog starts past the structure at the default viewing distance —
             it should swallow the starfield's depth, not the graph itself. */}
@@ -871,6 +946,19 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
         >
           Ambient
         </button>
+
+        {/* Isolated toggle — shown only when isolated entities exist */}
+        {(data?.isolated_count ?? 0) > 0 && (
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border/60 bg-card/80 px-2 py-1 text-label-xs text-muted-foreground backdrop-blur hover:bg-accent/40">
+            <input
+              type="checkbox"
+              checked={includeIsolated}
+              onChange={(e) => setIncludeIsolated(e.target.checked)}
+              className="rounded border-border/60"
+            />
+            Show isolated ({data?.isolated_count})
+          </label>
+        )}
 
         {/* View mode toggle */}
         <div

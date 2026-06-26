@@ -230,6 +230,19 @@ def detect_communities(
                 threshold=min_community_size,
             )
 
+        # Assign degree-0 orphan entities the 'isolated' sentinel.  GDS
+        # projections include only nodes that participate in at least one
+        # CO_MENTIONED edge, so Leiden never touches pure orphans and their
+        # community_id stays NULL after the loop above.  Renderers and UMAP
+        # jobs skip NULL community_id; this one Cypher makes every entity
+        # queryable with a non-null value.  'isolated' is intentionally NOT
+        # in the '{level}:{native_id}' Leiden format — Task 4.4 wires it to
+        # a fixed graphite/neutral colour without touching the Leiden hierarchy.
+        isolated_summary = session.run(
+            "MATCH (e:Entity) WHERE e.community_id IS NULL SET e.community_id = 'isolated'"
+        ).consume()
+        stats["isolated_assigned"] = isolated_summary.counters.properties_set
+
     stats["communities_per_level"] = {
         level: len(comms) for level, comms in communities_seen.items()
     }

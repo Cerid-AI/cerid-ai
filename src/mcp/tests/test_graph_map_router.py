@@ -75,9 +75,14 @@ def fake_driver_factory():
 
         def _run(query, **_kwargs):
             result = MagicMock()
-            if "CO_MENTIONED" in query:
+            if "count(e)" in query:
+                # isolated_count subquery
+                result.data = lambda: [{"isolated_count": 0}]
+            elif ")-[r:" in query:
+                # link query: MATCH (a:Entity)-[r:CO_MENTIONED|SIMILAR_TO]->
                 result.data = lambda: edge_rows or []
             else:
+                # entity rows query: MATCH (e:Entity)
                 result.data = lambda: entity_rows
             return result
 
@@ -126,7 +131,7 @@ def test_map_returns_200_with_entities_links_communities(mock_redis, fake_driver
     payload = r.json()
     assert payload["count"] == 2
     assert {e["id"] for e in payload["entities"]} == {"a", "b"}
-    assert payload["links"] == [[0, 1, 3.0]]
+    assert payload["links"] == [[0, 1, 3.0, "co_mention"]]
     assert len(payload["communities"]) == 1
     comm = payload["communities"][0]
     assert comm["id"] == "comm1"

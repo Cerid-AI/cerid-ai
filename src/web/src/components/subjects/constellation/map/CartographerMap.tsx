@@ -18,15 +18,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Sigma from "sigma"
 import Graph from "graphology"
-import { Loader2, X } from "lucide-react"
+import { Loader2, X, Link2, Users, ShieldCheck } from "lucide-react"
 import type { GraphMapResponse, CommunityHull } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
 import { useCommunityLayer, resolveMapTokens, type MapTokens } from "./community-layer"
 import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
+import { HOVER_INTENT_DELAY_MS } from "@/lib/graph/hover-intent"
 import { useNavigation } from "@/contexts/navigation-context"
 import { domainColor } from "@/lib/graph/identity"
 import { createHealController } from "@/lib/graph/interactions/drag-heal"
+import { nodeBaseAlpha, ISOLATED_COMMUNITY_ID } from "../palette"
 import type { OnInspect, OnFocusEntity } from "@/lib/graph/cycle4-contracts"
 // sigma's MouseCoords — local interface matching the vendored type
 interface SigmaMouseCoords {
@@ -71,7 +73,7 @@ function hashToSlot(id: string): number {
 }
 
 function clusterColor(communityId: string | null, tokens: MapTokens): string {
-  if (!communityId) return tokens.clusterOther
+  if (!communityId || communityId === ISOLATED_COMMUNITY_ID) return tokens.graphite
   return tokens.clusters[hashToSlot(communityId)] ?? tokens.clusterOther
 }
 
@@ -134,6 +136,7 @@ function tokensEqual(a: MapTokens, b: MapTokens): boolean {
     a.trustVerified === b.trustVerified &&
     a.trustPartial === b.trustPartial &&
     a.trustUnverified === b.trustUnverified &&
+    a.graphite === b.graphite &&
     a.fontSans === b.fontSans &&
     a.clusters.length === b.clusters.length &&
     a.clusters.every((c, i) => c === b.clusters[i]) &&
@@ -247,6 +250,7 @@ export function CartographerMap({
       trustVerified: "#333", // drift-allowed: SSR fallback only, never reaches browser
       trustPartial: "#555", // drift-allowed: SSR fallback only, never reaches browser
       trustUnverified: "#888", // drift-allowed: SSR fallback only, never reaches browser
+      graphite: "#6b7080", // drift-allowed: SSR fallback only, never reaches browser
       grid: "#eee", // drift-allowed: SSR fallback only, never reaches browser
       fontSans: "system-ui, sans-serif", // drift-allowed: SSR fallback only, never reaches browser
     }
@@ -266,6 +270,8 @@ export function CartographerMap({
   const hoverIdRef = useRef<string | null>(null)
   // DOM tooltip state for the HTML overlay (separate from sigma hover plate)
   const [tooltipState, setTooltipState] = useState<{ id: string; x: number; y: number } | null>(null)
+  // Intent-delay timer — cleared on leaveNode to suppress accidental hover-throughs.
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Drag state ref — no React state; updates don't trigger re-renders.
   const dragRef = useRef<DragRef>({ nodeId: null, startX: 0, startY: 0, didDrag: false })
@@ -362,7 +368,15 @@ export function CartographerMap({
 
     const links = dedupedLinks.slice(0, budget)
 
-    for (const [si, ti, weight] of links) {
+    // Alpha suffix: 0x38 / 255 ≈ 0.22 — edges are the primary relational
+    // signal; raising alpha from the former near-invisible value makes
+    // them readable at a glance. similar edges get a dimmer suffix (0x28
+    // ≈ 0.157) as a calm secondary tone. Both suffixes appended to the
+    // token hex from resolveMapTokens, which always returns #RRGGBB.
+    const CO_MENTION_ALPHA_SUFFIX = "38"  // ≈ 22% — primary signal
+    const SIMILAR_ALPHA_SUFFIX = "28"     // ≈ 16% — secondary/dimmer
+
+    for (const [si, ti, weight, kind] of links) {
       const src = data.entities[si]
       const tgt = data.entities[ti]
       if (!src || !tgt) continue
@@ -371,9 +385,12 @@ export function CartographerMap({
       // added twice under two different directional keys.
       const key = src.id < tgt.id ? `${src.id}::${tgt.id}` : `${tgt.id}::${src.id}`
       if (graph.hasEdge(key)) continue
+      const alphaSuffix = kind === "similar" ? SIMILAR_ALPHA_SUFFIX : CO_MENTION_ALPHA_SUFFIX
       graph.addEdgeWithKey(key, src.id, tgt.id, {
         size: edgeWidth(weight),
-        color: tokens.edge,
+        color: tokens.edge + alphaSuffix,
+        // Store kind for the edgeReducer to use in focus styling.
+        _kind: kind ?? "co_mention",
       })
     }
 
@@ -529,9 +546,14 @@ export function CartographerMap({
       const orig = event.original
       const clientX = "clientX" in orig ? (orig as MouseEvent).clientX : 0
       const clientY = "clientY" in orig ? (orig as MouseEvent).clientY : 0
-      setTooltipState({ id: node, x: clientX, y: clientY })
+      // Intent delay — show card only after dwell (mirrors Atlas; avoids hover-through flicker)
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = setTimeout(() => {
+        setTooltipState({ id: node, x: clientX, y: clientY })
+      }, HOVER_INTENT_DELAY_MS)
     })
     sigma.on("leaveNode", () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
       hoverIdRef.current = null
       sigma.refresh({ skipIndexation: true })
       setTooltipState(null)
@@ -647,14 +669,26 @@ export function CartographerMap({
           color: currentTokens.dim,
           label: "",
           // Enforce minimum interactive hit size even when dimmed.
-          // Soft de-emphasis (0.85x) keeps non-focus nodes clearly
-          // perceptible rather than near-vanishing.
-          size: Math.max(HIT_SIZE_MIN, attrs.size * 0.85),
+          // 0.6× makes the local subgraph pop — non-focus nodes recede
+          // decisively without vanishing (floor = HIT_SIZE_MIN).
+          size: Math.max(HIT_SIZE_MIN, attrs.size * 0.6),
         }
       }
 
       // Apply lens recoloring
-      const color = lensColor(entity, currentLens, currentTokens)
+      const baseColor = lensColor(entity, currentLens, currentTokens)
+
+      // Confidence/recency → fill alpha. mention_count is the most robust
+      // per-node signal available: single-mention entities are newly-observed
+      // or rarely-cited and render softer; well-established nodes are opaque.
+      // This base alpha COMPOSES with focus-dim and type-filter above (both
+      // of which return early before reaching this path).
+      const alpha = nodeBaseAlpha(entity.mention_count ?? 1)
+      // resolveMapTokens always returns #RRGGBB; append a 2-hex alpha suffix.
+      const alphaSuffix = Math.round(alpha * 255).toString(16).padStart(2, "0")
+      const color = baseColor.startsWith("#") && baseColor.length === 7
+        ? baseColor + alphaSuffix
+        : baseColor
 
       // Hover/selection ring: teal border on focal node only (not all neighbors)
       // — marking all neighbors `highlighted` causes many white plates (sigma
@@ -689,10 +723,16 @@ export function CartographerMap({
       const currentPinnedId = pinnedIdRef.current
       const hoverId = hoverIdRef.current
       const focusCenter = currentPinnedId ?? hoverId ?? null
-      if (!focusCenter) return { ...attrs, color: tokensRef.current.edge }
+      const currentTokens = tokensRef.current
+
+      // Kind-aware base color: preserve the alpha suffix baked at build time.
+      // The attrs.color already has the kind-derived alpha suffix appended.
+      const baseColor: string = (attrs.color as string) || currentTokens.edge
+
+      if (!focusCenter) return { ...attrs, color: baseColor }
 
       const graph = sigma.getGraph()
-      if (!graph.hasNode(focusCenter)) return { ...attrs, color: tokensRef.current.edge }
+      if (!graph.hasNode(focusCenter)) return { ...attrs, color: baseColor }
 
       const focusNeighbors = new Set<string>()
       graph.forEachNeighbor(focusCenter, (n) => focusNeighbors.add(n))
@@ -703,12 +743,12 @@ export function CartographerMap({
       const srcInFocus = focusNeighbors.has(src)
       const tgtInFocus = focusNeighbors.has(tgt)
       if (srcInFocus && tgtInFocus) {
-        return { ...attrs, color: tokensRef.current.edge, hidden: false }
+        return { ...attrs, color: baseColor, hidden: false }
       }
       // Non-neighborhood edges stay visible but recede to the dim token
       // instead of vanishing — soft de-emphasis, not a blackout of the
       // whole edge layer.
-      return { ...attrs, color: tokensRef.current.dim, hidden: false }
+      return { ...attrs, color: currentTokens.dim, hidden: false }
     })
 
     sigma.refresh()
@@ -809,6 +849,14 @@ export function CartographerMap({
   )
 
   // ---------------------------------------------------------------------------
+  // Entity lookup map — must be declared before any early return (rules-of-hooks)
+  // ---------------------------------------------------------------------------
+  const entityById = useMemo(
+    () => new Map(data?.entities.map((e) => [e.id, e]) ?? []),
+    [data],
+  )
+
+  // ---------------------------------------------------------------------------
   // Render states
   // ---------------------------------------------------------------------------
   if (isLoading) {
@@ -849,6 +897,29 @@ export function CartographerMap({
     ? data.entities.find((e) => e.id === tooltipState.id)
     : undefined
 
+  function getNodeInfo(entityId: string): { degree: number; topNeighbors: Array<{ id: string; name: string; kind: string }> } {
+    const graph = sigmaRef.current?.getGraph()
+    if (!graph || !graph.hasNode(entityId)) {
+      const entity = entityById.get(entityId)
+      const deg = entity ? (graph?.getNodeAttribute(entityId, "_degree") as number | undefined) ?? 0 : 0
+      return { degree: deg, topNeighbors: [] }
+    }
+    const degree = graph.degree(entityId)
+    const topNeighbors: Array<{ id: string; name: string; kind: string }> = []
+    graph.forEachNeighbor(entityId, (nbId) => {
+      if (topNeighbors.length >= 3) return
+      const e = entityById.get(nbId)
+      if (!e) return
+      // Derive edge kind from the stored _kind attribute on the first edge
+      let kind = "co_mention"
+      graph.forEachEdge(entityId, nbId, (_key, attrs) => {
+        kind = (attrs._kind as string | undefined) ?? "co_mention"
+      })
+      topNeighbors.push({ id: nbId, name: e.name, kind })
+    })
+    return { degree, topNeighbors }
+  }
+
   return (
     <div
       className="relative h-full w-full bg-background"
@@ -868,64 +939,128 @@ export function CartographerMap({
       )}
 
       {/* Hover tooltip */}
-      {tooltipState && hoveredEntity && (
-        <div
-          className="pointer-events-none fixed z-50 max-w-xs rounded-lg border border-border/60 bg-card/95 px-3 py-2 shadow-xl backdrop-blur"
-          // Runtime-derived position — drift-allowlisted inline style (popover absolute positioning)
-          style={{ left: tooltipState.x + 14, top: tooltipState.y + 14 }} // drift-allowed: runtime pointer position
-        >
-          <div className="truncate text-sm font-semibold text-foreground">
-            {hoveredEntity.name}
+      {tooltipState && hoveredEntity && (() => {
+        const { degree, topNeighbors } = getNodeInfo(hoveredEntity.id)
+        return (
+          <div
+            role="tooltip"
+            aria-label={`Entity details: ${hoveredEntity.name}`}
+            className="pointer-events-none fixed z-50 w-64 rounded-lg border border-border/60 bg-card/95 px-3 py-2 shadow-xl backdrop-blur"
+            // Runtime-derived position — drift-allowlisted inline style (popover absolute positioning)
+            style={{ left: tooltipState.x + 14, top: tooltipState.y + 14 }} // drift-allowed: runtime pointer position
+          >
+            <div className="truncate text-sm font-semibold text-foreground">
+              {hoveredEntity.name}
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-label-xs text-muted-foreground">
+              <span className="rounded bg-accent/50 px-1 uppercase">{hoveredEntity.type}</span>
+              <span>{hoveredEntity.mention_count} mentions</span>
+            </div>
+            <div className="mt-1 flex flex-col gap-1">
+              <div className="flex items-center gap-1.5 text-label-xs text-muted-foreground">
+                <Link2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span data-testid="carto-tooltip-degree">{degree} {degree === 1 ? "connection" : "connections"}</span>
+              </div>
+              {hoveredEntity.trust_state !== "unknown" && (
+                <div className="flex items-center gap-1.5 text-label-xs text-muted-foreground">
+                  <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span data-testid="carto-tooltip-trust">{hoveredEntity.trust_state}</span>
+                  <span aria-hidden="true" className="text-muted-foreground/40">·</span>
+                  <span className="text-muted-foreground/60">verified / partial / unverified / contradicted</span>
+                </div>
+              )}
+              {topNeighbors.length > 0 && (
+                <div>
+                  <div className="mb-0.5 flex items-center gap-1 text-label-xs text-muted-foreground/70">
+                    <Users className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span>Top neighbors</span>
+                  </div>
+                  <ul className="flex flex-col gap-0.5" aria-label="Top neighbors">
+                    {topNeighbors.map((nb) => (
+                      <li key={nb.id} className="flex items-center gap-1.5 text-label-xs text-foreground/70">
+                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" aria-hidden="true" />
+                        <span className="truncate">{nb.name}</span>
+                        <span className="shrink-0 text-muted-foreground/40">{nb.kind === "similar" ? "≈" : "·"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            <div className="mt-1 text-label-xs text-muted-foreground/70">Click to inspect</div>
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-label-xs text-muted-foreground">
-            <span className="uppercase">{hoveredEntity.type}</span>
-            <span>·</span>
-            <span>{hoveredEntity.mention_count} mentions</span>
-            {hoveredEntity.trust_state !== "unknown" && (
-              <>
-                <span>·</span>
-                <span>{hoveredEntity.trust_state}</span>
-              </>
-            )}
-          </div>
-          <div className="mt-1 text-label-xs text-muted-foreground/70">Click to inspect</div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Pinned entity card */}
-      {pinnedId && pinnedEntity && (
-        <div className="absolute bottom-3 left-3 w-72 rounded-lg border border-border/60 bg-card/95 p-3 shadow-xl backdrop-blur">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-foreground">
-                {pinnedEntity.name}
+      {pinnedId && pinnedEntity && (() => {
+        const { degree, topNeighbors } = getNodeInfo(pinnedEntity.id)
+        return (
+          <div
+            role="dialog"
+            aria-label={`Entity details: ${pinnedEntity.name}`}
+            className="absolute bottom-3 left-3 w-72 rounded-lg border border-border/60 bg-card/95 p-3 shadow-xl backdrop-blur"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-foreground">
+                  {pinnedEntity.name}
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-label-xs text-muted-foreground">
+                  <span className="rounded bg-accent/50 px-1 uppercase">{pinnedEntity.type}</span>
+                  <span>{pinnedEntity.mention_count} mentions</span>
+                </div>
               </div>
-              <div className="mt-0.5 text-label-xs text-muted-foreground">
-                <span className="uppercase">{pinnedEntity.type}</span>
-                {" · "}
-                {pinnedEntity.mention_count} mentions
-                {pinnedEntity.trust_state !== "unknown" &&
-                  ` · ${pinnedEntity.trust_state}`}
+              <button
+                type="button"
+                onClick={handleClearPin}
+                aria-label="Clear focus"
+                className="rounded p-1 text-muted-foreground hover:bg-accent/40"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="mt-2 flex flex-col gap-1">
+              <div className="flex items-center gap-1.5 text-label-xs text-muted-foreground">
+                <Link2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span data-testid="carto-pin-degree">{degree} {degree === 1 ? "connection" : "connections"}</span>
               </div>
+              {pinnedEntity.trust_state !== "unknown" && (
+                <div className="flex items-center gap-1.5 text-label-xs text-muted-foreground">
+                  <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span data-testid="carto-pin-trust">{pinnedEntity.trust_state}</span>
+                  <span aria-hidden="true" className="text-muted-foreground/40">·</span>
+                  <span className="text-muted-foreground/60">verified / partial / unverified / contradicted</span>
+                </div>
+              )}
+              {topNeighbors.length > 0 && (
+                <div>
+                  <div className="mb-0.5 flex items-center gap-1 text-label-xs text-muted-foreground/70">
+                    <Users className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span>Top neighbors</span>
+                  </div>
+                  <ul className="flex flex-col gap-0.5" aria-label="Top neighbors">
+                    {topNeighbors.map((nb) => (
+                      <li key={nb.id} className="flex items-center gap-1.5 text-label-xs text-foreground/70">
+                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" aria-hidden="true" />
+                        <span className="truncate">{nb.name}</span>
+                        <span className="shrink-0 text-muted-foreground/40">{nb.kind === "similar" ? "≈" : "·"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
             <button
               type="button"
-              onClick={handleClearPin}
-              aria-label="Clear focus"
-              className="rounded p-1 text-muted-foreground hover:bg-accent/40"
+              onClick={handleOpenInWiki}
+              className="mt-2 w-full rounded-md bg-accent px-2 py-1.5 text-label-xs font-medium text-accent-foreground hover:bg-accent/80"
             >
-              <X className="h-3 w-3" aria-hidden="true" />
+              Open in Wiki
             </button>
           </div>
-          <button
-            type="button"
-            onClick={handleOpenInWiki}
-            className="mt-2 w-full rounded-md bg-accent px-2 py-1.5 text-label-xs font-medium text-accent-foreground hover:bg-accent/80"
-          >
-            Open in Wiki
-          </button>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Stats overlay */}
       <div className="pointer-events-none absolute right-3 top-3 rounded-md bg-card/80 px-3 py-1.5 text-label-xs text-muted-foreground backdrop-blur">

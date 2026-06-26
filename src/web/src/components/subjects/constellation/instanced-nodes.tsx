@@ -35,6 +35,13 @@ import { communityRgb, degreeRadius, hash01 } from "./palette"
 
 const GROW_DURATION_S = 0.9
 
+/**
+ * Opacity multiplier applied to a non-neighbor node (sphere + glow) when
+ * another node is hovered/selected. Decisive fade so the local subgraph pops.
+ * Exported for unit tests.
+ */
+export const NON_NEIGHBOR_NODE_DIM = 0.12
+
 // ease-out-back: overshoots ~10% then settles — the organic "pop".
 function easeOutBack(x: number): number {
   const c1 = 1.70158
@@ -207,6 +214,9 @@ export function InstancedNodes({
     geom.setAttribute("aSeed", new BufferAttribute(seeds, 1))
     geom.setAttribute("aBirth", new BufferAttribute(birthsAttr, 1))
     geom.setAttribute("aDim", new BufferAttribute(new Float32Array(n).fill(1), 1))
+    // Required for frustumCulled=true: without a bounding sphere the
+    // renderer cannot determine visibility and culls the draw call by default.
+    geom.computeBoundingSphere()
     return geom
   }, [entities, degrees, lensColors])
 
@@ -222,7 +232,7 @@ export function InstancedNodes({
     for (let i = 0; i < entities.length; i++) {
       let v = visibility?.[i] ?? 1
       if (hoveredIndex !== null && hoveredIndex !== undefined) {
-        v = i === hoveredIndex ? 1.8 : hood?.has(i) ? Math.min(v * 1.2, 1.2) : Math.min(v, 0.4)
+        v = i === hoveredIndex ? 1.8 : hood?.has(i) ? Math.min(v * 1.2, 1.2) : Math.min(v, NON_NEIGHBOR_NODE_DIM)
       }
       arr[i] = v
     }
@@ -266,7 +276,7 @@ export function InstancedNodes({
   // Hover focus folds into the same pass: the hovered node + its
   // neighbors keep full color (hovered slightly enlarged); the rest
   // darken toward the background so the active neighborhood pops.
-  const writeInstances = (t: number) => {
+  const writeInstances = (t: number, recomputeBounds = false) => {
     const mesh = meshRef.current
     if (!mesh) return
     const hood = hoveredIndex !== null && hoveredIndex !== undefined
@@ -281,7 +291,7 @@ export function InstancedNodes({
       let brightness = visibility?.[i] ?? 1
       if (hoveredIndex !== null && hoveredIndex !== undefined) {
         if (i === hoveredIndex) scale *= 1.35
-        else if (!hood?.has(i)) brightness = Math.min(brightness, 0.4)
+        else if (!hood?.has(i)) brightness = Math.min(brightness, NON_NEIGHBOR_NODE_DIM)
       }
       dummy.position.set(ent.x, ent.y, ent.z)
       dummy.scale.set(scale, scale, scale)
@@ -299,11 +309,21 @@ export function InstancedNodes({
     }
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+    // Recompute the instanced bounding sphere so frustum culling is correct.
+    // Called on entity-list changes and after growth completes (not every frame,
+    // since positions are fixed; scale changes during growth don't affect
+    // culling correctness because the sphere is conservatively large).
+    if (recomputeBounds) {
+      mesh.computeBoundingSphere()
+    }
   }
 
   // Initial population, on entity-list change, and on hover-focus change.
+  // recomputeBounds=true so the instanced bounding sphere is fresh after each
+  // entity-list change; hover/visibility changes don't shift positions so
+  // bounds don't need recomputing on those paths.
   useEffect(() => {
-    writeInstances(matTime.current)
+    writeInstances(matTime.current, true)
     // writeInstances reads only refs + the props captured here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entities, hoveredIndex, neighbors, degrees, lensColors, visibility])
@@ -311,6 +331,9 @@ export function InstancedNodes({
   // Per-frame: tick the glow clock (uniform only) and, while a growth
   // window is active, re-write sphere matrices. Outside the window the
   // scene is static and this is a two-comparison no-op.
+  // Recompute the instanced bounding sphere once at the end of the growth
+  // window so culling accounts for the final node positions/scales.
+  const growthBoundsComputedAt = useRef(-1)
   useFrame(({ clock }) => {
     if (!animate) return
     if (clockStart.current === null) clockStart.current = clock.elapsedTime
@@ -318,6 +341,11 @@ export function InstancedNodes({
     glowMaterial.uniforms.uTime.value = matTime.current
     if (matTime.current <= growthEndsAt.current) {
       writeInstances(matTime.current)
+    } else if (growthBoundsComputedAt.current < growthEndsAt.current) {
+      // Growth just finished — do one final bounds recompute so culling is
+      // accurate at the settled node scales.
+      writeInstances(matTime.current, true)
+      growthBoundsComputedAt.current = growthEndsAt.current
     }
   })
 
@@ -365,9 +393,8 @@ export function InstancedNodes({
         onClick={handleClick}
         onPointerMove={handlePointerMove}
         onPointerOut={handlePointerOut}
-        frustumCulled={false}
       />
-      {glow && <points ref={glowRef} args={[glowGeometry, glowMaterial]} frustumCulled={false} />}
+      {glow && <points ref={glowRef} args={[glowGeometry, glowMaterial]} />}
     </group>
   )
 }

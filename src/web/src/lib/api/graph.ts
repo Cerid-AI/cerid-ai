@@ -23,9 +23,15 @@ export async function fetchNeighborhood(
   entity: string,
   hops: 1 | 2 | 3 = 2,
   filter?: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; includeIsolated?: boolean } = {},
 ): Promise<NeighborhoodResponse> {
-  const url = mcpUrl("/graph/neighborhood", { entity, hops, filter })
+  const url = mcpUrl("/graph/neighborhood", {
+    entity,
+    hops,
+    filter,
+    // Omit the param when false/undefined to keep default URLs cache-stable.
+    ...(options.includeIsolated ? { include_isolated: "true" } : {}),
+  })
 
   const res = await fetch(url.toString(), {
     headers: mcpHeaders(),

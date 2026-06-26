@@ -257,6 +257,36 @@ thermal noise and Ollama model cache effects.
 
 ---
 
+## Graph topology baselines (knowledge-graph systemic fixes)
+
+Tracks the corpus-graph health metrics the systemic-fix program
+(`docs/superpowers/plans/2026-06-25-knowledge-graph-systemic-fixes.md`) moves.
+Measured live against the personal stack (`:8888`, `/graph/map?edges=all`).
+
+| Date | Phase | orphan_pct | single_mention_pct | connected_mean_degree | nodes_per_community | nodes / edges |
+|---|---|---|---|---|---|---|
+| 2026-06-25 | pre-fix (baseline) | 71.0 | 90.2 | 9.8 | 1.34 | 3375 / 4796 |
+| 2026-06-26 | post-reprocess (A+B merge + SIMILAR_TO k=10/thr=0.66) | **24.3** | 90.2 | 9.8 | 1.34 | 3371 / 4933 CO_MENTIONED + 5517 SIMILAR_TO |
+
+> **Result:** orphans 71.0% → **24.3%** (2395 → 819); connected nodes 29% → **75.7%**. The
+> reduction comes from `SIMILAR_TO` semantic edges (5517 at k=10/threshold=0.66), NOT from
+> merging (A+B merge collapsed only 5 true duplicate variants: Apple/Apple Inc., 4 Elsevier
+> legal entities). The default graph view (degree-0 filter) hides the remaining 24% orphans.
+> `single_mention_pct`/`nodes_per_community` unchanged because re-extraction (confidence floor)
+> was NOT run — Tier C embedding-MERGE over-merges distinct coded/numbered entities (RFC 2045≠2046)
+> so was correctly NOT used; embedding similarity is expressed as SIMILAR_TO edges (relate), not
+> merges (identify). Threshold sweep: 0.82→48.4%, 0.72→34.8%, 0.66→24.3%, 0.60→13.3% — 0.66 chosen
+> for edge precision over chasing the ≤15% number (the filter hides orphans regardless).
+> **4 latent real-driver bugs caught by the live run that MagicMock tests missed** — see ledger.
+
+**Acceptance targets** (program close-out): orphan_pct ≤ 35% after P1+P2, ≤ 15%
+after P3 semantic edges; nodes_per_community ≥ 3; connected_mean_degree ≥ baseline.
+Root cause: co-mention-only edges + slug-only `canonical_id` + no confidence floor
+(see the plan's "Measured baseline" section).
+
+Fill the PENDING row by running the reprocess procedure (`docs/RUNBOOK_PRODUCTION.md` §
+"Knowledge-graph reprocess") and recording `GET /graph/health .topology` afterward.
+
 ## See also
 
 - Driver doc: `tasks/2026-04-28-workstream-e-rag-modernization.md` (Phase 1)

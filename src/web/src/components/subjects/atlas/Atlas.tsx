@@ -13,7 +13,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import Sigma from "sigma"
 import type Graph from "graphology"
-import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight, Bookmark, ArrowLeft } from "lucide-react"
+import { Settings2, X, BookOpen, Clock, Quote, Network, ChevronRight, Bookmark, ArrowLeft, Link2, Users, ShieldCheck } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -33,6 +33,7 @@ import {
   type MapTokens,
 } from "@/lib/graph/identity"
 import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
+import { HOVER_INTENT_DELAY_MS } from "@/lib/graph/hover-intent"
 import type { AtlasEdgeAttributes, AtlasNodeAttributes } from "@/lib/types/graph"
 import { useAtlasKeyboard } from "./use-atlas-keyboard"
 import { AtlasA11yTree } from "./atlas-a11y-tree"
@@ -225,12 +226,22 @@ function useArrivalPing(
 // Entity card (hover tooltip + click-to-pin)
 // ---------------------------------------------------------------------------
 
+// Trust-band legend: one-line human label for each trust state.
+const TRUST_LABELS: Record<string, string> = {
+  verified: "verified",
+  partial: "partial",
+  unverified: "unverified",
+  contradicted: "contradicted",
+  unknown: "unknown",
+}
+
 interface EntityCardProps {
   nodeId: string
   attrs: AtlasNodeAttributes
   /** Screen position of the card anchor */
   screenPos: { x: number; y: number }
   tokens: MapTokens
+  graph: AtlasGraph | null
   onOpenWiki: (id: string) => void
   onOpenTimeline: (id: string) => void
   onMakeFocal: (id: string) => void
@@ -240,11 +251,12 @@ interface EntityCardProps {
   pinned: boolean
 }
 
-function EntityCard({
+export function EntityCard({
   nodeId,
   attrs,
   screenPos,
   tokens,
+  graph,
   onOpenWiki,
   onOpenTimeline,
   onMakeFocal,
@@ -253,19 +265,36 @@ function EntityCard({
   pinned,
 }: EntityCardProps) {
   // Keep card within viewport bounds
-  const cardW = 240
-  const cardH = 200
+  const cardW = 260
+  const cardH = 260
   const left = Math.min(screenPos.x + 12, window.innerWidth - cardW - 8)
   const top = Math.min(screenPos.y - 8, window.innerHeight - cardH - 8)
 
   const borderHex = attrs.borderColor ?? tokens.trustUnverified
+
+  // Degree + top-3 neighbors from live graph
+  const degree = graph?.degree(nodeId) ?? 0
+  const topNeighbors: Array<{ id: string; name: string; edgeType: string }> = []
+  if (graph?.hasNode(nodeId)) {
+    graph.forEachNeighbor(nodeId, (nbId, nbAttrs) => {
+      if (topNeighbors.length >= 3) return
+      // Get the edge kind (co_mention vs similar) from the first edge between them
+      let edgeType = "co_mention"
+      graph.forEachEdge(nodeId, nbId, (_key, edgeAttrs: AtlasEdgeAttributes) => {
+        edgeType = edgeAttrs.type ?? "co_mention"
+      })
+      topNeighbors.push({ id: nbId, name: nbAttrs.name, edgeType })
+    })
+  }
+
+  const trustLabel = TRUST_LABELS[attrs.trust_state] ?? "unknown"
 
   return (
     <div
       role={pinned ? "dialog" : "tooltip"}
       aria-label={`Entity details: ${attrs.name}`}
       style={{ left, top, borderLeftColor: borderHex }}
-      className="fixed z-50 w-[240px] rounded-lg border border-border/60 border-l-4 bg-card/95 shadow-xl backdrop-blur"
+      className="fixed z-50 w-[260px] rounded-lg border border-border/60 border-l-4 bg-card/95 shadow-xl backdrop-blur"
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-1">
@@ -285,6 +314,51 @@ function EntityCard({
           >
             <X className="h-3 w-3" />
           </button>
+        )}
+      </div>
+
+      {/* Connection count + trust band */}
+      <div className="px-3 pb-2 flex flex-col gap-1">
+        <div className="flex items-center gap-1.5 text-label-xs text-muted-foreground">
+          <Link2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span data-testid="entity-card-degree">{degree} {degree === 1 ? "connection" : "connections"}</span>
+        </div>
+        {attrs.trust_state !== "unknown" && (
+          <div className="flex items-center gap-1.5 text-label-xs text-muted-foreground">
+            <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden="true" />
+            <span
+              data-testid="entity-card-trust"
+              aria-label={`Trust: ${trustLabel}`}
+            >
+              {trustLabel}
+            </span>
+            <span aria-hidden="true" className="text-muted-foreground/40">·</span>
+            <span className="text-muted-foreground/60">verified / partial / unverified / contradicted</span>
+          </div>
+        )}
+
+        {/* Top-3 neighbors */}
+        {topNeighbors.length > 0 && (
+          <div className="mt-0.5">
+            <div className="mb-0.5 flex items-center gap-1 text-label-xs text-muted-foreground/70">
+              <Users className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span>Top neighbors</span>
+            </div>
+            <ul className="flex flex-col gap-0.5" aria-label="Top neighbors">
+              {topNeighbors.map((nb) => (
+                <li key={nb.id} className="flex items-center gap-1.5 text-label-xs text-foreground/70">
+                  <span
+                    className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40"
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{nb.name}</span>
+                  <span className="shrink-0 text-muted-foreground/40">
+                    {nb.edgeType === "similar" ? "≈" : "·"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 
@@ -340,6 +414,9 @@ interface PillToolbarProps {
   onConfigChange: (patch: Partial<AtlasConfig>) => void
   savedViewsSlot?: ReactNode
   onBackToOverview?: () => void
+  includeIsolated: boolean
+  onIncludeIsolatedChange: (v: boolean) => void
+  isolatedCount: number
 }
 
 function PillToolbar({
@@ -356,6 +433,9 @@ function PillToolbar({
   onConfigChange,
   savedViewsSlot,
   onBackToOverview,
+  includeIsolated,
+  onIncludeIsolatedChange,
+  isolatedCount,
 }: PillToolbarProps) {
   return (
     <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-1.5 border-b border-border/40 bg-card/80 px-3 py-1.5 backdrop-blur">
@@ -450,6 +530,23 @@ function PillToolbar({
           )
         })}
       </div>
+
+      {/* Show isolated pill — hidden when count is 0 */}
+      {isolatedCount > 0 && (
+        <>
+          <div className="h-4 w-px bg-border/40" aria-hidden="true" />
+          <label className="flex cursor-pointer items-center gap-1.5 text-label-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeIsolated}
+              disabled={isolatedCount === 0}
+              onChange={(e) => onIncludeIsolatedChange(e.target.checked)}
+              className="rounded border-border/60"
+            />
+            Show isolated ({isolatedCount})
+          </label>
+        </>
+      )}
 
       <div className="grow" />
 
@@ -550,8 +647,7 @@ interface LayoutStatus {
   progressPercent?: number
 }
 
-// Hover intent delay: ~500ms before tooltip shows
-const HOVER_DELAY_MS = 480
+// Hover intent delay: shared with Cartographer (see lib/graph/hover-intent.ts)
 
 // ---------------------------------------------------------------------------
 // Atlas
@@ -596,6 +692,8 @@ export function Atlas({
   const [activeTypeChips, setActiveTypeChips] = useState<Set<string>>(new Set())
   const [config, setConfig] = useState<AtlasConfig>(loadConfig)
   const [arrivalPingKey, setArrivalPingKey] = useState(0)
+  // Isolated-node toggle — off by default (graph shows connected core)
+  const [includeIsolated, setIncludeIsolated] = useState(false)
 
   // Hover tooltip + pinned entity card
   const [hoverNode, setHoverNode] = useState<{ id: string; pos: { x: number; y: number } } | null>(null)
@@ -616,6 +714,7 @@ export function Atlas({
       trustVerified: "#555555", // drift-allowed: SSR fallback only
       trustPartial: "#777777",  // drift-allowed: SSR fallback only
       trustUnverified: "#999999", // drift-allowed: SSR fallback only
+      graphite: "#6b7080",      // drift-allowed: SSR fallback only
       grid: "#eeeeee",          // drift-allowed: SSR fallback only
       fontSans: "system-ui, sans-serif", // drift-allowed: SSR fallback only
     }
@@ -665,8 +764,8 @@ export function Atlas({
   }, [])
 
   const { data, isLoading, isFetching, isError, error } = useQuery({
-    queryKey: ["graph-neighborhood", entity, hops, filter ?? null],
-    queryFn: ({ signal }) => fetchNeighborhood(entity, hops, filter, { signal }),
+    queryKey: ["graph-neighborhood", entity, hops, filter ?? null, includeIsolated],
+    queryFn: ({ signal }) => fetchNeighborhood(entity, hops, filter, { signal, includeIsolated }),
     staleTime: 30_000,
     enabled: Boolean(entity),
     placeholderData: keepPreviousData,
@@ -780,11 +879,11 @@ export function Atlas({
     sigma.on("enterNode", ({ node, event }) => {
       const original = event.original as MouseEvent | undefined
       const pos = { x: original?.clientX ?? 0, y: original?.clientY ?? 0 }
-      // 500ms intent delay
+      // 300ms intent delay
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
       hoverTimerRef.current = setTimeout(() => {
         setHoverNode({ id: node, pos })
-      }, HOVER_DELAY_MS)
+      }, HOVER_INTENT_DELAY_MS)
       try { graph.setNodeAttribute(node, "highlighted", true) } catch { /* removed mid-event */ }
     })
 
@@ -999,6 +1098,9 @@ export function Atlas({
           config={config}
           onConfigChange={handleConfigChange}
           onBackToOverview={onBackToOverview}
+          includeIsolated={includeIsolated}
+          onIncludeIsolatedChange={setIncludeIsolated}
+          isolatedCount={data?.isolated_count ?? 0}
           savedViewsSlot={
             <Popover>
               <PopoverTrigger asChild>
@@ -1063,6 +1165,7 @@ export function Atlas({
           attrs={cardAttrs}
           screenPos={cardPos}
           tokens={tokens}
+          graph={graphInstance}
           onOpenWiki={(id) => { onOpenInWiki?.(id); setPinnedNode(null) }}
           onOpenTimeline={(id) => { onOpenInTimeline?.(id); setPinnedNode(null) }}
           onMakeFocal={handleMakeFocal}

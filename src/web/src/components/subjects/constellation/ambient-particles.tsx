@@ -78,6 +78,9 @@ export function AmbientParticles({ count = 800, radius = 18 }: AmbientParticlesP
     }
     geom.setAttribute("position", new BufferAttribute(positions, 3))
     geom.setAttribute("color", new BufferAttribute(colors, 3))
+    // Required for frustumCulled=true: without this the bounding sphere is null
+    // and the renderer culls the draw call incorrectly.
+    geom.computeBoundingSphere()
     return geom
   }, [count, radius])
 
@@ -87,7 +90,7 @@ export function AmbientParticles({ count = 800, radius = 18 }: AmbientParticlesP
       size: 0.07,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.25,
       depthWrite: false,
       blending: AdditiveBlending,  // brand glow on dark Vault navy bg
     })
@@ -111,5 +114,5 @@ export function AmbientParticles({ count = 800, radius = 18 }: AmbientParticlesP
     p.rotation.x += delta * 0.008
   })
 
-  return <points ref={pointsRef} args={[geometry, material]} frustumCulled={false} />
+  return <points ref={pointsRef} args={[geometry, material]} />
 }

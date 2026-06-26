@@ -12,9 +12,11 @@
 // draw. Billboarding keeps them camera-facing for free.
 
 import { Billboard, Text } from "@react-three/drei"
-import { useMemo } from "react"
+import { useMemo, useRef, useState } from "react"
+import { useFrame } from "@react-three/fiber"
 import type { EntityEmbedding3D } from "@/lib/api/embeddings-3d"
 import { degreeRadius } from "./palette"
+import { visibleLabelCount } from "./quality"
 
 export interface HubLabelsProps {
   entities: EntityEmbedding3D[]
@@ -26,7 +28,33 @@ export interface HubLabelsProps {
   hoveredIndex?: number | null
 }
 
+// Distance bucket boundaries — a re-render is only triggered when the camera
+// crosses one of these thresholds, not on every frame.
+const DISTANCE_BUCKETS = [28, 40, 55]
+
+function distanceBucket(d: number): number {
+  for (let i = 0; i < DISTANCE_BUCKETS.length; i++) {
+    if (d < DISTANCE_BUCKETS[i]) return i
+  }
+  return DISTANCE_BUCKETS.length
+}
+
 export function HubLabels({ entities, degrees, count = 18, hoveredIndex = null }: HubLabelsProps) {
+  // Camera distance sampled per-frame, only triggers a re-render when the
+  // bucket (zoom level) changes — avoids per-frame React reconciliation.
+  const [cameraDist, setCameraDist] = useState(30)
+  const lastBucketRef = useRef(distanceBucket(30))
+  useFrame(({ camera }) => {
+    const d = camera.position.length()
+    const bucket = distanceBucket(d)
+    if (bucket !== lastBucketRef.current) {
+      lastBucketRef.current = bucket
+      setCameraDist(d)
+    }
+  })
+
+  const visibleCount = visibleLabelCount(cameraDist, count)
+
   const hubs = useMemo(() => {
     return entities
       .map((ent, index) => ({ ent, index, degree: degrees?.[index] ?? 0 }))
@@ -37,7 +65,7 @@ export function HubLabels({ entities, degrees, count = 18, hoveredIndex = null }
 
   return (
     <group>
-      {hubs.map(({ ent, index, degree }) => (
+      {hubs.slice(0, visibleCount).map(({ ent, index, degree }) => (
         <Billboard key={ent.id} position={[ent.x, ent.y + degreeRadius(degree) + 0.28, ent.z]}>
           <Text
             fontSize={0.34}

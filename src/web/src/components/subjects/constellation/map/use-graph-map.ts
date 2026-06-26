@@ -14,19 +14,21 @@ import { useCallback, useRef } from "react"
 import { fetchGraphMap } from "@/lib/api/graph-map"
 import type { MapLayout } from "@/lib/graph/cycle4-contracts"
 
-export function useGraphMap(layout?: MapLayout) {
+export function useGraphMap(layout?: MapLayout, includeIsolated?: boolean) {
   const seenIdsRef = useRef<Set<string>>(new Set())
   const newIdsRef = useRef<Set<string>>(new Set())
 
-  // Include layout in query key so "force", "wells", "domain" have
-  // independent TanStack entries hitting per-layout Redis keys.
-  const queryKey = layout && layout !== "force"
-    ? ["graph-map", layout]
-    : ["graph-map"]
+  // Include layout + includeIsolated in query key so each combination
+  // has an independent TanStack cache entry and toggling triggers a refetch.
+  const queryKey = [
+    "graph-map",
+    layout && layout !== "force" ? layout : null,
+    includeIsolated ? "isolated" : null,
+  ].filter(Boolean)
 
   const queryResult = useQuery({
     queryKey,
-    queryFn: ({ signal }) => fetchGraphMap(layout ?? "force", signal),
+    queryFn: ({ signal }) => fetchGraphMap(layout ?? "force", includeIsolated, signal),
     staleTime: 60 * 1000,
     refetchInterval: 75 * 1000,
     placeholderData: (prev) => prev,

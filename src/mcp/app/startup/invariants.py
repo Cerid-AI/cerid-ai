@@ -128,11 +128,13 @@ def _probe_collection_dim(collection: Any) -> int | None:
         pass
     try:
         peek = collection.peek(1)
-        emb = (peek or {}).get("embeddings") or []
+        _raw_emb = (peek or {}).get("embeddings")
+        emb = list(_raw_emb) if _raw_emb is not None else []
         if emb and emb[0] is not None:
             return int(len(emb[0]))
-    except Exception:
-        pass
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("app.startup.invariants._probe_collection_dim", exc)
     return None
 
 

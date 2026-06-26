@@ -40,6 +40,7 @@ const TOKENS: MapTokens = {
   trustVerified:   "#4488FF", // drift-allowed: test stub only
   trustPartial:    "#FFAA44", // drift-allowed: test stub only
   trustUnverified: "#FF4444", // drift-allowed: test stub only
+  graphite:        "#6b7080", // drift-allowed: test stub only
   grid:          "#EEEEEE", // drift-allowed: test stub only
 }
 
@@ -84,6 +85,7 @@ function mkResponse(overrides: Partial<NeighborhoodResponse> = {}): Neighborhood
     ],
     truncated: false,
     cached: false,
+    isolated_count: 0,
     ...overrides,
   }
 }
@@ -289,6 +291,7 @@ describe("adaptNeighborhood", () => {
       edges: [],
       truncated: false,
       cached: false,
+      isolated_count: 0,
     }, TOKENS)
     expect(g.order).toBe(0)
     expect(g.size).toBe(0)
@@ -320,7 +323,7 @@ describe("adaptNeighborhood", () => {
       contradiction: false,
     }))
     const start = performance.now()
-    const g = adaptNeighborhood({ focal_entity: "n0", nodes, edges, truncated: false, cached: false }, TOKENS)
+    const g = adaptNeighborhood({ focal_entity: "n0", nodes, edges, truncated: false, cached: false, isolated_count: 0 }, TOKENS)
     const elapsed = performance.now() - start
     expect(g.order).toBe(100)
     expect(g.size).toBe(100)

@@ -590,6 +590,19 @@ reference layer; every other surface references entities by
 | Wiki page | Contradiction | `(:Entity)-[:HAS_CONTRADICTION]->(:ContradictionFinding)` |
 | Conversation | Wiki touch | `EXTRACTED_FROM` edge + `entities_added` event |
 
+### Graph edge model (hybrid: co-mention + semantic)
+
+The knowledge graph carries two relationship types between `(:Entity)` nodes:
+
+| Relationship | How built | Cypher label |
+|---|---|---|
+| Co-occurrence | Entities that appear together in the same artifact chunk are linked with a weight proportional to co-mention frequency. Written by the ingestion pipeline. | `CO_MENTIONED {weight}` |
+| Semantic similarity | Nightly kNN over per-entity embeddings (mean-pooled from their MENTIONS chunk vectors, quenchforge name-embed fallback). Top-k cosine neighbours above a threshold. Written by `build_similarity_edges` (`app/db/neo4j/semantic_edges.py`). | `SIMILAR_TO {score}` |
+
+**Default graph view** excludes degree-0 isolated nodes (entities with no `CO_MENTIONED` or `SIMILAR_TO` edge). Endpoints `/graph/map`, `/graph/embeddings/3d`, and `/graph/neighborhood` accept `include_isolated=false` (default) and return `isolated_count` for the toggle label. Isolated entities carry `community_id='isolated'` so they never receive a Leiden community colour.
+
+Link tuples in the API are 4-tuples `[src_idx, tgt_idx, weight, kind]` where `kind` is `"co_mention"` or `"similar"`. The force layout (`compute_umap_3d`) uses both relationship types; semantic edges are down-weighted by `SEMANTIC_EDGE_SPRING_SCALE` (default 0.6) so co-mention structure stays dominant. The nightly cadence is: `compute_entity_embeddings` (03:15) → `build_similarity_edges` (03:22) → `compute_umap_3d` (03:30).
+
 ### Observability (Phase K6)
 
 `/health.wiki_freshness` returns six metrics in one Cypher round-

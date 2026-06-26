@@ -36,9 +36,16 @@ def mock_neo4j_with_rows():
     fake_session.__enter__ = lambda self: self
     fake_session.__exit__ = lambda self, exc_type, exc, tb: None
 
-    def _run(*_args, **_kwargs):
+    def _run(query, **_kwargs):
         result = MagicMock()
-        result.data = lambda: rows[0]
+        if "count(e)" in query:
+            # isolated-count subquery — always return 0 for unit tests
+            result.data = lambda: [{"isolated_count": 0}]
+        elif ")-[r:" in query:
+            # link query — return empty for generic fixtures
+            result.data = lambda: []
+        else:
+            result.data = lambda: rows[0]
         return result
 
     fake_session.run = _run
@@ -137,8 +144,8 @@ def test_embeddings_3d_filter_changes_cache_key(client, mock_neo4j_with_rows):
 def test_embeddings_3d_corrupt_cache_falls_through_to_neo4j(client, mock_neo4j_with_rows, mock_redis):
     _, set_rows = mock_neo4j_with_rows
     set_rows([_make_row("a")])
-    # Plant corrupt JSON into the cache slot (v2 key — payload carries links)
-    mock_redis._state["cerid:graph:emb3d:v2:all"] = "not-json{"
+    # Plant corrupt JSON into the cache slot (v5 key — payload carries links + isolated_count)
+    mock_redis._state["cerid:graph:emb3d:v5:all"] = "not-json{"
 
     r = client.get("/graph/embeddings/3d")
     assert r.status_code == 200
@@ -164,7 +171,7 @@ def test_embeddings_3d_entity_whitelist(client, mock_neo4j_with_rows):
 
 
 def test_embeddings_3d_links_are_index_triples(mock_redis):
-    """links = [sourceIdx, targetIdx, weight] indexing into entities;
+    """links = [sourceIdx, targetIdx, weight, kind] 4-tuples indexing into entities;
     edges referencing out-of-scope ids and self-loops are dropped."""
     from app.routers import graph as graph_router
 
@@ -175,14 +182,19 @@ def test_embeddings_3d_links_are_index_triples(mock_redis):
 
     def _run(query, **_kwargs):
         result = MagicMock()
-        if "CO_MENTIONED" in query:
+        if "count(e)" in query:
+            # isolated-count subquery
+            result.data = lambda: [{"isolated_count": 0}]
+        elif ")-[r:" in query:
+            # link query: MATCH (a:Entity)-[r:CO_MENTIONED|SIMILAR_TO]->
             result.data = lambda: [
-                {"s": "a", "t": "b", "w": 5.0},
-                {"s": "b", "t": "c", "w": 2.0},
-                {"s": "a", "t": "ghost", "w": 9.0},  # out of scope — dropped
-                {"s": "c", "t": "c", "w": 3.0},      # self-loop — dropped
+                {"s": "a", "t": "b", "w": 5.0, "kind": "CO_MENTIONED"},
+                {"s": "b", "t": "c", "w": 2.0, "kind": "CO_MENTIONED"},
+                {"s": "a", "t": "ghost", "w": 9.0, "kind": "CO_MENTIONED"},  # out of scope — dropped
+                {"s": "c", "t": "c", "w": 3.0, "kind": "CO_MENTIONED"},      # self-loop — dropped
             ]
         else:
+            # entity rows query
             result.data = lambda: [_make_row("a"), _make_row("b"), _make_row("c")]
         return result
 
@@ -198,7 +210,7 @@ def test_embeddings_3d_links_are_index_triples(mock_redis):
     assert r.status_code == 200
     payload = r.json()
     assert payload["count"] == 3
-    assert payload["links"] == [[0, 1, 5.0], [1, 2, 2.0]]
+    assert payload["links"] == [[0, 1, 5.0, "co_mention"], [1, 2, 2.0, "co_mention"]]
 
 
 def test_embeddings_3d_links_failure_does_not_break_nodes(mock_redis):
@@ -211,7 +223,12 @@ def test_embeddings_3d_links_failure_does_not_break_nodes(mock_redis):
     fake_session.__exit__ = lambda self, exc_type, exc, tb: None
 
     def _run(query, **_kwargs):
-        if "CO_MENTIONED" in query:
+        if "count(e)" in query:
+            result = MagicMock()
+            result.data = lambda: [{"isolated_count": 0}]
+            return result
+        if ")-[r:" in query:
+            # link query — simulate failure
             raise RuntimeError("edge query down")
         result = MagicMock()
         result.data = lambda: [_make_row("a")]

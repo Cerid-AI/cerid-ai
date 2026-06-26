@@ -912,6 +912,7 @@ export function DecompositionIcicle({
     trustVerified: "#555", // drift-allowed: SSR fallback only, never reaches browser
     trustPartial: "#777", // drift-allowed: SSR fallback only, never reaches browser
     trustUnverified: "#999", // drift-allowed: SSR fallback only, never reaches browser
+    graphite: "#6b7080", // drift-allowed: SSR fallback only, never reaches browser
     grid: "#eee", // drift-allowed: SSR fallback only, never reaches browser
     fontSans: "system-ui, sans-serif",
   }

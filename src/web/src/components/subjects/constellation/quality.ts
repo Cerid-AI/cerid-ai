@@ -102,3 +102,43 @@ export function saveQuality(tier: QualityTier): void {
     // storage unavailable — selection lives for the session only
   }
 }
+
+// ---------------------------------------------------------------------------
+// Runtime adaptive-quality helpers — pure functions, no side-effects.
+// These drive the PerformanceMonitor step-down/step-up ladder.
+// The persisted user tier is NEVER modified by these; they only compute the
+// effective (transient, per-session) tier.
+// ---------------------------------------------------------------------------
+
+/** Step the effective quality down by one tier on GPU pressure. Floors at "low". */
+export function degradeTier(tier: QualityTier): QualityTier {
+  switch (tier) {
+    case "ultra":  return "high"
+    case "high":   return "medium"
+    case "medium": return "low"
+    case "low":    return "low"
+  }
+}
+
+/** Step the effective quality up by one tier when the GPU has headroom. Caps at the persisted tier. */
+export function upgradeTier(tier: QualityTier, ceiling: QualityTier): QualityTier {
+  const idx = QUALITY_TIERS.indexOf(tier)
+  const cap = QUALITY_TIERS.indexOf(ceiling)
+  const next = Math.min(idx + 1, cap)
+  return QUALITY_TIERS[next]
+}
+
+/**
+ * Maps camera distance to the number of hub labels to render.
+ * Far out: only the very highest-degree hubs are legible; close in: show all.
+ * Kept in quality.ts (a pure module with no side-effect imports) so it can be
+ * unit-tested without pulling in Three.js or palette modules.
+ */
+export function visibleLabelCount(cameraDistance: number, max: number): number {
+  // Thresholds tuned to the default camera position (distance ~29) and
+  // the graph spread (force layout ~±15 units).
+  if (cameraDistance >= 55) return Math.min(3, max)
+  if (cameraDistance >= 40) return Math.min(6, max)
+  if (cameraDistance >= 28) return Math.min(12, max)
+  return max
+}

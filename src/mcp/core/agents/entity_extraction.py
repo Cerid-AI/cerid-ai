@@ -21,6 +21,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable, Literal
 
+from config.settings import ENTITY_MIN_CONFIDENCE
+from core.agents.entity_resolution import resolve_canonical
 from core.utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.entity_extraction")
@@ -130,6 +132,7 @@ async def extract_entities_from_text(
     *,
     llm_caller: LLMCaller,
     max_chars: int = 8000,
+    min_confidence: float = ENTITY_MIN_CONFIDENCE,
 ) -> list[Entity]:
     """Extract entities from a single chunk of text.
 
@@ -166,11 +169,14 @@ async def extract_entities_from_text(
         )
         return []
 
-    return list(_normalise_entities(parsed))
+    return list(_normalise_entities(parsed, min_confidence=min_confidence))
 
 
-def _normalise_entities(parsed: Any) -> Iterable[Entity]:
-    """Apply schema validation, type-vocab filter, canonicalisation, dedup."""
+def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable[Entity]:
+    """Apply schema validation, type-vocab filter, canonicalisation, dedup.
+
+    Entities with ``confidence < min_confidence`` are dropped before yielding.
+    """
     if not isinstance(parsed, dict):
         return
     raw_list = parsed.get("entities")
@@ -192,8 +198,10 @@ def _normalise_entities(parsed: Any) -> Iterable[Entity]:
         except (TypeError, ValueError):
             confidence = 0.0
         confidence = max(0.0, min(1.0, confidence))
+        if confidence < min_confidence:
+            continue
 
-        cid = canonical_id(name, ent_type)
+        cid = resolve_canonical(name, ent_type)
         if not cid.endswith(":"):  # at least one slug character
             if cid in seen:
                 continue
