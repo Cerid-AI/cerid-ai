@@ -54,6 +54,7 @@ All services use sensible default ports. Override only when you have port confli
 | `CERID_PORT_NEO4J_BOLT` | `7687` | Neo4j Bolt protocol (host-side, bound to 127.0.0.1) |
 | `CERID_PORT_CHROMA` | `8001` | ChromaDB (host-side, bound to 127.0.0.1) |
 | `CERID_PORT_REDIS` | `6379` | Redis (host-side, bound to 127.0.0.1) |
+| `CERID_PORT_TAILNET` | `8443` | Tailnet front-door hop (host-local HTTP; TLS terminated by `tailscale serve`) |
 
 Port overrides affect the host-side port mapping only. Container-internal ports remain unchanged. The `start-cerid.sh` script exports these with defaults and uses them in preflight checks, health checks, and access URL output.
 
@@ -63,6 +64,7 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 |----------|---------|-------------|
 | `CERID_HOST` | *(auto-detected)* | LAN IP or hostname |
 | `CERID_GATEWAY` | `false` | Enable Caddy HTTPS reverse proxy |
+| `CERID_TAILSCALE` | `false` | Front the suite over the tailnet via host `tailscale serve` (dedicated HTTPS port, identity-trusted, serve-only). See LAN_REMOTE_ACCESS.md |
 | `CLOUDFLARE_TUNNEL_TOKEN` | *(empty)* | Enable Cloudflare Tunnel for demos |
 
 ### MCP Application Config (optional)

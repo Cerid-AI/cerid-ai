@@ -50,8 +50,8 @@ src/mcp/tests/conftest.py:126
 src/mcp/tests/conftest.py:159
 src/mcp/tests/conftest.py:170
 src/mcp/tests/eval/production_eval.py:125
-src/mcp/tests/integration/conftest.py:220
-src/mcp/tests/integration/conftest.py:274
+src/mcp/tests/integration/conftest.py:224
+src/mcp/tests/integration/conftest.py:278
 src/mcp/tests/integration/test_w4_contradiction_preservation.py:83
 src/mcp/tests/test_memory_metrics.py:285
 src/mcp/tests/test_session_changes.py:315

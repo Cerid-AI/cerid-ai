@@ -531,7 +531,7 @@ echo "[net] CERID_HOST=$CERID_HOST (source: $_host_source)"
 # LAN access is an explicit opt-in. Materialize the relevant settings from .env
 # (the script reads specific keys; it does not source the whole file) so that
 # `CERID_LAN_MODE=true` in .env actually takes effect.
-for _k in CERID_LAN_MODE CERID_API_KEY CERID_GATEWAY; do
+for _k in CERID_LAN_MODE CERID_API_KEY CERID_GATEWAY CERID_TAILSCALE CERID_PORT_TAILNET; do
   if [ -z "${!_k:-}" ] && [ -f "$ENV_FILE" ]; then
     printf -v "$_k" '%s' "$(grep -s "^${_k}=" "$ENV_FILE" | head -1 | cut -d'=' -f2- || echo "")"
   fi
@@ -566,6 +566,30 @@ if [[ -n "$CERID_HOST" && "$CERID_HOST" != "localhost" && "$CERID_HOST" != "127.
   else
     echo "    LAN IP detected ($CERID_HOST) but CERID_LAN_MODE is not set."
     echo "    Services will bind to 127.0.0.1 only. Set CERID_LAN_MODE=true in .env to enable LAN access."
+  fi
+fi
+
+# ── Tailscale trusted interface (opt-in) ────────────────────────────────
+# Fronts the suite portal over the tailnet with real TLS at a DEDICATED HTTPS
+# port (default 8443) so any existing `tailscale serve` config on :443 is left
+# untouched. Trust = tailnet membership + verified Tailscale identity (no
+# password). Serve only — never funnel. Proxies to the host-local Caddy tailnet
+# listener on 127.0.0.1:${CERID_PORT_TAILNET}. No-op unless CERID_TAILSCALE=true,
+# and tolerant of a missing/inactive tailscale CLI (so it never blocks startup
+# — important: this script is synced to the public repo).
+if [[ "${CERID_TAILSCALE:-}" == "true" ]]; then
+  _ts_port="${CERID_PORT_TAILNET:-8443}"
+  if ! command -v tailscale >/dev/null 2>&1; then
+    echo "[tailscale] CERID_TAILSCALE=true but the 'tailscale' CLI is not on PATH — skipping."
+  elif [[ "$(tailscale status --json 2>/dev/null | sed -n 's/.*"BackendState"[: ]*"\([^"]*\)".*/\1/p' | head -1)" != "Running" ]]; then
+    echo "[tailscale] CERID_TAILSCALE=true but tailscaled is not Running — skipping. Run 'tailscale up' first."
+  else
+    _ts_host="$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName"[: ]*"\([^"]*\)".*/\1/p' | head -1 | sed 's/\.$//')"
+    if tailscale serve --bg --https="${_ts_port}" "http://127.0.0.1:${_ts_port}" >/dev/null 2>&1; then
+      echo "[tailscale] trusted interface ON — https://${_ts_host}:${_ts_port} (tailnet-only, real TLS, identity-trusted)"
+    else
+      echo "[tailscale] 'tailscale serve' failed — check 'tailscale serve status'."
+    fi
   fi
 fi
 

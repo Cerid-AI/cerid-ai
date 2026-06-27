@@ -7,6 +7,12 @@ set -euo pipefail
 # Results file — set by caller or default
 RESULTS_FILE="${RESULTS_FILE:-/tmp/beta-test-results.txt}"
 
+# Auth header — injected when CERID_API_KEY is set; empty otherwise (backward-compat)
+_CERID_AUTH_ARGS=()
+if [[ -n "${CERID_API_KEY:-}" ]]; then
+  _CERID_AUTH_ARGS=(-H "X-API-Key: ${CERID_API_KEY}")
+fi
+
 _pass() {
   local id="$1" name="$2" duration="$3" notes="${4:-}"
   echo "PASS|${id}|${name}|${duration}s|${notes}" >> "$RESULTS_FILE"
@@ -31,7 +37,7 @@ assert_http_status() {
   shift 4
   local start end duration code
   start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
-  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$@" "$url" 2>/dev/null || echo "000")
+  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "${_CERID_AUTH_ARGS[@]}" "$@" "$url" 2>/dev/null || echo "000")
   end=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
   duration=$(awk "BEGIN{printf \"%.2f\", ($end - $start)/1000000000}")
   if [[ "$code" == "$expected" ]]; then
@@ -50,7 +56,7 @@ assert_json_field() {
   shift 5
   local start end duration body actual code
   start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
-  body=$(curl -s --connect-timeout 5 --max-time 10 -w '\n%{http_code}' "$@" "$url" 2>/dev/null || echo -e "\n000")
+  body=$(curl -s --connect-timeout 5 --max-time 10 -w '\n%{http_code}' "${_CERID_AUTH_ARGS[@]}" "$@" "$url" 2>/dev/null || echo -e "\n000")
   end=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
   duration=$(awk "BEGIN{printf \"%.2f\", ($end - $start)/1000000000}")
   code=$(echo "$body" | tail -1)
@@ -76,7 +82,7 @@ assert_json_exists() {
   shift 4
   local start end duration body actual code
   start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
-  body=$(curl -s --connect-timeout 5 --max-time 10 -w '\n%{http_code}' "$@" "$url" 2>/dev/null || echo -e "\n000")
+  body=$(curl -s --connect-timeout 5 --max-time 10 -w '\n%{http_code}' "${_CERID_AUTH_ARGS[@]}" "$@" "$url" 2>/dev/null || echo -e "\n000")
   end=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
   duration=$(awk "BEGIN{printf \"%.2f\", ($end - $start)/1000000000}")
   code=$(echo "$body" | tail -1)

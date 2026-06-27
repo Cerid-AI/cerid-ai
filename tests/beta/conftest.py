@@ -1,22 +1,27 @@
 """Shared pytest fixtures for Cerid AI beta functional tests."""
 
+import os
 import uuid
 
 import httpx
 import pytest
 
-MCP_BASE_URL = "http://ai-companion-mcp:8888"
+MCP_BASE_URL = os.getenv("BETA_MCP_BASE", "http://ai-companion-mcp:8888")
 
 
 @pytest.fixture(scope="session")
 def client() -> httpx.Client:
     """HTTP client pre-configured for the MCP service on the llm-network."""
+    headers: dict = {
+        "X-Client-ID": "beta-test",
+        "Content-Type": "application/json",
+    }
+    api_key = os.getenv("CERID_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
     with httpx.Client(
         base_url=MCP_BASE_URL,
-        headers={
-            "X-Client-ID": "beta-test",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         timeout=30.0,
     ) as c:
         yield c

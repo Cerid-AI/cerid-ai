@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -15,16 +16,20 @@ from typing import Any
 import httpx
 import pytest
 
-MCP_BASE = "http://ai-companion-mcp:8888"
+MCP_BASE = os.getenv("BETA_MCP_BASE", "http://ai-companion-mcp:8888")
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture(scope="session")
 async def aclient():
     """Async HTTP client for the MCP service on llm-network."""
+    headers: dict = {"X-Client-ID": "gui", "Content-Type": "application/json"}
+    api_key = os.getenv("CERID_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
     async with httpx.AsyncClient(
         base_url=MCP_BASE,
-        headers={"X-Client-ID": "gui", "Content-Type": "application/json"},
+        headers=headers,
         timeout=60.0,
     ) as c:
         yield c

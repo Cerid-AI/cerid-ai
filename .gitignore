@@ -129,7 +129,3 @@ test-results/
 
 # Playwright MCP runtime output
 .playwright-mcp/
-
-# Demo-video production workspace — final video lives in cerid-ai-marketing; large local intermediates stay out of the repo
-docs/assets/demo-video/
-docs/plans/90s-cerid-ai-demo-video-plan.md

@@ -134,7 +134,11 @@ def client_id_gui() -> str:
 
 @pytest.fixture
 def http_headers(client_id: str) -> dict:
-    return {"X-Client-ID": client_id, "Content-Type": "application/json"}
+    headers: dict = {"X-Client-ID": client_id, "Content-Type": "application/json"}
+    api_key = os.getenv("CERID_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
+    return headers
 
 
 @pytest.fixture
