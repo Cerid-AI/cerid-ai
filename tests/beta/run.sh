@@ -20,6 +20,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/lib/report.sh"
 
+# Auth: the MCP enforces X-API-Key on /api routes. Resolve the key from the
+# environment, falling back to the repo .env, and forward it into the Docker
+# test containers below (conftest.py reads CERID_API_KEY → sets X-API-Key).
+# Backward-compatible: an empty key leaves tests running unauthenticated.
+CERID_API_KEY="${CERID_API_KEY:-$(grep -E '^CERID_API_KEY=' "${REPO_ROOT}/.env" 2>/dev/null | cut -d= -f2-)}"
+export CERID_API_KEY
+
 # Parse flags
 RUN_SMOKE=true
 RUN_FUNCTIONAL=true
@@ -128,6 +135,7 @@ if $RUN_FUNCTIONAL; then
   fi
 
   docker run --rm --network "$DOCKER_NETWORK" \
+    -e CERID_API_KEY \
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
       pip install -q httpx pytest 2>/dev/null
@@ -205,6 +213,7 @@ if $RUN_INTEGRATION; then
   [[ -z "$DOCKER_NETWORK" ]] && DOCKER_NETWORK="cerid-ai_llm-network"
 
   docker run --rm --network "$DOCKER_NETWORK" \
+    -e CERID_API_KEY \
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
       pip install -q httpx pytest 2>/dev/null
@@ -370,6 +379,7 @@ if ${RUN_EVAL:-false}; then
   mkdir -p "${SCRIPT_DIR}/eval/reports"
 
   docker run --rm --network "$DOCKER_NETWORK" \
+    -e CERID_API_KEY \
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
       pip install -q httpx pytest 'pytest-asyncio>=0.23' 2>/dev/null

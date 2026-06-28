@@ -40,6 +40,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.db.neo4j.communities import CommunityHierarchy, community_hierarchy
 from app.deps import get_neo4j, get_redis
 from config.features import is_feature_enabled
 from core.utils.swallowed import log_swallowed_error
@@ -261,7 +262,7 @@ async def _query_neighborhood(
              [x IN related_raw WHERE x IS NOT NULL] AS related,
              dropped_count > 0 AS truncated
         UNWIND ([{{node: n, degree_co: COUNT {{ (n)-[:CO_MENTIONED|SIMILAR_TO]-() }} }}] + related) AS entry
-        WITH entry.node AS node, entry.degree_co AS degree_co, truncated
+        WITH n, related, entry.node AS node, entry.degree_co AS degree_co, truncated
         OPTIONAL MATCH (node)-[r]-(other:Entity)
         WHERE other IN ([n] + [x IN related | x.node])
         WITH DISTINCT
@@ -1113,6 +1114,9 @@ _VALID_LAYOUTS = frozenset({"force", "wells", "domain"})
 _LAYOUT_MAP_CACHE_KEY_TMPL = "cerid:graph:emb3d:v5:map:{layout}{iso}"
 _LAYOUT_COMMUNITY_REDIS_KEY_TMPL = "cerid:graph:map:communities:{layout}"
 
+_COMMUNITY_HIERARCHY_REDIS_KEY = "cerid:graph:community-hierarchy:v1"
+_COMMUNITY_HIERARCHY_TTL_SECONDS = 300
+
 
 @router.get("/map", response_model=GraphMapResponse)
 async def get_graph_map(
@@ -1189,7 +1193,7 @@ async def get_graph_map(
     # For non-default layouts: check if per-layout position artifact exists in
     # Redis. If missing, fall back to the force layout with layout_fallback=True.
     if is_non_default and redis:
-        layout_pos_key = f"cerid:graph:emb3d:v4:layout_positions:{effective_layout}"
+        layout_pos_key = f"cerid:graph:layout_positions:v3:{effective_layout}"
         try:
             has_layout_pos = redis.exists(layout_pos_key)
         except Exception as exc:  # noqa: BLE001
@@ -1225,7 +1229,7 @@ async def get_graph_map(
     layout_pos_override: dict[str, list[float]] = {}
     if is_non_default and not layout_fallback and redis:
         try:
-            pos_raw = redis.get(f"cerid:graph:emb3d:v4:layout_positions:{effective_layout}")
+            pos_raw = redis.get(f"cerid:graph:layout_positions:v3:{effective_layout}")
             if pos_raw:
                 layout_pos_override = json.loads(
                     pos_raw if isinstance(pos_raw, str) else pos_raw.decode("utf-8")
@@ -2860,3 +2864,36 @@ async def get_graph_decomposition(
             logger.info("graph.decomposition.cache_write_failed: %s", exc)
 
     return response
+
+
+@router.get("/community-hierarchy", response_model=CommunityHierarchy)
+async def get_community_hierarchy() -> CommunityHierarchy:
+    """Leiden community hierarchy (all levels) for semantic-zoom collapse.
+
+    Use when the 2D/3D map needs the precomputed community tree to collapse
+    nodes into super-nodes and zoom into a community's members. Returns the
+    cached hierarchy; rebuilt from Neo4j every 5 minutes.
+
+    Returns: levels (int), nodes (list of community_id/level/parent_id/
+    member_count/summary). Top-level communities carry parent_id=null;
+    level-0 (finest) communities point to their level-1 parent.
+    """
+    redis = get_redis()
+    if redis is not None:
+        cached_raw = redis.get(_COMMUNITY_HIERARCHY_REDIS_KEY)
+        if cached_raw:
+            raw = cached_raw if isinstance(cached_raw, str) else cached_raw.decode("utf-8")
+            return CommunityHierarchy(**json.loads(raw))
+
+    driver = get_neo4j()
+    if driver is None:
+        raise HTTPException(status_code=503, detail="Neo4j unavailable")
+    result = community_hierarchy(driver)
+
+    if redis is not None:
+        redis.set(
+            _COMMUNITY_HIERARCHY_REDIS_KEY,
+            result.model_dump_json(),
+            ex=_COMMUNITY_HIERARCHY_TTL_SECONDS,
+        )
+    return result

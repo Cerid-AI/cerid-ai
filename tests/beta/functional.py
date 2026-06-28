@@ -11,6 +11,7 @@ Priority markers:
 
 from __future__ import annotations
 
+import os
 import pathlib
 import uuid
 
@@ -116,9 +117,13 @@ def test_f13_file_upload(client: httpx.Client) -> None:
     sample = FIXTURES_DIR / "sample.txt"
     assert sample.exists(), f"Missing fixture: {sample}"
     # Use a separate client without the JSON content-type for multipart
+    upload_headers = {"X-Client-ID": "beta-test"}
+    _api_key = os.getenv("CERID_API_KEY")
+    if _api_key:
+        upload_headers["X-API-Key"] = _api_key
     with httpx.Client(
         base_url=MCP_BASE_URL,
-        headers={"X-Client-ID": "beta-test"},
+        headers=upload_headers,
         timeout=30.0,
     ) as upload_client:
         with open(sample, "rb") as f:
@@ -296,12 +301,16 @@ def test_f62_rate_limit_burst() -> None:
     120 requests per 60-second sliding window. We send 130 in a tight
     loop so the 121st-onwards crosses the threshold and returns 429.
     """
+    burst_headers = {
+        "X-Client-ID": "unknown",
+        "Content-Type": "application/json",
+    }
+    _api_key = os.getenv("CERID_API_KEY")
+    if _api_key:
+        burst_headers["X-API-Key"] = _api_key
     with httpx.Client(
         base_url=MCP_BASE_URL,
-        headers={
-            "X-Client-ID": "unknown",
-            "Content-Type": "application/json",
-        },
+        headers=burst_headers,
         timeout=30.0,
     ) as burst_client:
         status_codes: list[int] = []

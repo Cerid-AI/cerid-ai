@@ -38,6 +38,8 @@ vi.mock("sigma", () => {
     getCamera = vi.fn(() => ({
       ratio: 1.5,
       getState: vi.fn(() => ({ x: 0, y: 0, ratio: 1, angle: 0 })),
+      on: vi.fn(),
+      off: vi.fn(),
     }))
     getContainer = vi.fn(() => {
       const div = document.createElement("div")
@@ -46,6 +48,8 @@ vi.mock("sigma", () => {
       return div
     })
     graphToViewport = vi.fn(({ x, y }: { x: number; y: number }) => ({ x, y }))
+    viewportToFramedGraph = vi.fn(({ x, y }: { x: number; y: number }) => ({ x, y }))
+    getNodeDisplayData = vi.fn(() => ({ x: 0, y: 0 }))
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     constructor(_graph: unknown, _container: unknown, _settings?: unknown) {}
   }
@@ -78,6 +82,34 @@ const mockFetchGraphMap = vi.fn()
 vi.mock("@/lib/api/graph-map", () => ({
   fetchGraphMap: (...args: unknown[]) => mockFetchGraphMap(...args),
 }))
+
+// Mock @sigma/edge-curve and @sigma/node-border — they call WebGL APIs at
+// module-load time which are not available in jsdom.
+vi.mock("@sigma/edge-curve", () => ({
+  default: class {},
+}))
+
+vi.mock("@sigma/node-border", () => ({
+  createNodeBorderProgram: vi.fn(() => class {}),
+}))
+
+vi.mock("sigma/rendering", () => ({
+  NodeCircleProgram: class {},
+  createNodeCompoundProgram: vi.fn(() => class {}),
+}))
+
+// Mock FA2Layout worker — Worker is not defined in jsdom; stub the supervisor.
+vi.mock("graphology-layout-forceatlas2/worker", () => {
+  class MockFA2Layout {
+    start = vi.fn()
+    stop = vi.fn()
+    kill = vi.fn()
+    isRunning = vi.fn(() => false)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    constructor(_graph: unknown, _opts?: unknown) {}
+  }
+  return { default: MockFA2Layout }
+})
 
 // ---------------------------------------------------------------------------
 // Static imports (after vi.mock hoisting)
@@ -179,6 +211,9 @@ const DEFAULT_CONFIG = {
   edgeBudget: "8k" as const,
   labelDensity: "normal" as const,
   hullsVisible: true,
+  liveLayout: true,
+  hideOrphans: false,
+  collapseCommunities: true,
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +398,7 @@ describe("MapConfig — localStorage persistence", () => {
   })
 
   it("persists config to localStorage via saveMapConfig", () => {
-    saveMapConfig({ edgeBudget: "2k", labelDensity: "sparse", hullsVisible: false })
+    saveMapConfig({ edgeBudget: "2k", labelDensity: "sparse", hullsVisible: false, liveLayout: false, hideOrphans: false, collapseCommunities: false })
     const loaded = loadMapConfig()
     expect(loaded.edgeBudget).toBe("2k")
     expect(loaded.labelDensity).toBe("sparse")
@@ -371,7 +406,7 @@ describe("MapConfig — localStorage persistence", () => {
   })
 
   it("round-trips all config fields", () => {
-    const config = { edgeBudget: "all" as const, labelDensity: "rich" as const, hullsVisible: true }
+    const config = { edgeBudget: "all" as const, labelDensity: "rich" as const, hullsVisible: true, liveLayout: true, hideOrphans: false, collapseCommunities: true }
     saveMapConfig(config)
     expect(loadMapConfig()).toEqual(config)
   })

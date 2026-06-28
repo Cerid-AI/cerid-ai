@@ -270,3 +270,79 @@ def get_community(driver: Any, community_id: str) -> CommunityFull | None:
             "communities.get_community", exc, context={"community_id": community_id}
         )
         raise
+
+
+# ---------------------------------------------------------------------------
+# community_hierarchy
+# ---------------------------------------------------------------------------
+
+
+class CommunityHierarchyNode(BaseModel):
+    community_id: str
+    level: int
+    parent_id: str | None = None
+    member_count: int
+    summary: str | None = None
+
+
+class CommunityHierarchy(BaseModel):
+    levels: int
+    nodes: list[CommunityHierarchyNode] = []
+
+
+def community_hierarchy(
+    driver: Any,
+    *,
+    max_levels: int = 5,
+    min_size: int = 1,
+) -> CommunityHierarchy:
+    """Return the full Leiden community hierarchy across all levels.
+
+    parent_id of a level-L community is the level-(L+1) community that its
+    members belong to (derived from Entity.leiden_communityIds, index = level).
+    Top-level communities have parent_id == None.
+    """
+    cypher = """
+    MATCH (c:Community)
+    WHERE c.level < $max_levels
+    OPTIONAL MATCH (c)<-[:IN_COMMUNITY]-(e:Entity)
+    WITH c, count(DISTINCT e) AS member_count, collect(e)[0] AS sample
+    WHERE member_count >= $min_size
+    WITH c, member_count, sample,
+         CASE
+           WHEN sample IS NOT NULL
+            AND sample.leiden_communityIds IS NOT NULL
+            AND size(sample.leiden_communityIds) > c.level + 1
+           THEN (c.level + 1) + ':' + toString(sample.leiden_communityIds[c.level + 1])
+           ELSE null
+         END AS parent_id
+    RETURN
+        c.id      AS community_id,
+        c.level   AS level,
+        parent_id AS parent_id,
+        member_count,
+        c.summary AS summary
+    ORDER BY c.level ASC, member_count DESC
+    """
+    try:
+        with driver.session() as session:
+            rows = session.run(cypher, max_levels=max_levels, min_size=min_size)
+            nodes: list[CommunityHierarchyNode] = []
+            max_level = 0
+            for row in rows:
+                r = dict(row)
+                lvl = int(r.get("level", 0))
+                max_level = max(max_level, lvl)
+                nodes.append(
+                    CommunityHierarchyNode(
+                        community_id=str(r.get("community_id", "")),
+                        level=lvl,
+                        parent_id=r.get("parent_id"),
+                        member_count=int(r.get("member_count", 0)),
+                        summary=r.get("summary"),
+                    )
+                )
+            return CommunityHierarchy(levels=max_level + 1 if nodes else 0, nodes=nodes)
+    except Exception as exc:
+        log_swallowed_error("communities.community_hierarchy", exc)
+        raise

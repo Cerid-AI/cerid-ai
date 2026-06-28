@@ -27,6 +27,13 @@ export default defineConfig({
   ],
   use: {
     baseURL: process.env.CERID_WEB_URL ?? "http://localhost:3000",
+    // The MCP enforces X-API-Key on /api routes. Forward the key (exported by
+    // run.sh from .env) on every `request`-context call so REST-surface specs
+    // (E-09 wiki, E-13 stats, …) authenticate the same way the keyed frontend
+    // does. UI-driven specs rely on the frontend's own baked-in VITE key.
+    extraHTTPHeaders: process.env.CERID_API_KEY
+      ? { "X-API-Key": process.env.CERID_API_KEY }
+      : {},
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
     trace: "retain-on-failure",

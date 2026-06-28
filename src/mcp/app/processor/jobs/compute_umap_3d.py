@@ -96,8 +96,11 @@ _COMMUNITY_MAP_REDIS_KEY = "cerid:graph:map:communities"
 _COMMUNITY_MAP_REDIS_KEY_TMPL = "cerid:graph:map:communities:{layout}"
 
 # Per-layout position artifact key (non-default layouts only).
-# "cerid:graph:emb3d:v3:layout_positions:{layout}"
-_LAYOUT_POSITIONS_REDIS_KEY_TMPL = "cerid:graph:emb3d:v3:layout_positions:{layout}"
+# Lives OUTSIDE the cerid:graph:emb3d:* namespace on purpose: the serving-cache
+# busts (job _bust_serving_cache + scheduler _JOB_CACHE_PATTERNS) wipe
+# cerid:graph:emb3d:*, which previously deleted these artifacts the instant the
+# job wrote them. This is a computed INPUT, not a serving cache.
+_LAYOUT_POSITIONS_REDIS_KEY_TMPL = "cerid:graph:layout_positions:v3:{layout}"
 
 _SILHOUETTE_SAMPLE = 800  # max nodes sampled for silhouette score
 
@@ -1275,7 +1278,7 @@ class ComputeUmap3DJob(BaseJob):
         """Store per-layout position artifact for non-default layouts.
 
         Stores a compact JSON dict {entity_id: [x, y, z]} under
-        ``cerid:graph:emb3d:v3:layout_positions:{layout}`` so the /graph/map
+        ``cerid:graph:layout_positions:v3:{layout}`` so the /graph/map
         endpoint can detect whether a layout pass has been computed.
         """
         try:

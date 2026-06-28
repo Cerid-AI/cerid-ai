@@ -16,12 +16,22 @@ export interface MapConfig {
   labelDensity: LabelDensity
   /** Show community hull fills + labels */
   hullsVisible: boolean
+  /** Run the live ForceAtlas2 simulation (warm + breathing). Reduced-motion overrides. */
+  liveLayout: boolean
+  /** Hide degree-0 (orphan) nodes from the graph. */
+  hideOrphans: boolean
+  /** Collapse member nodes into super-node discs when zoomed out past the
+   *  overview threshold (camera ratio >= 1.4; see COLLAPSE_THRESHOLD_DEFAULT). */
+  collapseCommunities: boolean
 }
 
 export const MAP_CONFIG_DEFAULTS: MapConfig = {
   edgeBudget: "8k",
   labelDensity: "normal",
   hullsVisible: true,
+  liveLayout: true,
+  hideOrphans: false,
+  collapseCommunities: true,
 }
 
 export const EDGE_BUDGET_LABELS: Record<EdgeBudget, string> = {

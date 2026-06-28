@@ -164,6 +164,39 @@ function MapConfigPanel({
               Show community regions
             </label>
 
+            {/* Live layout toggle */}
+            <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={config.liveLayout}
+                onChange={(e) => onChange({ liveLayout: e.target.checked })}
+                className="rounded border-border/60"
+              />
+              Live motion
+            </label>
+
+            {/* Hide orphans toggle */}
+            <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={config.hideOrphans}
+                onChange={(e) => onChange({ hideOrphans: e.target.checked })}
+                className="rounded border-border/60"
+              />
+              Hide orphans
+            </label>
+
+            {/* Collapse communities toggle */}
+            <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={config.collapseCommunities}
+                onChange={(e) => onChange({ collapseCommunities: e.target.checked })}
+                className="rounded border-border/60"
+              />
+              Collapse communities
+            </label>
+
             {/* Show isolated toggle — hidden when count is 0 */}
             {isolatedCount > 0 && (
               <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
@@ -332,6 +365,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   const [lens, setLens] = useState<ColorLens>("cluster")
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
   const [pinned, setPinned] = useState<number | null>(null)
+  const [search, setSearch] = useState("")
 
   // Top entity types by frequency — shared between map and 3D modes.
   // Map mode uses mapData?.entities; 3D mode uses data?.entities.
@@ -495,6 +529,14 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
               )}
             </div>
           )}
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search nodes…"
+            aria-label="Search knowledge map"
+            className="rounded-md border border-border bg-card/60 px-2 py-1 text-label-xs text-foreground placeholder:text-muted-foreground"
+          />
         </div>
 
         {/* Map scene */}
@@ -512,6 +554,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           onInspect={onNodeClick}
           onCommunityClick={handleCommunityClick}
           layoutFallback={mapData?.layout_fallback}
+          search={search}
         />
 
         {/* Community card (shown when a hull is clicked) */}

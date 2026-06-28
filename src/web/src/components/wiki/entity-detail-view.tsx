@@ -148,15 +148,15 @@ function CategoriesFooter({
 
 function LoadingSkeleton() {
   return (
-    <div role="status" aria-busy="true" aria-label="Loading article" className="h-full overflow-y-auto">
+    <div role="status" aria-busy="true" aria-label="Loading article" className="@container h-full overflow-y-auto">
       {/* Slim header skeleton */}
       <div className="sticky top-0 z-10 flex items-center gap-3 border-b px-6 py-3">
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-5 w-16 rounded-full" />
       </div>
       {/* Article body skeleton */}
-      <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-[200px_minmax(0,1fr)_280px]">
-        <div className="hidden lg:block">
+      <div className="grid grid-cols-1 gap-6 p-6 @3xl:grid-cols-[200px_minmax(0,1fr)_280px]">
+        <div className="hidden @3xl:block">
           <Skeleton className="h-4 w-20 mb-2" />
           <Skeleton className="h-3 w-full mb-1" />
           <Skeleton className="h-3 w-full mb-1" />
@@ -170,7 +170,7 @@ function LoadingSkeleton() {
             <Skeleton className="h-4 w-3/4" />
           </div>
         </div>
-        <div className="hidden lg:block">
+        <div className="hidden @3xl:block">
           <Skeleton className="h-36 w-full rounded-xl mb-2" />
           <Skeleton className="h-3 w-full mb-1" />
           <Skeleton className="h-3 w-3/4" />
@@ -348,7 +348,7 @@ export function EntityDetailView({
   }
 
   return (
-    <div className="cerid-stagger-fast h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}> {/* drift-allowed: animation stagger index */}
+    <div className="cerid-stagger-fast @container h-full overflow-y-auto" style={{ ["--i" as string]: 0 }}> {/* drift-allowed: animation stagger index */}
 
       {/* ----------------------------------------------------------------- */}
       {/* Slim sticky header — title + TrustBandBadge + refresh pill        */}
@@ -412,10 +412,10 @@ export function EntityDetailView({
       {/* <lg: single column (infobox after lead)                          */}
       {/* Cramped-measure guard: TOC column collapses first at marginal lg  */}
       {/* ----------------------------------------------------------------- */}
-      <div className="grid grid-cols-1 gap-x-6 gap-y-0 px-6 pb-8 pt-4 lg:grid-cols-[200px_minmax(0,1fr)_280px]">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-0 px-6 pb-8 pt-4 @3xl:grid-cols-[200px_minmax(0,1fr)_280px]">
 
-        {/* ------ Left: sticky TOC (lg+) ------ */}
-        <aside aria-label="Article contents" className="hidden pt-2 lg:block">
+        {/* ------ Left: sticky TOC (wide container only) ------ */}
+        <aside aria-label="Article contents" className="hidden pt-2 @3xl:block">
           <div className="sticky top-16">
             <ArticleToc entries={tocEntries} />
           </div>
@@ -424,8 +424,8 @@ export function EntityDetailView({
         {/* ------ Center: article prose ------ */}
         <article className="min-w-0">
 
-          {/* Mobile TOC disclosure (below lg) */}
-          <div className="mb-4 lg:hidden">
+          {/* Inline TOC disclosure (narrow container) */}
+          <div className="mb-4 @3xl:hidden">
             <ArticleToc entries={tocEntries} ariaLabel="Contents (mobile)" />
           </div>
 
@@ -529,9 +529,9 @@ export function EntityDetailView({
             </section>
           )}
 
-          {/* Mobile-only: infobox renders after lead on small screens */}
+          {/* Narrow-container: infobox renders after lead when no side rail */}
           {data.primary_domain && (
-            <div className="my-4 lg:hidden">
+            <div className="my-4 @3xl:hidden">
               <ArticleInfobox
                 page={data}
                 onNavigateToDomain={handleNavigateToDomain}
@@ -790,7 +790,7 @@ export function EntityDetailView({
         </article>
 
         {/* ------ Right: infobox (lg+ only — mobile version rendered above) ------ */}
-        <aside aria-label="Article infobox" className="hidden pt-2 lg:block">
+        <aside aria-label="Article infobox" className="hidden pt-2 @3xl:block">
           <div className="sticky top-16">
             {data.primary_domain ? (
               <ArticleInfobox

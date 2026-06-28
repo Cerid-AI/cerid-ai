@@ -18,11 +18,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Sigma from "sigma"
 import Graph from "graphology"
+import EdgeCurveProgram from "@sigma/edge-curve"
+import { createNodeBorderProgram } from "@sigma/node-border"
+import { NodeCircleProgram, createNodeCompoundProgram } from "sigma/rendering"
+import type { NodeProgramType } from "sigma/rendering"
 import { Loader2, X, Link2, Users, ShieldCheck } from "lucide-react"
 import type { GraphMapResponse, CommunityHull } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
 import { useCommunityLayer, resolveMapTokens, type MapTokens } from "./community-layer"
+import { useSuperNodeLayer, aggregateCommunityEdges } from "./community-supernodes"
+import { useHighlightEdges } from "./highlight-edges"
 import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import { HOVER_INTENT_DELAY_MS } from "@/lib/graph/hover-intent"
 import { useNavigation } from "@/contexts/navigation-context"
@@ -30,6 +36,40 @@ import { domainColor } from "@/lib/graph/identity"
 import { createHealController } from "@/lib/graph/interactions/drag-heal"
 import { nodeBaseAlpha, ISOLATED_COMMUNITY_ID } from "../palette"
 import type { OnInspect, OnFocusEntity } from "@/lib/graph/cycle4-contracts"
+import { useForceLayout } from "./use-force-layout"
+import { matchesSearch } from "./filter-predicates"
+import { cameraTargetForPoints, lodTier, lodEdgeMinSize } from "./semantic-zoom"
+// ---------------------------------------------------------------------------
+// 2D cathedral programs — mirroring atlas-programs.ts (3D uses same libs).
+// Subtle 1px border (trust ring); curved edges at 0.25 curvature.
+// ---------------------------------------------------------------------------
+
+const CartoBorderProgram = createNodeBorderProgram({
+  borders: [
+    {
+      size: { value: 1, mode: "pixels" },
+      color: { attribute: "borderColor", defaultValue: "#888888" }, // drift-allowed: neutral fallback
+    },
+    {
+      size: { fill: true },
+      color: { attribute: "color", defaultValue: "#5C6680" }, // drift-allowed: graphite fallback
+    },
+  ],
+})
+
+const CARTO_NODE_PROGRAM: NodeProgramType = createNodeCompoundProgram([
+  CartoBorderProgram as unknown as NodeProgramType,
+  NodeCircleProgram as unknown as NodeProgramType,
+])
+
+const CARTO_NODE_PROGRAM_CLASSES: Record<string, NodeProgramType> = {
+  bordered: CARTO_NODE_PROGRAM,
+}
+
+const CARTO_EDGE_PROGRAM_CLASSES = {
+  curve: EdgeCurveProgram,
+} as const
+
 // sigma's MouseCoords — local interface matching the vendored type
 interface SigmaMouseCoords {
   x: number
@@ -202,6 +242,8 @@ export interface CartographerMapProps {
    * Parent can persist this into the saved view's pinnedNodes field.
    */
   onPinnedNodesChange?: (pinnedNodes: Record<string, { x: number; y: number }>) => void
+  /** Live search query — non-matching nodes dim to the search-miss state. */
+  search?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +265,7 @@ export function CartographerMap({
   onCommunityClick,
   layoutFallback,
   onPinnedNodesChange,
+  search,
 }: CartographerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
@@ -283,6 +326,20 @@ export function CartographerMap({
       ? (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false)
       : false
 
+  // Tracks whether communities are collapsed — read by nodeReducer/edgeReducer
+  // AND by the FA2 controller (keeps the sim paused while members are hidden).
+  // Updated by useSuperNodeLayer's onCollapsedChange, never by React state.
+  const collapsedRef = useRef(false)
+
+  const forceCtrl = useForceLayout({
+    sigma: sigmaInstance,
+    enabled: config.liveLayout,
+    reducedMotion,
+    shouldStayPaused: () => collapsedRef.current,
+  })
+  const forceCtrlRef = useRef(forceCtrl)
+  forceCtrlRef.current = forceCtrl
+
   // Pulse ring state: map from nodeId → start timestamp
   const [pulseMap, setPulseMap] = useState<Map<string, number>>(new Map())
   const pulseRafRef = useRef<number | null>(null)
@@ -330,12 +387,19 @@ export function CartographerMap({
     for (let i = 0; i < data.entities.length; i++) {
       const e = data.entities[i]
       const deg = degreeMap.get(i) ?? 0
+      // Border color: neutral foreground ramp keyed on trust state (subtle ≤1px).
+      const borderColor =
+        e.trust_state === "verified"     ? tokens.foreground :
+        e.trust_state === "partial"      ? tokens.graphite :
+        e.trust_state === "contradicted" ? tokens.graphite :
+        tokens.dim  // unverified / unknown → quietest ring
       graph.addNode(e.id, {
         x: e.x,
         y: e.y,
         label: e.name,
         size: nodeRadius(deg),
         color: lensColor(e, lens, tokens),
+        borderColor,
         // Store original data for reducer access
         _degree: deg,
         _trust: e.trust_state,
@@ -389,6 +453,7 @@ export function CartographerMap({
       graph.addEdgeWithKey(key, src.id, tgt.id, {
         size: edgeWidth(weight),
         color: tokens.edge + alphaSuffix,
+        curvature: 0.25,
         // Store kind for the edgeReducer to use in focus styling.
         _kind: kind ?? "co_mention",
       })
@@ -418,6 +483,11 @@ export function CartographerMap({
       zIndex: true,
       // Theme-aware hover plate (overrides sigma's hardcoded #FFF default)
       defaultDrawNodeHover: makeDrawNodeHover(tokens),
+      // Cathedral aesthetics: curved edges + node halos (FLAT rule — no bloom/glow)
+      defaultEdgeType: "curve",
+      edgeProgramClasses: CARTO_EDGE_PROGRAM_CLASSES,
+      defaultNodeType: "bordered",
+      nodeProgramClasses: CARTO_NODE_PROGRAM_CLASSES,
     })
 
     sigmaRef.current = sigma
@@ -469,6 +539,7 @@ export function CartographerMap({
 
       setIsDragging(true)
       healCtrl.startDrag(node)
+      forceCtrlRef.current.pause()
     })
 
     // ---------------------------------------------------------------------------
@@ -520,10 +591,13 @@ export function CartographerMap({
             return next
           })
         }
+        forceCtrlRef.current.reheat()
       } else {
         // Click: pin/inspect only per unified click contract.
+        const wasAlreadyPinned = pinnedIdRef.current === node
         setPinnedId((prev) => (prev === node ? null : node))
         onInspectRef.current?.(node)
+        if (!wasAlreadyPinned) focusCameraOnRef.current?.(node)
       }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -536,12 +610,15 @@ export function CartographerMap({
     // ---------------------------------------------------------------------------
     sigma.on("clickNode", ({ node }) => {
       if (dragRef.current.nodeId !== null) return // already handled by mouseup
+      const wasAlreadyPinned = pinnedIdRef.current === node
       setPinnedId((prev) => (prev === node ? null : node))
       onInspectRef.current?.(node)
+      if (!wasAlreadyPinned) focusCameraOnRef.current?.(node)
     })
 
     sigma.on("enterNode", ({ node, event }) => {
       hoverIdRef.current = node
+      recomputeFocusNeighbors()
       sigma.refresh({ skipIndexation: true })
       const orig = event.original
       const clientX = "clientX" in orig ? (orig as MouseEvent).clientX : 0
@@ -555,11 +632,29 @@ export function CartographerMap({
     sigma.on("leaveNode", () => {
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
       hoverIdRef.current = null
+      recomputeFocusNeighbors()
       sigma.refresh({ skipIndexation: true })
       setTooltipState(null)
     })
 
+    // ---------------------------------------------------------------------------
+    // LOD camera listener — refresh ONLY on tier change (the tier-change guard
+    // prevents a refresh storm on every camera move).
+    // ---------------------------------------------------------------------------
+    const camera = sigma.getCamera()
+    const onCameraUpdate = () => {
+      const tier = lodTier(camera.ratio)
+      if (tier !== lodTierRef.current) {
+        lodTierRef.current = tier
+        sigma.refresh({ skipIndexation: true })
+      }
+    }
+    camera.on("updated", onCameraUpdate)
+    // Sync the initial tier so first paint uses the correct floor.
+    onCameraUpdate()
+
     return () => {
+      camera.off("updated", onCameraUpdate)
       healCtrl.dispose()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mouseCaptor.off("mousemovebody", handleMouseMove as any)
@@ -579,10 +674,15 @@ export function CartographerMap({
   // ---------------------------------------------------------------------------
   // Layout-preset switch (force/wells/domain): same nodes, new coordinates.
   // Update x/y in place on the live graph and refresh — no Sigma reconstruction.
+  // Re-seed positions only when the NODE SET changes; otherwise leave the live
+  // sim's positions alone (a routine 75s refetch must not yank nodes back to
+  // the seed mid-breath). On a real change, re-seed then reheat the sim.
   // ---------------------------------------------------------------------------
+  const seededKeyRef = useRef("")
   useEffect(() => {
     const sigma = sigmaRef.current
     if (!sigma || !data) return
+    if (seededKeyRef.current === dataNodeKey) return
     const graph = sigma.getGraph()
     let moved = false
     for (const e of data.entities) {
@@ -592,8 +692,10 @@ export function CartographerMap({
         moved = true
       }
     }
+    seededKeyRef.current = dataNodeKey
     if (moved) sigma.refresh({ skipIndexation: false })
-  }, [data])
+    forceCtrlRef.current.reheat()
+  }, [data, dataNodeKey])
 
   // ---------------------------------------------------------------------------
   // Node/edge reducers for lens + filter + hover dimming (installed ONCE per
@@ -611,6 +713,50 @@ export function CartographerMap({
   tokensRef.current = tokens
   const pinnedIdRef = useRef(pinnedId)
   pinnedIdRef.current = pinnedId
+  const searchRef = useRef(search ?? "")
+  searchRef.current = search ?? ""
+  const configRef = useRef(config)
+  configRef.current = config
+
+  // (collapsedRef declared earlier, before useForceLayout, so the controller
+  // can read it to stay paused while collapsed.)
+
+  // LOD tier, updated by the camera "updated" listener. lodTierRef guards
+  // sigma.refresh against a per-frame storm — only fires on tier change, not
+  // every camera update (same pattern as A6 collapsed guard).
+  const lodTierRef = useRef<"overview" | "mid" | "detail">("mid")
+
+  // Stable ref to focusCameraOn so the sigma rebuild closure (which runs once
+  // per dataNodeKey change) can call the latest version without being
+  // re-installed on every reducedMotion change.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const focusCameraOnRef = useRef<((nodeId: string) => void) | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const focusCameraOnPointsRef = useRef<((pts: [number, number][]) => void) | null>(null)
+
+  // Memoized focus neighbourhood: recomputed ONCE whenever the hover/pin
+  // center changes (recomputeFocusNeighbors), then READ by the node/edge
+  // reducers. Previously each reducer rebuilt this set per-element on every
+  // refresh (O(degree×N) per hover frame) — the source of the hover jank.
+  const focusNeighborsRef = useRef<Set<string> | null>(null)
+  const recomputeFocusNeighbors = useCallback(() => {
+    const sigma = sigmaRef.current
+    if (!sigma) {
+      focusNeighborsRef.current = null
+      return
+    }
+    const graph = sigma.getGraph()
+    const focusCenter = pinnedIdRef.current ?? hoverIdRef.current ?? null
+    if (focusCenter && graph.hasNode(focusCenter)) {
+      const set = new Set<string>()
+      graph.forEachNeighbor(focusCenter, (n) => set.add(n))
+      set.add(focusCenter)
+      focusNeighborsRef.current = set
+    } else {
+      focusNeighborsRef.current = null
+    }
+  }, [])
+
   const pulseMapRef = useRef(pulseMap)
   pulseMapRef.current = pulseMap
   const dataRef = useRef(data)
@@ -634,6 +780,7 @@ export function CartographerMap({
     }
 
     sigma.setSetting("nodeReducer", (node, attrs) => {
+      if (collapsedRef.current) return { ...attrs, hidden: true }
       const entity = entityByIdMap.get(node)
       if (!entity) return { ...attrs, hidden: true }
 
@@ -646,24 +793,29 @@ export function CartographerMap({
       const currentDragId = dragRef.current.nodeId
       const isPermanentPin = node in pinnedNodesRef.current
 
-      // Build neighbor sets for focus dimming
-      const graph = sigma.getGraph()
+      // Focus neighbourhood is precomputed once per hover/pin change
+      // (recomputeFocusNeighbors) — read it here instead of rebuilding the
+      // set for every node on every refresh.
       const focusCenter = currentPinnedId ?? hoverId ?? null
-      let focusNeighbors: Set<string> | null = null
-      if (focusCenter && graph.hasNode(focusCenter)) {
-        focusNeighbors = new Set<string>()
-        graph.forEachNeighbor(focusCenter, (n) => focusNeighbors!.add(n))
-        focusNeighbors.add(focusCenter)
-      }
+      const focusNeighbors = focusNeighborsRef.current
 
       // Type filter dim
       const typeFiltered = currentTypeFilter.size > 0 && !currentTypeFilter.has(entity.type)
+
+      // Search dim: non-matching nodes recede to dim
+      const searchMiss = !matchesSearch(entity.name, searchRef.current)
+
+      // Orphan hide: degree-0 nodes hidden when hideOrphans is on
+      const orphanHidden = configRef.current.hideOrphans && ((attrs._degree as number) ?? 0) === 0
 
       // Focus dim: when there's a focus center, non-neighbors fade to dim token
       const hasFocus = focusNeighbors !== null
       const inFocus = !hasFocus || focusNeighbors!.has(node)
 
-      if (typeFiltered || (!inFocus && hasFocus)) {
+      if (orphanHidden) {
+        return { ...attrs, hidden: true }
+      }
+      if (typeFiltered || searchMiss || (!inFocus && hasFocus)) {
         return {
           ...attrs,
           color: currentTokens.dim,
@@ -720,6 +872,7 @@ export function CartographerMap({
     })
 
     sigma.setSetting("edgeReducer", (edge, attrs) => {
+      if (collapsedRef.current) return { ...attrs, hidden: true }
       const currentPinnedId = pinnedIdRef.current
       const hoverId = hoverIdRef.current
       const focusCenter = currentPinnedId ?? hoverId ?? null
@@ -729,26 +882,28 @@ export function CartographerMap({
       // The attrs.color already has the kind-derived alpha suffix appended.
       const baseColor: string = (attrs.color as string) || currentTokens.edge
 
-      if (!focusCenter) return { ...attrs, color: baseColor }
+      // LOD floor: compute once per edge evaluation.
+      const minSize = lodEdgeMinSize(lodTierRef.current)
+      const sizeBelowFloor = ((attrs.size as number) ?? 1) < minSize
+
+      if (!focusCenter) return { ...attrs, color: baseColor, hidden: sizeBelowFloor }
+
+      // Read the precomputed focus neighbourhood (null when no valid center).
+      const focusNeighbors = focusNeighborsRef.current
+      if (!focusNeighbors) return { ...attrs, color: baseColor, hidden: sizeBelowFloor }
 
       const graph = sigma.getGraph()
-      if (!graph.hasNode(focusCenter)) return { ...attrs, color: baseColor }
-
-      const focusNeighbors = new Set<string>()
-      graph.forEachNeighbor(focusCenter, (n) => focusNeighbors.add(n))
-      focusNeighbors.add(focusCenter)
-
       const src = graph.source(edge)
       const tgt = graph.target(edge)
       const srcInFocus = focusNeighbors.has(src)
       const tgtInFocus = focusNeighbors.has(tgt)
       if (srcInFocus && tgtInFocus) {
+        // Focus neighbourhood edges always stay visible regardless of LOD.
         return { ...attrs, color: baseColor, hidden: false }
       }
-      // Non-neighborhood edges stay visible but recede to the dim token
-      // instead of vanishing — soft de-emphasis, not a blackout of the
-      // whole edge layer.
-      return { ...attrs, color: currentTokens.dim, hidden: false }
+      // Non-neighborhood edges recede to dim AND obey the LOD floor —
+      // weak non-focus edges drop out when zoomed out.
+      return { ...attrs, color: currentTokens.dim, hidden: sizeBelowFloor }
     })
 
     sigma.refresh()
@@ -758,8 +913,19 @@ export function CartographerMap({
   // without reinstalling reducers.
   useEffect(() => {
     if (!sigmaInstance) return
+    recomputeFocusNeighbors()
     sigmaInstance.refresh({ skipIndexation: true })
-  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, pulseMap, isDragging])
+  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, pulseMap, isDragging, search, config.hideOrphans, recomputeFocusNeighbors])
+
+  // Animated reveal: briefly reheat the live sim ONLY when the filtered SET
+  // changes (search / orphan filter / type filter) so users see what changed.
+  // Deliberately excludes pinnedId/isDragging/pulseMap/tokens (those must not
+  // re-settle the whole graph — pin drives A4 focus-zoom; drag has its own
+  // drop-reheat in handleMouseUp).
+  useEffect(() => {
+    forceCtrlRef.current?.reheat()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sigmaInstance, search, config.hideOrphans, typeFilter])
 
   // ---------------------------------------------------------------------------
   // Ingest pulse: fire when newEntityIds changes
@@ -807,12 +973,58 @@ export function CartographerMap({
   // ---------------------------------------------------------------------------
   // Community hull canvas overlay
   // ---------------------------------------------------------------------------
+
+  // Aggregated cross-community edges for the super-node overlay — must be
+  // declared before any early return (useSuperNodeLayer is a hook below).
+  const superEdges = useMemo(
+    () => (data ? aggregateCommunityEdges(
+      data.entities.map((e) => ({ id: e.id, community: e.community ?? null })),
+      data.links,
+    ) : []),
+    [data],
+  )
+
+  const wrappedOnCommunityClick = useCallback((community: CommunityHull) => {
+    // Zoom the camera to this community's hull extent before surfacing to parent.
+    if (community.hull.length >= 3) {
+      focusCameraOnPointsRef.current?.(community.hull)
+    }
+    onCommunityClick?.(community)
+  }, [onCommunityClick])
+
   useCommunityLayer({
     sigma: sigmaInstance,
     communities: data?.communities ?? [],
     tokens,
     hullsVisible: config.hullsVisible,
-    onCommunityClick,
+    onCommunityClick: wrappedOnCommunityClick,
+  })
+
+  useSuperNodeLayer({
+    sigma: sigmaInstance,
+    communities: data?.communities ?? [],
+    superEdges,
+    tokens,
+    enabled: config.collapseCommunities,
+    onCommunityClick: wrappedOnCommunityClick,
+    onCollapsedChange: (collapsed) => {
+      collapsedRef.current = collapsed
+      // Pause the live FA2 sim while collapsed — every member node/edge is
+      // hidden, so simulating + refreshing the mesh is wasted worker + main-
+      // thread work. Reheat when expanding back into members.
+      if (collapsed) forceCtrlRef.current?.pause()
+      else forceCtrlRef.current?.reheat()
+      sigmaRef.current?.refresh({ skipIndexation: true })
+    },
+  })
+
+  useHighlightEdges({
+    sigma: sigmaInstance,
+    tokens,
+    getFocusCenter: useCallback(
+      () => pinnedIdRef.current ?? hoverIdRef.current ?? null,
+      [],
+    ),
   })
 
   // ---------------------------------------------------------------------------
@@ -831,7 +1043,64 @@ export function CartographerMap({
     ? data.entities.find((e) => e.id === pinnedId)
     : undefined
 
-  const handleClearPin = useCallback(() => setPinnedId(null), [])
+  // ---------------------------------------------------------------------------
+  // Camera helpers for semantic zoom drill-down
+  // ---------------------------------------------------------------------------
+
+  /** Ease the camera to (re-center on) a focal node + its neighbours. */
+  const focusCameraOn = useCallback((nodeId: string) => {
+    const sigma = sigmaRef.current
+    if (!sigma || !sigma.getGraph().hasNode(nodeId)) return
+    const graph = sigma.getGraph()
+    const ids: string[] = [nodeId]
+    graph.forEachNeighbor(nodeId, (n) => ids.push(n))
+    // The camera operates in framed-graph coordinates; getNodeDisplayData
+    // returns node positions in that exact space, so the bbox center of the
+    // display coords is a valid camera (x,y) target — true re-centering, not
+    // just a ratio change.
+    const framed: [number, number][] = []
+    for (const id of ids) {
+      const dd = sigma.getNodeDisplayData(id)
+      if (dd) framed.push([dd.x, dd.y])
+    }
+    const target = cameraTargetForPoints(framed)
+    if (!target) return
+    const camera = sigma.getCamera()
+    if (reducedMotion) camera.setState(target)
+    else camera.animate(target, { duration: 400 })
+  }, [reducedMotion])
+  // Keep ref current so the sigma rebuild closure can call it.
+  focusCameraOnRef.current = focusCameraOn
+
+  /** Ease the camera to (re-center on) a set of GRAPH-space points (hull zoom). */
+  const focusCameraOnPoints = useCallback((pts: [number, number][]) => {
+    const sigma = sigmaRef.current
+    if (!sigma || pts.length === 0) return
+    // Hull points are graph-space; convert to framed-graph coords (the camera's
+    // space) via graph→viewport→framed so the camera can re-center on them.
+    const framed: [number, number][] = pts.map(([x, y]) => {
+      const f = sigma.viewportToFramedGraph(sigma.graphToViewport({ x, y }))
+      return [f.x, f.y] as [number, number]
+    })
+    const target = cameraTargetForPoints(framed)
+    if (!target) return
+    const camera = sigma.getCamera()
+    if (reducedMotion) camera.setState(target)
+    else camera.animate(target, { duration: 400 })
+  }, [reducedMotion])
+  focusCameraOnPointsRef.current = focusCameraOnPoints
+
+  const handleClearPin = useCallback(() => {
+    setPinnedId(null)
+    const sigma = sigmaRef.current
+    if (!sigma) return
+    const camera = sigma.getCamera()
+    if (reducedMotion) {
+      camera.setState({ x: 0.5, y: 0.5, ratio: 1 })
+    } else {
+      camera.animatedReset()
+    }
+  }, [reducedMotion])
 
   const handleOpenInWiki = useCallback(() => {
     if (!pinnedId) return

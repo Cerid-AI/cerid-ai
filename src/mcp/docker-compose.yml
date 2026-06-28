@@ -35,8 +35,12 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 6G
+          # Client brain: heavy bursts (graph layouts, embeddings, ingestion,
+          # RAG) — high ceiling to use otherwise-idle VM cores instead of
+          # throttling to 2. Limits are ceilings, not reservations, so this
+          # oversubscribes safely against the 16-CPU / 63GiB Docker VM.
+          cpus: '10.0'
+          memory: 16G
     healthcheck:
       # /health/live is instant (no Cypher query). The sentinel-guarded kill
       # auto-recovers from a hung uvicorn AFTER successful startup. The

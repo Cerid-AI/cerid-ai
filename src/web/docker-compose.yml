@@ -8,6 +8,10 @@ services:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
     environment:
       - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+      # Surface the API key to the served UI at runtime (entrypoint emits it into
+      # window.__ENV__) so browser/remote-client calls carry X-API-Key when auth
+      # is on. Falls back to CERID_API_KEY from .env; empty = no-auth local use.
+      - VITE_CERID_API_KEY=${VITE_CERID_API_KEY:-${CERID_API_KEY:-}}
     networks:
       - llm-network
     restart: unless-stopped

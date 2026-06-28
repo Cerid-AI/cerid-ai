@@ -23,8 +23,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4.0'
-          memory: 4G  # 1G heap + 2G pagecache + JVM overhead
+          cpus: '6.0'
+          memory: 12G  # headroom for graph traversals/APOC; heap/pagecache env-governed
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
       interval: 30s
@@ -54,8 +54,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 1G
+          cpus: '4.0'
+          memory: 4G  # vector search/HNSW; 1G was very tight for the embedding set
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/heartbeat"]
       interval: 30s

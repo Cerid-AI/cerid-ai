@@ -14,6 +14,12 @@ MCP_BASE="http://localhost:8888"
 GUI_BASE="http://localhost:3000"
 FAILED=0
 
+# Forward the MCP API key (exported by run.sh from .env) on authenticated /api
+# routes. Word-split as two curl args; the key is space-free so unquoted is safe
+# (and bash-3.2 compatible — no empty-array expansion under `set -u`).
+KEY_HDR=""
+[ -n "${CERID_API_KEY:-}" ] && KEY_HDR="-H X-API-Key:${CERID_API_KEY}"
+
 echo ""
 echo "╔══════════════════════════════════════╗"
 echo "║   PERFORMANCE TESTS (Latency)        ║"
@@ -82,7 +88,7 @@ p02_check() {
 
   for i in $(seq 1 10); do
     curl -w '%{time_total}\n' -s -o /dev/null --connect-timeout 5 --max-time 30 \
-      -X POST -H 'Content-Type: application/json' \
+      -X POST -H 'Content-Type: application/json' $KEY_HDR \
       -d '{"query":"test","top_k":3}' \
       "${MCP_BASE}/agent/query" >> "$tmpfile" 2>/dev/null || echo "9999" >> "$tmpfile"
   done
@@ -114,7 +120,7 @@ p03_check() {
   start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 
   for i in $(seq 1 20); do
-    curl -w '%{time_total}\n' -s -o /dev/null --connect-timeout 5 --max-time 10 \
+    curl -w '%{time_total}\n' -s -o /dev/null --connect-timeout 5 --max-time 10 $KEY_HDR \
       "${MCP_BASE}/artifacts?limit=50" >> "$tmpfile" 2>/dev/null || echo "9999" >> "$tmpfile"
   done
 
@@ -148,7 +154,7 @@ p04_check() {
   # Launch 5 parallel POST /agent/query requests (use trading-agent for 80/min limit)
   for i in $(seq 1 5); do
     curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 \
-      -X POST -H 'Content-Type: application/json' -H 'X-Client-ID: trading-agent' \
+      -X POST -H 'Content-Type: application/json' -H 'X-Client-ID: trading-agent' $KEY_HDR \
       -d '{"query":"test","top_k":3}' \
       "${MCP_BASE}/agent/query" > "${tmpdir}/result_${i}" 2>/dev/null &
   done

@@ -3,6 +3,7 @@ Integration tests for Cerid AI beta test harness.
 Runs inside Docker on llm-network against ai-companion-mcp.
 """
 
+import os
 import time
 import uuid
 
@@ -19,7 +20,11 @@ def _uid() -> str:
 
 
 def _client() -> httpx.Client:
-    return httpx.Client(base_url=BASE_URL, timeout=TIMEOUT)
+    headers: dict[str, str] = {}
+    api_key = os.getenv("CERID_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
+    return httpx.Client(base_url=BASE_URL, headers=headers, timeout=TIMEOUT)
 
 
 # ---------------------------------------------------------------------------

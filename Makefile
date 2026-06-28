@@ -69,6 +69,8 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	  -m "not benchmark_slo and not preservation and not integration" -x -q -p no:cacheprovider
 	@echo "[ci-local] frontend · eslint + tsc + vitest"
 	cd src/web && npx eslint . && npx tsc -b && npx vitest run
+	@echo "[ci-local] secret detection (matches CI security job)"
+	bash scripts/detect-secrets-scan.sh
 	@echo "[ci-local] supply-chain guard"
 	bash scripts/guard-no-ai-commits.sh
 	@echo "[ci-local] ✓ all local checks passed"
