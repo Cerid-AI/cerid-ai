@@ -5,7 +5,7 @@
 // mesh on a dedicated canvas synced to the Sigma camera (afterRender). Sigma's
 // own edge program never raises edges over nodes; this layer fills that gap.
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import type Sigma from "sigma"
 import type { MapTokens } from "./community-layer"
 
@@ -39,8 +39,12 @@ export function useHighlightEdges(args: {
   sigma: Sigma | null
   tokens: MapTokens
   getFocusCenter: () => string | null
+  /** 0..1 eased focus strength — fades the highlight in/out (default 1). */
+  getFocusProgress?: () => number
 }): void {
-  const { sigma, tokens, getFocusCenter } = args
+  const { sigma, tokens, getFocusCenter, getFocusProgress } = args
+  const getFocusProgressRef = useRef(getFocusProgress)
+  getFocusProgressRef.current = getFocusProgress
   useEffect(() => {
     if (!sigma) return
     const container = sigma.getContainer()
@@ -68,9 +72,11 @@ export function useHighlightEdges(args: {
       const graph = sigma.getGraph()
       const segs = incidentEdgeSegments(graph as never, focus)
       if (segs.length === 0) return
+      const progress = getFocusProgressRef.current?.() ?? 1
+      if (progress <= 0.01) return
       ctx.lineWidth = 1.6
       ctx.strokeStyle = tokens.interaction
-      ctx.globalAlpha = 0.9
+      ctx.globalAlpha = 0.9 * progress
       for (const s of segs) {
         const p1 = sigma.graphToViewport({ x: s.x1, y: s.y1 })
         const p2 = sigma.graphToViewport({ x: s.x2, y: s.y2 })

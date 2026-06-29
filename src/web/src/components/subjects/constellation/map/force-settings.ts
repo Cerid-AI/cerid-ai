@@ -22,17 +22,24 @@ const BARNES_HUT_NODE_THRESHOLD = 500
 
 export function buildForceSettings(nodeCount: number): FA2Settings {
   return {
-    gravity: 1,
-    scalingRatio: 10,
-    strongGravityMode: true,
+    // Light gravity (NOT strong) so the layout doesn't compress to the centre —
+    // communities are free to push apart and read as distinct clusters.
+    gravity: 0.5,
+    scalingRatio: 12,
+    strongGravityMode: false,
     barnesHutOptimize: nodeCount > BARNES_HUT_NODE_THRESHOLD,
     barnesHutTheta: 0.5,
-    // Higher slowDown damps the per-tick step so the graph glides from the
-    // seed instead of exploding, then breathes at low energy.
-    slowDown: 8,
+    // Lower slowDown so nodes actually travel from the server seed into their
+    // affinity clusters (8 was so damped the graph looked static); still high
+    // enough to glide, not explode.
+    slowDown: 4,
     adjustSizes: true,
-    linLogMode: false,
-    edgeWeightInfluence: 1,
+    // linLog tightens intra-cluster spacing while repulsion separates clusters
+    // — the clearest "communities pull together, push apart" structure.
+    linLogMode: true,
+    // Weight attraction by edge strength so strongly co-mentioned / similar
+    // nodes pull together harder (visible affinity).
+    edgeWeightInfluence: 1.5,
   }
 }
 

@@ -218,6 +218,23 @@ async def install_pack(
                 pack.id, pack.version, len(ingested_artifact_ids),
                 len(content_files),
             )
+            # Post-install recompute: pack content is ingested + extracted, but the
+            # layout (compute_umap_3d, which also busts the /graph/map serving cache)
+            # and trust (compute_trust_state) jobs are nightly — so freshly installed
+            # packs are invisible in the Constellation + trust-less until then.
+            # Enqueue them now so the pack appears promptly. Best-effort: a queue
+            # hiccup must never fail an otherwise-successful install.
+            try:
+                from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+                from app.processor.jobs.compute_trust_state import ComputeTrustStateJob  # noqa: PLC0415
+                from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob  # noqa: PLC0415
+
+                enqueue_job(ComputeTrustStateJob(), payload={})
+                enqueue_job(ComputeUmap3DJob(), payload={})
+                logger.info("install_pack.recompute_enqueued pack=%s", pack.id)
+            except Exception as exc:  # noqa: BLE001 — recompute is best-effort
+                log_swallowed_error("services.knowledge_packs.install_recompute", exc)
+
             return record
         finally:
             if not keep_staging:

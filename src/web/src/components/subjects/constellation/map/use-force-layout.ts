@@ -19,7 +19,9 @@ export interface ForceLayoutController {
   isRunning: () => boolean
 }
 
-const DEFAULT_WARM_MS = 2500
+// Long enough for the seed to actually migrate into affinity clusters under the
+// (now lighter-gravity, linLog) settings before settling to the idle trickle.
+const DEFAULT_WARM_MS = 5000
 // Refresh cadence: full rAF while warming; throttled while idle-breathing so a
 // continuously-running worker doesn't burn the main thread.
 const IDLE_REFRESH_INTERVAL_MS = 1000 / 30

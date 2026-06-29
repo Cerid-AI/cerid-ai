@@ -6,8 +6,15 @@ describe("buildForceSettings", () => {
     expect(buildForceSettings(3000).barnesHutOptimize).toBe(true)
     expect(buildForceSettings(100).barnesHutOptimize).toBe(false)
   })
-  it("uses strong gravity to keep components anchored to the seed", () => {
-    expect(buildForceSettings(3000).strongGravityMode).toBe(true)
+  it("uses light (non-strong) gravity so communities can separate into clusters", () => {
+    const s = buildForceSettings(3000)
+    expect(s.strongGravityMode).toBe(false)
+    expect(s.gravity).toBeLessThan(1)
+  })
+  it("uses linLog + edge-weight attraction for visible affinity clustering", () => {
+    const s = buildForceSettings(3000)
+    expect(s.linLogMode).toBe(true)
+    expect(s.edgeWeightInfluence).toBeGreaterThan(1)
   })
   it("keeps theta at 0.5 and a non-zero slowDown to damp jitter", () => {
     const s = buildForceSettings(3000)

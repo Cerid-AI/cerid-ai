@@ -22,13 +22,22 @@ from core.processor.priority import Priority
 # ---------------------------------------------------------------------------
 
 
-def _make_driver(rows: list[dict]) -> tuple:
-    """Return a mock (driver, session) that yields ``rows`` on .run().data()."""
+def _make_driver(rows: list[dict], pack_rows: list[dict] | None = None) -> tuple:
+    """Return a mock (driver, session) that yields ``rows`` on the first
+    .run().data() call and ``pack_rows`` (default: []) on the second.
+
+    _fetch_trust_scores now issues two queries (verification, then pack),
+    so we use side_effect to return distinct data for each call.
+    """
     fake_driver = MagicMock()
     fake_session = MagicMock()
     fake_session.__enter__ = lambda self: self
     fake_session.__exit__ = lambda self, exc_type, exc, tb: None
-    fake_session.run.return_value.data.return_value = rows
+    first_result = MagicMock()
+    first_result.data.return_value = rows
+    second_result = MagicMock()
+    second_result.data.return_value = pack_rows if pack_rows is not None else []
+    fake_session.run.side_effect = [first_result, second_result]
     fake_driver.session.return_value = fake_session
     return fake_driver, fake_session
 
@@ -146,6 +155,8 @@ def test_write_trust_states_empty_input_is_noop():
 def test_write_trust_states_batches_large_input():
     """Large inputs must be split into batches of _WRITE_BATCH."""
     fake_driver, fake_session = _make_driver([])
+    # Reset side_effect so unlimited sequential batch calls succeed.
+    fake_session.run.side_effect = None
     fake_session.run.return_value = MagicMock()
     job = ComputeTrustStateJob()
     scores = [{"id": f"e{i}", "trust_state": "partial"} for i in range(1100)]
@@ -158,6 +169,86 @@ def test_write_trust_states_batches_large_input():
 # ---------------------------------------------------------------------------
 # _count_distribution
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Pack-trust seeding (Fix 2)
+# ---------------------------------------------------------------------------
+
+
+def test_pack_entity_with_no_verification_evidence_is_seeded_verified():
+    """A pack-sourced entity with no VerificationReport evidence → 'verified'."""
+    # First query (verification) returns nothing for this entity.
+    # Second query (pack) returns one entity.
+    fake_driver, _ = _make_driver(
+        rows=[],
+        pack_rows=[{"entity_id": "pack-only-entity"}],
+    )
+    job = ComputeTrustStateJob()
+    results = job._fetch_trust_scores(fake_driver)
+    state_map = {r["id"]: r["trust_state"] for r in results}
+    assert state_map.get("pack-only-entity") == "verified", (
+        "Pack-sourced entity with no verification evidence must be seeded 'verified'"
+    )
+
+
+def test_pack_entity_with_verification_evidence_keeps_derived_state():
+    """An entity covered by VerificationReport keeps its derived state even if
+    it is also pack-sourced (verification evidence wins over pack fallback)."""
+    # First query returns a partial-verified entity.
+    # Second query returns the same entity as pack-sourced.
+    fake_driver, _ = _make_driver(
+        rows=[{"entity_id": "dual-entity", "verified_total": 3, "evidence_total": 10}],
+        pack_rows=[{"entity_id": "dual-entity"}],
+    )
+    job = ComputeTrustStateJob()
+    results = job._fetch_trust_scores(fake_driver)
+    state_map = {r["id"]: r["trust_state"] for r in results}
+    # 3/10 = 0.30 → 'partial'; pack fallback must NOT override to 'verified'.
+    assert state_map.get("dual-entity") == "partial", (
+        "Verification-derived trust must win over pack-source fallback"
+    )
+    # Exactly one result entry for this entity.
+    assert sum(1 for r in results if r["id"] == "dual-entity") == 1
+
+
+def test_pack_query_failure_is_swallowed_and_does_not_break_job():
+    """A failure in the pack-trust query must be swallowed; verification results
+    still returned."""
+    fake_driver = MagicMock()
+    fake_session = MagicMock()
+    fake_session.__enter__ = lambda self: self
+    fake_session.__exit__ = lambda self, exc_type, exc, tb: None
+
+    # First session call (verification) succeeds.
+    good_result = MagicMock()
+    good_result.data.return_value = [
+        {"entity_id": "e1", "verified_total": 8, "evidence_total": 10}
+    ]
+    # Second session call (pack) raises.
+    fake_session.run.side_effect = [good_result, RuntimeError("redis down")]
+    fake_driver.session.return_value = fake_session
+
+    job = ComputeTrustStateJob()
+    results = job._fetch_trust_scores(fake_driver)
+    # Verification result for e1 must still be present.
+    state_map = {r["id"]: r["trust_state"] for r in results}
+    assert state_map.get("e1") == "verified", (
+        "Verification result must survive a pack-query failure"
+    )
+
+
+def test_pack_entity_with_null_id_is_skipped():
+    """Pack rows with null entity_id must not appear in results."""
+    fake_driver, _ = _make_driver(
+        rows=[],
+        pack_rows=[{"entity_id": None}, {"entity_id": "good-pack-entity"}],
+    )
+    job = ComputeTrustStateJob()
+    results = job._fetch_trust_scores(fake_driver)
+    ids = [r["id"] for r in results]
+    assert None not in ids
+    assert "good-pack-entity" in ids
 
 
 def test_count_distribution_tally():

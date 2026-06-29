@@ -15,6 +15,7 @@ import io
 import json
 import tarfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -579,3 +580,70 @@ def test_validate_embedded_manifest_version_mismatch_raises():
     }).encode()
     with pytest.raises(PackError, match="does not match registry version"):
         _validate_embedded_manifest(embedded, registry_pack)
+
+
+# ── Post-install recompute trigger (Fix 1) ────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_install_pack_enqueues_trust_and_umap_jobs(tmp_path):
+    """A successful install must enqueue ComputeTrustStateJob + ComputeUmap3DJob."""
+    archive_path, _, manifest = _build_pack_archive(tmp_path)
+    download = _make_download_stub(archive_path)
+    ingest, _ = _make_ingest_stub()
+
+    mock_enqueue = MagicMock()
+    fake_trust_job = MagicMock()
+    fake_umap_job = MagicMock()
+    fake_trust_cls = MagicMock(return_value=fake_trust_job)
+    fake_umap_cls = MagicMock(return_value=fake_umap_job)
+
+    with patch.dict("sys.modules", {
+        "app.db.redis.processor_queue": MagicMock(enqueue_job=mock_enqueue),
+        "app.processor.jobs.compute_trust_state": MagicMock(ComputeTrustStateJob=fake_trust_cls),
+        "app.processor.jobs.compute_umap_3d": MagicMock(ComputeUmap3DJob=fake_umap_cls),
+    }):
+        record = await install_pack(
+            manifest,
+            state_path=tmp_path / "state.json",
+            staging_root=tmp_path / "staging",
+            download=download,
+            ingest=ingest,
+        )
+
+    assert record.pack_id == manifest.id
+    assert mock_enqueue.call_count == 2
+    enqueued_jobs = [c[0][0] for c in mock_enqueue.call_args_list]
+    assert fake_trust_job in enqueued_jobs, "ComputeTrustStateJob must be enqueued"
+    assert fake_umap_job in enqueued_jobs, "ComputeUmap3DJob must be enqueued"
+
+
+@pytest.mark.asyncio
+async def test_install_pack_recompute_queue_failure_does_not_raise(tmp_path):
+    """A failure in the recompute enqueue block must not abort a successful install."""
+    archive_path, _, manifest = _build_pack_archive(tmp_path)
+    download = _make_download_stub(archive_path)
+    ingest, _ = _make_ingest_stub()
+
+    # Simulate enqueue_job raising (e.g. Redis unavailable).
+    exploding_module = MagicMock()
+    exploding_module.enqueue_job.side_effect = RuntimeError("Redis unavailable")
+    trust_module = MagicMock()
+    umap_module = MagicMock()
+
+    with patch.dict("sys.modules", {
+        "app.db.redis.processor_queue": exploding_module,
+        "app.processor.jobs.compute_trust_state": trust_module,
+        "app.processor.jobs.compute_umap_3d": umap_module,
+    }):
+        # Must NOT raise — best-effort block swallows the error.
+        record = await install_pack(
+            manifest,
+            state_path=tmp_path / "state.json",
+            staging_root=tmp_path / "staging",
+            download=download,
+            ingest=ingest,
+        )
+
+    assert record.pack_id == manifest.id, (
+        "install_pack must succeed even when the recompute enqueue fails"
+    )

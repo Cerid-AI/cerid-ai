@@ -171,6 +171,32 @@ class ComputeTrustStateJob(BaseJob):
                 state = "unverified"
             results.append({"id": entity_id, "trust_state": state})
 
+        # Pack-sourced entities (authoritative, license-vetted corpora) have no
+        # VerificationReport evidence but ARE trustworthy by provenance. Seed
+        # them 'verified' as a FALLBACK — entities with real verification
+        # evidence above keep that derived state (don't override).
+        scored_ids = {r["id"] for r in results}
+        try:
+            with driver.session() as session:
+                pack_rows = session.run(
+                    """
+                    MATCH (a:Artifact)-[:MENTIONS]->(e:Entity)
+                    WHERE e.canonical_id IS NOT NULL
+                      AND (a.client_source = 'knowledge-pack'
+                           OR any(t IN coalesce(a.tags, []) WHERE t STARTS WITH 'pack:'))
+                    RETURN DISTINCT e.canonical_id AS entity_id
+                    LIMIT $limit
+                    """,
+                    limit=_MAX_ENTITIES,
+                ).data()
+            for row in pack_rows:
+                eid = row.get("entity_id")
+                if eid and eid not in scored_ids:
+                    results.append({"id": eid, "trust_state": "verified"})
+                    scored_ids.add(eid)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("processor.compute_trust_state.pack_trust", exc)
+
         return results
 
     def _write_trust_states(

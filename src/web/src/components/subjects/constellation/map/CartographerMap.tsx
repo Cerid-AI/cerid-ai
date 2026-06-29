@@ -22,7 +22,7 @@ import EdgeCurveProgram from "@sigma/edge-curve"
 import { createNodeBorderProgram } from "@sigma/node-border"
 import { NodeCircleProgram, createNodeCompoundProgram } from "sigma/rendering"
 import type { NodeProgramType } from "sigma/rendering"
-import { Loader2, X, Link2, Users, ShieldCheck } from "lucide-react"
+import { Loader2, X, Link2, Users, ShieldCheck, Maximize2 } from "lucide-react"
 import type { GraphMapResponse, CommunityHull } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
@@ -439,8 +439,11 @@ export function CartographerMap({
     // them readable at a glance. similar edges get a dimmer suffix (0x28
     // ≈ 0.157) as a calm secondary tone. Both suffixes appended to the
     // token hex from resolveMapTokens, which always returns #RRGGBB.
-    const CO_MENTION_ALPHA_SUFFIX = "38"  // ≈ 22% — primary signal
-    const SIMILAR_ALPHA_SUFFIX = "28"     // ≈ 16% — secondary/dimmer
+    // Softer than before (was 0x38/0x28) so the dense edge web reads as a calm
+    // underlay when zoomed in rather than overwhelming the nodes; hover-focus +
+    // the highlight-edge layer surface the relevant connections on demand.
+    const CO_MENTION_ALPHA_SUFFIX = "26"  // ≈ 15% — primary signal
+    const SIMILAR_ALPHA_SUFFIX = "1a"     // ≈ 10% — secondary/dimmer
 
     for (const [si, ti, weight, kind] of links) {
       const src = data.entities[si]
@@ -490,6 +493,15 @@ export function CartographerMap({
       edgeProgramClasses: CARTO_EDGE_PROGRAM_CLASSES,
       defaultNodeType: "bordered",
       nodeProgramClasses: CARTO_NODE_PROGRAM_CLASSES,
+      // Smaller per-wheel zoom factor → finer, smoother zoom steps (default 1.7
+      // felt steppy). Bound the camera so the user can't zoom into the void with
+      // no way back — combined with the Reset button this prevents "lost in space".
+      zoomingRatio: 1.3,
+      minCameraRatio: 0.08,
+      // 5.0 stays above the A8 multi-level collapse bands (coarsest ~4.4) while
+      // still bounding zoom-out; the spread transform keeps the collapsed
+      // overview viewport-filled, so a high cap never strands the user.
+      maxCameraRatio: 5.0,
     })
 
     sigmaRef.current = sigma
@@ -741,6 +753,43 @@ export function CartographerMap({
   // reducers. Previously each reducer rebuilt this set per-element on every
   // refresh (O(degree×N) per hover frame) — the source of the hover jank.
   const focusNeighborsRef = useRef<Set<string> | null>(null)
+  // Focus fade progress 0..1 — ramps up when a node is hovered/pinned and back
+  // down on leave, so the neighbourhood emphasis eases in/out instead of
+  // snapping (the "abrupt / jarring" hover the reducers read this to interpolate
+  // the non-focus fade). reduced-motion jumps straight to the target.
+  const focusProgressRef = useRef(0)
+  const focusRafRef = useRef<number | null>(null)
+  const FOCUS_FADE_MS = 180
+  const rampFocusProgress = useCallback((target: number) => {
+    if (focusRafRef.current !== null) {
+      cancelAnimationFrame(focusRafRef.current)
+      focusRafRef.current = null
+    }
+    if (reducedMotion) {
+      focusProgressRef.current = target
+      if (target === 0) focusNeighborsRef.current = null
+      sigmaRef.current?.refresh({ skipIndexation: true })
+      return
+    }
+    const start = performance.now()
+    const from = focusProgressRef.current
+    const step = () => {
+      const t = Math.min(1, (performance.now() - start) / FOCUS_FADE_MS)
+      // easeOutCubic for a soft settle
+      const e = 1 - Math.pow(1 - t, 3)
+      focusProgressRef.current = from + (target - from) * e
+      if (t >= 1) {
+        focusRafRef.current = null
+        // Clear the held neighbourhood only AFTER the fade-out completes, so
+        // non-focus nodes ease back to full rather than snapping.
+        if (target === 0) focusNeighborsRef.current = null
+      } else {
+        focusRafRef.current = requestAnimationFrame(step)
+      }
+      sigmaRef.current?.refresh({ skipIndexation: true })
+    }
+    focusRafRef.current = requestAnimationFrame(step)
+  }, [reducedMotion])
   const recomputeFocusNeighbors = useCallback(() => {
     const sigma = sigmaRef.current
     if (!sigma) {
@@ -754,10 +803,13 @@ export function CartographerMap({
       graph.forEachNeighbor(focusCenter, (n) => set.add(n))
       set.add(focusCenter)
       focusNeighborsRef.current = set
+      rampFocusProgress(1)
     } else {
-      focusNeighborsRef.current = null
+      // Keep the prior neighbourhood set until the fade-out ramp finishes
+      // (rampFocusProgress clears it at progress 0) so the un-dim is smooth.
+      rampFocusProgress(0)
     }
-  }, [])
+  }, [rampFocusProgress])
 
   const pulseMapRef = useRef(pulseMap)
   pulseMapRef.current = pulseMap
@@ -801,48 +853,54 @@ export function CartographerMap({
       const focusCenter = currentPinnedId ?? hoverId ?? null
       const focusNeighbors = focusNeighborsRef.current
 
-      // Type filter dim
+      // Deliberate filters (instant, neutral-dim): type chip, search miss, and —
+      // in the domain lens — entities with no domain (so the domained structure
+      // reads instead of 66% neutral swamping it).
       const typeFiltered = currentTypeFilter.size > 0 && !currentTypeFilter.has(entity.type)
-
-      // Search dim: non-matching nodes recede to dim
       const searchMiss = !matchesSearch(entity.name, searchRef.current)
-
-      // Orphan hide: degree-0 nodes hidden when hideOrphans is on
+      const domainMiss = currentLens === "domain" && !entity.primary_domain
+      // Trust lens: recede the (large) "unknown" set so the actually-verified
+      // nodes stand out — honest about where trust evidence exists.
+      const trustMiss = currentLens === "trust" && (!entity.trust_state || entity.trust_state === "unknown")
       const orphanHidden = configRef.current.hideOrphans && ((attrs._degree as number) ?? 0) === 0
 
-      // Focus dim: when there's a focus center, non-neighbors fade to dim token
       const hasFocus = focusNeighbors !== null
       const inFocus = !hasFocus || focusNeighbors!.has(node)
+
+      // Lens color + confidence alpha, computed up-front so the focus fade can
+      // preserve hue (fade alpha) instead of graying out.
+      const baseColor = lensColor(entity, currentLens, currentTokens)
+      const baseAlpha = nodeBaseAlpha(entity.mention_count ?? 1)
+      const withAlpha = (a: number) =>
+        baseColor.startsWith("#") && baseColor.length === 7
+          ? baseColor + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, "0")
+          : baseColor
 
       if (orphanHidden) {
         return { ...attrs, hidden: true }
       }
-      if (typeFiltered || searchMiss || (!inFocus && hasFocus)) {
+      if (typeFiltered || searchMiss || domainMiss || trustMiss) {
         return {
           ...attrs,
           color: currentTokens.dim,
           label: "",
-          // Enforce minimum interactive hit size even when dimmed.
-          // 0.6× makes the local subgraph pop — non-focus nodes recede
-          // decisively without vanishing (floor = HIT_SIZE_MIN).
           size: Math.max(HIT_SIZE_MIN, attrs.size * 0.6),
         }
       }
+      // Hover/pin focus: non-neighbours EASE out — hue-preserving alpha fade +
+      // gentle shrink, strength driven by focusProgressRef (0→1 over ~180ms) so
+      // the emphasis glides in/out instead of snapping.
+      if (!inFocus && hasFocus) {
+        const p = focusProgressRef.current
+        return {
+          ...attrs,
+          color: withAlpha(baseAlpha * (1 - 0.8 * p)),
+          label: "",
+          size: Math.max(HIT_SIZE_MIN, attrs.size * (1 - 0.4 * p)),
+        }
+      }
 
-      // Apply lens recoloring
-      const baseColor = lensColor(entity, currentLens, currentTokens)
-
-      // Confidence/recency → fill alpha. mention_count is the most robust
-      // per-node signal available: single-mention entities are newly-observed
-      // or rarely-cited and render softer; well-established nodes are opaque.
-      // This base alpha COMPOSES with focus-dim and type-filter above (both
-      // of which return early before reaching this path).
-      const alpha = nodeBaseAlpha(entity.mention_count ?? 1)
-      // resolveMapTokens always returns #RRGGBB; append a 2-hex alpha suffix.
-      const alphaSuffix = Math.round(alpha * 255).toString(16).padStart(2, "0")
-      const color = baseColor.startsWith("#") && baseColor.length === 7
-        ? baseColor + alphaSuffix
-        : baseColor
+      const color = withAlpha(baseAlpha)
 
       // Hover/selection ring: teal border on focal node only (not all neighbors)
       // — marking all neighbors `highlighted` causes many white plates (sigma
@@ -969,6 +1027,7 @@ export function CartographerMap({
   useEffect(() => {
     return () => {
       if (pulseRafRef.current !== null) cancelAnimationFrame(pulseRafRef.current)
+      if (focusRafRef.current !== null) cancelAnimationFrame(focusRafRef.current)
     }
   }, [])
 
@@ -1035,6 +1094,9 @@ export function CartographerMap({
       () => pinnedIdRef.current ?? hoverIdRef.current ?? null,
       [],
     ),
+    // Fade the highlight in/out with the same eased focus progress as the node
+    // dimming, so hover emphasis is one smooth gesture, not an abrupt flash.
+    getFocusProgress: useCallback(() => focusProgressRef.current, []),
   })
 
   // ---------------------------------------------------------------------------
@@ -1116,6 +1178,18 @@ export function CartographerMap({
     if (!pinnedId) return
     goTo("subjects", { mode: "wiki", entity: pinnedId })
   }, [pinnedId, goTo])
+
+  // Reset view — refit the whole graph and clear focus. The recovery hatch when
+  // the user has zoomed/panned into a dead end (camera bounds keep it in range;
+  // this re-centres and fits).
+  const handleResetView = useCallback(() => {
+    setPinnedId(null)
+    const sigma = sigmaRef.current
+    if (!sigma) return
+    const camera = sigma.getCamera()
+    if (reducedMotion) camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 })
+    else camera.animatedReset()
+  }, [reducedMotion])
 
   // ---------------------------------------------------------------------------
   // Trust lens empty-state: detect when ALL nodes lack real trust data
@@ -1348,6 +1422,18 @@ export function CartographerMap({
         {data.silhouette !== null &&
           ` · silhouette ${data.silhouette.toFixed(2)}`}
       </div>
+
+      {/* Reset view — recovery hatch (re-fit + clear focus) */}
+      <button
+        type="button"
+        onClick={handleResetView}
+        aria-label="Reset view"
+        title="Reset view (fit graph)"
+        className="absolute right-3 top-11 flex items-center gap-1 rounded-md border border-border/60 bg-card/80 px-2 py-1 text-label-xs text-muted-foreground backdrop-blur hover:bg-accent/40 hover:text-foreground"
+      >
+        <Maximize2 className="h-3 w-3" aria-hidden="true" />
+        Reset view
+      </button>
 
       {/* Trust lens empty-state notice */}
       {allTrustUnknown && (
