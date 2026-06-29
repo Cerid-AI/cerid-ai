@@ -955,7 +955,7 @@
         "notes": "CC-BY-4.0: stamp attribution per chunk. Excludes the 3 MedlinePlus subsets (ADAM, Drugs, Herbs) whose answers were removed for copyright. Needs a qa_xml adapter step (MedQuAD question/answer XML -> chunk); the github_zip adapter handles prose, not this XML schema."
       },
       "build": {
-        "adapter": "github_zip",
+        "adapter": "qa_xml",
         "config": {
           "repo": "abachaa/MedQuAD",
           "ref": "master",
@@ -975,7 +975,7 @@
       "id": "drug-supplement-key-facts",
       "name": "Common Drugs & Supplements - Key Facts (DailyMed / NIH ODS)",
       "version": "0.0.0",
-      "description": "Curated key-facts reference for commonly prescribed drugs and dietary supplements: indications, dosing, contraindications, warnings, and interactions for the top several hundred drugs (FDA Structured Product Labeling via DailyMed) plus NIH Office of Dietary Supplements fact sheets. Closes the drugs/supplements gap that MedQuAD excludes. Curated + section-filtered by design: it is NOT the full label corpus and NOT a complete drug database - it claims common-drug KEY FACTS, not all drugs.",
+      "description": "Curated key-facts reference for the most-prescribed drugs and common dietary supplements: indications, dosing, contraindications, warnings, interactions for a bundled list of ~45 top US generics (sourced from openFDA drug labeling, the structured/queryable form of FDA SPL) plus NIH Office of Dietary Supplements fact sheets. Closes the drugs/supplements gap that MedQuAD excludes. Section-filtered by design: NOT the full label corpus and NOT a complete drug database - it claims KEY FACTS for the bundled common-drug list (recipe-extendable), not all drugs.",
       "domain": "personal",
       "sub_category": "health",
       "tags": [
@@ -992,26 +992,35 @@
       "download_url": "",
       "sha256": "",
       "provenance": {
-        "source": "https://dailymed.nlm.nih.gov/dailymed/",
+        "source": "https://api.fda.gov/drug/label.json",
         "curator": "U.S. FDA / National Library of Medicine; NIH Office of Dietary Supplements",
         "license_category": "public_domain",
         "status": "experimental",
-        "notes": "FDA SPL labeling + NIH ODS fact sheets are US-gov public information. Curated to a top-N common-drug list and KEY SPL sections (indications, dosage, contraindications, warnings, interactions) - NOT full labels, which are boilerplate-heavy and would balloon the index. Supplements come from NIH ODS (ods.od.nih.gov). Needs a dailymed_spl adapter (SPL XML -> sectioned chunk) + an ods_factsheet pull; verify manufacturer-authored SPL portions carry no third-party restriction before ship."
+        "notes": "FDA drug labeling (via openFDA, the structured/queryable form of SPL) + NIH ODS fact sheets are US-gov public information. Scoped to a bundled curated list of ~45 most-prescribed generics and KEY sections (indications, dosage, contraindications, warnings, interactions, adverse reactions) - NOT full labels, which are boilerplate-heavy and would balloon the index. Complete-for-claim for the bundled list; extend via the 'drugs' config key. Supplements from NIH ODS (ods.od.nih.gov)."
       },
       "build": {
-        "adapter": "dailymed_spl",
+        "adapter": "drug_facts",
         "config": {
-          "drug_list": "top_prescribed",
-          "max_drugs": 500,
           "include_sections": [
-            "INDICATIONS AND USAGE",
-            "DOSAGE AND ADMINISTRATION",
-            "CONTRAINDICATIONS",
-            "WARNINGS AND PRECAUTIONS",
-            "DRUG INTERACTIONS",
-            "ADVERSE REACTIONS"
+            "indications_and_usage",
+            "dosage_and_administration",
+            "contraindications",
+            "warnings_and_cautions",
+            "drug_interactions",
+            "adverse_reactions"
           ],
-          "supplement_source": "https://ods.od.nih.gov/factsheets/list-all/",
+          "supplements": [
+            "Vitamin D",
+            "Vitamin B12",
+            "Magnesium",
+            "Omega-3 Fatty Acids",
+            "Calcium",
+            "Iron",
+            "Folate",
+            "Zinc"
+          ],
+          "openfda_endpoint": "https://api.fda.gov/drug/label.json",
+          "ods_factsheet_base": "https://ods.od.nih.gov/factsheets/",
           "min_text_chars": 200
         }
       }

@@ -76,6 +76,14 @@ def test_hf_config_rejects_zero_max_rows():
         ))
 
 
+def test_hf_config_requires_filter_value_with_filter_field():
+    with pytest.raises(PackError, match="filter_value is required"):
+        HfDatasetConfig.from_build(BuildSpec(
+            adapter="hf_dataset",
+            config={"dataset_id": "x/y", "text_field": "text", "filter_field": "court"},
+        ))
+
+
 def test_hf_config_round_trips_optional_fields():
     cfg = HfDatasetConfig.from_build(BuildSpec(
         adapter="hf_dataset",
@@ -166,6 +174,24 @@ def test_hf_adapter_max_rows_caps_output(tmp_path):
     })
     result = adapter.fetch(manifest, staging_root=tmp_path)
     assert len(result.files) == 5
+
+
+def test_hf_adapter_filters_by_field(tmp_path):
+    """filter_field/filter_value keep only matching rows (court-scoped subset)."""
+    rows = [
+        {"title": "SCOTUS case", "text": "z" * 500, "court": "U.S. Supreme Court"},
+        {"title": "Appeals case", "text": "z" * 500, "court": "9th Circuit"},
+        {"title": "Another SCOTUS", "text": "z" * 500, "court": "U.S. Supreme Court"},
+    ]
+    adapter = HfDatasetAdapter(loader=_stub_loader(rows))
+    manifest = _make_manifest(build_config={
+        "dataset_id": "free-law/Caselaw_Access_Project", "text_field": "text",
+        "title_field": "title", "filter_field": "court",
+        "filter_value": "U.S. Supreme Court",
+    })
+    result = adapter.fetch(manifest, staging_root=tmp_path)
+    names = sorted(p.name for p in result.files)
+    assert names == ["another-scotus.md", "scotus-case.md"]
 
 
 def test_hf_adapter_handles_title_collisions_via_counter(tmp_path):

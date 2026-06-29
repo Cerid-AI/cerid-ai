@@ -69,6 +69,8 @@ class HfDatasetConfig:
     split: str = "train"
     title_field: str | None = None
     id_field: str | None = None
+    filter_field: str | None = None
+    filter_value: str | None = None
     min_text_chars: int = 100
     max_rows: int | None = None
     markdown_template: str = "# {title}\n\n{text}\n"
@@ -96,6 +98,14 @@ class HfDatasetConfig:
         max_rows = int(max_rows_raw) if max_rows_raw is not None else None
         if max_rows is not None and max_rows <= 0:
             raise PackError("hf_dataset config: max_rows must be > 0 if set")
+        filter_field = str(cfg["filter_field"]) if cfg.get("filter_field") else None
+        filter_value = (
+            str(cfg["filter_value"]) if cfg.get("filter_value") is not None else None
+        )
+        if filter_field and filter_value is None:
+            raise PackError(
+                "hf_dataset config: filter_value is required when filter_field is set",
+            )
         return cls(
             dataset_id=dataset_id,
             text_field=text_field,
@@ -103,6 +113,8 @@ class HfDatasetConfig:
             split=str(cfg.get("split", "train")),
             title_field=str(cfg["title_field"]) if cfg.get("title_field") else None,
             id_field=str(cfg["id_field"]) if cfg.get("id_field") else None,
+            filter_field=filter_field,
+            filter_value=filter_value,
             min_text_chars=int(cfg.get("min_text_chars", 100)),
             max_rows=max_rows,
             markdown_template=str(
@@ -169,6 +181,13 @@ class HfDatasetAdapter(PackSourceAdapter):
         for index, row in enumerate(self._loader(config)):
             if config.max_rows is not None and len(kept) >= config.max_rows:
                 break
+            # Optional field filter (e.g. court == "U.S. Supreme Court"):
+            # ship only matching rows so a court-scoped subset stays
+            # complete-for-claim rather than an arbitrary head() sample.
+            if config.filter_field is not None:
+                fv = row.get(config.filter_field)
+                if fv is None or str(fv) != config.filter_value:
+                    continue
             text = row.get(config.text_field)
             if not isinstance(text, str) or len(text) < config.min_text_chars:
                 continue

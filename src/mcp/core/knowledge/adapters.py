@@ -358,10 +358,13 @@ def list_registered_adapters() -> list[str]:
     # Import sibling adapter modules so they self-register at first call.
     # Lazy here (rather than at module top) so a cyclic import between
     # adapters.py and a sibling adapter module is impossible.
+    import core.knowledge.adapter_drugfacts  # noqa: F401  (drug_facts)
     import core.knowledge.adapter_gutenberg  # noqa: F401
     import core.knowledge.adapter_hf  # noqa: F401  (side-effect: register)
     import core.knowledge.adapter_html_scrape  # noqa: F401
     import core.knowledge.adapter_mediawiki  # noqa: F401
+    import core.knowledge.adapter_medlineplus  # noqa: F401  (medlineplus_xml)
+    import core.knowledge.adapter_medquad  # noqa: F401  (qa_xml)
     import core.knowledge.adapter_python_docs  # noqa: F401
     import core.knowledge.adapter_wiki_dump  # noqa: F401
 

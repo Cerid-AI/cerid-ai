@@ -303,17 +303,22 @@ personal data"*. The harness defends this on three layers:
 
 ### Phase 10 — deferred (new adapters for stretch sources)
 
-Several catalog packs remain `planned`/`experimental` because their
-upstreams need a new or enhanced adapter:
+Status: **4 of these adapters landed 2026-06-29** — the `hf_dataset`
+court-filter, `qa_xml`, `medlineplus_xml`, and `drug_facts` adapters are
+implemented + unit-tested, so `caselaw-scotus`, `medquad-health-qa`,
+`medlineplus-health-topics`, and `drug-supplement-key-facts` now need only
+a **curator build + publish** (run the adapter, seal the tarball, upload
+the release, set `download_url` + `sha256`). `bogleheads-wiki` and
+`pes2o-cs-recent` remain genuinely blocked on upstream issues.
 
-| Pack | Reason | Adapter needed |
+| Pack | Reason | Adapter |
 |---|---|---|
-| `bogleheads-wiki` | Cloudflare anti-bot challenge on `/w/api.php` | Playwright-based `mediawiki_browser_api`, **or** operator-side manual `Special:Export` + a future `wiki_xml_export` adapter |
-| `pes2o-cs-recent` | Deprecated dataset-script loader (`peS2o.py`) refused by current `datasets` versions | Wait for non-script `allenai/peS2o-v2` mirror, or pin a `datasets<3.0` interpreter per-recipe |
-| `medlineplus-health-topics` | Mixed PD + copyrighted A.D.A.M./drug-monograph entries — needs filtering before seal | New `medlineplus_xml` adapter with `<Mesh>`-code filter |
-| `caselaw-scotus` | Full CAP is 38 GB (CC0); needs court-filtering to the **complete** SCOTUS subset, era-narrowing if >500 MB | `hf_dataset` enhancement: `filter_field`/`filter_value` (court) + optional date filter — **no row sampling** |
-| `medquad-health-qa` | Ships Question/Answer **XML**, not prose; 3 subsets copyright-stripped | New `qa_xml` adapter (Question/Answer → chunk); exclude the 3 MedlinePlus subsets |
-| `drug-supplement-key-facts` | DailyMed SPL labels are boilerplate-heavy; supplements live at NIH ODS | New `dailymed_spl` adapter (curated drug list + key sections, **no full labels**) + `ods_factsheet` pull |
+| `bogleheads-wiki` | Cloudflare anti-bot challenge on `/w/api.php` | ⏳ Playwright `mediawiki_browser_api`, **or** operator `Special:Export` + a future `wiki_xml_export` |
+| `pes2o-cs-recent` | Deprecated dataset-script loader (`peS2o.py`) refused by current `datasets` | ⏳ wait for non-script `allenai/peS2o-v2`, or pin `datasets<3.0` per-recipe |
+| `caselaw-scotus` | Full CAP is 38 GB (CC0); court-filter to the **complete** SCOTUS subset, era-narrow if >500 MB | ✅ **landed** — `hf_dataset` `filter_field`/`filter_value` (no row sampling) |
+| `medquad-health-qa` | Ships Question/Answer **XML**, not prose; 3 subsets copyright-stripped | ✅ **landed** — `qa_xml` renders `<QAPair>`, excludes the 3 subsets |
+| `medlineplus-health-topics` | NLM topics XML; filter A.D.A.M. + drug/supplement categories | ✅ **landed** — `medlineplus_xml` HTML→prose + category/prefix filter |
+| `drug-supplement-key-facts` | Full DailyMed labels are boilerplate-heavy; supplements at NIH ODS | ✅ **landed** — `drug_facts` openFDA key-sections (curated drug list) + NIH ODS supplements |
 
 Other Phase-10 catalog candidates from research (deferred — each
 needs a focused 200–300 LOC adapter):
