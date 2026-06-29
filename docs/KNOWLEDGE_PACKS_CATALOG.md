@@ -15,17 +15,18 @@ financial-literacy primers, classic productivity essays. The
 **knowledge-pack harness** (Phases 1–9, landed 2026-05-10) lets users
 opt into curated baseline corpora without forcing them on everyone.
 
-**As of v1.0.1 (2026-05-10):** 17 of 19 catalog packs are built,
+**As of v1.0.1 (2026-05-10):** 17 of 23 catalog packs are built,
 sha256-pinned, and published as GitHub releases at
 [github.com/Cerid-AI/cerid-ai-knowledge-packs](https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases).
 End users install via `pkb_knowledge_pack_install <id>` (MCP),
 `POST /knowledge_packs/{id}/install` (REST), the Library UI button,
 or `scripts/install_knowledge_pack install <id>` (CLI) — no side-car
-configuration needed. Two packs (`bogleheads-wiki`,
-`pes2o-cs-recent`) remain `planned` pending adapter follow-up; see
-the Catalog section below for status per pack.
+configuration needed. Six packs (`bogleheads-wiki`, `pes2o-cs-recent`,
+`medlineplus-health-topics`, `caselaw-scotus`, `medquad-health-qa`,
+`drug-supplement-key-facts`) remain `planned`/`experimental` pending
+adapter follow-up; see the Catalog section below for status per pack.
 
-Every pack in this catalog meets four hard requirements:
+Every pack in this catalog meets five hard requirements:
 
 1. **Permissive license** — public domain, CC0, CC-BY*, MIT, Apache-2.0,
    BSD, PSF-2.0, or Blue-Oak. Anything copyleft beyond CC-BY-SA is
@@ -38,6 +39,13 @@ Every pack in this catalog meets four hard requirements:
    sections, structured metadata where possible.
 4. **Sub-500 MB per pack** — large enough to be useful, small enough
    that an install completes in minutes on a residential connection.
+5. **Complete for its claimed scope** — a pack must contain *all* of
+   what its name and description claim. When the sub-500 MB budget can't
+   hold a full corpus, narrow the *claim* (scope to a sub-domain, era,
+   or curated set) and name it accordingly — **never** ship a silent
+   row-sample that answers confidently from a partial corpus. A pack
+   that drops part of its claimed scope (e.g. a license-excluded subset)
+   must say so in its name/description.
 
 ## Catalog
 
@@ -48,7 +56,7 @@ Status legend:
 - `experimental` — recipe defined but flagged for caveats (license
   edge case, source rate limit, content review pending)
 
-### Coding (8 packs — 8 built)
+### Coding (9 packs — 9 built)
 
 | ID | Status | License | Size | Files | Source |
 |---|---|---|---|---|---|
@@ -132,13 +140,21 @@ first, tax tables as secondary); investing-blog scrapes (license risk).
 **Skipped:** Atlassian Agile Coach (proprietary), PMI BoK / PRINCE2
 (Axelos proprietary), wikiHow (restrictive ToS).
 
-### Personal (3 packs — 2 built, 1 deferred)
+### Personal (5 packs — 2 built, 3 experimental)
 
 | ID | Status | License | Size | Files | Source |
 |---|---|---|---|---|---|
 | `wikivoyage-en` | built v1.0.0 | CC-BY-SA 3.0 | 72 MB | 30919 | [enwikivoyage dump](https://dumps.wikimedia.org/enwikivoyage/latest/) |
 | `medlineplus-health-topics` | **deferred** (experimental) | US gov public domain (filtered) | — | — | [medlineplus.gov/xml.html](https://medlineplus.gov/xml.html) |
+| `medquad-health-qa` | **experimental** | CC-BY-4.0 | — | — | [abachaa/MedQuAD](https://github.com/abachaa/MedQuAD) (drugs/supplements excluded) |
+| `drug-supplement-key-facts` | **experimental** | US gov public domain | — | — | [DailyMed](https://dailymed.nlm.nih.gov/dailymed/) + [NIH ODS](https://ods.od.nih.gov/) |
 | `gutenberg-classics-curated` | built v1.0.0 | Public domain (CC0) | 3.9 MB | 15 | [gutenberg.org](https://www.gutenberg.org/) |
+
+**MedQuAD scope note:** complete for the **9 redistributable** NLM
+subsets; the 3 MedlinePlus subsets (A.D.A.M., drugs, herbs/supplements)
+are excluded for copyright — so this pack deliberately does **not** cover
+drug/supplement questions. Named to say so rather than imply full
+medical coverage.
 
 **MedlinePlus deferral note:** the dump bundles federal-PD content
 **plus** copyrighted A.D.A.M. Medical Encyclopedia + drug-monograph
@@ -161,13 +177,14 @@ in Phase 10.
   UTF-8, no OCR risk. Slot: `personal/notes` and as a fallback in
   `general`.
 
-### General (3 packs — 2 built, 1 deferred)
+### General (4 packs — 2 built, 2 experimental)
 
 | ID | Status | License | Size | Files | Source |
 |---|---|---|---|---|---|
 | `wikipedia-simple-en` | built v1.0.1 | CC-BY-SA 3.0 + GFDL | 100 MB | 196034 | [wikimedia/wikipedia 20231101.simple](https://huggingface.co/datasets/wikimedia/wikipedia) |
 | `cosmopedia-khanacademy` | built v1.0.1 | Apache-2.0 | 29 MB | 23855 | [HuggingFaceTB/cosmopedia](https://huggingface.co/datasets/HuggingFaceTB/cosmopedia) `khanacademy` config |
 | `pes2o-cs-recent` | **deferred** (experimental) | ODC-BY-1.0 | — | — | [allenai/peS2o](https://huggingface.co/datasets/allenai/peS2o) v2 |
+| `caselaw-scotus` (sub: `legal`) | **experimental** | CC0-1.0 | — | — | [free-law/Caselaw_Access_Project](https://huggingface.co/datasets/free-law/Caselaw_Access_Project) |
 
 **peS2o deferral note:** uses a deprecated dataset-script loader
 (`peS2o.py`); newer `datasets` versions refuse to execute scripts.
@@ -185,6 +202,12 @@ per-recipe. Tracked in Phase 10.
   textbook corpus, Apache-2.0. The `khanacademy` config is ~24k rows
   / 72 MB and is the single most practical sub-500 MB
   LLM-prepped synthetic corpus. Drop-in for `general/general`.
+
+- **Caselaw (SCOTUS, `general/legal`)** — the Caselaw Access Project
+  went **CC0** in 2024; U.S. Supreme Court opinions are the highest-
+  utility, most-cited legal slice. Scoped to the *complete* SCOTUS set
+  (not an arbitrary row sample); if it exceeds the budget at build, the
+  recipe narrows by era and renames — see completeness (requirement 5).
 
 **Skipped (too large for first-install):** OpenStax full set, full
 fineweb-edu, full SlimPajama, full RedPajama, full Cosmopedia
@@ -280,14 +303,17 @@ personal data"*. The harness defends this on three layers:
 
 ### Phase 10 — deferred (new adapters for stretch sources)
 
-Two existing catalog packs remain `planned` because their upstreams
-need a new adapter type:
+Several catalog packs remain `planned`/`experimental` because their
+upstreams need a new or enhanced adapter:
 
 | Pack | Reason | Adapter needed |
 |---|---|---|
 | `bogleheads-wiki` | Cloudflare anti-bot challenge on `/w/api.php` | Playwright-based `mediawiki_browser_api`, **or** operator-side manual `Special:Export` + a future `wiki_xml_export` adapter |
 | `pes2o-cs-recent` | Deprecated dataset-script loader (`peS2o.py`) refused by current `datasets` versions | Wait for non-script `allenai/peS2o-v2` mirror, or pin a `datasets<3.0` interpreter per-recipe |
 | `medlineplus-health-topics` | Mixed PD + copyrighted A.D.A.M./drug-monograph entries — needs filtering before seal | New `medlineplus_xml` adapter with `<Mesh>`-code filter |
+| `caselaw-scotus` | Full CAP is 38 GB (CC0); needs court-filtering to the **complete** SCOTUS subset, era-narrowing if >500 MB | `hf_dataset` enhancement: `filter_field`/`filter_value` (court) + optional date filter — **no row sampling** |
+| `medquad-health-qa` | Ships Question/Answer **XML**, not prose; 3 subsets copyright-stripped | New `qa_xml` adapter (Question/Answer → chunk); exclude the 3 MedlinePlus subsets |
+| `drug-supplement-key-facts` | DailyMed SPL labels are boilerplate-heavy; supplements live at NIH ODS | New `dailymed_spl` adapter (curated drug list + key sections, **no full labels**) + `ods_factsheet` pull |
 
 Other Phase-10 catalog candidates from research (deferred — each
 needs a focused 200–300 LOC adapter):

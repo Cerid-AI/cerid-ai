@@ -170,6 +170,15 @@ MCP_TOOLS = [
                     "items": {"type": "string", "enum": ["wiki", "vector", "graph", "memory"]},
                     "description": "Phase K3.3 — restrict retrieval to the named surfaces. Empty/omitted = router-chosen.",
                 },
+                "exclude_packs": {
+                    "type": "boolean",
+                    "description": "Personal-first (Slice 7.3): when true, drop knowledge-pack (baseline-corpus) chunks so the answer is grounded only in your own ingested content.",
+                    "default": False,
+                },
+                "metadata_filter": {
+                    "type": "object",
+                    "description": "ChromaDB where-clause to scope retrieval by chunk metadata, e.g. {\"filename\": \"report.pdf\"}, or {\"pack_id\": \"mdn-web-docs\"} to scope to a single pack.",
+                },
             },
             "required": ["query"],
         },
@@ -783,6 +792,8 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             chroma_client=get_chroma(),
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
+            exclude_packs=arguments.get("exclude_packs", False),
+            metadata_filter=arguments.get("metadata_filter"),
         )
 
         # Attach surface route metadata + wiki page when fetched.

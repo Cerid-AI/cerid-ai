@@ -245,6 +245,33 @@ class TestExecuteToolAgents:
                 execute_tool("pkb_agent_query", {"query": "test"})
             )
         assert result["context"] == "result"
+        # Defaults: exclude_packs off, no metadata_filter.
+        assert mock_aq.call_args.kwargs["exclude_packs"] is False
+        assert mock_aq.call_args.kwargs["metadata_filter"] is None
+
+    @patch("app.tools.get_redis")
+    @patch("app.tools.get_chroma")
+    @patch("app.tools.get_neo4j")
+    def test_pkb_agent_query_forwards_pack_scope(self, mock_neo4j, mock_chroma, mock_redis):
+        """exclude_packs (personal-first) + metadata_filter reach agent_query."""
+        mock_neo4j.return_value = MagicMock()
+        mock_chroma.return_value = MagicMock()
+        mock_redis.return_value = MagicMock()
+
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+            mock_aq.return_value = {"context": "result", "sources": []}
+            asyncio.run(
+                execute_tool(
+                    "pkb_agent_query",
+                    {
+                        "query": "test",
+                        "exclude_packs": True,
+                        "metadata_filter": {"pack_id": "mdn-web-docs"},
+                    },
+                )
+            )
+        assert mock_aq.call_args.kwargs["exclude_packs"] is True
+        assert mock_aq.call_args.kwargs["metadata_filter"] == {"pack_id": "mdn-web-docs"}
 
     @patch("app.tools.get_redis")
     def test_pkb_audit(self, mock_redis):

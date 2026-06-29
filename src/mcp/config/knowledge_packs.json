@@ -439,7 +439,21 @@
         "curator": "National Library of Medicine",
         "license_category": "public_domain",
         "status": "experimental",
-        "notes": "Build gate: refuse seal if any A.D.A.M.-prefixed XML element survives the filter; same for drug-monograph entries."
+        "notes": "Build gate: refuse seal if any A.D.A.M.-prefixed XML element survives the filter; same for drug-monograph entries. COMPLETENESS: ship the full set of NLM-authored PD health topics (minus the filtered copyrighted entries) so 'health topics' is complete-for-claim; drug/supplement coverage lives in the separate drug-supplement-key-facts pack."
+      },
+      "build": {
+        "adapter": "medlineplus_xml",
+        "config": {
+          "source_url": "https://medlineplus.gov/xml/mplus_topics_compressed.xml",
+          "exclude_element_prefixes": [
+            "A.D.A.M."
+          ],
+          "exclude_categories": [
+            "drugs",
+            "herbs-and-supplements"
+          ],
+          "min_text_chars": 300
+        }
       }
     },
     {
@@ -870,6 +884,135 @@
           "title_field": "id",
           "min_text_chars": 800,
           "max_rows": 5000
+        }
+      }
+    },
+    {
+      "id": "caselaw-scotus",
+      "name": "U.S. Supreme Court Opinions (Caselaw Access Project)",
+      "version": "0.0.0",
+      "description": "Complete full-text U.S. Supreme Court opinions from the Caselaw Access Project (Harvard Law / Free Law Project), CC0 public-domain. Scoped to SCOTUS (court-filtered) because the full CAP corpus (~6.7M cases / 38 GB) far exceeds the per-pack budget. The build ships the COMPLETE court-filtered set; if that still exceeds 500 MB it is narrowed by era (e.g. 1925-present) and renamed to match - never an arbitrary row sample.",
+      "domain": "general",
+      "sub_category": "legal",
+      "tags": [
+        "catalog",
+        "reference",
+        "legal",
+        "case-law",
+        "public-domain",
+        "experimental"
+      ],
+      "license": "CC0-1.0",
+      "size_bytes": 0,
+      "artifact_count": 0,
+      "download_url": "",
+      "sha256": "",
+      "provenance": {
+        "source": "https://huggingface.co/datasets/free-law/Caselaw_Access_Project",
+        "curator": "Caselaw Access Project (Harvard Law School / Free Law Project)",
+        "license_category": "public_domain",
+        "status": "experimental",
+        "notes": "CC0 since the LexisNexis restriction expired 2024-03. COMPLETENESS RULE: ship EVERY court=='U.S. Supreme Court' opinion; if the complete set exceeds 500 MB, narrow the claimed SCOPE by era and rename - do NOT silently row-sample (a partial corpus that still claims 'SCOTUS opinions' would answer confidently while missing cases). Needs an hf_dataset adapter enhancement for court-filtering; ship text-only (strip non-PD editorial headnotes)."
+      },
+      "build": {
+        "adapter": "hf_dataset",
+        "config": {
+          "dataset_id": "free-law/Caselaw_Access_Project",
+          "split": "train",
+          "text_field": "text",
+          "title_field": "name_abbreviation",
+          "filter_field": "court",
+          "filter_value": "U.S. Supreme Court",
+          "min_text_chars": 800,
+          "_size_strategy": "ship the COMPLETE court-filtered set; narrow by era (add a date filter) only if >500 MB. No row sampling."
+        }
+      }
+    },
+    {
+      "id": "medquad-health-qa",
+      "name": "MedQuAD - NIH/NLM Consumer-Health Q&A (drugs/supplements excluded)",
+      "version": "0.0.0",
+      "description": "Consumer-health question/answer pairs from NIH/NLM sources (cancer.gov, GARD, GHR, NIDDK, NHLBI, and others). Plain-language Q&A, an ideal RAG shape. COMPLETE for the 9 redistributable MedQuAD subsets; the 3 MedlinePlus subsets (A.D.A.M. encyclopedia, drugs, herbs/supplements) are excluded for copyright, so this pack does NOT answer drug or supplement questions - pair it with a dedicated drug source for that coverage.",
+      "domain": "personal",
+      "sub_category": "health",
+      "tags": [
+        "catalog",
+        "reference",
+        "health",
+        "medical-qa",
+        "experimental"
+      ],
+      "license": "CC-BY-4.0",
+      "size_bytes": 0,
+      "artifact_count": 0,
+      "download_url": "",
+      "sha256": "",
+      "provenance": {
+        "source": "https://github.com/abachaa/MedQuAD",
+        "curator": "U.S. National Library of Medicine (Ben Abacha and Demner-Fushman)",
+        "license_category": "attribution",
+        "status": "experimental",
+        "notes": "CC-BY-4.0: stamp attribution per chunk. Excludes the 3 MedlinePlus subsets (ADAM, Drugs, Herbs) whose answers were removed for copyright. Needs a qa_xml adapter step (MedQuAD question/answer XML -> chunk); the github_zip adapter handles prose, not this XML schema."
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "abachaa/MedQuAD",
+          "ref": "master",
+          "include_globs": [
+            "*/*.xml"
+          ],
+          "exclude_globs": [
+            "10_MPlus_ADAM_QA/**",
+            "11_MPlusDrugs_QA/**",
+            "12_MPlusHerbsSupplements_QA/**"
+          ],
+          "min_text_chars": 120
+        }
+      }
+    },
+    {
+      "id": "drug-supplement-key-facts",
+      "name": "Common Drugs & Supplements - Key Facts (DailyMed / NIH ODS)",
+      "version": "0.0.0",
+      "description": "Curated key-facts reference for commonly prescribed drugs and dietary supplements: indications, dosing, contraindications, warnings, and interactions for the top several hundred drugs (FDA Structured Product Labeling via DailyMed) plus NIH Office of Dietary Supplements fact sheets. Closes the drugs/supplements gap that MedQuAD excludes. Curated + section-filtered by design: it is NOT the full label corpus and NOT a complete drug database - it claims common-drug KEY FACTS, not all drugs.",
+      "domain": "personal",
+      "sub_category": "health",
+      "tags": [
+        "catalog",
+        "reference",
+        "health",
+        "drugs",
+        "supplements",
+        "experimental"
+      ],
+      "license": "us-gov-pd",
+      "size_bytes": 0,
+      "artifact_count": 0,
+      "download_url": "",
+      "sha256": "",
+      "provenance": {
+        "source": "https://dailymed.nlm.nih.gov/dailymed/",
+        "curator": "U.S. FDA / National Library of Medicine; NIH Office of Dietary Supplements",
+        "license_category": "public_domain",
+        "status": "experimental",
+        "notes": "FDA SPL labeling + NIH ODS fact sheets are US-gov public information. Curated to a top-N common-drug list and KEY SPL sections (indications, dosage, contraindications, warnings, interactions) - NOT full labels, which are boilerplate-heavy and would balloon the index. Supplements come from NIH ODS (ods.od.nih.gov). Needs a dailymed_spl adapter (SPL XML -> sectioned chunk) + an ods_factsheet pull; verify manufacturer-authored SPL portions carry no third-party restriction before ship."
+      },
+      "build": {
+        "adapter": "dailymed_spl",
+        "config": {
+          "drug_list": "top_prescribed",
+          "max_drugs": 500,
+          "include_sections": [
+            "INDICATIONS AND USAGE",
+            "DOSAGE AND ADMINISTRATION",
+            "CONTRAINDICATIONS",
+            "WARNINGS AND PRECAUTIONS",
+            "DRUG INTERACTIONS",
+            "ADVERSE REACTIONS"
+          ],
+          "supplement_source": "https://ods.od.nih.gov/factsheets/list-all/",
+          "min_text_chars": 200
         }
       }
     }
