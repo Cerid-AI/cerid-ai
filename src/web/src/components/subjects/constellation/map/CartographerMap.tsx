@@ -27,7 +27,9 @@ import type { GraphMapResponse, CommunityHull } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
 import { useCommunityLayer, resolveMapTokens, type MapTokens } from "./community-layer"
-import { useSuperNodeLayer, aggregateCommunityEdges } from "./community-supernodes"
+import { useSuperNodeLayer } from "./community-supernodes"
+import { buildLevelCommunities, buildLevelSuperEdges } from "./community-hierarchy-levels"
+import { useCommunityHierarchy } from "./use-community-hierarchy"
 import { useHighlightEdges } from "./highlight-edges"
 import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import { HOVER_INTENT_DELAY_MS } from "@/lib/graph/hover-intent"
@@ -974,18 +976,26 @@ export function CartographerMap({
   // Community hull canvas overlay
   // ---------------------------------------------------------------------------
 
-  // Aggregated cross-community edges for the super-node overlay — must be
-  // declared before any early return (useSuperNodeLayer is a hook below).
-  const superEdges = useMemo(
-    () => (data ? aggregateCommunityEdges(
-      data.entities.map((e) => ({ id: e.id, community: e.community ?? null })),
-      data.links,
-    ) : []),
-    [data],
+  // Per-Leiden-level community and super-edge arrays for the multi-level overlay.
+  // Must be declared before any early return (useSuperNodeLayer is a hook below).
+  const hierarchyQuery = useCommunityHierarchy()
+  const levelCommunities = useMemo(
+    () => buildLevelCommunities(data?.communities ?? [], hierarchyQuery.data),
+    [data, hierarchyQuery.data],
+  )
+  const levelSuperEdges = useMemo(
+    () => buildLevelSuperEdges(
+      data?.entities.map((e) => ({ community: e.community ?? null })) ?? [],
+      data?.links ?? [],
+      hierarchyQuery.data,
+    ),
+    [data, hierarchyQuery.data],
   )
 
   const wrappedOnCommunityClick = useCallback((community: CommunityHull) => {
     // Zoom the camera to this community's hull extent before surfacing to parent.
+    // For synthetic level-L communities, hull is the descendant-region union —
+    // zooming to it crosses into the finer level and reveals sub-communities.
     if (community.hull.length >= 3) {
       focusCameraOnPointsRef.current?.(community.hull)
     }
@@ -1002,8 +1012,8 @@ export function CartographerMap({
 
   useSuperNodeLayer({
     sigma: sigmaInstance,
-    communities: data?.communities ?? [],
-    superEdges,
+    levels: levelCommunities,
+    levelSuperEdges,
     tokens,
     enabled: config.collapseCommunities,
     onCommunityClick: wrappedOnCommunityClick,

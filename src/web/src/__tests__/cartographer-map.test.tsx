@@ -233,6 +233,7 @@ describe("CartographerMap — loading state", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(screen.getByText(/loading knowledge map/i)).toBeTruthy()
   })
@@ -250,6 +251,7 @@ describe("CartographerMap — loading state", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(screen.getByText(/graph map fetch failed: 503/i)).toBeTruthy()
   })
@@ -266,6 +268,7 @@ describe("CartographerMap — loading state", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(screen.getByText(/no map data yet/i)).toBeTruthy()
   })
@@ -289,6 +292,7 @@ describe("CartographerMap — renders with data", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(container.querySelector('[role="application"]')).not.toBeNull()
   })
@@ -306,6 +310,7 @@ describe("CartographerMap — renders with data", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(screen.getByText(/3 entities/)).toBeTruthy()
   })
@@ -323,6 +328,7 @@ describe("CartographerMap — renders with data", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(screen.getByText(/silhouette 0\.72/)).toBeTruthy()
   })
@@ -340,6 +346,7 @@ describe("CartographerMap — renders with data", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(screen.getByText(/cached/)).toBeTruthy()
   })
@@ -357,6 +364,7 @@ describe("CartographerMap — renders with data", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(container.querySelector('[role="application"]')).not.toBeNull()
   })
@@ -375,6 +383,7 @@ describe("CartographerMap — renders with data", () => {
         onInspect={vi.fn()}
         onCommunityClick={vi.fn()}
       />,
+      { wrapper: createWrapper() },
     )
     expect(container.querySelector('[role="application"]')).not.toBeNull()
   })

@@ -11,6 +11,7 @@ import { useEffect, useRef } from "react"
 import type Sigma from "sigma"
 import type { CommunityHull } from "@/lib/api/graph-map"
 import type { MapTokens } from "./community-layer"
+import { levelForRatio } from "./community-hierarchy-levels"
 
 export interface SuperEdge { a: string; b: string; weight: number }
 
@@ -19,6 +20,8 @@ export interface SuperEdge { a: string; b: string; weight: number }
 // super-node discs spread across the canvas instead of compressing into a
 // central blob. One scroll-out from fit lands in this clean-overview band.
 const COLLAPSE_THRESHOLD_DEFAULT = 1.4
+// Each additional zoom-out step of this ratio magnitude advances one Leiden level.
+const LEVEL_STEP_DEFAULT = 1.0
 
 export function superNodeRadius(count: number): number {
   // sqrt scaling, floored so tiny communities stay clickable, capped so a giant
@@ -95,21 +98,23 @@ function slot(id: string): number {
 
 export function useSuperNodeLayer(args: {
   sigma: Sigma | null
-  communities: CommunityHull[]
-  superEdges: SuperEdge[]
+  levels: CommunityHull[][]
+  levelSuperEdges: SuperEdge[][]
   tokens: MapTokens
   enabled: boolean
   threshold?: number
+  levelStep?: number
   onCommunityClick?: (c: CommunityHull) => void
   onCollapsedChange?: (collapsed: boolean) => void
 }): void {
   const {
     sigma,
-    communities,
-    superEdges,
+    levels,
+    levelSuperEdges,
     tokens,
     enabled,
     threshold = COLLAPSE_THRESHOLD_DEFAULT,
+    levelStep = LEVEL_STEP_DEFAULT,
     onCommunityClick,
     onCollapsedChange,
   } = args
@@ -145,21 +150,26 @@ export function useSuperNodeLayer(args: {
     const ro = new ResizeObserver(resize)
     ro.observe(container)
 
-    // index communities by id for anchor lookup
-    const byId = new Map(communities.map((c) => [c.id, c]))
-
     const draw = () => {
       const ctx = cvs.getContext("2d")
       if (!ctx) return
       const dpr = window.devicePixelRatio || 1
       ctx.clearRect(0, 0, cvs.width, cvs.height)
-      const collapsed = enabled && communities.length > 0 && isCollapsed(s.getCamera().ratio, threshold)
+      const ratio = s.getCamera().ratio
+      const collapsed = enabled && levels[0] && levels[0].length > 0 && isCollapsed(ratio, threshold)
       // notify CartographerMap so its reducers hide/show member nodes
       if (collapsed !== lastCollapsedRef.current) {
         lastCollapsedRef.current = collapsed
         collapsedChangeRef.current?.(collapsed)
       }
       if (!collapsed) return
+      // Pick the active Leiden level for this camera ratio.
+      const lvl = levelForRatio(ratio, levels.length, threshold, levelStep)
+      const communities = levels[lvl] ?? levels[0]
+      const superEdges = levelSuperEdges[lvl] ?? levelSuperEdges[0] ?? []
+      // index communities by id for anchor lookup (per-frame, since level may change)
+      const byId = new Map(communities.map((c) => [c.id, c]))
+
       ctx.save()
       ctx.scale(dpr, dpr)
 
@@ -212,7 +222,11 @@ export function useSuperNodeLayer(args: {
 
     const handleClick = (evt: MouseEvent) => {
       if (!clickRef.current) return
-      if (!(enabled && communities.length > 0 && isCollapsed(s.getCamera().ratio, threshold))) return
+      const ratio = s.getCamera().ratio
+      if (!(enabled && levels[0] && levels[0].length > 0 && isCollapsed(ratio, threshold))) return
+      // Pick the active level — must match draw() so hit regions align.
+      const lvl = levelForRatio(ratio, levels.length, threshold, levelStep)
+      const communities = levels[lvl] ?? levels[0]
       const rect = container.getBoundingClientRect()
       const cx = evt.clientX - rect.left, cy = evt.clientY - rect.top
       // Same spread transform as draw() so hit-testing matches the rendered discs.
@@ -233,5 +247,5 @@ export function useSuperNodeLayer(args: {
       ro.disconnect()
       cvs.remove()
     }
-  }, [sigma, communities, superEdges, tokens, enabled, threshold])
+  }, [sigma, levels, levelSuperEdges, tokens, enabled, threshold, levelStep])
 }
