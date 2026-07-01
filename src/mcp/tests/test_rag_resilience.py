@@ -505,7 +505,7 @@ class TestCRAGGate:
 
     def test_strong_kb_suppresses_external(self):
         """Top KB relevance above threshold → external NOT launched."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         result = {"results": [
             {"relevance": 0.85, "content": "strong hit"},
@@ -517,7 +517,7 @@ class TestCRAGGate:
 
     def test_weak_kb_fires_external(self):
         """Top KB relevance below threshold → external IS launched."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         result = {"results": [
             {"relevance": 0.15, "content": "weak hit"},
@@ -529,7 +529,7 @@ class TestCRAGGate:
 
     def test_empty_kb_fires_external(self):
         """No KB results (KB disabled or empty) → external fires."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         assert should_fire_external_crag(
             ext_on=True, kb_result={"results": []}, threshold=0.4,
@@ -540,7 +540,7 @@ class TestCRAGGate:
 
     def test_ext_disabled_blocks_fire(self):
         """When client sets context_sources.external=False, gate never fires."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         # Even empty KB should not fire when ext_on is False.
         assert should_fire_external_crag(
@@ -555,7 +555,7 @@ class TestCRAGGate:
 
     def test_relevance_at_threshold_does_not_fire(self):
         """Boundary: relevance == threshold is treated as 'strong enough'."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         # Strict '<' means == threshold counts as strong.
         assert should_fire_external_crag(
@@ -566,7 +566,7 @@ class TestCRAGGate:
 
     def test_missing_relevance_treated_as_zero(self):
         """A result without a 'relevance' field is treated as weak (0.0)."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         assert should_fire_external_crag(
             ext_on=True,

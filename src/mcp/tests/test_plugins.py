@@ -220,24 +220,8 @@ class TestFeatureFlags:
 
     @pytest.mark.asyncio
     async def test_require_feature_blocks_disabled(self):
-        """require_feature raises 403 for disabled features."""
-        # Stub fastapi.HTTPException if fastapi not installed
-        try:
-            from fastapi import HTTPException
-        except ImportError:
-            from types import ModuleType
-            if "fastapi" not in sys.modules:
-                _stub = ModuleType("fastapi")
-
-                class _HTTPException(Exception):
-                    def __init__(self, status_code=500, detail=""):
-                        self.status_code = status_code
-                        self.detail = detail
-
-                _stub.HTTPException = _HTTPException
-                sys.modules["fastapi"] = _stub
-            HTTPException = sys.modules["fastapi"].HTTPException
-
+        """require_feature raises FeatureGateError (→ 403) for disabled features."""
+        from errors import FeatureGateError
         from utils.features import require_feature
 
         @require_feature("test_blocked_feature")
@@ -245,10 +229,10 @@ class TestFeatureFlags:
             return {"ok": True}
 
         with patch("config.FEATURE_FLAGS", {"test_blocked_feature": False}):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(FeatureGateError) as exc_info:
                 await dummy_endpoint()
-            assert exc_info.value.status_code == 403
-            assert "tier" in exc_info.value.detail.lower()
+            assert exc_info.value.http_status == 403
+            assert "tier" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
     async def test_require_feature_allows_enabled(self):

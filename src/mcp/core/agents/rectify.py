@@ -11,6 +11,7 @@ from datetime import timedelta
 from typing import Any
 
 import config
+from core.context.identity import with_tenant_scope
 from core.utils.cache import log_event
 from core.utils.time import utcnow, utcnow_iso
 
@@ -67,6 +68,7 @@ def find_similar_artifacts(
         query_texts=[query_text[:2000]],
         n_results=top_k,
         include=["metadatas", "distances"],
+        where=with_tenant_scope(None),
     )
 
     similar = []

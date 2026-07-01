@@ -558,7 +558,7 @@ MCP_TOOLS = [
     },
     {
         "name": "pkb_web_search",
-        "description": "Search the web (Brave/Bing/DuckDuckGo via configured provider) for information not yet in the KB. **Use when** the answer requires fresh data the KB doesn't have. Results are scored via Self-RAG; pass `auto_ingest=true` to write verified results into the KB (gated by `ENABLE_AUTO_LEARN=true`). **Returns** `{query, results: [{title, url, snippet, score}], provider, ingested_count, timestamp}`.",
+        "description": "Search the web (Tavily or SearXNG when configured, else an OpenRouter `:online` fallback) for information not yet in the KB. **Use when** the answer requires fresh data the KB doesn't have. Results are scored via Self-RAG; pass `auto_ingest=true` to write verified results into the KB (gated by `ENABLE_AUTO_LEARN=true`). **Returns** `{query, results: [{title, url, snippet, score}], provider, ingested_count, timestamp}`.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -754,7 +754,7 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
     elif name == "pkb_collections":
         return await asyncio.to_thread(list_collections)
     elif name == "pkb_agent_query":
-        from core.agents.query_agent import agent_query
+        from core.agents.query_agent import agent_query_full
         from core.retrieval.surface_router import route as _surface_route
 
         # Phase K3.3 — surface-aware query.
@@ -784,7 +784,7 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             except Exception:  # noqa: BLE001
                 wiki_page = None
 
-        result = await agent_query(
+        result = await agent_query_full(
             query=query_text,
             domains=arguments.get("domains"),
             top_k=arguments.get("top_k", 10),

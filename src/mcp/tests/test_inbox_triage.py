@@ -189,6 +189,18 @@ class TestHeuristic:
 # ── end-to-end ─────────────────────────────────────────────────────────
 
 class TestTriageInboxes:
+    @pytest.fixture(autouse=True)
+    def _wire_inbox_di(self):
+        # core/ reads the DataSourceRegistry via DI now; wire the real singleton
+        # (the same one app startup injects) so the registry.get patches below
+        # take effect. Reset after each test to avoid cross-test leakage.
+        import core.agents.inbox_triage as _m
+        from app.agents_di import wire_inbox_triage_di
+
+        wire_inbox_triage_di()
+        yield
+        _m._registry = None
+
     @pytest.mark.asyncio
     async def test_skips_when_feature_off(self):
         from core.agents.inbox_triage import triage_inboxes

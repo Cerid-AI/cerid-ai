@@ -20,8 +20,10 @@ NOT used for verification (that uses dedicated VERIFICATION_MODEL).
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -123,6 +125,37 @@ def _resolve_stage_model(stage: str | None) -> str:
     except Exception:  # noqa: BLE001 — registry must never block a call
         log_swallowed_error("core.utils.internal_llm.resolve_stage_model", Exception(f"registry lookup failed for tier={tier}"))
         return ""
+
+
+def _build_chat_payload(
+    model: str,
+    messages: list[dict[str, str]],
+    options: dict[str, Any],
+    *,
+    stream: bool,
+    json_mode: bool,
+) -> dict[str, Any]:
+    """Build the Ollama/Quenchforge ``/api/chat`` request body.
+
+    Shared by the non-streaming collector (:func:`_call_ollama`) and the
+    streaming generator (:func:`_stream_ollama`) so the wire shape is identical
+    across both — only ``stream`` differs. Centralizing the payload keeps the
+    two paths from drifting (json format, prefix-cache keep-alive).
+    """
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": stream,
+        "options": options,
+    }
+    # Both backends accept format: "json" to enforce JSON output.
+    if json_mode:
+        payload["format"] = "json"
+    # Prefix-cache keep-alive: ask the backend to keep the model loaded between
+    # calls so prompt-prefix reuse (KV cache hits) survives.
+    if getattr(config, "ENABLE_PROMPT_PREFIX_CACHE", False):
+        payload["keep_alive"] = getattr(config, "PROMPT_PREFIX_KEEP_ALIVE", "30m")
+    return payload
 
 
 async def call_internal_llm(
@@ -244,22 +277,9 @@ async def _call_ollama(
             options["draft_model"] = draft_model
 
     async def _do_call() -> str:
-        payload: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "stream": False,
-            "options": options,
-        }
-        # Both backends accept format: "json" to enforce JSON output
-        if json_mode:
-            payload["format"] = "json"
-        # Prefix-cache keep-alive: ask the backend to keep the model loaded
-        # between calls so prompt-prefix reuse (KV cache hits) survives.
-        if getattr(config, "ENABLE_PROMPT_PREFIX_CACHE", False):
-            payload["keep_alive"] = getattr(
-                config, "PROMPT_PREFIX_KEEP_ALIVE", "30m"
-            )
-
+        payload = _build_chat_payload(
+            model, messages, options, stream=False, json_mode=json_mode,
+        )
         client = await _get_ollama_client()
         resp = await client.post(
             f"{base_url}/api/chat",
@@ -391,3 +411,122 @@ async def _call_ollama(
         max_tokens=max_tokens,
         response_format=fallback_response_format,
     )
+
+
+async def _stream_ollama(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float,
+    max_tokens: int,
+    json_mode: bool = False,
+    provider: str = "ollama",
+) -> AsyncIterator[str]:
+    """Stream assistant-content deltas from a local Ollama-protocol backend.
+
+    Yields each ``message.content`` fragment as the NDJSON stream arrives.
+    Errors (connect/timeout/HTTP) propagate to the caller, which decides
+    whether to fall back — this generator does not swallow them.
+    """
+    if provider == "quenchforge":
+        base_url = getattr(config, "QUENCHFORGE_URL", "") or os.getenv(
+            "OLLAMA_URL", "http://localhost:11434"
+        )
+    else:
+        base_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
+    options: dict[str, Any] = {"temperature": temperature, "num_predict": max_tokens}
+    if json_mode and getattr(config, "ENABLE_CONSTRAINED_DECODE", False):
+        options["temperature"] = 0.0
+    payload = _build_chat_payload(
+        model, messages, options, stream=True, json_mode=json_mode,
+    )
+
+    client = await _get_ollama_client()
+    async with client.stream("POST", f"{base_url}/api/chat", json=payload) as resp:
+        if resp.status_code >= 400:
+            # Read the error body before raising so the exception carries detail
+            # (streaming responses raise ResponseNotRead otherwise).
+            await resp.aread()
+            resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            if not line.strip():
+                continue
+            try:
+                data = _json.loads(line)
+            except ValueError:
+                continue
+            piece = data.get("message", {}).get("content", "")
+            if piece:
+                yield piece
+            if data.get("done"):
+                break
+
+
+async def call_internal_llm_stream(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.1,
+    max_tokens: int = 500,
+    response_format: dict | None = None,
+    stage: str,
+) -> AsyncIterator[str]:
+    """Stream an internal-LLM completion as content deltas.
+
+    Companion to :func:`call_internal_llm` for the inline-verification path:
+    yields assistant-content fragments as they arrive so a consumer (e.g.
+    :func:`core.agents.hallucination.inline_gate.inline_nli_gate`) can gate
+    sentences mid-stream instead of verifying post-hoc.
+
+    ``stage`` is required and keyword-only — the streaming path is always a
+    named synthesis stage, which structurally satisfies the call-site stage
+    contract (:mod:`tests.test_llm_call_site_contract`) without a separate lint.
+
+    Local providers (ollama/quenchforge) stream token deltas over NDJSON. For
+    non-local providers, or if local streaming fails before the first token,
+    this degrades to a single chunk holding the full non-streaming result — so
+    the capability is provider-agnostic without duplicating the OpenRouter
+    transport. A local failure *after* partial output stops cleanly rather than
+    re-emitting duplicate content.
+    """
+    default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    provider = _resolve_stage_provider(stage, default_provider)
+    json_mode = (
+        response_format is not None
+        and response_format.get("type") == "json_object"
+    )
+
+    if provider in ("ollama", "quenchforge"):
+        yielded_any = False
+        try:
+            async for chunk in _stream_ollama(
+                messages,
+                provider=provider,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=json_mode,
+            ):
+                yielded_any = True
+                yield chunk
+            return
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.HTTPStatusError,
+        ) as exc:
+            log_swallowed_error("core.utils.internal_llm.stream_fallback", exc)
+            if yielded_any:
+                # Partial stream already delivered — restarting would duplicate
+                # content, so stop here rather than fall back to a full call.
+                return
+            # No tokens yet → safe to fall back to the non-streaming path below.
+
+    # Non-local provider, or local streaming failed before first token.
+    full = await call_internal_llm(
+        messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format=response_format,
+        stage=stage,
+    )
+    if full:
+        yield full

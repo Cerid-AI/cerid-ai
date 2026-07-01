@@ -194,7 +194,7 @@ async def pkb_artifact_delete(
 
     Soft-delete: sets ``a.archived = true`` + ``a.archived_at`` on the
     Neo4j node. Retrieval filters out archived artifacts by default
-    (see ``app.routers.query.query_knowledge``'s domain pre-filter).
+    (the canonical retrieval path drops archived artifacts).
     Chunks stay in ChromaDB so an accidental delete can be reversed by
     clearing the flag.
 

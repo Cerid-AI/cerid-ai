@@ -153,6 +153,18 @@ class TestFeatureGate:
 # ── end-to-end with mocked LLM ────────────────────────────────────────
 
 class TestGenerateDailyDigest:
+    @pytest.fixture(autouse=True)
+    def _wire_digest_di(self):
+        # core/ reads the graph accessor via DI now; wire the real adapter (the
+        # same one app startup injects) so the app.deps.get_neo4j patches below
+        # take effect. Reset after each test to avoid cross-test leakage.
+        import core.agents.daily_digest as _m
+        from app.agents_di import wire_daily_digest_di
+
+        wire_daily_digest_di()
+        yield
+        _m._graph = None
+
     @pytest.mark.asyncio
     async def test_empty_window_returns_zero_activity_digest(self):
         """Zero artifacts → digest with empty sections but

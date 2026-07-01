@@ -23,6 +23,7 @@ from typing import Any, Literal
 import httpx
 
 import config
+from core.context.identity import with_tenant_scope
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.internal_llm import call_internal_llm
@@ -101,7 +102,7 @@ async def classify_memory(
             query_texts=[new_content],
             n_results=3,
             include=["documents", "metadatas", "distances"],
-            where={"memory_type": memory_type} if memory_type else None,
+            where=with_tenant_scope({"memory_type": memory_type} if memory_type else None),
         )
     except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Consolidation similarity search failed: %s", e)

@@ -29,6 +29,8 @@ from app.models.sdk import (
     SDKMemoryExtractJobStatus,
     SDKMemoryExtractResponse,
     SDKQueryResponse,
+    SDKSearchRequest,
+    SDKSearchResponse,
 )
 from app.routers.agents import (
     AgentQueryRequest,
@@ -40,7 +42,6 @@ from app.routers.agents import (
 )
 from app.routers.health import degradation_status, health_check, list_collections
 from app.routers.plugins import list_plugins
-from app.routers.query import query_knowledge
 from app.routers.sdk_version import SDK_VERSION
 from app.services.external_ingest import ExternalIngestRequest, IngestResult, ingest_external
 from app.services.ingestion import ingest_content, ingest_file
@@ -688,12 +689,26 @@ def sdk_settings():
     return {"version": SDK_VERSION, "tier": FEATURE_TIER, "features": dict(FEATURE_FLAGS)}
 
 
-@router.post("/search", summary="KB Search", responses={422: _422, 503: _503})
-def sdk_search(req: dict):
-    result = query_knowledge(
-        req.get("query", ""),
-        domain=req.get("domain", "general"),
-        top_k=req.get("top_k", 3),
+@router.post(
+    "/search",
+    summary="KB Search",
+    response_model=SDKSearchResponse,
+    responses={422: _422, 503: _503},
+)
+async def sdk_search(req: SDKSearchRequest):
+    from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
+    from core.agents.query_agent import agent_query_full
+
+    result = await agent_query_full(
+        query=req.query,
+        domains=[req.domain],
+        top_k=req.top_k,
+        exclude_packs=req.exclude_packs,
+        external_augmentation=False,
+        chroma_client=get_chroma(),
+        redis_client=get_redis(),
+        neo4j_driver=get_neo4j(),
+        graph_store=get_graph_store(),
     )
     sources = result.get("sources", [])
     return {"results": sources, "total_results": len(sources), "confidence": result.get("confidence", 0.0)}

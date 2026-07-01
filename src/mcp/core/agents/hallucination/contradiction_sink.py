@@ -11,8 +11,10 @@ here; the guard invokes it with primitives, and the app side builds the
 ->(:ContradictionFinding)`` + emit the wiki-refresh event).
 
 Mirrors :func:`core.agents.hallucination.authoritative_verify.set_data_source_registry`.
-Unwired (no app registration) → :func:`get_contradiction_sink` returns ``None``
-and the guard simply skips logging, so ``core`` runs standalone unchanged.
+App startup wires the sink (``set_contradiction_sink`` in ``app/main.py``), so it
+is registered in production. Only in ``core``-standalone / test contexts (no app
+registration) does :func:`get_contradiction_sink` return ``None`` — then the
+guard simply skips logging, so ``core`` runs standalone unchanged.
 """
 
 from __future__ import annotations

@@ -35,12 +35,39 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
-from app.data_sources.base import DataSource, DataSourceResult, registry
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.inbox_triage")
+
+
+# ── app DI (keeps core/ free of app.* imports; mirrors set_data_source_registry) ──
+# core/ must never import app/. The concrete DataSourceRegistry — and its
+# GmailDataSource / OutlookDataSource / DataSourceResult types — live app-side;
+# app/main.py injects the registry here at startup and core duck-types it.
+class _InboxRegistryProtocol(Protocol):
+    """The slice of app.data_sources.registry that inbox triage needs."""
+
+    def get(self, name: str) -> Any: ...
+
+
+_registry: _InboxRegistryProtocol | None = None
+
+
+def set_inbox_registry(registry: _InboxRegistryProtocol) -> None:
+    """Wire the app DataSourceRegistry in at startup (the DI boundary)."""
+    global _registry
+    _registry = registry
+
+
+def get_inbox_registry() -> _InboxRegistryProtocol | None:
+    return _registry
+
+
+# Annotated-against app types; concrete classes arrive via the injected registry.
+DataSource = Any
+DataSourceResult = Any
 
 
 # ── shape ─────────────────────────────────────────────────────────────
@@ -366,6 +393,10 @@ async def triage_inboxes(
         return result
 
     # Identify which inbox sources are registered + configured
+    registry = get_inbox_registry()
+    if registry is None:
+        result.skipped.append({"source": "all", "reason": "registry_unwired"})
+        return result
     candidates: list[DataSource] = []
     for source_name in ("gmail", "outlook"):
         src = registry.get(source_name)

@@ -604,6 +604,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Source ingest-sink wiring failed (connector polling disabled): {e}")
 
+    # Wire the Phase J/K agent DI seams (inbox triage + daily digest). core/
+    # must not import app/, so app injects the registry + graph accessor here at
+    # startup. Defined once in app/agents_di.py so startup + tests wire the
+    # identical seam (no divergent copies).
+    try:
+        from app.agents_di import (
+            wire_crag_external_di,
+            wire_daily_digest_di,
+            wire_inbox_triage_di,
+        )
+
+        wire_inbox_triage_di()
+        wire_daily_digest_di()
+        wire_crag_external_di()
+    except Exception as e:
+        logger.warning(f"Agent DI wiring failed (inbox triage / daily digest / CRAG disabled): {e}")
+
     # Phase K2.1 — wire the entity-extraction enqueue callback into
     # core.agents.memory so freshly-stored memories trigger graph
     # entity upserts (and the K1.3 wiki refresh chain). Keeps core/
@@ -1050,6 +1067,13 @@ app.include_router(settings_secrets.router)
 # R4-1 security invariant: redact 'input' from all FastAPI 422 validation error
 # responses so that a mis-typed API key is never echoed back to the caller.
 settings_secrets.register_redacted_validation_handler(app)
+
+# Render any uncaught CeridError as structured JSON instead of a bare 500
+# (audit Cluster 4 / CEG-1/CEG-2). Defined in app/error_handlers.py so startup +
+# tests register the identical handler.
+from app.error_handlers import register_cerid_error_handler
+
+register_cerid_error_handler(app)
 app.include_router(providers.router)
 app.include_router(models.router)
 

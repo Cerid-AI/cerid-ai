@@ -1,0 +1,8 @@
+# Grandfather allowlist: Pydantic model class names defined in >1 module TODAY.
+# Enforced by scripts/lint-model-name-uniqueness.py --check.
+# May ONLY SHRINK: a new collision fails CI; a resolved one must be removed
+# via --update. Rename the duplicates to distinct names to burn down (Phase 5).
+AutomationUpdate::src/mcp/app/routers/automations.py,src/mcp/app/routers/pro_automations.py
+ChatRequest::src/mcp/app/routers/chat.py,src/mcp/app/routers/ollama_proxy.py
+CompressRequest::src/mcp/app/routers/agents.py,src/mcp/app/routers/chat.py
+OAuthStartResponse::src/mcp/app/routers/connectors.py,src/mcp/app/routers/oauth.py

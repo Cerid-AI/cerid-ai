@@ -43,6 +43,26 @@ class SDKQueryResponse(_SDKBase):
     results: list[dict[str, Any]] = Field(default_factory=list, description="All results with full metadata")
 
 
+class SDKSearchRequest(BaseModel):
+    """Request body for ``POST /sdk/v1/search`` — single-domain KB search."""
+
+    query: str = Field(description="Search query text")
+    domain: str = Field(default="general", description="KB domain/collection to search")
+    top_k: int = Field(default=3, ge=1, le=100, description="Maximum results to return")
+    exclude_packs: bool = Field(
+        default=False,
+        description="Drop knowledge-pack chunks from retrieval (personal-first KB search).",
+    )
+
+
+class SDKSearchResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/search`` — canonical KB search projection."""
+
+    results: list[dict[str, Any]] = Field(default_factory=list, description="Result chunks with relevance + metadata")
+    total_results: int = Field(default=0, ge=0, description="Number of results returned")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Average relevance of returned results")
+
+
 def _default_hallucination_summary() -> dict[str, float | int]:
     """Zero-count summary used when verification is skipped."""
     return {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0}

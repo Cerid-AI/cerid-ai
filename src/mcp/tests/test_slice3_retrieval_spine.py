@@ -100,14 +100,14 @@ def test_manual_path_threads_graph_store_to_agent_query(client):
 
 
 def test_crag_gate_fires_on_below_threshold():
-    from app.routers.agents import should_fire_external_crag
+    from core.agents.crag import should_fire_external_crag
 
     weak = {"results": [{"relevance": 0.2}]}
     assert should_fire_external_crag(ext_on=True, kb_result=weak, threshold=0.5) is True
 
 
 def test_crag_gate_skips_strong_kb_when_no_temporal_intent():
-    from app.routers.agents import should_fire_external_crag
+    from core.agents.crag import should_fire_external_crag
 
     strong = {"results": [{"relevance": 0.9}]}
     assert should_fire_external_crag(ext_on=True, kb_result=strong, threshold=0.5) is False
@@ -115,7 +115,7 @@ def test_crag_gate_skips_strong_kb_when_no_temporal_intent():
 
 def test_crag_gate_fires_on_stale_kb_with_temporal_intent():
     """High relevance + temporal intent + stale KB → fire external."""
-    from app.routers.agents import should_fire_external_crag
+    from core.agents.crag import should_fire_external_crag
 
     strong_stale = {"results": [{"relevance": 0.9}]}
     assert should_fire_external_crag(
@@ -129,7 +129,7 @@ def test_crag_gate_fires_on_stale_kb_with_temporal_intent():
 
 
 def test_crag_gate_skips_fresh_kb_with_temporal_intent():
-    from app.routers.agents import should_fire_external_crag
+    from core.agents.crag import should_fire_external_crag
 
     strong_fresh = {"results": [{"relevance": 0.9}]}
     assert should_fire_external_crag(
@@ -143,7 +143,7 @@ def test_crag_gate_skips_fresh_kb_with_temporal_intent():
 
 
 def test_crag_gate_returns_false_when_external_disabled():
-    from app.routers.agents import should_fire_external_crag
+    from core.agents.crag import should_fire_external_crag
 
     weak = {"results": [{"relevance": 0.1}]}
     assert should_fire_external_crag(ext_on=False, kb_result=weak, threshold=0.5) is False
@@ -152,7 +152,7 @@ def test_crag_gate_returns_false_when_external_disabled():
 def test_freshest_kb_age_parses_created_at():
     from datetime import timedelta
 
-    from app.routers.agents import _freshest_kb_age_days
+    from core.agents.crag import freshest_kb_age_days as _freshest_kb_age_days
     from core.utils.time import utcnow
 
     recent = (utcnow() - timedelta(days=2)).replace(tzinfo=None).isoformat()
@@ -167,7 +167,7 @@ def test_freshest_kb_age_parses_created_at():
 
 
 def test_freshest_kb_age_returns_none_when_no_dates():
-    from app.routers.agents import _freshest_kb_age_days
+    from core.agents.crag import freshest_kb_age_days as _freshest_kb_age_days
 
     assert _freshest_kb_age_days({"results": [{"relevance": 0.5}]}) is None
     assert _freshest_kb_age_days({}) is None

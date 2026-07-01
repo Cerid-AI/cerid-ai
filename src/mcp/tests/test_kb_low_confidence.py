@@ -9,7 +9,7 @@ surfaced as ``low_confidence`` on the response. Pure signal, no behaviour change
 """
 from __future__ import annotations
 
-from app.routers.agents import _kb_low_confidence
+from core.agents.crag import kb_low_confidence as _kb_low_confidence
 
 
 def test_empty_results_is_low():

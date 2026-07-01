@@ -13,9 +13,9 @@ connector ingests opt-in conversations BUT retrieval will not surface
 their content unless the active session has private_mode Level 2+.
 
 This module is the single source of truth for that filter. Callers
-into pkb_search_filtered, query_knowledge, and any direct ChromaDB
-collection lookup go through ``visible_domains()`` to drop the
-privacy-gated entries.
+into pkb_search_filtered, the /query + /sdk/v1/search endpoints, and any
+direct ChromaDB collection lookup go through ``visible_domains()`` to
+drop the privacy-gated entries.
 """
 from __future__ import annotations
 

@@ -129,7 +129,3 @@ test-results/
 
 # Playwright MCP runtime output
 .playwright-mcp/
-
-# Demo-video production WIP — heavy binaries, not for version control
-docs/assets/demo-video/
-docs/plans/90s-cerid-ai-demo-video-plan.md

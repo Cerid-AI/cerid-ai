@@ -80,11 +80,27 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/gen_env_example.py --check
 	@echo "[drift] router-registry"
 	.venv/bin/python scripts/gen_router_registry.py --check
+	@echo "[drift] route-response-model"
+	.venv/bin/python scripts/lint-route-response-model.py --check
+	@echo "[drift] retrieval-import-boundary"
+	.venv/bin/python scripts/lint-retrieval-import-boundary.py --check
+	@echo "[drift] magic-numbers"
+	.venv/bin/python scripts/lint-magic-numbers.py --check
+	@echo "[drift] gates-parity"
+	@test -f scripts/lint-gates-parity.py \
+	  && .venv/bin/python scripts/lint-gates-parity.py --check \
+	  || echo "  (internal-only gate — not present in this checkout, skipped)"
+	@echo "[drift] model-name-uniqueness"
+	.venv/bin/python scripts/lint-model-name-uniqueness.py --check
 	@echo "[drift] sdk-openapi"
 	.venv/bin/python scripts/gen_sdk_openapi.py --check
 	@echo "[drift] sync-manifest"
 	@test -f scripts/lint-sync-manifest.py \
 	  && .venv/bin/python scripts/lint-sync-manifest.py \
+	  || echo "  (internal-only gate — not present in this checkout, skipped)"
+	@echo "[drift] public-leak-preflight"
+	@test -f scripts/lint-public-leak-preflight.py \
+	  && .venv/bin/python scripts/lint-public-leak-preflight.py \
 	  || echo "  (internal-only gate — not present in this checkout, skipped)"
 	@echo "[drift] silent-catch"
 	.venv/bin/python scripts/lint-no-silent-catch.py src/mcp/
@@ -106,6 +122,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-mcp-descriptions.py
 	@echo "[drift] no-hardcoded-models"
 	.venv/bin/python scripts/lint-no-hardcoded-models.py --strict src/mcp/
+	@echo "[drift] pro-gating"
+	.venv/bin/python scripts/lint-pro-gating.py
 	@echo "[drift] ✓ drift + lint gates passed"
 
 prepush: ci-local drift-check ## FULL pre-push parity with remote CI (run before every push)

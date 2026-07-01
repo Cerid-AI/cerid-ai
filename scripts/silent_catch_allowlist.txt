@@ -31,9 +31,9 @@ src/mcp/core/agents/hallucination/authoritative_verify.py:312
 src/mcp/core/agents/hallucination/extraction.py:483
 src/mcp/core/agents/maintenance.py:180
 src/mcp/core/agents/maintenance.py:319
-src/mcp/core/agents/rectify.py:229
-src/mcp/core/agents/rectify.py:393
-src/mcp/core/agents/self_rag.py:199
+src/mcp/core/agents/rectify.py:231
+src/mcp/core/agents/rectify.py:395
+src/mcp/core/agents/self_rag.py:229
 src/mcp/core/retrieval/hype_match.py:244
 src/mcp/core/retrieval/semantic_cache.py:153
 src/mcp/core/retrieval/semantic_cache.py:240

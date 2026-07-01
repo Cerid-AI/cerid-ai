@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 import config
+from core.context.identity import with_tenant_scope
 from errors import IngestionError
 
 logger = logging.getLogger("ai-companion.dedup")
@@ -44,6 +45,7 @@ def check_semantic_duplicate(
             query_texts=[snippet],
             n_results=min(3, count),
             include=["metadatas", "distances"],
+            where=with_tenant_scope(None),
         )
 
         if not results or not results.get("ids") or len(results["ids"]) == 0 or not results["ids"][0]:

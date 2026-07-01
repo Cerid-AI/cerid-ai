@@ -33,12 +33,44 @@ import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Protocol
 
 from core.utils.artifact_tags import parse_tag_object
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.daily_digest")
+
+
+# ── app DI (keeps core/ free of app.* imports; mirrors set_data_source_registry) ──
+# core/ must never import app/. The Neo4j driver factory (app.deps.get_neo4j) and
+# the artifact reader (app.db.neo4j.list_artifacts) live app-side; app/main.py
+# injects an adapter here at startup so core/ stays app-free.
+class _DigestGraphProtocol(Protocol):
+    """The graph-access slice the daily digest needs."""
+
+    def get_driver(self) -> Any: ...
+
+    def list_artifacts(
+        self,
+        driver: Any,
+        *,
+        since: str,
+        limit: int = ...,
+        domain: str | None = ...,
+    ) -> list[dict[str, Any]] | None: ...
+
+
+_graph: _DigestGraphProtocol | None = None
+
+
+def set_digest_graph(graph: _DigestGraphProtocol) -> None:
+    """Wire the app graph accessor in at startup (the DI boundary)."""
+    global _graph
+    _graph = graph
+
+
+def get_digest_graph() -> _DigestGraphProtocol | None:
+    return _graph
 
 
 # ── shape ─────────────────────────────────────────────────────────────
@@ -124,9 +156,11 @@ _JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")  # greedy — digest JSON is one bi
 # ── data fetchers ─────────────────────────────────────────────────────
 
 def _fetch_recent_artifacts(driver: Any, since_iso: str, limit: int = 200) -> list[dict[str, Any]]:
+    graph = get_digest_graph()
+    if graph is None:
+        return []
     try:
-        from app.db import neo4j as graph_db
-        return graph_db.list_artifacts(driver, since=since_iso, limit=limit) or []
+        return graph.list_artifacts(driver, since=since_iso, limit=limit) or []
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error("daily_digest._fetch_recent", exc)
         return []
@@ -140,11 +174,13 @@ def _fetch_flagged_artifacts(
 ) -> list[dict[str, Any]]:
     """Pull artifacts in the window with quality_score below threshold —
     the closest existing signal Cerid has for "curator-flagged"."""
+    graph = get_digest_graph()
+    if graph is None:
+        return []
     try:
-        from app.db import neo4j as graph_db
         # list_artifacts supports min_quality (≥), not max. We pull
         # everything in the window then filter in Python — small N.
-        all_recent = graph_db.list_artifacts(driver, since=since_iso, limit=500) or []
+        all_recent = graph.list_artifacts(driver, since=since_iso, limit=500) or []
         return [
             a for a in all_recent
             if isinstance(a.get("quality_score"), (int, float))
@@ -157,9 +193,11 @@ def _fetch_flagged_artifacts(
 
 def _fetch_inbox_urgent(driver: Any, since_iso: str, limit: int = 20) -> list[dict[str, Any]]:
     """Fetch Phase J triaged-inbox urgent + actionable items in window."""
+    graph = get_digest_graph()
+    if graph is None:
+        return []
     try:
-        from app.db import neo4j as graph_db
-        recent = graph_db.list_artifacts(driver, domain="inbox", since=since_iso, limit=limit) or []
+        recent = graph.list_artifacts(driver, since=since_iso, limit=limit, domain="inbox") or []
         return [
             a for a in recent
             if parse_tag_object(a.get("tags")).get("category") in ("urgent", "actionable")
@@ -392,10 +430,14 @@ async def generate_daily_digest(
         result.skip_reason = "feature_gated"
         return result
 
-    # Resolve neo4j driver — soft-skip if unavailable
+    # Resolve neo4j driver via the injected graph accessor — soft-skip if unavailable
+    graph = get_digest_graph()
+    if graph is None:
+        result.skipped = True
+        result.skip_reason = "neo4j_unavailable"
+        return result
     try:
-        from app.deps import get_neo4j
-        driver = get_neo4j()
+        driver = graph.get_driver()
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error("daily_digest.get_neo4j", exc)
         result.skipped = True

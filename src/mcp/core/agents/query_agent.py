@@ -1824,6 +1824,98 @@ async def agent_query(
         return env.to_dict()
 
 
+async def agent_query_full(
+    query: str,
+    *,
+    domains: list[str] | None = None,
+    top_k: int = 10,
+    use_reranking: bool = True,
+    conversation_messages: list[dict[str, str]] | None = None,
+    chroma_client: Any | None = None,
+    redis_client: Any | None = None,
+    neo4j_driver: Any | None = None,
+    graph_store: GraphStore | None = None,
+    debug_timing: bool = False,
+    allowed_domains: list[str] | None = None,
+    strict_domains: bool = False,
+    model: str | None = None,
+    skip_cache: bool = False,
+    metadata_filter: dict | None = None,
+    exclude_packs: bool = False,
+    kb_enabled: bool = True,
+    external_augmentation: bool = True,
+    response_text: str | None = None,
+    enable_self_rag: bool | None = None,
+) -> dict[str, Any]:
+    """Canonical full agentic-retrieval path.
+
+    The single importable entry every surface routes through — REST
+    ``/agent/query`` (manual mode), MCP ``pkb_agent_query``, A2A, custom agents —
+    so they all get the identical pipeline: core multi-surface retrieval (rerank,
+    provenance, ``exclude_packs``, tenant-scope, via :func:`agent_query`) + CRAG
+    external augmentation + Self-RAG. Built in Phase 1 to end the
+    wrapper-owns-the-stack bypass (audit RPB-1 / STREAM-07).
+
+    REST-only concerns (the KB_POOL gate, query-scope expansion, exact-match
+    query cache, header parsing, smart-mode orchestrator, ndcg metric,
+    HTTPException mapping) stay in the thin router wrapper.
+    """
+    from core.agents.crag import augment_external_crag, kb_low_confidence
+    from core.agents.self_rag import maybe_self_rag
+
+    threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
+
+    if not kb_enabled:
+        # Conversation-only path: no KB to retrieve from.
+        result: dict[str, Any] = {
+            "context": "", "sources": [], "confidence": 0.0,
+            "domains_searched": [], "total_results": 0,
+            "token_budget_used": 0, "graph_results": 0, "results": [],
+            "strategy": "conversation_only",
+            "source_status": {"kb": "disabled"},
+        }
+    else:
+        result = await agent_query(
+            query=query,
+            domains=domains,
+            top_k=top_k,
+            use_reranking=use_reranking,
+            conversation_messages=conversation_messages,
+            chroma_client=chroma_client,
+            redis_client=redis_client,
+            neo4j_driver=neo4j_driver,
+            graph_store=graph_store,
+            debug_timing=debug_timing,
+            allowed_domains=allowed_domains,
+            strict_domains=strict_domains,
+            model=model,
+            skip_cache=skip_cache,
+            metadata_filter=metadata_filter,
+            exclude_packs=exclude_packs,
+        )
+
+    # B2a: capture KB-only confidence BEFORE any external augmentation.
+    kb_low_conf = kb_low_confidence(result, threshold)
+
+    if external_augmentation:
+        result = await augment_external_crag(result, query, domains, threshold)
+
+    if isinstance(result, dict):
+        result["low_confidence"] = kb_low_conf
+
+    # Self-RAG only fires when a generated answer is supplied to validate.
+    result = await maybe_self_rag(
+        result,
+        response_text,
+        enable_self_rag,
+        chroma_client=chroma_client,
+        neo4j_driver=neo4j_driver,
+        redis_client=redis_client,
+        model=model,
+    )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Phase R.3 — HyPE augmentation helper
 # ---------------------------------------------------------------------------

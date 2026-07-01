@@ -952,6 +952,73 @@
         "title": "SDKQueryResponse",
         "type": "object"
       },
+      "SDKSearchRequest": {
+        "description": "Request body for ``POST /sdk/v1/search`` \u2014 single-domain KB search.",
+        "properties": {
+          "domain": {
+            "default": "general",
+            "description": "KB domain/collection to search",
+            "title": "Domain",
+            "type": "string"
+          },
+          "exclude_packs": {
+            "default": false,
+            "description": "Drop knowledge-pack chunks from retrieval (personal-first KB search).",
+            "title": "Exclude Packs",
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Search query text",
+            "title": "Query",
+            "type": "string"
+          },
+          "top_k": {
+            "default": 3,
+            "description": "Maximum results to return",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SDKSearchRequest",
+        "type": "object"
+      },
+      "SDKSearchResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/search`` \u2014 canonical KB search projection.",
+        "properties": {
+          "confidence": {
+            "default": 0.0,
+            "description": "Average relevance of returned results",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "results": {
+            "description": "Result chunks with relevance + metadata",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "total_results": {
+            "default": 0,
+            "description": "Number of results returned",
+            "minimum": 0.0,
+            "title": "Total Results",
+            "type": "integer"
+          }
+        },
+        "title": "SDKSearchResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1516,9 +1583,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Req",
-                "type": "object"
+                "$ref": "#/components/schemas/SDKSearchRequest"
               }
             }
           },
@@ -1528,7 +1593,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SDKSearchResponse"
+                }
               }
             },
             "description": "Successful Response"

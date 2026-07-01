@@ -25,6 +25,36 @@ import config
 logger = logging.getLogger("ai-companion.self_rag")
 
 
+async def maybe_self_rag(
+    query_result: dict[str, Any],
+    response_text: str | None,
+    enable_self_rag: bool | None,
+    *,
+    chroma_client: Any,
+    neo4j_driver: Any,
+    redis_client: Any,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Apply Self-RAG enhancement when enabled AND a ``response_text`` is supplied
+    to validate; return the result unchanged otherwise.
+
+    The gate (``enable_self_rag`` override → ``config.ENABLE_SELF_RAG`` default,
+    plus the ``response_text`` precondition) lives here so ``agent_query_full``
+    and the smart-mode router branch share one implementation (Phase 1).
+    """
+    use = enable_self_rag if enable_self_rag is not None else config.ENABLE_SELF_RAG
+    if use and response_text:
+        return await self_rag_enhance(
+            query_result=query_result,
+            response_text=response_text,
+            chroma_client=chroma_client,
+            neo4j_driver=neo4j_driver,
+            redis_client=redis_client,
+            model=model,
+        )
+    return query_result
+
+
 async def self_rag_enhance(
     query_result: dict[str, Any],
     response_text: str,

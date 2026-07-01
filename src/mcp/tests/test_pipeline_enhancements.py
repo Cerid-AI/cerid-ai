@@ -273,7 +273,7 @@ class TestCRAGQualityGate:
     def test_gate_fires_on_low_relevance(self):
         """Router-level should_fire_external_crag returns True when KB is weak."""
         import config as _cfg
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         low_kb = {"results": [{"relevance": 0.2, "content": "weak match"}]}
         threshold = getattr(_cfg, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
@@ -284,7 +284,7 @@ class TestCRAGQualityGate:
 
     def test_gate_does_not_fire_on_high_relevance(self):
         """Router gate returns False when top KB relevance is above threshold."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         high_kb = {"results": [{"relevance": 0.85, "content": "strong match"}]}
         assert should_fire_external_crag(
@@ -293,7 +293,7 @@ class TestCRAGQualityGate:
 
     def test_gate_handles_empty_results(self):
         """Empty KB results trigger the router gate (top_rel = 0.0)."""
-        from app.routers.agents import should_fire_external_crag
+        from core.agents.crag import should_fire_external_crag
 
         assert should_fire_external_crag(
             ext_on=True, kb_result={"results": []}, threshold=0.4,

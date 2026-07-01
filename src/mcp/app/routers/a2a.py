@@ -78,7 +78,9 @@ async def agent_card():
         "url": f"http://localhost:{os.getenv('CERID_PORT_MCP', '8888')}",
         "version": "2.0.0",
         "capabilities": {
-            "streaming": True,
+            # Honest: every A2A skill returns a buffered dict (no SSE). Advertise
+            # false until real streaming lands (audit 2026-06-29, STREAM/quick-win).
+            "streaming": False,
             "pushNotifications": False,
             "stateTransitionHistory": True,
         },
@@ -146,9 +148,9 @@ async def agent_card():
 
 async def _execute_query(input_data: dict) -> dict:
     """Wrap the agent query pipeline."""
-    from core.agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query_full
 
-    result = await agent_query(
+    result = await agent_query_full(
         query=input_data.get("text", input_data.get("query", "")),
         domains=input_data.get("domains"),
         top_k=input_data.get("top_k", 10),

@@ -13,112 +13,16 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 import config
 from app.concurrency import KB_POOL
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
-from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
 from core.utils.swallowed import log_swallowed_error
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
-
-
-def _freshest_kb_age_days(kb_result: dict) -> float | None:
-    """Return the age in days of the most recent KB result, or None.
-
-    Reads ``created_at`` / ``ingested_at`` from each result (Slice 2 Phase 1.1
-    threads these through ``_format_chroma_result``). Returns ``None`` when no
-    result carries a parseable date — caller treats that as "unknown, do not
-    apply the staleness rule".
-    """
-    from datetime import datetime
-
-    from core.utils.time import utcnow
-
-    results = kb_result.get("results") if isinstance(kb_result, dict) else None
-    if not results:
-        return None
-    youngest_age: float | None = None
-    now = utcnow().replace(tzinfo=None)
-    for r in results:
-        date_str = r.get("created_at") or r.get("ingested_at")
-        if not date_str:
-            continue
-        try:
-            dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
-            dt_naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
-            age = (now - dt_naive).total_seconds() / 86400.0
-        except (ValueError, TypeError):
-            continue
-        if age < 0:
-            age = 0.0
-        if youngest_age is None or age < youngest_age:
-            youngest_age = age
-    return youngest_age
-
-
-def should_fire_external_crag(
-    *,
-    ext_on: bool,
-    kb_result: dict,
-    threshold: float,
-    temporal_intent_days: int | None = None,
-    freshest_kb_age_days: float | None = None,
-    staleness_window_days: int | None = None,
-) -> bool:
-    """CRAG gate: decide whether to launch external sources.
-
-    External sources are expensive (network I/O bounded by EXTERNAL_SOURCE_QUERY_TIMEOUT,
-    circuit-breaker pressure).  When KB already has a strong hit we skip
-    them entirely — strong KB > any external result for the usual query
-    mix, and the 10s /agent/query wall-clock budget is precious.
-
-    Fires when ANY is true:
-      - the best KB relevance is strictly below `threshold`, OR
-      - the query has temporal intent (``temporal_intent_days`` not None) AND
-        the freshest KB result is older than ``staleness_window_days`` — a
-        high-relevance stale memory must not suppress a "current X" lookup.
-
-    Always returns False when `ext_on=False`. A result set with no `results`
-    key (or empty list) yields max=0.0, which is always < threshold — so
-    unknown-KB correctly falls through to external.
-    """
-    if not ext_on:
-        return False
-    results = kb_result.get("results") if isinstance(kb_result, dict) else None
-    if not results:
-        return True
-
-    max_rel = max((r.get("relevance", 0.0) for r in results), default=0.0)
-    if max_rel < threshold:
-        return True
-
-    if temporal_intent_days is not None:
-        if staleness_window_days is None:
-            staleness_window_days = getattr(config, "CRAG_STALENESS_WINDOW_DAYS", 7)
-        if freshest_kb_age_days is None or freshest_kb_age_days > staleness_window_days:
-            return True
-
-    return False
-
-
-def _kb_low_confidence(kb_result: dict, threshold: float) -> bool:
-    """True when the best KB relevance is below the quality threshold (GA P0.5 B2a).
-
-    Surfaced as ``low_confidence`` on the response so callers/UI can hedge a weak
-    KB answer even when external augmentation fired (the CRAG threshold only
-    decided whether to *fire* external; it never marked the KB result itself).
-    Mirrors :func:`should_fire_external_crag`'s max-relevance rule. Pure signal —
-    no behaviour change.
-    """
-    results = kb_result.get("results") if isinstance(kb_result, dict) else None
-    if not results:
-        return True
-    max_rel = max((r.get("relevance", 0.0) for r in results), default=0.0)
-    return max_rel < threshold
 
 
 class AgentQueryRequest(BaseModel):
@@ -156,6 +60,25 @@ class AgentQueryRequest(BaseModel):
     )
     rag_mode: str = Field("manual", description="Retrieval mode: manual | smart | custom_smart")
     source_config: dict | None = Field(None, description="Source weights/toggles for custom_smart mode")
+
+
+class AgentQueryResponse(BaseModel):
+    """Response from ``POST /agent/query`` — the canonical retrieval envelope.
+
+    ``extra="allow"`` so the agent pipeline can evolve its return shape (surface
+    metadata, timings, ``low_confidence``, CRAG/Self-RAG fields, cache markers)
+    without breaking the typed contract — mirrors the SDK response models. Phase 1
+    typed the producer that ``/sdk/v1/query`` delegates to (audit ACG-2 / RPB-4).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    context: str = Field(default="", description="Assembled context string")
+    sources: list[dict[str, Any]] = Field(default_factory=list, description="Result chunks with relevance + metadata")
+    confidence: float = Field(default=0.0, description="Average relevance of returned sources")
+    results: list[dict[str, Any]] = Field(default_factory=list, description="All results with full metadata")
+    domains_searched: list[str] = Field(default_factory=list, description="Domains actually searched")
+    total_results: int = Field(default=0, description="Total results after dedup + filtering")
 
 
 class TriageFileRequest(BaseModel):
@@ -303,7 +226,7 @@ async def compress_history_endpoint(req: CompressRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/query")
+@router.post("/agent/query", response_model=AgentQueryResponse)
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
     # Heavy RAG path is gated by KB_POOL so /health, /observability, and
     # other lightweight routes served by HEALTH_POOL are never starved by
@@ -360,14 +283,12 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         consumer_strict = consumer.get("strict_domains", False)
         strict_domains = req.strict_domains if req.strict_domains else consumer_strict
 
-        # Bind the KB low-confidence signal + threshold before the mode branch.
-        # The smart/custom_smart path skips the manual CRAG block below, so
-        # reading _kb_low_conf at the end would otherwise UnboundLocalError.
         _threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
-        _kb_low_conf = False
 
         if req.rag_mode in ("smart", "custom_smart"):
             from app.agents.retrieval_orchestrator import orchestrated_query
+            from core.agents.crag import kb_low_confidence
+            from core.agents.self_rag import maybe_self_rag
             result = await orchestrated_query(
                 query=req.query,
                 rag_mode=req.rag_mode,
@@ -387,109 +308,54 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 model=req.model,
                 exclude_packs=req.exclude_packs,
             )
-            # Mirror the manual path's KB-quality signal for the smart path so
-            # the low_confidence field is meaningful (not just a default).
-            _kb_low_conf = _kb_low_confidence(result, _threshold)
+            # Smart mode shares the canonical path's low-confidence stamp +
+            # Self-RAG (the manual path gets these inside agent_query_full).
+            if isinstance(result, dict):
+                result["low_confidence"] = kb_low_confidence(result, _threshold)
+            result = await maybe_self_rag(
+                result,
+                req.response_text,
+                req.enable_self_rag,
+                chroma_client=get_chroma(),
+                neo4j_driver=get_neo4j(),
+                redis_client=get_redis(),
+                model=req.model,
+            )
         else:
-            # Manual mode: KB gate check — if context_sources disables KB, skip retrieval
+            # Manual mode → the canonical full agentic-retrieval path. The KB
+            # gate, core retrieval, CRAG external augmentation, low-confidence
+            # stamp, and Self-RAG all live in core.agent_query_full now (Phase 1);
+            # the wrapper just supplies the store handles + header-derived
+            # isolation params, so MCP/A2A/custom-agent callers reach the SAME path.
+            from core.agents.query_agent import agent_query_full
             _cs = req.context_sources or {}
-            _ext_on = _cs.get("external", True)
+            result = await agent_query_full(
+                query=req.query,
+                domains=req.domains,
+                top_k=req.top_k,
+                use_reranking=req.use_reranking,
+                conversation_messages=req.conversation_messages,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                graph_store=get_graph_store(),
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=req.model,
+                skip_cache=req.skip_cache,
+                metadata_filter=req.metadata_filter,
+                exclude_packs=req.exclude_packs,
+                kb_enabled=_cs.get("kb", True) is not False,
+                external_augmentation=_cs.get("external", True),
+                response_text=req.response_text,
+                enable_self_rag=req.enable_self_rag,
+            )
 
-            # ── Fetch KB first, then decide whether to fire external (CRAG gate) ──
-            # Audit RC-B: launching external unconditionally in parallel ate the
-            # 10s /agent/query budget even when KB had strong hits. The CRAG gate
-            # below skips external when KB is already authoritative.
-            _kb_low_conf = False  # conversation-only path has no KB to judge
-            if _cs.get("kb", True) is False:
-                result = {
-                    "context": "", "sources": [], "confidence": 0.0,
-                    "domains_searched": [], "total_results": 0,
-                    "token_budget_used": 0, "graph_results": 0, "results": [],
-                    "strategy": "conversation_only",
-                    "source_status": {"kb": "disabled"},
-                }
-            else:
-                from core.agents.query_agent import agent_query
-                result = await agent_query(
-                    query=req.query,
-                    domains=req.domains,
-                    top_k=req.top_k,
-                    use_reranking=req.use_reranking,
-                    conversation_messages=req.conversation_messages,
-                    chroma_client=get_chroma(),
-                    redis_client=get_redis(),
-                    neo4j_driver=get_neo4j(),
-                    graph_store=get_graph_store(),
-                    debug_timing=debug_timing,
-                    allowed_domains=allowed_domains,
-                    strict_domains=strict_domains,
-                    model=req.model,
-                    skip_cache=req.skip_cache,
-                    metadata_filter=req.metadata_filter,
-                    exclude_packs=req.exclude_packs,
-                )
-
-            # CRAG gate: fire external when KB quality is below threshold OR
-            # the query has temporal intent and the freshest KB hit is stale.
-            # Saves the 5s-per-source hang cost when KB already has strong hits.
-            # B2a: capture KB-only confidence before any external augmentation.
-            _kb_low_conf = _kb_low_confidence(result, _threshold)
-            from core.utils.temporal import parse_temporal_intent
-            _temporal_days = parse_temporal_intent(req.query)
-            _freshest_age = _freshest_kb_age_days(result) if _temporal_days is not None else None
-            if should_fire_external_crag(
-                ext_on=_ext_on,
-                kb_result=result,
-                threshold=_threshold,
-                temporal_intent_days=_temporal_days,
-                freshest_kb_age_days=_freshest_age,
-            ):
-                _ext_results: list = []
-                try:
-                    from app.agents.retrieval_orchestrator import _extract_search_terms
-                    from app.data_sources import registry
-                    _search_terms = _extract_search_terms(req.query)
-                    _ext_results = await asyncio.wait_for(
-                        registry.query_all(
-                            _search_terms,
-                            domain=req.domains[0] if req.domains else None,
-                            timeout=EXTERNAL_SOURCE_QUERY_TIMEOUT,
-                        ),
-                        timeout=EXTERNAL_SOURCE_QUERY_TIMEOUT + 1.0,
-                    )
-                except (Exception, asyncio.TimeoutError):
-                    _ext_results = []
-
-                if _ext_results:
-                    from app.models.query_envelope import QueryEnvelope, SourceItem
-                    env = QueryEnvelope.from_legacy_result(result)
-                    _DISCOUNT = 0.6
-                    env.merge_external([
-                        SourceItem(
-                            content=r.get("content", ""),
-                            relevance=round(r.get("confidence", 0.8) * _DISCOUNT, 3),
-                            artifact_id="",
-                            filename=r.get("source_name", ""),
-                            source_type="external",
-                            domain="external",
-                            collection="external",
-                            source_url=r.get("source_url", ""),
-                            source_name=r.get("source_name", r.get("title", "")),
-                        )
-                        for r in _ext_results
-                    ])
-                    result = env.to_dict()
-
-        # B2a: surface the KB-quality signal (additive; survives external merge).
-        if isinstance(result, dict):
-            result["low_confidence"] = _kb_low_conf
-
-        # Phase 4.3 — record a retrieval-quality proxy into the time-series
-        # collector /observability/quality reads (`retrieval_ndcg` was declared
-        # in METRIC_NAMES but never recorded). Proxy = mean relevance of the
-        # returned results; a true NDCG needs graded judgments we don't have at
-        # serve time, but mean relevance tracks the same signal (are the hits
-        # good?) cheaply. Best-effort; never blocks the response.
+        # Phase 4.3 — retrieval-quality proxy into the time-series collector
+        # /observability/quality reads. Proxy = mean relevance of the returned
+        # results. Best-effort; never blocks the response. REST-only observability
+        # (utils.metrics is app-bound), so it stays in the wrapper, not in core.
         try:
             _res = result.get("results") if isinstance(result, dict) else None
             if _res:
@@ -502,19 +368,6 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                     )
         except Exception as _exc:  # noqa: BLE001 — metrics recording must never block the query response
             log_swallowed_error("app.routers.agents.retrieval_ndcg", _exc)
-
-        # Self-RAG: validate claims and refine retrieval if enabled
-        use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
-        if use_self_rag and req.response_text:
-            from core.agents.self_rag import self_rag_enhance
-            result = await self_rag_enhance(
-                query_result=result,
-                response_text=req.response_text,
-                chroma_client=get_chroma(),
-                neo4j_driver=get_neo4j(),
-                redis_client=get_redis(),
-                model=req.model,
-            )
 
         if not has_context and not req.skip_cache:
             set_cached(req.query, domain_key, req.top_k, result)

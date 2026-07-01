@@ -481,15 +481,14 @@ def require_feature(feature_name: str) -> _Callable:
         @_functools.wraps(func)
         async def wrapper(*args: _Any, **kwargs: _Any) -> _Any:
             if not is_feature_enabled(feature_name):
-                from fastapi import HTTPException
+                from errors import FeatureGateError
 
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        f"Feature '{feature_name}' requires a higher Cerid AI tier. "
-                        f"Current tier: {FEATURE_TIER}. "
-                        f"Upgrade your tier to enable."
-                    ),
+                # Phase 2: raise the canonical FeatureGateError (rendered to 403
+                # by the app's CeridError handler) so tier gating has ONE error
+                # type + one JSON shape, not a mix of HTTPException + CeridError.
+                raise FeatureGateError(
+                    f"Feature '{feature_name}' requires a higher Cerid AI tier. "
+                    f"Current tier: {FEATURE_TIER}. Upgrade your tier to enable."
                 )
             return await func(*args, **kwargs)
         return wrapper

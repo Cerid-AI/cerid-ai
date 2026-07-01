@@ -17,6 +17,11 @@ compatibility — callers can continue to use:
 # the package namespace, e.g. ``agents.hallucination.httpx.AsyncClient``).
 import httpx  # noqa: F401
 
+from core.agents.hallucination.enums import (  # noqa: F401
+    NLIUse,
+    VerificationStatus,
+)
+
 # ---------------------------------------------------------------------------
 # Re-exports from extraction.py
 # ---------------------------------------------------------------------------
@@ -80,6 +85,7 @@ from core.agents.hallucination.verification import (  # noqa: F401
     _query_memories,
     _verify_claim_externally,
     verify_claim,
+    verify_claims,
 )
 
 # Explicit public API. Private helpers above (prefixed `_`) are only re-exported
@@ -95,7 +101,11 @@ __all__ = [
     "check_hallucinations",
     "verify_response_streaming",
     "verify_claim",
+    "verify_claims",
     "get_hallucination_report",
+    # Enums
+    "NLIUse",
+    "VerificationStatus",
     # Public constants
     "REDIS_HALLUCINATION_PREFIX",
     "REDIS_HALLUCINATION_TTL",

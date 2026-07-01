@@ -23,6 +23,7 @@ from collections.abc import AsyncGenerator
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
+from core.utils.sse import sse_event
 from deps import get_redis
 from utils.agent_events import STREAM_KEY, clear_events, get_recent_events
 
@@ -50,7 +51,7 @@ async def _event_generator() -> AsyncGenerator[str, None]:
     last_id = "$"
 
     # Send an initial heartbeat so the client knows the connection is live
-    yield f"event: heartbeat\ndata: {json.dumps({'ts': time.time()})}\n\n"
+    yield sse_event({"ts": time.time()}, event="heartbeat")
 
     while True:
         try:
@@ -61,7 +62,7 @@ async def _event_generator() -> AsyncGenerator[str, None]:
 
             if not entries:
                 # No new events -- send keepalive to prevent proxy timeouts
-                yield f"event: heartbeat\ndata: {json.dumps({'ts': time.time()})}\n\n"
+                yield sse_event({"ts": time.time()}, event="heartbeat")
                 continue
 
             for _stream_name, messages in entries:
@@ -80,7 +81,7 @@ async def _event_generator() -> AsyncGenerator[str, None]:
                         except (json.JSONDecodeError, TypeError):
                             fields["metadata"] = {}
                     fields["id"] = msg_id
-                    yield f"data: {json.dumps(fields)}\n\n"
+                    yield sse_event(fields)
 
         except asyncio.CancelledError:
             logger.debug("Agent console SSE stream cancelled")

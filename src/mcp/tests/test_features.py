@@ -71,17 +71,16 @@ class TestRequireFeature:
 
     @pytest.mark.asyncio
     async def test_decorator_blocks_disabled_feature(self):
-        """Decorated function should raise 403 when feature is disabled."""
-        from fastapi import HTTPException
+        """Decorated function raises FeatureGateError (→ 403) when feature is disabled."""
 
         @require_feature("sso_saml")  # Enterprise-only, disabled on community
         async def my_endpoint():
             return {"status": "ok"}
 
         with patch.dict(FEATURE_FLAGS, {"sso_saml": False}):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(FeatureGateError) as exc_info:
                 await my_endpoint()
-            assert exc_info.value.status_code == 403
+            assert exc_info.value.http_status == 403
 
 
 # ---------------------------------------------------------------------------

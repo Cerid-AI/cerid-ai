@@ -15,10 +15,12 @@ from fastapi.testclient import TestClient
 
 
 def _make_app() -> FastAPI:
+    from app.error_handlers import register_cerid_error_handler
     from app.routers.analytics import router
 
     app = FastAPI()
     app.include_router(router)
+    register_cerid_error_handler(app)  # so require_feature's FeatureGateError → 403
     return app
 
 

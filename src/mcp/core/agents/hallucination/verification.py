@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 import config
+from core.agents.hallucination.enums import VerificationStatus
 from core.agents.hallucination.extraction import _reclassify_recency
 from core.agents.hallucination.patterns import (
     MEMORY_TYPES,
@@ -33,6 +34,7 @@ from core.agents.hallucination.patterns import (
     _pick_verification_model,
     memory_authority_boost,
 )
+from core.context.identity import with_tenant_scope
 from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
 from core.utils.claim_cache import cache_verdict, get_cached_verdict
 from core.utils.embeddings import l2_distance_to_relevance
@@ -734,7 +736,7 @@ async def _query_memories(
         results = collection.query(
             query_texts=[claim],
             n_results=top_k,
-            where={"memory_type": {"$in": MEMORY_TYPES}},
+            where=with_tenant_scope({"memory_type": {"$in": MEMORY_TYPES}}),
             include=["documents", "metadatas", "distances"],
         )
 
@@ -1541,6 +1543,63 @@ async def verify_claims_batch_external(
 # ---------------------------------------------------------------------------
 # Main claim verification
 # ---------------------------------------------------------------------------
+
+async def verify_claims(
+    claims: list[str],
+    chroma_client,
+    neo4j_driver=None,
+    redis_client=None,
+    *,
+    threshold: float | None = None,
+    model: str | None = None,
+    streaming: bool = False,
+    expert_mode: bool = False,
+    response_context: str | None = None,
+    conversation_context: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Verify a batch of already-extracted claims concurrently.
+
+    The single consolidated entrypoint over :func:`verify_claim`: hand it a list
+    of claim strings and get back one verdict dict per claim (the same shape
+    ``verify_claim`` emits). Wraps the concurrency + per-claim isolation so no
+    consumer re-rolls the ``asyncio.gather`` loop, and normalizes a failed claim
+    to a canonical :class:`~core.agents.hallucination.enums.VerificationStatus`
+    ``error`` verdict rather than sinking the whole batch.
+
+    This is the coherence facade for the verification layer; the streaming
+    orchestrator (:func:`~core.agents.hallucination.streaming.verify_response_streaming`)
+    keeps its own per-claim timeout/SSE machinery, but new callers that just
+    need "verify these N claims" use this.
+    """
+    if not claims:
+        return []
+
+    async def _one(claim: str) -> dict[str, Any]:
+        try:
+            return await verify_claim(
+                claim,
+                chroma_client,
+                neo4j_driver,
+                redis_client,
+                threshold=threshold,
+                model=model,
+                streaming=streaming,
+                expert_mode=expert_mode,
+                response_context=response_context,
+                conversation_context=conversation_context,
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad claim must not sink the batch
+            log_swallowed_error(f"{__name__}.verify_claims", exc)
+            return {
+                "claim": claim,
+                "status": VerificationStatus.error.value,
+                "confidence": 0.0,
+                "reason": f"verifier error: {exc}",
+                "verification_method": "error",
+            }
+
+    return await asyncio.gather(*[_one(c) for c in claims])
+
 
 async def verify_claim(
     claim: str,

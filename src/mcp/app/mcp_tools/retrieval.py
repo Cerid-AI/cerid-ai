@@ -943,12 +943,26 @@ async def pkb_answer_with_citations(
         _messages[-1]["content"] += (
             "\n- Cite the source identifiers from the context when you use them."
         )
-        answer = await call_internal_llm(
-            _messages,
-            temperature=0.1,
-            max_tokens=max(900, suggested_max_tokens(_mode, 900)),
-            stage="mcp_answer_with_citations",
-        )
+        _max_tokens = max(900, suggested_max_tokens(_mode, 900))
+        if getattr(config, "ENABLE_INLINE_NLI_GATING", False):
+            # Inline mode (opt-in): stream synthesis through the NLI gate so any
+            # sentence the retrieved evidence contradicts is suppressed
+            # mid-generation, not just flagged post-hoc.
+            from core.agents.hallucination.inline_gate import gated_synthesis
+            answer = await gated_synthesis(
+                _messages,
+                context=context,
+                stage="mcp_answer_with_citations",
+                temperature=0.1,
+                max_tokens=_max_tokens,
+            )
+        else:
+            answer = await call_internal_llm(
+                _messages,
+                temperature=0.1,
+                max_tokens=_max_tokens,
+                stage="mcp_answer_with_citations",
+            )
     answer = answer.strip()
 
     # 3. Extract claims from the answer + bind each to its source by

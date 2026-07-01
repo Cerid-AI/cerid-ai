@@ -22,6 +22,7 @@ import httpx
 
 import config
 from config.settings import MEMORY_TYPE_MIGRATION
+from core.context.identity import with_tenant_scope
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
@@ -541,6 +542,7 @@ async def detect_memory_conflict(
             query_texts=[new_memory_text],
             n_results=5,
             include=["documents", "metadatas", "distances"],
+            where=with_tenant_scope(None),
         )
     except Exception as e:
         logger.debug("Conflict detection similarity search failed: %s", e)
@@ -783,6 +785,7 @@ async def recall_memories(
             query_texts=[query],
             n_results=top_k * 3,  # over-fetch to compensate for decay filtering
             include=["documents", "metadatas", "distances"],
+            where=with_tenant_scope(None),
         )
     except Exception as e:
         logger.debug("Memory recall vector search failed: %s", e)

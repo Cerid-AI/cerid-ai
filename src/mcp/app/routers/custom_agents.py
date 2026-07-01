@@ -180,9 +180,9 @@ async def query_agent(agent_id: str, body: AgentQueryRequest):
         )
 
     # Delegate to the query agent with the custom agent's configuration
-    from core.agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query_full
 
-    result = await agent_query(
+    result = await agent_query_full(
         query=body.query,
         domains=agent.get("domains") or None,
         model=agent.get("model_override") or None,

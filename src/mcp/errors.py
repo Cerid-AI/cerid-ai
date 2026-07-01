@@ -18,6 +18,7 @@ __all__ = [
     "CreditExhaustedError",
     "RateLimitError",
     "ConfigError",
+    "FeatureGateError",
     "error_response",
 ]
 
@@ -36,6 +37,7 @@ class CeridError(Exception):
     """
 
     _default_prefix: str = "CERID_"
+    http_status: int = 500  # default HTTP status when rendered by the app handler
 
     def __init__(
         self,
@@ -89,12 +91,14 @@ class CreditExhaustedError(ProviderError):
     """Upstream provider returned HTTP 402 — credits or quota exhausted."""
 
     _default_prefix: str = "PROVIDER_CREDIT_"
+    http_status: int = 402
 
 
 class RateLimitError(ProviderError):
     """Upstream provider returned HTTP 429 — rate limit exceeded."""
 
     _default_prefix: str = "PROVIDER_RATE_"
+    http_status: int = 429
 
 
 class ConfigError(CeridError):
@@ -107,6 +111,7 @@ class FeatureGateError(CeridError):
     """Feature requires a higher tier (e.g. pro or enterprise)."""
 
     _default_prefix: str = "FEATURE_GATE_"
+    http_status: int = 403
 
 
 # ---------------------------------------------------------------------------

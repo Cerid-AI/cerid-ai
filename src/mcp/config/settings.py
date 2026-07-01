@@ -373,6 +373,13 @@ NLI_ONNX_FILENAME = os.getenv("NLI_ONNX_FILENAME", "onnx/model.onnx")
 NLI_MODEL_CACHE_DIR = os.getenv("NLI_MODEL_CACHE_DIR", "")
 NLI_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ENTAILMENT_THRESHOLD", "0.7"))
 NLI_CONTRADICTION_THRESHOLD = float(os.getenv("NLI_CONTRADICTION_THRESHOLD", "0.6"))
+# Inline NLI gating: when true, the MCP answer-synthesis path streams tokens
+# through core.agents.hallucination.inline_gate and SUPPRESSES any sentence the
+# retrieved evidence contradicts (contradiction >= NLI_CONTRADICTION_THRESHOLD)
+# mid-stream, instead of only verifying post-hoc. Default off — opt-in
+# capability; the proven post-hoc path (verify_claim / check_hallucinations) is
+# unchanged when this is false.
+ENABLE_INLINE_NLI_GATING = os.getenv("ENABLE_INLINE_NLI_GATING", "false").lower() == "true"
 # The retrieval NLI contradiction gate (query_agent Step 5.65) runs NLI on
 # (doc, query) pairs — but a query is a question, not a declarative hypothesis,
 # so DeBERTa-MNLI false-positives "contradiction" on definitional answers (it

@@ -492,37 +492,51 @@ class TestSDKSettings:
 
 
 class TestSDKSearch:
-    """POST /sdk/v1/search delegates to routers.query.query_knowledge."""
+    """POST /sdk/v1/search routes through the canonical agent_query_full path."""
 
-    @patch("app.routers.sdk.query_knowledge")
-    def test_search_success(self, mock_qk):
-        mock_qk.return_value = {
-            "sources": [
-                {"title": "auth.py", "chunk_text": "JWT token validation", "similarity": 0.88}
-            ],
-            "confidence": 0.88,
-        }
-
-        client = TestClient(_make_app())
-        resp = client.post(
-            "/sdk/v1/search",
-            json={"query": "JWT authentication", "domain": "coding", "top_k": 5},
-        )
+    def test_search_success(self):
+        with (
+            patch(
+                "core.agents.query_agent.agent_query_full",
+                new=AsyncMock(return_value={
+                    "sources": [
+                        {"title": "auth.py", "chunk_text": "JWT token validation", "similarity": 0.88}
+                    ],
+                    "confidence": 0.88,
+                }),
+            ),
+            patch("app.deps.get_chroma", return_value=None),
+            patch("app.deps.get_redis", return_value=None),
+            patch("app.deps.get_neo4j", return_value=None),
+            patch("app.deps.get_graph_store", return_value=None),
+        ):
+            client = TestClient(_make_app())
+            resp = client.post(
+                "/sdk/v1/search",
+                json={"query": "JWT authentication", "domain": "coding", "top_k": 5},
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert "results" in data
         assert "total_results" in data
         assert data["total_results"] == 1
 
-    @patch("app.routers.sdk.query_knowledge")
-    def test_search_no_results(self, mock_qk):
-        mock_qk.return_value = {"sources": [], "confidence": 0.0}
-
-        client = TestClient(_make_app())
-        resp = client.post(
-            "/sdk/v1/search",
-            json={"query": "nonexistent topic"},
-        )
+    def test_search_no_results(self):
+        with (
+            patch(
+                "core.agents.query_agent.agent_query_full",
+                new=AsyncMock(return_value={"sources": [], "confidence": 0.0}),
+            ),
+            patch("app.deps.get_chroma", return_value=None),
+            patch("app.deps.get_redis", return_value=None),
+            patch("app.deps.get_neo4j", return_value=None),
+            patch("app.deps.get_graph_store", return_value=None),
+        ):
+            client = TestClient(_make_app())
+            resp = client.post(
+                "/sdk/v1/search",
+                json={"query": "nonexistent topic"},
+            )
         assert resp.status_code == 200
         assert resp.json()["total_results"] == 0
 
