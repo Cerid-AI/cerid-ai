@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from http import HTTPStatus
 from typing import Any, Literal
 
 import httpx
@@ -129,7 +130,7 @@ class CustomApiSource(DataSource):
                     self.base_url,
                     headers=self._build_headers(),
                 )
-                if resp.status_code < 500:
+                if resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
                     return True, None
                 return False, f"Server returned {resp.status_code}"
         except (httpx.HTTPError, OSError) as e:

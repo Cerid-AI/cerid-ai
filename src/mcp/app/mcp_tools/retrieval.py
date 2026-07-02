@@ -706,7 +706,7 @@ async def pkb_hypothetical_doc(
 ) -> dict[str, Any]:
     num_variants = max(1, min(int(num_variants), 3))
 
-    from core.agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query  # retrieval-import-allowed: HyDE composes primitive
     from core.utils.internal_llm import call_internal_llm
 
     docs = []
@@ -825,7 +825,7 @@ async def pkb_answer_with_citations(
         raise InvalidParamsError("question must be non-empty")
 
     from core.agents.hallucination.extraction import extract_claims
-    from core.agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query  # retrieval-import-allowed: tool runs own verify pipeline
     from core.retrieval.surface_router import route as _surface_route
     from core.utils.cache import record_chunks_per_answer
     from core.utils.internal_llm import call_internal_llm
@@ -1030,6 +1030,8 @@ async def pkb_answer_with_citations(
             )
             out["verification"] = check.get("summary", {})
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.mcp_tools.retrieval', exc)
             logger.warning("pkb_answer_with_citations verify failed: %s", exc)
             out["verification_error"] = str(exc)
 

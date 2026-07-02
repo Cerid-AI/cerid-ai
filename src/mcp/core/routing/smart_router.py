@@ -21,6 +21,7 @@ import os
 import time
 from dataclasses import dataclass
 from enum import Enum
+from http import HTTPStatus
 
 import config
 from core.utils.swallowed import log_swallowed_error
@@ -212,7 +213,6 @@ def _load_tier_overlay() -> dict[str, str]:
                 if isinstance(k, str) and isinstance(v, str)
             } if isinstance(raw, dict) else {}
         except (OSError, ValueError) as exc:  # noqa: BLE001 — resilient overlay read
-            from core.utils.swallowed import log_swallowed_error
 
             log_swallowed_error("smart_router.tier_overlay", exc)
             _tier_overlay = {}
@@ -288,13 +288,14 @@ async def _check_ollama() -> bool:
         from core.utils.internal_llm import _get_ollama_client
         client = await _get_ollama_client()
         resp = await client.get(f"{ollama_url}/api/tags")
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             data = resp.json()
             _ollama_models = [m.get("name", "") for m in data.get("models", [])]
             _ollama_available = len(_ollama_models) > 0
         else:
             _ollama_available = False
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('core.routing.smart_router', exc)
         _ollama_available = False
 
     _ollama_checked_at = now

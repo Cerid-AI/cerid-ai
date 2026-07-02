@@ -57,7 +57,7 @@ class AutomationListResponse(BaseModel):
     automations: list[AutomationState]
 
 
-class AutomationUpdate(BaseModel):
+class ProAutomationUpdate(BaseModel):
     enabled: bool | None = Field(default=None)
     schedule: str | None = Field(
         default=None,
@@ -100,7 +100,7 @@ async def get_automation(name: str) -> AutomationState:
 
 
 @router.put("/{name}", response_model=AutomationState)
-async def put_automation(name: str, req: AutomationUpdate) -> AutomationState:
+async def put_automation(name: str, req: ProAutomationUpdate) -> AutomationState:
     if name not in automations.AUTOMATIONS:
         raise HTTPException(status_code=404, detail=f"unknown automation: {name}")
     spec = automations.AUTOMATIONS[name]

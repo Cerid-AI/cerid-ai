@@ -19,6 +19,7 @@ import hashlib
 import logging
 import time
 import uuid
+from http import HTTPStatus
 from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
@@ -151,9 +152,9 @@ class UrlWatchConnector(SourceConnector):
 
         try:
             resp = await guarded_get(url, method="HEAD", user_agent=_USER_AGENT)  # SSRF-guarded
-            if resp.status_code >= 400:
+            if resp.status_code >= HTTPStatus.BAD_REQUEST:
                 resp = await guarded_get(url, user_agent=_USER_AGENT)  # some servers reject HEAD
-            if resp.status_code >= 400:
+            if resp.status_code >= HTTPStatus.BAD_REQUEST:
                 return HealthStatus(
                     ok=False,
                     detail=f"HTTP {resp.status_code}",

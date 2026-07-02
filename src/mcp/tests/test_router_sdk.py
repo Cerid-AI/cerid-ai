@@ -184,7 +184,9 @@ class TestSDKTradingGate:
                     assert "confidence" in data
                 elif resp.status_code == 404:
                     pytest.skip("Trading routes not registered (CERID_TRADING_ENABLED=false at import)")
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.test_router_sdk', exc)
             pytest.skip("Trading endpoints not available")
 
     @pytest.mark.asyncio
@@ -203,7 +205,9 @@ class TestSDKTradingGate:
                     assert "violations" in data
                 elif resp.status_code == 404:
                     pytest.skip("Trading routes not registered")
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.test_router_sdk', exc)
             pytest.skip("Trading endpoints not available")
 
     @pytest.mark.asyncio
@@ -223,7 +227,9 @@ class TestSDKTradingGate:
                     assert data["kelly_fraction"] <= 0.25
                 elif resp.status_code == 404:
                     pytest.skip("Trading routes not registered")
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.test_router_sdk', exc)
             pytest.skip("Trading endpoints not available")
 
     @pytest.mark.asyncio
@@ -242,7 +248,9 @@ class TestSDKTradingGate:
                     assert "confirmation_score" in data
                 elif resp.status_code == 404:
                     pytest.skip("Trading routes not registered")
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.test_router_sdk', exc)
             pytest.skip("Trading endpoints not available")
 
     @pytest.mark.asyncio
@@ -261,7 +269,9 @@ class TestSDKTradingGate:
                     assert data["asset"] == "ETH"
                 elif resp.status_code == 404:
                     pytest.skip("Trading routes not registered")
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.test_router_sdk', exc)
             pytest.skip("Trading endpoints not available")
 
 

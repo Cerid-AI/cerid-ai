@@ -184,6 +184,8 @@ async def suggest_tags_endpoint(
         driver = get_neo4j()
         existing_tags = graph.list_tags(driver, limit=200)
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.taxonomy', e)
         logger.error(f"Tag suggest error: {e}")
         existing_tags = []
 

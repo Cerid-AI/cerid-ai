@@ -34,8 +34,9 @@ def _get_memory_mb() -> float:
         # macOS returns bytes, Linux returns KB
         if hasattr(ru, "ru_maxrss"):
             return ru.ru_maxrss / (1024 * 1024) if os.uname().sysname == "Darwin" else ru.ru_maxrss / 1024
-    except Exception:
-        pass
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.parsers.pdf', exc)
     return 0.0
 
 
@@ -44,7 +45,9 @@ def _extract_page_lite(page: Any) -> str:
     try:
         text = page.extract_text()
         return text.strip() if text else ""
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.parsers.pdf', exc)
         return ""
 
 
@@ -55,7 +58,9 @@ def _extract_page_full(page: Any, page_num: int, page_count: int) -> tuple[str, 
 
     try:
         tables = page.find_tables()
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.parsers.pdf', exc)
         # Table detection can fail on complex pages — fall back to text only
         return _extract_page_lite(page), 0
 
@@ -66,7 +71,9 @@ def _extract_page_full(page: Any, page_num: int, page_count: int) -> tuple[str, 
             table_count += 1
             try:
                 rows = table.extract()
-            except Exception:
+            except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('app.parsers.pdf', exc)
                 continue
             if not rows:
                 continue
@@ -89,7 +96,9 @@ def _extract_page_full(page: Any, page_num: int, page_count: int) -> tuple[str, 
             for bbox in table_bboxes:
                 filtered = filtered.outside_bounding_box(bbox)  # type: ignore[attr-defined]
             plain_text = filtered.extract_text()
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.parsers.pdf', exc)
             plain_text = page.extract_text()
 
         if plain_text and plain_text.strip():
@@ -159,7 +168,9 @@ def parse_pdf(file_path: str) -> dict[str, Any]:
                 else:
                     try:
                         page_text, page_tables = _extract_page_full(page, i, effective_pages)
-                    except Exception:
+                    except Exception as exc:
+                        from core.utils.swallowed import log_swallowed_error
+                        log_swallowed_error('app.parsers.pdf', exc)
                         # Full extraction failed — try lite
                         page_text = _extract_page_lite(page)
                         page_tables = 0
@@ -181,10 +192,13 @@ def parse_pdf(file_path: str) -> dict[str, Any]:
                                     f"{field_name}: {field_value}" if field_name
                                     else str(field_value)
                                 )
-                except Exception:
-                    pass  # form field extraction is best-effort
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.parsers.pdf', exc)
 
             except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('app.parsers.pdf', e)
                 pages_with_errors += 1
                 logger.warning(f"PDF page {i+1}/{effective_pages} failed: {e}")
             finally:

@@ -12,6 +12,7 @@ in interactive paths.
 """
 from __future__ import annotations
 
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -115,6 +116,6 @@ class WikidataAdapter(ExternalAPIAdapter):
                 _SPARQL_URL,
                 params={"query": "SELECT ?x WHERE { BIND(1 AS ?x) } LIMIT 1", "format": "json"},
             )
-            return resp.status_code < 500
+            return resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR
         except Exception:  # noqa: BLE001
             return False

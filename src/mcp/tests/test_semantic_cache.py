@@ -281,6 +281,8 @@ class TestThreadSafety:
                 emb = _random_embedding(seed=seed)
                 cache_store(f"query_{seed}", emb, {"seed": seed}, redis, ttl=300)
             except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('tests.test_semantic_cache', e)
                 errors.append(e)
 
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]

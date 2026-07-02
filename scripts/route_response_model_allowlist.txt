@@ -125,11 +125,7 @@ src/mcp/app/routers/providers.py::update_model_provider_config::PUT /config
 src/mcp/app/routers/query.py::query_endpoint::POST /query
 src/mcp/app/routers/recommendations.py::clear_recommendation::DELETE /{rec_id}
 src/mcp/app/routers/recommendations.py::dismiss_recommendation::POST /{rec_id}/dismiss
-src/mcp/app/routers/scanner.py::get_scan_progress::GET /admin/scan/{scan_id}
 src/mcp/app/routers/scanner.py::reset_scan_state::POST /admin/scan/reset
-src/mcp/app/routers/scanner.py::scan_preview::GET /admin/scan/preview
-src/mcp/app/routers/scanner.py::scan_preview_post::POST /admin/scan/preview
-src/mcp/app/routers/scanner.py::scan_state::GET /admin/scan/state
 src/mcp/app/routers/scanner.py::start_scan::POST /admin/scan
 src/mcp/app/routers/sdk.py::sdk_collections::GET /collections
 src/mcp/app/routers/sdk.py::sdk_health_detailed::GET /health/detailed
@@ -173,12 +169,6 @@ src/mcp/app/routers/taxonomy.py::list_tags_endpoint::GET /tags
 src/mcp/app/routers/taxonomy.py::merge_tags_endpoint::POST /tags/merge
 src/mcp/app/routers/taxonomy.py::suggest_tags_endpoint::GET /tags/suggest
 src/mcp/app/routers/taxonomy.py::update_artifact_taxonomy_endpoint::POST /taxonomy/artifact
-src/mcp/app/routers/trading_proxy.py::proxy_aggregate_portfolio::GET /aggregate/portfolio
-src/mcp/app/routers/trading_proxy.py::proxy_market_data::GET /market-data
-src/mcp/app/routers/trading_proxy.py::proxy_session_portfolio::GET /sessions/{name}/portfolio
-src/mcp/app/routers/trading_proxy.py::proxy_session_positions::GET /sessions/{name}/positions
-src/mcp/app/routers/trading_proxy.py::proxy_session_signals::GET /sessions/{name}/signals
-src/mcp/app/routers/trading_proxy.py::proxy_sessions::GET /sessions
 src/mcp/app/routers/upload.py::list_archive_files::GET /archive/files
 src/mcp/app/routers/upload.py::supported_extensions_endpoint::GET /upload/supported
 src/mcp/app/routers/upload.py::upload_file_endpoint::POST /upload

@@ -66,6 +66,8 @@ def parse_node(state: TriageStateDict) -> TriageStateDict:
     except (FileNotFoundError, ValueError) as e:
         return {**state, "status": "error", "error": str(e)}
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.agents.triage', e)
         return {**state, "status": "error", "error": f"Parse failed: {e}"}
 
 
@@ -319,6 +321,8 @@ async def triage_batch(
             )
             results.append(result)
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.agents.triage', e)
             logger.error(f"Triage failed for {file_spec.get('file_path', '?')}: {e}")
             results.append({
                 "file_path": file_spec.get("file_path", ""),

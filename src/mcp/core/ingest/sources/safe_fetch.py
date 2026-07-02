@@ -137,3 +137,60 @@ async def guarded_get(
                     request=resp.request,
                 )
     raise ValueError(f"too many redirects (> {MAX_REDIRECTS})")
+
+
+def guarded_get_sync(
+    url: str,
+    *,
+    method: str = "GET",
+    user_agent: str = "CeridAI-Connector/1.0",
+    timeout: float = DEFAULT_TIMEOUT,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Synchronous mirror of :func:`guarded_get` for sync call sites.
+
+    Same guarantees — validate the target, disable auto-redirects, manually
+    follow up to ``MAX_REDIRECTS`` hops re-validating each ``Location``, and
+    abort once the body exceeds ``max_bytes``. Kept side-by-side with the async
+    variant (both delegate to the shared :func:`assert_fetchable`) so the one
+    canonical guard covers both call styles without the security check drifting.
+    """
+    current = url
+    with httpx.Client(
+        timeout=timeout,
+        follow_redirects=False,  # validate every hop ourselves
+        headers={"User-Agent": user_agent, **(headers or {})},
+    ) as client:
+        for _hop in range(MAX_REDIRECTS + 1):
+            assert_fetchable(current)
+            with client.stream(method, current) as resp:
+                location = resp.headers.get("location")
+                if resp.is_redirect and location:
+                    current = urljoin(current, location)
+                    continue
+                total = 0
+                chunks: list[bytes] = []
+                for chunk in resp.iter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError(
+                            f"response body exceeds {max_bytes} byte cap (DoS guard)"
+                        )
+                    chunks.append(chunk)
+                body = b"".join(chunks)
+                resp_headers = httpx.Headers(
+                    [
+                        (k, v)
+                        for k, v in resp.headers.items()
+                        if k.lower()
+                        not in ("content-encoding", "content-length", "transfer-encoding")
+                    ]
+                )
+                return httpx.Response(
+                    status_code=resp.status_code,
+                    headers=resp_headers,
+                    content=body,
+                    request=resp.request,
+                )
+    raise ValueError(f"too many redirects (> {MAX_REDIRECTS})")

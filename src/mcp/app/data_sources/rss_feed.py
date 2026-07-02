@@ -19,6 +19,7 @@ import re
 import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -302,7 +303,7 @@ def _fetch_url(url: str, timeout: float = 10.0, etag: str | None = None,
         raise _BlockedURLError(f"Too many redirects following {url}")
 
     assert resp is not None  # loop runs at least once
-    if resp.status_code == 304:
+    if resp.status_code == HTTPStatus.NOT_MODIFIED:
         return None, {}
     resp.raise_for_status()
     resp_headers = {k.lower(): v for k, v in resp.headers.items()}

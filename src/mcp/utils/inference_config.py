@@ -28,6 +28,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from http import HTTPStatus
 
 from core.utils.swallowed import log_swallowed_error
 
@@ -140,7 +141,7 @@ def _probe_ollama() -> bool:
     try:
         import httpx
         resp = httpx.get(f"{ollama_url}/api/tags", timeout=2)
-        return resp.status_code == 200
+        return resp.status_code == HTTPStatus.OK
     except (httpx.HTTPError, OSError, ValueError) as exc:  # noqa: BLE001
         log_swallowed_error(
             "utils.inference_config.probe_ollama",
@@ -152,7 +153,7 @@ def _probe_ollama() -> bool:
         try:
             import httpx
             resp = httpx.get("http://localhost:11434/api/tags", timeout=2)
-            return resp.status_code == 200
+            return resp.status_code == HTTPStatus.OK
         except (httpx.HTTPError, OSError, ValueError) as exc:  # noqa: BLE001
             log_swallowed_error(
                 "utils.inference_config.probe_ollama_localhost",
@@ -168,7 +169,7 @@ def _probe_sidecar() -> tuple[bool, str]:
     try:
         import httpx
         resp = httpx.get(f"{url}/health", timeout=2)
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             return True, url
     except (httpx.HTTPError, OSError, ValueError) as exc:  # noqa: BLE001
         log_swallowed_error(

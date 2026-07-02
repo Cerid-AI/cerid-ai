@@ -200,7 +200,7 @@ async def _assess_claims(
     threshold: float,
 ) -> list[dict[str, Any]]:
     """Check how well each claim is covered by the KB (lightweight, no reranking)."""
-    from core.agents.query_agent import multi_domain_query
+    from core.agents.query_agent import multi_domain_query  # retrieval-import-allowed: component of full; would recurse
 
     verification_domains = [d for d in config.DOMAINS if d != "conversations"]
     assessments: list[dict[str, Any]] = []
@@ -226,7 +226,9 @@ async def _assess_claims(
                     nli = nli_score(r_content, claim)
                     if nli["entailment"] > best_nli["entailment"]:
                         best_nli = nli
-            except Exception:
+            except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.agents.self_rag', exc)
                 logger.debug("Self-RAG: NLI scoring failed for claim %r — using similarity", claim[:50])
 
             covered = float(best_nli["entailment"]) >= config.NLI_ENTAILMENT_THRESHOLD  # type: ignore[arg-type]
@@ -246,6 +248,8 @@ async def _assess_claims(
                 "top_source": results[0].get("filename", "") if results else "",
             })
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.self_rag', e)
             logger.warning("Self-RAG: claim assessment failed for %r: %s", claim[:50], e)
             assessments.append({
                 "claim": claim,
@@ -266,7 +270,7 @@ async def _retrieve_for_claims(
     neo4j_driver: Any,
 ) -> list[dict[str, Any]]:
     """Run targeted agent_query for each refined query (no reranking for speed)."""
-    from core.agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query  # retrieval-import-allowed: component of full; would recurse
 
     top_k = config.SELF_RAG_REFINED_TOP_K
     additional: list[dict[str, Any]] = []
@@ -283,6 +287,8 @@ async def _retrieve_for_claims(
             )
             additional.extend(result.get("results", []))
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.self_rag', e)
             logger.warning("Self-RAG: refined query failed for %r: %s", query[:50], e)
 
     return additional

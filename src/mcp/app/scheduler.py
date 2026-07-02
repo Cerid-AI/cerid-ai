@@ -58,6 +58,7 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
             },
         )
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         logger.warning(f"Failed to log scheduled job {job_name}: {e}")
 
 
@@ -119,6 +120,7 @@ async def _run_daily_digest() -> None:
             except Exception as exc:  # noqa: BLE001
                 log_swallowed_error("daily_digest.fire_event", exc)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("daily_digest", "error", duration, str(e))
         logger.error(f"Scheduled daily digest failed: {e}")
@@ -166,6 +168,7 @@ async def _run_inbox_triage() -> None:
         _log_execution("inbox_triage", "success", duration, msg)
         logger.info("Scheduled inbox triage completed: %s", msg)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("inbox_triage", "error", duration, str(e))
         logger.error(f"Scheduled inbox triage failed: {e}")
@@ -192,6 +195,7 @@ async def _run_rectify() -> None:
             from utils.webhooks import notify_rectify_findings
             await notify_rectify_findings(findings)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("rectify", "error", duration, str(e))
         logger.error(f"Scheduled rectify failed: {e}")
@@ -211,6 +215,7 @@ async def _run_health_check() -> None:
             from utils.webhooks import notify_health_warning
             await notify_health_warning(status)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("health_check", "error", duration, str(e))
         logger.error(f"Scheduled health check failed: {e}")
@@ -236,6 +241,7 @@ async def _run_stale_detection() -> None:
         _log_execution("stale_detection", "success", duration, f"{stale_count} stale")
         logger.info(f"Scheduled stale detection: {stale_count} stale in {duration:.1f}s")
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("stale_detection", "error", duration, str(e))
         logger.error(f"Scheduled stale detection failed: {e}")
@@ -269,6 +275,7 @@ async def _run_sync_export() -> None:
         _log_execution("sync_export", "success", duration, f"{neo4j_count} artifacts")
         logger.info("Scheduled sync export: %d artifacts in %.1fs", neo4j_count, duration)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("sync_export", "error", duration, str(e))
         logger.error("Scheduled sync export failed: %s", e)
@@ -336,6 +343,7 @@ async def _run_quarantine_purge() -> None:
                     except Exception as exc:  # noqa: BLE001 — collection-gone is a valid post-state during quarantine cleanup
                         log_swallowed_error(__name__, exc)
             except Exception as e:
+                log_swallowed_error('app.scheduler', e)
                 failed += 1
                 logger.warning("Quarantine purge failed for %s: %s", artifact_id, e)
 
@@ -350,6 +358,7 @@ async def _run_quarantine_purge() -> None:
             purged, duration, chunk_dropped, failed,
         )
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("quarantine_purge", "error", duration, str(e))
         logger.error("Scheduled quarantine purge failed: %s", e)
@@ -366,6 +375,7 @@ async def _run_tombstone_purge() -> None:
         _log_execution("tombstone_purge", "success", duration, f"{purged} purged")
         logger.info("Scheduled tombstone purge: %d expired in %.1fs", purged, duration)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("tombstone_purge", "error", duration, str(e))
         logger.error("Scheduled tombstone purge failed: %s", e)
@@ -403,6 +413,7 @@ async def _run_folder_scan() -> None:
         _log_execution("folder_scan", "success", duration, detail)
         logger.info(f"Folder scan complete: {detail} ({duration:.1f}s)")
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         _log_execution("folder_scan", "error", time.time() - start, str(e))
         logger.error(f"Folder scan failed: {e}")
 
@@ -456,7 +467,8 @@ async def _run_ingest_recovery() -> None:
         try:
             from app.main import app as _app  # type: ignore[import]  # FastAPI app
             queue = getattr(getattr(_app, "state", None), "processor_queue", None)
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.scheduler', exc)
             queue = None
 
         if queue is not None:
@@ -487,6 +499,7 @@ async def _run_ingest_recovery() -> None:
             _log_execution("ingest_recovery", "success", duration, detail)
             logger.info("ingest_recovery (direct): %s in %.1fs", detail, duration)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("ingest_recovery", "error", duration, str(e))
         logger.error("ingest_recovery scheduled job failed: %s", e)
@@ -588,6 +601,7 @@ async def _run_wiki_drift_lint() -> None:
         _log_execution("wiki_drift_lint", "success", duration, detail)
         logger.info("wiki_drift_lint: %s in %.1fs", detail, duration)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("wiki_drift_lint", "error", duration, str(e))
         logger.error("wiki_drift_lint failed: %s", e)
@@ -664,6 +678,7 @@ async def _run_wiki_stale_sweep() -> None:
         _log_execution("wiki_stale_sweep", "success", duration, detail)
         logger.info("wiki_stale_sweep: %s in %.1fs", detail, duration)
     except Exception as e:
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("wiki_stale_sweep", "error", duration, str(e))
         logger.error("wiki_stale_sweep failed: %s", e)
@@ -918,7 +933,8 @@ async def _run_compute_entity_embeddings() -> None:
         try:
             from app.main import app as _app  # type: ignore[import]
             queue = getattr(getattr(_app, "state", None), "processor_queue", None)
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.scheduler', exc)
             queue = None
 
         job = ComputeEntityEmbeddingsJob()
@@ -1000,7 +1016,8 @@ async def _run_compute_umap_3d() -> None:
         try:
             from app.main import app as _app  # type: ignore[import]
             queue = getattr(getattr(_app, "state", None), "processor_queue", None)
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.scheduler', exc)
             queue = None
 
         job = ComputeUmap3DJob()
@@ -1033,7 +1050,8 @@ async def _run_compute_trust_state() -> None:
         try:
             from app.main import app as _app  # type: ignore[import]
             queue = getattr(getattr(_app, "state", None), "processor_queue", None)
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.scheduler', exc)
             queue = None
 
         job = ComputeTrustStateJob()
@@ -1074,7 +1092,8 @@ async def _run_derive_domains() -> None:
         try:
             from app.main import app as _app  # type: ignore[import]
             queue = getattr(getattr(_app, "state", None), "processor_queue", None)
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.scheduler', exc)
             queue = None
 
         job = DeriveDomainsJob()
@@ -1118,7 +1137,8 @@ async def _run_backfill_enrichment() -> None:
         try:
             from app.main import app as _app  # type: ignore[import]
             queue = getattr(getattr(_app, "state", None), "processor_queue", None)
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.scheduler', exc)
             queue = None
 
         job = BackfillEnrichmentJob()

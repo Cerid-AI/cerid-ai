@@ -112,7 +112,9 @@ def is_enabled(slug: str, redis_client: Any | None = None) -> bool:
             raw = redis_client.get(_redis_key(slug))
             if raw is not None:
                 return raw in ("1", b"1", 1)
-        except Exception:  # silent-catch-allowed: Redis unreachable returns default — never breaks API calls
+        except Exception as exc:  # silent-catch-allowed: Redis unreachable returns default — never breaks API calls
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.services.external_apis.registry', exc)
             logger.debug("Redis get failed for %s enabled flag", slug)
 
     # Default: enabled iff the key requirement is satisfied

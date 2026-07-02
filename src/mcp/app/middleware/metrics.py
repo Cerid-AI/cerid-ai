@@ -44,6 +44,8 @@ async def _record_metric_async(name: str, value: float, tags: dict[str, str] | N
         collector = get_metrics_collector()
         collector.record_metric(name, value, tags)
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.middleware.metrics', exc)
         logger.debug("Metrics recording failed (non-critical): %s", exc)
 
 

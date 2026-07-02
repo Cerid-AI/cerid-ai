@@ -42,7 +42,9 @@ def parse_epub(file_path: str) -> dict[str, Any]:
             ns = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
             rootfile = container_root.find(".//c:rootfile", ns)
             opf_path = rootfile.get("full-path", "") if rootfile is not None else ""
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.parsers.ebook', exc)
             opf_path = ""
             for name in zf.namelist():
                 if name.endswith(".opf"):
@@ -98,6 +100,8 @@ def parse_epub(file_path: str) -> dict[str, Any]:
                 if chapter_text.strip():
                     chapters.append(chapter_text.strip())
             except (KeyError, Exception) as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('app.parsers.ebook', e)
                 logger.debug(f"EPUB: skipping {href}: {e}")
 
     finally:

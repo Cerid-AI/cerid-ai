@@ -12,6 +12,7 @@ recommended for high-volume entity-enrichment workloads.
 """
 from __future__ import annotations
 
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -78,6 +79,6 @@ class WikipediaAdapter(ExternalAPIAdapter):
         client = await get_http_client()
         try:
             resp = await client.get(f"{_BASE_URL}/page/summary/Cerid_AI")
-            return resp.status_code < 500
+            return resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR
         except Exception:  # noqa: BLE001
             return False

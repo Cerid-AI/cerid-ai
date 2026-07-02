@@ -24,6 +24,7 @@ import json as _json
 import logging
 import os
 from collections.abc import AsyncIterator
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -344,7 +345,7 @@ async def _call_ollama(
                 status = exc.response.status_code
                 # Retry server-side (5xx) and rate-limit (429) but not 4xx
                 # classes that signal a bad request — backoff won't fix those.
-                if (500 <= status < 600 or status == 429) and attempt + 1 < max_retries:
+                if (HTTPStatus.INTERNAL_SERVER_ERROR <= status < 600 or status == HTTPStatus.TOO_MANY_REQUESTS) and attempt + 1 < max_retries:
                     delay = backoff_base * (2 ** attempt)
                     logger.info(
                         "%s HTTP %d (attempt %d/%d) — retry in %.2fs",
@@ -443,7 +444,7 @@ async def _stream_ollama(
 
     client = await _get_ollama_client()
     async with client.stream("POST", f"{base_url}/api/chat", json=payload) as resp:
-        if resp.status_code >= 400:
+        if resp.status_code >= HTTPStatus.BAD_REQUEST:
             # Read the error body before raising so the exception carries detail
             # (streaming responses raise ResponseNotRead otherwise).
             await resp.aread()

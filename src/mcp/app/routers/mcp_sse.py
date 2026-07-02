@@ -87,6 +87,8 @@ async def _session_reaper() -> None:
         except asyncio.CancelledError:
             return
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.routers.mcp_sse', exc)
             logger.warning("MCP session reaper error (continuing): %s", exc)
 
 
@@ -170,6 +172,8 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
             )
             return {"jsonrpc": "2.0", "id": msg_id, "error": _error_envelope_for(e)}
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.routers.mcp_sse', e)
             logger.error(f"Tool call error {tool_name}: {e}")
             return {"jsonrpc": "2.0", "id": msg_id, "error": _error_envelope_for(e)}
     elif method == "ping":
@@ -303,6 +307,8 @@ async def mcp_call_sync(request: Request):
             return Response(status_code=400, content="empty request body")
         msg = json.loads(body_text)
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.mcp_sse', e)
         return Response(status_code=400, content=f"parse error: {e}")
 
     method = msg.get("method", "")
@@ -329,6 +335,8 @@ async def mcp_messages(request: Request):
             return Response(status_code=202)
         msg = json.loads(body_text)
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.mcp_sse', e)
         logger.error(f"[MCP] Parse error: {e}")
         return Response(status_code=400, content=str(e))
 

@@ -193,7 +193,9 @@ class TestSubmoduleAccess:
         try:
             from core.agents.hallucination import verification as _v
             has_via_core = hasattr(_v, "httpx")
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.test_hallucination_imports', exc)
             has_via_core = False
         assert has_direct or has_via_core, (
             "httpx must be patchable via agents.hallucination or "

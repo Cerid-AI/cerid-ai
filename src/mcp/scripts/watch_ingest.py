@@ -26,6 +26,7 @@ import os
 import sys
 import time
 from datetime import datetime
+from http import HTTPStatus
 from pathlib import Path
 
 import httpx
@@ -228,7 +229,7 @@ def _flush_batch():
             json={"items": batch_items},
             timeout=120,  # longer timeout for batch
         )
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             data = resp.json()
             succeeded = data.get("succeeded", 0)
             failed = data.get("failed", 0)

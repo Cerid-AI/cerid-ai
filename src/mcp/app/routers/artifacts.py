@@ -115,6 +115,7 @@ def recategorize(
             extra={"old_domain": old_domain, "sub_category": sub_category},
         )
     except Exception as e:
+        log_swallowed_error('app.routers.artifacts', e)
         logger.error(f"Redis log failed: {e}")
 
     return {

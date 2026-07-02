@@ -105,7 +105,9 @@ def _build_route_set() -> set[tuple[str, str]]:
             modname = f"{module_prefix}.{py_file.stem}"
             try:
                 mod = importlib.import_module(modname)
-            except Exception:
+            except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('tests.test_frontend_backend_route_contract', exc)
                 continue
             # A module can expose ``router`` and/or specialised auxiliaries
             # (e.g. agent_console.activity_router).

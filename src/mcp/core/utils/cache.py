@@ -61,6 +61,7 @@ def log_event(
         pipe.expire(config.REDIS_INGEST_LOG, 86400 * 30)  # 30-day TTL
         pipe.execute()
     except Exception as e:
+        log_swallowed_error('core.utils.cache', e)
         logger.error(f"Failed to log event to Redis: {e}")
 
 
@@ -70,6 +71,7 @@ def get_log(redis_client, limit: int = 50) -> list[dict[str, Any]]:
         entries = redis_client.lrange(config.REDIS_INGEST_LOG, 0, limit - 1)
         return [json.loads(e) for e in entries]
     except Exception as e:
+        log_swallowed_error('core.utils.cache', e)
         logger.error(f"Failed to read ingest log: {e}")
         return []
 
@@ -103,6 +105,7 @@ def log_conversation_metrics(
         redis_client.rpush(key, entry)
         redis_client.expire(key, REDIS_CONV_METRICS_TTL)
     except Exception as e:
+        log_swallowed_error('core.utils.cache', e)
         logger.warning(f"Failed to log conversation metrics: {e}")
 
 
@@ -152,6 +155,7 @@ def log_verification_metrics(
         redis_client.rpush(REDIS_VERIFICATION_METRICS_KEY, entry)
         redis_client.expire(REDIS_VERIFICATION_METRICS_KEY, REDIS_VERIFICATION_METRICS_TTL)
     except Exception as e:
+        log_swallowed_error('core.utils.cache', e)
         logger.warning(f"Failed to log verification metrics: {e}")
 
     # Phase 4.3 — also feed the time-series MetricsCollector that
@@ -188,6 +192,7 @@ def log_claim_feedback(
         redis_client.rpush(REDIS_VERIFICATION_FEEDBACK_KEY, entry)
         redis_client.expire(REDIS_VERIFICATION_FEEDBACK_KEY, REDIS_VERIFICATION_METRICS_TTL)
     except Exception as e:
+        log_swallowed_error('core.utils.cache', e)
         logger.warning(f"Failed to log claim feedback: {e}")
 
 
@@ -227,6 +232,7 @@ def log_verification_error(
         redis_client.ltrim(REDIS_VERIFICATION_ERRORS_KEY, -REDIS_VERIFICATION_ERRORS_MAX, -1)
         redis_client.expire(REDIS_VERIFICATION_ERRORS_KEY, REDIS_VERIFICATION_METRICS_TTL)
     except Exception as e:
+        log_swallowed_error('core.utils.cache', e)
         logger.warning(f"Failed to log verification error: {e}")
 
 

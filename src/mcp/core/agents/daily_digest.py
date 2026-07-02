@@ -33,6 +33,7 @@ import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
 from typing import Any, Protocol
 
 from core.utils.artifact_tags import parse_tag_object
@@ -381,7 +382,7 @@ async def _persist(result: DigestResult, mcp_base_url: str) -> str | None:
                 json=payload,
                 headers={"X-Client-ID": "daily_digest"},
             )
-        if resp.status_code != 200:
+        if resp.status_code != HTTPStatus.OK:
             logger.warning("daily_digest persist returned %d", resp.status_code)
             return None
         body = resp.json()

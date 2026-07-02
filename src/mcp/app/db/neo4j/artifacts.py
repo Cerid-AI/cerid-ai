@@ -647,6 +647,8 @@ def save_verification_report(
         try:
             canonical.append(ClaimVerification.from_legacy_dict(raw))
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.db.neo4j.artifacts', exc)
             logger.warning(
                 "verification_report.claim_normalize_failed: %s — keys=%s",
                 exc, list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__,

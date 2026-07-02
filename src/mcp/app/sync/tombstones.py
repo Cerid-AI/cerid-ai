@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +142,8 @@ def apply_tombstones(
                     skipped_absent += 1
                     continue
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.sync.tombstones', exc)
             logger.warning("Tombstone Neo4j delete failed for %s: %s", artifact_id[:8], exc)
             errors += 1
             continue
@@ -206,7 +209,7 @@ def _delete_chroma_chunks(chroma_url: str, domain: str, chunk_ids: list[str]) ->
             f"{chroma_url}/api/v1/collections/{coll_name}",
             timeout=10.0,
         )
-        if resp.status_code != 200:
+        if resp.status_code != HTTPStatus.OK:
             return
         coll_id = resp.json().get("id", coll_name)
         del_resp = httpx.post(
@@ -216,6 +219,8 @@ def _delete_chroma_chunks(chroma_url: str, domain: str, chunk_ids: list[str]) ->
         )
         del_resp.raise_for_status()
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.tombstones', exc)
         logger.warning(
             "Tombstone ChromaDB delete failed for %s/%s: %s",
             domain, chunk_ids[0][:8] if chunk_ids else "?", exc,

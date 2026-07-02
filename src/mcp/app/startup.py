@@ -35,6 +35,8 @@ def _probe_collection_dim(collection: Any) -> int | None:
     try:
         peek = collection.peek(1)
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup', exc)
         logger.warning("Collection peek failed for %r: %s", getattr(collection, "name", "?"), exc)
         return None
 
@@ -72,6 +74,8 @@ def validate_collection_dimensions(chroma_client: Any, expected_dim: int) -> lis
     try:
         collections = chroma_client.list_collections()
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup', exc)
         logger.warning("Could not enumerate Chroma collections at startup: %s", exc)
         return mismatches
 
@@ -87,6 +91,8 @@ def validate_collection_dimensions(chroma_client: Any, expected_dim: int) -> lis
         try:
             coll = chroma_client.get_collection(name=name)
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.startup', exc)
             logger.warning("Could not fetch collection %s for dim probe: %s", name, exc)
             continue
 
@@ -135,5 +141,7 @@ def run_startup_dim_check() -> list[dict[str, Any]]:
             )
         return mismatches
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup', exc)
         logger.warning("Startup dim check skipped (non-fatal): %s", exc)
         return []

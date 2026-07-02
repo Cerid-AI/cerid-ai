@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import re
+from http import HTTPStatus
 
 import httpx
 
@@ -68,7 +69,7 @@ class WolframAlphaSource(DataSource):
                     "https://api.wolframalpha.com/v1/result",
                     params={"appid": app_id, "i": query},
                 )
-                if resp.status_code == 200 and resp.text:
+                if resp.status_code == HTTPStatus.OK and resp.text:
                     return [DataSourceResult(
                         title=f"Wolfram Alpha: {query}",
                         content=resp.text,

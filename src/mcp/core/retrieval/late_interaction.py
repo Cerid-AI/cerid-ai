@@ -103,6 +103,8 @@ def late_interaction_rerank(
     try:
         query_embeddings = embed_fn(query_windows)
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.retrieval.late_interaction', e)
         logger.warning("Failed to embed query windows: %s", e)
         return results
 
@@ -115,7 +117,9 @@ def late_interaction_rerank(
 
         try:
             doc_embeddings = embed_fn(doc_windows[:20])  # Cap windows for performance
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.retrieval.late_interaction', exc)
             continue
 
         maxsim = compute_maxsim(query_embeddings, doc_embeddings)

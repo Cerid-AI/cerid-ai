@@ -23,6 +23,7 @@ import logging
 import os
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from http import HTTPStatus
 from pathlib import Path
 
 import httpx
@@ -240,14 +241,14 @@ async def test_openrouter_key(req: OpenRouterKeyTestRequest) -> OpenRouterKeyTes
                 "https://openrouter.ai/api/v1/auth/key",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             data = resp.json().get("data", {})
             limit = data.get("limit_remaining")
             return OpenRouterKeyTestResponse(
                 valid=True,
                 credits_remaining=float(limit) if limit is not None else None,
             )
-        if resp.status_code == 401:
+        if resp.status_code == HTTPStatus.UNAUTHORIZED:
             return OpenRouterKeyTestResponse(valid=False, error="Invalid API key (401)")
         return OpenRouterKeyTestResponse(
             valid=False, error=f"Unexpected status {resp.status_code}"
@@ -343,7 +344,7 @@ async def _probe_hf_gated_model(client: httpx.AsyncClient, token: str, model_id:
             f"https://huggingface.co/api/models/{model_id}",
             headers={"Authorization": f"Bearer {token}"},
         )
-        return resp.status_code == 200
+        return resp.status_code == HTTPStatus.OK
     except (httpx.HTTPError, OSError):
         return False
 
@@ -364,9 +365,9 @@ async def test_hf_token(req: HFTokenTestRequest) -> HFTokenTestResponse:
                 "https://huggingface.co/api/whoami-v2",
                 headers={"Authorization": f"Bearer {token}"},
             )
-            if who.status_code == 401:
+            if who.status_code == HTTPStatus.UNAUTHORIZED:
                 return HFTokenTestResponse(valid=False, error="Invalid token (401)")
-            if who.status_code != 200:
+            if who.status_code != HTTPStatus.OK:
                 return HFTokenTestResponse(
                     valid=False, error=f"Unexpected status {who.status_code}"
                 )

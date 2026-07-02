@@ -108,3 +108,64 @@ class TestGuardedGetHeaderMerge:
 
         assert captured["headers"]["User-Agent"] == "cerid-test/1"
         assert captured["headers"]["Accept"] == "text/html"
+
+
+class TestGuardedGetSync:
+    """Phase 5 — sync mirror of guarded_get for sync call sites (html_scrape,
+    clipboard daemon). Same SSRF guarantees as the async variant."""
+
+    def test_internal_address_refused(self):
+        """A URL resolving to an internal address is refused before any fetch."""
+        from core.ingest.sources.safe_fetch import guarded_get_sync
+
+        with patch("socket.getaddrinfo", return_value=_PRIVATE):
+            with pytest.raises(ValueError, match="SSRF guard"):
+                guarded_get_sync("http://metadata.internal/")
+
+    def test_scheme_validated(self):
+        from core.ingest.sources.safe_fetch import guarded_get_sync
+
+        with pytest.raises(ValueError, match="scheme"):
+            guarded_get_sync("file:///etc/passwd")
+
+    def test_disables_autoredirect(self, monkeypatch):
+        """The sync client never delegates redirect-following to httpx."""
+        from core.ingest.sources import safe_fetch
+
+        captured: dict = {}
+
+        class _Boom(Exception):
+            pass
+
+        class _Client:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def stream(self, *a, **k):
+                raise _Boom()
+
+        monkeypatch.setattr(safe_fetch, "assert_fetchable", lambda url: None)
+        monkeypatch.setattr("httpx.Client", _Client)
+
+        with pytest.raises(_Boom):
+            safe_fetch.guarded_get_sync("https://example.com/x")
+        assert captured["follow_redirects"] is False
+
+
+class TestHtmlScrapeGuard:
+    def test_httpx_text_get_uses_guarded_sync(self, monkeypatch):
+        """The operator-supplied sitemap/page fetch routes through the guard."""
+        from core.ingest.sources import safe_fetch
+
+        with patch("socket.getaddrinfo", return_value=_PRIVATE):
+            from core.knowledge.adapter_html_scrape import _httpx_text_get
+
+            with pytest.raises(ValueError, match="SSRF guard"):
+                _httpx_text_get("http://metadata.internal/", "ua/1")
+        assert safe_fetch.guarded_get_sync is not None

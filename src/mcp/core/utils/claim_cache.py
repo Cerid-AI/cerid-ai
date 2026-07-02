@@ -158,7 +158,9 @@ async def get_cached_verdict(
             _l1_set(key, verdict)  # promote to L1
             logger.debug("Claim L2 cache hit: %s -> %s", key, verdict.get("status"))
             return verdict
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.utils.claim_cache', exc)
         logger.debug("Claim cache miss or error: %s", key)
     return None
 
@@ -219,4 +221,6 @@ async def cache_verdict(
         await asyncio.to_thread(redis_client.set, key, json.dumps(cache_entry), ttl)
         logger.debug("Claim cached: %s (status=%s, ttl=%d)", key, cache_entry["status"], ttl)
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.utils.claim_cache', e)
         logger.debug("Failed to cache claim %s: %s", key, e)

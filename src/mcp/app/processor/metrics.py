@@ -138,8 +138,8 @@ def _sync_cost_usd_7d(redis_client: Any) -> Decimal:
         if len(parts) == 2:
             try:
                 total += Decimal(parts[1])
-            except Exception:  # silent-catch-allowed: malformed cost-row decimal — skip, sum the rest
-                pass
+            except Exception as exc:  # silent-catch-allowed: malformed cost-row decimal — skip, sum the rest
+                log_swallowed_error('app.processor.metrics', exc)
     return total
 
 

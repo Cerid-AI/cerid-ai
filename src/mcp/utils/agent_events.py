@@ -48,6 +48,8 @@ def emit_agent_event(
         }
         redis.xadd(STREAM_KEY, event, maxlen=STREAM_MAXLEN)
     except Exception as e:  # noqa: BLE001
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('utils.agent_events', e)
         logger.debug("Failed to emit agent event: %s", e)
 
 

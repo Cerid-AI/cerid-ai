@@ -239,6 +239,8 @@ async def delete_memory(memory_id: str):
                 filename=record["filename"] or "",
             )
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.routers.memories', e)
             logger.warning(f"Redis audit log failed for memory deletion: {e}")
 
         return {"status": "deleted", "memory_id": memory_id}

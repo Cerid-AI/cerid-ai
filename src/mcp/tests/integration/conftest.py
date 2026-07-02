@@ -32,6 +32,7 @@ Design principles:
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 import warnings
@@ -108,7 +109,9 @@ def stack_reachable(mcp_base: str) -> bool:
         import httpx
         r = httpx.get(f"{mcp_base}/health", timeout=5.0)
         return r.status_code == 200
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('tests.integration.conftest', exc)
         return False
 
 
@@ -185,6 +188,8 @@ def neo4j_driver(request: pytest.FixtureRequest):
         with driver.session() as s:
             s.run("RETURN 1").single()
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('tests.integration.conftest', exc)
         pytest.skip(f"neo4j unreachable ({exc}) — graph assertions unavailable")
     yield driver
     driver.close()
@@ -194,7 +199,7 @@ def _direct_orphan_sweep() -> None:
     """Run the m0002 predicate directly against Neo4j. Safe — only
     deletes :VerificationReport nodes with ZERO provenance (no edges,
     no source_urls, no verification_methods)."""
-    try:
+    with contextlib.suppress(Exception):  # best-effort orphan sweep in test session setup
         import os
 
         from neo4j import GraphDatabase
@@ -221,8 +226,6 @@ def _direct_orphan_sweep() -> None:
                 )
         finally:
             driver.close()
-    except Exception:  # silent-catch-allowed: best-effort orphan sweep in test session setup
-        pass
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -267,7 +270,7 @@ def cleanup_ids() -> Iterator[list[tuple[str, str]]]:
     # leaked ids are observability noise, not failures.
     import httpx
     for kind, _id in accumulator:
-        try:
+        with contextlib.suppress(Exception):  # best-effort artifact teardown
             if kind == "conversation":
                 httpx.delete(f"{MCP_BASE}/conversations/{_id}", timeout=5.0)
             elif kind == "artifact":
@@ -275,5 +278,3 @@ def cleanup_ids() -> Iterator[list[tuple[str, str]]]:
                     f"{MCP_BASE}/admin/kb/artifact/{_id}", timeout=5.0
                 )
             # Add more kinds as preservation tests introduce them.
-        except Exception:  # silent-catch-allowed: best-effort artifact teardown
-            pass

@@ -18,6 +18,7 @@ decompression automatically.
 from __future__ import annotations
 
 import html
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -118,6 +119,6 @@ class StackExchangeAdapter(ExternalAPIAdapter):
                 params={"site": "stackoverflow"},
                 headers={"Accept-Encoding": "gzip"},
             )
-            return resp.status_code < 500
+            return resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR
         except Exception:  # noqa: BLE001
             return False

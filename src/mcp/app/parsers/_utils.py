@@ -42,7 +42,7 @@ def _strip_html_tags(html: str) -> str:
         try:
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error("parsers.html_strip", exc)
-        except Exception:  # noqa: BLE001 — observability must not block the fallback
+        except Exception:  # noqa: BLE001  # silent-catch-meta: swallowing a failure of log_swallowed_error itself
             pass
         return re.sub(r"<[^>]+>", " ", html).strip()
 

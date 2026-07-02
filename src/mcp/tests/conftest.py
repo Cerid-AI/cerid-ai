@@ -3,6 +3,7 @@
 
 """Shared test fixtures and dependency stubs for cerid-ai tests."""
 
+import contextlib
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -121,10 +122,8 @@ def pytest_configure(config):
 # into sys.modules that leaks into later tests patching
 # ``core.agents.hallucination.verification`` / ``.streaming``. (Exposed when
 # surface-biased retrieval became default-ON and shifted import timing.)
-try:  # noqa: SIM105
+with contextlib.suppress(Exception):  # real hallucination package may be unavailable in some envs
     import core.agents.hallucination  # noqa: F401
-except Exception:  # noqa: BLE001 — best-effort; real package may be unavailable in some envs
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -153,22 +152,18 @@ def _reset_llm_client():
     os.environ["OPENROUTER_API_KEY"] = "test-dummy-key"  # pragma: allowlist secret
 
     # Also reset internal_llm client
-    try:
+    with contextlib.suppress(Exception):  # best-effort internal_llm client reset
         import core.utils.internal_llm as _internal_llm_mod
         _internal_llm_mod._ollama_client = None
-    except Exception:
-        pass
 
     _llm_mod._client = None
     clear_l1_cache()
     # GA P0.5: surface-bias retrieval is now default-ON, so the C2 wiki-fetcher
     # registry must be reset between tests — a fetcher leaked from one test would
     # otherwise inject wiki results into later compiled_summary queries.
-    try:
+    with contextlib.suppress(Exception):  # best-effort wiki-fetcher registry reset
         from core.agents.query_agent import set_wiki_page_fetcher
         set_wiki_page_fetcher(None)
-    except Exception:  # noqa: BLE001 — best-effort test hygiene
-        pass
     # Reset all circuit breakers to prevent cross-test state leakage.
     # The "bifrost-*" breaker names survive as legacy identifiers for
     # historical call-site categories (rerank/claims/verify/...); Bifrost

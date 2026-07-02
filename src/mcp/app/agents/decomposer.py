@@ -284,6 +284,8 @@ async def multi_domain_query(
                                 ))
                                 seen_ids.add(cid)
                         except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+                            from core.utils.swallowed import log_swallowed_error
+                            log_swallowed_error('app.agents.decomposer', e)
                             logger.debug(f"BM25-only fetch failed for {domain}: {e}")
 
             return formatted

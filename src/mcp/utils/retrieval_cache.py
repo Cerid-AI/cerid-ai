@@ -77,6 +77,8 @@ class RetrievalCache:
                 logger.debug("Retrieval cache hit (top_k=%d)", top_k)
                 return json.loads(raw)
         except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('utils.retrieval_cache', exc)
             logger.debug("Retrieval cache get error: %s", exc)
 
         self._misses += 1
@@ -94,6 +96,8 @@ class RetrievalCache:
             self._redis().setex(key, self._ttl, json.dumps(results, default=str))
             logger.debug("Retrieval cache set (top_k=%d, ttl=%ds)", top_k, self._ttl)
         except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('utils.retrieval_cache', exc)
             logger.debug("Retrieval cache set error: %s", exc)
 
     def invalidate_all(self) -> None:
@@ -102,6 +106,8 @@ class RetrievalCache:
             new_gen = self._redis().incr(self.GENERATION_KEY)
             logger.info("Retrieval cache invalidated (generation=%d)", new_gen)
         except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('utils.retrieval_cache', exc)
             logger.debug("Retrieval cache invalidate error: %s", exc)
 
     def hit_rate(self) -> dict:

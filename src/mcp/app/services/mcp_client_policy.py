@@ -182,7 +182,7 @@ def audit_call(
         )
     except ImportError:
         pass
-    except Exception:  # noqa: BLE001 — observability must never raise
+    except Exception:  # noqa: BLE001  # silent-catch-meta: sentry breadcrumb emit must never raise
         pass
 
 

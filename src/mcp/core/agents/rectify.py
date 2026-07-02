@@ -61,6 +61,8 @@ def find_similar_artifacts(
     try:
         collection = chroma_client.get_collection(name=config.collection_name(domain))
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.rectify', e)
         logger.debug(f"Collection not found for domain {domain}: {e}")
         return []
 
@@ -139,6 +141,8 @@ def find_orphaned_chunks(
         try:
             collection = chroma_client.get_collection(name=config.collection_name(domain))
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.rectify', e)
             logger.debug(f"Collection not found for domain {domain}: {e}")
             continue
 
@@ -197,6 +201,8 @@ def resolve_duplicates(
                 collection = chroma_client.get_collection(name=config.collection_name(artifact['domain']))
                 collection.delete(ids=chunk_ids)
             except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.agents.rectify', e)
                 logger.warning(f"Failed to delete chunks for {artifact['id']}: {e}")
 
         try:
@@ -209,6 +215,8 @@ def resolve_duplicates(
                     id=artifact["id"],
                 )
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.rectify', e)
             logger.error(f"Failed to delete artifact {artifact['id']} from Neo4j: {e}")
             continue
 
@@ -229,6 +237,8 @@ def resolve_duplicates(
                     extra={"kept": keep_artifact_id, "content_hash": content_hash},
                 )
             except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.agents.rectify', e)
                 logger.debug(f"Failed to log rectify event: {e}")
 
     return {
@@ -254,6 +264,8 @@ def cleanup_orphaned_chunks(
             collection.delete(ids=chunk_ids)
             cleaned[domain] = len(chunk_ids)
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.rectify', e)
             logger.error(f"Failed to clean orphans in {domain}: {e}")
             cleaned[domain] = 0
 
@@ -393,6 +405,8 @@ async def rectify(
                 },
             )
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.rectify', e)
             logger.debug(f"Failed to log rectify event: {e}")
 
     return report

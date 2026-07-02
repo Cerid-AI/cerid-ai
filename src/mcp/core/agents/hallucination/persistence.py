@@ -30,5 +30,7 @@ def get_hallucination_report(
         if data:
             return json.loads(data)
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.hallucination.persistence', e)
         logger.warning("Failed to retrieve hallucination report: %s", e)
     return None

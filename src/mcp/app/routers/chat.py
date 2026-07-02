@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncGenerator
+from http import HTTPStatus
 
 import httpx
 from fastapi import APIRouter, Request
@@ -110,7 +111,7 @@ class ChatRequest(BaseModel):
     cost_sensitivity: str = "medium"  # "low", "medium", "high"
 
 
-class CompressRequest(BaseModel):
+class ContextCompressRequest(BaseModel):
     messages: list[_ChatMessage]
     target_tokens: int = 4000
 
@@ -297,7 +298,7 @@ async def _attempt_stream(
         response = await client.send(req_obj, stream=True)
 
         status = response.status_code
-        if status != 200:
+        if status != HTTPStatus.OK:
             error_body = (await response.aread()).decode(errors="replace")[:500]
             logger.error(
                 "OpenRouter error %d for model=%s: %s",
@@ -369,6 +370,7 @@ async def _proxy_stream(
                     decision.model, decision.reason, req.cost_sensitivity,
                 )
             except Exception as exc:
+                log_swallowed_error('app.routers.chat', exc)
                 logger.warning("Smart routing failed (%s), using fallback", exc)
                 req.model = _current_assignments().get("general", DEFAULT_ASSIGNMENTS["general"])
 
@@ -463,7 +465,7 @@ async def chat_stream(req: ChatRequest, request: Request):
 
 
 @router.post("/chat/compress")
-async def compress_context(req: CompressRequest):
+async def compress_context(req: ContextCompressRequest):
     """Compress conversation history to fit a target token budget."""
     from utils.context_compression import (
         _estimate_messages_tokens,

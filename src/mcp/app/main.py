@@ -14,6 +14,7 @@ import threading
 import time
 import traceback
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 
 # Must run before any FastAPI import for integration hooks to attach cleanly.
 from app.observability.sentry_init import init_sentry
@@ -221,6 +222,7 @@ def _hydrate_settings_from_sync() -> None:
         if hydrated:
             logger.info("Hydrated %d settings from sync directory", hydrated)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning("Failed to hydrate settings from sync directory: %s", e)
 
 
@@ -266,7 +268,7 @@ async def _openrouter_auth_probe_loop() -> None:
                     "https://openrouter.ai/api/v1/auth/key",
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
-            if resp.status_code == 200:
+            if resp.status_code == HTTPStatus.OK:
                 # Reset ALL OpenRouter-dependent breakers — they share the same
                 # upstream and may have tripped from startup DNS/auth races.
                 for breaker_name in ("openrouter", "bifrost-verify", "bifrost-claims",
@@ -279,7 +281,7 @@ async def _openrouter_auth_probe_loop() -> None:
                     attempt + 1, max_attempts,
                 )
                 return
-            if resp.status_code == 401:
+            if resp.status_code == HTTPStatus.UNAUTHORIZED:
                 logger.warning(
                     "Startup OpenRouter auth probe: API key rejected (401) — aborting probe loop"
                 )
@@ -354,7 +356,8 @@ async def _check_infra_connectivity() -> None:
         try:
             from urllib.parse import urlparse
             return urlparse(url).hostname or url
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.main', exc)
             return url
 
     unreachable: list[str] = []
@@ -365,9 +368,10 @@ async def _check_infra_connectivity() -> None:
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.get(chroma_url.rstrip("/") + "/api/v2/heartbeat")
-            if r.status_code >= 400:
+            if r.status_code >= HTTPStatus.BAD_REQUEST:
                 unreachable.append(f"ChromaDB ({_host(chroma_url)}: HTTP {r.status_code})")
         except Exception as exc:
+            log_swallowed_error('app.main', exc)
             unreachable.append(f"ChromaDB ({_host(chroma_url)}: {type(exc).__name__})")
 
         # --- Neo4j Bolt TCP check (lightweight — just opens a socket) ---
@@ -388,6 +392,7 @@ async def _check_infra_connectivity() -> None:
                     wc_exc,
                 )
         except Exception as exc:
+            log_swallowed_error('app.main', exc)
             unreachable.append(f"Neo4j ({host}:{port}: {type(exc).__name__})")
 
         # --- Redis TCP check ---
@@ -408,6 +413,7 @@ async def _check_infra_connectivity() -> None:
                     wc_exc,
                 )
         except Exception as exc:
+            log_swallowed_error('app.main', exc)
             unreachable.append(f"Redis ({rhost}:{rport}: {type(exc).__name__})")
 
         if not unreachable:
@@ -468,6 +474,7 @@ async def lifespan(app: FastAPI):
         backfill_updated_at(driver)
         register_recategorized_at(driver)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
     # Ensure default tenant exists (for multi-user mode migration safety)
@@ -503,6 +510,7 @@ async def lifespan(app: FastAPI):
                     "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
                 )
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Multi-user startup check failed: {e}")
 
     # Auto-import from sync directory if DB is empty
@@ -510,6 +518,7 @@ async def lifespan(app: FastAPI):
         from sync_check import auto_import_if_empty
         auto_import_if_empty()
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Sync auto-import check failed: {e}")
 
     # Hydrate user settings from sync directory (before logging toggle states)
@@ -527,6 +536,7 @@ async def lifespan(app: FastAPI):
         from core.agents.hallucination.authoritative_verify import set_data_source_registry
         set_data_source_registry(_data_source_registry)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"DataSourceRegistry wiring failed (authoritative verify disabled): {e}")
 
     # Wire the contradiction-ledger sink into core/verification via DI (same
@@ -583,6 +593,7 @@ async def lifespan(app: FastAPI):
 
         set_contradiction_sink(_contradiction_sink)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Contradiction-ledger sink wiring failed (ledger disabled): {e}")
 
     # Wire the connector ingest sink into core/ingest via DI (same pattern) so
@@ -602,6 +613,7 @@ async def lifespan(app: FastAPI):
 
         set_source_ingest_fn(_source_ingest_fn)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Source ingest-sink wiring failed (connector polling disabled): {e}")
 
     # Wire the Phase J/K agent DI seams (inbox triage + daily digest). core/
@@ -619,6 +631,7 @@ async def lifespan(app: FastAPI):
         wire_daily_digest_di()
         wire_crag_external_di()
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Agent DI wiring failed (inbox triage / daily digest / CRAG disabled): {e}")
 
     # Phase K2.1 — wire the entity-extraction enqueue callback into
@@ -641,6 +654,7 @@ async def lifespan(app: FastAPI):
 
         set_entity_extraction_enqueue(_enqueue_memory_entity_extraction)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Memory→entity extraction wiring failed: {e}")
 
     # GA P0.5 C2 — wire the compiled-wiki fetcher so surface-biased retrieval can
@@ -669,6 +683,7 @@ async def lifespan(app: FastAPI):
 
         set_wiki_page_fetcher(_fetch_wiki_page)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Wiki-page fetcher wiring failed (C2 surface disabled): {e}")
 
     # Load plugins
@@ -678,12 +693,14 @@ async def lifespan(app: FastAPI):
         if loaded:
             logger.info(f"Plugins loaded: {', '.join(loaded)}")
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Plugin loading failed (server runs without plugins): {e}")
 
     # Start scheduled maintenance engine
     try:
         start_scheduler()
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Scheduler start failed (server runs without it): {e}")
 
     # Register user-facing automations with scheduler
@@ -691,6 +708,7 @@ async def lifespan(app: FastAPI):
         from app.routers.automations import register_all_automations
         register_all_automations()
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Automation registration failed (server runs without it): {e}")
 
     # Start background processor worker
@@ -710,6 +728,7 @@ async def lifespan(app: FastAPI):
         app.state.processor_queue = _proc_queue
         logger.info("ProcessorWorker started (%d job types registered)", len(_proc_registry))
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"ProcessorWorker start failed (server runs without it): {e}")
 
     # Wire brief scheduler (N.1) — enqueues BriefGenerationJob daily and
@@ -728,6 +747,7 @@ async def lifespan(app: FastAPI):
                 schedule_weekly_synthesis(_brief_scheduler, app.state.processor_queue)
                 logger.info("Brief scheduler wired (daily + weekly enqueue cron live)")
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning(f"Brief scheduler wiring failed (server runs without briefs): {e}")
 
     # Pre-warm connections and models for faster first request
@@ -749,6 +769,7 @@ async def lifespan(app: FastAPI):
         _get_redis().ping()
         logger.info("Redis PING pre-warm passed")
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning("Redis PING pre-warm failed (cache may be unavailable): %s", e)
 
     # Phase O.2 (v0.92): bind memory consolidation failure callback.
@@ -847,6 +868,7 @@ async def lifespan(app: FastAPI):
         from app.startup import run_startup_dim_check
         await asyncio.get_running_loop().run_in_executor(None, run_startup_dim_check)
     except Exception as e:
+        log_swallowed_error('app.main', e)
         logger.warning("Startup dim check errored (non-fatal): %s", e)
 
     # Warm up NLI model — the slow one (~45s on cold start due to model download).
@@ -855,7 +877,8 @@ async def lifespan(app: FastAPI):
     try:
         from core.utils.nli import warmup as nli_warmup
         await asyncio.get_running_loop().run_in_executor(None, nli_warmup)
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("NLI model warmup failed — will load on first verification")
 
     # Pre-warm external data sources — runs in the background so startup remains
@@ -939,6 +962,7 @@ async def lifespan(app: FastAPI):
 
         await get_pool().disconnect_all()
     except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("MCPClientPool disconnect failed: %s", exc)
 
     # Shutdown: stop background processor worker
@@ -946,38 +970,45 @@ async def lifespan(app: FastAPI):
         if hasattr(app.state, "processor_worker"):
             await app.state.processor_worker.stop()
     except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("ProcessorWorker shutdown failed: %s", exc)
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
     try:
         stop_scheduler()
     except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("Scheduler shutdown failed: %s", exc)
     try:
         from core.utils.llm_client import close_client
         await close_client()
     except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("LLM client shutdown failed: %s", exc)
     try:
         from app.routers.chat import close_chat_client
         await close_chat_client()
     except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("Chat client shutdown failed: %s", exc)
     try:
         from core.utils.internal_llm import close_ollama_client
         await close_ollama_client()
     except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("Ollama client shutdown failed: %s", exc)
     try:
         from app.routers.providers import close_openrouter_client
         await close_openrouter_client()
     except Exception as exc:
+        log_swallowed_error('app.main', exc)
         logger.warning("OpenRouter credit-probe client shutdown failed: %s", exc)
     # Extension shutdown hooks (registered by bootstrap)
     for _hook in _shutdown_hooks:
         try:
             await _hook()
         except Exception as exc:
+            log_swallowed_error('app.main', exc)
             logger.warning("Extension shutdown hook failed: %s", exc)
     # Semantic cache: clear the registered backend handle so any late
     # callers hit the disabled path. flush_cache itself is now a no-op

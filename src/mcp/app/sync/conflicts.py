@@ -100,6 +100,8 @@ def detect_conflicts(
                         remote_content_hash=remote_hash,
                     ))
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.conflicts', exc)
         logger.error("Conflict detection failed: %s", exc)
 
     if conflicts:

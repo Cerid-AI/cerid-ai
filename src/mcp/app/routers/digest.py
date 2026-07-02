@@ -12,7 +12,6 @@ from fastapi import APIRouter, Query
 from app.deps import get_neo4j, get_redis
 from app.routers.health import health_check
 from core.utils.cache import get_log
-from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow, utcnow_iso
 
 router = APIRouter()
@@ -61,6 +60,8 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
             if rec:
                 new_relationships = rec["cnt"]
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.digest', e)
         logger.warning(f"Digest Neo4j query failed: {e}")
 
     # Domain distribution of recent artifacts
@@ -72,6 +73,8 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
     try:
         system_health = health_check()
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.digest', e)
         logger.debug(f"Health check failed during digest: {e}")
         system_health = {"status": "unknown"}
 

@@ -129,7 +129,9 @@ def warmup() -> None:
         return
     try:
         _load_model()
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.retrieval.reranker', exc)
         logger.warning("Reranker warmup failed — model will be loaded on first query")
 
 

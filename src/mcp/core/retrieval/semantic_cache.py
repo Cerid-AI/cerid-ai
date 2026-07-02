@@ -227,6 +227,7 @@ def cache_store(
         logger.debug("Semantic cache stored: %s (ttl=%ds)", entry_id[:12], cache_ttl)
 
     except Exception as e:
+        log_swallowed_error('core.retrieval.semantic_cache', e)
         logger.warning("Semantic cache store failed: %s", e)
 
 
@@ -268,6 +269,7 @@ def invalidate_cache(redis_client: Any) -> int:
             logger.info("Semantic cache invalidated: %d keys", count)
         return count
     except Exception as e:
+        log_swallowed_error('core.retrieval.semantic_cache', e)
         logger.warning("Semantic cache invalidation failed: %s", e)
         return 0
 

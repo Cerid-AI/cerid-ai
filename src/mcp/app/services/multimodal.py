@@ -185,6 +185,8 @@ async def ingest_multimodal(
     try:
         text, plugin_used = await _extract_text(file_path, plugin_name)
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.services.multimodal', e)
         logger.error("Plugin extraction failed for %s: %s", path.name, e)
         return {"status": "error", "error": f"Plugin '{plugin_name}' failed: {e}"}
 

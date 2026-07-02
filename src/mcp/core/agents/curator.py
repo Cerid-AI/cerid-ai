@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import re
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -208,9 +209,10 @@ async def _store_quality_scores(
                 {"quality_score": s["quality_score"], "quality_scored_at": now},
             )
             updated += 1
-        except Exception:
+        except Exception as exc:
             # Individual failures should not abort the batch
-            pass
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.curator', exc)
     return updated
 
 
@@ -294,7 +296,7 @@ async def _generate_synopsis(
                 continue
             return ""
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429 and attempt == 0:
+            if e.response.status_code == HTTPStatus.TOO_MANY_REQUESTS and attempt == 0:
                 logger.info("Rate limited (429), waiting 60s before retry")
                 await asyncio.sleep(60)
                 continue
@@ -327,7 +329,9 @@ async def estimate_synopsis_run(
                 domain=domain, limit=max_artifacts,
             )
             artifacts = [_node_to_dict(n) for n in nodes]
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.curator', exc)
             continue
         candidates = [
             a for a in artifacts
@@ -405,6 +409,8 @@ async def curate(
             )
             artifacts = [_node_to_dict(n) for n in nodes]
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.curator', e)
             logger.warning(f"Failed to list artifacts for {domain}: {e}")
             continue
 
@@ -428,6 +434,8 @@ async def curate(
         try:
             updated = await _store_quality_scores(graph_store, all_scores)
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.curator', e)
             logger.error(f"Failed to store quality scores: {e}")
 
     # Synopsis generation pass
@@ -452,6 +460,8 @@ async def curate(
                     name=config.collection_name(domain)
                 )
             except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.agents.curator', e)
                 logger.warning(f"Cannot access collection for {domain}: {e}")
                 continue
 
@@ -463,7 +473,9 @@ async def curate(
                     if not docs or not docs[0]:
                         continue
                     text = docs[0]
-                except Exception:
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('core.agents.curator', exc)
                     continue
 
                 synopsis = await _generate_synopsis(
@@ -481,6 +493,8 @@ async def curate(
                         )
                         synopses_generated += 1
                     except Exception as e:
+                        from core.utils.swallowed import log_swallowed_error
+                        log_swallowed_error('core.agents.curator', e)
                         logger.warning(f"Failed to store synopsis for {artifact['id'][:8]}: {e}")
                 # Adaptive throttle based on model rate limits
                 await asyncio.sleep(float(throttle_delay))

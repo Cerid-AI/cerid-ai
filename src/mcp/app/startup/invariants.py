@@ -61,7 +61,9 @@ def _collection_count(c: Any) -> int:
         if callable(count_attr):
             return int(count_attr())
         return int(count_attr or 0)
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         return 0
 
 
@@ -124,8 +126,9 @@ def _probe_collection_dim(collection: Any) -> int | None:
         for key in ("dimension", "dim", "hnsw:dim"):
             if key in md and md[key] is not None:
                 return int(md[key])
-    except Exception:
-        pass
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
     try:
         peek = collection.peek(1)
         _raw_emb = (peek or {}).get("embeddings")
@@ -195,6 +198,8 @@ def run_startup_dim_check() -> list[dict[str, Any]]:
         chroma = get_chroma()
         return _startup_pkg.validate_collection_dimensions(chroma, expected)
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         _startup_logger.info("startup dim check skipped (non-fatal): %s", exc)
         return []
 
@@ -207,6 +212,8 @@ def _probe_nli() -> dict[str, Any]:
         loaded = bool(getattr(nli, "_MODEL_LOADED", False))
         return {"nli_model_loaded": loaded}
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         return {"nli_model_loaded": False, "nli_error": str(exc)}
 
 
@@ -223,6 +230,8 @@ def _probe_internal_modules() -> dict[str, Any]:
         from app.internal_modules import snapshot
         return {"internal_modules": snapshot()}
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         return {"internal_modules": {}, "internal_modules_error": str(exc)}
 
 
@@ -240,6 +249,8 @@ def _probe_swallowed_errors(redis: Any) -> dict[str, Any]:
         from core.utils.swallowed import swallowed_error_counts
         return {"swallowed_errors_last_hour": swallowed_error_counts(redis)}
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         return {"swallowed_errors_last_hour": {}, "swallowed_errors_error": str(exc)}
 
 
@@ -262,6 +273,8 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
     try:
         snapshot.update(_probe_chroma(chroma))
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         logger.warning("chroma invariant probe failed: %s", exc)
         snapshot["errors"].append(f"chroma: {exc}")
         snapshot["collections_empty"] = []
@@ -269,6 +282,8 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
     try:
         snapshot.update(_probe_neo4j(neo4j))
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         logger.warning("neo4j invariant probe failed: %s", exc)
         snapshot["errors"].append(f"neo4j: {exc}")
         snapshot["verification_report_orphans"] = -1
@@ -276,6 +291,8 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
     try:
         snapshot.update(_probe_nli())
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         logger.warning("nli invariant probe failed: %s", exc)
         snapshot["errors"].append(f"nli: {exc}")
         snapshot["nli_model_loaded"] = False
@@ -283,6 +300,8 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
     try:
         snapshot.update(_probe_internal_modules())
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         logger.warning("internal_modules invariant probe failed: %s", exc)
         snapshot["errors"].append(f"internal_modules: {exc}")
         snapshot["internal_modules"] = {}
@@ -290,6 +309,8 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
     try:
         snapshot.update(_probe_swallowed_errors(redis))
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
         logger.warning("swallowed_errors invariant probe failed: %s", exc)
         snapshot["errors"].append(f"swallowed_errors: {exc}")
         snapshot["swallowed_errors_last_hour"] = {}

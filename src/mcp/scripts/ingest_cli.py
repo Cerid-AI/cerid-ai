@@ -23,6 +23,7 @@ import sys
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from http import HTTPStatus
 from pathlib import Path
 from threading import Lock
 
@@ -119,7 +120,7 @@ def _ingest_one(
             },
             timeout=120,
         )
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             data = resp.json()
             status = data.get("status", "success")
             if status == "duplicate":

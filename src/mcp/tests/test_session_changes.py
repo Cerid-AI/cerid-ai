@@ -312,7 +312,7 @@ class TestNliRagPipelineGate:
         # Simulate the exception handling path
         try:
             raise RuntimeError("NLI model unavailable")
-        except Exception:
+        except RuntimeError:
             pass  # NLI gate skipped
 
         # Results unchanged

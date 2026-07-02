@@ -100,6 +100,6 @@ async def with_timeout(
             )
         except ImportError:
             pass
-        except Exception:  # noqa: BLE001 — observability must never itself raise
+        except Exception:  # noqa: BLE001  # silent-catch-meta: observability layer must never raise/recurse
             pass
         raise StoreTimeoutError(label, seconds) from exc

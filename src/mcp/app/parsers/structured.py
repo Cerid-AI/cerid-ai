@@ -31,8 +31,9 @@ def parse_csv(file_path: str) -> dict[str, Any]:
             delimiter = dialect.delimiter
         except csv_module.Error:
             pass  # keep default
-    except Exception:
-        pass
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.parsers.structured', exc)
 
     try:
         try:
@@ -127,7 +128,9 @@ def parse_html(file_path: str) -> dict[str, Any]:
         extractor = _TextExtractor()
         extractor.feed(raw)
         text = "\n".join(extractor._parts)
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.parsers.structured', exc)
         # Fallback: return raw if parsing fails
         text = raw
 
@@ -160,8 +163,9 @@ def parse_text(file_path: str) -> dict[str, Any]:
             )
     except ValueError:
         raise
-    except Exception:
-        pass  # proceed with text read if binary check fails
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.parsers.structured', exc)
 
     text = path.read_text(encoding="utf-8", errors="replace")
     return {

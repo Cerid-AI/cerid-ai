@@ -210,7 +210,7 @@ async def execute_automation(automation: Automation) -> AutomationRun:
     start = time.time()
     try:
         # Run query through agent pipeline
-        from core.agents.query_agent import agent_query
+        from core.agents.query_agent import agent_query  # retrieval-import-allowed: INGEST path stays KB-only
 
         result = await agent_query(
             query=automation.prompt,
@@ -383,6 +383,7 @@ def register_all_automations() -> int:
                 _register_job(auto)
                 registered += 1
             except Exception as e:
+                log_swallowed_error('app.routers.automations', e)
                 _logger.warning("Failed to register automation %s: %s", auto.id, e)
     if registered:
         _logger.info("Registered %d user automations with scheduler", registered)

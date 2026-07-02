@@ -90,7 +90,8 @@ class ProcessorWorker:
         # Compute default load ceiling once at init
         try:
             cpu = os.cpu_count() or 1
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.processor.worker', exc)
             cpu = 1
         self._load_ceiling = load_ceiling if load_ceiling is not None else cpu * 0.7
 
@@ -137,7 +138,8 @@ class ProcessorWorker:
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):
+            except (asyncio.CancelledError, Exception) as exc:
+                log_swallowed_error('app.processor.worker', exc)
                 pass
 
         self._tasks.clear()

@@ -29,6 +29,7 @@ Design notes
 """
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 import pytest
@@ -67,7 +68,7 @@ def _make_synthetic_finding():
 
 def _cleanup_finding(neo4j_driver, finding_id: str, claim_a_id: str, claim_b_id: str) -> None:
     """Remove the synthetic ContradictionFinding and its Claim nodes."""
-    try:
+    with contextlib.suppress(Exception):  # best-effort cleanup; leaked nodes swept later
         with neo4j_driver.session() as session:
             session.run(
                 """
@@ -80,8 +81,6 @@ def _cleanup_finding(neo4j_driver, finding_id: str, claim_a_id: str, claim_b_id:
                 claim_a_id=claim_a_id,
                 claim_b_id=claim_b_id,
             )
-    except Exception:  # silent-catch-allowed: best-effort cleanup; leaked nodes swept by future runs
-        pass
 
 
 # ---------------------------------------------------------------------------

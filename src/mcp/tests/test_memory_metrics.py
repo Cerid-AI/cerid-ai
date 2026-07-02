@@ -11,6 +11,7 @@ Covers:
 """
 from __future__ import annotations
 
+import contextlib
 import time
 from unittest.mock import MagicMock, patch
 
@@ -278,12 +279,10 @@ class TestHealthInvariantsField:
                 create=True,
             ),
         ):
-            try:
+            with contextlib.suppress(Exception):  # optional patch on possibly-absent symbol in test setup
                 # Patch the trust_score import path
                 with patch("app.services.trust_score.trust_score_24h_summary", return_value={"score": None}, create=True):
                     pass
-            except Exception:  # silent-catch-allowed: optional patch on possibly-absent symbol in test setup
-                pass
 
             try:
                 app = FastAPI()

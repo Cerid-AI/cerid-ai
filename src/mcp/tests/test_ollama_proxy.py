@@ -69,9 +69,9 @@ class TestOllamaDisabled:
     async def test_chat_disabled(self):
         from fastapi import HTTPException
 
-        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, OllamaChatRequest, chat_completion
 
-        req = ChatRequest(
+        req = OllamaChatRequest(
             model="llama3.2",
             messages=[ChatMessage(role="user", content="Hello")],
         )
@@ -163,7 +163,7 @@ class TestListModels:
 class TestChatSync:
     @pytest.mark.asyncio
     async def test_chat_success(self):
-        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, OllamaChatRequest, chat_completion
 
         ollama_response = {
             "model": "llama3.2",
@@ -182,7 +182,7 @@ class TestChatSync:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        req = ChatRequest(
+        req = OllamaChatRequest(
             model="llama3.2",
             messages=[ChatMessage(role="user", content="Hello")],
             stream=False,
@@ -207,14 +207,14 @@ class TestChatSync:
     async def test_chat_connection_error(self):
         from fastapi import HTTPException
 
-        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, OllamaChatRequest, chat_completion
 
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.ConnectError("Connection refused")
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        req = ChatRequest(
+        req = OllamaChatRequest(
             model="llama3.2",
             messages=[ChatMessage(role="user", content="Hello")],
         )
@@ -228,7 +228,7 @@ class TestChatSync:
     async def test_chat_circuit_breaker_open(self):
         from fastapi import HTTPException
 
-        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, OllamaChatRequest, chat_completion
         from core.utils.circuit_breaker import CircuitState, get_breaker
 
         # Force circuit breaker open
@@ -236,7 +236,7 @@ class TestChatSync:
         breaker._state = CircuitState.OPEN
         breaker._last_failure_time = __import__("time").monotonic()
 
-        req = ChatRequest(
+        req = OllamaChatRequest(
             model="llama3.2",
             messages=[ChatMessage(role="user", content="Hello")],
         )
@@ -257,14 +257,14 @@ class TestChatStream:
     async def test_stream_circuit_breaker_open(self):
         from fastapi import HTTPException
 
-        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, OllamaChatRequest, chat_completion
         from core.utils.circuit_breaker import CircuitState, get_breaker
 
         breaker = get_breaker("ollama")
         breaker._state = CircuitState.OPEN
         breaker._last_failure_time = __import__("time").monotonic()
 
-        req = ChatRequest(
+        req = OllamaChatRequest(
             model="llama3.2",
             messages=[ChatMessage(role="user", content="Hello")],
             stream=True,

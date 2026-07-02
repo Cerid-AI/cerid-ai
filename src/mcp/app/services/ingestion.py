@@ -364,6 +364,7 @@ def _rollback_chromadb(collection, chunk_ids: list[str]) -> None:
             "Rolled back %d ChromaDB chunks after graph failure", len(chunk_ids),
         )
     except Exception as e:
+        log_swallowed_error('app.services.ingestion', e)
         logger.error(
             "CRITICAL: ChromaDB rollback failed for %d chunks — orphaned data: %s",
             len(chunk_ids), e,
@@ -387,6 +388,7 @@ def _check_duplicate(content_hash: str, domain: str) -> dict | None:
                     "domain": record["domain"],
                 }
     except Exception as e:
+        log_swallowed_error('app.services.ingestion', e)
         logger.warning(f"Dedup check failed (proceeding with ingest): {e}")
     return None
 
@@ -406,6 +408,7 @@ def _reingest_artifact(
         try:
             collection.delete(ids=old_chunk_ids)
         except Exception as e:
+            log_swallowed_error('app.services.ingestion', e)
             logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
         # BM25 + sparse indexes dedup-skip known chunk_ids, so without an
         # explicit removal they keep serving the PRE-edit text while ChromaDB
@@ -442,6 +445,7 @@ def _reingest_artifact(
             from core.utils.contextual import contextualize_chunks
             chunks = contextualize_chunks(chunks, content, metadata)
         except Exception as e:
+            log_swallowed_error('app.services.ingestion', e)
             logger.warning("Contextual enrichment skipped (re-ingest): %s", e)
 
     # RAG C2.6 — parent-child dispatch (re-ingest path mirrors ingest_content).
@@ -574,6 +578,7 @@ def _reingest_artifact(
             quality_score=quality_score,
         )
     except Exception as e:
+        log_swallowed_error('app.services.ingestion', e)
         logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
 
     logger.info(f"Re-ingested artifact {artifact_id[:8]} ({base_meta.get('filename', '?')})")
@@ -681,6 +686,7 @@ def ingest_content(
             if prev and prev["content_hash"] != content_hash:
                 return _reingest_artifact(prev, content, domain, metadata, content_hash)
         except Exception as e:
+            log_swallowed_error('app.services.ingestion', e)
             logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
 
     # Workstream E Phase 2b wire-in: when caller supplies layout-aware
@@ -758,6 +764,7 @@ def ingest_content(
                 from core.utils.contextual import contextualize_chunks
                 chunks = contextualize_chunks(chunks, content, metadata)
             except Exception as e:
+                log_swallowed_error('app.services.ingestion', e)
                 logger.warning("Contextual enrichment skipped: %s", e)
 
     # ── RAG C2.6 — parent-child chunk dispatch ────────────────────────────
@@ -1140,6 +1147,7 @@ def ingest_content(
         # operators revert to backfill-only via CERID_ENTITY_EXTRACTION_ENABLED=false.
         _enqueue_entity_extraction_if_enabled(artifact_id=artifact_id)
     except Exception as e:
+        log_swallowed_error('app.services.ingestion', e)
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:
             logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
@@ -1176,6 +1184,7 @@ def ingest_content(
             filename=base_meta.get("filename", "text_input"),
         )
     except Exception as e:
+        log_swallowed_error('app.services.ingestion', e)
         logger.error(f"Redis log failed: {e}")
 
     # Discover and create relationships with existing artifacts
@@ -1191,6 +1200,7 @@ def ingest_content(
                 content=content[:5000],  # limit content scan for performance
             )
         except Exception as e:
+            log_swallowed_error('app.services.ingestion', e)
             logger.warning(f"Relationship discovery failed (non-blocking): {e}")
 
     # RAG Cycle C2.1 — wikilink edge commits (mirror of the
@@ -1784,6 +1794,7 @@ async def ingest_batch(
                 else:
                     return {"status": "error", "error": "Item must have 'file_path' or 'content'"}
             except Exception as e:
+                log_swallowed_error('app.services.ingestion', e)
                 logger.error("Batch ingest item failed: %s", e)
                 return {
                     "status": "error",

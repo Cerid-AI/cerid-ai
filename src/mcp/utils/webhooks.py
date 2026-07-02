@@ -11,6 +11,7 @@ Events: ingestion.complete, health.warning, digest.ready, rectify.findings
 from __future__ import annotations
 
 import logging
+from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlparse
 
@@ -89,7 +90,7 @@ async def fire_event(
                     json=body,
                     headers={"Content-Type": "application/json", "User-Agent": "cerid-ai/1.0"},
                 )
-                if resp.status_code < 400:
+                if resp.status_code < HTTPStatus.BAD_REQUEST:
                     delivered += 1
                     logger.debug(f"Webhook delivered: {event_type} -> {url} ({resp.status_code})")
                 else:

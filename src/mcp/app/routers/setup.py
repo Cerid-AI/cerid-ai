@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import secrets
+from http import HTTPStatus
 from pathlib import Path
 
 import httpx
@@ -122,7 +123,7 @@ async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(url)
-            if resp.status_code < 500:
+            if resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
                 return "healthy"
             return "unhealthy"
     except (httpx.ConnectError, httpx.TimeoutException, OSError):
@@ -139,7 +140,8 @@ async def _service_statuses() -> dict[str, str]:
         with driver.session() as session:
             session.run("RETURN 1").consume()
         neo4j_status = "healthy"
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
         neo4j_status = "unavailable"
 
     redis_status = "unknown"
@@ -148,7 +150,8 @@ async def _service_statuses() -> dict[str, str]:
 
         get_redis()
         redis_status = "healthy"
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
         redis_status = "unavailable"
 
     chroma_status = await _check_service(
@@ -367,7 +370,7 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
 
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             data = resp.json()
             model_count = len(data.get("data", []))
             return KeyValidationResponse(valid=True, models_available=model_count)
@@ -379,6 +382,7 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
     except httpx.TimeoutException:
         return KeyValidationResponse(valid=False, error="Request timed out")
     except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
         return KeyValidationResponse(valid=False, error=str(exc))
 
 
@@ -542,6 +546,7 @@ async def retest_services() -> dict:
         await recycle_client()
         results["llm_pool"] = "recycled"
     except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
         results["llm_pool"] = f"error: {exc}"
 
     # Reset LLM + bifrost circuit breakers so they start fresh
@@ -557,6 +562,7 @@ async def retest_services() -> dict:
             get_breaker(name).reset()
         results["circuit_breakers"] = "reset"
     except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
         results["circuit_breakers"] = f"error: {exc}"
 
     # Re-probe OpenRouter auth with the configured key
@@ -568,11 +574,12 @@ async def retest_services() -> dict:
                     "https://openrouter.ai/api/v1/auth/key",
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
-            if resp.status_code == 200:
+            if resp.status_code == HTTPStatus.OK:
                 results["openrouter_auth"] = "ok"
             else:
                 results["openrouter_auth"] = f"failed (HTTP {resp.status_code})"
         except Exception as exc:
+            log_swallowed_error('app.routers.setup', exc)
             results["openrouter_auth"] = f"error: {exc}"
     else:
         results["openrouter_auth"] = "no_key_configured"
@@ -690,13 +697,14 @@ async def system_check(response: Response) -> dict:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{ollama_url}/api/tags")
-                if resp.status_code == 200:
+                if resp.status_code == HTTPStatus.OK:
                     data = resp.json()
                     raw_names = [m.get("name", "") for m in data.get("models", [])]
                     ollama_models = _clean_ollama_models(raw_names)
                     ollama_detected = len(ollama_models) > 0
                 break
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.routers.setup', exc)
             if _attempt == 0:
                 continue
             break

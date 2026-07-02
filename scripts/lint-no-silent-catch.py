@@ -44,6 +44,12 @@ from typing import NamedTuple
 _OBSERVABLE_ATTR_CALLS = {"exception", "capture_exception"}
 _OBSERVABLE_NAME_CALLS = {"log_swallowed_error"}
 _NOQA_BROAD_TOKENS = ("noqa: BLE001", "silent-catch-allowed")
+# Reviewed exemption from the STRICT patterns (1-3), not just the warn-only one.
+# Reserved for the irreducible case: the observability layer itself (the swallowed
+# -error recorder, the timeout guard) must catch broadly and stay silent, because
+# it cannot record/raise its own failure without recursing or crashing the app.
+# Deliberate + rare + grep-auditable — do not use to silence ordinary swallows.
+_META_TOKEN = "silent-catch-meta"
 
 
 class Violation(NamedTuple):
@@ -67,6 +73,11 @@ class SilentCatchVisitor(ast.NodeVisitor):
         self._source_lines = source_lines or []
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
+        # Reviewed meta-exemption: the observability layer's own guards (see
+        # _META_TOKEN) are exempt from every pattern, strict included.
+        if self._line_has_meta(node.lineno):
+            self.generic_visit(node)
+            return
         # Pattern 1: bare `except:` — type is None
         if node.type is None:
             self.violations.append(Violation(
@@ -177,6 +188,13 @@ class SilentCatchVisitor(ast.NodeVisitor):
             return False
         line = self._source_lines[lineno - 1]
         return any(token in line for token in _NOQA_BROAD_TOKENS)
+
+    def _line_has_meta(self, lineno: int) -> bool:
+        """True if the source line carries the reviewed ``# silent-catch-meta:``
+        exemption (observability-layer self-protection — see _META_TOKEN)."""
+        if not self._source_lines or lineno <= 0 or lineno > len(self._source_lines):
+            return False
+        return _META_TOKEN in self._source_lines[lineno - 1]
 
 
 def iter_py_files(root: Path) -> Iterator[Path]:

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from http import HTTPStatus
 from urllib.parse import quote
 
 import httpx
@@ -63,7 +64,7 @@ class PubChemSource(DataSource):
                 search_resp = await client.get(
                     f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_query}/description/JSON",
                 )
-                if search_resp.status_code != 200:
+                if search_resp.status_code != HTTPStatus.OK:
                     return []
 
                 data = search_resp.json()

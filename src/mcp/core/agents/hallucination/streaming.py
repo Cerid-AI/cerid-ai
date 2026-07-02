@@ -351,6 +351,7 @@ async def check_hallucinations(
                 len(batch_verdicts), len(current_event_claims), batch_model,
             )
         except (TimeoutError, Exception) as exc:
+            log_swallowed_error('core.agents.hallucination.streaming', exc)
             logger.warning(
                 "Non-streaming batch verification failed (%s) — falling back to individual",
                 exc,
@@ -415,6 +416,7 @@ async def check_hallucinations(
         key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
         redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
     except Exception as e:
+        log_swallowed_error('core.agents.hallucination.streaming', e)
         logger.warning("Failed to store hallucination report in Redis: %s", e)
 
     # --- Promote verified facts to empirical memories (non-streaming path) ---
@@ -574,6 +576,7 @@ async def verify_response_streaming(
             logger.error("Claim extraction timed out for conversation %s", conversation_id)
             method = "timeout"
         except Exception as exc:
+            log_swallowed_error('core.agents.hallucination.streaming', exc)
             logger.error("Claim extraction failed for %s: %s", conversation_id, exc)
             method = "error"
 
@@ -760,6 +763,7 @@ async def verify_response_streaming(
                     len(batch_verdicts), len(current_event_claims), batch_model,
                 )
             except (TimeoutError, Exception) as exc:
+                log_swallowed_error('core.agents.hallucination.streaming', exc)
                 logger.warning("Batch verification failed (%s), falling back to individual", exc)
 
         batch_task = asyncio.create_task(_run_batch())

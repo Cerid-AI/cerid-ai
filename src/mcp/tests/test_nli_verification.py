@@ -171,7 +171,9 @@ class TestKbBlockNliClassification:
                     f"entailment={_ext_nli['entailment']:.2f}, "
                     f"contradiction={_ext_nli['contradiction']:.2f}"
                 )
-            except Exception:
+            except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('tests.test_nli_verification', exc)
                 _ext_nli_label = "unknown"
                 _ext_nli_conf = ""
         kb_block = (
@@ -213,7 +215,9 @@ class TestKbBlockNliClassification:
                     f"entailment={_ext_nli['entailment']:.2f}, "
                     f"contradiction={_ext_nli['contradiction']:.2f}"
                 )
-            except Exception:
+            except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('tests.test_nli_verification', exc)
                 _ext_nli_label = "unknown"
                 _ext_nli_conf = ""
         kb_block = (

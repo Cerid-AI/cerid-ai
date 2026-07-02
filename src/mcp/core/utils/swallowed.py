@@ -80,7 +80,7 @@ def log_swallowed_error(
         )
     except ImportError:
         pass
-    except Exception:  # noqa: BLE001 — observability must never itself raise
+    except Exception:  # noqa: BLE001  # silent-catch-meta: observability layer must never raise/recurse
         pass
 
     if redis_client is None:
@@ -92,7 +92,7 @@ def log_swallowed_error(
         # Trim the sliding window on every write. O(log N) amortized.
         cutoff = ts_ms - _DEFAULT_WINDOW_S * 1000
         redis_client.zremrangebyscore(key, 0, cutoff)
-    except Exception:  # noqa: BLE001 — observability must never itself raise
+    except Exception:  # noqa: BLE001  # silent-catch-meta: observability layer must never raise/recurse
         pass
 
 
@@ -127,6 +127,6 @@ def swallowed_error_counts(
                 out[name] = int(redis_client.zcard(key))
             except Exception:  # noqa: BLE001
                 out.setdefault(name, 0)
-    except Exception:  # noqa: BLE001 — observability must never itself raise
+    except Exception:  # noqa: BLE001  # silent-catch-meta: observability layer must never raise/recurse
         pass
     return out

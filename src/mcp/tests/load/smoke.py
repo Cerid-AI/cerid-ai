@@ -89,7 +89,9 @@ async def post(client, path, body, headers=None):
     )
     try:
         j = r.json()
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('tests.load.smoke', exc)
         j = {}
     return t, r.status_code, j
 
@@ -273,6 +275,8 @@ async def test_head_of_line_blocking(client):
         try:
             await b
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.load.smoke', exc)
             print(f"  bg drain swallowed: {exc!r}")
     print(
         f"  /health during load: p50={statistics.median(mids):.2f}s p95={sorted(mids)[-1]:.2f}s max={max(mids):.2f}s"

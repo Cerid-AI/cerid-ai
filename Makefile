@@ -105,7 +105,7 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	  && .venv/bin/python scripts/lint-public-leak-preflight.py \
 	  || echo "  (internal-only gate — not present in this checkout, skipped)"
 	@echo "[drift] silent-catch"
-	.venv/bin/python scripts/lint-no-silent-catch.py src/mcp/
+	.venv/bin/python scripts/lint-no-silent-catch.py --strict-broad src/mcp/
 	@echo "[drift] no-legacy-neo4j-tree"
 	.venv/bin/python scripts/lint-no-legacy-neo4j-tree.py
 	@echo "[drift] import-star-without-all"

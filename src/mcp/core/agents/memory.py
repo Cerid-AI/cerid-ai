@@ -187,6 +187,7 @@ async def extract_memories(
         )
         return []
     except Exception as e:
+        log_swallowed_error('core.agents.memory', e)
         logger.warning("Memory extraction LLM call failed: %s", e)
         return []
 
@@ -545,6 +546,7 @@ async def detect_memory_conflict(
             where=with_tenant_scope(None),
         )
     except Exception as e:
+        log_swallowed_error('core.agents.memory', e)
         logger.debug("Conflict detection similarity search failed: %s", e)
         return []
 
@@ -788,6 +790,7 @@ async def recall_memories(
             where=with_tenant_scope(None),
         )
     except Exception as e:
+        log_swallowed_error('core.agents.memory', e)
         logger.debug("Memory recall vector search failed: %s", e)
         return []
 
@@ -970,6 +973,7 @@ async def archive_old_memories(
             "archived_count": archived_count,
         }
     except Exception as e:  # Neo4j driver exceptions vary by version
+        log_swallowed_error('core.agents.memory', e)
         logger.error("Memory archival failed: %s", e)
         return {
             "timestamp": utcnow_iso(),

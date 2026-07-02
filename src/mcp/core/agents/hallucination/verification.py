@@ -14,6 +14,7 @@ import json
 import logging
 import re
 from datetime import datetime
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -764,6 +765,7 @@ async def _query_memories(
                 })
         return formatted
     except Exception as e:
+        log_swallowed_error('core.agents.hallucination.verification', e)
         logger.debug("Memory query failed (non-blocking): %s", e)
         return []
 
@@ -938,7 +940,7 @@ async def _llm_call_with_retry(
         # 402 = payment required / credits exhausted — not transient, don't retry
         if resp.status_code == 402:
             raise CreditExhaustedError("openrouter")
-        if resp.status_code != 429:
+        if resp.status_code != HTTPStatus.TOO_MANY_REQUESTS:
             resp.raise_for_status()
             return resp
         # 429 — wait with exponential backoff, respect Retry-After if present
@@ -1233,7 +1235,8 @@ async def _verify_claim_externally(
                             f"entailment={_ext_nli['entailment']:.2f}, "
                             f"contradiction={_ext_nli['contradiction']:.2f}"
                         )
-                    except Exception:
+                    except Exception as exc:
+                        log_swallowed_error('core.agents.hallucination.verification', exc)
                         _ext_nli_label = "unknown"
                         _ext_nli_conf = ""
                 kb_block = (
@@ -1542,6 +1545,7 @@ async def verify_claims_batch_external(
             len(results), len(claims), model,
         )
     except Exception as exc:
+        log_swallowed_error('core.agents.hallucination.verification', exc)
         logger.warning("Batch verification failed (%s), claims will fall back to individual", exc)
 
     return results
@@ -1949,7 +1953,8 @@ async def verify_claim(
         try:
             from core.utils.nli import nli_score_async
             _nli = await nli_score_async(top_result.get("content", "")[:512], claim)
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('core.agents.hallucination.verification', exc)
             logger.debug("NLI scoring failed for claim %r — falling back to similarity", claim[:60])
             _nli = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "label": "neutral"}
 
@@ -2278,6 +2283,7 @@ async def verify_claim(
             })
 
     except Exception as e:
+        log_swallowed_error('core.agents.hallucination.verification', e)
         logger.warning("Claim verification failed for '%s...': %s", claim[:50], e)
         return {
             "claim": claim,
@@ -2373,5 +2379,6 @@ async def _check_history_consistency(
         return []
 
     except (CircuitOpenError, Exception) as e:
+        log_swallowed_error('core.agents.hallucination.verification', e)
         logger.warning("Consistency check failed: %s", e)
         return []

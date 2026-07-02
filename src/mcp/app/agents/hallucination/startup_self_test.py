@@ -80,6 +80,8 @@ async def run_verification_self_test(redis_client) -> dict:
         if redis_client is not None:
             redis_client.set(_SELF_TEST_KEY, json.dumps(result), ex=3600)
     except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.agents.hallucination.startup_self_test', exc)
         logger.debug("Failed to persist self-test result to Redis: %s", exc)
 
     return result

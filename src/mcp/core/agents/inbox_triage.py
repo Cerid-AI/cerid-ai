@@ -35,6 +35,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from http import HTTPStatus
 from typing import Any, Protocol
 
 from core.utils.swallowed import log_swallowed_error
@@ -347,7 +348,7 @@ async def _persist_to_kb(thread: TriagedThread, mcp_base_url: str) -> str | None
                 json=payload,
                 headers={"X-Client-ID": "inbox_triage"},
             )
-        if resp.status_code != 200:
+        if resp.status_code != HTTPStatus.OK:
             logger.warning(
                 "inbox_triage write-back returned %d for %s",
                 resp.status_code, thread.thread_id,

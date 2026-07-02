@@ -202,6 +202,8 @@ async def query_with_hype(
                         "memory_type": meta.get("memory_type", ""),
                     })
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.retrieval.hype_match', e)
             logger.warning("hype_match.content_query failed for %s: %s", coll_name, e)
 
         # --- HyPE query --------------------------------------------------
@@ -242,6 +244,8 @@ async def query_with_hype(
                         "metadata": meta,  # carry full meta for dedup logic
                     })
         except Exception as e:  # silent-catch-allowed: HyPE collection absent is the off-by-default norm
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.retrieval.hype_match', e)
             # HyPE collection missing (flag was off at index time) — not an
             # error, just means HyPE has no data for this collection.
             logger.debug(

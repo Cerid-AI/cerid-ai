@@ -1010,6 +1010,8 @@ def _real_driver():
             s.run("RETURN 1").single()
         return driver
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('tests.test_merge_entity_aliases', exc)
         pytest.skip(f"Neo4j unreachable ({exc})")
 
 

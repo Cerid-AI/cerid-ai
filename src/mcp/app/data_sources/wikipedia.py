@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from http import HTTPStatus
 
 import httpx
 
@@ -124,7 +125,7 @@ class WikipediaSource(DataSource):
                     summary_resp = await client.get(
                         f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
                     )
-                    if summary_resp.status_code == 200:
+                    if summary_resp.status_code == HTTPStatus.OK:
                         data = summary_resp.json()
                         extract = data.get("extract", "")
                         # Drop stubs — they entail nothing and waste an NLI call.

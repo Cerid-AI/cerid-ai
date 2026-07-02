@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
+from http import HTTPStatus
 
 import httpx
 
@@ -76,6 +77,8 @@ async def sidecar_embed(
         else:
             cfg.embed_latency_ms = latency_ms
     except Exception as exc:  # noqa: BLE001
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('utils.inference_sidecar_client', exc)
         logger.debug("Latency tracking failed: %s", exc)
 
     embeddings = data["embeddings"]
@@ -129,6 +132,8 @@ async def sidecar_rerank(
         else:
             cfg.rerank_latency_ms = latency_ms
     except Exception as exc:  # noqa: BLE001
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('utils.inference_sidecar_client', exc)
         logger.debug("Latency tracking failed: %s", exc)
 
     logger.debug("Sidecar rerank: %d docs in %.1fms", len(documents), latency_ms)
@@ -187,9 +192,11 @@ async def sidecar_health() -> dict | None:
         client = await _get_client()
         url = _get_sidecar_url()
         resp = await client.get(f"{url}/health", timeout=2)
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             return resp.json()
     except Exception as exc:  # noqa: BLE001
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('utils.inference_sidecar_client', exc)
         logger.debug("Sidecar health check failed: %s", exc)
     return None
 

@@ -30,7 +30,9 @@ def run(driver) -> dict:
         for row in rows:
             try:
                 raw_claims = json.loads(row["claims"] or "[]")
-            except Exception:
+            except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('app.db.neo4j.migrations.m0001_backfill_verification_edges', exc)
                 continue
             aids: set[str] = set()
             urls: set[str] = set()
@@ -38,7 +40,9 @@ def run(driver) -> dict:
             for raw in raw_claims:
                 try:
                     c = ClaimVerification.from_legacy_dict(raw)
-                except Exception:
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.db.neo4j.migrations.m0001_backfill_verification_edges', exc)
                     continue
                 if c.verification_method:
                     methods.add(c.verification_method)

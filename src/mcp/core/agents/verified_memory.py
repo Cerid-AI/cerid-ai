@@ -248,7 +248,9 @@ async def promote_verified_facts(
                     memory_id, confidence, claim_text[:80],
                 )
 
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.verified_memory', exc)
             counts["errors"] += 1
             logger.debug("Verified memory promotion failed for claim", exc_info=True)
 

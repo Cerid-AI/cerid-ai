@@ -212,6 +212,7 @@ async def compress_history_endpoint(req: CompressRequest):
         try:
             compressed = await compress_history(messages, req.target_tokens)
         except Exception as exc:
+            log_swallowed_error('app.routers.agents', exc)
             logger.warning("compress_history LLM failed, falling back to sliding window: %s", exc)
             compressed = sliding_window_prune(messages)
 
@@ -443,6 +444,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
                 result["triage_status"] = triage_result["status"]
                 final_results.append(result)
             except Exception as e:
+                log_swallowed_error('app.routers.agents', e)
                 final_results.append({
                     "filename": triage_result.get("filename", ""),
                     "status": "error",
@@ -731,6 +733,7 @@ async def memory_recall_endpoint(req: MemoryRecallRequest):
         ]
         return MemoryRecallResponse(memories=filtered, total=len(filtered))
     except Exception as e:
+        log_swallowed_error('app.routers.agents', e)
         logger.error(f"Memory recall error: {e}")
         # Graceful degradation — empty recall, not 500. Still object-shaped.
         return MemoryRecallResponse(memories=[], total=0)
@@ -880,7 +883,8 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                     anext_task.cancel()
                     try:
                         await anext_task
-                    except (asyncio.CancelledError, Exception):
+                    except (asyncio.CancelledError, Exception) as exc:
+                        log_swallowed_error('app.routers.agents', exc)
                         pass
                 # Now the generator is idle — safe to close
                 try:
@@ -910,6 +914,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 req.conversation_id,
             )
         except Exception as e:
+            log_swallowed_error('app.routers.agents', e)
             logger.error(
                 "Verify stream error for conversation=%s: %s",
                 req.conversation_id,

@@ -482,7 +482,8 @@ async def multi_domain_query(
     # Pre-check which collections actually exist to skip missing domains fast
     try:
         existing_collections = {c.name for c in chroma_client.list_collections()}
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('core.agents.query_agent', exc)
         existing_collections = set()
 
     pc_enabled = _parent_child_enabled()
@@ -717,6 +718,7 @@ async def multi_domain_query(
             return formatted
 
         except Exception as e:
+            log_swallowed_error('core.agents.query_agent', e)
             logger.warning(f"Error querying domain {domain}: {e}")
             return []
 
@@ -846,6 +848,7 @@ async def graph_expand_results(
             logger.debug("graph_store not provided; skipping graph expansion")
             return results
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning(f"Graph traversal failed (continuing without): {e}")
         return results
 
@@ -962,6 +965,7 @@ async def graph_expand_results_via_entities(
             top_k=config.GRAPH_MAX_RELATED,
         )
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning("entity-neighborhood expansion failed: %s", e)
         return results
 
@@ -979,6 +983,7 @@ async def graph_expand_results_via_entities(
             neo4j_driver.execute_query, cypher, {"ids": [aid for aid, _ in related_pairs]},
         )
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning("artifact-resolution for entity expansion failed: %s", e)
         return results
     by_id = {r["id"]: dict(r) for r in records}
@@ -1097,6 +1102,7 @@ async def graph_expand_results_via_communities(
             neo4j_driver.execute_query, cypher, {"seeds": seed_ids},
         )
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning("global-mode community fetch failed: %s", e)
         return results
 
@@ -1220,6 +1226,7 @@ async def _rerank_cross_encoder(
         with span("retrieval.rerank", "cross_encoder", k=len(results)):
             return await loop.run_in_executor(None, ce_rerank, query, results)
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning(
             "Cross-encoder reranking failed — returning results in original "
             "order (no LLM fallback after Bifrost retirement): %s",
@@ -1602,6 +1609,7 @@ async def apply_quality_boost(
         nodes = await graph_store.get_artifacts_batch(artifact_ids)
         scores = {aid: n.quality_score for aid, n in nodes.items()}
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning(f"Quality score lookup failed (skipping boost): {e}")
         return results
 
@@ -1635,6 +1643,7 @@ async def _enrich_summaries(
         nodes = await graph_store.get_artifacts_batch(artifact_ids)
         summaries = {aid: n.summary for aid, n in nodes.items() if n.summary}
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning(f"Summary lookup failed (skipping): {e}")
         return results
 
@@ -1673,6 +1682,7 @@ async def _apply_quality_and_summaries(
         scores = {aid: n.quality_score for aid, n in nodes.items()}
         summaries = {aid: n.summary for aid, n in nodes.items() if n.summary}
     except Exception as e:
+        log_swallowed_error('core.agents.query_agent', e)
         logger.warning(f"Quality/summary lookup failed (skipping): {e}")
         return results
 
@@ -2583,6 +2593,7 @@ async def _agent_query_impl(
                         results=results, query=query, embed_fn=_ef,
                     )
             except Exception as e:
+                log_swallowed_error('core.agents.query_agent', e)
                 logger.warning("Late interaction scoring failed: %s", e)
 
     # Step 5.5: Quality boost + summary enrichment — single Neo4j round-trip
@@ -2597,6 +2608,7 @@ async def _agent_query_impl(
                 from core.utils.diversity import mmr_reorder
                 results = mmr_reorder(results=results, query=query)
             except Exception as e:
+                log_swallowed_error('core.agents.query_agent', e)
                 logger.warning("MMR diversity reordering failed: %s", e)
 
     # Step 5.65: NLI contradiction gate — remove results that contradict the query
@@ -2652,6 +2664,7 @@ async def _agent_query_impl(
                     )
                 char_count = len(context)
             except Exception as e:
+                log_swallowed_error('core.agents.query_agent', e)
                 logger.warning("Intelligent assembly failed, falling back: %s", e)
                 with span("retrieval.assembly", "token_budget_pack_fallback", budget=ctx_budget, n_results=len(results)):
                     context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
@@ -2680,6 +2693,7 @@ async def _agent_query_impl(
                 },
             )
         except Exception as e:
+            log_swallowed_error('core.agents.query_agent', e)
             logger.warning(f"Failed to log query: {e}")
 
     # Reranker status — first non-empty value across `results` so callers can

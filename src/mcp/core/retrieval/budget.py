@@ -141,6 +141,8 @@ class RetrievalBudget:
             })
             raise
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.retrieval.budget', exc)
             ms = round((time.monotonic() - t0) * 1000, 1)
             self._entries.append({
                 "name": name, "ms": ms, "ok": False,

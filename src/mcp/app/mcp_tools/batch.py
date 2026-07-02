@@ -286,6 +286,8 @@ async def pkb_batch(
             results[op_id] = result
             completed += 1
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.mcp_tools.batch', e)
             errors.append({
                 "op_id": op_id,
                 "tool": tool_name,
@@ -353,7 +355,9 @@ async def pkb_external_servers() -> dict[str, Any]:
     try:
         from utils.mcp_client import mcp_client_manager
         servers = mcp_client_manager.list_servers()
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.mcp_tools.batch', exc)
         # No external manager configured — return empty list, not 503,
         # because the lack of any external server is a valid steady state.
         servers = []

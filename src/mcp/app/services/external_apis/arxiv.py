@@ -11,6 +11,7 @@ No authentication required.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET  # noqa: B314 — parsing trusted arXiv Atom feed
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -138,6 +139,6 @@ class ArxivAdapter(ExternalAPIAdapter):
                 _BASE_URL,
                 params={"search_query": "all:test", "max_results": 1},
             )
-            return resp.status_code < 500
+            return resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR
         except Exception:  # noqa: BLE001
             return False

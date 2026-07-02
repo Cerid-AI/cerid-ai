@@ -69,7 +69,7 @@ async def orchestrated_query(
     external: bool}``.  ``None`` or missing keys default to ``True``.
     Disabled sources are never queried (saves latency).
     """
-    from core.agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query  # retrieval-import-allowed: smart-mode sibling of full path
 
     if memory_top_k is None:
         memory_top_k = MEMORY_RECALL_TOP_K

@@ -15,6 +15,7 @@ See: https://operations.osmfoundation.org/policies/nominatim/
 from __future__ import annotations
 
 import asyncio
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -158,6 +159,6 @@ class OSMAdapter(ExternalAPIAdapter):
         params: dict[str, Any] = {"q": "London", "format": "jsonv2", "limit": 1}
         try:
             resp = await _rate_limited_get(client, f"{_BASE_URL}/search", params)
-            return resp.status_code < 500
+            return resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR
         except Exception:  # noqa: BLE001
             return False

@@ -242,7 +242,9 @@ async def verify_claim_authoritatively(
                 timeout=AUTHORITATIVE_VERIFY_QUERY_TIMEOUT + 1.0,
             )
             external_results = raw_results[:max_sources]
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.hallucination.authoritative_verify', exc)
             logger.debug("Authoritative source query failed (non-blocking)")
 
     if not external_results:
@@ -275,7 +277,9 @@ async def verify_claim_authoritatively(
                     nli_contradiction=float(nli["contradiction"]),
                 ).to_authoritative_dict()
             )
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.hallucination.authoritative_verify', exc)
         logger.debug("NLI scoring of authoritative sources failed")
         # Fall back to unscored sources (NLI defaults to 0.0)
         for ext in external_results:
@@ -295,7 +299,9 @@ async def verify_claim_authoritatively(
                     "kb_vs_external_agreement": float(cross_nli["entailment"]),
                     "kb_vs_external_contradiction": float(cross_nli["contradiction"]),
                 }
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.hallucination.authoritative_verify', exc)
             logger.debug("KB vs external cross-validation failed")
 
     # Step 4: Build evidence summary for the LLM verifier

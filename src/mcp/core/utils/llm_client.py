@@ -26,6 +26,7 @@ import logging
 import os
 import threading
 import uuid
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import httpx
@@ -350,7 +351,7 @@ async def call_llm(
             )
             if _consecutive_401s >= _POOL_RECYCLE_401_THRESHOLD:
                 await _recycle_client()
-        elif 400 <= exc.response.status_code < 500:
+        elif HTTPStatus.BAD_REQUEST <= exc.response.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
             # 4xx (other than auth) — diagnose with model name + response body
             # so Sentry / log captures the actual rejection cause. Without this
             # the 2026-05-20 audit saw 80 events of bare "HTTPStatusError 400"
@@ -556,6 +557,8 @@ async def _call_ollama_direct(
             resp.raise_for_status()
             return resp.json().get("message", {}).get("content", "")
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.utils.llm_client', e)
         _logger.warning("Ollama call failed (%s), falling back to OpenRouter", e)
         return await call_llm(messages, temperature=temperature, max_tokens=max_tokens)
 

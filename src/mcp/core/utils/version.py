@@ -41,6 +41,8 @@ def get_version() -> str:
                 if version:
                     return version
             except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.utils.version', exc)
                 logger.warning("Failed to read %s: %s", version_file, exc)
 
         # Fall back to pyproject.toml
@@ -56,6 +58,8 @@ def get_version() -> str:
                 if version:
                     return str(version)
             except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.utils.version', exc)
                 logger.warning("Failed to parse %s: %s", candidate, exc)
                 break
     return _DEFAULT

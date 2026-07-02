@@ -47,6 +47,8 @@ def check_system_health(
         health["data"]["total_chunks"] = total_chunks
         health["data"]["collection_sizes"] = collection_sizes
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.maintenance', e)
         health["services"]["chromadb"] = f"error: {e}"
 
     try:
@@ -67,6 +69,8 @@ def check_system_health(
         health["data"]["artifacts"] = artifact_count
         health["data"]["domains"] = domain_count
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.maintenance', e)
         health["services"]["neo4j"] = f"error: {e}"
 
     try:
@@ -75,6 +79,8 @@ def check_system_health(
         health["services"]["redis"] = "connected"
         health["data"]["audit_log_entries"] = log_size
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.maintenance', e)
         health["services"]["redis"] = f"error: {e}"
 
     # LLM provider check is async-only; callers in async context (maintain())
@@ -111,6 +117,8 @@ async def check_llm_health() -> str:
         )
         return "connected"
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.maintenance', e)
         return f"unreachable: {e}"
 
 
@@ -153,6 +161,8 @@ def purge_artifacts(
                     collection = chroma_client.get_collection(name=config.collection_name(domain))
                     collection.delete(ids=chunk_ids)
                 except Exception as e:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('core.agents.maintenance', e)
                     logger.warning(f"Failed to delete chunks for {artifact_id}: {e}")
 
             with neo4j_driver.session() as session:
@@ -178,9 +188,13 @@ def purge_artifacts(
                         filename=filename,
                     )
                 except Exception as e:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('core.agents.maintenance', e)
                     logger.debug(f"Failed to log maintenance purge event: {e}")
 
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.maintenance', e)
             errors.append({"id": artifact_id, "error": str(e)})
 
     return {
@@ -317,6 +331,8 @@ async def maintain(
             },
         )
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.maintenance', e)
         logger.debug(f"Failed to log maintenance event: {e}")
 
     return report

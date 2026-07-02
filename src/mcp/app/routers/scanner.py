@@ -118,6 +118,8 @@ async def _run_scan(scan_id: str, req: ScanRequest) -> None:
             f"({progress.elapsed_s:.1f}s)"
         )
     except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.scanner', e)
         progress.status = "error"
         progress.elapsed_s = round(time.time() - _scan_start_times[scan_id], 2)
         logger.error(f"Scan {scan_id} failed: {e}")
@@ -177,7 +179,7 @@ async def start_scan(req: ScanRequest) -> dict:
     return {"scan_id": scan_id, "status": "started", "files_estimate": estimate}
 
 
-@router.get("/admin/scan/state")
+@router.get("/admin/scan/state", response_model=ScanState)
 def scan_state() -> ScanState:
     """Return persistent scan state from Redis."""
     redis = get_redis()
@@ -191,7 +193,7 @@ def scan_state() -> ScanState:
     )
 
 
-@router.get("/admin/scan/preview")
+@router.get("/admin/scan/preview", response_model=PreviewResponse)
 async def scan_preview(
     path: str = Query(..., description="Directory to preview"),
     max_file_size_mb: int = Query(50, description="Max file size in MB"),
@@ -209,7 +211,7 @@ class ScanPreviewRequest(BaseModel):
     max_file_size_mb: int = 50
 
 
-@router.post("/admin/scan/preview")
+@router.post("/admin/scan/preview", response_model=PreviewResponse)
 async def scan_preview_post(req: ScanPreviewRequest) -> PreviewResponse:
     """Quick preview of a directory (POST variant — accepts JSON body)."""
     _validate_scan_path(req.path)
@@ -217,7 +219,7 @@ async def scan_preview_post(req: ScanPreviewRequest) -> PreviewResponse:
     return PreviewResponse(**result)
 
 
-@router.get("/admin/scan/{scan_id}")
+@router.get("/admin/scan/{scan_id}", response_model=ScanProgress)
 def get_scan_progress(scan_id: str) -> ScanProgress:
     """Get progress of an active or completed scan."""
     if scan_id not in _active_scans:

@@ -25,6 +25,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from http import HTTPStatus
 from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
@@ -276,10 +277,10 @@ class RssConnector(SourceConnector):
 
         try:
             resp = await guarded_get(url, method="HEAD", user_agent=_USER_AGENT)  # SSRF-guarded probe
-            if resp.status_code >= 400:
+            if resp.status_code >= HTTPStatus.BAD_REQUEST:
                 # Some servers don't support HEAD; retry with GET
                 resp = await guarded_get(url, user_agent=_USER_AGENT)
-            if resp.status_code >= 400:
+            if resp.status_code >= HTTPStatus.BAD_REQUEST:
                 return HealthStatus(
                     ok=False,
                     detail=f"HTTP {resp.status_code}",

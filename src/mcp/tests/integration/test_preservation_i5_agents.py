@@ -77,6 +77,8 @@ def test_other_agents_reachable_without_500(http_client):
         try:
             r = http_client.post(path, json=body, timeout=15.0)
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('tests.integration.test_preservation_i5_agents', exc)
             failures.append(f"{path}: transport error {exc}")
             continue
         if r.status_code >= 500:

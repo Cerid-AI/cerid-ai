@@ -394,6 +394,8 @@ async def scan_folder(
                             file_size_bytes=file_size,
                         )
                 except Exception as e:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.services.folder_scanner', e)
                     _record_file_scanned(redis, content_hash, file_path, "error")
                     logger.error(f"Scan ingest failed for {file_path}: {e}")
                     yield ScanResult(

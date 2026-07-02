@@ -97,7 +97,7 @@ class ChatMessage(BaseModel):
     content: str
 
 
-class ChatRequest(BaseModel):
+class OllamaChatRequest(BaseModel):
     model: str = Field(..., description="Ollama model name (e.g. 'llama3.2')")
     messages: list[ChatMessage]
     stream: bool = False
@@ -183,7 +183,7 @@ async def list_ollama_models():
 
 
 @router.post("/chat", response_model=None)
-async def chat_completion(req: ChatRequest):
+async def chat_completion(req: OllamaChatRequest):
     """Proxy a chat completion request to local Ollama.
 
     Supports both streaming (SSE) and non-streaming responses.
@@ -280,6 +280,8 @@ async def _stream_chat(
             error_payload = json.dumps({"error": "Ollama stream timed out"})
             yield f"data: {error_payload}\n\n"
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.routers.ollama_proxy', exc)
             logger.error("Ollama stream error: %s", exc)
             error_payload = json.dumps({"error": f"Ollama stream error: {exc}"})
             yield f"data: {error_payload}\n\n"
@@ -370,6 +372,8 @@ async def pull_model(req: PullRequest):
             )
             yield f"data: {error_payload}\n\n"
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.routers.ollama_proxy', exc)
             logger.error("Ollama pull failed: %s", exc)
             error_payload = json.dumps({"error": f"Ollama pull error: {exc}"})
             yield f"data: {error_payload}\n\n"

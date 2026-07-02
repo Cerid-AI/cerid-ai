@@ -32,6 +32,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from http import HTTPStatus
 from pathlib import Path
 
 import httpx
@@ -253,7 +254,7 @@ def ingest_note(file_path: str, domain: str, mode: str):
             json=payload,
             timeout=60,
         )
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             data = resp.json()
             status = data.get("status", "success")
             if status == "duplicate":

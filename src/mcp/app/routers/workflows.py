@@ -360,7 +360,9 @@ async def _evaluate_condition(expression: str, input_data: dict[str, Any]) -> bo
                ">": lambda a, b: a > b, "<": lambda a, b: a < b,
                ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b}
         return ops[op](actual, val)
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.workflows', exc)
         return True
 
 

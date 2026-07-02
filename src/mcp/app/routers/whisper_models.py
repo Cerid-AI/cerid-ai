@@ -22,6 +22,7 @@ import logging
 import os
 import platform
 import uuid
+from http import HTTPStatus
 from pathlib import Path
 from typing import Literal
 
@@ -201,7 +202,7 @@ async def _do_download(download_id: str, model_id: str) -> None:
         status.state = "downloading"
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=120.0)) as client:
             async with client.stream("GET", url, follow_redirects=True) as resp:
-                if resp.status_code != 200:
+                if resp.status_code != HTTPStatus.OK:
                     status.state = "failed"
                     status.error = f"HTTP {resp.status_code}"
                     return

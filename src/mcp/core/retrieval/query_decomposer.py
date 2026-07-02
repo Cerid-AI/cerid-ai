@@ -171,6 +171,8 @@ async def decompose_query(
                         logger.info("Decomposed query into %d sub-queries (LLM)", len(result))
                         return result
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.retrieval.query_decomposer', e)
             logger.warning("LLM decomposition failed: %s", e)
 
     return [query]

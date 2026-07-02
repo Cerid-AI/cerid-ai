@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -60,6 +61,8 @@ def compare_status(
                 f"MATCH ()-[r:{rel_types}]->() RETURN count(r) AS n"
             ).single()["n"]
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.status', exc)
         logger.warning("Neo4j local count failed: %s", exc)
 
     for domain in config.DOMAINS:
@@ -68,18 +71,20 @@ def compare_status(
             coll_resp = httpx.get(
                 f"{chroma_url}/api/v1/collections/{coll_name}", timeout=10.0
             )
-            if coll_resp.status_code == 200:
+            if coll_resp.status_code == HTTPStatus.OK:
                 coll_id = coll_resp.json().get("id", coll_name)
                 count_resp = httpx.get(
                     f"{chroma_url}/api/v1/collections/{coll_id}/count", timeout=10.0
                 )
-                if count_resp.status_code == 200:
+                if count_resp.status_code == HTTPStatus.OK:
                     local["chroma_chunks"][domain] = count_resp.json()
                 else:
                     local["chroma_chunks"][domain] = 0
             else:
                 local["chroma_chunks"][domain] = 0
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.sync.status', exc)
             logger.warning("ChromaDB local count failed for %s: %s", domain, exc)
             local["chroma_chunks"][domain] = 0
 
@@ -87,6 +92,8 @@ def compare_status(
         try:
             local["redis_entries"] = redis_client.llen(config.REDIS_INGEST_LOG)
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.sync.status', exc)
             logger.warning("Redis local count failed: %s", exc)
 
     # --- Sync counts (from manifest + JSONL line counts) ---

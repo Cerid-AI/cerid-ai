@@ -95,9 +95,46 @@ class TestRssConnectorSafeParse:
         )
 
 
+class TestHtmlScrapeFetchGuarded:
+    _REL = "core/knowledge/adapter_html_scrape.py"
+
+    def test_uses_guarded_sync_not_raw_httpx(self):
+        fn = _find_function(_parse(self._REL), "_httpx_text_get")
+        assert fn is not None, "_httpx_text_get not found"
+        assert _calls_name(fn, "guarded_get_sync"), (
+            "operator-URL scrape fetch must use guarded_get_sync"
+        )
+        assert not _instantiates_raw_httpx_client(fn), (
+            "html_scrape fetch must NOT construct a raw httpx client (SSRF regression)"
+        )
+
+
+class TestClipboardDaemonFetchGuarded:
+    _REL = "scripts/clipboard_daemon.py"
+
+    def test_uses_guarded_sync_not_raw_httpx(self):
+        fn = _find_function(_parse(self._REL), "_detect_content_type")
+        assert fn is not None, "_detect_content_type not found"
+        assert _calls_name(fn, "guarded_get_sync"), (
+            "clipboard URL fetch must use guarded_get_sync"
+        )
+        assert not _instantiates_raw_httpx_client(fn), (
+            "clipboard fetch must NOT construct a raw httpx client (SSRF regression)"
+        )
+
+
 class TestGuardedGetIsHardened:
     def test_guarded_get_disables_autoredirect_and_validates(self):
         src = (_MCP / "core/ingest/sources/safe_fetch.py").read_text()
         # The single hardened entry: no auto-redirect + per-hop SSRF revalidation.
         assert "follow_redirects=False" in src
         assert "assert_fetchable" in src
+
+    def test_sync_variant_also_hardened(self):
+        fn = _find_function(
+            _parse("core/ingest/sources/safe_fetch.py"), "guarded_get_sync"
+        )
+        assert fn is not None, "guarded_get_sync not found"
+        assert _calls_name(fn, "assert_fetchable"), (
+            "guarded_get_sync must re-validate each hop via assert_fetchable"
+        )

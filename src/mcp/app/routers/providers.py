@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from http import HTTPStatus
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -146,7 +147,7 @@ async def get_internal_provider():
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         async with httpx.AsyncClient(timeout=3) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
-        ollama_available = resp.status_code == 200
+        ollama_available = resp.status_code == HTTPStatus.OK
     except Exception as exc:
         log_swallowed_error("app.routers.providers.get_internal_ollama_probe", exc)
 
@@ -195,7 +196,7 @@ async def get_ollama_status():
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code == 200:
+            if resp.status_code == HTTPStatus.OK:
                 result["reachable"] = True
                 models_data = resp.json().get("models", [])
                 result["models"] = [m.get("name", "") for m in models_data]
@@ -225,7 +226,7 @@ async def enable_ollama():
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code != 200:
+            if resp.status_code != HTTPStatus.OK:
                 raise HTTPException(status_code=503, detail="Ollama is not responding")
     except httpx.ConnectError:
         raise HTTPException(
@@ -388,7 +389,7 @@ async def get_provider_credits():
             "https://openrouter.ai/api/v1/credits",
             headers=headers,
         )
-        if credits_resp.status_code == 200:
+        if credits_resp.status_code == HTTPStatus.OK:
             credits_data = credits_resp.json().get("data", {})
             total = credits_data.get("total_credits", 0)
             used = credits_data.get("total_usage", 0)
@@ -401,7 +402,7 @@ async def get_provider_credits():
             "https://openrouter.ai/api/v1/auth/key",
             headers=headers,
         )
-        if key_resp.status_code == 200:
+        if key_resp.status_code == HTTPStatus.OK:
             key_data = key_resp.json().get("data", {})
             result["usage_daily"] = round(key_data.get("usage_daily", 0), 4)
             result["usage_weekly"] = round(key_data.get("usage_weekly", 0), 2)
@@ -421,6 +422,7 @@ async def get_provider_credits():
         else:
             result["status"] = "ok"
     except Exception as e:
+        log_swallowed_error('app.routers.providers', e)
         logger.warning("OpenRouter credit check failed: %s", e)
         result["error"] = str(e)
         result["status"] = "error"

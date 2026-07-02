@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import time
+from http import HTTPStatus
 from typing import Any
 
 from fastapi import APIRouter
@@ -76,11 +77,13 @@ def health_check() -> dict:
         get_chroma()
         status["chromadb"] = "connected"
     except Exception as exc:
+        log_swallowed_error('app.routers.health', exc)
         status["chromadb"] = f"error: {exc}"
     try:
         get_redis()
         status["redis"] = "connected"
     except Exception as exc:
+        log_swallowed_error('app.routers.health', exc)
         status["redis"] = f"error: {exc}"
     try:
         driver = get_neo4j()
@@ -93,6 +96,7 @@ def health_check() -> dict:
                 session.run("RETURN 1").consume()
             status["neo4j"] = "connected"
     except Exception as exc:
+        log_swallowed_error('app.routers.health', exc)
         status["neo4j"] = f"error: {exc}"
     # Circuit breaker states
     try:
@@ -125,9 +129,10 @@ def health_check() -> dict:
         try:
             import httpx
             resp = httpx.get(f"{ollama_url}/api/tags", timeout=1)
-            models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == 200 else []
+            models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == HTTPStatus.OK else []
             ollama_status = {"reachable": True, "models": len(models), "url": ollama_url}
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.routers.health', exc)
             ollama_status = {"reachable": False, "url": ollama_url}
 
     # Embedding-cache stats — read-only, no side effects. Cheap (single
@@ -295,7 +300,8 @@ def degradation_status() -> dict:
         from utils.degradation import DegradationManager
         mgr = DegradationManager()
         tier = mgr.current_tier().value  # .value → lowercase ("full"), not .name ("FULL")
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('app.routers.health', exc)
         tier = "unknown"
     base["degradation_tier"] = tier
     base["uptime_seconds"] = int(time.time() - _start_time)
@@ -320,7 +326,8 @@ def degradation_status() -> dict:
         base["can_retrieve"] = mgr.can_retrieve()
         base["can_verify"] = mgr.can_verify()
         base["can_generate"] = mgr.can_generate()
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('app.routers.health', exc)
         base["can_retrieve"] = True
         base["can_verify"] = True
         base["can_generate"] = True
@@ -353,22 +360,24 @@ def degradation_status() -> dict:
                     headers={"Authorization": f"Bearer {api_key}"},
                     timeout=3,
                 )
-                if resp.status_code == 200:
+                if resp.status_code == HTTPStatus.OK:
                     _openrouter_auth_cache = True
-                elif resp.status_code == 401 and get_consecutive_auth_failures() == 0:
+                elif resp.status_code == HTTPStatus.UNAUTHORIZED and get_consecutive_auth_failures() == 0:
                     # /auth/key returned 401 but completions are succeeding —
                     # treat as a transient probe false positive.
                     _openrouter_auth_cache = True
                 else:
-                    _openrouter_auth_cache = resp.status_code == 200
+                    _openrouter_auth_cache = resp.status_code == HTTPStatus.OK
             else:
                 _openrouter_auth_cache = None  # no key configured
-        except Exception:
+        except Exception as exc:
+            log_swallowed_error('app.routers.health', exc)
             # Network error on the probe itself — fall back to completion health.
             try:
                 from core.utils.llm_client import get_consecutive_auth_failures
                 _openrouter_auth_cache = get_consecutive_auth_failures() == 0
-            except Exception:
+            except Exception as exc:
+                log_swallowed_error('app.routers.health', exc)
                 _openrouter_auth_cache = False
         _openrouter_auth_cache_ts = now
     base["openrouter_auth_ok"] = _openrouter_auth_cache
@@ -427,6 +436,7 @@ def _invariants_snapshot() -> dict:
                 if chroma is not None:
                     snap.update(_probe_chroma(chroma))
             except Exception as exc:
+                log_swallowed_error('app.routers.health', exc)
                 errs = snap["errors"]
                 if isinstance(errs, list):
                     errs.append(f"chroma: {exc}")
@@ -438,6 +448,7 @@ def _invariants_snapshot() -> dict:
         snap["mcp"] = _mcp_tool_summary()
         return snap
     except Exception as exc:
+        log_swallowed_error('app.routers.health', exc)
         logger.warning("invariants snapshot failed: %s", exc)
         return {"healthy_invariants": False, "errors": [str(exc)]}
 
@@ -743,7 +754,7 @@ async def health_check_endpoint():
     services_ok = all(_ok(v) for v in result["services"].values())
     invariants_ok = result.get("invariants", {}).get("healthy_invariants", True)
     http_status = 200 if (services_ok and invariants_ok) else 503
-    if http_status == 200:
+    if http_status == HTTPStatus.OK:
         return result
     return JSONResponse(content=result, status_code=503)
 

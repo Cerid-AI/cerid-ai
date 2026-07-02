@@ -328,6 +328,7 @@ async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
         )
         neo4j_ok = True
     except Exception as e:
+        log_swallowed_error('app.services.ingest_recovery', e)
         err_msg = str(e).lower()
         # A content_hash constraint violation means another path already
         # committed this artifact — treat as success so we can flip the chunk.

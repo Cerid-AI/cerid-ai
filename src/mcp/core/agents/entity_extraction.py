@@ -161,7 +161,9 @@ async def extract_entities_from_text(
 
     try:
         parsed = parse_llm_json(raw)
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.agents.entity_extraction', exc)
         logger.warning(
             "entity_extraction.json_parse_failed (returning [] for this chunk); "
             "first 200 chars: %r",

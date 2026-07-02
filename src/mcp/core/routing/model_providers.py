@@ -142,7 +142,9 @@ def load_config(redis_client) -> ModelProviderConfig:  # noqa: ANN001
             if raw:
                 config = ModelProviderConfig.from_dict(json.loads(raw))
                 return config
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.routing.model_providers', exc)
             logger.debug("Failed to load model provider config from Redis", exc_info=True)
 
     # Fall back to env vars (backward compatibility)

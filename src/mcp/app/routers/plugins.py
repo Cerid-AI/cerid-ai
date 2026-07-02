@@ -96,7 +96,9 @@ def _is_plugin_enabled_redis(name: str) -> bool | None:
         if val is None:
             return None
         return val.decode() == "1" if isinstance(val, bytes) else str(val) == "1"
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.plugins', exc)
         return None
 
 
@@ -114,7 +116,9 @@ def _get_plugin_config_redis(name: str) -> dict[str, Any]:
         if raw is None:
             return {}
         return json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.plugins', exc)
         return {}
 
 

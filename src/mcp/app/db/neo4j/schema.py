@@ -29,6 +29,8 @@ def init_schema(driver) -> None:
         try:
             session.run("DROP INDEX artifact_content_hash IF EXISTS")
         except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.db.neo4j.schema', e)
             logger.debug(f"Old index drop skipped: {e}")
         session.run(
             "CREATE CONSTRAINT artifact_content_hash_unique IF NOT EXISTS "

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -78,7 +79,7 @@ async def _fetch_latest_release() -> dict[str, str] | None:
             follow_redirects=True,
         )
 
-    if resp.status_code != 200:
+    if resp.status_code != HTTPStatus.OK:
         logger.debug("GitHub releases API returned %d", resp.status_code)
         return None
 

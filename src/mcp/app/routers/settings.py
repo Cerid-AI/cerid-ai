@@ -633,6 +633,8 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
             from app.sync.user_state import write_settings_with_retry
             await write_settings_with_retry(config.SYNC_DIR, updated)
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.settings', exc)
         logger.warning("Failed to persist settings to sync dir: %s", exc)
 
     logger.info(f"Settings updated: {updated}")
@@ -656,7 +658,9 @@ async def get_private_mode():
         redis = get_redis()
         level = redis.get(_PRIVATE_MODE_KEY)
         return {"level": int(level) if level is not None else 0}
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.routers.settings', exc)
         return {"level": 0}
 
 

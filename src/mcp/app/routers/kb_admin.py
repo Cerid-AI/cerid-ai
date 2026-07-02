@@ -339,6 +339,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
                     deleted_count += 1
                     chunks_removed += len(result.get("chunk_ids", []))
             except Exception as e:
+                log_swallowed_error('app.routers.kb_admin', e)
                 logger.warning("Failed to delete artifact %s: %s", artifact["id"][:8], e)
 
         # Delete ChromaDB collection for the domain
@@ -347,6 +348,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
             chroma.delete_collection(name=coll_name)
             logger.info("Deleted ChromaDB collection: %s", coll_name)
         except Exception as e:
+            log_swallowed_error('app.routers.kb_admin', e)
             logger.warning("Failed to delete collection %s: %s", coll_name, e)
 
         await invalidate_cache_non_blocking()
@@ -386,6 +388,7 @@ async def delete_single_artifact(artifact_id: str):
                 collection.delete(ids=chunk_ids)
                 chunks_removed = len(chunk_ids)
             except Exception as e:
+                log_swallowed_error('app.routers.kb_admin', e)
                 logger.warning("Failed to clean ChromaDB chunks: %s", e)
 
         await invalidate_cache_non_blocking()
@@ -504,7 +507,8 @@ async def repair_collection(req: CollectionRepairRequest):
     try:
         existing = chroma.get_collection(name=coll_name)
         actual_dim = _probe_collection_dim(existing)
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error('app.routers.kb_admin', exc)
         actual_dim = None
 
     # Find artifacts that would be re-ingested
@@ -560,7 +564,8 @@ async def repair_collection(req: CollectionRepairRequest):
                     continue
                 try:
                     rec = _json.loads(line)
-                except Exception:
+                except Exception as exc:
+                    log_swallowed_error('app.routers.kb_admin', exc)
                     continue
                 doc = rec.get("document")
                 meta = rec.get("metadata") or {}
@@ -581,6 +586,7 @@ async def repair_collection(req: CollectionRepairRequest):
                     )
                     replayed += 1
                 except Exception as e:
+                    log_swallowed_error('app.routers.kb_admin', e)
                     logger.warning("Repair replay failed for one doc: %s", e)
         rebuilt = replayed
     except Exception as e:

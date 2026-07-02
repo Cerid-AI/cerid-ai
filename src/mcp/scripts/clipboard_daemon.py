@@ -137,8 +137,9 @@ def _detect_content_type(text: str) -> tuple[str, str | None]:
         parsed = urlparse(stripped)
         if parsed.scheme and parsed.netloc:
             try:
-                import httpx
-                resp = httpx.get(stripped, timeout=10.0, follow_redirects=True)
+                from core.ingest.sources.safe_fetch import guarded_get_sync
+
+                resp = guarded_get_sync(stripped, timeout=10.0)
                 resp.raise_for_status()
                 page_text = _strip_html(resp.text)
                 if len(page_text) >= MIN_LENGTH:
@@ -293,8 +294,8 @@ def run_daemon(*, api_only: bool = False) -> NoReturn:
                 if isinstance(e, _redis.ConnectionError):
                     logger.warning("Redis connection lost, reconnecting...")
                     r = _connect_redis()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as reconnect_exc:  # noqa: BLE001
+                logger.warning("Redis reconnect failed: %s", reconnect_exc)
 
         # Interruptible sleep
         deadline = time.monotonic() + POLL_SECONDS

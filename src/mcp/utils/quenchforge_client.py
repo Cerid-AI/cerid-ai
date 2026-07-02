@@ -47,6 +47,7 @@ import asyncio
 import logging
 import os
 import time
+from http import HTTPStatus
 
 import httpx
 
@@ -164,7 +165,7 @@ async def _post_with_retry_after(
     """
     for attempt in range(_MAX_503_RETRIES + 1):
         resp = await client.post(url, json=json_body)
-        if resp.status_code != 503 or attempt == _MAX_503_RETRIES:
+        if resp.status_code != HTTPStatus.SERVICE_UNAVAILABLE or attempt == _MAX_503_RETRIES:
             resp.raise_for_status()
             return resp.json()
         # Server asked us to back off. Sleep for Retry-After (clamped).
@@ -358,7 +359,7 @@ async def quenchforge_health() -> dict | None:
         client = await _get_client()
         url = _get_quenchforge_url()
         resp = await client.get(f"{url}/health", timeout=2)
-        if resp.status_code == 200:
+        if resp.status_code == HTTPStatus.OK:
             return resp.json()
     except Exception as exc:  # noqa: BLE001 — health probe is best-effort
         log_swallowed_error(__name__, exc)

@@ -153,7 +153,7 @@ class ConnectorListResponse(BaseModel):
     connectors: list[ConnectorStatus]
 
 
-class OAuthStartResponse(BaseModel):
+class ConnectorOAuthStartResponse(BaseModel):
     auth_kind: str
     # Google: returns an open-URL the operator visits to complete the flow
     auth_url: str | None = None
@@ -248,8 +248,8 @@ async def get_connector(slug: str) -> ConnectorStatus:
     return _build_status(meta)
 
 
-@router.post("/{slug}/auth/start", response_model=OAuthStartResponse)
-async def start_auth(slug: str) -> OAuthStartResponse:
+@router.post("/{slug}/auth/start", response_model=ConnectorOAuthStartResponse)
+async def start_auth(slug: str) -> ConnectorOAuthStartResponse:
     meta = _CONNECTORS.get(slug)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"unknown connector: {slug}")
@@ -257,7 +257,7 @@ async def start_auth(slug: str) -> OAuthStartResponse:
     if meta.auth_kind == "google_oauth":
         port = os.getenv("CERID_PORT_GOOGLE_MCP", "8810")
         auth_url = f"http://127.0.0.1:{port}/oauth/start"
-        return OAuthStartResponse(
+        return ConnectorOAuthStartResponse(
             auth_kind="google_oauth",
             auth_url=auth_url,
             instructions=(
@@ -269,7 +269,7 @@ async def start_auth(slug: str) -> OAuthStartResponse:
     if meta.auth_kind == "msal_device_code":
         # Surface the device-code via the sibling's CLI surface (operator
         # runs `docker compose exec ms365-mcp ms365-mcp login`).
-        return OAuthStartResponse(
+        return ConnectorOAuthStartResponse(
             auth_kind="msal_device_code",
             instructions=(
                 "Run: docker compose -f stacks/connectors/docker-compose.yml "
@@ -281,7 +281,7 @@ async def start_auth(slug: str) -> OAuthStartResponse:
 
     # tcc_only — open System Settings → Privacy & Security
     settings_url = "x-apple.systempreferences:com.apple.preference.security?Privacy"
-    return OAuthStartResponse(
+    return ConnectorOAuthStartResponse(
         auth_kind="tcc_only",
         settings_url=settings_url,
         instructions=(

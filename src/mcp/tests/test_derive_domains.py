@@ -538,7 +538,9 @@ def test_a4_subcategory_signal_measurement():
         driver = get_neo4j()
         if driver is None:
             pytest.skip("live Neo4j not available")
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('tests.test_derive_domains', exc)
         pytest.skip("live Neo4j not available")
 
     cypher = """
@@ -553,6 +555,8 @@ def test_a4_subcategory_signal_measurement():
         with driver.session() as session:
             row = session.run(cypher).single()
     except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('tests.test_derive_domains', exc)
         pytest.skip(f"query failed: {exc}")
 
     total = int(row["total"]) if row else 0

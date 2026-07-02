@@ -47,7 +47,9 @@ def _encrypt_value(value: str) -> str:
         from utils.encryption import encrypt_field
 
         return encrypt_field(value) if value else value
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.user_state', exc)
         return value
 
 
@@ -57,7 +59,9 @@ def _decrypt_value(value: str) -> str:
         from utils.encryption import decrypt_field
 
         return decrypt_field(value) if value else value
-    except Exception:
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.user_state', exc)
         return value
 
 
@@ -351,10 +355,10 @@ def read_conversation(sync_dir: str, conv_id: str) -> dict[str, Any]:
 def delete_conversation(sync_dir: str, conv_id: str) -> None:
     """Delete a conversation file. No-op if the file does not exist."""
     path = Path(sync_dir) / "user" / "conversations" / f"{conv_id}.json"
-    try:
-        path.unlink()
+    if path.exists():
+        path.unlink(missing_ok=True)  # missing_ok closes the exists()->unlink race
         logger.info("Deleted conversation %s", conv_id)
-    except FileNotFoundError:
+    else:
         logger.debug("Conversation %s not found, nothing to delete", conv_id)
 
 

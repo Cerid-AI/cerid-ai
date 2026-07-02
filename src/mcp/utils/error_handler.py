@@ -72,6 +72,8 @@ def handle_errors(
                 try:
                     return await fn(*args, **kwargs)
                 except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('utils.error_handler', exc)
                     return _handle_exception(exc, fn.__name__)
 
             return async_wrapper
@@ -81,6 +83,8 @@ def handle_errors(
             try:
                 return fn(*args, **kwargs)
             except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('utils.error_handler', exc)
                 return _handle_exception(exc, fn.__name__)
 
         return sync_wrapper

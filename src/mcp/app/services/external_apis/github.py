@@ -16,6 +16,7 @@ provides a ``GITHUB_TOKEN``, it is passed as a Bearer token.
 from __future__ import annotations
 
 import os
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -147,6 +148,6 @@ class GitHubAdapter(ExternalAPIAdapter):
         headers = {"Accept": "application/vnd.github+json", **_auth_headers()}
         try:
             resp = await client.get(f"{_BASE_URL}/zen", headers=headers)
-            return resp.status_code < 500
+            return resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR
         except Exception:  # noqa: BLE001
             return False

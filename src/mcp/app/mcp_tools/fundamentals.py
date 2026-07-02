@@ -248,7 +248,9 @@ async def pkb_artifact_delete(
             )
             await asyncio.to_thread(coll.delete, ids=chunk_ids)
             chunks_removed = len(chunk_ids)
-        except Exception:
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.mcp_tools.fundamentals', exc)
             # Collection might not exist; tolerate.
             chunks_removed = 0
 
@@ -362,7 +364,7 @@ async def pkb_search_filtered(
     utils/domain_privacy.py, domain="messages" (iMessage content) is
     stripped from the requested domains. See docs/PRO_MESSAGES.md.
     """
-    from core.agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query  # retrieval-import-allowed: filter-then-retrieve; KB-only
     from utils.domain_privacy import (
         DOMAIN_PRIVACY_FLOOR,
         get_global_private_mode_level,
@@ -610,6 +612,8 @@ async def pkb_recategorize_bulk(
             )
             moved += 1
         except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.mcp_tools.fundamentals', exc)
             failures.append({
                 "artifact_id": artifact_id,
                 "reason": str(exc),

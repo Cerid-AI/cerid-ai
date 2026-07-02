@@ -353,6 +353,8 @@ async def import_bookmarks(browser: str = "all") -> dict[str, Any]:
             if existing:
                 seen = {m.decode("utf-8") if isinstance(m, bytes) else m for m in existing}
     except (OSError, RuntimeError) as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.data_sources.bookmarks', exc)
         logger.debug("Redis dedup set unavailable: %s", exc)
 
     start = time.monotonic()
@@ -469,6 +471,8 @@ async def _update_import_status(
         existing["last_duration_seconds"] = duration
         r.set(_REDIS_STATUS_KEY, json.dumps(existing))
     except (OSError, RuntimeError) as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.data_sources.bookmarks', exc)
         logger.debug("Failed to update bookmark import status: %s", exc)
 
 

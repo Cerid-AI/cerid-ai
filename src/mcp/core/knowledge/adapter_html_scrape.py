@@ -404,16 +404,13 @@ HttpGet = Callable[[str, str], str]
 
 
 def _httpx_text_get(url: str, user_agent: str) -> str:
-    import httpx
+    # Operator-supplied sitemap/page URLs are an SSRF vector; route through the
+    # one canonical guard (per-hop redirect revalidation + byte cap).
+    from core.ingest.sources.safe_fetch import guarded_get_sync
 
-    headers = {"User-Agent": user_agent}
-    with httpx.Client(
-        timeout=httpx.Timeout(60.0, connect=10.0),
-        follow_redirects=True,
-    ) as client:
-        resp = client.get(url, headers=headers)
-        resp.raise_for_status()
-        return resp.text
+    resp = guarded_get_sync(url, user_agent=user_agent, timeout=60.0)
+    resp.raise_for_status()
+    return resp.text
 
 
 # ── Adapter ─────────────────────────────────────────────────────────────
