@@ -100,6 +100,17 @@ def write_baseline(counts: Counter[str]) -> None:
         "# Per-file raw follow_redirects=True (external-fetch) baseline — SHRINK-ONLY.",
         "# Route new redirect-following fetches through core.ingest.sources.safe_fetch.",
         "# Regenerate after burn-down: python scripts/lint-external-fetch-boundary.py --update",
+        "#",
+        "# Reviewed residual (Phase 5, 2026-07-02): the two arbitrary/operator-URL",
+        "# fetches were migrated to guarded_get(_sync); every entry below is a",
+        "# FIXED, TRUSTED endpoint documented inline at its call site with a",
+        "# `# follow_redirects:` note — knowledge-pack build-time adapters",
+        "# (api.fda.gov, ods.od.nih.gov, gutenberg.org, MediaWiki API,",
+        "# docs.python.org, dumps.wikimedia.org, GitHub codeload) plus fixed-host",
+        "# release/model downloads (GitHub releases, HuggingFace) and the pooled",
+        "# external-API client. Several validate `https://` up front. The streamed",
+        "# downloads exceed guarded_get's 8MB in-memory cap, so they stay raw by",
+        "# design. Not debt — reviewed exceptions; the ratchet keeps them shrink-only.",
         f"# total={total} files={len(counts)}",
     ]
     lines += [f"{counts[rel]}\t{rel}" for rel in sorted(counts)]

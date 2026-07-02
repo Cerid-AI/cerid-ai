@@ -1019,6 +1019,110 @@
         "title": "SDKSearchResponse",
         "type": "object"
       },
+      "SdkIngestVoiceNoteResponse": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "transcribe_ms": {
+            "title": "Transcribe Ms"
+          },
+          "transcript": {
+            "title": "Transcript"
+          },
+          "word_count": {
+            "title": "Word Count"
+          }
+        },
+        "required": [
+          "status",
+          "artifact_id",
+          "transcript",
+          "transcribe_ms",
+          "word_count"
+        ],
+        "title": "SdkIngestVoiceNoteResponse",
+        "type": "object"
+      },
+      "SdkIngestWebhookResponse": {
+        "properties": {
+          "normalized_count": {
+            "title": "Normalized Count"
+          },
+          "source_id": {
+            "title": "Source Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "source_id",
+          "normalized_count"
+        ],
+        "title": "SdkIngestWebhookResponse",
+        "type": "object"
+      },
+      "SdkPluginsResponse": {
+        "properties": {
+          "plugins": {
+            "items": {},
+            "title": "Plugins",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total"
+          }
+        },
+        "required": [
+          "plugins",
+          "total"
+        ],
+        "title": "SdkPluginsResponse",
+        "type": "object"
+      },
+      "SdkSettingsResponse": {
+        "properties": {
+          "features": {
+            "title": "Features"
+          },
+          "tier": {
+            "title": "Tier"
+          },
+          "version": {
+            "title": "Version"
+          }
+        },
+        "required": [
+          "version",
+          "tier",
+          "features"
+        ],
+        "title": "SdkSettingsResponse",
+        "type": "object"
+      },
+      "SdkTaxonomyResponse": {
+        "properties": {
+          "domains": {
+            "title": "Domains"
+          },
+          "taxonomy": {
+            "title": "Taxonomy"
+          }
+        },
+        "required": [
+          "domains",
+          "taxonomy"
+        ],
+        "title": "SdkTaxonomyResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1295,9 +1399,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Sdk Ingest Voice Note Sdk V1 Ingest Voice Note Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SdkIngestVoiceNoteResponse"
                 }
               }
             },
@@ -1339,11 +1441,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Sdk Ingest Webhook Sdk V1 Ingest Webhook  Token  Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SdkIngestWebhookResponse"
                 }
               }
             },
@@ -1526,7 +1624,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SdkPluginsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1620,7 +1720,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SdkSettingsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1639,7 +1741,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SdkTaxonomyResponse"
+                }
               }
             },
             "description": "Successful Response"

@@ -10,10 +10,20 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 
 import config
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class SupportedExtensionsEndpointResponse(BaseModel):
+    extensions: Any
+    count: Any
+
+
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.upload")
@@ -24,7 +34,7 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.post("/upload")
+@router.post("/upload")  # response-model-allowed: dynamic response (shape varies)
 async def upload_file_endpoint(
     file: UploadFile = File(...),
     domain: str = Query("", description="Target domain (empty = auto-detect)"),
@@ -167,7 +177,7 @@ async def upload_file_endpoint(
                 logger.warning(f"Failed to clean up temp file {tmp_path}: {e}")
 
 
-@router.get("/upload/supported")
+@router.get("/upload/supported", response_model=SupportedExtensionsEndpointResponse)
 async def supported_extensions_endpoint():
     """Return the list of supported file extensions for upload."""
     return {
@@ -176,7 +186,7 @@ async def supported_extensions_endpoint():
     }
 
 
-@router.get("/archive/files")
+@router.get("/archive/files", response_model=dict[str, Any])
 async def list_archive_files(
     domain: str = Query("", description="Filter by domain folder (empty = all)"),
 ):

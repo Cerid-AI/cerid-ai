@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import time
+from typing import Any
 
 from fastapi import APIRouter, Query
 
@@ -126,7 +127,7 @@ def _bm25_metrics() -> dict:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
-@router.get("/system/storage")
+@router.get("/system/storage")  # response-model-allowed: dynamic response (shape varies)
 def get_storage_metrics():
     """Return storage usage across all data stores, cached for 60 seconds."""
     try:
@@ -179,7 +180,7 @@ def get_storage_metrics():
     return result
 
 
-@router.get("/admin/ingest-history")
+@router.get("/admin/ingest-history", response_model=dict[str, Any])
 def get_ingest_history(
     limit: int = Query(50, ge=1, le=500),
     offset: str = Query("0-0", description="Redis stream ID for cursor-based pagination"),

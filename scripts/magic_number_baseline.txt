@@ -1,6 +1,16 @@
 # Per-file production PLR2004 (magic-number) baseline — SHRINK-ONLY.
 # Regenerate after burn-down: python scripts/lint-magic-numbers.py --update
-# total=256 files=84
+#
+# Reviewed residual (Phase 5, 2026-07-02): HTTP status codes were extracted
+# to http.HTTPStatus and threshold DUPLICATES were pointed at their existing
+# config constants (NLI_*_THRESHOLD, QUALITY_TIER_*). What remains is
+# deliberately-inline SELF-EVIDENT literals — tiny ints (0/1/2/3…), epsilons
+# (1e-9, 1e-12), simple ratios (0.5), local input-length/word caps
+# (len(x) > N), sanity bounds (month > 12, uint16 0xFFFF), and assertion
+# counts — where a named constant would add indirection, not clarity
+# (Phase-0 assessment, tasks/2026-06-30-sprint-plr-magic-numbers.md). The
+# ratchet keeps them shrink-only; extract opportunistically, never regress.
+# total=247 files=82
 3	src/mcp/app/agents/assembler.py
 1	src/mcp/app/agents/decomposer.py
 1	src/mcp/app/data_sources/base.py
@@ -10,7 +20,7 @@
 1	src/mcp/app/data_sources/wolfram.py
 1	src/mcp/app/db/neo4j/decomposition.py
 2	src/mcp/app/eval/harness.py
-5	src/mcp/app/eval/memory_efficacy.py
+4	src/mcp/app/eval/memory_efficacy.py
 1	src/mcp/app/mcp_tools/batch.py
 5	src/mcp/app/mcp_tools/feedback.py
 1	src/mcp/app/mcp_tools/fundamentals.py
@@ -37,12 +47,12 @@
 1	src/mcp/app/sync/user_state.py
 2	src/mcp/app/tools.py
 1	src/mcp/config/providers.py
-12	src/mcp/core/agents/curator.py
+9	src/mcp/core/agents/curator.py
 2	src/mcp/core/agents/hallucination/authoritative_verify.py
 11	src/mcp/core/agents/hallucination/extraction.py
 4	src/mcp/core/agents/hallucination/patterns.py
 11	src/mcp/core/agents/hallucination/streaming.py
-23	src/mcp/core/agents/hallucination/verification.py
+20	src/mcp/core/agents/hallucination/verification.py
 2	src/mcp/core/agents/memory.py
 7	src/mcp/core/agents/query_agent.py
 4	src/mcp/core/agents/trading_agent.py
@@ -59,12 +69,10 @@
 3	src/mcp/core/retrieval/reranker.py
 2	src/mcp/core/retrieval/retrieval_gate.py
 7	src/mcp/core/routing/smart_router.py
-1	src/mcp/core/utils/claim_cache.py
 1	src/mcp/core/utils/contextual.py
 9	src/mcp/core/utils/diversity.py
 1	src/mcp/core/utils/embeddings.py
 1	src/mcp/core/utils/internal_llm.py
-1	src/mcp/core/utils/llm_client.py
 5	src/mcp/core/utils/quality.py
 4	src/mcp/parsers/code_ast.py
 1	src/mcp/plugins/apple_calendar/data_source.py

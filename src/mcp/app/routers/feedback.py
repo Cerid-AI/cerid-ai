@@ -15,18 +15,28 @@ lives in the ``/sdk/v1/`` namespace per the additive-evolution rule.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 
 from app.services.feedback import ClaimFeedback, submit_feedback
 from core.utils.swallowed import log_swallowed_error
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class SubmitClaimFeedbackResponse(BaseModel):
+    ok: bool
+    rating_id: Any
+
+
 
 logger = logging.getLogger("ai-companion.feedback")
 
 router = APIRouter(prefix="/sdk/v1", tags=["feedback"])
 
 
-@router.post("/feedback", status_code=status.HTTP_201_CREATED)
+@router.post("/feedback", status_code=status.HTTP_201_CREATED, response_model=SubmitClaimFeedbackResponse)
 async def submit_claim_feedback(body: ClaimFeedback) -> dict:
     """Submit user feedback for a single verified claim.
 

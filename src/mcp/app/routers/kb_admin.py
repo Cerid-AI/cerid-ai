@@ -25,6 +25,26 @@ from core.retrieval.bm25 import rebuild_all as rebuild_bm25_all
 from core.utils.swallowed import log_swallowed_error
 from utils.query_cache import invalidate_cache_non_blocking
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class ClearDomainResponse(BaseModel):
+    domain: Any
+    artifacts_deleted: Any
+    chunks_removed: Any
+    message: Any
+
+
+class MergeDuplicatesResponse(BaseModel):
+    status: str
+    merged: Any
+
+
+class DismissDuplicatesResponse(BaseModel):
+    status: str
+    dismissed: Any
+
+
+
 logger = logging.getLogger("ai-companion.kb-admin")
 
 
@@ -313,7 +333,7 @@ async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
         raise HTTPException(status_code=500, detail=f"Failed to regenerate summaries: {e}")
 
 
-@router.post("/admin/kb/clear-domain/{domain}")
+@router.post("/admin/kb/clear-domain/{domain}", response_model=ClearDomainResponse)
 async def clear_domain(domain: str, req: ClearDomainRequest):
     """Clear all artifacts in a specific domain. Requires confirm=true."""
     if not req.confirm:
@@ -688,7 +708,7 @@ async def list_duplicates(min_similarity: float = 0.85):
     return DuplicatesResponse(groups=groups, total_groups=len(groups))
 
 
-@router.post("/admin/kb/duplicates/merge")
+@router.post("/admin/kb/duplicates/merge", response_model=MergeDuplicatesResponse)
 async def merge_duplicates(req: MergeDuplicatesRequest):
     """Delete the ``remove_ids`` artifacts, keeping ``keep_id``."""
     neo4j = get_neo4j()
@@ -704,7 +724,7 @@ async def merge_duplicates(req: MergeDuplicatesRequest):
     return {"status": "ok", "merged": merged}
 
 
-@router.post("/admin/kb/duplicates/dismiss")
+@router.post("/admin/kb/duplicates/dismiss", response_model=DismissDuplicatesResponse)
 async def dismiss_duplicates(req: DismissDuplicatesRequest):
     """Mark a duplicate group as dismissed (Sprint 2: persist to filter future fetches).
 

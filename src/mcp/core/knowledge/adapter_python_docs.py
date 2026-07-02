@@ -111,7 +111,7 @@ def _httpx_zip_downloader(url: str, max_bytes: int) -> bytes:
     import httpx
 
     timeout = httpx.Timeout(300.0, connect=15.0)
-    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:  # follow_redirects: fixed docs.python.org zip (https-validated); streamed
         with client.stream("GET", url) as resp:
             resp.raise_for_status()
             buf = io.BytesIO()

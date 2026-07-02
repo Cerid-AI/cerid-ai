@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -22,6 +23,24 @@ from models.data_sources import (
     RssPollAllResponse,
 )
 from utils.error_handler import handle_errors
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class DeleteEmailSourceResponse(BaseModel):
+    status: str
+
+
+class ConfigureEmailResponse(BaseModel):
+    status: str
+    host: Any
+    user: Any
+
+
+class QueryDataSourcesResponse(BaseModel):
+    results: Any
+    count: Any
+
+
 
 router = APIRouter(tags=["data-sources"])
 logger = logging.getLogger("ai-companion.data_sources")
@@ -68,7 +87,7 @@ class DataSourceQueryRequest(BaseModel):
     timeout: float = 5.0
 
 
-@router.post("/data-sources/query")
+@router.post("/data-sources/query", response_model=QueryDataSourcesResponse)
 @handle_errors(fallback={"results": [], "count": 0})
 async def query_data_sources(body: DataSourceQueryRequest):
     """Query all enabled external data sources in parallel."""
@@ -146,7 +165,7 @@ class EmailConfigRequest(BaseModel):
     poll_interval: int = 15  # minutes
 
 
-@router.post("/data-sources/email/configure")
+@router.post("/data-sources/email/configure", response_model=ConfigureEmailResponse)
 @handle_errors(breaker_name="email-imap")
 async def configure_email(config: EmailConfigRequest):
     """Configure IMAP connection — validates connectivity before saving."""
@@ -171,7 +190,7 @@ async def configure_email(config: EmailConfigRequest):
     return {"status": "configured", "host": config.host, "user": config.user}
 
 
-@router.get("/data-sources/email/status")
+@router.get("/data-sources/email/status")  # response-model-allowed: dynamic response (shape varies)
 @handle_errors(fallback={"last_poll": None, "messages_ingested": 0, "errors": []})
 async def email_status():
     """Return current email polling status — last poll time, message count, errors."""
@@ -180,7 +199,7 @@ async def email_status():
     return await get_email_status()
 
 
-@router.delete("/data-sources/email")
+@router.delete("/data-sources/email", response_model=DeleteEmailSourceResponse)
 @handle_errors()
 async def delete_email_source():
     """Remove IMAP configuration and stop polling."""
@@ -190,7 +209,7 @@ async def delete_email_source():
     return {"status": "deleted"}
 
 
-@router.post("/data-sources/email/poll-now")
+@router.post("/data-sources/email/poll-now")  # response-model-allowed: dynamic response (shape varies)
 @handle_errors(breaker_name="email-imap")
 async def poll_email_now():
     """Trigger an immediate email poll."""
@@ -200,7 +219,7 @@ async def poll_email_now():
     return result
 
 
-@router.post("/data-sources/email/import-emlx")
+@router.post("/data-sources/email/import-emlx")  # response-model-allowed: dynamic response (shape varies)
 @handle_errors()
 async def import_emlx_file(
     path: str = Query(..., description="Absolute path to .emlx file"),

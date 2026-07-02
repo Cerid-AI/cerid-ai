@@ -48,6 +48,15 @@ from core.ingest.sources.registry import get_connector
 from core.ingest.telemetry import time_connect
 from core.utils.swallowed import log_swallowed_error
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class GetWebhookUrlResponse(BaseModel):
+    url: Any
+    require_hmac: Any
+    curl_example: Any
+
+
+
 logger = logging.getLogger("ai-companion.routers.sources")
 
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -424,7 +433,7 @@ async def test_source(source_id: str):
     return HealthProbeResult(ok=probe.ok, detail=probe.detail, last_error=probe.last_error)
 
 
-@router.get("/{source_id}/webhook-url")
+@router.get("/{source_id}/webhook-url", response_model=GetWebhookUrlResponse)
 async def get_webhook_url(source_id: str, request: Request):
     """Return the live webhook receiver URL (with token) for a
     webhook-kind source. Drives the F7 share card — the only place

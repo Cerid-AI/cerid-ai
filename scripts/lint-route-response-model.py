@@ -15,8 +15,9 @@ Mechanism (the ratchet):
 * AST-scan every ``@router.<method>("/path")`` under src/mcp/app/routers/
   and src/mcp/routers/ (no app.* import needed — runs in a slim container).
 * A route is *untyped* when its decorator has no ``response_model=`` AND the
-  handler does not return a custom Response subclass (streaming / file /
-  redirect / plain / html / SSE) — those legitimately set their own body.
+  handler does not return a custom Response (Response / JSONResponse / streaming
+  / file / redirect / plain / html / SSE) AND it is not a no-body status
+  (204/205/304) — those legitimately set their own body or have none.
 * The grandfather allowlist (``route_response_model_allowlist.txt``) holds
   the routes that are untyped TODAY. The gate fails when:
     - a NEW untyped route appears that is not allowlisted, OR
@@ -49,10 +50,17 @@ SCAN_DIRS = [
 _HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
 
 # Response subclasses that set their own body — response_model does not apply.
+# Includes the base ``Response`` and ``JSONResponse`` (used for custom status /
+# headers / raw content), which pass their body through unfiltered.
 _CUSTOM_RESPONSE_CLASSES = {
+    "Response", "JSONResponse",
     "StreamingResponse", "FileResponse", "RedirectResponse",
     "PlainTextResponse", "HTMLResponse", "EventSourceResponse",
 }
+
+# Status codes that MUST NOT carry a response body — FastAPI rejects a
+# response_model on these at import time, so they are legitimately exempt.
+_NO_BODY_STATUS = {204, 205, 304}
 
 # Per-line suppression token (rare — prefer the allowlist).
 _SUPPRESS_TOKEN = "response-model-allowed"
@@ -84,6 +92,9 @@ def _route_decorator(decorator: ast.expr) -> tuple[str, str | None, bool, bool] 
         if kw.arg == "response_model" and not _is_none(kw.value):
             has_response_model = True
         if kw.arg == "response_class" and _name_of(kw.value) in _CUSTOM_RESPONSE_CLASSES:
+            exempt = True
+        # A no-body status (204/205/304) cannot carry a response_model.
+        if kw.arg == "status_code" and isinstance(kw.value, ast.Constant) and kw.value.value in _NO_BODY_STATUS:
             exempt = True
     return method.upper(), path, has_response_model, exempt
 

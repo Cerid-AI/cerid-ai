@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -15,7 +16,7 @@ logger = logging.getLogger("ai-companion.plugin_registry")
 router = APIRouter(prefix="/plugin-registry", tags=["plugin-registry"])
 
 
-@router.get("")
+@router.get("", response_model=dict[str, Any])
 async def list_community_plugins(q: str = "", type: str = ""):
     """List or search community plugins from the registry.
 
@@ -31,7 +32,7 @@ async def list_community_plugins(q: str = "", type: str = ""):
         return {"plugins": [], "total": 0}
 
 
-@router.get("/{name}")
+@router.get("/{name}")  # response-model-allowed: dynamic response (shape varies)
 async def get_community_plugin(name: str):
     """Get details for a specific community plugin by name."""
     try:

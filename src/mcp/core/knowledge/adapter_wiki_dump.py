@@ -202,7 +202,7 @@ def _httpx_stream_download(
     headers = {"User-Agent": user_agent}
     dest.parent.mkdir(parents=True, exist_ok=True)
     timeout = httpx.Timeout(600.0, connect=30.0)
-    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:  # follow_redirects: fixed dumps.wikimedia.org endpoint; streamed (large)
         with client.stream("GET", url, headers=headers) as resp:
             resp.raise_for_status()
             total = 0

@@ -6,19 +6,34 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from app.deps import get_neo4j, get_redis
 from app.routers.health import health_check
 from core.utils.cache import get_log
 from core.utils.time import utcnow, utcnow_iso
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class DigestEndpointResponse(BaseModel):
+    period_hours: Any
+    generated_at: Any
+    artifacts: dict
+    relationships: dict
+    health: Any
+    recent_events: Any
+    errors: dict
+
+
+
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
 
-@router.get("/digest")
+@router.get("/digest", response_model=DigestEndpointResponse)
 async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
     """
     Summarize recent activity: new artifacts, connections, and system health.

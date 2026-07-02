@@ -43,6 +43,20 @@ from app.services.wiki_pages import (
 )
 from core.utils.swallowed import log_swallowed_error
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class GetConceptWikiPageResponse(BaseModel):
+    slug: Any
+    name: Any
+    entity_type: str
+    summary: Any
+    members: list
+    member_count: Any
+    level: Any
+    last_updated_at: Any
+
+
+
 logger = logging.getLogger("ai-companion.wiki")
 
 router = APIRouter(prefix="/wiki", tags=["wiki"])
@@ -355,7 +369,7 @@ async def edit_entity_summary(slug: str, body: EntitySummaryEditRequest) -> Wiki
         "(matches the legacy ``/communities/{id}`` paths). Returns 404 if "
         "no community matches."
     ),
-)
+ response_model=GetConceptWikiPageResponse)
 async def get_concept_wiki_page(community_id: str) -> dict[str, Any]:
     import asyncio as _asyncio
 

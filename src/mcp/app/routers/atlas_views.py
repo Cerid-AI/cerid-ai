@@ -37,6 +37,17 @@ from pydantic import BaseModel, Field, field_validator
 from app.deps import get_redis
 from config.features import is_feature_enabled
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class AtlasViewsHealthResponse(BaseModel):
+    redis_available: Any
+    max_views_per_user: Any
+    free_tier_max_views: Any
+    supported_modes: Any
+    pro_unlocked: Any
+
+
+
 logger = logging.getLogger("ai-companion.atlas_views")
 router = APIRouter(prefix="/atlas/views", tags=["atlas", "views"])
 
@@ -272,7 +283,7 @@ async def delete_view(view_id: str, request: Request) -> None:
         raise HTTPException(status_code=500, detail="Failed to delete view") from exc
 
 
-@router.get("/health")
+@router.get("/health", response_model=AtlasViewsHealthResponse)
 async def health() -> dict[str, Any]:
     """Probe — confirms router is mounted and Redis reachable."""
     redis = get_redis()

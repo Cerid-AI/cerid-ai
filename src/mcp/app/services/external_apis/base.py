@@ -52,7 +52,7 @@ async def get_http_client() -> httpx.AsyncClient:
             _http_client = httpx.AsyncClient(
                 timeout=_DEFAULT_TIMEOUT,
                 headers={"User-Agent": _USER_AGENT},
-                follow_redirects=True,
+                follow_redirects=True,  # follow_redirects: shared pool for fixed external-API hosts (adapter-supplied)
             )
     return _http_client
 

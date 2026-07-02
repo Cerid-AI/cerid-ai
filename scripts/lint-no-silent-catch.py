@@ -20,12 +20,19 @@ Warn-only pattern (Phase 2.4 of the 2026-04-22 ship audit):
      ``# silent-catch-allowed: <reason>`` comment.
 
 Promote ``broad-no-helper`` to a hard failure with ``--strict-broad``
-once the existing 102 call sites are remediated or annotated.
+(Phase 5 flipped this — it is now blocking; the allowlist below is empty).
 
 Existing strict violations are grandfathered via
-``scripts/silent_catch_allowlist.txt``. Use ``--bootstrap-allowlist`` to
-regenerate it. The allowlist shrinks as cleanups land — new entries
-require explicit review.
+``scripts/silent_catch_allowlist.txt`` (now empty — Phase 5 burned it to
+zero). Use ``--bootstrap-allowlist`` to regenerate it. The allowlist shrinks
+as cleanups land — new entries require explicit review.
+
+Reviewed meta-exemption: the observability layer's OWN guards cannot record
+or raise their own failure without recursing/crashing, so a line carrying
+``# silent-catch-meta: <reason>`` is exempt from every pattern (strict
+included). Reserved for that irreducible case only — see ``_META_TOKEN``.
+Today's 6 meta sites: swallowed.py (x3), timeouts.py, _utils.py (the
+log_swallowed_error fallback), mcp_client_policy.py (sentry breadcrumb).
 
 Usage:
     python scripts/lint-no-silent-catch.py src/mcp/                 # lint (CI)

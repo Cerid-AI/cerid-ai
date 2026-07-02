@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 from http import HTTPStatus
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -27,6 +28,69 @@ from core.routing.model_providers import (
     save_config,
 )
 from core.utils.swallowed import log_swallowed_error
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class SetInternalProviderResponse(BaseModel):
+    status: str
+    provider: Any
+    model: Any
+
+
+class GetOllamaRecommendationsResponse(BaseModel):
+    hardware: Any
+    models: Any
+    recommended: Any
+
+
+class ListConfiguredProvidersResponse(BaseModel):
+    providers: Any
+    total: Any
+
+
+class GetInternalProviderResponse(BaseModel):
+    provider: Any
+    model: Any
+    intelligence_model: Any
+    ollama_available: Any
+
+
+class EnableOllamaResponse(BaseModel):
+    status: str
+    provider: str
+    model: Any
+    url: Any
+
+
+class UpdateModelProviderConfigResponse(BaseModel):
+    status: str
+
+
+class GetProviderResponse(BaseModel):
+    name: Any
+    display_name: Any
+    base_url: Any
+    env_var: Any
+    requires_api_key: Any
+    key_set: Any
+    key_preview: Any
+    models: Any
+    test_endpoint: Any
+
+
+class GetRoutingInfoResponse(BaseModel):
+    ollama_available: Any
+    ollama_models: Any
+    model_registry: Any
+    default_internal_model: Any
+    smart_routing_enabled: Any
+
+
+class DisableOllamaResponse(BaseModel):
+    status: str
+    provider: str
+
+
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 logger = logging.getLogger("ai-companion.providers")
@@ -131,14 +195,14 @@ async def list_providers():
     return ProviderListResponse(providers=providers, total=len(providers))
 
 
-@router.get("/configured")
+@router.get("/configured", response_model=ListConfiguredProvidersResponse)
 async def list_configured_providers():
     """Return only providers that have API keys configured."""
     configured = get_configured_providers()
     return {"providers": configured, "total": len(configured)}
 
 
-@router.get("/internal")
+@router.get("/internal", response_model=GetInternalProviderResponse)
 async def get_internal_provider():
     """Return the configured internal LLM provider for pipeline operations."""
     ollama_available = False
@@ -159,7 +223,7 @@ async def get_internal_provider():
     }
 
 
-@router.put("/internal")
+@router.put("/internal", response_model=SetInternalProviderResponse)
 async def set_internal_provider(body: dict):
     """Update internal LLM provider configuration (runtime, not persisted to .env)."""
     provider = body.get("provider", "openrouter")
@@ -177,7 +241,7 @@ async def set_internal_provider(body: dict):
     return {"status": "updated", "provider": provider, "model": model}
 
 
-@router.get("/ollama/status")
+@router.get("/ollama/status", response_model=dict[str, Any])
 async def get_ollama_status():
     """Check Ollama availability, installed models, and hardware info."""
     import httpx
@@ -210,7 +274,7 @@ async def get_ollama_status():
     return result
 
 
-@router.post("/ollama/enable")
+@router.post("/ollama/enable", response_model=EnableOllamaResponse)
 async def enable_ollama():
     """Enable Ollama as the internal LLM provider.
 
@@ -248,14 +312,14 @@ async def enable_ollama():
     }
 
 
-@router.post("/ollama/disable")
+@router.post("/ollama/disable", response_model=DisableOllamaResponse)
 async def disable_ollama():
     """Disable Ollama — fall back to OpenRouter for pipeline tasks."""
     config.INTERNAL_LLM_PROVIDER = "openrouter"
     return {"status": "disabled", "provider": "openrouter"}
 
 
-@router.get("/ollama/recommendations")
+@router.get("/ollama/recommendations", response_model=GetOllamaRecommendationsResponse)
 async def get_ollama_recommendations():
     """Return hardware-aware model recommendations for the setup wizard.
 
@@ -365,7 +429,7 @@ async def get_ollama_recommendations():
     }
 
 
-@router.get("/credits")
+@router.get("/credits", response_model=dict[str, Any])
 async def get_provider_credits():
     """Get OpenRouter credit balance and usage stats."""
     api_key = os.getenv("OPENROUTER_API_KEY", "")
@@ -430,7 +494,7 @@ async def get_provider_credits():
     return result
 
 
-@router.get("/routing")
+@router.get("/routing", response_model=GetRoutingInfoResponse)
 async def get_routing_info():
     """Return smart routing configuration and current state."""
     from core.routing.smart_router import _check_ollama, _ollama_models, get_model_registry
@@ -446,7 +510,7 @@ async def get_routing_info():
     }
 
 
-@router.get("/config")
+@router.get("/config")  # response-model-allowed: dynamic response (shape varies)
 async def get_model_provider_config():
     """Get the full model provider configuration (keys masked)."""
     from app.deps import get_redis
@@ -484,7 +548,7 @@ async def get_model_provider_config():
     return result
 
 
-@router.put("/config")
+@router.put("/config", response_model=UpdateModelProviderConfigResponse)
 async def update_model_provider_config(body: dict):
     """Update model provider configuration (persists to Redis)."""
     from app.deps import get_redis
@@ -525,7 +589,7 @@ async def update_model_provider_config(body: dict):
     return {"status": "updated"}
 
 
-@router.get("/{name}")
+@router.get("/{name}", response_model=GetProviderResponse)
 async def get_provider(name: str):
     """Get details for a single provider including available models."""
     if name not in PROVIDER_REGISTRY:

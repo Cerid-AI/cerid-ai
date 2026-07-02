@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 import config
 from app.sync.user_state import (
@@ -21,6 +22,25 @@ from app.sync.user_state import (
     write_preferences_with_retry,
 )
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class RemoveConversationResponse(BaseModel):
+    deleted: Any
+
+
+class SavePreferencesResponse(BaseModel):
+    ok: bool
+
+
+class SaveConversationResponse(BaseModel):
+    saved: Any
+
+
+class SaveConversationsBulkResponse(BaseModel):
+    saved: Any
+
+
+
 router = APIRouter(prefix="/user-state", tags=["user-state"])
 logger = logging.getLogger("ai-companion.user_state")
 
@@ -30,7 +50,7 @@ def _sync_dir() -> str:
     return config.SYNC_DIR
 
 
-@router.get("")
+@router.get("", response_model=dict[str, Any])
 def get_user_state_summary():
     """Return a summary of user state: settings, preferences, conversation IDs."""
     sd = _sync_dir()
@@ -46,7 +66,7 @@ def get_user_state_summary():
     }
 
 
-@router.get("/conversations")
+@router.get("/conversations")  # response-model-allowed: dynamic response (shape varies)
 def list_conversations():
     """List all synced conversations."""
     sd = _sync_dir()
@@ -55,7 +75,7 @@ def list_conversations():
     return read_conversations(sd)
 
 
-@router.get("/conversations/{conv_id}")
+@router.get("/conversations/{conv_id}")  # response-model-allowed: dynamic response (shape varies)
 def get_conversation(conv_id: str):
     """Return a single conversation by ID."""
     sd = _sync_dir()
@@ -67,7 +87,7 @@ def get_conversation(conv_id: str):
     return data
 
 
-@router.post("/conversations")
+@router.post("/conversations", response_model=SaveConversationResponse)
 def save_conversation(body: dict[str, Any]):
     """Save a single conversation. Body must contain an 'id' field."""
     sd = _sync_dir()
@@ -79,7 +99,7 @@ def save_conversation(body: dict[str, Any]):
     return {"saved": body["id"]}
 
 
-@router.post("/conversations/bulk")
+@router.post("/conversations/bulk", response_model=SaveConversationsBulkResponse)
 def save_conversations_bulk(body: list[dict[str, Any]]):
     """Save multiple conversations. Each dict must contain an 'id' field."""
     sd = _sync_dir()
@@ -92,7 +112,7 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
     return {"saved": len(body)}
 
 
-@router.delete("/conversations/{conv_id}")
+@router.delete("/conversations/{conv_id}", response_model=RemoveConversationResponse)
 def remove_conversation(conv_id: str):
     """Delete a conversation by ID."""
     sd = _sync_dir()
@@ -102,7 +122,7 @@ def remove_conversation(conv_id: str):
     return {"deleted": conv_id}
 
 
-@router.patch("/preferences")
+@router.patch("/preferences", response_model=SavePreferencesResponse)
 async def save_preferences(body: dict[str, Any]):
     """Merge UI preferences into the stored state.
 

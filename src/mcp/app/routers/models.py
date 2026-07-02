@@ -9,6 +9,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
@@ -22,6 +23,25 @@ from core.routing.model_catalog import (
     resolve_assignments,
     resolve_latest,
 )
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class CheckModelUpdatesResponse(BaseModel):
+    checked: bool
+    success: bool
+    new_updates: Any
+    new_count: Any
+    deprecated_count: int
+    updates: Any
+    last_checked: Any
+    catalog_size: Any
+
+
+class DismissModelUpdateResponse(BaseModel):
+    dismissed: bool
+    id: Any
+
+
 
 router = APIRouter(prefix="/models", tags=["models"])
 _logger = logging.getLogger("ai-companion.models")
@@ -364,7 +384,7 @@ async def apply_latest_assignments() -> dict:
     }
 
 
-@router.get("/updates")
+@router.get("/updates")  # response-model-allowed: dynamic response (shape varies)
 async def list_model_updates():
     """Latest in-family model updates available per role (live OpenRouter check)."""
     result = await _compute_model_updates()
@@ -372,7 +392,7 @@ async def list_model_updates():
     return result
 
 
-@router.post("/updates/check")
+@router.post("/updates/check", response_model=CheckModelUpdatesResponse)
 async def check_model_updates():
     """Check OpenRouter for newer in-family models per role (dry-run, no apply)."""
     result = await _compute_model_updates()
@@ -388,13 +408,13 @@ async def check_model_updates():
     }
 
 
-@router.post("/updates/apply")
+@router.post("/updates/apply")  # response-model-allowed: dynamic response (shape varies)
 async def apply_model_updates():
     """Adopt the latest in-family model for every role + regenerate Bifrost."""
     return await apply_latest_assignments()
 
 
-@router.post("/updates/dismiss/{update_id}")
+@router.post("/updates/dismiss/{update_id}", response_model=DismissModelUpdateResponse)
 async def dismiss_model_update(update_id: str):
     """Dismiss a model update notification."""
     return {"dismissed": True, "id": update_id}
@@ -436,7 +456,7 @@ async def list_available_models():
     return AvailableModelsResponse(models=models, total=len(models))
 
 
-@router.get("/doctor")
+@router.get("/doctor")  # response-model-allowed: dynamic response (shape varies)
 async def model_doctor():
     """Audit the live model config against the active hardware profile + the
     OpenRouter catalog.

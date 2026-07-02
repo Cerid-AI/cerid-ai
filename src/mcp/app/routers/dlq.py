@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from config.features import CERID_MULTI_USER
 from deps import get_redis
@@ -18,6 +19,21 @@ from errors import IngestionError
 from utils.dlq import MAX_ATTEMPTS, clear_dlq_entry, dlq_count, list_dlq, push_to_dlq
 from utils.error_handler import handle_errors
 from utils.typed_redis import TypedRedis
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class DiscardDlqEntryResponse(BaseModel):
+    status: str
+    entry_id: Any
+
+
+class GetDlqEntriesResponse(BaseModel):
+    entries: Any
+    total: Any
+    limit: Any
+    offset: Any
+
+
 
 logger = logging.getLogger("ai-companion.dlq-admin")
 
@@ -38,7 +54,7 @@ router = APIRouter(
 )
 
 
-@router.get("")
+@router.get("", response_model=GetDlqEntriesResponse)
 @handle_errors()
 async def get_dlq_entries(
     limit: int = 50,
@@ -56,7 +72,7 @@ async def get_dlq_entries(
     }
 
 
-@router.post("/retry/{entry_id}")
+@router.post("/retry/{entry_id}", response_model=dict[str, Any])
 @handle_errors()
 async def retry_dlq_entry(entry_id: str) -> dict[str, Any]:
     """Manually retry a specific DLQ entry.
@@ -141,7 +157,7 @@ async def retry_dlq_entry(entry_id: str) -> dict[str, Any]:
     }
 
 
-@router.delete("/{entry_id}")
+@router.delete("/{entry_id}", response_model=DiscardDlqEntryResponse)
 @handle_errors()
 async def discard_dlq_entry(entry_id: str) -> dict[str, Any]:
     """Discard a DLQ entry without retrying."""

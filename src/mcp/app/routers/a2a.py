@@ -18,11 +18,27 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.deps import get_chroma, get_neo4j, get_redis
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class AgentCardResponse(BaseModel):
+    name: str
+    description: str
+    url: Any
+    version: str
+    capabilities: dict
+    skills: list
+    authentication: dict
+    defaultInputModes: list
+    defaultOutputModes: list
+
+
 
 logger = logging.getLogger("ai-companion.a2a")
 
@@ -66,7 +82,7 @@ class A2ATaskHistory(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-@router.get("/.well-known/agent.json")
+@router.get("/.well-known/agent.json", response_model=AgentCardResponse)
 async def agent_card():
     """A2A Agent Card — advertises cerid's capabilities to other agents."""
     return {

@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 from threading import Lock as _TLock
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -22,6 +23,15 @@ from app.services.ingestion import ingest_batch, ingest_content, ingest_file
 from core.utils import cache
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class IngestionProgressEndpointResponse(BaseModel):
+    files: Any
+    total_files: Any
+    completed_files: Any
+
+
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -121,7 +131,7 @@ class BatchIngestRequest(BaseModel):
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
-@router.get("/ingestion/progress")
+@router.get("/ingestion/progress", response_model=IngestionProgressEndpointResponse)
 def ingestion_progress_endpoint():
     """Return current ingestion pipeline state for the progress UI."""
     with _progress_lock:
@@ -131,7 +141,7 @@ def ingestion_progress_endpoint():
     return {"files": files, "total_files": len(files), "completed_files": completed}
 
 
-@router.post("/ingest")
+@router.post("/ingest")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_endpoint(req: IngestRequest, request: Request):
     client_source = request.headers.get("X-Client-ID", "")
     metadata = {"client_source": client_source} if client_source else None
@@ -145,7 +155,7 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     return result
 
 
-@router.post("/ingest/structured")
+@router.post("/ingest/structured")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Request):
     """Structured-content ingest. Used by the Apple connectors (Notes,
     Mail, Messages) — each maps a source row to one artifact with rich
@@ -173,7 +183,7 @@ async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Requ
     return result
 
 
-@router.post("/ingest_file")
+@router.post("/ingest_file")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
     filename = req.file_path.rsplit("/", 1)[-1] if "/" in req.file_path else req.file_path
     _register_job(filename)
@@ -206,7 +216,7 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/ingest_batch")
+@router.post("/ingest_batch")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_batch_endpoint(req: BatchIngestRequest):
     """Ingest up to 20 files/content items concurrently."""
     try:
@@ -257,7 +267,7 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/ingest/feedback")
+@router.post("/ingest/feedback")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
     """Ingest a chat turn into the conversations domain for the feedback loop."""
     # Backend gate: reject if feedback loop is disabled server-side
@@ -349,7 +359,7 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/ingest_log")
+@router.get("/ingest_log")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_log_endpoint(limit: int = Query(50, ge=1, le=500)):
     try:
         return cache.get_log(get_redis(), limit=limit)

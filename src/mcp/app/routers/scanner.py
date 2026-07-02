@@ -14,6 +14,7 @@ import time
 import uuid
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -26,6 +27,19 @@ from app.services.folder_scanner import (
     preview_folder,
     scan_folder,
 )
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class StartScanResponse(BaseModel):
+    scan_id: Any
+    status: str
+    files_estimate: Any
+
+
+class ResetScanStateResponse(BaseModel):
+    cleared: Any
+
+
 
 logger = logging.getLogger("ai-companion.scanner")
 
@@ -149,7 +163,7 @@ def _validate_scan_path(path: str) -> None:
     raise HTTPException(status_code=403, detail=f"Path not within allowed SCAN_PATHS: {path}")
 
 
-@router.post("/admin/scan")
+@router.post("/admin/scan", response_model=StartScanResponse)
 async def start_scan(req: ScanRequest) -> dict:
     """Start an asynchronous folder scan."""
     _validate_scan_path(req.path)
@@ -227,7 +241,7 @@ def get_scan_progress(scan_id: str) -> ScanProgress:
     return _active_scans[scan_id]
 
 
-@router.post("/admin/scan/reset")
+@router.post("/admin/scan/reset", response_model=ResetScanStateResponse)
 def reset_scan_state() -> dict:
     """Clear all persistent scan state from Redis."""
     redis = get_redis()

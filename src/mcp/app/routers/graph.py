@@ -45,6 +45,18 @@ from app.deps import get_neo4j, get_redis
 from config.features import is_feature_enabled
 from core.utils.swallowed import log_swallowed_error
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class GraphHealthResponse(BaseModel):
+    neo4j_available: Any
+    cache_ttl_seconds: Any
+    max_node_degree: Any
+    max_hops: Any
+    visualization_enabled: Any
+    topology: Any
+
+
+
 logger = logging.getLogger("ai-companion.graph")
 router = APIRouter(prefix="/graph", tags=["graph"])
 
@@ -724,7 +736,7 @@ def _fetch_topology(driver: Any) -> dict[str, Any] | None:
         return None
 
 
-@router.get("/health")
+@router.get("/health", response_model=GraphHealthResponse)
 async def graph_health() -> dict[str, Any]:
     """Lightweight liveness probe for the graph subsystem. Returns config,
     dep readiness, and a topology aggregate (orphan ratio, mean degree,

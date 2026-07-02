@@ -401,7 +401,7 @@ async def _default_download(url: str, dest: Path) -> None:
         return
 
     timeout = httpx.Timeout(60.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:  # follow_redirects: operator-curated pack URL; streamed to disk (exceeds 8MB guard cap)
         async with client.stream("GET", url) as resp:
             resp.raise_for_status()
             with open(dest, "wb") as fh:

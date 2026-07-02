@@ -13,16 +13,28 @@ from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class LivenessProbeResponse(BaseModel):
+    status: str
+
+
+class HealthPingResponse(BaseModel):
+    ok: bool
+
+
+
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
 
-@router.get("/health/ping", include_in_schema=False)
+@router.get("/health/ping", include_in_schema=False, response_model=HealthPingResponse)
 async def health_ping() -> dict:
     """Lightweight liveness probe — no DB checks, used by Docker healthcheck."""
     return {"ok": True}
@@ -392,7 +404,7 @@ def list_collections() -> dict:
     return {"total": len(collections), "collections": [c.name for c in collections]}
 
 
-@router.get("/health/live")
+@router.get("/health/live", response_model=LivenessProbeResponse)
 def liveness_probe():
     """Kubernetes-style liveness probe — always returns 200."""
     return {"status": "alive"}
@@ -759,18 +771,18 @@ async def health_check_endpoint():
     return JSONResponse(content=result, status_code=503)
 
 
-@router.get("/health/status")
+@router.get("/health/status")  # response-model-allowed: dynamic response (shape varies)
 def health_status_endpoint():
     """Extended health check with degradation tier and uptime."""
     return degradation_status()
 
 
-@router.get("/collections")
+@router.get("/collections")  # response-model-allowed: dynamic response (shape varies)
 def list_collections_endpoint():
     return list_collections()
 
 
-@router.get("/scheduler")
+@router.get("/scheduler")  # response-model-allowed: dynamic response (shape varies)
 def scheduler_status_endpoint():
     """Return status of all scheduled jobs."""
     from app.scheduler import get_job_status
@@ -799,7 +811,7 @@ async def scheduler_run_job_endpoint(job_id: str):
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
-@router.get("/plugins")
+@router.get("/plugins", response_model=dict[str, Any])
 def plugins_endpoint():
     """Return loaded plugins and feature flag status."""
     from plugins import get_loaded_plugins

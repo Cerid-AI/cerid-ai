@@ -153,7 +153,7 @@ def _httpx_text_get(url: str, user_agent: str) -> str:
     headers = {"User-Agent": user_agent}
     with httpx.Client(
         timeout=httpx.Timeout(120.0, connect=15.0),
-        follow_redirects=True,
+        follow_redirects=True,  # follow_redirects: fixed gutenberg.org endpoint (build-time pack fetch)
     ) as client:
         resp = client.get(url, headers=headers)
         resp.raise_for_status()

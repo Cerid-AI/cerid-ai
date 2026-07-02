@@ -12,12 +12,23 @@ timestamp}`` response shape is preserved for existing SDK/UI consumers.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from core.utils.time import utcnow_iso
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class QueryEndpointResponse(BaseModel):
+    context: Any
+    sources: Any
+    confidence: Any
+    timestamp: Any
+
+
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -33,7 +44,7 @@ class QueryRequest(BaseModel):
     )
 
 
-@router.post("/query")
+@router.post("/query", response_model=QueryEndpointResponse)
 async def query_endpoint(req: QueryRequest):
     """KB search over the canonical retrieval path (rerank, provenance,
     ``exclude_packs``, tenant-scope). ``external_augmentation`` is off — this is

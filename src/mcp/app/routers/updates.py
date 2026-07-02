@@ -76,7 +76,7 @@ async def _fetch_latest_release() -> dict[str, str] | None:
         resp = await client.get(
             _GITHUB_RELEASES_URL,
             headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
-            follow_redirects=True,
+            follow_redirects=True,  # follow_redirects: fixed GitHub releases API
         )
 
     if resp.status_code != HTTPStatus.OK:

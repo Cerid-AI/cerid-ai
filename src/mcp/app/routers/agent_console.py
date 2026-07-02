@@ -19,13 +19,36 @@ import json
 import logging
 import time
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from core.utils.sse import sse_event
 from deps import get_redis
 from utils.agent_events import STREAM_KEY, clear_events, get_recent_events
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class RecentEventsResponse(BaseModel):
+    events: Any
+    count: Any
+
+
+class ActivityClearResponse(BaseModel):
+    cleared: Any
+
+
+class ActivityRecentResponse(BaseModel):
+    events: Any
+    count: Any
+
+
+class ClearResponse(BaseModel):
+    cleared: Any
+
+
 
 logger = logging.getLogger("ai-companion.agent_console")
 
@@ -110,14 +133,14 @@ async def stream_events():
 # ---------------------------------------------------------------------------
 
 
-@router.get("/recent")
+@router.get("/recent", response_model=RecentEventsResponse)
 def recent_events(count: int = Query(default=50, ge=1, le=200)):
     """Return the most recent agent events for initial hydration."""
     events = get_recent_events(count)
     return {"events": events, "count": len(events)}
 
 
-@router.delete("/clear")
+@router.delete("/clear", response_model=ClearResponse)
 def clear():
     """Clear the agent event stream."""
     deleted = clear_events()
@@ -149,14 +172,14 @@ async def activity_stream():
     )
 
 
-@activity_router.get("/recent")
+@activity_router.get("/recent", response_model=ActivityRecentResponse)
 def activity_recent(count: int = Query(default=50, ge=1, le=200)):
     """Return the most recent agent events for initial hydration."""
     events = get_recent_events(count)
     return {"events": events, "count": len(events)}
 
 
-@activity_router.delete("/clear")
+@activity_router.delete("/clear", response_model=ActivityClearResponse)
 def activity_clear():
     """Clear the agent event stream."""
     deleted = clear_events()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -16,6 +17,16 @@ from pydantic import BaseModel
 import config
 from app.db import neo4j as graph
 from app.deps import get_neo4j
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class MergeTagsEndpointResponse(BaseModel):
+    status: str
+    source: Any
+    target: Any
+    artifacts_updated: Any
+
+
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.taxonomy")
@@ -48,7 +59,7 @@ class MergeTagsRequest(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.get("/taxonomy")
+@router.get("/taxonomy")  # response-model-allowed: dynamic response (shape varies)
 async def get_taxonomy_endpoint():
     """Return the full taxonomy tree (domains, sub-categories, tags)."""
     try:
@@ -59,7 +70,7 @@ async def get_taxonomy_endpoint():
         raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
-@router.post("/taxonomy/domain")
+@router.post("/taxonomy/domain")  # response-model-allowed: dynamic response (shape varies)
 async def create_domain_endpoint(req: CreateDomainRequest):
     """Create a new domain with optional sub-categories."""
     name = req.name.strip().lower()
@@ -91,7 +102,7 @@ async def create_domain_endpoint(req: CreateDomainRequest):
         raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
-@router.post("/taxonomy/subcategory")
+@router.post("/taxonomy/subcategory")  # response-model-allowed: dynamic response (shape varies)
 async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
     """Add a sub-category to an existing domain."""
     domain = req.domain.strip().lower()
@@ -119,7 +130,7 @@ async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
         raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
-@router.get("/tags")
+@router.get("/tags")  # response-model-allowed: dynamic response (shape varies)
 async def list_tags_endpoint(
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -132,7 +143,7 @@ async def list_tags_endpoint(
         raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
-@router.post("/taxonomy/artifact")
+@router.post("/taxonomy/artifact")  # response-model-allowed: dynamic response (shape varies)
 async def update_artifact_taxonomy_endpoint(req: UpdateArtifactTaxonomyRequest):
     """Update an artifact's sub-category and/or tags."""
     try:
@@ -151,7 +162,7 @@ async def update_artifact_taxonomy_endpoint(req: UpdateArtifactTaxonomyRequest):
         raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")
 
 
-@router.get("/tags/suggest")
+@router.get("/tags/suggest", response_model=list[Any])
 async def suggest_tags_endpoint(
     domain: str | None = Query(None, description="Filter vocabulary by domain"),
     prefix: str = Query("", description="Prefix filter for typeahead"),
@@ -209,7 +220,7 @@ async def suggest_tags_endpoint(
     return results
 
 
-@router.post("/tags/merge")
+@router.post("/tags/merge", response_model=MergeTagsEndpointResponse)
 async def merge_tags_endpoint(req: MergeTagsRequest):
     """Merge source_tag into target_tag (rename/consolidate)."""
     source = req.source_tag.strip().lower()

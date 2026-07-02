@@ -13,6 +13,20 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class ListServerToolsResponse(BaseModel):
+    server: Any
+    tools: Any
+    total: Any
+
+
+class RemoveMcpServerResponse(BaseModel):
+    status: str
+    name: Any
+
+
+
 router = APIRouter(prefix="/mcp-servers", tags=["MCP Client"])
 
 
@@ -116,7 +130,7 @@ async def add_mcp_server(req: MCPServerAddRequest):
     )
 
 
-@router.delete("/{name}", summary="Remove MCP Server")
+@router.delete("/{name}", summary="Remove MCP Server", response_model=RemoveMcpServerResponse)
 def remove_mcp_server(name: str):
     """Remove an external MCP server and disconnect."""
     from utils.mcp_client import mcp_client_manager
@@ -150,7 +164,7 @@ async def reconnect_mcp_server(name: str):
     )
 
 
-@router.get("/{name}/tools", summary="List Server Tools")
+@router.get("/{name}/tools", summary="List Server Tools", response_model=ListServerToolsResponse)
 def list_server_tools(name: str):
     """List all tools from a specific external MCP server."""
     from utils.mcp_client import mcp_client_manager

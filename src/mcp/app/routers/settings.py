@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,6 +17,104 @@ import config.features as features_mod
 from app.deps import get_redis
 from core.utils.version import get_version
 from utils.features import set_toggle
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class WipePrivateSessionResponse(BaseModel):
+    wiped: bool
+    level_after: int
+    conversation_id: Any
+
+
+class ResetPrivateModeResponse(BaseModel):
+    level: int
+
+
+class UpdateSettingsEndpointResponse(BaseModel):
+    status: str
+    updated: Any
+
+
+class SetTierResponse(BaseModel):
+    tier: Any
+    feature_flags: Any
+
+
+class SetPrivateModeResponse(BaseModel):
+    level: Any
+
+
+class GetSettingsEndpointResponse(BaseModel):
+    categorize_mode: Any
+    chunk_max_tokens: Any
+    chunk_overlap: Any
+    enable_encryption: Any
+    enable_feedback_loop: Any
+    enable_hallucination_check: Any
+    enable_memory_extraction: Any
+    enable_model_router: Any
+    enable_auto_inject: Any
+    enable_self_rag: Any
+    hallucination_threshold: Any
+    auto_inject_threshold: Any
+    cost_sensitivity: Any
+    feature_tier: Any
+    feature_flags: Any
+    feature_toggles: Any
+    multi_user: Any
+    mcp_client_mode: Any
+    mcp_client_allowlist: Any
+    strict_agents_only: Any
+    domains: Any
+    taxonomy: Any
+    storage_mode: Any
+    sync_backend: Any
+    machine_id: Any
+    version: Any
+    memory_config: dict
+    bifrost_timeout: Any
+    chroma_url: Any
+    neo4j_uri: Any
+    redis_url: Any
+    archive_path: Any
+    chunking_mode: Any
+    hybrid_vector_weight: Any
+    hybrid_keyword_weight: Any
+    rerank_llm_weight: Any
+    rerank_original_weight: Any
+    pack_relevance_weight: Any
+    temporal_half_life_days: Any
+    temporal_recency_weight: Any
+    enable_contextual_chunks: Any
+    enable_adaptive_retrieval: Any
+    adaptive_retrieval_light_top_k: Any
+    enable_query_decomposition: Any
+    query_decomposition_max_subqueries: Any
+    enable_mmr_diversity: Any
+    mmr_lambda: Any
+    enable_intelligent_assembly: Any
+    enable_late_interaction: Any
+    late_interaction_top_n: Any
+    late_interaction_blend_weight: Any
+    enable_semantic_cache: Any
+    semantic_cache_threshold: Any
+    enable_memory_consolidation: Any
+    enable_context_compression: Any
+    trading_enabled: Any
+    ollama_enabled: Any
+    ollama_url: Any
+    internal_llm_provider: Any
+    internal_llm_model: Any
+    rag_mode: Any
+    enable_sparse_retrieval: Any
+    hybrid_fusion_mode: Any
+    hybrid_rrf_sparse_weight: Any
+    embeddings_provider: Any
+    rerank_provider: Any
+    quenchforge_embed_model: Any
+    quenchforge_rerank_model: Any
+
+
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.settings")
@@ -245,7 +344,7 @@ class SettingsUpdateRequest(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.get("/settings")
+@router.get("/settings", response_model=GetSettingsEndpointResponse)
 async def get_settings_endpoint():
     """Return current server settings (read-only view of safe-to-expose config)."""
     return {
@@ -337,7 +436,7 @@ async def get_settings_endpoint():
     }
 
 
-@router.patch("/settings")
+@router.patch("/settings", response_model=UpdateSettingsEndpointResponse)
 async def update_settings_endpoint(req: SettingsUpdateRequest):
     """Update a subset of settings at runtime.
 
@@ -651,7 +750,7 @@ _PRIVATE_MODE_KEY = "cerid:private_mode:global"
 _PRIVATE_MODE_SESSION_PREFIX = "cerid:private_mode:session:"
 
 
-@router.get("/settings/private-mode")
+@router.get("/settings/private-mode", response_model=dict[str, Any])
 async def get_private_mode():
     """Return current private mode level (0 = disabled)."""
     try:
@@ -677,7 +776,7 @@ class PrivateModeRequest(BaseModel):
     )
 
 
-@router.post("/settings/private-mode")
+@router.post("/settings/private-mode", response_model=SetPrivateModeResponse)
 async def set_private_mode(req: PrivateModeRequest):
     """Set private mode level."""
     redis = get_redis()
@@ -686,7 +785,7 @@ async def set_private_mode(req: PrivateModeRequest):
     return {"level": req.level}
 
 
-@router.delete("/settings/private-mode")
+@router.delete("/settings/private-mode", response_model=ResetPrivateModeResponse)
 async def reset_private_mode():
     """Reset private mode to level 0 (disabled)."""
     redis = get_redis()
@@ -711,7 +810,7 @@ class SessionWipeRequest(BaseModel):
     )
 
 
-@router.post("/settings/private-mode/session-wipe", status_code=200)
+@router.post("/settings/private-mode/session-wipe", status_code=200, response_model=WipePrivateSessionResponse)
 async def wipe_private_session(req: SessionWipeRequest):
     """L4 contract: erase ephemeral session state for a conversation.
 
@@ -761,7 +860,7 @@ class TierRequest(BaseModel):
     tier: str = Field(..., description="Feature tier: community, pro, or enterprise")
 
 
-@router.post("/settings/tier")
+@router.post("/settings/tier", response_model=SetTierResponse)
 async def set_tier(req: TierRequest):
     """Update feature tier at runtime and recalculate feature flags."""
     valid_tiers = ("community", "pro", "enterprise")

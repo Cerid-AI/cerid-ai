@@ -35,6 +35,21 @@ from config.features import (
 from core.utils.swallowed import log_swallowed_error
 from utils.encryption import encrypt_field
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class SetApiKeyResponse(BaseModel):
+    detail: str
+
+
+class LogoutResponse(BaseModel):
+    detail: str
+
+
+class DeleteApiKeyResponse(BaseModel):
+    detail: str
+
+
+
 logger = logging.getLogger("ai-companion.auth")
 
 UTC = timezone.utc
@@ -276,7 +291,7 @@ def refresh(body: RefreshRequest):
     return RefreshResponse(access_token=access_token)
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=LogoutResponse)
 def logout(body: RefreshRequest):
     """Revoke the refresh token (invalidates future refresh attempts)."""
     try:
@@ -317,7 +332,7 @@ def me(request: Request):
 # Per-user API key management
 # ---------------------------------------------------------------------------
 
-@router.put("/me/api-key")
+@router.put("/me/api-key", response_model=SetApiKeyResponse)
 def set_api_key(body: ApiKeyRequest, request: Request):
     """Store the user's OpenRouter API key (encrypted at rest)."""
     user = _get_authenticated_user(request)
@@ -331,7 +346,7 @@ def set_api_key(body: ApiKeyRequest, request: Request):
     return {"detail": "API key saved"}
 
 
-@router.delete("/me/api-key")
+@router.delete("/me/api-key", response_model=DeleteApiKeyResponse)
 def delete_api_key(request: Request):
     """Remove the user's stored OpenRouter API key."""
     user = _get_authenticated_user(request)
@@ -356,7 +371,7 @@ def api_key_status(request: Request):
 # Usage metering
 # ---------------------------------------------------------------------------
 
-@router.get("/me/usage")
+@router.get("/me/usage")  # response-model-allowed: dynamic response (shape varies)
 def user_usage(request: Request):
     """Return the current month's usage counters for the authenticated user."""
     user = _get_authenticated_user(request)

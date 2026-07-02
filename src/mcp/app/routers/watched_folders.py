@@ -30,6 +30,21 @@ from models.watched_folders import (
     WatchedFolderStatusResponse,
 )
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class ScanWatchedFolderResponse(BaseModel):
+    status: str
+    id: Any
+    path: Any
+
+
+class DeleteWatchedFolderResponse(BaseModel):
+    status: str
+    id: Any
+    path: Any
+
+
+
 # Allowed root directories for watched folders (prevents path traversal)
 _ALLOWED_ROOTS = [
     pathlib.Path(os.getenv("ARCHIVE_PATH", "/archive")).resolve(),
@@ -204,7 +219,7 @@ async def get_watched_folder(folder_id: str):
     return data
 
 
-@router.patch("/{folder_id}")
+@router.patch("/{folder_id}")  # response-model-allowed: dynamic response (shape varies)
 async def update_watched_folder(folder_id: str, body: WatchedFolderUpdate):
     """Update a watched folder's settings."""
     redis = _get_redis()
@@ -234,7 +249,7 @@ async def update_watched_folder(folder_id: str, body: WatchedFolderUpdate):
     return data
 
 
-@router.delete("/{folder_id}")
+@router.delete("/{folder_id}", response_model=DeleteWatchedFolderResponse)
 async def delete_watched_folder(folder_id: str):
     """Remove a watched folder (does not delete ingested content)."""
     redis = _get_redis()
@@ -249,7 +264,7 @@ async def delete_watched_folder(folder_id: str):
     return {"status": "deleted", "id": folder_id, "path": data.get("path")}
 
 
-@router.post("/{folder_id}/scan")
+@router.post("/{folder_id}/scan", response_model=ScanWatchedFolderResponse)
 async def scan_watched_folder(folder_id: str, background_tasks: BackgroundTasks):
     """Trigger a scan on a specific watched folder."""
     redis = _get_redis()

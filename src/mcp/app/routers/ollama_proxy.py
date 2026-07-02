@@ -20,6 +20,13 @@ from pydantic import BaseModel, Field
 
 from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class GetRecommendationsResponse(BaseModel):
+    recommendations: Any
+
+
+
 router = APIRouter(prefix="/ollama", tags=["ollama"])
 logger = logging.getLogger("ai-companion.ollama")
 
@@ -182,7 +189,7 @@ async def list_ollama_models():
     return ModelsResponse(models=models)
 
 
-@router.post("/chat", response_model=None)
+@router.post("/chat", response_model=None)  # response-model-allowed: dual-mode stream/JSON (StreamingResponse or dict)
 async def chat_completion(req: OllamaChatRequest):
     """Proxy a chat completion request to local Ollama.
 
@@ -307,7 +314,7 @@ async def _stream_chat(
     )
 
 
-@router.get("/recommendations")
+@router.get("/recommendations", response_model=GetRecommendationsResponse)
 async def get_recommendations():
     """Return recommended Ollama models per pipeline stage."""
     _require_enabled()

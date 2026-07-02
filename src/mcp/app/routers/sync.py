@@ -41,7 +41,7 @@ class ImportRequest(BaseModel):
 
 # -- Endpoints -----------------------------------------------------------------
 
-@router.post("/sync/export")
+@router.post("/sync/export")  # response-model-allowed: dynamic response (shape varies)
 async def sync_export_endpoint(req: ExportRequest):
     """Trigger an incremental (or full) export to the sync directory."""
     try:
@@ -74,7 +74,7 @@ async def sync_export_endpoint(req: ExportRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/sync/import")
+@router.post("/sync/import")  # response-model-allowed: dynamic response (shape varies)
 async def sync_import_endpoint(req: ImportRequest):
     """Trigger a merge import from the sync directory."""
     try:
@@ -95,7 +95,7 @@ async def sync_import_endpoint(req: ImportRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.get("/sync/status")
+@router.get("/sync/status")  # response-model-allowed: dynamic response (shape varies)
 async def sync_status_endpoint(sync_dir: str | None = Query(default=None)):
     """Compare local DB counts against the sync directory manifest."""
     try:

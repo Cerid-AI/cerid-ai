@@ -15,8 +15,10 @@ adding new cerid-series consumers.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 import config
 from app.middleware.idempotency import idempotent
@@ -47,6 +49,39 @@ from app.services.external_ingest import ExternalIngestRequest, IngestResult, in
 from app.services.ingestion import ingest_content, ingest_file
 from config.features import FEATURE_FLAGS, FEATURE_TIER
 from config.taxonomy import DOMAINS, TAXONOMY
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class SdkIngestWebhookResponse(BaseModel):
+    status: str
+    source_id: Any
+    normalized_count: Any
+
+
+class SdkPluginsResponse(BaseModel):
+    plugins: list
+    total: Any
+
+
+class SdkSettingsResponse(BaseModel):
+    version: Any
+    tier: Any
+    features: Any
+
+
+class SdkTaxonomyResponse(BaseModel):
+    domains: Any
+    taxonomy: Any
+
+
+class SdkIngestVoiceNoteResponse(BaseModel):
+    status: str
+    artifact_id: Any
+    transcript: Any
+    transcribe_ms: Any
+    word_count: Any
+
+
 
 router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 
@@ -326,7 +361,7 @@ def sdk_health():
 # ---------------------------------------------------------------------------
 
 
-@router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})
+@router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
 async def sdk_ingest(req: dict, request: Request):
     # Preserve client-supplied provenance metadata (GA P0.2): external clients
     # pass rich metadata (title / provenance / source_file / …). Keep the
@@ -345,7 +380,7 @@ async def sdk_ingest(req: dict, request: Request):
     )
 
 
-@router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})
+@router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
 async def sdk_ingest_file(req: dict):
     result = await ingest_file(
         req.get("file_path", ""),
@@ -411,7 +446,7 @@ async def sdk_ingest_external(request: ExternalIngestRequest, http_request: Requ
         401: {"description": "HMAC signature missing or invalid"},
     },
     status_code=202,
-)
+ response_model=SdkIngestWebhookResponse)
 async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
     """Token-gated webhook receiver. See module docstring."""
     import json as _json
@@ -571,7 +606,7 @@ async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
         501: {"description": "Whisper runtime deps not installed"},
     },
     status_code=201,
-)
+ response_model=SdkIngestVoiceNoteResponse)
 async def sdk_ingest_voice_note(request: Request) -> dict:
     """Multipart upload → transcript → artifact.
 
@@ -669,22 +704,22 @@ async def sdk_ingest_voice_note(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/collections", summary="List Collections")
+@router.get("/collections", summary="List Collections")  # response-model-allowed: dynamic response (shape varies)
 def sdk_collections():
     return list_collections()
 
 
-@router.get("/taxonomy", summary="Domain Taxonomy")
+@router.get("/taxonomy", summary="Domain Taxonomy", response_model=SdkTaxonomyResponse)
 def sdk_taxonomy():
     return {"domains": list(DOMAINS), "taxonomy": dict(TAXONOMY)}
 
 
-@router.get("/health/detailed", summary="Detailed Health")
+@router.get("/health/detailed", summary="Detailed Health")  # response-model-allowed: dynamic response (shape varies)
 def sdk_health_detailed():
     return degradation_status()
 
 
-@router.get("/settings", summary="SDK Settings")
+@router.get("/settings", summary="SDK Settings", response_model=SdkSettingsResponse)
 def sdk_settings():
     return {"version": SDK_VERSION, "tier": FEATURE_TIER, "features": dict(FEATURE_FLAGS)}
 
@@ -714,7 +749,7 @@ async def sdk_search(req: SDKSearchRequest):
     return {"results": sources, "total_results": len(sources), "confidence": result.get("confidence", 0.0)}
 
 
-@router.get("/plugins", summary="List Plugins")
+@router.get("/plugins", summary="List Plugins", response_model=SdkPluginsResponse)
 def sdk_plugins():
     result = list_plugins()
     return {"plugins": [p.model_dump() for p in result.plugins], "total": result.total}

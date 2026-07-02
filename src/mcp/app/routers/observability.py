@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -23,6 +24,39 @@ from pydantic import BaseModel
 
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class GetRestartInfoResponse(BaseModel):
+    process_start_iso: Any
+    uptime_seconds: Any
+    restart_count: Any
+    last_restart_iso: Any
+    timestamp: Any
+
+
+class GetKnowledgeStatsHistoryResponse(BaseModel):
+    days: Any
+    snapshots: Any
+
+
+class GetClaimAccuracyResponse(BaseModel):
+    window_minutes: Any
+    overall_accuracy: Any
+    by_type: dict
+    note: str
+    sample_count: Any
+    timestamp: Any
+
+
+class GetCostPerQueryResponse(BaseModel):
+    window_minutes: Any
+    cost_per_query_usd: Any
+    total_cost_usd: Any
+    total_queries: Any
+    timestamp: Any
+
+
 
 logger = logging.getLogger("ai-companion.observability")
 
@@ -323,7 +357,7 @@ def get_ragas_metrics(
     )
 
 
-@router.get("/cost-per-query")
+@router.get("/cost-per-query", response_model=GetCostPerQueryResponse)
 def get_cost_per_query(
     window: int = Query(60, ge=1, le=10080, alias="window_minutes"),
 ):
@@ -343,7 +377,7 @@ def get_cost_per_query(
     }
 
 
-@router.get("/queue-depth")
+@router.get("/queue-depth")  # response-model-allowed: dynamic response (shape varies)
 async def queue_depth_endpoint():
     """Return in-use and waiting counts for each concurrency pool.
 
@@ -355,7 +389,7 @@ async def queue_depth_endpoint():
     return queue_depths()
 
 
-@router.get("/claim-accuracy")
+@router.get("/claim-accuracy", response_model=GetClaimAccuracyResponse)
 def get_claim_accuracy(
     window: int = Query(60, ge=1, le=10080, alias="window_minutes"),
 ):
@@ -381,7 +415,7 @@ def get_claim_accuracy(
     }
 
 
-@router.get("/claim-accuracy/{domain}")
+@router.get("/claim-accuracy/{domain}", response_model=dict[str, Any])
 async def get_claim_accuracy_by_domain(
     domain: str,
     window_hours: int = Query(168, ge=1, le=8760, description="Look-back window in hours (default 7 days)"),
@@ -419,7 +453,7 @@ async def get_claim_accuracy_by_domain(
         }
 
 
-@router.get("/restarts")
+@router.get("/restarts", response_model=GetRestartInfoResponse)
 async def get_restart_info() -> dict:
     """Process-restart visibility (Workstream A Phase 1.3).
 
@@ -463,7 +497,7 @@ async def get_restart_info() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/communities")
+@router.get("/communities", response_model=list[Any])
 async def list_communities_endpoint(
     min_size: int = Query(3, ge=1, description="Minimum community member count"),
     limit: int = Query(30, ge=1, le=200, description="Max results"),
@@ -492,7 +526,7 @@ async def list_communities_endpoint(
     return [c.model_dump() for c in communities]
 
 
-@router.get("/communities/{community_id:path}")
+@router.get("/communities/{community_id:path}", response_model=dict[str, Any])
 async def get_community_endpoint(community_id: str) -> dict:
     """Return the full community record for ``community_id``.
 
@@ -522,7 +556,7 @@ async def get_community_endpoint(community_id: str) -> dict:
     return community.model_dump()
 
 
-@router.get("/trust-score")
+@router.get("/trust-score", response_model=dict[str, Any])
 async def get_trust_score() -> dict:
     """System evaluation posture, 0–100, with disclosed component scores.
 
@@ -553,7 +587,7 @@ _KNOWLEDGE_STATS_CACHE_KEY = "cerid:knowledge_stats:cached"
 _KNOWLEDGE_STATS_CACHE_TTL_S = 60
 
 
-@router.get("/knowledge-stats")
+@router.get("/knowledge-stats")  # response-model-allowed: dynamic response (shape varies)
 async def get_knowledge_stats() -> dict:
     """Corpus-growth snapshot — powers the Sources pane F9 hero card.
 
@@ -602,7 +636,7 @@ async def get_knowledge_stats() -> dict:
     return snapshot
 
 
-@router.get("/knowledge-stats/history")
+@router.get("/knowledge-stats/history", response_model=GetKnowledgeStatsHistoryResponse)
 async def get_knowledge_stats_history(
     days: int = Query(default=30, ge=1, le=365),
 ) -> dict:

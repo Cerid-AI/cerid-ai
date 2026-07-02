@@ -222,7 +222,7 @@ def _httpx_json_fetch(url: str) -> dict[str, Any]:
     import httpx
 
     headers = {"User-Agent": "Cerid-AI-Knowledge-Pack-Builder/1.0 (+https://github.com/Cerid-AI/cerid-ai)"}
-    with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), follow_redirects=True) as client:
+    with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), follow_redirects=True) as client:  # follow_redirects: fixed FDA openFDA endpoint (https-validated, build-time)
         resp = client.get(url, headers=headers)
         resp.raise_for_status()
         data = json.loads(resp.text)
@@ -235,7 +235,7 @@ def _httpx_text_fetch(url: str) -> str:
     import httpx
 
     headers = {"User-Agent": "Cerid-AI-Knowledge-Pack-Builder/1.0 (+https://github.com/Cerid-AI/cerid-ai)"}
-    with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), follow_redirects=True) as client:
+    with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), follow_redirects=True) as client:  # follow_redirects: fixed NIH ODS factsheet endpoint (build-time)
         resp = client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.text

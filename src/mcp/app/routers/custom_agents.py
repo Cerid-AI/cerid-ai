@@ -8,8 +8,10 @@ Prefix: ``/custom-agents`` (avoids collision with the built-in ``/agents`` route
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.services.strict_agents_policy import enforce_strict_mode
 from deps import get_neo4j
@@ -21,6 +23,18 @@ from models.agents import (
     AgentTemplateOverrides,
     AgentUpdateRequest,
 )
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class DeleteAgentResponse(BaseModel):
+    deleted: bool
+    agent_id: Any
+
+
+class ListTemplatesResponse(BaseModel):
+    templates: Any
+
+
 
 # Sprint 1C — STRICT_AGENTS_ONLY=true blocks every endpoint here with 403
 # before the body executes. Default off; regulated deployments turn it on.
@@ -36,7 +50,7 @@ logger = logging.getLogger("ai-companion.custom_agents")
 # ---------------------------------------------------------------------------
 
 
-@router.get("/custom-agents/templates")
+@router.get("/custom-agents/templates", response_model=ListTemplatesResponse)
 async def list_templates():
     """Return all built-in agent templates."""
     from app.agents.templates import list_templates as _list
@@ -86,7 +100,7 @@ async def create_from_template(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/custom-agents")
+@router.get("/custom-agents")  # response-model-allowed: dynamic response (shape varies)
 async def list_agents(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -139,7 +153,7 @@ async def update_agent(agent_id: str, body: AgentUpdateRequest):
     return updated
 
 
-@router.delete("/custom-agents/{agent_id}")
+@router.delete("/custom-agents/{agent_id}", response_model=DeleteAgentResponse)
 async def delete_agent(agent_id: str):
     """Delete a custom agent by ID."""
     from app.db.neo4j.agents import delete_agent as _delete
@@ -156,7 +170,7 @@ async def delete_agent(agent_id: str):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/custom-agents/{agent_id}/query")
+@router.post("/custom-agents/{agent_id}/query")  # response-model-allowed: dynamic response (shape varies)
 async def query_agent(agent_id: str, body: AgentQueryRequest):
     """Execute a query using a custom agent's configuration.
 

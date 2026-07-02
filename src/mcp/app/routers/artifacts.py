@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -16,6 +17,29 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils import cache
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class ArtifactFeedbackEndpointResponse(BaseModel):
+    status: str
+    artifact_id: Any
+    signal: Any
+    old_score: Any
+    new_score: Any
+
+
+class ArtifactDetailEndpointResponse(BaseModel):
+    artifact_id: Any
+    title: Any
+    domain: Any
+    filename: Any
+    source_type: Any
+    chunk_count: Any
+    total_content: Any
+    chunks: Any
+    metadata: dict
+
+
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -135,7 +159,7 @@ class RecategorizeRequest(BaseModel):
     tags: str = ""
 
 
-@router.get("/artifacts/{artifact_id}/related")
+@router.get("/artifacts/{artifact_id}/related")  # response-model-allowed: dynamic response (shape varies)
 async def related_artifacts_endpoint(
     artifact_id: str,
     depth: int = Query(2, ge=1, le=4),
@@ -152,7 +176,7 @@ async def related_artifacts_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/artifacts/{artifact_id}")
+@router.get("/artifacts/{artifact_id}", response_model=ArtifactDetailEndpointResponse)
 async def artifact_detail_endpoint(artifact_id: str):
     """Fetch full artifact content: Neo4j metadata + reassembled ChromaDB chunks."""
     try:
@@ -210,7 +234,7 @@ async def artifact_detail_endpoint(artifact_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/artifacts")
+@router.get("/artifacts")  # response-model-allowed: dynamic response (shape varies)
 async def list_artifacts_endpoint(
     domain: str | None = Query(None, description="Filter by domain"),
     sub_category: str | None = Query(None, description="Filter by sub-category"),
@@ -239,7 +263,7 @@ async def list_artifacts_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/recategorize")
+@router.post("/recategorize")  # response-model-allowed: dynamic response (shape varies)
 async def recategorize_endpoint(req: RecategorizeRequest):
     try:
         return recategorize(req.artifact_id, req.new_domain, req.sub_category, req.tags)
@@ -264,7 +288,7 @@ _INJECT_BOOST = 0.05
 _DISMISS_PENALTY = 0.03
 
 
-@router.post("/artifacts/{artifact_id}/feedback")
+@router.post("/artifacts/{artifact_id}/feedback", response_model=ArtifactFeedbackEndpointResponse)
 async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
     """Record user inject/dismiss feedback and adjust artifact quality score.
 

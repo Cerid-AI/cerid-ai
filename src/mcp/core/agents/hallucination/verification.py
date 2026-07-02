@@ -938,7 +938,7 @@ async def _llm_call_with_retry(
     for attempt in range(max_attempts):
         resp = await client.post(url, **post_kwargs)
         # 402 = payment required / credits exhausted — not transient, don't retry
-        if resp.status_code == 402:
+        if resp.status_code == HTTPStatus.PAYMENT_REQUIRED:
             raise CreditExhaustedError("openrouter")
         if resp.status_code != HTTPStatus.TOO_MANY_REQUESTS:
             resp.raise_for_status()
@@ -2233,8 +2233,8 @@ async def verify_claim(
                     )
                     auth_sources = auth.get("authoritative_sources", [])
                     # If any authoritative source has strong entailment, upgrade to verified
-                    strong_support = [s for s in auth_sources if s.get("nli_entailment", 0) >= 0.7]
-                    strong_contradict = [s for s in auth_sources if s.get("nli_contradiction", 0) >= 0.6]
+                    strong_support = [s for s in auth_sources if s.get("nli_entailment", 0) >= config.NLI_ENTAILMENT_THRESHOLD]
+                    strong_contradict = [s for s in auth_sources if s.get("nli_contradiction", 0) >= config.NLI_CONTRADICTION_THRESHOLD]
                     # Full structured evidence for downstream audit/UI — previously
                     # only the scalar verdict + source_urls survived, losing
                     # per-source NLI scores, domain classification, and

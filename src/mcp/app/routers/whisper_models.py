@@ -24,7 +24,7 @@ import platform
 import uuid
 from http import HTTPStatus
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -201,7 +201,7 @@ async def _do_download(download_id: str, model_id: str) -> None:
     try:
         status.state = "downloading"
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=120.0)) as client:
-            async with client.stream("GET", url, follow_redirects=True) as resp:
+            async with client.stream("GET", url, follow_redirects=True) as resp:  # follow_redirects: fixed HuggingFace model URL; streamed (exceeds 8MB guard cap)
                 if resp.status_code != HTTPStatus.OK:
                     status.state = "failed"
                     status.error = f"HTTP {resp.status_code}"
@@ -271,7 +271,7 @@ async def cancel_download(download_id: str) -> DownloadStatus:
     return status
 
 
-@router.delete("/models/{model_id}")
+@router.delete("/models/{model_id}", response_model=dict[str, Any])
 async def delete_cached_model(model_id: str) -> dict[str, bool]:
     """Remove a cached model file."""
     if model_id not in _MODEL_REGISTRY:

@@ -91,6 +91,10 @@ def claim_hash(claim: str) -> str:
 # the new `verf:claim:v2:…` namespace and will age out via their 30d TTL.
 _CACHE_SCHEMA = "v2"
 
+# Web-search verdicts go stale fast, so cap their TTL regardless of the
+# caller-requested scope. 3 days in seconds.
+_WEB_SEARCH_VERDICT_MAX_TTL_S = 3 * 24 * 60 * 60
+
 
 def claim_cache_key(
     claim: str,
@@ -198,8 +202,8 @@ async def cache_verdict(
     # Shorten TTL when the *verdict* is a web-search result — time-sensitive
     # data goes stale even if the reader asked us to scope the key differently.
     verdict_method = verdict.get("verification_method", "") or ""
-    if verdict_method in ("web_search",) and ttl > 259_200:
-        ttl = 259_200  # 3 days for web-search verdicts
+    if verdict_method in ("web_search",) and ttl > _WEB_SEARCH_VERDICT_MAX_TTL_S:
+        ttl = _WEB_SEARCH_VERDICT_MAX_TTL_S
     # Key components default to empty string so unupdated callers stay in a
     # self-consistent namespace with unupdated readers.
     key_model = model if model is not None else ""

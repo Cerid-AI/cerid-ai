@@ -18,6 +18,14 @@ from app.deps import get_redis
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class DeleteAutomationResponse(BaseModel):
+    status: str
+    id: Any
+
+
+
 _logger = logging.getLogger("ai-companion.automations")
 
 router = APIRouter(prefix="/automations", tags=["automations"])
@@ -395,13 +403,13 @@ def register_all_automations() -> int:
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
+@router.get("", response_model=list[Any])
 async def list_automations():
     """List all automations."""
     return [a.model_dump() for a in _list_automations()]
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=dict[str, Any])
 async def create_automation(req: AutomationCreate):
     """Create a new automation."""
     _validate_cron(req.schedule)
@@ -419,13 +427,13 @@ async def create_automation(req: AutomationCreate):
     return auto.model_dump()
 
 
-@router.get("/presets")
+@router.get("/presets")  # response-model-allowed: dynamic response (shape varies)
 async def get_presets():
     """Return cron schedule presets."""
     return SCHEDULE_PRESETS
 
 
-@router.get("/{automation_id}")
+@router.get("/{automation_id}", response_model=dict[str, Any])
 async def get_automation(automation_id: str):
     """Get a single automation by ID."""
     auto = _load_automation(automation_id)
@@ -434,7 +442,7 @@ async def get_automation(automation_id: str):
     return auto.model_dump()
 
 
-@router.put("/{automation_id}")
+@router.put("/{automation_id}", response_model=dict[str, Any])
 async def update_automation(automation_id: str, req: AutomationUpdate):
     """Update an automation."""
     auto = _load_automation(automation_id)
@@ -460,7 +468,7 @@ async def update_automation(automation_id: str, req: AutomationUpdate):
     return auto.model_dump()
 
 
-@router.delete("/{automation_id}")
+@router.delete("/{automation_id}", response_model=DeleteAutomationResponse)
 async def delete_automation(automation_id: str):
     """Delete an automation and its history."""
     auto = _load_automation(automation_id)
@@ -472,7 +480,7 @@ async def delete_automation(automation_id: str):
     return {"status": "deleted", "id": automation_id}
 
 
-@router.post("/{automation_id}/enable")
+@router.post("/{automation_id}/enable", response_model=dict[str, Any])
 async def enable_automation(automation_id: str):
     """Enable an automation."""
     auto = _load_automation(automation_id)
@@ -485,7 +493,7 @@ async def enable_automation(automation_id: str):
     return auto.model_dump()
 
 
-@router.post("/{automation_id}/disable")
+@router.post("/{automation_id}/disable", response_model=dict[str, Any])
 async def disable_automation(automation_id: str):
     """Disable an automation."""
     auto = _load_automation(automation_id)
@@ -498,7 +506,7 @@ async def disable_automation(automation_id: str):
     return auto.model_dump()
 
 
-@router.post("/{automation_id}/run")
+@router.post("/{automation_id}/run", response_model=dict[str, Any])
 async def trigger_manual_run(automation_id: str):
     """Trigger an immediate manual run of an automation."""
     auto = _load_automation(automation_id)
@@ -508,7 +516,7 @@ async def trigger_manual_run(automation_id: str):
     return run.model_dump()
 
 
-@router.get("/{automation_id}/history")
+@router.get("/{automation_id}/history", response_model=list[Any])
 async def get_history(automation_id: str, limit: int = 20):
     """Get execution history for an automation (last N runs)."""
     auto = _load_automation(automation_id)

@@ -91,6 +91,16 @@ def write_baseline(counts: Counter[str]) -> None:
     lines = [
         "# Per-file production PLR2004 (magic-number) baseline — SHRINK-ONLY.",
         "# Regenerate after burn-down: python scripts/lint-magic-numbers.py --update",
+        "#",
+        "# Reviewed residual (Phase 5, 2026-07-02): HTTP status codes were extracted",
+        "# to http.HTTPStatus and threshold DUPLICATES were pointed at their existing",
+        "# config constants (NLI_*_THRESHOLD, QUALITY_TIER_*). What remains is",
+        "# deliberately-inline SELF-EVIDENT literals — tiny ints (0/1/2/3…), epsilons",
+        "# (1e-9, 1e-12), simple ratios (0.5), local input-length/word caps",
+        "# (len(x) > N), sanity bounds (month > 12, uint16 0xFFFF), and assertion",
+        "# counts — where a named constant would add indirection, not clarity",
+        "# (Phase-0 assessment, tasks/2026-06-30-sprint-plr-magic-numbers.md). The",
+        "# ratchet keeps them shrink-only; extract opportunistically, never regress.",
         f"# total={total} files={len(counts)}",
     ]
     lines += [f"{counts[rel]}\t{rel}" for rel in sorted(counts)]

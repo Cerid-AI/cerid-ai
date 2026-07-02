@@ -17,6 +17,14 @@ from pydantic import BaseModel, Field
 from app.deps import get_redis
 from core.utils.time import utcnow_iso
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class DeleteWorkflowResponse(BaseModel):
+    status: str
+    workflow_id: Any
+
+
+
 _logger = logging.getLogger("ai-companion.workflows")
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -460,7 +468,7 @@ async def list_workflows():
     return WorkflowListResponse(workflows=workflows, total=len(workflows))
 
 
-@router.get("/templates")
+@router.get("/templates", response_model=list[Any])
 async def list_templates():
     """Return predefined workflow templates."""
     templates = []
@@ -541,7 +549,7 @@ async def update_workflow(workflow_id: str, body: WorkflowUpdate):
     return wf
 
 
-@router.delete("/{workflow_id}")
+@router.delete("/{workflow_id}", response_model=DeleteWorkflowResponse)
 async def delete_workflow(workflow_id: str):
     """Delete a workflow and its run history."""
     r = get_redis()

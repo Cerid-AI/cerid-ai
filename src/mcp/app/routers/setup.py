@@ -15,12 +15,32 @@ import re
 import secrets
 from http import HTTPStatus
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from core.utils.swallowed import log_swallowed_error
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class RetestServicesResponse(BaseModel):
+    status: str
+    results: Any
+
+
+class ModelsStatusResponse(BaseModel):
+    reranker: Any
+    embedder: Any
+
+
+class SetupHealthResponse(BaseModel):
+    services: Any
+    all_healthy: Any
+    docker: dict
+
+
 
 _logger = logging.getLogger("ai-companion.setup")
 
@@ -262,7 +282,7 @@ async def setup_status() -> SetupStatus:
     )
 
 
-@router.get("/health")
+@router.get("/health", response_model=SetupHealthResponse)
 async def setup_health() -> dict:
     """Detailed health dashboard for all services."""
     neo4j_url = os.environ.get("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
@@ -511,7 +531,7 @@ async def _post_configure_warmup() -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/retest-verification")
+@router.post("/retest-verification", response_model=dict[str, Any])
 async def retest_verification() -> dict:
     """Re-run the verification pipeline self-test and overwrite cached status.
 
@@ -530,7 +550,7 @@ async def retest_verification() -> dict:
         return {"ok": False, "error": str(exc)}
 
 
-@router.post("/retest-services")
+@router.post("/retest-services", response_model=RetestServicesResponse)
 async def retest_services() -> dict:
     """Reset the LLM connection pool and circuit breakers, then re-probe all providers.
 
@@ -826,7 +846,7 @@ def _is_loading(module_path: str) -> bool:
         return False
 
 
-@router.get("/models/status")
+@router.get("/models/status", response_model=ModelsStatusResponse)
 async def models_status() -> dict:
     """Report whether the reranker + embedder ONNX models are cached.
 
@@ -857,7 +877,7 @@ async def models_status() -> dict:
     return {"reranker": reranker, "embedder": embedder}
 
 
-@router.post("/models/preload")
+@router.post("/models/preload", response_model=dict[str, Any])
 async def models_preload() -> dict:
     """Eagerly load the reranker + embedder, downloading from HuggingFace
     if not yet cached.

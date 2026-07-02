@@ -27,6 +27,15 @@ from pydantic import BaseModel, Field
 from app.deps import get_neo4j
 from config.features import is_feature_enabled
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class TourHealthResponse(BaseModel):
+    pro_visualization_tour_enabled: Any
+    max_stops: Any
+    default_duration_s: Any
+
+
+
 logger = logging.getLogger("ai-companion.graph_tour")
 router = APIRouter(prefix="/graph/tour", tags=["graph", "tour"])
 
@@ -143,7 +152,7 @@ async def generate_tour(body: TourRequest) -> TourArc:
     )
 
 
-@router.get("/health")
+@router.get("/health", response_model=TourHealthResponse)
 async def tour_health() -> dict[str, Any]:
     """Probe — confirms router mounted + feature-gate state."""
     return {

@@ -18,6 +18,7 @@ import logging
 import os
 from collections.abc import AsyncGenerator
 from http import HTTPStatus
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Request
@@ -27,6 +28,15 @@ from pydantic import BaseModel
 import config
 from app.routers.models import DEFAULT_ASSIGNMENTS, _current_assignments
 from core.utils.swallowed import log_swallowed_error
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class CompressContextResponse(BaseModel):
+    compressed_messages: Any
+    original_tokens: Any
+    compressed_tokens: Any
+
+
 
 logger = logging.getLogger("ai-companion.chat")
 
@@ -464,7 +474,7 @@ async def chat_stream(req: ChatRequest, request: Request):
     )
 
 
-@router.post("/chat/compress")
+@router.post("/chat/compress", response_model=CompressContextResponse)
 async def compress_context(req: ContextCompressRequest):
     """Compress conversation history to fit a target token budget."""
     from utils.context_compression import (

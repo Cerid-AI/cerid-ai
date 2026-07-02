@@ -21,6 +21,26 @@ from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
 from core.utils.swallowed import log_swallowed_error
 
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class TriageBatchEndpointResponse(BaseModel):
+    total: Any
+    succeeded: Any
+    failed: Any
+    duplicates: Any
+    results: Any
+
+
+class ClaimFeedbackEndpointResponse(BaseModel):
+    status: str
+
+
+class SaveVerificationReportResponse(BaseModel):
+    status: str
+    report_id: Any
+
+
+
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
@@ -184,7 +204,7 @@ class CompressRequest(BaseModel):
     target_tokens: int = Field(ge=100, le=1_000_000)
 
 
-@router.post("/chat/compress")
+@router.post("/chat/compress", response_model=dict[str, Any])
 async def compress_history_endpoint(req: CompressRequest):
     """Compress conversation history to fit a target token budget.
 
@@ -380,7 +400,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/triage")
+@router.post("/agent/triage")  # response-model-allowed: dynamic response (shape varies)
 async def triage_file_endpoint(req: TriageFileRequest):
     try:
         validate_file_path(req.file_path)
@@ -417,7 +437,7 @@ async def triage_file_endpoint(req: TriageFileRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/triage/batch")
+@router.post("/agent/triage/batch", response_model=TriageBatchEndpointResponse)
 async def triage_batch_endpoint(req: TriageBatchRequest):
     try:
         from app.agents.triage import triage_batch
@@ -465,7 +485,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/hallucination")
+@router.post("/agent/hallucination")  # response-model-allowed: dynamic response (shape varies)
 async def hallucination_check_endpoint(req: HallucinationCheckRequest):
     try:
         # Fast mode bypasses the cross-model NLI pipeline entirely — the
@@ -574,7 +594,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.get("/agent/hallucination/{conversation_id}")
+@router.get("/agent/hallucination/{conversation_id}")  # response-model-allowed: dynamic response (shape varies)
 async def hallucination_report_endpoint(conversation_id: str):
     try:
         from core.agents.hallucination import get_hallucination_report
@@ -595,7 +615,7 @@ class ClaimFeedbackRequest(BaseModel):
     correct: bool
 
 
-@router.post("/agent/hallucination/feedback")
+@router.post("/agent/hallucination/feedback", response_model=ClaimFeedbackEndpointResponse)
 async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
     """Record user feedback on a verification claim."""
     try:
@@ -634,7 +654,7 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/memory/extract")
+@router.post("/agent/memory/extract")  # response-model-allowed: dynamic response (shape varies)
 async def memory_extract_endpoint(req: MemoryExtractionRequest):
     started = time.perf_counter()
     try:
@@ -672,7 +692,7 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/memory/archive")
+@router.post("/agent/memory/archive")  # response-model-allowed: dynamic response (shape varies)
 async def memory_archive_endpoint(req: MemoryArchiveRequest):
     try:
         from app.agents.memory import archive_old_memories
@@ -948,7 +968,7 @@ class SaveVerificationRequest(BaseModel):
     total: int = 0
 
 
-@router.post("/verification/save")
+@router.post("/verification/save", response_model=SaveVerificationReportResponse)
 async def save_verification_report(req: SaveVerificationRequest):
     """Persist a verification report to Neo4j for long-term storage."""
     from app.db.neo4j.artifacts import save_verification_report as _save
@@ -970,7 +990,7 @@ async def save_verification_report(req: SaveVerificationRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.get("/verification/{conversation_id}")
+@router.get("/verification/{conversation_id}")  # response-model-allowed: dynamic response (shape varies)
 async def get_verification_report(conversation_id: str):
     """Retrieve a saved verification report by conversation ID."""
     from app.db.neo4j.artifacts import get_verification_report as _get
@@ -987,7 +1007,7 @@ async def get_verification_report(conversation_id: str):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/rectify")
+@router.post("/agent/rectify")  # response-model-allowed: dynamic response (shape varies)
 async def rectify_endpoint(req: RectifyRequest):
     try:
         from core.agents.rectify import rectify
@@ -1004,7 +1024,7 @@ async def rectify_endpoint(req: RectifyRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/audit")
+@router.post("/agent/audit")  # response-model-allowed: dynamic response (shape varies)
 async def audit_endpoint(req: AuditRequest):
     try:
         from core.agents.audit import audit
@@ -1018,7 +1038,7 @@ async def audit_endpoint(req: AuditRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/maintain")
+@router.post("/agent/maintain")  # response-model-allowed: dynamic response (shape varies)
 async def maintain_endpoint(req: MaintenanceRequest):
     try:
         from core.agents.maintenance import maintain
@@ -1035,7 +1055,7 @@ async def maintain_endpoint(req: MaintenanceRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/curate")
+@router.post("/agent/curate")  # response-model-allowed: dynamic response (shape varies)
 async def curate_endpoint(req: CurateRequest):
     try:
         from app.agents.curator import curate
@@ -1053,7 +1073,7 @@ async def curate_endpoint(req: CurateRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
-@router.post("/agent/curate/estimate")
+@router.post("/agent/curate/estimate")  # response-model-allowed: dynamic response (shape varies)
 async def curate_estimate_endpoint(req: CurateEstimateRequest):
     try:
         from app.agents.curator import estimate_synopsis_run
