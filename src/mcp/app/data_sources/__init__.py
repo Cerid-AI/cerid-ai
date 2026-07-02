@@ -18,6 +18,7 @@ from .finance import ExchangeRatesSource
 from .openlibrary import OpenLibrarySource
 from .pubchem import PubChemSource
 from .rss_feed import RSSFeedSource
+from .web_search_source import WebSearchDataSource
 from .wikipedia import WikipediaSource
 from .wolfram import WolframAlphaSource
 
@@ -31,5 +32,6 @@ registry.register(PubChemSource())
 registry.register(BookmarksSource())
 registry.register(EmailImapSource())
 registry.register(RSSFeedSource())
+registry.register(WebSearchDataSource())
 
 __all__ = ["DataSource", "DataSourceResult", "DataSourceRegistry", "registry"]

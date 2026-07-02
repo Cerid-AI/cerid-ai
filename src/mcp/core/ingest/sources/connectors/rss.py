@@ -37,6 +37,7 @@ from core.ingest.sources.base import (
     SourceConnector,
 )
 from core.ingest.sources.safe_fetch import guarded_get
+from core.utils.safe_xml import safe_fromstring
 
 logger = logging.getLogger("ai-companion.connectors.rss")
 
@@ -75,11 +76,10 @@ def _parse_feed(
     """
     cursor = cursor or {}
     last_guid = cursor.get("last_guid")
-    # XXE / billion-laughs hardening (feeds are untrusted external input):
-    # RSS/Atom never legitimately declare a DTD, so refuse any feed containing a
-    # DOCTYPE or ENTITY declaration. Both XXE (external entities) and entity-
-    # expansion DoS require such a declaration, so this is the dependency-free
-    # equivalent of defusedxml's forbid_dtd/forbid_entities for this input.
+    # XXE / billion-laughs hardening (feeds are untrusted external input).
+    # Primary guard is the shared defusedxml wrapper (safe_fromstring), which
+    # forbids DTDs/entities. The DOCTYPE/ENTITY string-scan below is kept as a
+    # cheap fast-reject so obviously-malicious feeds never reach the parser.
     lowered = xml_text.lower()
     if "<!doctype" in lowered or "<!entity" in lowered:
         logger.warning(
@@ -88,7 +88,7 @@ def _parse_feed(
         )
         return [], cursor
     try:
-        root = ET.fromstring(xml_text)  # nosec B314 — XXE/entity guarded above (DOCTYPE/ENTITY feeds refused)
+        root = safe_fromstring(xml_text)
     except ET.ParseError:
         return [], cursor
 

@@ -426,16 +426,21 @@ async def pkb_ingest_url(
     import httpx
 
     from app.services.ingestion import ingest_content
+    from core.ingest.sources.safe_fetch import guarded_get
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; cerid-kb/pkb_ingest_url)",
-                "Accept": "text/html,application/xhtml+xml,text/plain,*/*;q=0.5",
-            })
-            resp.raise_for_status()
-            body = resp.content[:max_bytes]
-    except httpx.HTTPError as exc:
+        # SSRF guard: pkb_ingest_url fetches a caller-supplied URL, so resolve
+        # + reject internal/private targets and re-validate every redirect hop.
+        # A blocked target raises ValueError → surfaced as InvalidParamsError.
+        resp = await guarded_get(
+            url,
+            user_agent="Mozilla/5.0 (compatible; cerid-kb/pkb_ingest_url)",
+            timeout=30.0,
+            headers={"Accept": "text/html,application/xhtml+xml,text/plain,*/*;q=0.5"},
+        )
+        resp.raise_for_status()
+        body = resp.content[:max_bytes]
+    except (httpx.HTTPError, ValueError) as exc:
         raise InvalidParamsError(f"fetch failed: {exc}") from exc
 
     # Best-effort HTML → text. The parsers module already handles this

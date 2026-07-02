@@ -615,6 +615,11 @@ SEARXNG_URL = os.getenv("SEARXNG_URL", "")  # e.g. http://localhost:8080
 ENABLE_AUTO_LEARN = os.getenv("ENABLE_AUTO_LEARN", "false").lower() == "true"
 WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
 WEB_SEARCH_RATE_LIMIT = int(os.getenv("WEB_SEARCH_RATE_LIMIT", "10"))  # per minute
+# When a real web-search provider (Tavily/SearXNG) is configured, also fold it
+# into the RAG external-source path (not just the pkb_web_search tool). Escape
+# hatch: set false to keep web search out of retrieval. No effect without a
+# configured provider — a default install is unchanged either way.
+ENABLE_WEB_SEARCH_IN_RAG = os.getenv("ENABLE_WEB_SEARCH_IN_RAG", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Self-RAG (retrieval-augmented generation validation loop)

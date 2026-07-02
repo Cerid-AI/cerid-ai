@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-__all__ = ["DegradationTier", "DegradationManager", "degradation"]
+__all__ = ["DegradationTier", "DegradationManager"]
 
 # Breaker names grouped by logical service.
 _CHROMADB_BREAKERS = ("chromadb", "bifrost-rerank")
@@ -123,6 +123,3 @@ class DegradationManager:
             if svc["redis"] == "down":
                 degraded.extend(["cache", "rate_limiting", "audit_log"])
         return {"tier": tier.value, "services": svc, "degraded_features": degraded}
-
-
-degradation = DegradationManager()

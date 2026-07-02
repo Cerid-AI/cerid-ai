@@ -18,7 +18,11 @@ from collections.abc import Callable
 from typing import Any
 
 import config
-from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
+from config.constants import (
+    EXTERNAL_SOURCE_QUERY_TIMEOUT,
+    EXTERNAL_SOURCE_RELEVANCE_DISCOUNT,
+)
+from core.utils.swallowed import log_swallowed_error
 
 # ── DI seam (app injects at startup; core never imports app) ──────────────
 _external_registry: Any = None
@@ -130,7 +134,6 @@ def kb_low_confidence(kb_result: dict, threshold: float) -> bool:
 
 
 # ── firing (app-bound deps via DI; no-op when unwired) ────────────────────
-_EXTERNAL_DISCOUNT = 0.6
 
 
 async def augment_external_crag(
@@ -172,26 +175,33 @@ async def augment_external_crag(
             ),
             timeout=EXTERNAL_SOURCE_QUERY_TIMEOUT + 1.0,
         )
-    except (Exception, asyncio.TimeoutError):
+    except asyncio.TimeoutError:
+        ext_results = []  # external sources over budget — expected, not swallowed
+    except Exception as exc:
+        log_swallowed_error(f"{__name__}.external_query", exc)
         ext_results = []
 
     if ext_results:
+        from core.models.external_evidence import ExternalEvidence
         from core.models.query_envelope import QueryEnvelope, SourceItem
 
         env = QueryEnvelope.from_legacy_result(result)
-        env.merge_external([
-            SourceItem(
-                content=r.get("content", ""),
-                relevance=round(r.get("confidence", 0.8) * _EXTERNAL_DISCOUNT, 3),
+        items = []
+        for r in ext_results:
+            ev = ExternalEvidence.from_mapping(r)
+            # confidence-absent → 0.8 (legacy default; a real 0.0 stays 0.0).
+            rel = ev.relevance if ev.relevance is not None else 0.8
+            items.append(SourceItem(
+                content=ev.content,
+                relevance=round(rel * EXTERNAL_SOURCE_RELEVANCE_DISCOUNT, 3),
                 artifact_id="",
-                filename=r.get("source_name", ""),
+                filename=ev.source_name,
                 source_type="external",
                 domain="external",
                 collection="external",
-                source_url=r.get("source_url", ""),
-                source_name=r.get("source_name", r.get("title", "")),
-            )
-            for r in ext_results
-        ])
+                source_url=ev.url,
+                source_name=ev.source_name or ev.title,
+            ))
+        env.merge_external(items)
         result = env.to_dict()
     return result

@@ -86,6 +86,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-retrieval-import-boundary.py --check
 	@echo "[drift] magic-numbers"
 	.venv/bin/python scripts/lint-magic-numbers.py --check
+	@echo "[drift] external-fetch-boundary"
+	.venv/bin/python scripts/lint-external-fetch-boundary.py --check
 	@echo "[drift] gates-parity"
 	@test -f scripts/lint-gates-parity.py \
 	  && .venv/bin/python scripts/lint-gates-parity.py --check \

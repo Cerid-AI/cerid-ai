@@ -81,12 +81,16 @@ async def guarded_get(
     user_agent: str = "CeridAI-Connector/1.0",
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: int = DEFAULT_MAX_BYTES,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     """SSRF-guarded fetch. Validates the target, disables auto-redirects, and
     manually follows up to ``MAX_REDIRECTS`` hops re-validating each Location.
     Raises ValueError on a blocked target / redirect loop / oversize body;
     httpx.HTTPError on network failure. Returns the final (non-redirect)
     response with its body fully loaded.
+
+    ``headers`` (optional) are merged over the ``User-Agent`` so a caller can
+    send request hints (e.g. ``Accept``) without giving up the guard.
 
     The response is streamed and the download is aborted once it exceeds
     ``max_bytes`` — the cap is enforced DURING the read, not after the whole
@@ -96,7 +100,7 @@ async def guarded_get(
     async with httpx.AsyncClient(
         timeout=timeout,
         follow_redirects=False,  # validate every hop ourselves
-        headers={"User-Agent": user_agent},
+        headers={"User-Agent": user_agent, **(headers or {})},
     ) as client:
         for _hop in range(MAX_REDIRECTS + 1):
             await asyncio.to_thread(assert_fetchable, current)  # blocking DNS off the loop
@@ -118,7 +122,7 @@ async def guarded_get(
                 # aiter_bytes yields content-decoded bytes, so the original
                 # framing headers no longer describe `body`; drop them to keep
                 # the returned response self-consistent for callers.
-                headers = httpx.Headers(
+                resp_headers = httpx.Headers(
                     [
                         (k, v)
                         for k, v in resp.headers.items()
@@ -128,7 +132,7 @@ async def guarded_get(
                 )
                 return httpx.Response(
                     status_code=resp.status_code,
-                    headers=headers,
+                    headers=resp_headers,
                     content=body,
                     request=resp.request,
                 )

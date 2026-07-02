@@ -17,12 +17,17 @@ import asyncio
 import logging
 from typing import Any
 
-from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
+from config.constants import (
+    EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT,
+    EXTERNAL_SOURCE_QUERY_TIMEOUT,
+    EXTERNAL_SOURCE_RELEVANCE_DISCOUNT,
+)
 from config.settings import (
     MEMORY_RECALL_MIN_SCORE,
     MEMORY_RECALL_TIMEOUT_MS,
     MEMORY_RECALL_TOP_K,
 )
+from core.models.external_evidence import ExternalEvidence
 from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.retrieval")
@@ -139,7 +144,7 @@ async def orchestrated_query(
     external_task = asyncio.create_task(_query_external_sources(
         query=query,
         domain=domains[0] if domains else None,
-        timeout=5.0,
+        timeout=EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT,
     )) if _ext_on else None
 
     # Gather only enabled tasks
@@ -192,14 +197,14 @@ async def orchestrated_query(
     # Normalize real external results to match frontend ExternalSourceResult shape.
     # External sources use hardcoded confidence (not semantic similarity), so
     # discount them to prevent book-metadata noise from outranking KB results.
-    _EXTERNAL_RELEVANCE_DISCOUNT = 0.6
     for raw in external_results:
-        raw_confidence = raw.get("confidence", raw.get("relevance", 0.0))
+        ev = ExternalEvidence.from_mapping(raw)
+        rel = ev.relevance if ev.relevance is not None else 0.0
         external_sources.append({
-            "content": raw.get("content", ""),
-            "relevance": round(raw_confidence * _EXTERNAL_RELEVANCE_DISCOUNT, 3),
-            "source_url": raw.get("source_url", ""),
-            "source_name": raw.get("source_name", raw.get("title", "")),
+            "content": ev.content,
+            "relevance": round(rel * EXTERNAL_SOURCE_RELEVANCE_DISCOUNT, 3),
+            "source_url": ev.url,
+            "source_name": ev.source_name or ev.title,
             "source_type": "external",
             # RAG Phase 1.1 — best-effort provenance date (None when the
             # external connector result carries no publish/fetch timestamp).

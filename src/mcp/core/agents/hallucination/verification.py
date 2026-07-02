@@ -261,12 +261,17 @@ async def _verify_against_cited_url(
     """
     from html.parser import HTMLParser
 
+    from core.ingest.sources.safe_fetch import guarded_get
     from core.utils.nli import nli_score
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"User-Agent": "cerid-verifier/1"})
-        resp.raise_for_status()
-        body = resp.text[:max_bytes]
+    # SSRF guard: the cited URL comes from LLM output (attacker-influenceable
+    # via prompt injection / poisoned KB), so route it through the shared
+    # per-hop-revalidating fetch instead of a raw redirect-following client.
+    # A blocked/internal target raises ValueError → the caller's except falls
+    # through to the KB + web-search path, same as any other fetch error.
+    resp = await guarded_get(url, user_agent="cerid-verifier/1", timeout=timeout)
+    resp.raise_for_status()
+    body = resp.text[:max_bytes]
 
     class _TextExtractor(HTMLParser):
         def __init__(self) -> None:
@@ -293,7 +298,8 @@ async def _verify_against_cited_url(
     try:
         ext.feed(body)
         text = " ".join(ext.parts)
-    except Exception:
+    except Exception as exc:
+        log_swallowed_error(f"{__name__}.cited_url_html_parse", exc)
         text = body  # fall back to raw body if HTML parsing explodes
 
     # NLI context window — cross-encoder/nli-deberta-v3-xsmall truncates to
@@ -1389,6 +1395,7 @@ async def _verify_claim_externally(
                 "source_urls": [],
             }
         except Exception as e:
+            log_swallowed_error(f"{__name__}.external_verify", e)
             logger.warning("External verification failed for '%s...': %s", claim[:50], e)
             return {
                 "status": "uncertain",
@@ -1730,6 +1737,7 @@ async def verify_claim(
             try:
                 cited_verdict = await _verify_against_cited_url(claim, url)
             except Exception as exc:
+                log_swallowed_error(f"{__name__}.cited_url_verify", exc)
                 logger.debug(
                     "cited URL verification failed for %s: %s", url, exc,
                 )

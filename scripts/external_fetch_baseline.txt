@@ -1,0 +1,16 @@
+# Per-file raw follow_redirects=True (external-fetch) baseline — SHRINK-ONLY.
+# Route new redirect-following fetches through core.ingest.sources.safe_fetch.
+# Regenerate after burn-down: python scripts/lint-external-fetch-boundary.py --update
+# total=13 files=12
+1	src/mcp/app/routers/updates.py
+1	src/mcp/app/routers/whisper_models.py
+1	src/mcp/app/services/external_apis/base.py
+1	src/mcp/app/services/knowledge_packs.py
+2	src/mcp/core/knowledge/adapter_drugfacts.py
+1	src/mcp/core/knowledge/adapter_gutenberg.py
+1	src/mcp/core/knowledge/adapter_html_scrape.py
+1	src/mcp/core/knowledge/adapter_mediawiki.py
+1	src/mcp/core/knowledge/adapter_python_docs.py
+1	src/mcp/core/knowledge/adapter_wiki_dump.py
+1	src/mcp/core/knowledge/adapters.py
+1	src/mcp/scripts/clipboard_daemon.py

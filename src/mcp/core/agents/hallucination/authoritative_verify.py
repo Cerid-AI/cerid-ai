@@ -24,6 +24,8 @@ import re
 from typing import Any, Protocol
 
 import config
+from config.constants import AUTHORITATIVE_VERIFY_QUERY_TIMEOUT
+from core.models.external_evidence import ExternalEvidence
 
 logger = logging.getLogger("ai-companion.authoritative_verify")
 
@@ -233,11 +235,11 @@ async def verify_claim_authoritatively(
             raw_results = await asyncio.wait_for(
                 effective_registry.query_all(
                     search_terms,
-                    timeout=4.0,
+                    timeout=AUTHORITATIVE_VERIFY_QUERY_TIMEOUT,
                     raw_query=claim,
                     keywords=keywords,
                 ),
-                timeout=5.0,
+                timeout=AUTHORITATIVE_VERIFY_QUERY_TIMEOUT + 1.0,
             )
             external_results = raw_results[:max_sources]
         except Exception:
@@ -253,7 +255,10 @@ async def verify_claim_authoritatively(
             "evidence_summary": "No authoritative sources returned results.",
         }
 
-    # Step 2: NLI entailment between claim and each external result
+    # Step 2: NLI entailment between claim and each external result.
+    # ExternalEvidence normalises the source dict; to_authoritative_dict emits
+    # the legacy shape (source / content[:200] / source_url / nli_* / freshness)
+    # byte-for-byte, so downstream consumers see no change.
     scored_sources: list[dict[str, Any]] = []
     try:
         from core.utils.nli import nli_score
@@ -263,37 +268,18 @@ async def verify_claim_authoritatively(
             if not content:
                 continue
             nli = nli_score(content, claim)
-            scored_sources.append({
-                "source": ext.get("source_name", "unknown"),
-                "content": content[:200],
-                "source_url": ext.get("source_url", ""),
-                "nli_entailment": float(nli["entailment"]),
-                "nli_contradiction": float(nli["contradiction"]),
-                # Provenance for staleness auditing — sources may provide
-                # last_updated / data_freshness / published / retrieved_at
-                # fields (data_sources registry), or none (defaults to
-                # "unknown" so downstream reports can render an honest
-                # "freshness unknown" label instead of dropping the field).
-                "data_freshness": ext.get("last_updated")
-                    or ext.get("data_freshness")
-                    or ext.get("published")
-                    or ext.get("retrieved_at", "unknown"),
-            })
+            scored_sources.append(
+                ExternalEvidence.from_mapping(
+                    ext,
+                    nli_entailment=float(nli["entailment"]),
+                    nli_contradiction=float(nli["contradiction"]),
+                ).to_authoritative_dict()
+            )
     except Exception:
         logger.debug("NLI scoring of authoritative sources failed")
-        # Fall back to unscored sources
+        # Fall back to unscored sources (NLI defaults to 0.0)
         for ext in external_results:
-            scored_sources.append({
-                "source": ext.get("source_name", "unknown"),
-                "content": ext.get("content", "")[:200],
-                "source_url": ext.get("source_url", ""),
-                "nli_entailment": 0.0,
-                "nli_contradiction": 0.0,
-                "data_freshness": ext.get("last_updated")
-                    or ext.get("data_freshness")
-                    or ext.get("published")
-                    or ext.get("retrieved_at", "unknown"),
-            })
+            scored_sources.append(ExternalEvidence.from_mapping(ext).to_authoritative_dict())
 
     # Step 3: Cross-validate KB results against external evidence
     cross_validation: dict[str, Any] = {}

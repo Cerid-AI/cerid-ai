@@ -29,6 +29,12 @@ NEO4J_QUERY_TIMEOUT = 15.0
 # headroom — a hung source (e.g. DuckDuckGo) otherwise serializes its
 # full timeout into first-touch responses until the circuit opens.
 EXTERNAL_SOURCE_QUERY_TIMEOUT = 2.0
+# Longer per-source budget for the async /query orchestrator path, which is
+# off the synchronous 3 s cold-query SLO and can afford more headroom.
+EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT = 5.0
+# Per-source budget for authoritative claim verification (hallucination gate).
+# Each of these paths applies an outer guard of (inner + 1.0 s).
+AUTHORITATIVE_VERIFY_QUERY_TIMEOUT = 4.0
 
 # ── Budget & rate limits ────────────────────────────────────────────
 MONTHLY_BUDGET_USD = 20.0
@@ -38,6 +44,11 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 DEFAULT_TOP_K = 10
 RETRIEVAL_CACHE_TTL = 1800  # 30 minutes
 SEMANTIC_CACHE_SIMILARITY_THRESHOLD = 0.92
+# External sources carry hardcoded confidence (not semantic similarity), so
+# their relevance is discounted before merging with KB results — prevents e.g.
+# book-metadata noise from outranking real KB hits. One value, two consumers
+# (crag gate + retrieval orchestrator).
+EXTERNAL_SOURCE_RELEVANCE_DISCOUNT = 0.6
 HYDE_TRIGGER_THRESHOLD = 0.4
 CHUNK_MAX_TOKENS = 512
 CHUNK_OVERLAP_RATIO = 0.2

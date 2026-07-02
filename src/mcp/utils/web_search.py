@@ -3,9 +3,13 @@
 
 """Web search provider abstraction — Tavily, SearXNG, or OpenRouter :online fallback.
 
-Provides a unified interface for explicit web searches triggered by the
-hallucination pipeline (ignorance claims), the ``pkb_web_search`` MCP tool,
-or any service that needs fresh external context.
+Provides a unified interface for explicit web searches. Current callers: the
+``pkb_web_search`` MCP tool (``app/tools.py``) and the a2a ``web-search`` skill
+(``app/routers/a2a.py``). NOT reached from the RAG/retrieval path today — the
+hallucination pipeline does its own ``:online`` model-suffix web search inline
+(``core/agents/hallucination/verification.py``), not via this module. Wiring
+these providers into the retrieval path as first-class external sources is
+tracked as Phase 2b follow-on 4b.
 
 Priority: Tavily (structured API) > SearXNG (self-hosted) > OpenRouter online
 (LLM with implicit web search, always available as fallback).

@@ -26,8 +26,8 @@ src/mcp/app/sync/user_state.py:357
 src/mcp/core/agents/audit.py:373
 src/mcp/core/agents/audit.py:392
 src/mcp/core/agents/curator.py:211
-src/mcp/core/agents/hallucination/authoritative_verify.py:243
-src/mcp/core/agents/hallucination/authoritative_verify.py:312
+src/mcp/core/agents/hallucination/authoritative_verify.py:245
+src/mcp/core/agents/hallucination/authoritative_verify.py:298
 src/mcp/core/agents/hallucination/extraction.py:483
 src/mcp/core/agents/maintenance.py:180
 src/mcp/core/agents/maintenance.py:319
