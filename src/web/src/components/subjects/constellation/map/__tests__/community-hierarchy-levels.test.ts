@@ -27,6 +27,11 @@ describe("buildAncestorIndex", () => {
     expect(ix.childrenOf("1:9").sort()).toEqual(["0:1", "0:2"])
     expect(ix.maxLevel).toBe(1)
   })
+
+  it("returns a non-null index with maxLevel 0 for an empty hierarchy (Leiden not yet run) — callers must gate on nodes.length, not truthiness", () => {
+    const ix = buildAncestorIndex({ levels: 0, nodes: [] })
+    expect(ix.maxLevel).toBe(0)
+  })
 })
 
 describe("buildLevelCommunities", () => {

@@ -23,7 +23,7 @@ import { createNodeBorderProgram } from "@sigma/node-border"
 import { NodeCircleProgram, createNodeCompoundProgram } from "sigma/rendering"
 import type { NodeProgramType } from "sigma/rendering"
 import { Loader2, X, Link2, Users, ShieldCheck, Maximize2 } from "lucide-react"
-import type { GraphMapResponse, CommunityHull } from "@/lib/api/graph-map"
+import type { GraphMapResponse, CommunityHull, MapLayout } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
 import { useCommunityLayer, resolveMapTokens, type MapTokens } from "./community-layer"
@@ -93,6 +93,72 @@ function nodeRadius(degree: number): number {
 /** Edge width formula: weight → 1–2.5px clamped */
 function edgeWidth(weight: number): number {
   return Math.min(2.5, Math.max(1, 1 + (weight / 10) * 1.5))
+}
+
+/** Ray-casting point-in-polygon over a hull (graph coordinates). */
+function pointInHull(x: number, y: number, poly: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i]
+    const [xj, yj] = poly[j]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+/** Andrew's monotone-chain convex hull. Returns the hull polygon (CCW). */
+function convexHull(pts: [number, number][]): [number, number][] {
+  if (pts.length < 3) return pts
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const lower: [number, number][] = []
+  for (const pt of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) lower.pop()
+    lower.push(pt)
+  }
+  const upper: [number, number][] = []
+  for (let i = p.length - 1; i >= 0; i--) {
+    const pt = p[i]
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) upper.pop()
+    upper.push(pt)
+  }
+  lower.pop()
+  upper.pop()
+  return lower.concat(upper)
+}
+
+/** Build a per-domain region hull from entity positions, trimming outliers so
+ *  a single stray node doesn't balloon the territory. Shaped as a CommunityHull
+ *  so it flows through the same nebula overlay. */
+function buildDomainHulls(
+  entities: { x: number; y: number; primary_domain?: string | null }[],
+): CommunityHull[] {
+  const byDomain = new Map<string, [number, number][]>()
+  for (const e of entities) {
+    const dom = e.primary_domain
+    if (!dom || e.x == null || e.y == null) continue
+    const arr = byDomain.get(dom) ?? []
+    arr.push([e.x, e.y])
+    byDomain.set(dom, arr)
+  }
+  const hulls: CommunityHull[] = []
+  for (const [dom, pts] of byDomain) {
+    if (pts.length < 3) continue
+    const cx = pts.reduce((s, q) => s + q[0], 0) / pts.length
+    const cy = pts.reduce((s, q) => s + q[1], 0) / pts.length
+    const kept = pts
+      .map((q) => ({ q, d: Math.hypot(q[0] - cx, q[1] - cy) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, Math.max(3, Math.floor(pts.length * 0.85)))
+      .map((x) => x.q)
+    const hull = convexHull(kept)
+    if (hull.length < 3) continue
+    hulls.push({ id: dom, count: pts.length, hull, anchor: [cx, cy], label: dom, top_hubs: [], trust_mix: {} })
+  }
+  return hulls
 }
 
 // Minimum interactive hit size in pixels — nodes that shrink past this floor
@@ -237,6 +303,12 @@ export interface CartographerMapProps {
    */
   onFocusEntity?: OnFocusEntity
   onCommunityClick?: (community: CommunityHull) => void
+  /**
+   * The requested server layout ("force" | "wells" | "domain"). Drives the
+   * position re-seed guard so a preset switch actually applies new coordinates.
+   * (The server response does not echo the layout, so we thread the request.)
+   */
+  layout?: MapLayout
   /** layout_fallback: true → show inline "wells layout not computed yet" notice */
   layoutFallback?: boolean
   /**
@@ -265,6 +337,7 @@ export function CartographerMap({
   onInspect,
   onFocusEntity: _onFocusEntity, // eslint-disable-line @typescript-eslint/no-unused-vars
   onCommunityClick,
+  layout,
   layoutFallback,
   onPinnedNodesChange,
   search,
@@ -303,6 +376,14 @@ export function CartographerMap({
 
   // Pinned entity card state
   const [pinnedId, setPinnedId] = useState<string | null>(null)
+  // Drill-down (Model B): double-click a community region to isolate its
+  // members (the rest of the map recedes); Esc / empty double-click exits.
+  const [drilledCommunityId, setDrilledCommunityId] = useState<string | null>(null)
+  const drilledCommunityIdRef = useRef<string | null>(null)
+  drilledCommunityIdRef.current = drilledCommunityId
+  // Fresh region hulls (community OR domain, per active layout) for the
+  // double-click-region drill hit-test. Assigned below once activeHulls exists.
+  const communitiesRef = useRef<CommunityHull[]>([])
   // Pinned node position overrides (Shift-drop drag-pins)
   const [pinnedNodes, setPinnedNodes] = useState<Record<string, { x: number; y: number }>>({})
   const pinnedNodesRef = useRef(pinnedNodes)
@@ -596,6 +677,10 @@ export function CartographerMap({
       if (didDrag) {
         const orig = coords.original as MouseEvent
         const isShift = orig.shiftKey ?? false
+        // Plain drop: endDrag runs a lerp-home tween back to the server-computed
+        // position; Shift-drop pins in place. Do NOT reheat FA2 here — a global
+        // warm would race the tween and can freeze the node off-target (and it
+        // disturbs the whole graph). The heal owns the dropped node's return.
         healCtrl.endDrag(node, { pin: isShift })
         if (isShift) {
           const attrs = sigma.getGraph().getNodeAttributes(node)
@@ -605,12 +690,13 @@ export function CartographerMap({
             return next
           })
         }
-        forceCtrlRef.current.reheat()
       } else {
-        // Click: pin/inspect only per unified click contract.
+        // Single click: pin + focus-zoom IN THE GRAPH only (explore-first).
+        // The analysis drawer now opens on double-click, so a plain click keeps
+        // exploration in the map (focus + connectivity highlight) instead of
+        // surfacing an occluding wiki card that steals the whole view.
         const wasAlreadyPinned = pinnedIdRef.current === node
         setPinnedId((prev) => (prev === node ? null : node))
-        onInspectRef.current?.(node)
         if (!wasAlreadyPinned) focusCameraOnRef.current?.(node)
       }
     }
@@ -626,8 +712,43 @@ export function CartographerMap({
       if (dragRef.current.nodeId !== null) return // already handled by mouseup
       const wasAlreadyPinned = pinnedIdRef.current === node
       setPinnedId((prev) => (prev === node ? null : node))
-      onInspectRef.current?.(node)
       if (!wasAlreadyPinned) focusCameraOnRef.current?.(node)
+    })
+
+    // doubleClickNode — deliberate deep-dive: pin the node and open the
+    // analysis drawer. Kept off single-click so exploring the graph doesn't
+    // immediately throw up an occluding card. preventSigmaDefault stops
+    // sigma's built-in double-click zoom from fighting the focus camera.
+    sigma.on("doubleClickNode", ({ node, preventSigmaDefault }) => {
+      preventSigmaDefault()
+      setPinnedId(node)
+      onInspectRef.current?.(node)
+    })
+
+    // doubleClickStage — double-click empty map space inside a community region
+    // DRILLS into that community: isolate its members + frame it. Double-click
+    // the same region again, empty space, or Esc exits the drill. (Nodes keep
+    // their own single=explore / double=wiki behaviour above; stage only fires
+    // when the click misses every node.)
+    sigma.on("doubleClickStage", ({ event, preventSigmaDefault }) => {
+      preventSigmaDefault()
+      const gp = sigma.viewportToGraph({ x: event.x, y: event.y })
+      let hit: CommunityHull | null = null
+      for (const c of communitiesRef.current) {
+        if (c.hull.length >= 3 && pointInHull(gp.x, gp.y, c.hull)) {
+          hit = c
+          break
+        }
+      }
+      if (hit) {
+        const target = hit
+        setDrilledCommunityId((prev) => (prev === target.id ? null : target.id))
+        if (drilledCommunityIdRef.current !== target.id) {
+          focusCameraOnPointsRef.current?.(target.hull)
+        }
+      } else {
+        setDrilledCommunityId(null)
+      }
     })
 
     sigma.on("enterNode", ({ node, event }) => {
@@ -688,15 +809,18 @@ export function CartographerMap({
   // ---------------------------------------------------------------------------
   // Layout-preset switch (force/wells/domain): same nodes, new coordinates.
   // Update x/y in place on the live graph and refresh — no Sigma reconstruction.
-  // Re-seed positions only when the NODE SET changes; otherwise leave the live
-  // sim's positions alone (a routine 75s refetch must not yank nodes back to
-  // the seed mid-breath). On a real change, re-seed then reheat the sim.
+  // The seed guard keys on NODE SET *and* the served layout: a routine 75s
+  // refetch (same nodes, same layout) is ignored so it can't yank nodes back
+  // mid-breath, but a preset switch (same nodes, new layout) re-seeds. Keying on
+  // node set alone made every preset a no-op — the coordinates were dropped.
   // ---------------------------------------------------------------------------
   const seededKeyRef = useRef("")
   useEffect(() => {
     const sigma = sigmaRef.current
     if (!sigma || !data) return
-    if (seededKeyRef.current === dataNodeKey) return
+    const servedLayout = layout ?? "force"
+    const seedKey = `${dataNodeKey}:${servedLayout}`
+    if (seededKeyRef.current === seedKey) return
     const graph = sigma.getGraph()
     let moved = false
     for (const e of data.entities) {
@@ -706,10 +830,14 @@ export function CartographerMap({
         moved = true
       }
     }
-    seededKeyRef.current = dataNodeKey
+    seededKeyRef.current = seedKey
     if (moved) sigma.refresh({ skipIndexation: false })
-    forceCtrlRef.current.reheat()
-  }, [data, dataNodeKey])
+    // Only the default force layout gets the organic settle warm. The wells /
+    // domain presets carry a deliberate arrangement (e.g. domains pulled apart);
+    // re-warming FA2 would drag them back toward the community disc, so we apply
+    // their coordinates and leave the sim frozen.
+    if (servedLayout === "force") forceCtrlRef.current.reheat()
+  }, [data, dataNodeKey, layout])
 
   // ---------------------------------------------------------------------------
   // Node/edge reducers for lens + filter + hover dimming (installed ONCE per
@@ -838,6 +966,18 @@ export function CartographerMap({
       const entity = entityByIdMap.get(node)
       if (!entity) return { ...attrs, hidden: true }
 
+      // Drill-down (Model B): when a region is drilled, everything outside it is
+      // hidden so only its members remain. A drilled community matches on
+      // community id; a drilled domain region matches on primary_domain (the two
+      // id spaces don't collide, so checking both is safe).
+      if (
+        drilledCommunityIdRef.current &&
+        String(entity.community ?? "") !== drilledCommunityIdRef.current &&
+        String(entity.primary_domain ?? "") !== drilledCommunityIdRef.current
+      ) {
+        return { ...attrs, hidden: true }
+      }
+
       const currentTokens = tokensRef.current
       const currentLens = lensRef.current
       const currentTypeFilter = typeFilterRef.current
@@ -879,7 +1019,16 @@ export function CartographerMap({
       if (orphanHidden) {
         return { ...attrs, hidden: true }
       }
-      if (typeFiltered || searchMiss || domainMiss || trustMiss) {
+      // Explicit filters (type chips, search) HIDE non-matching entities so the
+      // matching set reads on its own — a dim-only recede was too subtle to
+      // register as a filter.
+      if (typeFiltered || searchMiss) {
+        return { ...attrs, hidden: true }
+      }
+      // Lens recede (no-domain in the domain lens, unknown in the trust lens) is
+      // a softening of an irrelevant set, not a user filter — keep it a dim ghost
+      // so the domained / trusted structure still reads against context.
+      if (domainMiss || trustMiss) {
         return {
           ...attrs,
           color: currentTokens.dim,
@@ -975,7 +1124,17 @@ export function CartographerMap({
     if (!sigmaInstance) return
     recomputeFocusNeighbors()
     sigmaInstance.refresh({ skipIndexation: true })
-  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, pulseMap, isDragging, search, config.hideOrphans, recomputeFocusNeighbors])
+  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, drilledCommunityId, pulseMap, isDragging, search, config.hideOrphans, recomputeFocusNeighbors])
+
+  // Esc exits a community drill (Model B).
+  useEffect(() => {
+    if (!drilledCommunityId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrilledCommunityId(null)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [drilledCommunityId])
 
   // Animated reveal: briefly reheat the live sim ONLY when the filtered SET
   // changes (search / orphan filter / type filter) so users see what changed.
@@ -1061,12 +1220,30 @@ export function CartographerMap({
     onCommunityClick?.(community)
   }, [onCommunityClick])
 
+  // Per-domain nebula: in the "domain" layout, shade domain territories instead
+  // of community regions (domains are the meaningful grouping there). Hulls are
+  // computed client-side — the server ships community hulls only — and coloured
+  // by domain. Other layouts keep the server community regions.
+  const domainHulls = useMemo(
+    () => (layout === "domain" && data ? buildDomainHulls(data.entities) : []),
+    [layout, data],
+  )
+  const showDomainRegions = layout === "domain" && domainHulls.length > 0
+  const activeHulls = showDomainRegions ? domainHulls : data?.communities ?? []
+  // Region hulls the double-click-drill hit-tests against (community or domain).
+  communitiesRef.current = activeHulls
+  const regionColorFor = useMemo(
+    () => (showDomainRegions ? (id: string) => domainColor(tokens, id) : undefined),
+    [showDomainRegions, tokens],
+  )
+
   useCommunityLayer({
     sigma: sigmaInstance,
-    communities: data?.communities ?? [],
+    communities: activeHulls,
     tokens,
     hullsVisible: config.hullsVisible,
     onCommunityClick: wrappedOnCommunityClick,
+    colorFor: regionColorFor,
   })
 
   useSuperNodeLayer({
@@ -1290,6 +1467,26 @@ export function CartographerMap({
           Wells layout not computed yet — showing force
         </div>
       )}
+
+      {/* Drill-down breadcrumb (Model B) — isolate a community, Esc/✕ to exit */}
+      {drilledCommunityId && (() => {
+        const drilled = data.communities?.find((c) => String(c.id) === drilledCommunityId)
+        return (
+          <div className="absolute left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border/60 bg-card/95 px-3 py-1.5 text-label-xs text-foreground shadow-lg backdrop-blur">
+            <span className="max-w-[18rem] truncate">
+              Drilled into <span className="font-semibold">{drilled?.label ?? "community"}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setDrilledCommunityId(null)}
+              className="rounded-full border border-border/60 px-1.5 py-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+              aria-label="Exit drill-down"
+            >
+              Esc ✕
+            </button>
+          </div>
+        )
+      })()}
 
       {/* Hover tooltip */}
       {tooltipState && hoveredEntity && (() => {

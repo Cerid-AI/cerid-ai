@@ -8,22 +8,28 @@
 // View mode persists in localStorage "cerid-constellation-mode", default "map".
 // Both modes share the same server x/y layout so the mental map is stable.
 
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react"
 import { Canvas } from "@react-three/fiber"
 import { AdaptiveDpr, OrbitControls, PerformanceMonitor, Stars } from "@react-three/drei"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
 import { fetchEmbeddings3D } from "@/lib/api/embeddings-3d"
+import type { Vec3 } from "./drag-plane"
 import { InstancedNodes } from "./instanced-nodes"
 import { NeuralLinks } from "./neural-links"
 import { HubLabels } from "./hub-labels"
 import { AmbientParticles } from "./ambient-particles"
-import { TourCameraAnimator, TourControlPanel, useTourState } from "./tour-controller"
+import { TourCameraAnimator, TourControlPanel, useTourState, FocusCameraAnimator, FocusExitSampler } from "./tour-controller"
 import { QUALITY_SETTINGS, QUALITY_TIERS, degradeTier, upgradeTier, loadQuality, saveQuality, type QualityTier } from "./quality"
 import { communityRgb, trustRgb, typeRgb, domainRgb, nodeBaseAlpha } from "./palette"
 import { CartographerMap } from "./map/CartographerMap"
 import { useGraphMap } from "./map/use-graph-map"
 import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
+import { useCommunityHierarchy } from "./map/use-community-hierarchy"
+import { buildAncestorIndex } from "./map/community-hierarchy-levels"
+import { buildSuperNodes3D } from "./supernodes-3d"
+import { CollapseLOD, SuperNodes3D } from "./supernodes-layer"
+import { boundingSphere, framingDistanceFor } from "./camera-focus-3d"
 import type { CommunityHull } from "@/lib/api/graph-map"
 import { useNavigation } from "@/contexts/navigation-context"
 import { resolveMapTokens, type MapTokens } from "./map/community-layer"
@@ -64,6 +70,12 @@ const COLOR_LENSES: { id: ColorLens; label: string; hint: string }[] = [
 
 // Postprocessing only loads for Ultra — nobody else pays for the bundle.
 const UltraEffects = lazy(() => import("./ultra-effects"))
+
+// Community drill-down (B4.4): alpha applied to every entity outside the
+// focused community once a super-node is clicked. Reuses the same
+// `visibility` channel instanced-nodes.tsx/neural-links.tsx already consume
+// for lens/type-filter fading — no new per-entity alpha mechanism.
+const FOCUS_FADE_ALPHA = 0.12
 
 export interface ConstellationProps {
   /** Initial focal entity (optional — UMAP shows global view by default) */
@@ -297,6 +309,91 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     enabled: viewMode === "3d",
   })
 
+  // ---------------------------------------------------------------------------
+  // 3D community collapse (B4.3): same hierarchy endpoint the 2D map's
+  // useSuperNodeLayer consumes (map/use-community-hierarchy.ts), gated to 3D
+  // mode. collapsedLevel is driven by camera distance (see <CollapseLOD>
+  // inside the Canvas below) — null means members are shown.
+  // ---------------------------------------------------------------------------
+  const hierarchyQuery = useCommunityHierarchy({ enabled: viewMode === "3d" })
+  const ancestorIx = useMemo(
+    () =>
+      hierarchyQuery.data && hierarchyQuery.data.nodes.length > 0
+        ? buildAncestorIndex(hierarchyQuery.data)
+        : null,
+    [hierarchyQuery.data],
+  )
+  const [collapsedLevel, setCollapsedLevel] = useState<number | null>(null)
+
+  // ---------------------------------------------------------------------------
+  // 3D community drill-down (B4.4): click a super-node -> ease the camera to
+  // that community's bounding sphere and fade the rest of the corpus via the
+  // existing `visibility` alpha channel. `level` pins the Leiden level the
+  // clicked super-node was built at (buildSuperNodes3D's own id scheme), so
+  // membership resolves consistently even as collapsedLevel keeps changing
+  // (CollapseLOD samples camera distance every frame, independent of focus).
+  // ---------------------------------------------------------------------------
+  const [focus, setFocus] = useState<{ communityId: string; level: number } | null>(null)
+  const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null)
+
+  const handleSuperNodeSelect = useCallback(
+    (communityId: string) => {
+      if (collapsedLevel === null) return // stray event after supers unmounted
+      setFocus({ communityId, level: collapsedLevel })
+    },
+    [collapsedLevel],
+  )
+
+  // Secondary exit path: zooming back out past COLLAPSE_IN re-collapses the
+  // graph (CollapseLOD drives collapsedLevel from actual camera distance from
+  // the world ORIGIN every frame, unaware of `focus`). The first null->non-null
+  // transition *after* a focus began is the signal — collapsedLevel is
+  // already non-null the instant a super-node is clicked (that's how it got
+  // rendered), so a bare "collapsedLevel !== null" check would clear focus
+  // immediately; watching for a transition avoids that.
+  //
+  // This path is unreliable on its own: it only crosses back through null for
+  // communities near the origin. A community centroid far from the origin
+  // (the "wells" layout pushes centroids apart) can keep the camera's
+  // distance-from-origin >= COLLAPSE_OUT for the whole focus session, so this
+  // never fires. <FocusExitSampler> below (focus-RELATIVE — measures distance
+  // from the community's own centroid) is the reliable exit path; this one is
+  // kept as a cheap fallback for the near-origin case where it still helps.
+  const prevCollapsedRef = useRef<number | null>(collapsedLevel)
+  useEffect(() => {
+    if (focus !== null && prevCollapsedRef.current === null && collapsedLevel !== null) {
+      setFocus(null)
+    }
+    prevCollapsedRef.current = collapsedLevel
+  }, [collapsedLevel, focus])
+
+  // Escape key is a guaranteed exit regardless of camera position — good UX,
+  // and a fallback in case both camera-distance heuristics above miss.
+  useEffect(() => {
+    if (focus === null) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFocus(null)
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [focus])
+
+  // Leaving 3D mode drops a stale focus so returning doesn't fade/re-tween
+  // toward a community the user never re-selected this visit. It also
+  // unmounts <NeuralLinks>/<InstancedNodes> (the whole Canvas swaps out
+  // for the 2D map below), so any drag pin must be cleared here too — see
+  // the showMembers effect below for the same cleanup on a same-mode
+  // collapse-to-supernodes.
+  useEffect(() => {
+    if (viewMode !== "3d") {
+      setFocus(null)
+      if (pinnedPositionsRef.current.size > 0) {
+        pinnedPositionsRef.current.clear()
+        setPinVersion((v) => v + 1)
+      }
+    }
+  }, [viewMode])
+
   const tour = useTourState()
 
   // Hover state for the Obsidian-style neighborhood focus + tooltip.
@@ -307,6 +404,21 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     } else {
       setHover({ index, x: clientX ?? 0, y: clientY ?? 0 })
     }
+  }, [])
+
+  // 3D node drag (B2.2): OrbitControls must be suspended while a node is
+  // being dragged, so the camera doesn't orbit under the pointer.
+  const [dragging, setDragging] = useState(false)
+  // Transient per-node drag-pin overrides, threaded down to NeuralLinks so
+  // the dragged node's edges follow it. A ref (not state) holds the Map —
+  // it's mutated in place on every drag-move; pinVersion is the state bump
+  // that tells NeuralLinks' effect a patch is due, without re-rendering the
+  // whole scene tree on every pointer-move.
+  const pinnedPositionsRef = useRef<Map<string, Vec3>>(new Map())
+  const [pinVersion, setPinVersion] = useState(0)
+  const handleNodeMoved = useCallback((entityId: string, pos: Vec3) => {
+    pinnedPositionsRef.current.set(entityId, pos)
+    setPinVersion((v) => v + 1)
   }, [])
 
   // Adjacency + degree from the link triples — powers neighborhood
@@ -400,23 +512,6 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.entities, lens, tokens3D])
 
-  // Type filter fades (not hides) non-matching nodes — fade keeps the
-  // structural context visible (yWorks KG-demo pattern).
-  // Confidence alpha (nodeBaseAlpha) is applied as a base multiplier so
-  // low-mention nodes render softer even before type-filter dimming. The
-  // type-filter 0.06 replaces the base alpha entirely (it is the dominant
-  // visual signal when active), while the base alpha is used on all nodes
-  // that pass the filter, giving meaning to node transparency.
-  const visibility = useMemo(() => {
-    const ents = data?.entities ?? []
-    const arr = new Float32Array(ents.length)
-    for (let i = 0; i < ents.length; i++) {
-      const filtered = typeFilter.size > 0 && !typeFilter.has(ents[i].type)
-      arr[i] = filtered ? 0.06 : nodeBaseAlpha(ents[i].mention_count ?? 1)
-    }
-    return arr
-  }, [data?.entities, typeFilter])
-
   const toggleType = useCallback((t: string) => {
     setTypeFilter((prev) => {
       const next = new Set(prev)
@@ -462,6 +557,97 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   }, [data, settings.flat])
 
   const hoveredEntity = hover ? sceneEntities[hover.index] : undefined
+
+  // Community super-nodes for the collapsed overview — 3D centroids of each
+  // community's members at the active Leiden level. Empty (and unrendered)
+  // while expanded (collapsedLevel === null) or before the hierarchy loads.
+  const supers = useMemo(() => {
+    if (collapsedLevel === null || !ancestorIx) return []
+    return buildSuperNodes3D(sceneEntities, ancestorIx.ancestorAt, collapsedLevel)
+  }, [sceneEntities, ancestorIx, collapsedLevel])
+
+  // Members of the focused community + their bounding sphere (B4.4) — drives
+  // both the camera tween (FocusCameraAnimator, below) and the corpus fade
+  // (visibility, below). Mirrors buildSuperNodes3D's own id scheme (level <= 0
+  // uses the raw community; deeper levels walk to that ancestor) so
+  // membership is consistent with whatever level the clicked super-node was
+  // built at.
+  const focusMembers = useMemo(() => {
+    if (!focus || !ancestorIx) return null
+    const { communityId, level } = focus
+    return sceneEntities.filter((e) => {
+      if (!e.community) return false
+      const cid = level <= 0 ? e.community : ancestorIx.ancestorAt(e.community, level)
+      return cid === communityId
+    })
+  }, [focus, ancestorIx, sceneEntities])
+
+  const focusSphere = useMemo(() => {
+    if (!focusMembers || focusMembers.length === 0) return null
+    return boundingSphere(focusMembers.map((m): Vec3 => [m.x, m.y, m.z]))
+  }, [focusMembers])
+
+  // Distance the camera was framed at for the current focus sphere — the
+  // exit threshold below (FOCUS_EXIT_MULTIPLIER * this) is relative to it,
+  // not to the world origin. Purely radius-derived (see framingDistanceFor),
+  // so it needs no camera position and can be computed outside <Canvas>.
+  const focusFramingDistance = useMemo(
+    () => (focusSphere ? framingDistanceFor(focusSphere.radius) : 0),
+    [focusSphere],
+  )
+
+  // Reliable drill-down exit (B4.4 fix): fires when the camera dollies back
+  // out past the focused community's own framed view — see FocusExitSampler
+  // in tour-controller.tsx for why this must be focus-relative, not
+  // origin-relative.
+  const handleFocusExit = useCallback(() => setFocus(null), [])
+
+  // Bypasses collapsedLevel while a community is focused: the camera tween
+  // takes real frames to arrive at the community, and CollapseLOD's own
+  // hysteresis (driven by actual camera distance, not this component's
+  // intent) would otherwise keep rendering the super-node view until the
+  // camera physically gets there.
+  const showMembers = collapsedLevel === null || focus !== null
+
+  // showMembers -> false unmounts <NeuralLinks>/<InstancedNodes> (collapsed
+  // to super-nodes). InstancedNodes' own dragOverrides ref is discarded on
+  // that unmount, but pinnedPositionsRef here is owned by this component and
+  // survives — left uncleared, it re-bakes edges from a stale drag position
+  // on the next expand/drill-down with no matching sphere override, so the
+  // edge dangles to empty space. Keyed on showMembers alone (not on data
+  // changes) so a routine corpus refetch that leaves members mounted never
+  // clears an in-progress pin.
+  useEffect(() => {
+    if (showMembers) return
+    if (pinnedPositionsRef.current.size === 0) return
+    pinnedPositionsRef.current.clear()
+    setPinVersion((v) => v + 1)
+  }, [showMembers])
+
+  // Type filter fades (not hides) non-matching nodes — fade keeps the
+  // structural context visible (yWorks KG-demo pattern).
+  // Confidence alpha (nodeBaseAlpha) is applied as a base multiplier so
+  // low-mention nodes render softer even before type-filter dimming. The
+  // type-filter 0.06 replaces the base alpha entirely (it is the dominant
+  // visual signal when active), while the base alpha is used on all nodes
+  // that pass the filter, giving meaning to node transparency. Community
+  // drill-down (B4.4) outranks both when active: the focused community's
+  // members render at full alpha, everything else fades to FOCUS_FADE_ALPHA
+  // — reuses this exact `visibility` channel, no new per-entity alpha path.
+  const visibility = useMemo(() => {
+    const ents = data?.entities ?? []
+    const arr = new Float32Array(ents.length)
+    const focusMemberIds = focusMembers ? new Set(focusMembers.map((m) => m.id)) : null
+    for (let i = 0; i < ents.length; i++) {
+      if (focusMemberIds) {
+        arr[i] = focusMemberIds.has(ents[i].id) ? 1 : FOCUS_FADE_ALPHA
+        continue
+      }
+      const filtered = typeFilter.size > 0 && !typeFilter.has(ents[i].type)
+      arr[i] = filtered ? 0.06 : nodeBaseAlpha(ents[i].mention_count ?? 1)
+    }
+    return arr
+  }, [data?.entities, typeFilter, focusMembers])
 
   // ---------------------------------------------------------------------------
   // Map mode renders CartographerMap — return early with the full map layout.
@@ -553,6 +739,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           newEntityIds={newIds.size > 0 ? newIds : undefined}
           onInspect={onNodeClick}
           onCommunityClick={handleCommunityClick}
+          layout={layout}
           layoutFallback={mapData?.layout_fallback}
           search={search}
         />
@@ -793,47 +980,89 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
         )}
 
         <Suspense fallback={null}>
-          {settings.particles && (
+          {settings.particles && showMembers && (
             <AmbientParticles count={Math.min(800, sceneEntities.length * 4)} radius={18} />
           )}
-          <NeuralLinks
-            entities={sceneEntities}
-            links={data.links ?? []}
-            animate={animate}
-            pulses={settings.pulses && effectiveAmbient}
-            hoveredIndex={focusIndex}
-            colors={nodeColors}
-            visibility={visibility}
-          />
-          <InstancedNodes
-            entities={sceneEntities}
-            animate={animate}
-            glow={settings.glow && effectiveAmbient}
-            pulses={settings.pulses && effectiveAmbient}
-            hoveredIndex={focusIndex}
-            neighbors={neighbors}
-            degrees={degrees}
-            colors={nodeColors}
-            visibility={visibility}
-            onHover={handleHover}
-            onSelect={(id) => {
-              // Click pins the neighborhood (inspection card opens);
-              // the card's "Open in Wiki" action navigates.
-              const idx = sceneEntities.findIndex((e) => e.id === id)
-              setPinned(idx >= 0 ? idx : null)
-            }}
-          />
-          <HubLabels entities={sceneEntities} degrees={degrees} hoveredIndex={focusIndex} />
+          {showMembers ? (
+            <>
+              <NeuralLinks
+                entities={sceneEntities}
+                links={data.links ?? []}
+                animate={animate}
+                pulses={settings.pulses && effectiveAmbient}
+                float={settings.float && effectiveAmbient}
+                hoveredIndex={focusIndex}
+                colors={nodeColors}
+                visibility={visibility}
+                pinnedPositions={pinnedPositionsRef.current}
+                pinVersion={pinVersion}
+              />
+              <InstancedNodes
+                entities={sceneEntities}
+                animate={animate}
+                glow={settings.glow && effectiveAmbient}
+                pulses={settings.pulses && effectiveAmbient}
+                float={settings.float && effectiveAmbient}
+                hoveredIndex={focusIndex}
+                neighbors={neighbors}
+                degrees={degrees}
+                colors={nodeColors}
+                visibility={visibility}
+                onHover={handleHover}
+                onSelect={(id) => {
+                  // Click pins the neighborhood (inspection card opens);
+                  // the card's "Open in Wiki" action navigates.
+                  const idx = sceneEntities.findIndex((e) => e.id === id)
+                  setPinned(idx >= 0 ? idx : null)
+                }}
+                onDragStateChange={setDragging}
+                onNodeMoved={handleNodeMoved}
+              />
+              <HubLabels entities={sceneEntities} degrees={degrees} hoveredIndex={focusIndex} />
+            </>
+          ) : (
+            // Zoomed-out overview: individual members + links are hidden;
+            // one instanced sphere per community, sized by member count.
+            // Click a super-node to drill in (B4.4). Super-edges are
+            // deferred to a follow-up — see task report.
+            <SuperNodes3D supers={supers} onSelect={handleSuperNodeSelect} />
+          )}
+          {/* Camera-distance LOD sampler — drives collapsedLevel with
+              hysteresis (COLLAPSE_IN/COLLAPSE_OUT in supernodes-3d.ts).
+              Re-renders React only when the collapsed level actually
+              changes, mirroring hub-labels.tsx's bucketed sampler. */}
+          <CollapseLOD maxLevel={ancestorIx?.maxLevel ?? -1} onLevelChange={setCollapsedLevel} />
           {/* TourCameraAnimator must be inside <Canvas> — it uses useFrame/useThree */}
           <TourCameraAnimator
             state={tour.state}
             onStopAdvance={tour.advance}
             onComplete={tour.complete}
           />
+          {/* Community drill-down camera tween (B4.4) — must be inside
+              <Canvas> for useFrame/useThree; idles (center === null) when
+              nothing is focused. Reduced motion snaps instead of tweening. */}
+          <FocusCameraAnimator
+            center={focusSphere?.center ?? null}
+            radius={focusSphere?.radius ?? 0}
+            instant={!animate}
+            controlsRef={controlsRef}
+          />
+          {/* Reliable focus-relative exit (B4.4 fix) — see FocusExitSampler
+              in tour-controller.tsx. Idles (center === null) when nothing is
+              focused. */}
+          <FocusExitSampler
+            center={focusSphere?.center ?? null}
+            framingDistance={focusFramingDistance}
+            onExit={handleFocusExit}
+          />
           {settings.postprocessing && <UltraEffects />}
         </Suspense>
 
         <OrbitControls
+          ref={controlsRef}
+          // Suspended for the duration of a node drag so the camera
+          // doesn't orbit under the pointer; re-enabled on drop.
+          enabled={!dragging}
           enablePan
           enableZoom
           // Low/2D locks orbit to pan + zoom — a flat knowledge graph.
@@ -845,8 +1074,10 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           // Cinematic idle — the cathedral turns slowly until the user
           // takes the controls (drei pauses auto-rotate during interaction
           // and resumes after). Disabled under reduced motion, in 2D,
-          // while hovering, and while a tour drives the camera.
-          autoRotate={animate && settings.autoRotate && tour.state.kind === "idle" && !hover && pinned === null}
+          // while hovering, while a tour drives the camera, and while
+          // dragging a node — three's OrbitControls.update() applies
+          // autoRotate regardless of `enabled`, so it needs its own guard.
+          autoRotate={animate && settings.autoRotate && tour.state.kind === "idle" && !hover && pinned === null && !dragging}
           autoRotateSpeed={0.35}
         />
       </Canvas>

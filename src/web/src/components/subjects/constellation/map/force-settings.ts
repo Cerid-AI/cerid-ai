@@ -22,21 +22,28 @@ const BARNES_HUT_NODE_THRESHOLD = 500
 
 export function buildForceSettings(nodeCount: number): FA2Settings {
   return {
-    // Light gravity (NOT strong) so the layout doesn't compress to the centre —
-    // communities are free to push apart and read as distinct clusters.
-    gravity: 0.5,
-    scalingRatio: 12,
-    strongGravityMode: false,
+    // Strong gravity anchors every node radially toward the centre in
+    // proportion to its distance. Without it, the ~90%-degree-1 tail feels
+    // almost no attraction and repulsion flings it to the rim — the corpus
+    // collapses into a hollow "donut" and the disc-filled server seed is lost.
+    // Strong mode keeps low-degree leaves in the body of the disc. Value tuned
+    // against the live 3.3k-node corpus: inner-40%-radius fill 0.1% → ~20%,
+    // outer-rim share 69% → ~12% (a filled disc with a natural edge taper).
+    gravity: 8,
+    // Low repulsion: enough to keep co-located nodes legible, low enough that it
+    // never overpowers gravity into a ring (12 + linLog produced a hard donut).
+    scalingRatio: 1,
+    strongGravityMode: true,
     barnesHutOptimize: nodeCount > BARNES_HUT_NODE_THRESHOLD,
     barnesHutTheta: 0.5,
-    // Lower slowDown so nodes actually travel from the server seed into their
-    // affinity clusters (8 was so damped the graph looked static); still high
-    // enough to glide, not explode.
-    slowDown: 4,
+    // Damp travel from the server seed — the seed is already a filled disc, so
+    // the sim should settle it into an organic float, not re-derive the layout.
+    slowDown: 6,
     adjustSizes: true,
-    // linLog tightens intra-cluster spacing while repulsion separates clusters
-    // — the clearest "communities pull together, push apart" structure.
-    linLogMode: true,
+    // linLog off: for a hub-and-leaf topology it pushes the degree-1 tail into
+    // an outer ring. Plain FA2 attraction keeps the disc filled; scalingRatio
+    // still gives clusters their separation.
+    linLogMode: false,
     // Weight attraction by edge strength so strongly co-mentioned / similar
     // nodes pull together harder (visible affinity).
     edgeWeightInfluence: 1.5,

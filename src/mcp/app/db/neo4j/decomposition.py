@@ -146,7 +146,6 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
     #         Three queries: (a) domain counts (b) community membership (c) derived_at
     entity_domain_counts: dict[str, int] = {}
     entity_by_community: dict[str, list[dict[str, Any]]] = {}  # L0 cid → [{id, name, degree, domain}]
-    sub_by_domain: dict[str, dict[str, int]] = {}  # domain → {sub → count}
     unclustered_by_domain: dict[str, int] = {}
     derived_at: str | None = None
     uncategorized_count = 0
@@ -204,11 +203,6 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
                         "sub": sub,
                         "degree": degree,
                     })
-
-                # subcategory fan-out
-                if sub:
-                    sub_by_domain.setdefault(domain, {}).setdefault(sub, 0)
-                    sub_by_domain[domain][sub] += 1
 
             # 3c. derived_at
             rows = s.run(
@@ -346,32 +340,18 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
         # Sort L1 by size desc
         l1_nodes.sort(key=lambda n: -n["size"])
 
-        # Conditional subcategory tier (only when domain has ≥2 live subs)
-        subs = sub_by_domain.get(domain, {})
-        live_subs = {k: v for k, v in subs.items() if v > 0}
-        subcategories: list[dict[str, Any]] | None = None
-        communities_key = "communities"
-        if len(live_subs) >= 2:
-            subcategories = [
-                {
-                    "id": sub_name,
-                    "label": sub_name.replace("/", " / ").title(),
-                    "entity_count": cnt,
-                    "children": l1_nodes,  # all L1s grouped under each sub (simplified)
-                }
-                for sub_name, cnt in sorted(live_subs.items(), key=lambda x: -x[1])
-            ]
-
+        # Flat community list per domain. A prior "subcategory" tier assigned the
+        # SAME l1_nodes to EVERY subcategory, so the frontend — which always
+        # flattens `subcategories.flatMap(children)` and never renders per-sub
+        # headers — rendered each community once per subcategory (2–3× dupes).
+        # Emit the deduplicated flat list the frontend actually consumes.
         node: dict[str, Any] = {
             "id": domain,
             "label": domain.replace("_", " ").title(),
             "entity_count": ec,
             "unclustered": {"count": unclustered},
+            "communities": l1_nodes,
         }
-        if subcategories is not None:
-            node["subcategories"] = subcategories
-        else:
-            node[communities_key] = l1_nodes
 
         domain_nodes.append(node)
 

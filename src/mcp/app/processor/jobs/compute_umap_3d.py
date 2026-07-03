@@ -65,11 +65,16 @@ _UMAP_MIN_DIST = float(os.getenv("UMAP_MIN_DIST", "0.1"))
 _FALLBACK_SCALE = 10.0  # bounding-box radius for the connected core
 _FORCE_ITERATIONS = int(os.getenv("UMAP_FORCE_ITERATIONS", "150"))
 _FORCE_REPULSION = float(os.getenv("UMAP_FORCE_REPULSION", "0.12"))
-_FORCE_GRAVITY = float(os.getenv("UMAP_FORCE_GRAVITY", "0.008"))
+_FORCE_GRAVITY = float(os.getenv("UMAP_FORCE_GRAVITY", "0.08"))  # harmonic (strong) gravity — see _force_layout; tuned live for a near-uniform disc
 # Community-anchored cohesion: linear spring toward the node's Leiden-community
 # centroid. This is what makes hulls render as coherent regions instead of
 # interleaved spaghetti — the Phase 0 silhouette gate measured -0.85 without it.
 _FORCE_COMMUNITY_PULL = float(os.getenv("UMAP_FORCE_COMMUNITY_PULL", "1.5"))
+# Macro domain cohesion: a weaker spring toward the node's primary_domain
+# centroid, layered UNDER the community pull. Communities stay locally tight
+# while same-domain communities drift into shared regions, so domains read as
+# distinct macro-territories. Kept < community pull so it groups, not collapses.
+_FORCE_DOMAIN_PULL = float(os.getenv("UMAP_FORCE_DOMAIN_PULL", "0.3"))
 # Hulls only for communities with at least this many members — hundreds of
 # tiny-community outlines are cartographic noise, not regions.
 _MIN_HULL_MEMBERS = int(os.getenv("UMAP_MIN_HULL_MEMBERS", "8"))
@@ -107,9 +112,21 @@ _SILHOUETTE_SAMPLE = 800  # max nodes sampled for silhouette score
 # Wells layout: boosted community-cohesion pull + inter-centroid repulsion.
 # UMAP_FORCE_COMMUNITY_PULL raised from 1.5 to ~5 for hard community separation.
 _WELLS_COMMUNITY_PULL = float(os.getenv("UMAP_WELLS_COMMUNITY_PULL", "5.0"))
-# Domain layout: per-domain anchor springs.
-# Uses the golden-ratio circle from _fallback_layout, area-proportional.
-_DOMAIN_SPRING_K = float(os.getenv("UMAP_DOMAIN_SPRING_K", "0.3"))
+# Domain layout: per-domain anchor springs. Anchors sit on a golden-angle ring
+# at a FIXED radius (not area-proportional — that pulled small domains into the
+# centre where they overlapped the big ones, the opposite of separation). A
+# strong anchor spring plus down-weighted cross-domain edges pulls each domain
+# into a distinct territory so the per-domain nebula reads as real regions.
+_DOMAIN_SPRING_K = float(os.getenv("UMAP_DOMAIN_SPRING_K", "2.5"))
+# Cross-domain edges are dropped by default (0.0) — the dense co-mention graph
+# otherwise drags every domain back into one central pile; intra-domain edges
+# keep full weight for local structure. Raise this for a little inter-domain
+# threading at the cost of separation.
+_DOMAIN_CROSS_EDGE_SCALE = float(os.getenv("UMAP_DOMAIN_CROSS_EDGE_SCALE", "0.0"))
+# Radius of the domain-anchor ring (≈ _FALLBACK_SCALE · 1.15).
+_DOMAIN_RING_RADIUS = float(os.getenv("UMAP_DOMAIN_RING_RADIUS", "11.5"))
+# Very light gravity for the domain pass — anchors do the centering.
+_DOMAIN_GRAVITY = float(os.getenv("UMAP_DOMAIN_GRAVITY", "0.01"))
 
 
 class ComputeUmap3DJob(BaseJob):
@@ -369,9 +386,11 @@ class ComputeUmap3DJob(BaseJob):
     def _fallback_layout(self, entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Community-cluster 2D layout. Stable per-entity coords.
 
-        Each community gets a centroid on a circle of radius _FALLBACK_SCALE
-        via golden-ratio distribution.  Within a community entities sit at
-        the centroid plus a per-entity hash offset.  z is community relief.
+        Each community gets a centroid placed by Vogel/sunflower phyllotaxis
+        (golden angle, radius ``√((i+0.5)/N)·_FALLBACK_SCALE``) so centroids
+        fill the disc evenly rather than landing on a single rim circle.
+        Within a community entities sit at the centroid plus a per-entity hash
+        offset.  z is community relief.
         """
         if not entities:
             return []
@@ -382,11 +401,19 @@ class ComputeUmap3DJob(BaseJob):
 
         community_keys = sorted(by_community.keys(), key=lambda k: (k is None, k or ""))
         golden = math.pi * (3 - math.sqrt(5))
+        n_comms = max(1, len(community_keys))
         centroids_2d: dict[str | None, tuple[float, float]] = {}
         for i, key in enumerate(community_keys):
             theta = golden * i
-            cx = math.cos(theta) * _FALLBACK_SCALE
-            cy = math.sin(theta) * _FALLBACK_SCALE
+            # Vogel/sunflower disc fill: radius grows as √((i+0.5)/N) so
+            # centroids spread evenly across the whole disc. The previous form
+            # used a constant radius (_FALLBACK_SCALE) with only the angle
+            # varying, which placed every community on a single circle — a
+            # hollow "donut" with an empty core. The golden angle keeps the
+            # radial rings interleaved.
+            radius = _FALLBACK_SCALE * math.sqrt((i + 0.5) / n_comms)
+            cx = math.cos(theta) * radius
+            cy = math.sin(theta) * radius
             centroids_2d[key] = (cx, cy)
 
         z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
@@ -515,9 +542,10 @@ class ComputeUmap3DJob(BaseJob):
         kr = _FORCE_REPULSION
         kg = _FORCE_GRAVITY
         kp = _FORCE_COMMUNITY_PULL
+        kd = _FORCE_DOMAIN_PULL
         logger.info(
-            "compute_umap_3d.force params kr=%s kg=%s kp=%s iters=%s m=%d",
-            kr, kg, kp, _FORCE_ITERATIONS, m,
+            "compute_umap_3d.force params kr=%s kg=%s kp=%s kd=%s iters=%s m=%d",
+            kr, kg, kp, kd, _FORCE_ITERATIONS, m,
         )
         temperature = extent / 5.0
         cooling = (0.015 / temperature) ** (1.0 / _FORCE_ITERATIONS)
@@ -534,6 +562,20 @@ class ComputeUmap3DJob(BaseJob):
             comm_idx[local_i] = comm_of[key]
         n_comms = len(comm_of)
         comm_counts = np.bincount(comm_idx, minlength=n_comms).astype(np.float64)
+
+        # Domain index per connected node (macro-level grouping). Nodes with no
+        # primary_domain become singletons (own centroid → no-op pull) so the
+        # ~2/3 uncategorised nodes don't clump into a fake "region".
+        dom_of: dict[str, int] = {}
+        dom_idx = np.zeros(m, dtype=np.int64)
+        for local_i, global_i in enumerate(connected):
+            dom_raw = entities[int(global_i)].get("primary_domain")
+            dkey = str(dom_raw) if dom_raw else f"__nodom:{global_i}"
+            if dkey not in dom_of:
+                dom_of[dkey] = len(dom_of)
+            dom_idx[local_i] = dom_of[dkey]
+        n_doms = len(dom_of)
+        dom_counts = np.bincount(dom_idx, minlength=n_doms).astype(np.float64)
 
         for _ in range(_FORCE_ITERATIONS):
             disp = np.zeros_like(pos)  # (m, 2)
@@ -554,9 +596,12 @@ class ComputeUmap3DJob(BaseJob):
             np.subtract.at(disp, src_a, pull)
             np.add.at(disp, dst_a, pull)
 
-            # Weak gravity keeps components on stage.
-            r = np.sqrt((pos * pos).sum(axis=1)) + 1e-9
-            disp -= (kg * mass / r)[:, None] * pos
+            # Strong (distance-proportional) gravity — a harmonic trap whose
+            # inward pull grows with radius. The old constant-magnitude form
+            # (kg·mass/r · pos ≡ kg·mass toward centre) could not hold the core
+            # against 1/d² repulsion, so the graph inflated into a hollow ring
+            # ("donut"). A harmonic trap confines nodes into a filled disc.
+            disp -= (kg * mass)[:, None] * pos
 
             # Community cohesion: linear spring toward the node's Leiden
             # centroid so communities are spatially coherent and the hull
@@ -566,6 +611,14 @@ class ComputeUmap3DJob(BaseJob):
                 np.add.at(centroids, comm_idx, pos)
                 centroids /= comm_counts[:, None]
                 disp += kp * (centroids[comm_idx] - pos)
+
+            # Macro domain cohesion: weaker spring toward the domain centroid so
+            # same-domain communities gather into a shared region.
+            if kd > 0:
+                dom_centroids = np.zeros((n_doms, 2))
+                np.add.at(dom_centroids, dom_idx, pos)
+                dom_centroids /= dom_counts[:, None]
+                disp += kd * (dom_centroids[dom_idx] - pos)
 
             # Apply, capped by temperature; cool.
             length = np.sqrt((disp * disp).sum(axis=1)) + 1e-9
@@ -954,41 +1007,58 @@ class ComputeUmap3DJob(BaseJob):
         # Sort domains by size (largest first) for anchor placement.
         sorted_domains = sorted(domain_counts.keys(), key=lambda d: -domain_counts[d])
 
-        # Area-proportional anchors: radius proportional to sqrt(count).
-        total_count = max(sum(domain_counts.values()), 1)
-        golden = math.pi * (3 - math.sqrt(5))
+        # Even-spaced ring anchors: each domain gets its own equal angular sector
+        # so no two land close together. (Golden-angle placement packed some of
+        # the ~10 domains within ~20°, whose seed blobs then overlapped.)
+        n_dom = max(1, len(sorted_domains))
         domain_anchors: dict[str, tuple[float, float]] = {}
         for idx, domain in enumerate(sorted_domains):
-            count = domain_counts[domain]
-            # Radius: scale by sqrt(count/total_count) * _FALLBACK_SCALE.
-            radius_scale = math.sqrt(count / total_count) * _FALLBACK_SCALE * 1.2
-            theta = golden * idx
-            ax = math.cos(theta) * radius_scale
-            ay = math.sin(theta) * radius_scale
+            theta = 2.0 * math.pi * idx / n_dom
+            ax = math.cos(theta) * _DOMAIN_RING_RADIUS
+            ay = math.sin(theta) * _DOMAIN_RING_RADIUS
             domain_anchors[domain] = (ax, ay)
 
-        # Start from the fallback layout positions.
+        # Seed each node AT its domain anchor (+ deterministic jitter) so domains
+        # start already separated on the ring; the sim then only adds local
+        # intra-domain structure. Relying on the anchor spring to drag nodes from
+        # a central seed out to the ring did not work — the step-capped, cooling
+        # schedule never let them travel that far, so domains stayed piled at the
+        # centre. Domainless nodes keep the community-spiral fallback seed.
         seed = self._fallback_layout(entities)
         pos_all = np.array([[r["x"], r["y"]] for r in seed], dtype=np.float64)
+        _jit = _DOMAIN_RING_RADIUS * 0.28
+        for _i, _e in enumerate(entities):
+            _d = str(_e.get("primary_domain") or "")
+            if _d in domain_anchors:
+                _ax, _ay = domain_anchors[_d]
+                pos_all[_i, 0] = _ax + (self._hash01(f"{_e['id']}:dx") - 0.5) * 2.0 * _jit
+                pos_all[_i, 1] = _ay + (self._hash01(f"{_e['id']}:dy") - 0.5) * 2.0 * _jit
 
         index_of = {e["id"]: i for i, e in enumerate(entities)}
 
-        # Edge arrays.
-        src, dst, wgt = [], [], []
+        # Domain per entity index — used to down-weight cross-domain edges.
+        dom_by_idx = [str(e.get("primary_domain") or "") for e in entities]
+
+        # Edge arrays. escale carries the intra/cross-domain attraction scale.
+        src, dst, wgt, escale = [], [], [], []
         max_w = 1.0
         for s, t, w in edges:
             si, ti = index_of.get(s), index_of.get(t)
             if si is None or ti is None or si == ti:
                 continue
+            ds, dt = dom_by_idx[si], dom_by_idx[ti]
             src.append(si)
             dst.append(ti)
             wgt.append(w)
+            escale.append(1.0 if (ds and ds == dt) else _DOMAIN_CROSS_EDGE_SCALE)
             max_w = max(max_w, w)
 
         if src:
             src_all = np.array(src, dtype=np.int64)
             dst_all = np.array(dst, dtype=np.int64)
-            w_all = np.log1p(np.array(wgt)) / math.log1p(max_w)
+            # Normalise weight, then scale cross-domain edges down so they keep a
+            # thin thread but can't drag whole domains together.
+            w_all = (np.log1p(np.array(wgt)) / math.log1p(max_w)) * np.array(escale)
         else:
             src_all = dst_all = w_all = np.array([], dtype=np.float64)
 
@@ -1009,7 +1079,10 @@ class ComputeUmap3DJob(BaseJob):
                 has_anchor[i] = True
 
         kr = _FORCE_REPULSION
-        kg = _FORCE_GRAVITY * 0.5
+        # Very light gravity: the domain anchors already provide the centering,
+        # so full gravity would just drag the anchor-seeded domains back toward
+        # the middle and undo the separation.
+        kg = _DOMAIN_GRAVITY
         ks = _DOMAIN_SPRING_K  # domain-anchor spring constant
         extent = float(np.sqrt((pos_all * pos_all).sum(axis=1)).max()) or _FALLBACK_SCALE
         temperature = extent / 5.0

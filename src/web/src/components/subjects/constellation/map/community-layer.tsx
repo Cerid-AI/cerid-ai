@@ -29,6 +29,9 @@ interface CommunityLayerProps {
   nearThreshold?: number
   /** Called when a community hull is clicked */
   onCommunityClick?: (community: CommunityHull) => void
+  /** Optional per-region colour override (e.g. domain colour for domain-layout
+   *  territories). Falls back to the community cluster palette when absent. */
+  colorFor?: (id: string) => string
 }
 
 export interface MapTokens {
@@ -158,9 +161,12 @@ export function useCommunityLayer({
   farThreshold = FAR_DEFAULT,
   nearThreshold = NEAR_DEFAULT,
   onCommunityClick,
+  colorFor,
 }: CommunityLayerProps): void {
   const onCommunityClickRef = useRef(onCommunityClick)
   onCommunityClickRef.current = onCommunityClick
+  const colorForRef = useRef(colorFor)
+  colorForRef.current = colorFor
 
   useEffect(() => {
     if (!sigma) return
@@ -179,7 +185,10 @@ export function useCommunityLayer({
       canvas.style.position = "absolute"
       canvas.style.inset = "0"
       canvas.style.pointerEvents = "none"
-      container.appendChild(canvas)
+      // Prepend so the nebula fill sits BEHIND sigma's node/edge canvases
+      // (which are z-index:auto and stack in DOM order) — nodes float on top of
+      // their shaded territory rather than being hazed over by it.
+      container.insertBefore(canvas, container.firstChild)
     }
 
     const cvs = canvas
@@ -215,17 +224,21 @@ export function useCommunityLayer({
         return
       }
 
-      // Hull fill alpha: far=5%, mid=3%, near=2%
-      const fillAlpha = isFar ? 0.05 : isNear ? 0.02 : 0.03
-      // Hull border alpha: far=12%, mid=6%, near=3%
-      const borderAlpha = isFar ? 0.12 : isNear ? 0.03 : 0.06
+      // Nebula fill alpha (peak, at the anchor — fades to 0 at the hull edge via
+      // the radial gradient below). Bold enough to read as a shaded territory
+      // behind the nodes; eases as you zoom in so detail work isn't tinted.
+      // far=44%, mid=30%, near=14%.
+      const fillAlpha = isFar ? 0.44 : isNear ? 0.14 : 0.3
+      // Hull border alpha: a defining rim. far=46%, mid=28%, near=13%.
+      const borderAlpha = isFar ? 0.46 : isNear ? 0.13 : 0.28
       // Label alpha: far=80%, mid=35%, near=0%
       const labelAlpha = isFar ? 0.80 : isNear ? 0 : Math.max(0, (cameraRatio - nearThreshold) / (farThreshold - nearThreshold) * 0.35)
 
       for (const community of communities) {
         if (community.hull.length < 3) continue
-        const slot = communitySlot(community.id)
-        const clusterColor = tokens.clusters[slot] ?? tokens.clusterOther
+        const clusterColor = colorForRef.current
+          ? colorForRef.current(community.id)
+          : tokens.clusters[communitySlot(community.id)] ?? tokens.clusterOther
 
         // Convert map coordinates to viewport pixels.
         const vpts: [number, number][] = community.hull.map(([mx, my]) => {
@@ -235,18 +248,32 @@ export function useCommunityLayer({
 
         drawHullPath(ctx, vpts)
 
+        // Radial nebula glow from the anchor: densest at the community centre,
+        // fading to transparent at the hull edge (clipped to the hull shape).
+        const vAnchor = s.graphToViewport({ x: community.anchor[0], y: community.anchor[1] })
+        let maxR = 1
+        for (const [px, py] of vpts) {
+          maxR = Math.max(maxR, Math.hypot(px - vAnchor.x, py - vAnchor.y))
+        }
         ctx.globalAlpha = fillAlpha
-        ctx.fillStyle = clusterColor
+        if (clusterColor.length === 7 && clusterColor[0] === "#") {
+          const grad = ctx.createRadialGradient(vAnchor.x, vAnchor.y, 0, vAnchor.x, vAnchor.y, maxR)
+          grad.addColorStop(0, clusterColor)
+          grad.addColorStop(0.6, clusterColor)
+          grad.addColorStop(1, `${clusterColor}00`)
+          ctx.fillStyle = grad
+        } else {
+          ctx.fillStyle = clusterColor
+        }
         ctx.fill()
 
         ctx.globalAlpha = borderAlpha
         ctx.strokeStyle = clusterColor
-        ctx.lineWidth = 1
+        ctx.lineWidth = 1.25
         ctx.stroke()
 
-        // Community label at anchor
+        // Community label at anchor (reuses vAnchor from the fill above)
         if (labelAlpha > 0) {
-          const vAnchor = s.graphToViewport({ x: community.anchor[0], y: community.anchor[1] })
           const labelText = community.label.toUpperCase()
           const fontSize = Math.max(11, Math.min(20, 11 + Math.sqrt(community.count) * 0.5))
           ctx.font = `500 ${fontSize}px ${tokens.fontSans}`

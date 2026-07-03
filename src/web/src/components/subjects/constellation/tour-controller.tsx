@@ -14,12 +14,13 @@
 // Pro-gated at the backend; the button surfaces an error toast if
 // the user isn't on Pro.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { useThree } from "@react-three/fiber"
 import { useFrame } from "@react-three/fiber"
 import { Vector3 } from "three"
 import { Play, Pause, Volume2, VolumeX, Loader2 } from "lucide-react"
 import { generateTour, type TourArc, type TourStop } from "@/lib/api/graph-tour"
+import { cameraTargetFor, type Vec3 } from "./camera-focus-3d"
 
 type TourState =
   | { kind: "idle" }
@@ -78,6 +79,154 @@ export function TourCameraAnimator({ state, onStopAdvance, onComplete }: CameraA
       const next = state.stopIndex + 1
       if (next >= state.arc.stops.length) onComplete()
       else onStopAdvance(next)
+    }
+  })
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Focus-drilldown camera animator (B4.4) — eases the camera to a community's
+// bounding sphere when a super-node is clicked, and updates the OrbitControls
+// target in lock-step so subsequent orbiting pivots on the community. Reuses
+// the same ease-in-out-cubic lerp as TourCameraAnimator above. `center`/
+// `radius` come from the caller's own boundingSphere() call (the caller lives
+// outside <Canvas> and has no camera access); this component owns turning
+// that into a camera position via cameraTargetFor, which needs the *current*
+// camera position and so must run inside <Canvas>.
+// ---------------------------------------------------------------------------
+
+const FOCUS_TWEEN_MS = 800
+
+export interface FocusCameraAnimatorProps {
+  /** Bounding-sphere center of the focused community's members, or null when nothing is focused (idle). */
+  center: Vec3 | null
+  /** Bounding-sphere radius of the focused community's members. */
+  radius: number
+  /** Reduced motion: snap to the target instead of tweening. */
+  instant: boolean
+  /** OrbitControls ref — duck-typed to the two members this animator needs. */
+  controlsRef: RefObject<{ target: Vector3; update: () => void } | null>
+}
+
+export function FocusCameraAnimator({ center, radius, instant, controlsRef }: FocusCameraAnimatorProps) {
+  const { camera } = useThree()
+  const fromCamera = useRef(new Vector3())
+  const toCamera = useRef(new Vector3())
+  const fromTarget = useRef(new Vector3())
+  const toTarget = useRef(new Vector3())
+  const startedAt = useRef<number | null>(null)
+  // Value-keyed (not reference-keyed) so a re-render that recomputes an
+  // equal-valued center/radius (new array identity, same numbers) doesn't
+  // restart the tween from the camera's current mid-flight position.
+  const activeKey = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!center) {
+      activeKey.current = null
+      startedAt.current = null
+      return
+    }
+    const key = `${center[0]},${center[1]},${center[2]}|${radius}`
+    if (key === activeKey.current) return
+    activeKey.current = key
+
+    const camPos: Vec3 = [camera.position.x, camera.position.y, camera.position.z]
+    const { target, position } = cameraTargetFor(center, radius, camPos)
+    fromCamera.current.copy(camera.position)
+    toCamera.current.set(position[0], position[1], position[2])
+    fromTarget.current.copy(controlsRef.current?.target ?? new Vector3(target[0], target[1], target[2]))
+    toTarget.current.set(target[0], target[1], target[2])
+
+    if (instant) {
+      camera.position.copy(toCamera.current)
+      if (controlsRef.current) {
+        controlsRef.current.target.copy(toTarget.current)
+        controlsRef.current.update()
+      }
+      startedAt.current = null
+    } else {
+      startedAt.current = performance.now()
+    }
+  }, [center, radius, instant, camera, controlsRef])
+
+  useFrame(() => {
+    if (startedAt.current === null) return
+    const elapsed = performance.now() - startedAt.current
+    const t = Math.min(1, elapsed / FOCUS_TWEEN_MS)
+    const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+
+    camera.position.lerpVectors(fromCamera.current, toCamera.current, e)
+    if (controlsRef.current) {
+      controlsRef.current.target.lerpVectors(fromTarget.current, toTarget.current, e)
+      controlsRef.current.update()
+    }
+
+    if (t >= 1) startedAt.current = null
+  })
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Focus-exit sampler (B4.4 fix) — clears focus once the camera dollies back
+// out past the framed view. CollapseLOD's own exit path measures camera
+// distance from the world ORIGIN (camera.position.length()), so it only
+// re-fires reliably for communities near the origin; a community centroid
+// far from the origin (common under the "wells" layout, which pushes
+// centroids apart) can keep the camera's distance-from-origin above
+// COLLAPSE_OUT for the whole focus session, so that path never crosses back
+// through null and drill-down never exits. This sampler is focus-RELATIVE —
+// it measures distance from the focused community's own centroid — so it is
+// the reliable exit path regardless of where the community sits in world
+// space. Crossing-guarded like CollapseLOD: `armedRef` only turns on once
+// the camera has actually arrived within the framed view (so the inbound
+// tween itself, which starts far from the community, can't trip a false
+// exit), and `onExit` fires once on the outbound crossing, not every frame.
+// ---------------------------------------------------------------------------
+
+const FOCUS_EXIT_MULTIPLIER = 1.6
+
+export interface FocusExitSamplerProps {
+  /** Bounding-sphere center of the focused community, or null when nothing is focused (idle). */
+  center: Vec3 | null
+  /** Distance the camera was framed at when focus began (radius-derived — see framingDistanceFor). */
+  framingDistance: number
+  /** Fires once when the camera crosses back out past framingDistance * FOCUS_EXIT_MULTIPLIER. */
+  onExit: () => void
+}
+
+export function FocusExitSampler({ center, framingDistance, onExit }: FocusExitSamplerProps) {
+  const { camera } = useThree()
+  const armedRef = useRef(false)
+  // Value-keyed (not reference-keyed) — the caller's center/framingDistance
+  // are recomputed from sceneEntities on every poll refresh, so a fresh array
+  // identity with the same numbers must NOT reset the arm guard mid-session
+  // (same problem FocusCameraAnimator's activeKey solves for the tween).
+  const activeKey = useRef<string | null>(null)
+
+  useEffect(() => {
+    const key = center ? `${center[0]},${center[1]},${center[2]}|${framingDistance}` : null
+    if (key === activeKey.current) return
+    activeKey.current = key
+    armedRef.current = false
+  }, [center, framingDistance])
+
+  useFrame(() => {
+    if (!center) return
+    const dist = Math.hypot(
+      camera.position.x - center[0],
+      camera.position.y - center[1],
+      camera.position.z - center[2],
+    )
+    const threshold = framingDistance * FOCUS_EXIT_MULTIPLIER
+    if (!armedRef.current) {
+      if (dist <= threshold) armedRef.current = true
+      return
+    }
+    if (dist > threshold) {
+      armedRef.current = false
+      onExit()
     }
   })
 

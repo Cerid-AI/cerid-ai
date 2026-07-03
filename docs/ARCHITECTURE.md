@@ -265,9 +265,11 @@ Subjects pane hosts four visualization modes (Atlas / Constellation / Timeline
 STRATA):
 
 - **Atlas (STRATA, Cycle 4)** — default mode is now a DOM **decomposition
-  icicle**: domains → conditional subcategory groups → L1 → L0 communities →
-  entities, backed by `GET /graph/decomposition` (with `?community=<id>` for
-  the leaf walk). The old ego-network view is demoted to an explicit
+  icicle**: domains → L1 → L0 communities → entities, backed by
+  `GET /graph/decomposition` (with `?community=<id>` for the leaf walk). (The
+  intermediate "subcategory group" tier was removed 2026-07-02 — it replicated
+  the full community list under every subcategory, and the client flattens it
+  anyway, so `/graph/decomposition` now emits a flat `communities` list per domain.) The old ego-network view is demoted to an explicit
   **Neighborhood** leaf mode (hops promoted to ≤2), backed by
   `GET /graph/neighborhood`. Fresh installs degrade to a Domain→Entity two-tier
   via the `no_communities_computed` flag.
@@ -601,7 +603,7 @@ The knowledge graph carries two relationship types between `(:Entity)` nodes:
 
 **Default graph view** excludes degree-0 isolated nodes (entities with no `CO_MENTIONED` or `SIMILAR_TO` edge). Endpoints `/graph/map`, `/graph/embeddings/3d`, and `/graph/neighborhood` accept `include_isolated=false` (default) and return `isolated_count` for the toggle label. Isolated entities carry `community_id='isolated'` so they never receive a Leiden community colour.
 
-Link tuples in the API are 4-tuples `[src_idx, tgt_idx, weight, kind]` where `kind` is `"co_mention"` or `"similar"`. The force layout (`compute_umap_3d`) uses both relationship types; semantic edges are down-weighted by `SEMANTIC_EDGE_SPRING_SCALE` (default 0.6) so co-mention structure stays dominant. The nightly cadence is: `compute_entity_embeddings` (03:15) → `build_similarity_edges` (03:22) → `compute_umap_3d` (03:30).
+Link tuples in the API are 4-tuples `[src_idx, tgt_idx, weight, kind]` where `kind` is `"co_mention"` or `"similar"`. The force layout (`compute_umap_3d`) uses both relationship types; semantic edges are down-weighted by `SEMANTIC_EDGE_SPRING_SCALE` (default 0.6) so co-mention structure stays dominant. The `force` layout (2026-07-02 re-tune) warm-starts from a Vogel/sunflower disc-fill seed and confines nodes with **strong/harmonic gravity** (`UMAP_FORCE_GRAVITY=0.08`) so the map fills a disc instead of a hollow ring; a weaker **domain-centroid cohesion** spring (`UMAP_FORCE_DOMAIN_PULL=0.3`), layered under the Leiden community pull, gathers same-domain communities into macro-regions. The nightly cadence is: `compute_entity_embeddings` (03:15) → `build_similarity_edges` (03:22) → `compute_umap_3d` (03:30).
 
 ### Observability (Phase K6)
 

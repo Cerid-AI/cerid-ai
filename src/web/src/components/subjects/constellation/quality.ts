@@ -30,6 +30,7 @@ export interface QualitySettings {
   antialias: boolean
   postprocessing: boolean
   autoRotate: boolean
+  float: boolean
 }
 
 export const QUALITY_SETTINGS: Record<QualityTier, QualitySettings> = {
@@ -43,6 +44,7 @@ export const QUALITY_SETTINGS: Record<QualityTier, QualitySettings> = {
     antialias: false,
     postprocessing: false,
     autoRotate: false,
+    float: false,
   },
   medium: {
     flat: false,
@@ -54,6 +56,7 @@ export const QUALITY_SETTINGS: Record<QualityTier, QualitySettings> = {
     antialias: true,
     postprocessing: false,
     autoRotate: true,
+    float: true,
   },
   high: {
     flat: false,
@@ -65,6 +68,7 @@ export const QUALITY_SETTINGS: Record<QualityTier, QualitySettings> = {
     antialias: true,
     postprocessing: false,
     autoRotate: true,
+    float: true,
   },
   ultra: {
     flat: false,
@@ -76,6 +80,7 @@ export const QUALITY_SETTINGS: Record<QualityTier, QualitySettings> = {
     antialias: true,
     postprocessing: true,
     autoRotate: true,
+    float: true,
   },
 }
 

@@ -34,6 +34,8 @@ import {
   ShaderMaterial,
 } from "three"
 import type { EntityEmbedding3D } from "@/lib/api/embeddings-3d"
+import type { Vec3 } from "./drag-plane"
+import { FLOAT3_GLSL } from "./float3"
 import { communityRgb, hash01 } from "./palette"
 
 export interface NeuralLinksProps {
@@ -44,6 +46,8 @@ export interface NeuralLinksProps {
   animate?: boolean
   /** Quality toggle: synaptic pulse animation on/off (growth unaffected). */
   pulses?: boolean
+  /** Quality toggle: organic per-node float around the fixed UMAP seed. */
+  float?: boolean
   /**
    * Hovered entity index (into entities) or null. Edges touching the
    * hovered node brighten; everything else recedes — the Obsidian
@@ -54,9 +58,15 @@ export interface NeuralLinksProps {
   colors?: Float32Array
   /** Per-entity visibility — an edge fades with its dimmest endpoint. */
   visibility?: Float32Array
+  /** Transient drag-pin overrides from InstancedNodes (entity id → world position). */
+  pinnedPositions?: Map<string, Vec3>
+  /** Bumped on every pinnedPositions change; the trigger for the incident-edge patch effect below (avoids a full geometry rebuild per drag-move). */
+  pinVersion?: number
 }
 
 const VERTEX_SHADER = /* glsl */ `
+  ${FLOAT3_GLSL}
+
   attribute vec3 aColor;
   attribute float aT;
   attribute float aSeed;
@@ -64,6 +74,10 @@ const VERTEX_SHADER = /* glsl */ `
   attribute float aBirth;
   attribute float aDim;
   attribute float aIsSimilar;
+  attribute float aNodeSeed;
+
+  uniform float uTime;
+  uniform float uFloatAmp;
 
   varying vec3 vColor;
   varying float vT;
@@ -81,7 +95,8 @@ const VERTEX_SHADER = /* glsl */ `
     vBirth = aBirth;
     vDim = aDim;
     vIsSimilar = aIsSimilar;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec3 fpos = position + float3(aNodeSeed, uTime, uFloatAmp);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(fpos, 1.0);
   }
 `
 
@@ -164,11 +179,18 @@ export function NeuralLinks({
   links,
   animate = true,
   pulses = true,
+  float = false,
   hoveredIndex = null,
   colors: lensColors,
   visibility,
+  pinnedPositions,
+  pinVersion = 0,
 }: NeuralLinksProps) {
   const lineRef = useRef<ThreeLineSegments>(null)
+  // Snapshot of pinnedPositions as of the last-applied pinVersion, so the
+  // patch effect below only touches edges whose endpoint actually moved
+  // rather than re-walking every link on each drag-move.
+  const appliedPins = useRef<Map<string, Vec3>>(new Map())
   // Edge keys already shown — edges that survive a refetch must NOT
   // re-grow; only genuinely new linkage animates in (Obsidian-style).
   const seenEdges = useRef<Set<string>>(new Set())
@@ -187,6 +209,7 @@ export function NeuralLinks({
     const weights = new Float32Array(n * 2)
     const births = new Float32Array(n * 2)
     const isSimilarArr = new Float32Array(n * 2)
+    const nodeSeeds = new Float32Array(n * 2)
 
     let maxW = 1
     for (const [, , w] of links) maxW = Math.max(maxW, w)
@@ -198,9 +221,14 @@ export function NeuralLinks({
       const t = entities[ti]
       if (!s || !t) continue
 
+      // A refetch rebuilds this geometry from the server-seeded entities
+      // array; an endpoint still pinned by a drag keeps its dropped
+      // position instead of snapping back mid-session.
+      const sPin = pinnedPositions?.get(s.id)
+      const tPin = pinnedPositions?.get(t.id)
       const o = i * 6
-      positions[o + 0] = s.x; positions[o + 1] = s.y; positions[o + 2] = s.z
-      positions[o + 3] = t.x; positions[o + 4] = t.y; positions[o + 5] = t.z
+      positions[o + 0] = sPin ? sPin[0] : s.x; positions[o + 1] = sPin ? sPin[1] : s.y; positions[o + 2] = sPin ? sPin[2] : s.z
+      positions[o + 3] = tPin ? tPin[0] : t.x; positions[o + 4] = tPin ? tPin[1] : t.y; positions[o + 5] = tPin ? tPin[2] : t.z
 
       if (lensColors) {
         colors[o + 0] = lensColors[si * 3]; colors[o + 1] = lensColors[si * 3 + 1]; colors[o + 2] = lensColors[si * 3 + 2]
@@ -218,6 +246,11 @@ export function NeuralLinks({
       const key = `${s.id}|${t.id}`
       const seed = hash01(key)
       seeds[v] = seed; seeds[v + 1] = seed
+
+      // Per-vertex node seed (NOT the edge seed above) — each endpoint uses
+      // its own node's hash01(id) so it floats in lock-step with that node's
+      // sphere + glow, which key off the same value.
+      nodeSeeds[v] = hash01(s.id); nodeSeeds[v + 1] = hash01(t.id)
 
       // log-normalized weight: most co-mentions are 1; the few heavy
       // pairs (e.g. SOL↔ETH at 39) should read clearly without
@@ -249,12 +282,16 @@ export function NeuralLinks({
     geom.setAttribute("aBirth", new BufferAttribute(births, 1))
     geom.setAttribute("aDim", new BufferAttribute(new Float32Array(n * 2).fill(1), 1))
     geom.setAttribute("aIsSimilar", new BufferAttribute(isSimilarArr, 1))
+    geom.setAttribute("aNodeSeed", new BufferAttribute(nodeSeeds, 1))
     // Required for frustumCulled=true: computes a tight bounding sphere over
     // all line endpoints so the renderer can skip the draw call when the graph
     // is scrolled fully off-screen.
     geom.computeBoundingSphere()
+    // This build already baked in the current pinnedPositions (above) — sync
+    // the applied-snapshot so the patch effect below doesn't re-diff them.
+    appliedPins.current = new Map(pinnedPositions ?? [])
     return geom
-  }, [entities, links, lensColors])
+  }, [entities, links, lensColors, pinnedPositions])
 
   // Neighborhood focus + lens visibility: edges touching the hovered
   // node brighten, the rest recede; an edge whose endpoint is filtered
@@ -275,6 +312,57 @@ export function NeuralLinks({
     dim.needsUpdate = true
   }, [hoveredIndex, links, geometry, visibility])
 
+  // Entity id → the (edgeIdx, endpoint-slot) pairs it's incident to, so a
+  // drag-move can patch just the moved node's edges without walking the
+  // full link list.
+  const incidentEdges = useMemo(() => {
+    const map = new Map<string, Array<{ edgeIdx: number; slot: 0 | 1 }>>()
+    for (let i = 0; i < links.length; i++) {
+      const [si, ti] = links[i]
+      const sId = entities[si]?.id
+      const tId = entities[ti]?.id
+      if (sId) {
+        const arr = map.get(sId) ?? []
+        arr.push({ edgeIdx: i, slot: 0 })
+        map.set(sId, arr)
+      }
+      if (tId) {
+        const arr = map.get(tId) ?? []
+        arr.push({ edgeIdx: i, slot: 1 })
+        map.set(tId, arr)
+      }
+    }
+    return map
+  }, [entities, links])
+
+  // Edge-follow during a drag: patch ONLY the moved node's incident
+  // endpoints in the position attribute — not a full geometry rebuild.
+  // pinVersion is the reactive trigger (bumped by the parent on every
+  // drag-move); diffing against appliedPins finds which id(s) actually
+  // moved since the last patch, bounding the work to that node's edges.
+  useEffect(() => {
+    if (!pinnedPositions) return
+    const posAttr = geometry.getAttribute("position") as BufferAttribute | undefined
+    if (!posAttr) return
+    let touched = false
+    for (const [id, pos] of pinnedPositions) {
+      const prev = appliedPins.current.get(id)
+      if (prev && prev[0] === pos[0] && prev[1] === pos[1] && prev[2] === pos[2]) continue
+      const edges = incidentEdges.get(id)
+      if (edges) {
+        for (const { edgeIdx, slot } of edges) {
+          posAttr.setXYZ(edgeIdx * 2 + slot, pos[0], pos[1], pos[2])
+        }
+        touched = true
+      }
+    }
+    if (touched) posAttr.needsUpdate = true
+    appliedPins.current = new Map(pinnedPositions)
+    // pinVersion is the intended trigger; pinnedPositions is read (not a
+    // reactive dep) since it's the same mutated-in-place Map each drag-move.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinVersion])
+
   const material = useMemo(() => {
     return new ShaderMaterial({
       vertexShader: VERTEX_SHADER,
@@ -286,6 +374,7 @@ export function NeuralLinks({
         // prevents over-bright bursts on already-bright hub edges).
         uPulseAmp: { value: animate ? 0.7 : 0.0 },
         uBaseAlpha: { value: 0.28 },
+        uFloatAmp: { value: 0 },
       },
       transparent: true,
       depthWrite: false,
@@ -314,6 +403,8 @@ export function NeuralLinks({
     if (clockStart.current === null) clockStart.current = clock.elapsedTime
     matTime.current = clock.elapsedTime - clockStart.current
     material.uniforms.uTime.value = matTime.current
+    const floatOn = animate && float === true
+    material.uniforms.uFloatAmp.value = floatOn ? 1 : 0
   })
 
   if (links.length === 0) return null

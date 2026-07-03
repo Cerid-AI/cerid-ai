@@ -376,6 +376,60 @@ def test_fetch_edges_co_mentioned_not_downweighted():
     assert abs(w - raw_weight) < 1e-9, f"CO_MENTIONED weight altered: expected {raw_weight}, got {w}"
 
 
+# ---- disc-fill (donut regression) -----------------------------------------
+
+
+def test_fallback_layout_fills_disc_not_ring():
+    """Regression: community centroids fill the disc (Vogel sunflower), not a
+    single rim circle. The old constant-radius placement put every community at
+    r=_FALLBACK_SCALE, projecting to a hollow "donut" with an empty core."""
+    from app.processor.jobs.compute_umap_3d import _FALLBACK_SCALE, ComputeUmap3DJob
+
+    job = ComputeUmap3DJob()
+    entities = [
+        {"id": f"e{c}:{m}", "community": f"1:{c}"}
+        for c in range(40)
+        for m in range(10)
+    ]
+    out = job._fallback_layout(entities)
+    radii = [math.hypot(o["x"], o["y"]) for o in out]
+    max_r = max(radii)
+    # A ring has ~0 nodes in the inner 40% of the radius; a filled disc has
+    # ~16% (area ratio 0.4^2). Require a meaningful inner population.
+    inner_frac = sum(1 for r in radii if r < 0.4 * max_r) / len(radii)
+    assert inner_frac > 0.08, f"hollow ring: only {inner_frac:.1%} of nodes inside 0.4*maxR"
+    # Innermost community sits well inside the disc (old bug: all at _FALLBACK_SCALE).
+    assert min(radii) < 0.5 * _FALLBACK_SCALE
+
+
+def test_force_layout_fills_disc_not_ring():
+    """Regression (donut): the served force layout must fill the disc. Gravity
+    is intentionally weak, so the layout preserves its warm-start seed — a
+    rim-only seed produced the hollow ring; the sunflower seed yields a disc."""
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    job = ComputeUmap3DJob()
+    n_comms, per = 40, 12
+    entities = [
+        {"id": f"e{c}:{m}", "community": f"1:{c}"}
+        for c in range(n_comms)
+        for m in range(per)
+    ]
+    # Intra-community star edges so every node has degree>0 (avoids the
+    # isolated shell) — representative of a clustered graph.
+    edges = [
+        (f"e{c}:0", f"e{c}:{m}", 1.0)
+        for c in range(n_comms)
+        for m in range(1, per)
+    ]
+    out = job._force_layout(entities, edges)
+    radii = [math.hypot(o["x"], o["y"]) for o in out]
+    max_r = max(radii)
+    inner_frac = sum(1 for r in radii if r < 0.4 * max_r) / len(radii)
+    # Filled disc ≈ 16% inner; the pre-fix hollow ring was ~5%. Guard at 10%.
+    assert inner_frac > 0.10, f"hollow ring: only {inner_frac:.1%} of nodes inside 0.4*maxR"
+
+
 # ---- module-level import needed for test ----
 from app.processor.jobs.compute_umap_3d import (  # noqa: E402
     _NOVERLAP_BASE_RADIUS,

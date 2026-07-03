@@ -6,14 +6,19 @@ describe("buildForceSettings", () => {
     expect(buildForceSettings(3000).barnesHutOptimize).toBe(true)
     expect(buildForceSettings(100).barnesHutOptimize).toBe(false)
   })
-  it("uses light (non-strong) gravity so communities can separate into clusters", () => {
+  it("uses strong gravity so the degree-1 tail stays in the disc (no donut)", () => {
     const s = buildForceSettings(3000)
-    expect(s.strongGravityMode).toBe(false)
-    expect(s.gravity).toBeLessThan(1)
+    // Weak/non-strong gravity let repulsion fling the ~90% single-mention tail
+    // to the rim, hollowing the centre into a donut. Strong gravity anchors it.
+    expect(s.strongGravityMode).toBe(true)
+    expect(s.gravity).toBeGreaterThanOrEqual(1)
   })
-  it("uses linLog + edge-weight attraction for visible affinity clustering", () => {
+  it("keeps repulsion low and linLog off so the disc fills instead of ringing", () => {
     const s = buildForceSettings(3000)
-    expect(s.linLogMode).toBe(true)
+    // linLog + high scalingRatio push a hub-and-leaf topology into an outer
+    // ring; low repulsion + plain attraction fills the disc uniformly.
+    expect(s.linLogMode).toBe(false)
+    expect(s.scalingRatio).toBeLessThanOrEqual(2)
     expect(s.edgeWeightInfluence).toBeGreaterThan(1)
   })
   it("keeps theta at 0.5 and a non-zero slowDown to damp jitter", () => {

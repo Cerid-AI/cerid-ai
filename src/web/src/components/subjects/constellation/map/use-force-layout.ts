@@ -19,12 +19,12 @@ export interface ForceLayoutController {
   isRunning: () => boolean
 }
 
-// Long enough for the seed to actually migrate into affinity clusters under the
-// (now lighter-gravity, linLog) settings before settling to the idle trickle.
-const DEFAULT_WARM_MS = 5000
-// Refresh cadence: full rAF while warming; throttled while idle-breathing so a
-// continuously-running worker doesn't burn the main thread.
-const IDLE_REFRESH_INTERVAL_MS = 1000 / 30
+// Short warm: a brief organic settle out of the server seed, then the sim
+// freezes (see refreshLoop). The server layout is already a filled disc; running
+// FA2 to convergence pulls this hub-and-leaf corpus into a hollow ring (its FA2
+// equilibrium — the ~90% degree-1 tail gets repelled to the rim). So we warm
+// just long enough to feel alive on load, then lock positions to keep the disc.
+const DEFAULT_WARM_MS = 700
 
 export function useForceLayout(args: {
   sigma: Sigma | null
@@ -40,7 +40,6 @@ export function useForceLayout(args: {
   shouldStayPausedRef.current = shouldStayPaused
   const layoutRef = useRef<FA2Layout | null>(null)
   const rafRef = useRef<number | null>(null)
-  const lastRefreshRef = useRef(0)
   const warmUntilRef = useRef(0)
 
   const stopRefreshLoop = useCallback(() => {
@@ -57,12 +56,16 @@ export function useForceLayout(args: {
       rafRef.current = null
       return
     }
-    const now = performance.now()
-    const warming = now < warmUntilRef.current
-    if (warming || now - lastRefreshRef.current >= IDLE_REFRESH_INTERVAL_MS) {
-      s.refresh({ skipIndexation: true })
-      lastRefreshRef.current = now
+    if (performance.now() >= warmUntilRef.current) {
+      // Warm elapsed — freeze. A continuously-running FA2 drifts the disc-filled
+      // server seed into a hollow ring, so we lock positions after the brief
+      // settle. reheat() (drag end, data change, reveal) starts a fresh warm.
+      layout.stop()
+      s.refresh()
+      rafRef.current = null
+      return
     }
+    s.refresh({ skipIndexation: true })
     rafRef.current = requestAnimationFrame(refreshLoop)
   }, [sigma])
 
