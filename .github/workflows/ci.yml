@@ -448,6 +448,11 @@ jobs:
           image-ref: cerid-mcp-test
           severity: CRITICAL,HIGH
           exit-code: 1
+          # Only fail on vulnerabilities that have an available fix. Unfixed
+          # base-image CVEs (perl/gnutls/curl/etc.) are unactionable and were the
+          # source of recurring ignore-list churn; fixed CVEs still fail (those
+          # are actionable — bump the dep/base image).
+          ignore-unfixed: true
           trivyignores: .trivyignore
           version: v0.69.3
       - name: Scan Web Docker image
@@ -456,6 +461,11 @@ jobs:
           image-ref: cerid-web-test
           severity: CRITICAL,HIGH
           exit-code: 1
+          # Only fail on vulnerabilities that have an available fix. Unfixed
+          # base-image CVEs (perl/gnutls/curl/etc.) are unactionable and were the
+          # source of recurring ignore-list churn; fixed CVEs still fail (those
+          # are actionable — bump the dep/base image).
+          ignore-unfixed: true
           trivyignores: .trivyignore
           version: v0.69.3
 
