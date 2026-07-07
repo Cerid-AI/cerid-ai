@@ -14,8 +14,11 @@ understanding** as you feed it — with every contradiction in your corpus,
 every entity Cerid has learned about, every concept it synthesizes —
 visible to you on a page you can read.
 
-Self-hosted. Privacy-first. All data stays local by default; LLM API calls
-send query context only.
+Self-hosted. Privacy-first. Your data stores stay local; what leaves the
+machine is only what you send to your chosen LLM provider — chat/query
+context, and (by default) per-document snippets for categorization and
+claims for verification. Every egress path is listed in the Data Egress
+panel. Run fully local to send nothing.
 
 ## The five primitives
 
@@ -71,8 +74,10 @@ back. Cerid does. The Narrative Loop closes that gap:
 - **Weekly synthesis** (Monday 06:00) — four sections: Emerging thesis,
   Contradictions (drawn from the W.4 ledger), Knowledge gaps, One action.
 
-Every claim in both surfaces renders through `<VerifiedResponse>`. The
-brief is not opinion — it is verified synthesis.
+Both surfaces are read in the **Briefs pane**, where every claim is run
+through claim extraction + KB verification at generation time and rendered
+through `<VerifiedResponse>` with its `verified` / `partial` / `unverified`
+band. The brief is not opinion — it is verified synthesis.
 
 ### 4. Wiki — accumulated understanding made visible
 

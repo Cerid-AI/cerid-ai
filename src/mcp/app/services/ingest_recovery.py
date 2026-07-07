@@ -38,6 +38,7 @@ import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils.swallowed import log_swallowed_error
+from utils.encryption import decrypt_field
 
 # Dead-letter: an orphan chunk's content + metadata are persisted here BEFORE it
 # is purged from Chroma, so an unrecoverable orphan (Neo4j permanently down
@@ -317,7 +318,11 @@ async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
             filename=meta.get("filename", "recovered_artifact"),
             domain=orphan.domain,
             keywords_json=meta.get("keywords_json", "[]"),
-            summary=meta.get("summary", orphan.document[:200]),
+            # meta is the raw Chroma chunk metadata — "summary" may carry the
+            # enc:v1: Chroma-only ciphertext (see CHROMA_ENCRYPTED_FIELDS).
+            # decrypt_field no-ops on plaintext, so this is safe either way,
+            # and it keeps Neo4j's summary property queryable cleartext.
+            summary=decrypt_field(meta.get("summary", orphan.document[:200])),
             chunk_count=1,  # conservative: one chunk visible to recovery
             chunk_ids_json=f'["{orphan.chunk_id}"]',
             content_hash=meta.get("content_hash", ""),

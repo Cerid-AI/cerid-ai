@@ -24,6 +24,10 @@ from app.sync._helpers import (
     CHROMA_BATCH_SIZE,
     CHROMA_SUBDIR,
     DOMAINS_JSONL,
+    ENTITIES_JSONL,
+    ENTITY_EDGES_JSONL,
+    MEMORIES_JSONL,
+    MEMORY_EDGES_JSONL,
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
@@ -38,6 +42,7 @@ from app.sync.conflicts import (
     resolve_conflicts,
     write_conflict_log,
 )
+from app.sync.user_state import read_conversations, write_conversation
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
@@ -626,6 +631,217 @@ def import_redis(
     return {"entries_added": entries_added, "entries_skipped": entries_skipped}
 
 
+def import_memories(driver, sync_dir: str | None = None) -> dict[str, Any]:
+    """
+    Merge :Memory nodes and their direct provenance edges (EXTRACTED_FROM →
+    Conversation, RELATES_TO → Artifact) from {sync_dir}/neo4j/memories.jsonl
+    and memory_edges.jsonl into the local graph.
+
+    Idempotent: MERGE by id + `SET m += $props` (never a blind CREATE), so
+    re-running an import never duplicates a memory.
+    """
+    sync_dir = sync_dir or _default_sync_dir()
+    neo4j_dir = Path(sync_dir) / NEO4J_SUBDIR
+
+    memories_merged = 0
+    edges_merged = 0
+
+    memories_path = str(neo4j_dir / MEMORIES_JSONL)
+    try:
+        with driver.session() as session:
+            for row in _iter_jsonl(memories_path):
+                memory_id = row.get("id")
+                props = row.get("props")
+                if not memory_id or not props:
+                    continue
+                try:
+                    session.run(
+                        "MERGE (m:Memory {id: $id}) SET m += $props",
+                        id=memory_id,
+                        props=props,
+                    )
+                    memories_merged += 1
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.sync.import_', exc)
+                    logger.warning("Failed to merge Memory %s: %s", memory_id, exc)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_', exc)
+        logger.error("Memory import failed: %s", exc)
+        return {"error": str(exc), "memories_merged": memories_merged, "edges_merged": edges_merged}
+
+    edges_path = str(neo4j_dir / MEMORY_EDGES_JSONL)
+    try:
+        with driver.session() as session:
+            for row in _iter_jsonl(edges_path):
+                source_id = row.get("source_id")
+                rel_type = row.get("rel_type")
+                target_id = row.get("target_id")
+                if not (source_id and rel_type and target_id):
+                    continue
+                try:
+                    if rel_type == "EXTRACTED_FROM":
+                        session.run(
+                            "MATCH (m:Memory {id: $source_id}) "
+                            "MERGE (c:Conversation {id: $target_id}) "
+                            "MERGE (m)-[:EXTRACTED_FROM]->(c)",
+                            source_id=source_id, target_id=target_id,
+                        )
+                        edges_merged += 1
+                    elif rel_type == "RELATES_TO":
+                        session.run(
+                            "MATCH (m:Memory {id: $source_id}) "
+                            "MATCH (a:Artifact {id: $target_id}) "
+                            "MERGE (m)-[:RELATES_TO]->(a)",
+                            source_id=source_id, target_id=target_id,
+                        )
+                        edges_merged += 1
+                    else:
+                        logger.warning("Skipping unknown memory edge rel_type: %s", rel_type)
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.sync.import_', exc)
+                    logger.warning(
+                        "Failed to merge memory edge %s→%s (%s): %s",
+                        source_id, target_id, rel_type, exc,
+                    )
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_', exc)
+        logger.error("Memory edge import failed: %s", exc)
+        return {"error": str(exc), "memories_merged": memories_merged, "edges_merged": edges_merged}
+
+    logger.info(
+        "Memory import complete: %d memories, %d edges", memories_merged, edges_merged
+    )
+    return {"memories_merged": memories_merged, "edges_merged": edges_merged}
+
+
+def import_entities(driver, sync_dir: str | None = None) -> dict[str, Any]:
+    """
+    Merge :Entity nodes and their direct MENTIONS provenance edges (from
+    Artifacts) from {sync_dir}/neo4j/entities.jsonl and entity_edges.jsonl
+    into the local graph.
+
+    Wiki pages are computed from entities at read time
+    (app.services.wiki_pages) so they regenerate automatically after this
+    import — they are never exported/imported directly. Derived
+    entity-entity edges (CO_MENTIONED, SIMILAR_TO, IN_COMMUNITY) are also
+    not imported here — they are recomputed by community_detection.py /
+    semantic_edges.py, not restored from a backup.
+
+    Idempotent: MERGE by canonical_id + `SET e += $props`.
+    """
+    sync_dir = sync_dir or _default_sync_dir()
+    neo4j_dir = Path(sync_dir) / NEO4J_SUBDIR
+
+    entities_merged = 0
+    edges_merged = 0
+
+    entities_path = str(neo4j_dir / ENTITIES_JSONL)
+    try:
+        with driver.session() as session:
+            for row in _iter_jsonl(entities_path):
+                canonical_id = row.get("canonical_id")
+                props = row.get("props")
+                if not canonical_id or not props:
+                    continue
+                try:
+                    session.run(
+                        "MERGE (e:Entity {canonical_id: $canonical_id}) SET e += $props",
+                        canonical_id=canonical_id,
+                        props=props,
+                    )
+                    entities_merged += 1
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.sync.import_', exc)
+                    logger.warning("Failed to merge Entity %s: %s", canonical_id, exc)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_', exc)
+        logger.error("Entity import failed: %s", exc)
+        return {"error": str(exc), "entities_merged": entities_merged, "edges_merged": edges_merged}
+
+    edges_path = str(neo4j_dir / ENTITY_EDGES_JSONL)
+    try:
+        with driver.session() as session:
+            for row in _iter_jsonl(edges_path):
+                source_id = row.get("source_id")
+                target_id = row.get("target_id")
+                rel_type = row.get("rel_type")
+                props = row.get("props") or {}
+                if not (source_id and target_id and rel_type == "MENTIONS"):
+                    if rel_type and rel_type != "MENTIONS":
+                        logger.warning("Skipping unknown entity edge rel_type: %s", rel_type)
+                    continue
+                try:
+                    session.run(
+                        "MATCH (a:Artifact {id: $source_id}) "
+                        "MATCH (e:Entity {canonical_id: $target_id}) "
+                        "MERGE (a)-[r:MENTIONS]->(e) "
+                        "SET r += $props",
+                        source_id=source_id, target_id=target_id, props=props,
+                    )
+                    edges_merged += 1
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.sync.import_', exc)
+                    logger.warning(
+                        "Failed to merge MENTIONS edge %s→%s: %s", source_id, target_id, exc,
+                    )
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_', exc)
+        logger.error("Entity edge import failed: %s", exc)
+        return {"error": str(exc), "entities_merged": entities_merged, "edges_merged": edges_merged}
+
+    logger.info(
+        "Entity import complete: %d entities, %d edges", entities_merged, edges_merged
+    )
+    return {"entities_merged": entities_merged, "edges_merged": edges_merged}
+
+
+def import_conversations(sync_dir: str | None = None) -> dict[str, Any]:
+    """
+    Ensure conversations already present at {sync_dir}/user/conversations/
+    are explicitly accounted for as part of import_all.
+
+    Conversations are stored directly in the sync dir (no separate local
+    store to restore into), so this reads them back and re-writes them
+    idempotently via write_conversation — making them a first-class,
+    explicitly-reported surface of import_all rather than an implicit
+    side effect of the filesystem already having the files.
+    """
+    sync_dir = sync_dir or _default_sync_dir()
+
+    try:
+        conversations = read_conversations(sync_dir)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_', exc)
+        logger.error("Conversation import failed: %s", exc)
+        return {"error": str(exc), "conversations": 0}
+
+    restored = 0
+    skipped = 0
+    for conv in conversations:
+        try:
+            write_conversation(sync_dir, conv)
+            restored += 1
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('app.sync.import_', exc)
+            logger.warning("Skipping conversation during import: %s", exc)
+            skipped += 1
+
+    logger.info(
+        "Conversation import complete: %d restored, %d skipped", restored, skipped
+    )
+    return {"conversations": restored, "skipped": skipped}
+
+
 def import_all(
     driver,
     chroma_url: str | None = None,
@@ -665,6 +881,13 @@ def import_all(
     )
     chroma_result = import_chroma(chroma_url=chroma_url, sync_dir=sync_dir, force=force)
     bm25_result = import_bm25(sync_dir=sync_dir)
+
+    # Memories/entities depend on Artifacts already being imported above
+    # (RELATES_TO / MENTIONS MATCH the artifact side); conversations have no
+    # cross-surface dependency.
+    memories_result = import_memories(driver, sync_dir=sync_dir)
+    entities_result = import_entities(driver, sync_dir=sync_dir)
+    conversations_result = import_conversations(sync_dir=sync_dir)
 
     redis_result: dict[str, Any] = {"entries_added": 0, "skipped": True}
     if redis_client is not None:
@@ -717,6 +940,9 @@ def import_all(
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,
+        "memories": memories_result,
+        "entities": entities_result,
+        "conversations": conversations_result,
         "redis": redis_result,
         "tombstones": tombstone_result,
         "consistency_warnings": consistency_warnings,

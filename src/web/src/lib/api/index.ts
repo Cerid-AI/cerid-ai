@@ -4,6 +4,7 @@
 // Barrel re-export — all domain modules + shared utilities
 export { MCP_BASE, mcpHeaders, extractError } from "./common"
 export * from "./kb"
+export * from "./briefs"
 export * from "./billing"
 export * from "./chat"
 export * from "./settings"

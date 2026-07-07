@@ -168,3 +168,19 @@ if (typeof globalThis.IntersectionObserver === "undefined") {
     disconnect() {}
   } as unknown as typeof globalThis.IntersectionObserver
 }
+
+// Polyfill pointer-capture + scrollIntoView for jsdom (required by Radix
+// Select/Dropdown/Combobox pointer-driven open/close + scroll-into-view
+// behaviour; jsdom implements neither API).
+if (typeof Element.prototype.hasPointerCapture === "undefined") {
+  Element.prototype.hasPointerCapture = () => false
+}
+if (typeof Element.prototype.setPointerCapture === "undefined") {
+  Element.prototype.setPointerCapture = () => {}
+}
+if (typeof Element.prototype.releasePointerCapture === "undefined") {
+  Element.prototype.releasePointerCapture = () => {}
+}
+if (typeof Element.prototype.scrollIntoView === "undefined") {
+  Element.prototype.scrollIntoView = () => {}
+}

@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
+from app.services.private_mode import private_blocks
 from app.sync.user_state import (
     delete_conversation,
     read_conversation,
@@ -95,6 +96,11 @@ def save_conversation(body: dict[str, Any]):
         raise HTTPException(status_code=412, detail="Sync directory not configured")
     if "id" not in body:
         raise HTTPException(status_code=400, detail="Conversation must have an 'id' field")
+    if private_blocks(1):
+        # response_model=SaveConversationResponse only declares `saved`, so
+        # any extra key here would be silently stripped on the wire — the
+        # None value alone is the skip signal (mirrors the bulk endpoint).
+        return {"saved": None}
     write_conversation(sd, body)
     return {"saved": body["id"]}
 
@@ -108,6 +114,9 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
     for conv in body:
         if "id" not in conv:
             raise HTTPException(status_code=400, detail="Each conversation must have an 'id' field")
+    if private_blocks(1):
+        return {"saved": []}
+    for conv in body:
         write_conversation(sd, conv)
     return {"saved": len(body)}
 

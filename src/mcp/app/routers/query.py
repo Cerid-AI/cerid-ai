@@ -18,6 +18,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
+from app.services.private_mode import private_blocks
 from core.utils.time import utcnow_iso
 
 
@@ -50,6 +51,17 @@ async def query_endpoint(req: QueryRequest):
     ``exclude_packs``, tenant-scope). ``external_augmentation`` is off — this is
     a KB search, not an agentic query, so it never fires external sources.
     """
+    # Private Mode L2 ("skip KB") — server-side enforcement. No response
+    # field survives to signal the bypass (QueryEndpointResponse has no
+    # extra="allow"), so the empty results ARE the signal.
+    if private_blocks(2):
+        return {
+            "context": "",
+            "sources": [],
+            "confidence": 0.0,
+            "timestamp": utcnow_iso(),
+        }
+
     from core.agents.query_agent import agent_query_full
 
     result = await agent_query_full(

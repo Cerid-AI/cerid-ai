@@ -61,6 +61,7 @@ from utils.chunker import (
     make_context_header,
     parent_child_enabled,
 )
+from utils.encryption import CHROMA_ENCRYPTED_FIELDS, encrypt_field
 from utils.metadata import ai_categorize, extract_metadata, extract_metadata_minimal
 
 logger = logging.getLogger("ai-companion")
@@ -85,6 +86,34 @@ PENDING_STATE_FILTER: dict[str, Any] = {"cerid_state": {"$ne": "pending"}}
 _FRONTMATTER_KEYS_HANDLED_ELSEWHERE: frozenset[str] = frozenset(
     {"tags", "aliases", "created", "updated"},
 )
+
+
+def _encrypt_chroma_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+    """Encrypt ``CHROMA_ENCRYPTED_FIELDS`` values for the Chroma-bound copy only.
+
+    Returns a new dict — the caller's ``base_meta`` (still needed in plaintext
+    for the Neo4j artifact write) is never mutated. No-op end to end without
+    ``CERID_ENCRYPTION_KEY``, since ``encrypt_field`` passes values through
+    unchanged in that case.
+
+    Fail-open per field: a value that ``encrypt_field`` cannot encode (e.g. a
+    lone Unicode surrogate from a parser using ``errors="surrogateescape"``)
+    is left in plaintext rather than aborting the ingest. One bad field must
+    never drop the others or fail the whole write.
+    """
+    result = dict(meta)
+    for field_name in CHROMA_ENCRYPTED_FIELDS:
+        value = result.get(field_name)
+        if isinstance(value, str) and value:
+            try:
+                result[field_name] = encrypt_field(value)
+            except Exception as e:
+                log_swallowed_error(
+                    "ingestion.encrypt_chroma_metadata",
+                    e,
+                    context={"field": field_name},
+                )
+    return result
 
 
 def _frontmatter_to_artifact_props(
@@ -514,6 +543,10 @@ def _reingest_artifact(
         }
         for i, rec in enumerate(chunk_records)
     ]
+    # Encrypt the Chroma-bound metadata copy (currently just "summary") —
+    # base_meta below stays plaintext for the Neo4j update further down.
+    chunk_metadatas = [_encrypt_chroma_metadata(m) for m in chunk_metadatas]
+
     # upsert (not add): content-addressed chunk IDs make re-delivery of identical
     # content overwrite the same rows instead of duplicating them (idempotent).
     collection.upsert(
@@ -1003,6 +1036,10 @@ def ingest_content(
                 "chunks": 0,
                 "timestamp": utcnow_iso(),
             }
+
+    # Encrypt the Chroma-bound metadata copy (currently just "summary") —
+    # base_meta below stays plaintext for the Neo4j create_artifact call.
+    chunk_metadatas = [_encrypt_chroma_metadata(m) for m in chunk_metadatas]
 
     # upsert (not add): content-addressed chunk IDs make re-delivery of identical
     # content overwrite the same rows instead of duplicating them (idempotent).

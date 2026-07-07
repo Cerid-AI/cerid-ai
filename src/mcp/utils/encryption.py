@@ -74,6 +74,8 @@ class FieldEncryptor:
 
     def decrypt(self, ciphertext: str) -> str:
         """Decrypt a field value. Returns unencrypted values as-is (backward compatible)."""
+        from cryptography.fernet import InvalidToken
+
         if not ciphertext:
             return ciphertext
 
@@ -83,7 +85,7 @@ class FieldEncryptor:
         token = ciphertext[len(ENCRYPTED_PREFIX):]
         try:
             return self._fernet.decrypt(token.encode("ascii")).decode("utf-8")
-        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError, InvalidToken):
             logger.exception("encryption.decrypt_failed")
             sentry_sdk.capture_exception()
             return ciphertext  # preserved: key-rotation debugging fallback
@@ -156,9 +158,20 @@ def decrypt_field(value: str) -> str:
     return enc.decrypt(value)
 
 
-NEO4J_ENCRYPTED_FIELDS = ["filename", "summary", "keywords"]
-REDIS_ENCRYPTED_FIELDS = ["filename", "domain", "extra"]
-CHROMA_ENCRYPTED_FIELDS = ["filename", "summary"]
+# Empty: every Neo4j field once listed here (filename, summary, keywords) is
+# queried by value (STARTS/ENDS/CONTAINS, exact-match dedup, or an index) —
+# Fernet ciphertext is non-deterministic, so encrypting any of them breaks
+# search/dedup. Full at-rest protection for the graph store is via VOLUME
+# encryption (see docs/OPERATIONS.md).
+NEO4J_ENCRYPTED_FIELDS: list[str] = []
+# Empty: filename/domain are parsed and grouped by audit analytics (breaks if
+# ciphertext), and "extra" has no literal write path (always spread via
+# **extra). Full at-rest protection for Redis is via VOLUME encryption.
+REDIS_ENCRYPTED_FIELDS: list[str] = []
+# "summary" only: display-only per-chunk metadata with no Chroma `where=`
+# filter targeting it, so it's safe to field-encrypt. "filename" is dropped —
+# it IS filtered on (metadata_filter / BM25 re-filter) and would break search.
+CHROMA_ENCRYPTED_FIELDS = ["summary"]
 
 
 def reset_encryptor():

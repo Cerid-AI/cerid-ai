@@ -811,6 +811,8 @@ export interface ServerSettings {
   rerank_llm_weight?: number
   rerank_original_weight?: number
   pack_relevance_weight?: number
+  // Task 1.2e — sensitive-domain retrieval opt-in (independent of Private Mode)
+  sensitive_domain_retrieval?: boolean
   temporal_half_life_days?: number
   temporal_recency_weight?: number
   // Advanced RAG pipeline (read-write)
@@ -904,6 +906,8 @@ export interface SettingsUpdate {
   rerank_llm_weight?: number
   rerank_original_weight?: number
   pack_relevance_weight?: number
+  // Task 1.2e — sensitive-domain retrieval opt-in (independent of Private Mode)
+  sensitive_domain_retrieval?: boolean
   // Advanced RAG pipeline
   enable_contextual_chunks?: boolean
   enable_adaptive_retrieval?: boolean
@@ -935,6 +939,24 @@ export interface SettingsUpdate {
   // v0.93.9 — internal LLM provider/model now mutable via PATCH /settings.
   internal_llm_provider?: "openrouter" | "ollama" | "quenchforge"
   internal_llm_model?: string
+  // Task 2.5d — background-processor mode + monthly spend cap
+  processor_mode?: "local" | "hybrid" | "disabled"
+  processor_monthly_cap_usd?: number
+}
+
+/** One outbound network path Cerid may take, and whether it's active now
+    (GET /settings/egress — Task 1.3b). Mirrors the backend `EgressRow` model. */
+export interface EgressRow {
+  channel: string
+  destination: string
+  trigger: string
+  payload_class: string
+  status: "local" | "external_off" | "external_on"
+  setting_key: string
+}
+
+export interface EgressReport {
+  egress: EgressRow[]
 }
 
 export interface Memory {
@@ -998,6 +1020,8 @@ export interface SyncCounts {
   neo4j_artifacts: number
   neo4j_domains: number
   neo4j_relationships: number
+  neo4j_memories: number
+  neo4j_entities: number
   chroma_chunks: Record<string, number>
   redis_entries: number
 }

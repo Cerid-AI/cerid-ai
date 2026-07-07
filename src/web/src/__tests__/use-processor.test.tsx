@@ -17,17 +17,23 @@ vi.mock("@/lib/api/processor", () => ({
   resumeProcessor: vi.fn(),
 }))
 
+vi.mock("@/lib/api/settings", () => ({
+  updateSettings: vi.fn(),
+}))
+
 import {
   fetchProcessorStatus,
   fetchProcessorRecent,
   pauseProcessor,
   resumeProcessor,
 } from "@/lib/api/processor"
+import { updateSettings } from "@/lib/api/settings"
 
 const mockFetchStatus = fetchProcessorStatus as ReturnType<typeof vi.fn>
 const mockFetchRecent = fetchProcessorRecent as ReturnType<typeof vi.fn>
 const mockPause = pauseProcessor as ReturnType<typeof vi.fn>
 const mockResume = resumeProcessor as ReturnType<typeof vi.fn>
+const mockUpdateSettings = updateSettings as ReturnType<typeof vi.fn>
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -41,6 +47,9 @@ const statusFixture: ProcessorStatus = {
   jobs_completed_24h: 8,
   cost_usd_7d: 0.12,
   throttled_ticks_1h: 1,
+  mode: "local",
+  monthly_spend_usd: 0,
+  cap_usd: 5,
 }
 
 function makeJob(id: string): JobRecord {
@@ -263,6 +272,65 @@ describe("useProcessorMutations — resume", () => {
       expect(invalidateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ queryKey: ["processor", "status"] }),
       )
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// useProcessorSettingsMutation — mode changes (Task 2.5d)
+// ---------------------------------------------------------------------------
+
+describe("useProcessorSettingsMutation", () => {
+  it("PATCHes /settings with the selected mode and invalidates status + settings on success", async () => {
+    mockUpdateSettings.mockResolvedValue({ status: "ok", updated: { processor_mode: "hybrid" } })
+
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0, staleTime: 0 },
+        mutations: { retry: false },
+      },
+    })
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries")
+
+    const { useProcessorSettingsMutation } = await import("@/hooks/use-processor")
+
+    const { result } = renderHook(() => useProcessorSettingsMutation(), {
+      wrapper: createWrapper(qc),
+    })
+
+    result.current.updateMode("hybrid")
+
+    await waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledWith({ processor_mode: "hybrid" })
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ["processor", "status"] }),
+      )
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ["settings"] }),
+      )
+    })
+  })
+
+  it("sets isPending while the mutation is in flight", async () => {
+    let resolve: (v: { status: string; updated: Record<string, unknown> }) => void = () => {}
+    mockUpdateSettings.mockReturnValue(new Promise((r) => { resolve = r }))
+    const { useProcessorSettingsMutation } = await import("@/hooks/use-processor")
+
+    const { result } = renderHook(() => useProcessorSettingsMutation(), {
+      wrapper: createWrapper(),
+    })
+
+    expect(result.current.isPending).toBe(false)
+    void result.current.updateMode("disabled")
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(true)
+    })
+
+    resolve({ status: "ok", updated: { processor_mode: "disabled" } })
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false)
     })
   })
 })

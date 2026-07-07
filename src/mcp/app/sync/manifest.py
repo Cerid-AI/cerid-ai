@@ -18,7 +18,11 @@ from app.sync._helpers import (
     BM25_SUBDIR,
     CHROMA_SUBDIR,
     DOMAINS_JSONL,
+    ENTITIES_JSONL,
+    ENTITY_EDGES_JSONL,
     MANIFEST_FILENAME,
+    MEMORIES_JSONL,
+    MEMORY_EDGES_JSONL,
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
@@ -62,6 +66,10 @@ def write_manifest(
         (f"{NEO4J_SUBDIR}/{RELATIONSHIPS_JSONL}", str(sync_path / NEO4J_SUBDIR / RELATIONSHIPS_JSONL)),
         (f"{REDIS_SUBDIR}/{AUDIT_LOG_JSONL}",     str(sync_path / REDIS_SUBDIR / AUDIT_LOG_JSONL)),
         (f"{NEO4J_SUBDIR}/{TOMBSTONES_JSONL}",     str(sync_path / NEO4J_SUBDIR / TOMBSTONES_JSONL)),
+        (f"{NEO4J_SUBDIR}/{MEMORIES_JSONL}",       str(sync_path / NEO4J_SUBDIR / MEMORIES_JSONL)),
+        (f"{NEO4J_SUBDIR}/{MEMORY_EDGES_JSONL}",   str(sync_path / NEO4J_SUBDIR / MEMORY_EDGES_JSONL)),
+        (f"{NEO4J_SUBDIR}/{ENTITIES_JSONL}",       str(sync_path / NEO4J_SUBDIR / ENTITIES_JSONL)),
+        (f"{NEO4J_SUBDIR}/{ENTITY_EDGES_JSONL}",   str(sync_path / NEO4J_SUBDIR / ENTITY_EDGES_JSONL)),
     ]
 
     # Add per-domain Chroma files

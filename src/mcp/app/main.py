@@ -40,6 +40,7 @@ from app.routers import (
     atlas_views,
     automations,
     brief_settings,
+    briefs,
     chat,
     connectors,
     contradictions,
@@ -715,13 +716,22 @@ async def lifespan(app: FastAPI):
     try:
         from app.db.redis.processor_queue import RedisJobQueue
         from app.deps import get_redis as _proc_get_redis
+        from config import settings as _proc_settings
         _proc_redis = _proc_get_redis()
         _proc_queue = RedisJobQueue(_proc_redis)
         _proc_registry = build_default_registry()
+        _proc_load_ceiling: float | None = None
+        _raw_ceiling = (_proc_settings.WORKER_LOAD_CEILING or "").strip().lower()
+        if _raw_ceiling and _raw_ceiling != "auto":
+            try:
+                _proc_load_ceiling = float(_raw_ceiling)
+            except ValueError as exc:
+                log_swallowed_error("app.main", exc)
         _proc_worker = ProcessorWorker(
             _proc_queue,
             _proc_registry,
             redis_client=_proc_redis,
+            load_ceiling=_proc_load_ceiling,
         )
         await _proc_worker.start()
         app.state.processor_worker = _proc_worker
@@ -1165,6 +1175,11 @@ app.include_router(analytics.router)
 # weekly synthesis jobs.  Lives under /briefs/* so the scheduler is the
 # obvious consumer; routes mounted here, not on the user-state router.
 app.include_router(brief_settings.router)
+
+# Briefs read API (Task 2.1a) — GET /briefs + GET /briefs/{brief_id}.
+# Included after brief_settings so the static /briefs/settings route is
+# matched before this router's dynamic /briefs/{brief_id}.
+app.include_router(briefs.router)
 
 # Adaptive recommendations dismiss/clear (C3.2). The read-side surfaces
 # via /health.recommended_features; this router only owns the write

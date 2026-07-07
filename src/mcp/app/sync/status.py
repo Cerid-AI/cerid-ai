@@ -17,6 +17,8 @@ from app.sync._helpers import (
     AUDIT_LOG_JSONL,
     CHROMA_SUBDIR,
     DOMAINS_JSONL,
+    ENTITIES_JSONL,
+    MEMORIES_JSONL,
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
@@ -44,6 +46,8 @@ def compare_status(
         "neo4j_artifacts": 0,
         "neo4j_domains": 0,
         "neo4j_relationships": 0,
+        "neo4j_memories": 0,
+        "neo4j_entities": 0,
         "chroma_chunks": {},
         "redis_entries": 0,
     }
@@ -59,6 +63,12 @@ def compare_status(
             rel_types = "|".join(config.GRAPH_RELATIONSHIP_TYPES)
             local["neo4j_relationships"] = session.run(
                 f"MATCH ()-[r:{rel_types}]->() RETURN count(r) AS n"
+            ).single()["n"]
+            local["neo4j_memories"] = session.run(
+                "MATCH (m:Memory) RETURN count(m) AS n"
+            ).single()["n"]
+            local["neo4j_entities"] = session.run(
+                "MATCH (e:Entity) RETURN count(e) AS n"
             ).single()["n"]
     except Exception as exc:
         from core.utils.swallowed import log_swallowed_error
@@ -101,6 +111,8 @@ def compare_status(
         "neo4j_artifacts": 0,
         "neo4j_domains": 0,
         "neo4j_relationships": 0,
+        "neo4j_memories": 0,
+        "neo4j_entities": 0,
         "chroma_chunks": {d: 0 for d in config.DOMAINS},
         "redis_entries": 0,
     }
@@ -116,6 +128,8 @@ def compare_status(
         sync["neo4j_artifacts"] = _manifest_count(f"{NEO4J_SUBDIR}/{ARTIFACTS_JSONL}")
         sync["neo4j_domains"] = _manifest_count(f"{NEO4J_SUBDIR}/{DOMAINS_JSONL}")
         sync["neo4j_relationships"] = _manifest_count(f"{NEO4J_SUBDIR}/{RELATIONSHIPS_JSONL}")
+        sync["neo4j_memories"] = _manifest_count(f"{NEO4J_SUBDIR}/{MEMORIES_JSONL}")
+        sync["neo4j_entities"] = _manifest_count(f"{NEO4J_SUBDIR}/{ENTITIES_JSONL}")
         sync["redis_entries"] = _manifest_count(f"{REDIS_SUBDIR}/{AUDIT_LOG_JSONL}")
 
         for domain in config.DOMAINS:
@@ -129,7 +143,10 @@ def compare_status(
 
     # --- Diff ---
     diff: dict[str, Any] = {}
-    for key in ("neo4j_artifacts", "neo4j_domains", "neo4j_relationships", "redis_entries"):
+    for key in (
+        "neo4j_artifacts", "neo4j_domains", "neo4j_relationships",
+        "neo4j_memories", "neo4j_entities", "redis_entries",
+    ):
         diff[key] = local[key] - sync[key]
 
     diff["chroma_chunks"] = {

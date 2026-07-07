@@ -30,6 +30,7 @@ from app.tool_registry import (
     UpstreamUnavailableError,
     register_tool,
 )
+from utils.encryption import decrypt_field
 
 # ---------------------------------------------------------------------- pkb_artifact_get
 
@@ -121,8 +122,15 @@ async def pkb_artifact_get(artifact_id: str, include_chunks: bool = True) -> dic
                     fetched.get("documents", []),
                     fetched.get("metadatas", []),
                 ):
+                    chunk_meta = dict(meta or {})
+                    # meta is the raw Chroma chunk metadata — "summary" may carry
+                    # the enc:v1: Chroma-only ciphertext (see
+                    # CHROMA_ENCRYPTED_FIELDS). decrypt_field no-ops on
+                    # plaintext, so legacy/keyless rows are unaffected.
+                    if chunk_meta.get("summary"):
+                        chunk_meta["summary"] = decrypt_field(str(chunk_meta["summary"]))
                     chunks_out.append(
-                        {"chunk_id": cid, "text": doc, "metadata": dict(meta or {})}
+                        {"chunk_id": cid, "text": doc, "metadata": chunk_meta}
                     )
             except Exception as exc:
                 raise UpstreamUnavailableError(
@@ -360,23 +368,23 @@ async def pkb_search_filtered(
     so the embedding-search hot path doesn't have to evaluate the
     full collection on every call.
 
-    Privacy filter: when private_mode is below the floor declared in
-    utils/domain_privacy.py, domain="messages" (iMessage content) is
-    stripped from the requested domains. See docs/PRO_MESSAGES.md.
+    Privacy filter: unless the dedicated SENSITIVE_DOMAIN_RETRIEVAL_ENABLED
+    opt-in (utils/domain_privacy.py) is on, domain="messages" (iMessage
+    content) is stripped from the requested domains. See docs/PRO_MESSAGES.md.
     """
     from core.agents.query_agent import agent_query  # retrieval-import-allowed: filter-then-retrieve; KB-only
     from utils.domain_privacy import (
-        DOMAIN_PRIVACY_FLOOR,
-        get_global_private_mode_level,
+        SENSITIVE_DOMAINS,
+        sensitive_domains_opted_in,
         visible_domains,
     )
 
     # Apply the privacy filter before any other narrowing. Expand
     # `domains=None` (all domains) to the explicit DOMAINS list so the
     # filter has something to subtract from.
-    pm_level = get_global_private_mode_level()
+    opted_in = sensitive_domains_opted_in()
     explicit_domains = domains if domains is not None else list(config.DOMAINS)
-    explicit_domains = visible_domains(explicit_domains, pm_level) or []
+    explicit_domains = visible_domains(explicit_domains, include_sensitive=opted_in) or []
     if not explicit_domains:
         return {
             "results": [],
@@ -385,8 +393,8 @@ async def pkb_search_filtered(
             "domains_searched": [],
             "total_results": 0,
             "filter_applied": {
-                "private_mode_floor": pm_level,
-                "privacy_gated_domains": sorted(DOMAIN_PRIVACY_FLOOR.keys()),
+                "sensitive_domain_retrieval_enabled": opted_in,
+                "privacy_gated_domains": sorted(SENSITIVE_DOMAINS),
             },
         }
     domains = explicit_domains

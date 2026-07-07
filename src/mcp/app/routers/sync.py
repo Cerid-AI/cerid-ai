@@ -31,6 +31,7 @@ class ExportRequest(BaseModel):
     machine_id: str | None = None
     since: str | None = None  # ISO-8601 for incremental (None = auto from manifest)
     domains: list[str] | None = None
+    full: bool = False  # True forces a full export, bypassing incremental auto-since
 
 
 class ImportRequest(BaseModel):
@@ -51,8 +52,11 @@ async def sync_export_endpoint(req: ExportRequest):
 
             sync_dir = req.sync_dir or config.SYNC_DIR
             since = req.since
-            # Auto-read last_exported_at for incremental default
-            if since is None and not req.domains:
+            if req.full:
+                # Full export: bypass the incremental auto-since read entirely.
+                since = None
+            elif since is None and not req.domains:
+                # Auto-read last_exported_at for incremental default
                 try:
                     manifest = read_manifest(sync_dir)
                     since = manifest.get("last_exported_at")

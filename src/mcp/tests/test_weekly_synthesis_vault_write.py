@@ -70,6 +70,20 @@ def _patch_pipeline_internals(record: MagicMock):
             new=AsyncMock(return_value=[]),
         )
     )
+    # Task 2.1b claim-verification deps — stubbed out here since these
+    # tests exercise vault-write behavior, not verification.
+    stack.enter_context(
+        patch("app.processor.jobs.weekly_synthesis._get_chroma", return_value=MagicMock())
+    )
+    stack.enter_context(
+        patch("app.processor.jobs.weekly_synthesis._get_redis", return_value=MagicMock())
+    )
+    stack.enter_context(
+        patch(
+            "app.services.briefs.verification.verify_brief_claims",
+            new=AsyncMock(return_value=[]),
+        )
+    )
     return stack
 
 

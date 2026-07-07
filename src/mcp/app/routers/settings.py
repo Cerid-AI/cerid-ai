@@ -14,9 +14,13 @@ from pydantic import BaseModel, Field
 
 import config
 import config.features as features_mod
-from app.deps import get_redis
+from app.deps import get_neo4j, get_redis
+from app.services.private_mode import PRIVATE_MODE_KEY
+from app.services.session_wipe import wipe_conversation_state
+from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
 from utils.features import set_toggle
+from utils.web_search import get_search_provider
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -83,6 +87,7 @@ class GetSettingsEndpointResponse(BaseModel):
     rerank_llm_weight: Any
     rerank_original_weight: Any
     pack_relevance_weight: Any
+    sensitive_domain_retrieval: Any
     temporal_half_life_days: Any
     temporal_recency_weight: Any
     enable_contextual_chunks: Any
@@ -113,7 +118,25 @@ class GetSettingsEndpointResponse(BaseModel):
     rerank_provider: Any
     quenchforge_embed_model: Any
     quenchforge_rerank_model: Any
+    processor_mode: Any
+    processor_monthly_cap_usd: Any
+    processor_api_cap_fallback: Any
+    processor_api_threshold_tokens: Any
 
+
+class EgressRow(BaseModel):
+    """One outbound network path Cerid may take, and whether it's active now."""
+
+    channel: str
+    destination: str
+    trigger: str
+    payload_class: str
+    status: str  # "local" | "external_off" | "external_on"
+    setting_key: str
+
+
+class EgressReport(BaseModel):
+    egress: list[EgressRow]
 
 
 router = APIRouter()
@@ -197,6 +220,13 @@ class SettingsUpdateRequest(BaseModel):
         None, ge=0.0, le=2.0,
         description="Knowledge-pack down-weight multiplier (Slice 7.2). <1.0 makes "
                     "personal data win ties; 1.0 = neutral. Advanced / SERVER scope.",
+    )
+    sensitive_domain_retrieval: bool | None = Field(
+        None,
+        description=(
+            "Opt-in to surface sensitive-domain content (iMessage/'messages') "
+            "in retrieval. Orthogonal to private_mode — defaults OFF (Task 1.2e)."
+        ),
     )
     # Advanced RAG pipeline toggles
     enable_contextual_chunks: bool | None = Field(
@@ -341,6 +371,25 @@ class SettingsUpdateRequest(BaseModel):
         description="Per-retriever weight for SPLADE-v3 in tri_rrf fusion.",
     )
 
+    # Task 2.5c — background processor mode/cap operator surface
+    # (docs/BACKGROUND_JOBS.md §9).
+    processor_mode: str | None = Field(
+        None,
+        description="Background processor mode: local, hybrid, or disabled.",
+    )
+    processor_monthly_cap_usd: float | None = Field(
+        None, ge=0.0,
+        description="Monthly USD spend cap for hybrid-mode API-tier routing.",
+    )
+    processor_api_cap_fallback: str | None = Field(
+        None,
+        description="Behavior once the monthly cap is hit: local or hold.",
+    )
+    processor_api_threshold_tokens: int | None = Field(
+        None, ge=0,
+        description="Token count above which hybrid mode may route a job to the API tier.",
+    )
+
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
@@ -396,6 +445,7 @@ async def get_settings_endpoint():
         "rerank_llm_weight": config.RERANK_LLM_WEIGHT,
         "rerank_original_weight": config.RERANK_ORIGINAL_WEIGHT,
         "pack_relevance_weight": config.PACK_RELEVANCE_WEIGHT,
+        "sensitive_domain_retrieval": config.SENSITIVE_DOMAIN_RETRIEVAL_ENABLED,
         "temporal_half_life_days": config.TEMPORAL_HALF_LIFE_DAYS,
         "temporal_recency_weight": config.TEMPORAL_RECENCY_WEIGHT,
         # Advanced RAG pipeline (read-write)
@@ -433,6 +483,11 @@ async def get_settings_endpoint():
         "rerank_provider": os.getenv("RERANK_PROVIDER", "sidecar"),
         "quenchforge_embed_model": os.getenv("QUENCHFORGE_EMBED_MODEL", ""),
         "quenchforge_rerank_model": os.getenv("QUENCHFORGE_RERANK_MODEL", ""),
+        # Task 2.5c — background processor mode/cap operator surface.
+        "processor_mode": config.PROCESSOR_MODE,
+        "processor_monthly_cap_usd": config.PROCESSOR_MONTHLY_CAP_USD,
+        "processor_api_cap_fallback": config.PROCESSOR_API_CAP_FALLBACK,
+        "processor_api_threshold_tokens": config.PROCESSOR_API_THRESHOLD_TOKENS,
     }
 
 
@@ -525,6 +580,10 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     if req.pack_relevance_weight is not None:
         config.PACK_RELEVANCE_WEIGHT = req.pack_relevance_weight  # type: ignore[assignment]
         updated["pack_relevance_weight"] = req.pack_relevance_weight
+
+    if req.sensitive_domain_retrieval is not None:
+        config.SENSITIVE_DOMAIN_RETRIEVAL_ENABLED = req.sensitive_domain_retrieval  # type: ignore[assignment]
+        updated["sensitive_domain_retrieval"] = req.sensitive_domain_retrieval
 
     # Advanced RAG pipeline — boolean toggles via set_toggle(), numeric params
     # via direct dual-mutation (not in FEATURE_TOGGLES registry).
@@ -717,6 +776,54 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         config.INTERNAL_LLM_MODEL = req.internal_llm_model  # type: ignore[attr-defined]
         updated["internal_llm_model"] = req.internal_llm_model
 
+    # Task 2.5c — background processor mode/cap operator surface
+    # (docs/BACKGROUND_JOBS.md §9). app.processor.worker and
+    # app.processor.model_policy read these via ``from config import
+    # settings`` — the config.settings submodule object, which is DIFFERENT
+    # from the config package namespace populated by ``from config.settings
+    # import *``. Mutate both so a PATCH takes effect on the worker's next
+    # tick (see worker.py's "read live each tick" comment) as well as in
+    # this endpoint's own GET response.
+    if req.processor_mode is not None:
+        normalized_processor_mode = req.processor_mode.strip().lower()
+        valid_processor_modes = ("local", "hybrid", "disabled")
+        if normalized_processor_mode not in valid_processor_modes:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid processor_mode: '{req.processor_mode}'. "
+                    f"Must be one of {valid_processor_modes}"
+                ),
+            )
+        config.PROCESSOR_MODE = normalized_processor_mode
+        config.settings.PROCESSOR_MODE = normalized_processor_mode
+        updated["processor_mode"] = normalized_processor_mode
+
+    if req.processor_monthly_cap_usd is not None:
+        config.PROCESSOR_MONTHLY_CAP_USD = req.processor_monthly_cap_usd  # type: ignore[assignment]
+        config.settings.PROCESSOR_MONTHLY_CAP_USD = req.processor_monthly_cap_usd
+        updated["processor_monthly_cap_usd"] = req.processor_monthly_cap_usd
+
+    if req.processor_api_cap_fallback is not None:
+        normalized_cap_fallback = req.processor_api_cap_fallback.strip().lower()
+        valid_cap_fallbacks = ("local", "hold")
+        if normalized_cap_fallback not in valid_cap_fallbacks:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid processor_api_cap_fallback: '{req.processor_api_cap_fallback}'. "
+                    f"Must be one of {valid_cap_fallbacks}"
+                ),
+            )
+        config.PROCESSOR_API_CAP_FALLBACK = normalized_cap_fallback
+        config.settings.PROCESSOR_API_CAP_FALLBACK = normalized_cap_fallback
+        updated["processor_api_cap_fallback"] = normalized_cap_fallback
+
+    if req.processor_api_threshold_tokens is not None:
+        config.PROCESSOR_API_THRESHOLD_TOKENS = req.processor_api_threshold_tokens  # type: ignore[assignment]
+        config.settings.PROCESSOR_API_THRESHOLD_TOKENS = req.processor_api_threshold_tokens
+        updated["processor_api_threshold_tokens"] = req.processor_api_threshold_tokens
+
     if not updated:
         raise HTTPException(
             status_code=400,
@@ -742,12 +849,20 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
 
 # ── Private mode endpoints ──────────────────────────────────────────────────
 
-_PRIVATE_MODE_KEY = "cerid:private_mode:global"
+# Moved to app.services.private_mode (Task 1.1) so the L1-enforcement gate
+# in user_state.py / agents.py / feedback.py reads the same key. Aliased
+# here — the name is part of this module's tested surface (test_private_mode_l4.py).
+_PRIVATE_MODE_KEY = PRIVATE_MODE_KEY
 # Per-tab/session level overrides — written when a tab declares its
 # private level via the X-Cerid-Session header.  Used by the L4
 # session-wipe endpoint to confirm a tab is in full-ephemeral mode
 # before clearing its state.
 _PRIVATE_MODE_SESSION_PREFIX = "cerid:private_mode:session:"
+
+
+def _sync_dir() -> str:
+    """Return the configured sync directory. Extracted for test patching."""
+    return config.SYNC_DIR
 
 
 @router.get("/settings/private-mode", response_model=dict[str, Any])
@@ -758,7 +873,6 @@ async def get_private_mode():
         level = redis.get(_PRIVATE_MODE_KEY)
         return {"level": int(level) if level is not None else 0}
     except Exception as exc:
-        from core.utils.swallowed import log_swallowed_error
         log_swallowed_error('app.routers.settings', exc)
         return {"level": 0}
 
@@ -812,21 +926,48 @@ class SessionWipeRequest(BaseModel):
 
 @router.post("/settings/private-mode/session-wipe", status_code=200, response_model=WipePrivateSessionResponse)
 async def wipe_private_session(req: SessionWipeRequest):
-    """L4 contract: erase ephemeral session state for a conversation.
+    """L4 contract: erase whatever persisted for a conversation.
 
-    The L4 ("Full ephemeral") level promises that closing the tab wipes
-    the conversation, memory state, and any cached query results — even
-    the audit log is bypassed.  The frontend calls this endpoint via
-    ``sendBeacon`` from a ``beforeunload`` handler when L4 is active.
+    L1 (task 1.1) already blocks conversation saves, memory extraction,
+    and feedback writes server-side, so during a true L4 session nothing
+    reaches these stores in the first place. This endpoint is
+    belt-and-suspenders for the window BEFORE a conversation escalated to
+    L4 (e.g. it was saved at L0/L1 and only bumped to full-ephemeral
+    later). The frontend calls this endpoint via ``sendBeacon`` from a
+    ``beforeunload`` handler when L4 is active.
 
-    What we wipe:
+    What is actually wiped for ``req.conversation_id``
+    (see ``app.services.session_wipe.wipe_conversation_state``):
 
-    * The global ``cerid:private_mode:global`` flag (so the next request
-      from any tab defaults back to L0).
-    * Any per-session override at ``cerid:private_mode:session:{id}``.
-    * The audit-log stream entries scoped to this conversation, if
-      any were written (defense in depth — L3 already bypasses them,
-      but L4 makes the absence explicit).
+    * The conversation itself, from the sync-directory JSON store
+      (skipped if no sync directory is configured).
+    * Memory artifacts extracted from the conversation — both the
+      Neo4j ``:Artifact`` node and its Chroma chunks, via the same
+      both-stores purge helper the retention job uses (skipped if
+      Neo4j is unreachable).
+    * The ``:Conversation`` node and its ``:VerificationReport`` node
+      in Neo4j.
+    * Verified-memory ``:Memory`` nodes (and their Chroma companion docs)
+      linked to this conversation's ``:VerificationReport`` via
+      ``VERIFIED_BY``. Verified-memory promotion is itself blocked
+      server-side at L1+ (task 1.2b — ``app/routers/agents.py`` injects no
+      write function once private mode engages), so this only cleans up
+      memories promoted *before* the conversation escalated past L0.
+    * The global ``cerid:private_mode:global`` flag and the per-session
+      override at ``cerid:private_mode:session:{id}``.
+
+    Each of the above is independently best-effort: one store's failure
+    is logged (``log_swallowed_error``) and does not prevent the others
+    from being wiped, and never turns into a 500 for the caller.
+
+    What is deliberately NOT wiped, and why that's fine:
+
+    * Cached query results — the query cache is keyed by
+      ``(query, domain, top_k)``, not by conversation, and carries a
+      300s TTL. There is nothing conversation-scoped to delete; it
+      self-expires.
+    * Audit-log entries — at L3+ the audit line is never written in the
+      first place (task 1.2a), so at L4 there is nothing to delete.
 
     Returns ``{wiped: true, level_after: 0, conversation_id}`` on
     success.  The endpoint is idempotent — re-firing with the same id
@@ -837,6 +978,22 @@ async def wipe_private_session(req: SessionWipeRequest):
     lifecycle in their logs without compromising the conversation
     contents themselves.
     """
+    try:
+        neo4j_driver = get_neo4j()
+    except Exception as exc:
+        log_swallowed_error("session_wipe.get_neo4j", exc, context={"conversation_id": req.conversation_id})
+        neo4j_driver = None
+
+    try:
+        summary = wipe_conversation_state(
+            req.conversation_id,
+            sync_dir=_sync_dir() or None,
+            neo4j_driver=neo4j_driver,
+        )
+    except Exception as exc:
+        log_swallowed_error("session_wipe.orchestrator", exc, context={"conversation_id": req.conversation_id})
+        summary = {}
+
     redis = get_redis()
     session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{req.conversation_id}"
     with redis.pipeline() as pipe:
@@ -845,7 +1002,7 @@ async def wipe_private_session(req: SessionWipeRequest):
         pipe.execute()
     logger.info(
         "private_mode.l4_session_wiped",
-        extra={"conversation_id": req.conversation_id},
+        extra={"conversation_id": req.conversation_id, "wipe_summary": summary},
     )
     return {
         "wiped": True,
@@ -874,3 +1031,237 @@ async def set_tier(req: TierRequest):
     features_mod.set_tier(req.tier)
     logger.info("Feature tier updated to '%s', flags refreshed", req.tier)
     return {"tier": req.tier, "feature_flags": config.FEATURE_FLAGS}
+
+
+# ── Egress transparency endpoint (Task 1.3b) ────────────────────────────────
+#
+# Status taxonomy used below (the 3-way enum the frontend maps to a badge
+# colour): "local" = as currently configured, nothing on this channel
+# reaches the network — either because a genuinely local backend is
+# serving it (Ollama/Quenchforge), or because the code path structurally
+# short-circuits before any network call (e.g. CATEGORIZE_MODE=manual,
+# ENABLE_EXTERNAL_VERIFICATION=false). "external_off" is reserved for
+# optional third-party integrations that simply have no credential/URL
+# configured yet (Tavily/SearXNG, Sentry DSN, an un-cached HF model) —
+# the destination exists and would receive traffic the moment it's
+# configured. "external_on" = this channel is reaching an external
+# destination right now, given the current settings.
+
+def _hf_model_cached(repo_id: str, filenames: tuple[str, ...], cache_dir: str) -> bool:
+    """Best-effort check: are all of ``filenames`` already in the local HF cache?
+
+    Read-only, no network call (``try_to_load_from_cache`` only inspects the
+    on-disk cache layout). Used instead of ``CERID_PRELOAD_MODELS`` because
+    that var is a Dockerfile *build arg* consumed only during `docker build`
+    (see config/settings.py's comment on ``_PRELOAD_MODELS_FOR_ENV_EXAMPLE``)
+    — it is never present in the running container's environment, so reading
+    it at request time would always report "not preloaded" even on images
+    built with models baked in. Checking the cache directly reflects what
+    will actually happen on next use. Falls back to "not cached" (i.e. would
+    egress) on any error — under-claiming locality is the safe failure mode
+    for a privacy-transparency endpoint.
+    """
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        resolved_cache_dir = cache_dir or None
+        return all(
+            isinstance(
+                try_to_load_from_cache(repo_id=repo_id, filename=fname, cache_dir=resolved_cache_dir),
+                str,
+            )
+            for fname in filenames
+        )
+    except Exception as exc:
+        log_swallowed_error("app.routers.settings.egress_model_cache", exc)
+        return False
+
+
+@router.get("/settings/egress", response_model=EgressReport)
+async def get_egress_report():
+    """Enumerate every outbound network path and whether it's active now.
+
+    Backs the Settings → Privacy panel. Every status below is derived from
+    reading the actual gating code path, not inferred from a setting's name
+    — see the module comment above for the local/external_off/external_on
+    taxonomy this endpoint commits to.
+    """
+    rows: list[dict[str, str]] = []
+
+    # chat_llm — app/routers/chat.py hits OpenRouter directly for every
+    # message; there is no local-chat code path. Without a key the call
+    # 503s before any network attempt, so no egress actually occurs.
+    chat_configured = bool(config.OPENROUTER_API_KEY)
+    rows.append({
+        "channel": "chat_llm",
+        "destination": "OpenRouter (openrouter.ai)",
+        "trigger": "every chat message",
+        "payload_class": "query + conversation context",
+        "status": "external_on" if chat_configured else "external_off",
+        "setting_key": "OPENROUTER_API_KEY",
+    })
+
+    # internal_llm — core/utils/internal_llm.py::call_internal_llm dispatches
+    # on INTERNAL_LLM_PROVIDER. Per-stage PROVIDER_STAGE_* overrides exist
+    # but this row reports the global default, matching what the Settings
+    # panel exposes as "the" internal LLM provider.
+    internal_local = config.INTERNAL_LLM_PROVIDER in ("ollama", "quenchforge")
+    rows.append({
+        "channel": "internal_llm",
+        "destination": (
+            "local Ollama/Quenchforge endpoint" if internal_local
+            else "OpenRouter (openrouter.ai)"
+        ),
+        "trigger": (
+            "internal pipeline calls routed via call_internal_llm "
+            "(memory, entity extraction, query decomposition, summarization, "
+            "wiki refresh, etc. — NOT claim verification, which always uses "
+            "OpenRouter directly; see external_verification)"
+        ),
+        "payload_class": "per-call context",
+        "status": "local" if internal_local else "external_on",
+        "setting_key": "INTERNAL_LLM_PROVIDER",
+    })
+
+    # ingest_enrichment — utils/metadata.py::ai_categorize. CATEGORIZE_MODE
+    # "manual" returns {} before any model_id/call branch is reached (no
+    # network path is even reachable); "smart"/"pro" then follow the same
+    # INTERNAL_LLM_PROVIDER branch as internal_llm.
+    if config.CATEGORIZE_MODE == "manual":
+        ingest_status, ingest_destination = "local", "none (manual categorization, no AI call)"
+    elif internal_local:
+        ingest_status, ingest_destination = "local", "local Ollama/Quenchforge endpoint"
+    else:
+        ingest_status, ingest_destination = "external_on", "OpenRouter (openrouter.ai)"
+    rows.append({
+        "channel": "ingest_enrichment",
+        "destination": ingest_destination,
+        "trigger": "per ingested document (ai_categorize)",
+        "payload_class": "document snippet (~1500 chars)",
+        "status": ingest_status,
+        "setting_key": "CATEGORIZE_MODE",
+    })
+
+    # external_verification — core/agents/hallucination/verification.py
+    # always calls call_llm_raw (hardcoded OpenRouter, requires
+    # OPENROUTER_API_KEY) — it does NOT route through call_internal_llm, so
+    # it never follows INTERNAL_LLM_PROVIDER regardless of that setting.
+    # When disabled the function returns a canned "uncertain" verdict before
+    # any call is attempted.
+    verification_on = bool(config.ENABLE_EXTERNAL_VERIFICATION)
+    rows.append({
+        "channel": "external_verification",
+        "destination": (
+            "OpenRouter (openrouter.ai) — cross-model verification pool"
+            if verification_on else "none (verification skipped)"
+        ),
+        "trigger": "per verified response claim",
+        "payload_class": "response claims",
+        "status": "external_on" if verification_on else "local",
+        "setting_key": "ENABLE_EXTERNAL_VERIFICATION",
+    })
+
+    # web_search — SOURCE the decision from the real factory
+    # (utils/web_search.py::get_search_provider()) instead of hand-mirroring
+    # its Tavily > SearXNG > OpenRouter priority chain here — a copy would
+    # silently drift the moment the factory's priority order changes.
+    # Construction is side-effect-free (env/config reads only, no I/O), so
+    # calling it just to inspect which provider it picked is safe. It falls
+    # back to OpenRouter's ":online" model when neither Tavily nor SearXNG is
+    # configured ("always available as fallback" — see its docstring), so
+    # this channel is external_on far more often than the setting names
+    # alone suggest: it is only genuinely off when OPENROUTER_API_KEY is
+    # also unset (the fallback provider can't actually reach the network
+    # either — see core/utils/llm_client.py::call_llm, which raises before
+    # any network call when the key is empty).
+    try:
+        web_search_provider = get_search_provider()
+    except Exception as exc:  # noqa: BLE001 — fail toward reporting egress, not a false "local"
+        log_swallowed_error("app.routers.settings.egress_web_search", exc)
+        web_search_provider = None
+
+    if web_search_provider is None:
+        web_search_status, web_search_destination = "external_on", "unknown provider (construction failed — see logs)"
+    elif web_search_provider.name == "tavily":
+        web_search_status, web_search_destination = "external_on", "Tavily (api.tavily.com)"
+    elif web_search_provider.name == "searxng":
+        web_search_status, web_search_destination = "external_on", f"SearXNG ({config.SEARXNG_URL})"
+    elif config.OPENROUTER_API_KEY:
+        web_search_status, web_search_destination = "external_on", "OpenRouter (:online fallback model)"
+    else:
+        web_search_status, web_search_destination = "external_off", "none configured (no Tavily/SearXNG/OpenRouter key)"
+    rows.append({
+        "channel": "web_search",
+        "destination": web_search_destination,
+        "trigger": "RAG web-search tool invocation",
+        "payload_class": "search queries",
+        "status": web_search_status,
+        "setting_key": "TAVILY_API_KEY / SEARXNG_URL",
+    })
+
+    # model_catalog_refresh — app/scheduler.py only registers the weekly
+    # job when MODEL_AUTO_UPDATE_ENABLED is true; the OpenRouter models
+    # listing endpoint itself is unauthenticated.
+    catalog_on = bool(getattr(config, "MODEL_AUTO_UPDATE_ENABLED", True))
+    rows.append({
+        "channel": "model_catalog_refresh",
+        "destination": "openrouter.ai/api/v1/models",
+        "trigger": "weekly cron (model_auto_update)",
+        "payload_class": "none (catalog fetch)",
+        "status": "external_on" if catalog_on else "external_off",
+        "setting_key": "MODEL_AUTO_UPDATE_ENABLED",
+    })
+
+    # model_downloads — CERID_PRELOAD_MODELS is a Dockerfile build-arg only
+    # (never a runtime env var); see _hf_model_cached's docstring for why
+    # this row checks the actual HuggingFace cache instead.
+    models_cached = _hf_model_cached(
+        config.RERANK_CROSS_ENCODER_MODEL,
+        (config.RERANK_ONNX_FILENAME, "tokenizer.json"),
+        config.RERANK_MODEL_CACHE_DIR,
+    ) and _hf_model_cached(
+        config.EMBEDDING_MODEL,
+        (config.EMBEDDING_ONNX_FILENAME, "tokenizer.json"),
+        config.EMBEDDING_MODEL_CACHE_DIR,
+    )
+    rows.append({
+        "channel": "model_downloads",
+        "destination": "HuggingFace Hub (huggingface.co)",
+        "trigger": "first use of a reranker/embedding model not already cached",
+        "payload_class": "none (model weight downloads)",
+        "status": "local" if models_cached else "external_off",
+        "setting_key": "CERID_PRELOAD_MODELS",
+    })
+
+    # error_reporting — app/observability/sentry_init.py::init_sentry() gates
+    # solely on SENTRY_DSN_MCP/SENTRY_DSN being set; config.ENABLE_SENTRY is
+    # NOT read anywhere in the init path (verified: no other reference to
+    # ENABLE_SENTRY exists in src/mcp/). Reporting status from ENABLE_SENTRY
+    # alone would misreport a DSN-configured, ENABLE_SENTRY=false deployment
+    # as "off" while it is actually sending events.
+    sentry_dsn = os.getenv("SENTRY_DSN_MCP") or os.getenv("SENTRY_DSN")
+    rows.append({
+        "channel": "error_reporting",
+        "destination": "Sentry (configured DSN target)",
+        "trigger": "on unhandled error/exception",
+        "payload_class": "error events (PII-scrubbed)",
+        "status": "external_on" if sentry_dsn else "external_off",
+        "setting_key": "SENTRY_DSN_MCP",
+    })
+
+    # kb_backup_sync — Cerid only ever writes to the local SYNC_DIR path;
+    # any further replication (e.g. Dropbox) is the OS/client syncing that
+    # directory, not something Cerid initiates.
+    sync_dir = _sync_dir()
+    rows.append({
+        "channel": "kb_backup_sync",
+        "destination": (
+            f"{sync_dir} (local directory; may be OS-synced, e.g. Dropbox)"
+            if sync_dir else "(sync disabled — SYNC_DIR unset)"
+        ),
+        "trigger": "on sync",
+        "payload_class": "KB JSONL",
+        "status": "local",
+        "setting_key": "SYNC_DIR",
+    })
+
+    return {"egress": rows}

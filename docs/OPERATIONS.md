@@ -519,9 +519,49 @@ All features below are present in the codebase. Some require environment variabl
 | Contextual chunking | `ENABLE_CONTEXTUAL_CHUNKS` | `false` | LLM-generated situational summaries on chunks |
 | Auto KB inject | `ENABLE_AUTO_INJECT` | `false` | Auto-inject relevant KB context into queries |
 | Model router | `ENABLE_MODEL_ROUTER` | `false` | Smart model selection (recommend/auto modes) |
-| Encryption at rest | `ENABLE_ENCRYPTION` | `false` | Fernet encryption for stored content |
 | Multi-user auth | `CERID_MULTI_USER` | `false` | JWT auth, tenant context, per-user API keys |
 | API key auth | `CERID_API_KEY` | (unset) | X-API-Key header auth when set |
+
+> **Note:** `ENABLE_ENCRYPTION` (`config/features.py`) is a settings-panel
+> display flag only — it does not gate any encryption code path. Field-level
+> Fernet encryption is controlled solely by whether `CERID_ENCRYPTION_KEY` is
+> set. See "Field-level encryption" below.
+
+### Field-level encryption
+
+Field-level Fernet encryption (`src/mcp/utils/encryption.py`) is opt-in via
+`CERID_ENCRYPTION_KEY` — absent key, every encrypt/decrypt call is a no-op
+and behavior is byte-identical to encryption being "off". When a key is
+set, it covers exactly:
+
+- Per-user API keys (stored in Neo4j, `PUT /auth/me/api-key`).
+- The sync directory, via `CERID_ENCRYPT_SYNC`.
+- The Chroma per-chunk `summary` metadata field (`CHROMA_ENCRYPTED_FIELDS`)
+  — display-only chunk metadata with no query/filter targeting it.
+
+It deliberately does **not** cover Neo4j or Redis fields
+(`NEO4J_ENCRYPTED_FIELDS` / `REDIS_ENCRYPTED_FIELDS` are both empty lists).
+Fernet ciphertext is non-deterministic, so encrypting a field that's
+queried by value — Neo4j `filename`/`summary`/`keywords` (exact-match
+dedup, indexed lookups, `STARTS/ENDS/CONTAINS`), or Redis `filename`/
+`domain` (parsed and grouped by audit analytics) — would silently break
+search, dedup, and analytics. Those stores keep those fields in cleartext
+by design.
+
+#### Full at-rest encryption
+
+Because the graph and cache stores intentionally hold cleartext fields,
+field-level encryption alone does not give full at-rest coverage. For
+complete at-rest protection, encrypt the underlying storage instead of (or
+in addition to) individual fields:
+
+- Encrypt the Docker volumes backing Neo4j, Redis, and ChromaDB (e.g. a
+  LUKS-encrypted volume group on Linux hosts, or an encrypted APFS volume
+  via FileVault on macOS).
+- On managed infrastructure, use the provider's encrypted-volume option
+  (e.g. encrypted EBS on AWS).
+- This is independent of `CERID_ENCRYPTION_KEY` and is the recommended
+  baseline for any deployment handling sensitive content.
 
 ### Retrieval Tuning (env vars with defaults)
 

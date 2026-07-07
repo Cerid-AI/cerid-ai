@@ -181,6 +181,129 @@ class TestRunFailure:
 
 
 # ---------------------------------------------------------------------------
+# Claim verification — best-effort (Task 2.1b)
+# ---------------------------------------------------------------------------
+
+
+class TestClaimVerificationBestEffort:
+    """A verification failure must never block brief generation."""
+
+    async def test_verification_failure_does_not_block_store(self):
+        job = _make_job()
+        record = _make_brief_record()
+        record.claim_ids = []
+
+        mock_service = AsyncMock()
+        mock_service.generate_daily.return_value = record
+        mock_service.store.return_value = None
+
+        with (
+            _patch_service_factory(mock_service),
+            patch(
+                "app.processor.jobs.brief_generation._get_neo4j",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._assemble_corpus",
+                return_value=("inbox text", "notes text"),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._get_chroma",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._get_redis",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.services.briefs.verification.verify_brief_claims",
+                new=AsyncMock(side_effect=RuntimeError("chroma down")),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation.log_swallowed_error"
+            ) as mock_log,
+        ):
+            result = await job.run(_noop_progress)
+
+        # The brief is still generated and persisted despite the
+        # verification pass blowing up.
+        mock_service.store.assert_awaited_once()
+        stored_record = mock_service.store.call_args[0][0]
+        assert stored_record is record
+        assert stored_record.claim_ids == []
+        assert isinstance(result, JobResult)
+        assert result.metadata["brief_id"] == record.brief_id
+        assert result.metadata["status"] == record.status
+
+        # Failure was logged via the swallow boundary, not raised.
+        mock_log.assert_called_once()
+        assert mock_log.call_args.args[0] == "processor.brief_generation.verify_claims"
+
+    async def test_persist_failure_does_not_set_claim_ids(self):
+        """Verification succeeding but the Neo4j persist raising must not
+        leave ``record.claim_ids`` pointing at unpersisted claims — the
+        swallow boundary wraps both the verify AND the save call.
+        """
+        job = _make_job()
+        record = _make_brief_record()
+        record.claim_ids = []
+
+        mock_service = AsyncMock()
+        mock_service.generate_daily.return_value = record
+        mock_service.store.return_value = None
+
+        surfaced_claims = [
+            {"claim_id": "c1", "text": "claim text", "band": "verified", "source_ids": []}
+        ]
+
+        with (
+            _patch_service_factory(mock_service),
+            patch(
+                "app.processor.jobs.brief_generation._get_neo4j",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._assemble_corpus",
+                return_value=("inbox text", "notes text"),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._get_chroma",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._get_redis",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.services.briefs.verification.verify_brief_claims",
+                new=AsyncMock(return_value=surfaced_claims),
+            ),
+            patch(
+                "app.db.neo4j.briefs.save_verified_claims",
+                side_effect=RuntimeError("neo4j write failed"),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation.log_swallowed_error"
+            ) as mock_log,
+        ):
+            result = await job.run(_noop_progress)
+
+        # The brief is still generated and persisted despite the persist
+        # failure, and claim_ids is never set to the unpersisted ids.
+        mock_service.store.assert_awaited_once()
+        stored_record = mock_service.store.call_args[0][0]
+        assert stored_record is record
+        assert stored_record.claim_ids == []
+        assert isinstance(result, JobResult)
+        assert result.metadata["brief_id"] == record.brief_id
+        assert result.metadata["status"] == record.status
+
+        # Failure was logged via the swallow boundary, not raised.
+        mock_log.assert_called_once()
+        assert mock_log.call_args.args[0] == "processor.brief_generation.verify_claims"
+
+
+# ---------------------------------------------------------------------------
 # Patch helpers
 # ---------------------------------------------------------------------------
 
@@ -259,6 +382,34 @@ def _patch_neo4j_and_corpus():
         patch(
             "app.processor.jobs.brief_generation._assemble_corpus",
             return_value=("inbox text", "notes text"),
+        )
+    )
+    stack.enter_context(_patch_verification_deps())
+    return stack
+
+
+def _patch_verification_deps():
+    """Patch the Task 2.1b claim-verification dependencies.
+
+    ``_get_chroma``/``_get_redis`` are patched so no real vector-store /
+    cache connection is attempted, and ``verify_brief_claims`` itself is
+    stubbed to a no-op so tests unrelated to verification aren't coupled
+    to real claim extraction. Dedicated verification behavior is covered
+    by ``test_brief_verification.py``.
+    """
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(
+        patch("app.processor.jobs.brief_generation._get_chroma", return_value=MagicMock())
+    )
+    stack.enter_context(
+        patch("app.processor.jobs.brief_generation._get_redis", return_value=MagicMock())
+    )
+    stack.enter_context(
+        patch(
+            "app.services.briefs.verification.verify_brief_claims",
+            new=AsyncMock(return_value=[]),
         )
     )
     return stack

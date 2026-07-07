@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
+from utils.encryption import CHROMA_ENCRYPTED_FIELDS, get_encryptor
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -187,6 +188,14 @@ def health_check() -> dict:
         "embedding_cache": embedding_cache_stats,
         "wiki_freshness": wiki_health,
         "knowledge_packs": knowledge_packs_health,
+    }
+    result["encryption"] = {
+        # get_encryptor() reflects whether encryption is actually operational —
+        # a malformed CERID_ENCRYPTION_KEY fails FieldEncryptor construction and
+        # get_encryptor() returns None, whereas is_encryption_enabled() only
+        # checks that the env var is set, which would report a false positive.
+        "key_present": get_encryptor() is not None,
+        "fields_covered": len(CHROMA_ENCRYPTED_FIELDS),
     }
     if ollama_status is not None:
         result["ollama"] = ollama_status

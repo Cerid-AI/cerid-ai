@@ -4,6 +4,7 @@
 """Integration tests for POST /admin/collections/repair."""
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -110,6 +111,66 @@ class TestRepairEndpointApply:
             )
         assert res.status_code == 400
         assert "does not map to a known domain" in res.json()["detail"]
+
+
+class TestRepairEndpointDecryptsSummaryForReplay:
+    """Task 2.6a: the backup JSONL's ``summary`` may carry the ``enc:v1:``
+    Chroma-only ciphertext (see ``CHROMA_ENCRYPTED_FIELDS``). Replay must
+    decrypt it before handing it to ``ingest_content`` — otherwise Neo4j's
+    ``summary`` property (re-derived from ``metadata`` on the re-ingest)
+    would end up storing ciphertext instead of the queryable cleartext.
+    """
+
+    def test_repair_decrypts_summary_before_reingest(self, client):
+        try:
+            from cryptography.fernet import Fernet
+        except ImportError:
+            pytest.skip("cryptography not installed")
+        from utils.encryption import encrypt_field, reset_encryptor
+
+        tc, chroma, _neo4j = client
+        key = Fernet.generate_key().decode()
+        reset_encryptor()
+        original_summary = "A plan to do secret things."
+
+        try:
+            with patch.dict(os.environ, {"CERID_ENCRYPTION_KEY": key}):
+                encrypted_summary = encrypt_field(original_summary)
+                assert encrypted_summary.startswith("enc:v1:")
+                chroma.get_collection.return_value.get.return_value = {
+                    "ids": ["doc_1"],
+                    "documents": ["The quick brown fox."],
+                    "metadatas": [
+                        {
+                            "filename": "note.txt",
+                            "domain": "general",
+                            "summary": encrypted_summary,
+                        }
+                    ],
+                }
+                with (
+                    patch("core.utils.embeddings.get_embedding_dim", return_value=384),
+                    patch(
+                        "app.services.ingestion.ingest_content",
+                        return_value={"status": "success", "chunks": 1},
+                    ) as mock_ingest,
+                    patch(
+                        "app.routers.kb_admin.invalidate_cache_non_blocking",
+                        new_callable=AsyncMock,
+                    ),
+                ):
+                    res = tc.post(
+                        "/admin/collections/repair",
+                        json={"collection_name": "domain_general", "dry_run": False},
+                    )
+        finally:
+            reset_encryptor()
+
+        assert res.status_code == 200, res.text
+        mock_ingest.assert_called_once()
+        replayed_metadata = mock_ingest.call_args.kwargs["metadata"]
+        assert replayed_metadata["summary"] == original_summary
+        assert not replayed_metadata["summary"].startswith("enc:v1:")
 
 
 class TestRepairEndpointBackupFormat:

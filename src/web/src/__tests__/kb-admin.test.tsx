@@ -73,7 +73,13 @@ function mockMultiFetch(settingsData: unknown, kbStatsData: unknown) {
       total_mb: 18, limit_mb: 1000, usage_pct: 1.8, status: "healthy",
     })
     if (url.includes("/system/check")) return ok({ ram_gb: 16, docker_running: true, env_exists: true, env_keys_present: [], ollama_detected: false, ollama_url: null, ollama_models: [], lightweight_recommended: false, archive_path_exists: true, default_archive_path: "/data", os: "macOS", cpu: "Apple M1", cpu_cores: 8, gpu: "Apple M1 GPU", gpu_acceleration: "Metal" })
-    if (url.includes("/sync/status")) return ok({ last_export: null, last_import: null, status: "idle" })
+    if (url.includes("/sync/status")) return ok({
+      sync_dir: "/data/sync",
+      manifest: null,
+      local: { neo4j_artifacts: 0, neo4j_domains: 0, neo4j_relationships: 0, neo4j_memories: 0, neo4j_entities: 0, chroma_chunks: {}, redis_entries: 0 },
+      sync: { neo4j_artifacts: 0, neo4j_domains: 0, neo4j_relationships: 0, neo4j_memories: 0, neo4j_entities: 0, chroma_chunks: {}, redis_entries: 0 },
+      diff: { neo4j_artifacts: 0, neo4j_domains: 0, neo4j_relationships: 0, neo4j_memories: 0, neo4j_entities: 0, chroma_chunks: {}, redis_entries: 0 },
+    })
     if (url.includes("/plugins")) return ok({ plugins: [], total: 0 })
     if (url.includes("/mcp-servers")) return ok({ servers: [], total: 0, total_tools: 0 })
     if (url.includes("/external-apis")) return ok({ adapters: [], total: 0 })

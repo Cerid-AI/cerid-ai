@@ -419,7 +419,9 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
     dispatch({ type: "SET_SYSTEM_CHECK", result })
   }, [])
 
-  const canProceedFromKeys = state.keys.openrouter.valid
+  // A detected+enabled local backend (Ollama/Quenchforge) is a valid
+  // alternative to an OpenRouter key — see task 1.3a.
+  const canProceedFromKeys = state.keys.openrouter.valid || state.ollama.enabled
 
   // Capability assessment — recomputed when keys or ollama state changes
   const assessment = useMemo(
@@ -660,14 +662,25 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   not contained in a form" + screen-reader navigation. */}
               <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
                 <p className="text-center text-xs text-muted-foreground">
-                  OpenRouter is required — it&apos;s a unified gateway that connects Cerid to
-                  hundreds of AI models (GPT-4o, Claude, Gemini, Llama, and more) through a
-                  single API key. OpenAI and Anthropic keys are optional for direct access.
+                  {state.ollama.enabled ? (
+                    <>
+                      A local inference backend was detected and is enabled — you can
+                      continue without an API key. Without OpenRouter, smart categorization
+                      and automatic model updates are unavailable, and chat quality is
+                      limited to your local model.
+                    </>
+                  ) : (
+                    <>
+                      OpenRouter is required — it&apos;s a unified gateway that connects Cerid to
+                      hundreds of AI models (GPT-4o, Claude, Gemini, Llama, and more) through a
+                      single API key. OpenAI and Anthropic keys are optional for direct access.
+                    </>
+                  )}
                 </p>
                 <ApiKeyInput
                   provider="openrouter"
                   label="OpenRouter API Key"
-                  required
+                  required={!state.ollama.enabled}
                   preconfigured={state.keys.openrouter.key === "(configured)" || state.keys.openrouter.key === "(from .env)"}
                   placeholder="sk-or-v1-..."
                   helpUrl="https://openrouter.ai/keys"

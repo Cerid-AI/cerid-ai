@@ -11,7 +11,12 @@
 
 import { cn } from "@/lib/utils"
 import { formatCost } from "@/lib/utils"
-import { useProcessorStatus, useProcessorRecent, useProcessorMutations } from "@/hooks/use-processor"
+import {
+  useProcessorStatus,
+  useProcessorRecent,
+  useProcessorMutations,
+  useProcessorSettingsMutation,
+} from "@/hooks/use-processor"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -20,6 +25,15 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { PaneError } from "@/components/ui/pane-error"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { ProgressBar } from "@/components/ui/progress-bar"
+import { InfoTip } from "@/components/ui/info-tip"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { JobRow } from "./job-row"
 import {
   Cpu,
@@ -28,7 +42,7 @@ import {
   List,
   LayoutGrid,
 } from "lucide-react"
-import type { ProcessorPriority } from "@/lib/types/processor"
+import type { ProcessorPriority, ProcessorMode } from "@/lib/types/processor"
 
 // ---------------------------------------------------------------------------
 // Activity chip
@@ -79,6 +93,126 @@ function ActivityChip({ isLoading, paused, totalQueued }: ActivityChipProps) {
       <Cpu className="h-3 w-3 shrink-0" aria-hidden="true" />
       <span>{label}</span>
     </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Mode badge + selector + monthly-spend meter (Task 2.5d)
+// ---------------------------------------------------------------------------
+
+const MODE_LABEL: Record<ProcessorMode, string> = {
+  local: "Local",
+  hybrid: "Hybrid",
+  disabled: "Disabled",
+}
+
+// Calm status colours — mirrors the amber/muted palette already used by
+// ActivityChip above. Hybrid is the only mode that can incur spend, so it
+// gets the "transient warn" amber; local/disabled stay neutral.
+const MODE_BADGE_CLASS: Record<ProcessorMode, string> = {
+  local: "border-border bg-muted text-muted-foreground",
+  hybrid:
+    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  disabled: "border-border bg-muted/70 text-muted-foreground",
+}
+
+const MODE_OPTIONS: ProcessorMode[] = ["local", "hybrid", "disabled"]
+
+function ModeBadge({ mode, isLoading }: { mode: ProcessorMode | undefined; isLoading: boolean }) {
+  if (isLoading) {
+    return <Skeleton className="h-5 w-14 rounded-full" />
+  }
+  if (!mode) return null
+  return (
+    <Badge
+      variant="outline"
+      className={cn("text-label-xs", MODE_BADGE_CLASS[mode])}
+      data-testid="processor-mode-badge"
+    >
+      {MODE_LABEL[mode]}
+    </Badge>
+  )
+}
+
+interface ModeSelectProps {
+  mode: ProcessorMode
+  onChange: (mode: ProcessorMode) => void
+  disabled: boolean
+}
+
+function ModeSelect({ mode, onChange, disabled }: ModeSelectProps) {
+  return (
+    <div className="flex items-center gap-1">
+      <Select value={mode} onValueChange={(v) => onChange(v as ProcessorMode)} disabled={disabled}>
+        <SelectTrigger
+          size="sm"
+          className="h-7 w-28 text-xs"
+          aria-label="Processor mode"
+          data-testid="processor-mode-select"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {MODE_OPTIONS.map((m) => (
+            <SelectItem key={m} value={m} className="text-xs">
+              {MODE_LABEL[m]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <InfoTip term="processor-mode" />
+    </div>
+  )
+}
+
+/** Fill colour by spend ratio — comfortably-under = green, ≥80% = amber,
+ *  ≥100% (over cap) = red. Uses the same status-token vocabulary as the
+ *  tier-colour system elsewhere in the app. */
+function spendFillClass(pct: number): string {
+  if (pct >= 100) return "bg-red-500"
+  if (pct >= 80) return "bg-amber-500"
+  return "bg-green-500"
+}
+
+interface SpendMeterProps {
+  mode: ProcessorMode
+  monthlySpendUsd: number
+  capUsd: number
+}
+
+function SpendMeter({ mode, monthlySpendUsd, capUsd }: SpendMeterProps) {
+  // Spend only accrues in hybrid mode — render a muted note rather than a
+  // bar that always reads 0% in local/disabled mode.
+  if (mode !== "hybrid") {
+    return (
+      <p className="text-label-xs text-muted-foreground" data-testid="processor-spend-note">
+        Monthly spend cap applies in Hybrid mode only
+      </p>
+    )
+  }
+
+  if (capUsd <= 0) {
+    return (
+      <p className="text-xs tabular-nums text-muted-foreground" data-testid="processor-spend-note">
+        {formatCost(monthlySpendUsd)} spent this month &mdash; no cap set
+      </p>
+    )
+  }
+
+  const pct = Math.round((monthlySpendUsd / capUsd) * 100)
+
+  return (
+    <div className="flex items-center gap-2" data-testid="processor-spend-meter">
+      <ProgressBar
+        pct={pct}
+        fillClassName={spendFillClass(pct)}
+        className="w-24"
+        label={`Monthly spend ${formatCost(monthlySpendUsd)} of ${formatCost(capUsd)}`}
+      />
+      <span className="text-xs tabular-nums text-muted-foreground">
+        {formatCost(monthlySpendUsd)} / {formatCost(capUsd)} this month
+      </span>
+    </div>
   )
 }
 
@@ -146,6 +280,7 @@ export function ProcessorPane() {
     refetch: refetchRecent,
   } = useProcessorRecent(50)
   const { pause, resume, isPending } = useProcessorMutations()
+  const { updateMode, isPending: modePending } = useProcessorSettingsMutation()
 
   const totalQueued = status
     ? Object.values(status.queue_sizes).reduce((sum, n) => sum + n, 0)
@@ -173,6 +308,7 @@ export function ProcessorPane() {
           <div className="flex items-center gap-2">
             <Cpu className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <CardTitle className="text-sm">Processor</CardTitle>
+            <ModeBadge mode={status?.mode} isLoading={statusLoading} />
           </div>
           <ActivityChip
             isLoading={statusLoading}
@@ -213,37 +349,55 @@ export function ProcessorPane() {
             </div>
           )}
 
-          {/* Pause / resume */}
-          {!statusLoading && !statusError && (
-            status?.paused ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1.5 text-xs"
-                onClick={() => void resume()}
-                disabled={isPending}
-                aria-label="Resume processor — allow new jobs to dequeue"
-                data-testid="processor-resume-button"
-              >
-                <Play className="h-3.5 w-3.5" aria-hidden="true" />
-                Resume
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1.5 text-xs"
-                onClick={() => void pause()}
-                disabled={isPending}
-                aria-label="Pause processor — halt new dequeues"
-                data-testid="processor-pause-button"
-              >
-                <Pause className="h-3.5 w-3.5" aria-hidden="true" />
-                Pause
-              </Button>
-            )
+          {/* Mode select + pause/resume */}
+          {!statusLoading && !statusError && status && (
+            <div className="flex items-center gap-2">
+              <ModeSelect
+                mode={status.mode}
+                onChange={(mode) => updateMode(mode)}
+                disabled={modePending}
+              />
+              {status.paused ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => void resume()}
+                  disabled={isPending}
+                  aria-label="Resume processor — allow new jobs to dequeue"
+                  data-testid="processor-resume-button"
+                >
+                  <Play className="h-3.5 w-3.5" aria-hidden="true" />
+                  Resume
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => void pause()}
+                  disabled={isPending}
+                  aria-label="Pause processor — halt new dequeues"
+                  data-testid="processor-pause-button"
+                >
+                  <Pause className="h-3.5 w-3.5" aria-hidden="true" />
+                  Pause
+                </Button>
+              )}
+            </div>
           )}
         </div>
+
+        {/* Monthly spend meter row */}
+        {!statusLoading && !statusError && status && (
+          <div className="mt-2">
+            <SpendMeter
+              mode={status.mode}
+              monthlySpendUsd={status.monthly_spend_usd}
+              capUsd={status.cap_usd}
+            />
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="p-3 pt-0">

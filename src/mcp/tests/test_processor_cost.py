@@ -102,3 +102,38 @@ class TestPricingTable:
         models = table.registered_models()
         assert isinstance(models, list)
         assert set(KNOWN_MODELS).issubset(set(models))
+
+
+class TestOpenRouterAndFreeModelNormalization:
+    """Task 2.5b fix: routed model ids must price, so the monthly cap accrues.
+
+    ``config.settings.CATEGORIZE_MODELS`` ships ids with an
+    ``openrouter/`` prefix and, for the "pro" tier, a dot-form Sonnet
+    version string the pricing table originally spelled with a hyphen.
+    Both must resolve without raising, and ``:free`` models must be
+    exactly zero cost regardless of prefix.
+    """
+
+    def test_openrouter_prefixed_pro_model_matches_hyphen_row(self) -> None:
+        prefixed = estimate("openrouter/anthropic/claude-sonnet-4.6", 1000, 500)
+        bare = estimate("anthropic/claude-sonnet-4-6", 1000, 500)
+        assert prefixed.estimated_usd > Decimal("0")
+        assert prefixed.estimated_usd == bare.estimated_usd
+
+    def test_openrouter_prefixed_free_model_is_zero_cost(self) -> None:
+        result = estimate(
+            "openrouter/meta-llama/llama-3.3-70b-instruct:free", 10_000, 5_000
+        )
+        assert result.estimated_usd == Decimal("0")
+
+    def test_bare_free_model_is_zero_cost(self) -> None:
+        result = estimate("some-vendor/some-model:free", 10_000, 5_000)
+        assert result.estimated_usd == Decimal("0")
+
+    def test_openrouter_prefixed_known_model_resolves(self) -> None:
+        result = estimate("openrouter/openai/gpt-5", 100, 100)
+        assert result.estimated_usd > Decimal("0")
+
+    def test_genuinely_unknown_model_still_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown model"):
+            estimate("openrouter/some-vendor/unpriced-model", 100, 100)

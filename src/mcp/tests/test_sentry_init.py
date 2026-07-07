@@ -72,6 +72,25 @@ def test_traces_sampler_drops_endpoint_styled_health_transactions():
     assert _traces_sampler(ctx("app.routers.health.readiness_probe")) == 0.0
 
 
+def test_sentry_logs_forward_warning_and_above_only(monkeypatch):
+    """2026-07-05 storage audit: INFO-level logs were ~90% of all Sentry log
+    volume (10.9M records/30d across cerid-ai-mcp + cerid-trading-agent).
+    enable_logs=True forwards INFO+ to Sentry Logs by default; raise the
+    threshold to WARNING so the INFO firehose is dropped while WARN/ERROR log
+    trails still flow."""
+    import logging
+
+    monkeypatch.setenv("SENTRY_DSN_MCP", "https://example@o1.ingest.sentry.io/1")
+    with patch("sentry_sdk.init") as mock_init:
+        from app.observability.sentry_init import init_sentry
+        init_sentry()
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    integrations = mock_init.call_args.kwargs["integrations"]
+    logging_integration = next(i for i in integrations if isinstance(i, LoggingIntegration))
+    # sentry_logs_level drives the SentryLogsHandler that ships records to Sentry Logs.
+    assert logging_integration._sentry_logs_handler.level == logging.WARNING
+
+
 def test_ignored_loggers_includes_httpx():
     """httpx INFO logs were ~25% of total Sentry log volume per the
     2026-05-18 audit. They're dropped at the SDK level via the

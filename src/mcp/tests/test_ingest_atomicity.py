@@ -363,6 +363,63 @@ class TestIngestRecoveryService:
         assert committed_calls, "Expected collection.update with cerid_state=committed"
 
     @pytest.mark.asyncio
+    async def test_recover_orphan_decrypts_summary_before_neo4j_write(self):
+        """Task 2.6a: an encrypted Chroma ``summary`` is decrypted before it
+        reaches ``graph.create_artifact`` — Neo4j's ``summary`` property must
+        stay cleartext (it's queried by value), never the ``enc:v1:`` blob
+        that ``_encrypt_chroma_metadata`` writes into the Chroma-bound copy.
+        """
+        try:
+            from cryptography.fernet import Fernet
+        except ImportError:
+            pytest.skip("cryptography not installed")
+
+        from app.services.ingest_recovery import OrphanRecord, RecoveryAction, recover_orphan
+        from utils.encryption import encrypt_field, reset_encryptor
+
+        key = Fernet.generate_key().decode()
+        reset_encryptor()
+        original_summary = "The quarterly roadmap in plain English."
+
+        try:
+            with patch.dict(os.environ, {"CERID_ENCRYPTION_KEY": key}):
+                encrypted_summary = encrypt_field(original_summary)
+                assert encrypted_summary.startswith("enc:v1:")
+
+                old_ts = (datetime.now(tz=timezone.utc) - timedelta(seconds=120)).isoformat()
+                orphan = OrphanRecord(
+                    chunk_id="c-enc",
+                    artifact_id="art-enc",
+                    domain="coding",
+                    collection_name="coll-coding",
+                    idempotency_key="enc1",
+                    pending_at=old_ts,
+                    document="doc text",
+                    metadata={"filename": "f.txt", "summary": encrypted_summary},
+                    retry_count=0,
+                )
+
+                collection = MagicMock()
+                chroma_client = MagicMock()
+                chroma_client.get_collection.return_value = collection
+                driver = MagicMock()
+
+                with (
+                    patch("app.services.ingest_recovery.get_chroma", return_value=chroma_client),
+                    patch("app.services.ingest_recovery.get_neo4j", return_value=driver),
+                    patch("app.services.ingest_recovery.graph") as mock_graph,
+                ):
+                    mock_graph.create_artifact.return_value = None
+                    action = await recover_orphan(orphan)
+        finally:
+            reset_encryptor()
+
+        assert action == RecoveryAction.COMMITTED
+        _, call_kwargs = mock_graph.create_artifact.call_args
+        assert call_kwargs["summary"] == original_summary
+        assert not call_kwargs["summary"].startswith("enc:v1:")
+
+    @pytest.mark.asyncio
     async def test_recover_orphan_neo4j_fails_deferred(self):
         """recover_orphan returns DEFERRED when Neo4j fails and retry budget remains."""
         from app.services.ingest_recovery import OrphanRecord, RecoveryAction, recover_orphan

@@ -19,6 +19,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 vi.mock("@/lib/api", () => ({
   fetchSystemCheck: vi.fn().mockResolvedValue({ os: "Linux", cpu: "x86_64", cpu_cores: 4, ram_gb: 16, gpu: null, gpu_acceleration: null }),
   fetchStorageMetrics: vi.fn().mockResolvedValue({ chromadb: { disk_mb: 10, collections: 1, chunks: 100 }, neo4j: { disk_mb: 5, nodes: 50, relationships: 20 }, redis: { memory_mb: 2, keys: 10, peak_mb: 3 }, bm25: { disk_mb: 1, index_count: 1 }, total_mb: 18, limit_mb: 1000, usage_pct: 1.8, status: "ok" }),
+  fetchSyncStatus: vi.fn().mockResolvedValue({
+    sync_dir: "/data/sync",
+    manifest: null,
+    local: { neo4j_artifacts: 0, neo4j_domains: 0, neo4j_relationships: 0, neo4j_memories: 0, neo4j_entities: 0, chroma_chunks: {}, redis_entries: 0 },
+    sync: { neo4j_artifacts: 0, neo4j_domains: 0, neo4j_relationships: 0, neo4j_memories: 0, neo4j_entities: 0, chroma_chunks: {}, redis_entries: 0 },
+    diff: { neo4j_artifacts: 0, neo4j_domains: 0, neo4j_relationships: 0, neo4j_memories: 0, neo4j_entities: 0, chroma_chunks: {}, redis_entries: 0 },
+  }),
   triggerSyncExport: vi.fn(),
   triggerSyncImport: vi.fn(),
 }))

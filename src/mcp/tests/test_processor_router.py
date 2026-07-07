@@ -97,6 +97,61 @@ def test_processor_status_shape(client):
     assert body["throttled_ticks_1h"] == 2
 
 
+def test_processor_status_includes_mode_and_spend(client):
+    """GET /processor/status surfaces mode, monthly spend, and cap (Task 2.5c)."""
+    import config
+
+    with (
+        patch("app.processor.router.get_redis") as mock_get_redis,
+        patch("app.processor.router.processor_jobs_completed_24h", new_callable=AsyncMock) as mock_jobs,
+        patch("app.processor.router.processor_cost_usd_7d", new_callable=AsyncMock) as mock_cost,
+        patch("app.processor.router.processor_throttled_ticks", new_callable=AsyncMock) as mock_throttled,
+        patch("app.processor.router.processor_cost_usd_month", new_callable=AsyncMock) as mock_month,
+    ):
+        mock_get_redis.return_value = MagicMock()
+        mock_jobs.return_value = 0
+        mock_cost.return_value = Decimal("0")
+        mock_throttled.return_value = 0
+        mock_month.return_value = Decimal("1.23")
+
+        saved_mode = config.settings.PROCESSOR_MODE
+        saved_cap = config.settings.PROCESSOR_MONTHLY_CAP_USD
+        config.settings.PROCESSOR_MODE = "hybrid"
+        config.settings.PROCESSOR_MONTHLY_CAP_USD = 5.0
+        try:
+            resp = client.get("/processor/status")
+        finally:
+            config.settings.PROCESSOR_MODE = saved_mode
+            config.settings.PROCESSOR_MONTHLY_CAP_USD = saved_cap
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "hybrid"
+    assert abs(body["monthly_spend_usd"] - 1.23) < 1e-6
+    assert body["cap_usd"] == 5.0
+
+
+def test_processor_status_monthly_spend_degrades_to_zero_on_redis_error(client):
+    """A redis error fetching monthly spend must not 500 the status endpoint."""
+    with (
+        patch("app.processor.router.get_redis") as mock_get_redis,
+        patch("app.processor.router.processor_jobs_completed_24h", new_callable=AsyncMock) as mock_jobs,
+        patch("app.processor.router.processor_cost_usd_7d", new_callable=AsyncMock) as mock_cost,
+        patch("app.processor.router.processor_throttled_ticks", new_callable=AsyncMock) as mock_throttled,
+        patch("app.processor.router.processor_cost_usd_month", new_callable=AsyncMock) as mock_month,
+    ):
+        mock_get_redis.return_value = MagicMock()
+        mock_jobs.return_value = 0
+        mock_cost.return_value = Decimal("0")
+        mock_throttled.return_value = 0
+        mock_month.side_effect = RuntimeError("redis down")
+
+        resp = client.get("/processor/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["monthly_spend_usd"] == 0.0
+
+
 def test_processor_status_queue_sizes(client, mock_queue):
     """Queue sizes are present and keyed by priority value."""
     with (

@@ -3,7 +3,7 @@
 
 """Tests for stage-aware routing + retry-on-502 in core.utils.internal_llm.
 
-Two surfaces covered:
+Three surfaces covered:
 
 1. ``_resolve_stage_provider`` — env override beats pipeline mapping beats
    global default. Lets the LongMemEval scorer route to OpenRouter while
@@ -11,6 +11,10 @@ Two surfaces covered:
 2. ``_call_ollama`` retry loop — server-side 5xx, 429, and timeouts retry
    with exponential backoff before falling through to OpenRouter; 4xx
    classes and circuit-open are not retried.
+3. ``llm_call_override`` — the contextvar-scoped (provider, model) override
+   ``app.processor.worker`` uses to route a hybrid-mode job to the API tier
+   (Task 2.5b). Absent an override, ``call_internal_llm`` must resolve
+   provider/model exactly as before.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import httpx
 import pytest
 
 from core.utils import internal_llm as mod
+from core.utils import llm_client
 
 # ---------------------------------------------------------------------------
 # _resolve_stage_provider
@@ -233,3 +238,65 @@ async def test_retries_exhaust_then_falls_through(monkeypatch):
     )
     assert result == "openrouter-stub"
     assert counter["n"] == 3
+
+
+# ---------------------------------------------------------------------------
+# llm_call_override — backward-compat + scoped routing (Task 2.5b)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_call_internal_llm_no_override_unchanged(monkeypatch):
+    """Absent an override, provider/model resolution is exactly as before."""
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "ollama", raising=False)
+    monkeypatch.setattr(mod.config, "PIPELINE_PROVIDERS", {}, raising=False)
+    monkeypatch.delenv("PROVIDER_STAGE_WIKI_SUMMARY", raising=False)
+
+    fake_ollama = AsyncMock(return_value="local-response")
+    monkeypatch.setattr(mod, "_call_ollama", fake_ollama)
+    fake_call_llm = AsyncMock(return_value="cloud-response")
+    monkeypatch.setattr(llm_client, "call_llm", fake_call_llm)
+
+    assert mod._llm_override.get() is None
+    result = await mod.call_internal_llm(
+        [{"role": "user", "content": "hi"}], stage="wiki_summary",
+    )
+
+    assert result == "local-response"
+    fake_ollama.assert_awaited_once()
+    fake_call_llm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_call_internal_llm_override_routes_to_call_llm(monkeypatch):
+    """With the override set, call_internal_llm takes the else-branch and
+    calls call_llm with the overridden model — regardless of the stage's
+    normal (local) provider resolution."""
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "ollama", raising=False)
+    monkeypatch.setattr(mod.config, "PIPELINE_PROVIDERS", {}, raising=False)
+    monkeypatch.delenv("PROVIDER_STAGE_WIKI_SUMMARY", raising=False)
+
+    fake_ollama = AsyncMock(return_value="local-response")
+    monkeypatch.setattr(mod, "_call_ollama", fake_ollama)
+    fake_call_llm = AsyncMock(return_value="cloud-response")
+    monkeypatch.setattr(llm_client, "call_llm", fake_call_llm)
+
+    with mod.llm_call_override("openrouter", "openrouter/foo"):
+        result = await mod.call_internal_llm(
+            [{"role": "user", "content": "hi"}], stage="wiki_summary",
+        )
+
+    assert result == "cloud-response"
+    fake_ollama.assert_not_awaited()
+    fake_call_llm.assert_awaited_once()
+    _, call_kwargs = fake_call_llm.call_args
+    assert call_kwargs["model"] == "openrouter/foo"
+
+
+@pytest.mark.asyncio
+async def test_llm_call_override_resets_after_context_exit():
+    """The contextvar never leaks past the `with` block."""
+    assert mod._llm_override.get() is None
+    with mod.llm_call_override("openrouter", "openrouter/foo"):
+        assert mod._llm_override.get() == ("openrouter", "openrouter/foo")
+    assert mod._llm_override.get() is None

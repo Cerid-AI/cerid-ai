@@ -89,6 +89,60 @@ async def test_artifact_get_skip_chunks_when_flag_false():
 
 
 @pytest.mark.asyncio
+async def test_artifact_get_decrypts_summary_in_chunk_metadata():
+    """Task 2.6a: with CERID_ENCRYPTION_KEY set, a chunk's raw Chroma
+    ``summary`` metadata (``enc:v1:...``) must be decrypted before it is
+    returned to the MCP caller — otherwise the ciphertext leaks verbatim.
+    """
+    import os
+
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        pytest.skip("cryptography not installed")
+    from utils.encryption import encrypt_field, reset_encryptor
+
+    key = Fernet.generate_key().decode()
+    reset_encryptor()
+    original_summary = "a private summary"
+
+    try:
+        with patch.dict(os.environ, {"CERID_ENCRYPTION_KEY": key}):
+            encrypted_summary = encrypt_field(original_summary)
+            assert encrypted_summary.startswith("enc:v1:")
+
+            fake_driver = MagicMock()
+            fake_chroma_coll = MagicMock()
+            fake_chroma_coll.get.return_value = {
+                "ids": ["c1"],
+                "documents": ["chunk text"],
+                "metadatas": [{"pos": 0, "summary": encrypted_summary}],
+            }
+            fake_chroma = MagicMock()
+            fake_chroma.get_collection = MagicMock(return_value=fake_chroma_coll)
+
+            with (
+                patch("app.mcp_tools.fundamentals.get_neo4j", return_value=fake_driver),
+                patch("app.mcp_tools.fundamentals.get_chroma", return_value=fake_chroma),
+                patch(
+                    "app.mcp_tools.fundamentals.graph.get_artifact",
+                    return_value={
+                        "id": "art-enc",
+                        "filename": "f.md",
+                        "domain": "coding",
+                        "chunk_ids": '["c1"]',
+                        "chunk_count": 1,
+                    },
+                ),
+            ):
+                out = await pkb_artifact_get(artifact_id="art-enc")
+    finally:
+        reset_encryptor()
+
+    assert out["chunks"][0]["metadata"]["summary"] == original_summary
+
+
+@pytest.mark.asyncio
 async def test_artifact_get_missing_raises_resource_not_found():
     fake_driver = MagicMock()
     with (

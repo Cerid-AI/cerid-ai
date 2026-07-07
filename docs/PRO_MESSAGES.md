@@ -58,7 +58,7 @@ Each message becomes part of a per-conversation artifact tagged with
 > `ceridimessage` helper's `scan`. Per-conversation opt-in enable/disable and
 > the `attributedBody` body recovery described below land with the helper's full
 > `chat.db` reader — no reconfiguration is needed when it does; the same Full
-> Disk Access grant and `private_mode` Level 2 floor cover it.
+> Disk Access grant and the `sensitive_domain_retrieval` toggle (below) cover it.
 
 ## What's NOT ingested
 
@@ -74,17 +74,27 @@ Each message becomes part of a per-conversation artifact tagged with
 All parsing is local. The connector reads `chat.db` read-only; nothing
 is sent over the network.
 
-Messages are subject to a stricter retrieval policy than other
-sources: **`private_mode` Level 2 or higher is required at query time**
-for chat content to surface in an answer. If you ask a question in
-the default privacy level, the agent can tell you *that* a
-conversation exists and *who* it's with, but it will not quote message
-text or include it in the synthesized answer. Raise privacy level for
-the query (or session) to allow chat bodies into the response.
+Messages are subject to a stricter retrieval policy than other sources:
+a dedicated **`sensitive_domain_retrieval`** opt-in must be turned on for
+chat content to surface in an answer, via `PATCH /settings`:
+
+```json
+{"sensitive_domain_retrieval": true}
+```
+
+`GET /settings` reports the current state under the same key. This toggle
+defaults to **off** and is independent of `private_mode` — raising or
+lowering the private-mode isolation level has no bearing on whether
+message content surfaces. If the toggle is off, the agent can tell you
+*that* a conversation exists and *who* it's with, but it will not quote
+message text or include it in the synthesized answer.
 
 This is intentional: messages are the most sensitive corpus most
 people own, and we don't want a casual question to splash a private
-conversation into the answer pane.
+conversation into the answer pane by default. (An earlier revision of
+this connector tied visibility to the `private_mode` level instead —
+that coupling was inverted, since *raising* privacy would *reveal* the
+data — and has been replaced by this standalone opt-in.)
 
 ## Where the data lives on disk
 

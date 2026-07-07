@@ -114,6 +114,19 @@ export const SYSTEM_DEFS: SettingDef[] = [
     danger: "confirm",
     writer: { kind: "endpoint", method: "POST", path: "/sync/import" },
   },
+  // ── Backup ─────────────────────────────────────────────────────────────────
+  {
+    id: "system.sync.backup",
+    category: "system",
+    group: "sync",
+    level: "core",
+    label: "Full backup export",
+    helpText: "Runs a full export (bypassing the incremental since-cursor) to the sync directory, covering every store: Neo4j artifacts/domains/relationships/memories/entities, ChromaDB chunks, and the Redis audit log. Pair with scripts/cerid-backup.sh for a portable archive.",
+    scopeOfEffect: { scope: "server", display: "Applies to this server instance — all sessions." },
+    keywords: ["backup", "full export", "sync", "archive", "counts", "System"],
+    type: "action",
+    writer: { kind: "endpoint", method: "POST", path: "/sync/export" },
+  },
   // ── Infrastructure (read-only env rows, collapsed) ─────────────────────────
   {
     id: "system.infra.bifrostUrl",

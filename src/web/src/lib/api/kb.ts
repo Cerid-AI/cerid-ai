@@ -418,6 +418,23 @@ export async function uploadFile(
   }
 }
 
+export async function ingestUrl(
+  url: string,
+  opts?: { domain?: string; tags?: string[] },
+): Promise<{ status?: string; artifact_id?: string; [k: string]: unknown }> {
+  const res = await fetch(`${MCP_BASE}/ingest/url`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      url,
+      ...(opts?.domain != null && { domain: opts.domain }),
+      ...(opts?.tags != null && { tags: opts.tags }),
+    }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "URL capture failed"))
+  return res.json()
+}
+
 // -- Sync API ----------------------------------------------------------------
 
 export async function fetchSyncStatus(): Promise<import("../types").SyncStatus> {
@@ -429,6 +446,7 @@ export async function fetchSyncStatus(): Promise<import("../types").SyncStatus> 
 export async function triggerSyncExport(options?: {
   since?: string
   domains?: string[]
+  full?: boolean
 }): Promise<import("../types").SyncExportResult> {
   const res = await fetch(`${MCP_BASE}/sync/export`, {
     method: "POST",

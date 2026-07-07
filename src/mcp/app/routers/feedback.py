@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from app.services.feedback import ClaimFeedback, submit_feedback
+from app.services.private_mode import private_blocks
 from core.utils.swallowed import log_swallowed_error
 
 
@@ -55,6 +56,8 @@ async def submit_claim_feedback(body: ClaimFeedback) -> dict:
     - ``0``  — neutral
     - ``-1`` — negative / the claim is incorrect
     """
+    if private_blocks(1):
+        return {"ok": True, "rating_id": None}
     try:
         rating_id = await submit_feedback(body)
         return {"ok": True, "rating_id": rating_id}

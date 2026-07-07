@@ -19,6 +19,8 @@ import config
 from app.concurrency import KB_POOL
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
+from app.services.private_mode import private_blocks
+from config.features import require_feature
 from core.utils.swallowed import log_swallowed_error
 
 
@@ -43,6 +45,26 @@ class SaveVerificationReportResponse(BaseModel):
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
+
+
+def _verified_memory_fn(create_fn: Any) -> Any:
+    """Return ``create_fn``, or ``None`` when private mode blocks promotion.
+
+    Shared by ``/agent/hallucination`` and ``/agent/verify-stream`` — both
+    dispatch verified-fact-to-memory promotion via an injected
+    ``create_memory_fn`` (see ``core.agents.verified_memory.promote_verified_facts``).
+
+    Bare ``None`` — not a no-op callable — is required: both call sites in
+    ``core.agents.hallucination.streaming`` gate the entire
+    ``promote_verified_facts`` dispatch on ``create_memory_fn is not None``,
+    and ``promote_verified_facts`` itself re-checks the same identity before
+    doing anything. A callable that merely returns ``None`` would still pass
+    both guards and reach the unconditional Chroma-ingest step that follows
+    the Neo4j write attempt, leaking the raw claim text into the
+    "conversations" collection regardless of what the Neo4j write did.
+    Passing ``None`` itself skips promotion — and both its writes — entirely.
+    """
+    return None if private_blocks(1) else create_fn
 
 
 class AgentQueryRequest(BaseModel):
@@ -249,6 +271,19 @@ async def compress_history_endpoint(req: CompressRequest):
 
 @router.post("/agent/query", response_model=AgentQueryResponse)
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
+    # Private Mode L2 ("skip KB") — server-side enforcement. A direct API
+    # caller must get the same query-only behavior the web client applies
+    # locally: no KB retrieval at all, not even a cache lookup.
+    if private_blocks(2):
+        return {
+            "context": "",
+            "sources": [],
+            "results": [],
+            "domains_searched": [],
+            "total_results": 0,
+            "confidence": 0.0,
+            "kb_bypassed": True,
+        }
     # Heavy RAG path is gated by KB_POOL so /health, /observability, and
     # other lightweight routes served by HEALTH_POOL are never starved by
     # concurrent KB queries (audit RC-C, smoke Test G).
@@ -486,6 +521,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
 
 
 @router.post("/agent/hallucination")  # response-model-allowed: dynamic response (shape varies)
+@require_feature("truth_audit")
 async def hallucination_check_endpoint(req: HallucinationCheckRequest):
     try:
         # Fast mode bypasses the cross-model NLI pipeline entirely — the
@@ -541,7 +577,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             model=req.model,
             user_query=req.user_query,
             expert_mode=req.expert_mode,
-            create_memory_fn=create_memory_node,
+            create_memory_fn=_verified_memory_fn(create_memory_node),
         )
         result["mode"] = "thorough"
 
@@ -595,6 +631,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
 
 
 @router.get("/agent/hallucination/{conversation_id}")  # response-model-allowed: dynamic response (shape varies)
+@require_feature("truth_audit")
 async def hallucination_report_endpoint(conversation_id: str):
     try:
         from core.agents.hallucination import get_hallucination_report
@@ -616,6 +653,7 @@ class ClaimFeedbackRequest(BaseModel):
 
 
 @router.post("/agent/hallucination/feedback", response_model=ClaimFeedbackEndpointResponse)
+@require_feature("truth_audit")
 async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
     """Record user feedback on a verification claim."""
     try:
@@ -656,6 +694,8 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
 
 @router.post("/agent/memory/extract")  # response-model-allowed: dynamic response (shape varies)
 async def memory_extract_endpoint(req: MemoryExtractionRequest):
+    if private_blocks(1):
+        return {"stored": False, "skipped": "private_mode"}
     started = time.perf_counter()
     try:
         from app.agents.memory import extract_and_store_memories
@@ -794,6 +834,7 @@ async def _safe_anext(gen):  # type: ignore[no-untyped-def]
 
 
 @router.post("/agent/verify-stream")
+@require_feature("truth_audit")
 async def verify_stream_endpoint(req: VerifyStreamRequest):
     """SSE endpoint for streaming truth verification of an LLM response.
 
@@ -855,7 +896,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 conversation_history=req.conversation_history,
                 expert_mode=req.expert_mode,
                 source_artifact_ids=req.source_artifact_ids,
-                create_memory_fn=_create_mem_fn,
+                create_memory_fn=_verified_memory_fn(_create_mem_fn),
                 save_report_fn=_save_report_fn,
             )
 
@@ -969,6 +1010,7 @@ class SaveVerificationRequest(BaseModel):
 
 
 @router.post("/verification/save", response_model=SaveVerificationReportResponse)
+@require_feature("truth_audit")
 async def save_verification_report(req: SaveVerificationRequest):
     """Persist a verification report to Neo4j for long-term storage."""
     from app.db.neo4j.artifacts import save_verification_report as _save
@@ -991,6 +1033,7 @@ async def save_verification_report(req: SaveVerificationRequest):
 
 
 @router.get("/verification/{conversation_id}")  # response-model-allowed: dynamic response (shape varies)
+@require_feature("truth_audit")
 async def get_verification_report(conversation_id: str):
     """Retrieve a saved verification report by conversation ID."""
     from app.db.neo4j.artifacts import get_verification_report as _get
@@ -1025,6 +1068,7 @@ async def rectify_endpoint(req: RectifyRequest):
 
 
 @router.post("/agent/audit")  # response-model-allowed: dynamic response (shape varies)
+@require_feature("truth_audit")
 async def audit_endpoint(req: AuditRequest):
     try:
         from core.agents.audit import audit

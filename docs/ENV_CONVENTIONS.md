@@ -88,7 +88,7 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | `ENABLE_HALLUCINATION_CHECK` | `true` | Hallucination detection |
 | `ENABLE_MEMORY_EXTRACTION` | `true` | Memory extraction from conversations |
 | `ENABLE_MODEL_ROUTER` | `false` | Automatic model routing |
-| `ENABLE_ENCRYPTION` | `false` | Field-level Fernet encryption |
+| `ENABLE_ENCRYPTION` | `false` | Settings-panel display flag only — does not gate encryption (see "Encryption" below) |
 | `ENABLE_EXTERNAL_VERIFICATION` | `true` | Cross-model claim verification |
 | `ENABLE_AUTO_INJECT` | `false` | Auto-inject high-confidence KB results |
 
@@ -206,8 +206,8 @@ opts in independently via its `*_PROVIDER` toggle.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENABLE_ENCRYPTION` | `false` | Enable field-level encryption |
-| `CERID_ENCRYPTION_KEY` | *(empty)* | Fernet encryption key |
+| `ENABLE_ENCRYPTION` | `false` | Settings-panel display flag only — does not gate any encryption code path |
+| `CERID_ENCRYPTION_KEY` | *(empty)* | Fernet key; when set, encrypts per-user API keys, the sync directory (`CERID_ENCRYPT_SYNC`), and the Chroma chunk `summary` field. Full KB at-rest protection requires volume/disk encryption — see [`OPERATIONS.md`](OPERATIONS.md#field-level-encryption). |
 
 ### Memory (optional)
 

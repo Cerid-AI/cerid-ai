@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Download, Upload, AlertTriangle, RefreshCw,
+  Download, Upload, AlertTriangle, RefreshCw, Archive, DatabaseBackup,
 } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/ui/empty-state"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
@@ -19,7 +20,7 @@ import {
 } from "@/components/settings/settings-primitives"
 import { getDef } from "@/lib/settings-registry"
 import {
-  fetchSystemCheck, fetchStorageMetrics,
+  fetchSystemCheck, fetchStorageMetrics, fetchSyncStatus,
   triggerSyncExport, triggerSyncImport,
 } from "@/lib/api"
 import { checkForUpdates } from "@/lib/api/updates"
@@ -399,6 +400,117 @@ function SyncSection() {
   )
 }
 
+// ── Backup ────────────────────────────────────────────────────────────────────
+
+function BackupSection() {
+  const backupDef = getDef("system.sync.backup")!
+  const queryClient = useQueryClient()
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["sync-status"],
+    queryFn: fetchSyncStatus,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  })
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+
+  const handleFullExport = async () => {
+    setRunning(true)
+    setResult(null)
+    try {
+      await triggerSyncExport({ full: true })
+      setResult("Full backup export complete.")
+      await queryClient.invalidateQueries({ queryKey: ["sync-status"] })
+    } catch (err) {
+      setResult("Full backup export failed: " + (err instanceof Error ? err.message : "Unknown error"))
+      logSwallowedError(err, "system.syncBackupExport")
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <SectionCard title="Backup">
+        <Skeleton className="h-24 w-full" />
+      </SectionCard>
+    )
+  }
+
+  if (isError || !data) {
+    return (
+      <SectionCard title="Backup">
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Failed to load backup status.{" "}
+            <button type="button" onClick={() => void refetch()} className="underline">Retry</button>
+          </AlertDescription>
+        </Alert>
+      </SectionCard>
+    )
+  }
+
+  const { manifest, local } = data
+  const totalChromaChunks = Object.values(local.chroma_chunks ?? {}).reduce((sum, n) => sum + n, 0)
+  const counts: Array<[string, number]> = [
+    ["Artifacts", local.neo4j_artifacts],
+    ["Memories", local.neo4j_memories],
+    ["Entities", local.neo4j_entities],
+    ["Relationships", local.neo4j_relationships],
+    ["Domains", local.neo4j_domains],
+    ["Chroma chunks", totalChromaChunks],
+    ["Redis entries", local.redis_entries],
+  ]
+
+  return (
+    <SectionCard title="Backup">
+      {manifest ? (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-muted-foreground">
+            Last {manifest.is_incremental ? "incremental" : "full"} export
+          </span>
+          <span className="font-mono text-xs tabular-nums">
+            {manifest.last_exported_at ? new Date(manifest.last_exported_at).toLocaleString() : "—"}
+          </span>
+        </div>
+      ) : (
+        <EmptyState
+          icon={Archive}
+          title="No export yet"
+          description="Run a full backup export below to create the first sync snapshot."
+        />
+      )}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        {counts.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{label}</span>
+            <span className="font-mono tabular-nums text-foreground">{value.toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+      <SettingRow def={backupDef}>
+        <div className="density-stack w-full">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleFullExport()}
+            disabled={running}
+            className="gap-1.5 w-fit"
+          >
+            <DatabaseBackup className={cn("h-4 w-4", running && "animate-pulse")} />
+            {running ? "Exporting…" : "Full backup export"}
+          </Button>
+          <p className="text-label-xs text-muted-foreground">
+            Writes a full snapshot to the sync directory. Run scripts/cerid-backup.sh separately for a portable, restorable archive.
+          </p>
+          {result && <p className="text-xs text-muted-foreground">{result}</p>}
+        </div>
+      </SettingRow>
+    </SectionCard>
+  )
+}
+
 // ── Infrastructure env rows ───────────────────────────────────────────────────
 
 function InfraSection() {
@@ -469,6 +581,7 @@ export default function SystemCategory({ settings }: SettingsCategoryPageProps) 
       <PlatformSection />
       <StorageSection />
       <SyncSection />
+      <BackupSection />
       <InfraSection />
       <TogglesSection />
     </div>

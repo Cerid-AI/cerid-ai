@@ -53,6 +53,18 @@ class _PricingRow:
     usd_per_1k_out: Decimal
 
 
+def _strip_openrouter_prefix(model: str) -> str:
+    """Strip a leading ``openrouter/`` from a model id, if present.
+
+    Mirrors ``core.utils.llm_client._strip_openrouter_prefix``; inlined
+    here (rather than imported) to keep this module free of that
+    module's heavier import surface.
+    """
+    if model.startswith("openrouter/"):
+        return model[len("openrouter/"):]
+    return model
+
+
 class PricingTable:
     """Versioned map from canonical model identifier to per-token pricing.
 
@@ -68,6 +80,14 @@ class PricingTable:
             usd_per_1k_out=Decimal("0.075"),
         ),
         "anthropic/claude-sonnet-4-6": _PricingRow(
+            usd_per_1k_in=Decimal("0.003"),
+            usd_per_1k_out=Decimal("0.015"),
+        ),
+        # Alias: config/settings.py's CATEGORIZE_MODELS["pro"] ships as
+        # "openrouter/anthropic/claude-sonnet-4.6" (dot, not hyphen). Same
+        # model, same price — registered under both spellings so routed
+        # model ids resolve without renaming the canonical hyphen key.
+        "anthropic/claude-sonnet-4.6": _PricingRow(
             usd_per_1k_in=Decimal("0.003"),
             usd_per_1k_out=Decimal("0.015"),
         ),
@@ -93,9 +113,27 @@ class PricingTable:
         )
 
     def get_row(self, model: str) -> _PricingRow:
-        """Return the pricing row for ``model`` or raise ``ValueError``."""
+        """Return the pricing row for ``model`` or raise ``ValueError``.
+
+        Falls back to a normalized lookup on a direct miss: the routing
+        layer stores model ids with an ``openrouter/`` prefix (Bifrost
+        convention) that this table's keys omit, and any ``:free`` model
+        is zero-cost by definition regardless of whether it's registered.
+        A direct hit always short-circuits, so normalization only ever
+        turns a previously-raising lookup into a success — it never
+        changes the result for an id already in the table.
+        """
         try:
             return self._rows[model]
+        except KeyError:
+            pass
+
+        normalized = _strip_openrouter_prefix(model)
+        if normalized.endswith(":free"):
+            return _PricingRow(usd_per_1k_in=Decimal("0"), usd_per_1k_out=Decimal("0"))
+
+        try:
+            return self._rows[normalized]
         except KeyError:
             raise ValueError(
                 f"Unknown model '{model}' — register it in PricingTable before"

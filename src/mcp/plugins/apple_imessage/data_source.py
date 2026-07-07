@@ -8,9 +8,10 @@ SQLite store (``~/Library/Messages/chat.db``); reading it requires **Full Disk
 Access** for the Cerid desktop app (a System Settings toggle).
 
 **Privacy gate:** iMessage content is the most sensitive Apple surface, so the
-connector additionally requires the instance to be in **private_mode level ≥ 2**
-(``docs/PRO_MESSAGES.md``). When the level is below 2 the connector returns
-nothing and never spawns the helper — no chat.db access at all. This complements
+connector additionally requires the dedicated **SENSITIVE_DOMAIN_RETRIEVAL_ENABLED**
+opt-in (``docs/PRO_MESSAGES.md``), independent of the private-mode isolation
+level. When the opt-in is off (the default) the connector returns nothing and
+never spawns the helper — no chat.db access at all. This complements
 ``utils.domain_privacy`` (which gates the ingested ``messages`` domain in
 retrieval); this check guards the live data-source path.
 
@@ -36,7 +37,6 @@ logger = logging.getLogger("ai-companion.data_sources.apple_imessage")
 
 DEFAULT_HELPER_NAME = "ceridimessage"
 _TCC_DENIED_CODES = (3, 77)  # CeridIMessage exits 77 on Full-Disk-Access denial; 3 kept for parity
-_PRIVATE_MODE_FLOOR = 2  # iMessage content requires private_mode level >= 2
 
 
 def _resolve_helper_path() -> str | None:
@@ -59,8 +59,8 @@ def _resolve_helper_path() -> str | None:
 
 class AppleIMessageDataSource(DataSource):
     name = "apple_imessage"
-    description = "Apple iMessage via Swift chat.db reader (private_mode L2+)"
-    requires_api_key = False  # TCC-gated (Full Disk Access) + private_mode-gated
+    description = "Apple iMessage via Swift chat.db reader (sensitive-domain opt-in required)"
+    requires_api_key = False  # TCC-gated (Full Disk Access) + sensitive-domain-opt-in-gated
 
     def __init__(self, helper_path: str | None = None) -> None:
         self._helper_path = helper_path or _resolve_helper_path()
@@ -96,12 +96,13 @@ class AppleIMessageDataSource(DataSource):
             return None
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
-        # Privacy floor: never touch chat.db unless the instance has opted into
-        # private_mode level >= 2. Fail-closed (the helper returns 0 on error).
-        from utils.domain_privacy import get_global_private_mode_level
+        # Privacy gate: never touch chat.db unless the dedicated
+        # SENSITIVE_DOMAIN_RETRIEVAL_ENABLED opt-in is on. Fail-closed
+        # (defaults to suppressed on any config-read error).
+        from utils.domain_privacy import sensitive_domains_opted_in
 
-        if get_global_private_mode_level() < _PRIVATE_MODE_FLOOR:
-            logger.info("apple_imessage suppressed — private_mode level < %d", _PRIVATE_MODE_FLOOR)
+        if not sensitive_domains_opted_in():
+            logger.info("apple_imessage suppressed — sensitive-domain retrieval opt-in is off")
             return []
 
         raw = await self._invoke_helper(["scan"])

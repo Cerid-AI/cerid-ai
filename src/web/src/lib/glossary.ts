@@ -163,6 +163,11 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     short:
       "Number of Ollama models currently loaded and ready for offline inference. Zero = no local fallback.",
   },
+  "processor-mode": {
+    label: "Processor Mode",
+    short:
+      "Local keeps background jobs on-device. Hybrid may route large jobs to a paid API within your monthly cap. Disabled pauses background processing.",
+  },
   "openrouter-credits": {
     label: "OpenRouter Credits",
     short:

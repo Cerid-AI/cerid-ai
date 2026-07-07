@@ -31,8 +31,13 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+from app.processor.model_policy import resolve_job_model
+from config import settings
+from core.processor import cost as cost_estimator
 from core.processor.job import BaseJob, JobRecord, JobResult, JobState
+from core.processor.mode import processor_is_disabled, resolve_processor_mode
 from core.processor.priority import priority_order
+from core.utils.internal_llm import llm_call_override
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.processor.worker")
@@ -153,6 +158,12 @@ class ProcessorWorker:
         """Main polling loop for a single worker."""
         while not self._stop_flag:
             try:
+                # Disabled-mode check — read live each tick so a runtime PATCH
+                # to PROCESSOR_MODE takes effect without a worker restart.
+                if processor_is_disabled(resolve_processor_mode(settings.PROCESSOR_MODE)):
+                    await asyncio.sleep(self._poll_interval)
+                    continue
+
                 # Throttle check — backs off when system load is high.
                 if self._is_throttled():
                     if self._redis_client is not None:
@@ -228,8 +239,56 @@ class ProcessorWorker:
 
         progress_cb = self._make_progress_cb(record)
 
+        chosen_model: str | None = None
+        default_local: str | None = None
+        if record.requires_llm:
+            default_local = record.model or "ollama/local"
+            estimated_tokens = record.estimated_tokens_in + record.estimated_tokens_out
+            decision = None
+            try:
+                decision = await resolve_job_model(
+                    self._redis_client,
+                    default_local=default_local,
+                    api_model=settings.CATEGORIZE_MODELS.get("smart", default_local),
+                    estimated_tokens=estimated_tokens,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log_swallowed_error(
+                    "processor.execute.resolve_job_model",
+                    exc,
+                    context={"job_id": job_id},
+                )
+
+            if decision is not None and decision.hold:
+                logger.warning(
+                    "processor.job_held job_id=%s reason=%s", job_id, decision.reason,
+                )
+                try:
+                    await self._queue.mark_completed(
+                        job_id,
+                        JobResult(
+                            job_id=job_id,
+                            actual_tokens_in=0,
+                            actual_tokens_out=0,
+                            metadata={"held": True, "reason": decision.reason},
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log_swallowed_error("processor.execute.mark_completed_held", exc)
+                return
+
+            chosen_model = (decision.model if decision is not None else None) or default_local
+
         try:
-            raw_result: JobResult = await job.run(progress_cb=progress_cb)
+            if (
+                record.requires_llm
+                and chosen_model is not None
+                and chosen_model != default_local
+            ):
+                with llm_call_override("openrouter", chosen_model):
+                    raw_result: JobResult = await job.run(progress_cb=progress_cb)
+            else:
+                raw_result = await job.run(progress_cb=progress_cb)
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error(
                 "processor.execute.run",
@@ -252,14 +311,46 @@ class ProcessorWorker:
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("processor.execute.mark_completed", exc)
 
-        # Record metrics (cost from estimate for now — actual-token
-        # reconciliation is a later refinement per spec)
+        # Record metrics. LLM jobs price against the model actually used
+        # (chosen_model) so hybrid-routed API jobs accrue real spend;
+        # non-LLM jobs keep their pre-execution CostEstimate (their
+        # cpu/* models aren't in the pricing table).
         if self._redis_client is not None:
             try:
                 from app.processor.metrics import record_completion
 
-                estimate = job.estimate_cost()
-                actual_cost = estimate.estimated_usd
+                if record.requires_llm and chosen_model is not None:
+                    try:
+                        actual_cost = cost_estimator.estimate(
+                            model=chosen_model,
+                            tokens_in=(
+                                result.actual_tokens_in
+                                if result.actual_tokens_in is not None
+                                else record.estimated_tokens_in
+                            ),
+                            tokens_out=(
+                                result.actual_tokens_out
+                                if result.actual_tokens_out is not None
+                                else record.estimated_tokens_out
+                            ),
+                        ).estimated_usd
+                    except Exception as exc:  # noqa: BLE001
+                        log_swallowed_error(
+                            "processor.execute.cost_estimate",
+                            exc,
+                            context={"job_id": job_id, "model": chosen_model},
+                        )
+                        if chosen_model != default_local:
+                            logger.warning(
+                                "processor.execute: cannot price chosen model=%r for "
+                                "job_id=%s — the monthly spend cap cannot track this "
+                                "job's cost; falling back to the pre-execution estimate",
+                                chosen_model,
+                                job_id,
+                            )
+                        actual_cost = job.estimate_cost().estimated_usd
+                else:
+                    actual_cost = job.estimate_cost().estimated_usd
                 await record_completion(
                     self._redis_client,
                     job_id,

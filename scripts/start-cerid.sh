@@ -262,9 +262,24 @@ preflight_checks() {
     local fail=0
 
     # Check required env vars are non-empty
+    # OPENROUTER_API_KEY is not required when a local inference backend
+    # (ollama/quenchforge, both serving the Ollama API on :11434) is active.
+    local llm_provider
+    llm_provider=$(grep "^INTERNAL_LLM_PROVIDER=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "")
+    local local_llm_active=0
+    if [ "$llm_provider" = "ollama" ] || [ "$llm_provider" = "quenchforge" ]; then
+        if curl -sf http://127.0.0.1:11434/ >/dev/null 2>&1; then
+            local_llm_active=1
+        fi
+    fi
+
     local required_vars="OPENROUTER_API_KEY"
+    if [ "$local_llm_active" -eq 1 ]; then
+        required_vars=""
+        echo "  Local inference mode ($llm_provider): OpenRouter key not required."
+    fi
     if [ "$LIGHTWEIGHT_MODE" != "true" ]; then
-        required_vars="NEO4J_PASSWORD OPENROUTER_API_KEY"
+        required_vars="NEO4J_PASSWORD $required_vars"
     fi
     for var in $required_vars; do
         local val

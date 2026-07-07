@@ -41,6 +41,7 @@ MCP_ROOT = REPO_ROOT / "src" / "mcp"
 # too so those gates are asserted, not just the ones under src/mcp/.
 PLUGINS_ROOT = REPO_ROOT / "plugins"
 ALLOWLIST = REPO_ROOT / "scripts" / "pro_gating_allowlist.txt"
+FEATURES_PY = MCP_ROOT / "config" / "features.py"
 
 GATE_FUNCTIONS = frozenset({"require_feature", "is_feature_enabled", "check_feature"})
 
@@ -83,6 +84,66 @@ def _get_call_name(node: ast.AST) -> str | None:
     return None
 
 
+def _assignment_value(node: ast.AST, name: str) -> ast.AST | None:
+    """Return the RHS value node if `node` assigns (plain or annotated) to `name`."""
+    if isinstance(node, ast.Assign):
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                return node.value
+    elif isinstance(node, ast.AnnAssign):
+        if isinstance(node.target, ast.Name) and node.target.id == name:
+            return node.value
+    return None
+
+
+def pro_flags_from_source(features_py: Path) -> set[str]:
+    """Statically derive the Pro-tier flag set, mirroring
+    ``config.features._PRO_TIER_FLAGS`` WITHOUT importing the app package —
+    importing it pulls heavy runtime deps (e.g. httpx, via config.settings)
+    that the lint CI job does not install. Reads FEATURE_BUCKETS plus the
+    _PRO_TIER_FLAGS definition by AST so the ``pro_`` prefix rule and the
+    back-compat alias stay sourced from the code, not duplicated here."""
+    tree = ast.parse(features_py.read_text(encoding="utf-8"), filename=str(features_py))
+    buckets: dict[str, list[str]] = {}
+    prefix = "pro_"
+    extra: set[str] = set()
+    for node in ast.walk(tree):
+        buckets_val = _assignment_value(node, "FEATURE_BUCKETS")
+        if isinstance(buckets_val, ast.Dict):
+            for key, value in zip(buckets_val.keys, buckets_val.values):
+                if (
+                    isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and isinstance(value, ast.List)
+                ):
+                    buckets[key.value] = [
+                        el.value
+                        for el in value.elts
+                        if isinstance(el, ast.Constant) and isinstance(el.value, str)
+                    ]
+        pro_val = _assignment_value(node, "_PRO_TIER_FLAGS")
+        if pro_val is not None:
+            for sub in ast.walk(pro_val):
+                # prefix comes from `bucket_name.startswith("pro_")`
+                if (
+                    isinstance(sub, ast.Call)
+                    and _get_call_name(sub.func) == "startswith"
+                    and sub.args
+                    and isinstance(sub.args[0], ast.Constant)
+                    and isinstance(sub.args[0].value, str)
+                ):
+                    prefix = sub.args[0].value
+                # back-compat aliases from set literals, e.g. {"calendar_sync"}
+                if isinstance(sub, ast.Set):
+                    extra |= {
+                        el.value
+                        for el in sub.elts
+                        if isinstance(el, ast.Constant) and isinstance(el.value, str)
+                    }
+    pro = {flag for name, flags in buckets.items() if name.startswith(prefix) for flag in flags}
+    return pro | extra
+
+
 def load_allowlist() -> set[str]:
     if not ALLOWLIST.exists():
         return set()
@@ -100,15 +161,18 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="Print all discovered gates and exit")
     args = parser.parse_args()
 
-    # Import features.py via direct file load (avoid app-level side effects)
-    sys.path.insert(0, str(MCP_ROOT))
-    try:
-        from config.features import _PRO_TIER_FLAGS  # type: ignore
-    except ImportError as exc:
-        print(f"ERROR: could not import config.features: {exc}", file=sys.stderr)
+    # Derive Pro flags by static analysis — importing config.features would pull
+    # heavy runtime deps (httpx via config.settings) the lint CI job doesn't install.
+    if not FEATURES_PY.exists():
+        print(f"ERROR: {FEATURES_PY.relative_to(REPO_ROOT)} not found", file=sys.stderr)
         return 2
-
-    pro_flags = set(_PRO_TIER_FLAGS)
+    pro_flags = pro_flags_from_source(FEATURES_PY)
+    if not pro_flags:
+        print(
+            f"ERROR: no Pro-tier flags parsed from {FEATURES_PY.relative_to(REPO_ROOT)}",
+            file=sys.stderr,
+        )
+        return 2
     gated = discover_gated_flags([MCP_ROOT, PLUGINS_ROOT])
     allowlist = load_allowlist()
 

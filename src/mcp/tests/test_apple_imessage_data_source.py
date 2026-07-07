@@ -5,8 +5,9 @@
 
 The ``ceridimessage`` Swift helper (a ``chat.db`` reader) isn't built or invoked
 in the test env (CI may not be on macOS). All subprocess calls are stubbed; we
-verify JSON parsing, configuration, error handling, and the **private_mode ≥ 2**
-gate. CeridIMessage signals a Full-Disk-Access TCC denial with exit code **77**.
+verify JSON parsing, configuration, error handling, and the **sensitive-domain
+retrieval opt-in** gate (Task 1.2e — decoupled from private_mode level).
+CeridIMessage signals a Full-Disk-Access TCC denial with exit code **77**.
 """
 from __future__ import annotations
 
@@ -19,11 +20,11 @@ from plugins.apple_imessage.data_source import AppleIMessageDataSource
 
 
 @pytest.fixture(autouse=True)
-def _private_mode_level_2():
-    """Default the instance to private_mode level 2 so the happy-path tests
-    exercise parsing. The gate test overrides this."""
+def _sensitive_domain_retrieval_opted_in():
+    """Default the instance to opted-in so the happy-path tests exercise
+    parsing. The gate test overrides this."""
     with patch(
-        "utils.domain_privacy.get_global_private_mode_level", return_value=2
+        "utils.domain_privacy.sensitive_domains_opted_in", return_value=True
     ):
         yield
 
@@ -114,21 +115,21 @@ class TestQuery:
         assert await AppleIMessageDataSource(helper_path=None).query("any") == []
 
 
-class TestPrivateModeGate:
+class TestSensitiveDomainRetrievalGate:
     @pytest.mark.asyncio
-    async def test_blocked_when_private_mode_below_2(self, helper_path):
-        """At private_mode < 2 the connector returns nothing AND never spawns
-        the helper (no chat.db access at all)."""
+    async def test_blocked_when_opted_out(self, helper_path):
+        """When the opt-in is off, the connector returns nothing AND never
+        spawns the helper (no chat.db access at all)."""
         ds = AppleIMessageDataSource(helper_path=helper_path)
         spawn = _make_proc_mock(_SCAN_OK)
-        with patch("utils.domain_privacy.get_global_private_mode_level", return_value=1), \
+        with patch("utils.domain_privacy.sensitive_domains_opted_in", return_value=False), \
              patch("asyncio.create_subprocess_exec", spawn):
             assert await ds.query("any") == []
         spawn.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_allowed_when_private_mode_2(self, helper_path):
+    async def test_allowed_when_opted_in(self, helper_path):
         ds = AppleIMessageDataSource(helper_path=helper_path)
-        with patch("utils.domain_privacy.get_global_private_mode_level", return_value=2), \
+        with patch("utils.domain_privacy.sensitive_domains_opted_in", return_value=True), \
              patch("asyncio.create_subprocess_exec", _make_proc_mock(_SCAN_OK)):
             assert len(await ds.query("any")) == 2

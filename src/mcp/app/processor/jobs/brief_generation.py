@@ -81,6 +81,28 @@ def _get_neo4j() -> Any:
     return get_neo4j()
 
 
+def _get_chroma() -> Any:
+    """Return the ChromaDB client singleton.
+
+    Lazy accessor so the module is importable without a live vector
+    store. Unit tests patch this function directly.
+    """
+    from app.deps import get_chroma
+
+    return get_chroma()
+
+
+def _get_redis() -> Any:
+    """Return the Redis client singleton.
+
+    Lazy accessor so the module is importable without a live cache.
+    Unit tests patch this function directly.
+    """
+    from app.deps import get_redis
+
+    return get_redis()
+
+
 # ---------------------------------------------------------------------------
 # Corpus assembly helper (sync, run via asyncio.to_thread)
 # ---------------------------------------------------------------------------
@@ -244,6 +266,48 @@ def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Claim verification (Task 2.1b — best-effort, never fails the job)
+# ---------------------------------------------------------------------------
+
+
+async def _verify_and_persist_claims(
+    driver: Any,
+    record: "BriefRecord",
+    target_date: str,
+) -> list[dict[str, Any]]:
+    """Best-effort claim-verification pass.
+
+    Runs claim extraction + KB verification against the brief's parsed
+    sections and persists a trust band per claim. Any failure — Chroma
+    down, LLM error, extraction error — is swallowed via
+    ``log_swallowed_error``; brief generation must never fail because
+    verification failed. Returns ``[]`` on any failure or when no
+    claims were surfaced, in which case the brief is still stored with
+    ``claim_ids=[]``.
+    """
+    from app.db.neo4j.briefs import save_verified_claims
+    from app.services.briefs.verification import verify_brief_claims
+
+    try:
+        claims = await verify_brief_claims(
+            record.sections,
+            chroma_client=_get_chroma(),
+            neo4j_driver=driver,
+            redis_client=_get_redis(),
+        )
+        if claims:
+            await asyncio.to_thread(save_verified_claims, driver, claims)
+        return claims
+    except Exception as exc:  # noqa: BLE001 — verification is best-effort by design
+        log_swallowed_error(
+            "processor.brief_generation.verify_claims",
+            exc,
+            context={"target_date": target_date},
+        )
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Job
 # ---------------------------------------------------------------------------
 
@@ -348,6 +412,15 @@ class BriefGenerationJob(BaseJob):
             notes_recent_7d,
         )
         await progress_cb(0.7)
+
+        # --- 2.5 (Task 2.1b) Best-effort claim verification ----------------
+        # Off the hot path: a verification failure must never fail brief
+        # generation. See _verify_and_persist_claims for the swallow.
+        claims = await _verify_and_persist_claims(driver, record, self._target_date)
+        if claims:
+            record = record.model_copy(
+                update={"claim_ids": [c["claim_id"] for c in claims]}
+            )
 
         # --- 3. Persist to Neo4j ------------------------------------------
         await brief_service.store(record, driver)

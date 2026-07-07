@@ -375,3 +375,93 @@ class TestHallucinationFastMode:
             },
         )
         assert res.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# F. truth_audit feature gate — Task 2.6b
+# ---------------------------------------------------------------------------
+
+
+class TestTruthAuditGate:
+    """The 7 verification/hallucination endpoints are gated behind the
+    community-tier ``truth_audit`` flag (default True). This makes the tier
+    contract explicit for enterprise builds that may flip it off, without
+    changing behavior for current (community/pro) users."""
+
+    @pytest.fixture
+    def gated_client(self):
+        """Same stubbed-dependency app as ``client``, but with the CeridError
+        handler registered so a raised ``FeatureGateError`` renders as 403
+        instead of a bare 500 — ``require_feature`` raises ``FeatureGateError``
+        directly, not ``HTTPException``."""
+        from app.error_handlers import register_cerid_error_handler
+        from app.routers import agents
+
+        fake_chroma = MagicMock()
+        fake_neo4j = MagicMock()
+        fake_redis = MagicMock()
+
+        app = FastAPI()
+        app.include_router(agents.router)
+        register_cerid_error_handler(app)
+
+        with (
+            patch.object(agents, "get_chroma", return_value=fake_chroma),
+            patch.object(agents, "get_neo4j", return_value=fake_neo4j),
+            patch.object(agents, "get_redis", return_value=fake_redis),
+        ):
+            yield TestClient(app, raise_server_exceptions=False)
+
+    def test_default_tier_does_not_gate_hallucination_check(self, client):
+        """``truth_audit`` defaults True — the gate must be a no-op for
+        current users. Uses fast mode to avoid exercising the full NLI
+        pipeline; only the gate's pass-through behavior is under test."""
+        res = client.post(
+            "/agent/hallucination",
+            json={
+                "response_text": "x" * 300,
+                "conversation_id": "gate-default",
+                "mode": "fast",
+            },
+        )
+        assert res.status_code != 403
+        assert res.status_code == 200, res.text
+
+    @pytest.mark.parametrize(
+        ("method", "path", "json_body"),
+        [
+            ("post", "/agent/hallucination",
+             {"response_text": "x" * 300, "conversation_id": "c1"}),
+            ("get", "/agent/hallucination/c1", None),
+            ("post", "/agent/hallucination/feedback",
+             {"conversation_id": "c1", "claim_index": 0, "correct": True}),
+            ("post", "/agent/verify-stream",
+             {"response_text": "x" * 300, "conversation_id": "c1"}),
+            ("post", "/verification/save",
+             {"conversation_id": "c1", "claims": [], "overall_score": 0.5}),
+            ("get", "/verification/c1", None),
+            ("post", "/agent/audit", {}),
+        ],
+        ids=[
+            "hallucination-check",
+            "hallucination-report",
+            "hallucination-feedback",
+            "verify-stream",
+            "verification-save",
+            "verification-get",
+            "audit",
+        ],
+    )
+    def test_forced_off_returns_403_for_all_gated_endpoints(
+        self, gated_client, method, path, json_body,
+    ):
+        from config.features import FEATURE_FLAGS
+
+        with patch.dict(FEATURE_FLAGS, {"truth_audit": False}):
+            call = getattr(gated_client, method)
+            res = call(path, json=json_body) if json_body is not None else call(path)
+
+        assert res.status_code == 403, res.text
+        body = res.json()
+        assert body["error_code"] == "FEATURE_GATE_ERROR"
+        assert "message" in body

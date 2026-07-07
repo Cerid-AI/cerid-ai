@@ -23,6 +23,7 @@ from app.deps import get_chroma, get_neo4j
 from config.features import CERID_MULTI_USER
 from core.retrieval.bm25 import rebuild_all as rebuild_bm25_all
 from core.utils.swallowed import log_swallowed_error
+from utils.encryption import decrypt_field
 from utils.query_cache import invalidate_cache_non_blocking
 
 
@@ -592,17 +593,25 @@ async def repair_collection(req: CollectionRepairRequest):
                 if not doc:
                     continue
                 try:
+                    replay_meta = {
+                        k: v for k, v in meta.items()
+                        if k in (
+                            "filename", "sub_category", "tags_json",
+                            "keywords_json", "summary", "client_source",
+                            "file_type",
+                        )
+                    }
+                    if replay_meta.get("summary"):
+                        # meta is the raw Chroma dump — "summary" may carry
+                        # the enc:v1: Chroma-only ciphertext (see
+                        # CHROMA_ENCRYPTED_FIELDS). decrypt_field no-ops on
+                        # plaintext; ingest_content re-encrypts the Chroma
+                        # copy and keeps Neo4j's summary cleartext.
+                        replay_meta["summary"] = decrypt_field(str(replay_meta["summary"]))
                     ingest_content(
                         content=doc,
                         domain=domain,
-                        metadata={
-                            k: v for k, v in meta.items()
-                            if k in (
-                                "filename", "sub_category", "tags_json",
-                                "keywords_json", "summary", "client_source",
-                                "file_type",
-                            )
-                        },
+                        metadata=replay_meta,
                     )
                     replayed += 1
                 except Exception as e:

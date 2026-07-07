@@ -30,6 +30,7 @@ import { OpeningSequence } from "@/components/ui/opening-sequence"
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 const SubjectsPane = lazy(() => import("@/components/subjects/subjects-pane"))
 const SourcesPane = lazy(() => import("@/components/sources/sources-pane"))
+const BriefsPane = lazy(() => import("@/components/briefs/briefs-pane"))
 const QuickCaptureFab = lazy(() =>
   import("@/components/quick-capture/quick-capture-fab").then((m) => ({ default: m.QuickCaptureFab })),
 )
@@ -189,12 +190,14 @@ export default function App() {
           case "settings":
           case "subjects":
           case "sources":
+          case "briefs":
             return (
               <PaneErrorBoundary label={activePane} queryClient={queryClient}>
                 <Suspense fallback={<PaneLoader />}>
                   {activePane === "settings" && <SettingsPane />}
                   {activePane === "subjects" && <SubjectsPane />}
                   {activePane === "sources" && <SourcesPane />}
+                  {activePane === "briefs" && <BriefsPane />}
                 </Suspense>
               </PaneErrorBoundary>
             )
@@ -207,11 +210,12 @@ export default function App() {
       }}
     </AppLayout>
     {/* Quick-capture FAB — visible from every pane except Sources (own
-        "Add a new source" FAB, BETA-001) and Subjects (Constellation
+        "Add a new source" FAB, BETA-001), Subjects (Constellation
         anchors its view-mode toggle + map settings in the same corner;
-        the fixed z-40 FAB sat on top and swallowed their clicks).
-        ⌘⇧N still opens quick capture from both panes. */}
-    {currentPane !== "sources" && currentPane !== "subjects" && (
+        the fixed z-40 FAB sat on top and swallowed their clicks), and
+        Briefs (a reading surface — no capture affordance needed there).
+        ⌘⇧N still opens quick capture from the excluded panes. */}
+    {currentPane !== "sources" && currentPane !== "subjects" && currentPane !== "briefs" && (
       <Suspense fallback={null}>
         <QuickCaptureFab />
       </Suspense>

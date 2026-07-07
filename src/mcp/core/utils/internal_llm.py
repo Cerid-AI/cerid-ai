@@ -23,7 +23,9 @@ import asyncio
 import json as _json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from http import HTTPStatus
 from typing import Any
 
@@ -34,6 +36,26 @@ from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.internal_llm")
+
+# Contextvar-scoped (provider, model) override for call_internal_llm. Set by
+# app.processor.worker via llm_call_override() to route a single hybrid-mode
+# job to the API tier without touching per-stage routing config. Concurrent
+# worker tasks each get their own contextvar copy, so an override set in one
+# task's context never leaks into another concurrently-running job.
+_llm_override: ContextVar[tuple[str, str] | None] = ContextVar(
+    "_llm_override", default=None
+)
+
+
+@contextmanager
+def llm_call_override(provider: str, model: str) -> Iterator[None]:
+    """Scope a (provider, model) override for every ``call_internal_llm`` call inside the block."""
+    token = _llm_override.set((provider, model))
+    try:
+        yield
+    finally:
+        _llm_override.reset(token)
+
 
 # Shared connection pool for Ollama calls (avoids per-request TCP handshake)
 _ollama_client: httpx.AsyncClient | None = None
@@ -187,6 +209,9 @@ async def call_internal_llm(
     default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
     provider = _resolve_stage_provider(stage, default_provider)
     resolved_model = _resolve_stage_model(stage)
+    override = _llm_override.get()
+    if override is not None:
+        provider, resolved_model = override
     log: logging.Logger | logging.LoggerAdapter = logger
     if stage:
         log = logging.LoggerAdapter(logger, {"llm_stage": stage})

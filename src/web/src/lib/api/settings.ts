@@ -109,6 +109,13 @@ export async function fetchSettings(): Promise<ServerSettings> {
   return res.json()
 }
 
+// Task 1.3b/1.3c — data-egress transparency panel
+export async function fetchEgressReport(): Promise<import("../types").EgressReport> {
+  const res = await fetch(`${MCP_BASE}/settings/egress`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Egress report fetch failed: ${res.status}`))
+  return res.json()
+}
+
 export async function updateSettings(settings: SettingsUpdate): Promise<{ status: string; updated: Record<string, unknown> }> {
   const res = await fetch(`${MCP_BASE}/settings`, {
     method: "PATCH",

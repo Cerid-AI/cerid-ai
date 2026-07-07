@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -206,3 +207,121 @@ class TestRAGPipelineSettings:
         # Clean up
         features_mod.ENABLE_MMR_DIVERSITY = False
         config.ENABLE_MMR_DIVERSITY = False  # type: ignore[assignment]
+
+
+class TestProcessorModeSettings:
+    """Task 2.5c — runtime PATCH of PROCESSOR_MODE / cap fields.
+
+    ``config.PROCESSOR_*`` are mutated in-process (both the config package
+    namespace and the config.settings submodule — see the handler's dual-
+    mutation comment). Snapshot + restore both surfaces so a test here can
+    never leak a non-default mode into unrelated worker/model_policy tests.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _restore_processor_settings(self):
+        import config
+
+        fields = (
+            "PROCESSOR_MODE",
+            "PROCESSOR_MONTHLY_CAP_USD",
+            "PROCESSOR_API_CAP_FALLBACK",
+            "PROCESSOR_API_THRESHOLD_TOKENS",
+        )
+        saved = {f: getattr(config, f) for f in fields}
+        saved_settings = {f: getattr(config.settings, f) for f in fields}
+        yield
+        for f, v in saved.items():
+            setattr(config, f, v)
+        for f, v in saved_settings.items():
+            setattr(config.settings, f, v)
+
+    def test_get_includes_processor_fields(self):
+        client = TestClient(_make_app())
+        data = client.get("/settings").json()
+
+        assert data["processor_mode"] == "local"
+        assert data["processor_monthly_cap_usd"] == 5.0
+        assert data["processor_api_cap_fallback"] == "local"
+        assert data["processor_api_threshold_tokens"] == 4000
+
+    def test_patch_processor_mode_updates_both_surfaces(self):
+        import config
+
+        client = TestClient(_make_app())
+        response = client.patch("/settings", json={"processor_mode": "hybrid"})
+
+        assert response.status_code == 200
+        assert response.json()["updated"]["processor_mode"] == "hybrid"
+        assert config.PROCESSOR_MODE == "hybrid"
+        assert config.settings.PROCESSOR_MODE == "hybrid"
+
+    def test_patch_processor_mode_normalizes_case(self):
+        client = TestClient(_make_app())
+        response = client.patch("/settings", json={"processor_mode": "  HYBRID  "})
+
+        assert response.status_code == 200
+        assert response.json()["updated"]["processor_mode"] == "hybrid"
+
+    def test_patch_processor_mode_rejects_invalid(self):
+        client = TestClient(_make_app())
+        response = client.patch("/settings", json={"processor_mode": "bogus"})
+
+        assert response.status_code == 400
+        assert "processor_mode" in response.json()["detail"]
+
+    def test_patch_processor_monthly_cap_usd(self):
+        import config
+
+        client = TestClient(_make_app())
+        response = client.patch(
+            "/settings", json={"processor_monthly_cap_usd": 12.5}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["updated"]["processor_monthly_cap_usd"] == 12.5
+        assert config.PROCESSOR_MONTHLY_CAP_USD == 12.5
+        assert config.settings.PROCESSOR_MONTHLY_CAP_USD == 12.5
+
+    def test_patch_processor_monthly_cap_usd_rejects_negative(self):
+        client = TestClient(_make_app())
+        response = client.patch(
+            "/settings", json={"processor_monthly_cap_usd": -1}
+        )
+
+        assert response.status_code == 422
+
+    def test_patch_processor_api_cap_fallback_rejects_invalid(self):
+        client = TestClient(_make_app())
+        response = client.patch(
+            "/settings", json={"processor_api_cap_fallback": "nope"}
+        )
+
+        assert response.status_code == 400
+        assert "processor_api_cap_fallback" in response.json()["detail"]
+
+    def test_patch_processor_api_cap_fallback_updates_both_surfaces(self):
+        import config
+
+        client = TestClient(_make_app())
+        response = client.patch(
+            "/settings", json={"processor_api_cap_fallback": "hold"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["updated"]["processor_api_cap_fallback"] == "hold"
+        assert config.PROCESSOR_API_CAP_FALLBACK == "hold"
+        assert config.settings.PROCESSOR_API_CAP_FALLBACK == "hold"
+
+    def test_patch_processor_api_threshold_tokens(self):
+        import config
+
+        client = TestClient(_make_app())
+        response = client.patch(
+            "/settings", json={"processor_api_threshold_tokens": 8000}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["updated"]["processor_api_threshold_tokens"] == 8000
+        assert config.PROCESSOR_API_THRESHOLD_TOKENS == 8000
+        assert config.settings.PROCESSOR_API_THRESHOLD_TOKENS == 8000

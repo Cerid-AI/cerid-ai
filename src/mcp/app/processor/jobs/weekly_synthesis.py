@@ -79,6 +79,28 @@ def _get_neo4j() -> Any:
     return get_neo4j()
 
 
+def _get_chroma() -> Any:
+    """Return the ChromaDB client singleton.
+
+    Lazy accessor so the module is importable without a live vector
+    store. Unit tests patch this function directly.
+    """
+    from app.deps import get_chroma
+
+    return get_chroma()
+
+
+def _get_redis() -> Any:
+    """Return the Redis client singleton.
+
+    Lazy accessor so the module is importable without a live cache.
+    Unit tests patch this function directly.
+    """
+    from app.deps import get_redis
+
+    return get_redis()
+
+
 # ---------------------------------------------------------------------------
 # Vault snapshot helper (sync, run via asyncio.to_thread)
 # ---------------------------------------------------------------------------
@@ -238,6 +260,48 @@ def _build_vault_snapshot(driver: Any, week_ending: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Claim verification (Task 2.1b — best-effort, never fails the job)
+# ---------------------------------------------------------------------------
+
+
+async def _verify_and_persist_claims(
+    driver: Any,
+    record: "BriefRecord",
+    week_ending: str,
+) -> list[dict[str, Any]]:
+    """Best-effort claim-verification pass.
+
+    Mirrors ``brief_generation._verify_and_persist_claims`` — runs claim
+    extraction + KB verification against the synthesis's parsed sections
+    and persists a trust band per claim. Any failure is swallowed via
+    ``log_swallowed_error``; the synthesis must never fail because
+    verification failed. Returns ``[]`` on any failure or when no claims
+    were surfaced, in which case the brief is still stored with
+    ``claim_ids=[]``.
+    """
+    from app.db.neo4j.briefs import save_verified_claims
+    from app.services.briefs.verification import verify_brief_claims
+
+    try:
+        claims = await verify_brief_claims(
+            record.sections,
+            chroma_client=_get_chroma(),
+            neo4j_driver=driver,
+            redis_client=_get_redis(),
+        )
+        if claims:
+            await asyncio.to_thread(save_verified_claims, driver, claims)
+        return claims
+    except Exception as exc:  # noqa: BLE001 — verification is best-effort by design
+        log_swallowed_error(
+            "processor.weekly_synthesis.verify_claims",
+            exc,
+            context={"week_ending": week_ending},
+        )
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Job
 # ---------------------------------------------------------------------------
 
@@ -373,6 +437,13 @@ class WeeklySynthesisJob(BaseJob):
             week_window=week_window,
         )
         await progress_cb(0.7)
+
+        # --- 3.5 (Task 2.1b) Best-effort claim verification ----------------
+        claims = await _verify_and_persist_claims(driver, record, self._week_ending)
+        if claims:
+            record = record.model_copy(
+                update={"claim_ids": [c["claim_id"] for c in claims]}
+            )
 
         # --- 4. Persist to Neo4j ------------------------------------------
         await brief_service.store(record, driver)

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import SystemCategory from "@/components/settings/categories/system"
@@ -78,11 +78,45 @@ const mockKBStats = {
   },
 }
 
+const mockSyncStatus = {
+  sync_dir: "/data/cerid-sync",
+  manifest: {
+    machine_id: "test-machine",
+    timestamp: "2026-06-01T00:00:00Z",
+    sync_format_version: 1,
+    last_exported_at: "2026-06-01T00:00:00Z",
+    is_incremental: true,
+    domains: ["code"],
+    files: {},
+  },
+  local: {
+    neo4j_artifacts: 12,
+    neo4j_domains: 4,
+    neo4j_relationships: 30,
+    neo4j_memories: 6,
+    neo4j_entities: 9,
+    chroma_chunks: { code: 44 },
+    redis_entries: 7,
+  },
+  sync: {
+    neo4j_artifacts: 10, neo4j_domains: 4, neo4j_relationships: 25,
+    neo4j_memories: 5, neo4j_entities: 8,
+    chroma_chunks: { code: 35 },
+    redis_entries: 2,
+  },
+  diff: {
+    neo4j_artifacts: 2, neo4j_domains: 0, neo4j_relationships: 5,
+    neo4j_memories: 1, neo4j_entities: 1,
+    chroma_chunks: { code: 9 },
+    redis_entries: 5,
+  },
+}
+
 function mockApis() {
   return vi.fn().mockImplementation((url: string) => {
     if (url.includes("/setup/system-check")) return ok(mockSystemCheck)
     if (url.includes("/system/storage")) return ok(mockStorage)
-    if (url.includes("/sync/status")) return ok({ last_export: null, last_import: null, status: "idle" })
+    if (url.includes("/sync/status")) return ok(mockSyncStatus)
     if (url.includes("/admin/kb/stats")) return ok(mockKBStats)
     return ok({})
   })
@@ -163,6 +197,74 @@ describe("SystemCategory — sync", () => {
 
 // KB Maintenance moved to the Knowledge category (ST12) — see
 // knowledge-category.test.tsx "Knowledge — KB maintenance".
+
+describe("SystemCategory — backup", () => {
+  it("loading: shows skeleton", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(screen.getByText("Backup")).toBeInTheDocument()
+    expect(document.querySelectorAll("[data-slot='skeleton']").length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("error: sync/status failure shows retry alert", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/sync/status")) return Promise.reject(new Error("status failed"))
+      return mockApis()(url)
+    }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText(/Failed to load backup status/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument()
+  })
+
+  it("success: renders last export time and per-store counts", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText(/Last incremental export/i)
+    const backupCard = screen.getByText("Backup").closest("[data-slot='card']") as HTMLElement
+    expect(within(backupCard).getByText("12")).toBeInTheDocument() // artifacts
+    expect(within(backupCard).getByText("6")).toBeInTheDocument() // memories
+    expect(within(backupCard).getByText("9")).toBeInTheDocument() // entities
+    expect(within(backupCard).getByText("44")).toBeInTheDocument() // total chroma chunks
+    expect(within(backupCard).getByText("7")).toBeInTheDocument() // redis entries
+  })
+
+  it("never exported: renders empty state without crashing", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/sync/status")) return ok({ ...mockSyncStatus, manifest: null })
+      return mockApis()(url)
+    }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText("No export yet")).toBeInTheDocument()
+  })
+
+  it("Full backup export button sends { full: true } and shows the result", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/sync/export")) {
+        return ok({ neo4j: {}, chroma: {}, bm25: {}, redis: 0, tombstones: 0, manifest: {} })
+      }
+      return mockApis()(url)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+
+    const button = await screen.findByRole("button", { name: "Full backup export" })
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      const exportCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/sync/export"))
+      expect(exportCall).toBeTruthy()
+      expect(JSON.parse((exportCall![1] as RequestInit).body as string)).toEqual({ full: true })
+    })
+    expect(await screen.findByText(/Full backup export complete/i)).toBeInTheDocument()
+  })
+
+  it("is axe-clean", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    const { container } = render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText(/Last incremental export/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})
 
 describe("SystemCategory — accessibility", () => {
   it("is axe-clean", async () => {

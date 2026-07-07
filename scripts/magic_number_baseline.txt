@@ -10,7 +10,7 @@
 # counts — where a named constant would add indirection, not clarity
 # (Phase-0 assessment, tasks/2026-06-30-sprint-plr-magic-numbers.md). The
 # ratchet keeps them shrink-only; extract opportunistically, never regress.
-# total=247 files=82
+# total=246 files=81
 3	src/mcp/app/agents/assembler.py
 1	src/mcp/app/agents/decomposer.py
 1	src/mcp/app/data_sources/base.py
@@ -18,7 +18,6 @@
 1	src/mcp/app/data_sources/rss_feed.py
 3	src/mcp/app/data_sources/wikipedia.py
 1	src/mcp/app/data_sources/wolfram.py
-1	src/mcp/app/db/neo4j/decomposition.py
 2	src/mcp/app/eval/harness.py
 4	src/mcp/app/eval/memory_efficacy.py
 1	src/mcp/app/mcp_tools/batch.py

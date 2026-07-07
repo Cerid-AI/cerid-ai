@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
@@ -28,6 +28,14 @@ vi.mock("@/lib/api", () => ({
     lightweight_recommended: false,
     archive_path_exists: false,
     default_archive_path: "~/cerid-archive",
+  }),
+  fetchModelDoctor: vi.fn().mockResolvedValue({
+    hardware_profile: "unknown",
+    ok: true,
+    findings: [],
+    known_good_local: {},
+    candidate_upgrades: {},
+    catalog_size: 0,
   }),
   uploadFile: vi.fn(),
   queryKB: vi.fn(),
@@ -84,6 +92,7 @@ vi.mock("@/lib/log-swallowed", () => ({
 
 import { SetupWizard } from "@/components/setup/setup-wizard"
 import { FirstDocumentStep } from "@/components/setup/first-document-step"
+import { fetchSystemCheck } from "@/lib/api"
 
 const noop = () => {}
 
@@ -122,6 +131,63 @@ describe("SetupWizard", () => {
   it("renders dialog title for accessibility", () => {
     renderWizard()
     expect(screen.getByText("Cerid AI Setup")).toBeInTheDocument()
+  })
+
+  // ---- Task 1.3a: local-only mode gate on the API Keys step ----
+
+  it("enables Next on the API Keys step when a local backend is detected, without an OpenRouter key", async () => {
+    vi.mocked(fetchSystemCheck).mockResolvedValueOnce({
+      ram_gb: 16,
+      docker_running: true,
+      env_exists: true,
+      env_keys_present: [],
+      ollama_detected: true,
+      ollama_url: "http://localhost:11434",
+      ollama_models: ["llama3.2:3b"],
+      lightweight_recommended: false,
+      archive_path_exists: false,
+      default_archive_path: "~/cerid-archive",
+      os: "darwin",
+      cpu: "Apple M1",
+      cpu_cores: 8,
+      gpu: "Apple M1 GPU",
+      gpu_acceleration: "metal",
+    })
+    renderWizard()
+    // Wait for the system check to resolve — SystemCheckCard runs on step 0
+    // and auto-enables state.ollama.enabled once ollama_detected is true.
+    await waitFor(() => expect(fetchSystemCheck).toHaveBeenCalled())
+    await screen.findByText(/Detected \(1 model\)/i)
+
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+    expect(screen.getByText(/A local inference backend was detected/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^next$/i })).toBeEnabled()
+  })
+
+  it("keeps Next disabled on the API Keys step when no local backend is detected and no key is validated", async () => {
+    vi.mocked(fetchSystemCheck).mockResolvedValueOnce({
+      ram_gb: 16,
+      docker_running: true,
+      env_exists: true,
+      env_keys_present: [],
+      ollama_detected: false,
+      ollama_url: null,
+      ollama_models: [],
+      lightweight_recommended: false,
+      archive_path_exists: false,
+      default_archive_path: "~/cerid-archive",
+      os: "darwin",
+      cpu: "Apple M1",
+      cpu_cores: 8,
+      gpu: "Apple M1 GPU",
+      gpu_acceleration: "metal",
+    })
+    renderWizard()
+    await waitFor(() => expect(fetchSystemCheck).toHaveBeenCalled())
+    await screen.findByText(/Not found/i)
+
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+    expect(screen.getByRole("button", { name: /^next$/i })).toBeDisabled()
   })
 
   it("step 6 renders both tabs via FirstDocumentStep", () => {

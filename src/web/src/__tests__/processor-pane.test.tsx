@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
@@ -15,17 +15,20 @@ vi.mock("@/hooks/use-processor", () => ({
   useProcessorStatus: vi.fn(),
   useProcessorRecent: vi.fn(),
   useProcessorMutations: vi.fn(),
+  useProcessorSettingsMutation: vi.fn(),
 }))
 
 import {
   useProcessorStatus,
   useProcessorRecent,
   useProcessorMutations,
+  useProcessorSettingsMutation,
 } from "@/hooks/use-processor"
 
 const mockUseStatus = useProcessorStatus as ReturnType<typeof vi.fn>
 const mockUseRecent = useProcessorRecent as ReturnType<typeof vi.fn>
 const mockUseMutations = useProcessorMutations as ReturnType<typeof vi.fn>
+const mockUseSettingsMutation = useProcessorSettingsMutation as ReturnType<typeof vi.fn>
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -40,6 +43,9 @@ function makeStatus(overrides: Partial<ProcessorStatus> = {}): ProcessorStatus {
     jobs_completed_24h: 12,
     cost_usd_7d: 0.42,
     throttled_ticks_1h: 3,
+    mode: "local",
+    monthly_spend_usd: 0,
+    cap_usd: 5,
     ...overrides,
   }
 }
@@ -72,6 +78,11 @@ const nopMutations = {
   isPending: false,
 }
 
+const nopSettingsMutation = {
+  updateMode: vi.fn().mockResolvedValue({ status: "ok", updated: {} }),
+  isPending: false,
+}
+
 function createWrapper() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -97,6 +108,7 @@ beforeEach(async () => {
     isError: false,
   })
   mockUseMutations.mockReturnValue(nopMutations)
+  mockUseSettingsMutation.mockReturnValue(nopSettingsMutation)
 
   const mod = await import("@/components/processor/processor-pane")
   ProcessorPane = mod.default ?? mod.ProcessorPane
@@ -363,6 +375,132 @@ describe("ProcessorPane — metrics triplet", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Mode badge + selector (Task 2.5d)
+// ---------------------------------------------------------------------------
+
+describe("ProcessorPane — mode selector", () => {
+  it("renders the mode badge for the current mode", async () => {
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "hybrid" }),
+      isLoading: false,
+      isError: false,
+    })
+    render(<ProcessorPane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByTestId("processor-mode-badge").textContent).toMatch(/hybrid/i)
+    })
+  })
+
+  it("renders the current mode as the Select's value", async () => {
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "disabled" }),
+      isLoading: false,
+      isError: false,
+    })
+    render(<ProcessorPane />, { wrapper: createWrapper() })
+    const trigger = await screen.findByTestId("processor-mode-select")
+    expect(trigger.textContent).toMatch(/disabled/i)
+  })
+
+  it("selecting a different mode fires the settings mutation with the correct payload", async () => {
+    const user = userEvent.setup()
+    const updateModeFn = vi.fn().mockResolvedValue({ status: "ok", updated: {} })
+    mockUseSettingsMutation.mockReturnValue({ updateMode: updateModeFn, isPending: false })
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "local" }),
+      isLoading: false,
+      isError: false,
+    })
+    render(<ProcessorPane />, { wrapper: createWrapper() })
+
+    const trigger = await screen.findByTestId("processor-mode-select")
+    await user.click(trigger)
+    const option = await screen.findByRole("option", { name: /hybrid/i })
+    await user.click(option)
+
+    expect(updateModeFn).toHaveBeenCalledWith("hybrid")
+  })
+
+  it("disables the Select while the settings mutation is pending", async () => {
+    mockUseSettingsMutation.mockReturnValue({ updateMode: vi.fn(), isPending: true })
+    mockUseStatus.mockReturnValue({
+      data: makeStatus(),
+      isLoading: false,
+      isError: false,
+    })
+    render(<ProcessorPane />, { wrapper: createWrapper() })
+    const trigger = await screen.findByTestId("processor-mode-select")
+    expect(trigger).toBeDisabled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Monthly-spend meter (Task 2.5d)
+// ---------------------------------------------------------------------------
+
+describe("ProcessorPane — monthly-spend meter", () => {
+  it("renders the spend percentage and dollar figures in hybrid mode", async () => {
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "hybrid", monthly_spend_usd: 1.2, cap_usd: 5 }),
+      isLoading: false,
+      isError: false,
+    })
+    render(<ProcessorPane />, { wrapper: createWrapper() })
+    const meter = await screen.findByTestId("processor-spend-meter")
+    const bar = within(meter).getByRole("progressbar")
+    expect(bar).toHaveAttribute("aria-valuenow", "24")
+    expect(screen.getByText("$1.20 / $5.00 this month")).toBeInTheDocument()
+  })
+
+  it("colours the fill amber at 80%+ and red at 100%+", async () => {
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "hybrid", monthly_spend_usd: 4.5, cap_usd: 5 }),
+      isLoading: false,
+      isError: false,
+    })
+    const { container, rerender } = render(<ProcessorPane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(container.querySelector("[class*='bg-amber-500']")).toBeInTheDocument()
+    })
+
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "hybrid", monthly_spend_usd: 6, cap_usd: 5 }),
+      isLoading: false,
+      isError: false,
+    })
+    rerender(<ProcessorPane />)
+    await waitFor(() => {
+      expect(container.querySelector("[class*='bg-red-500']")).toBeInTheDocument()
+    })
+  })
+
+  it("renders the no-cap-set fallback instead of NaN when cap_usd is 0", async () => {
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "hybrid", monthly_spend_usd: 0.5, cap_usd: 0 }),
+      isLoading: false,
+      isError: false,
+    })
+    render(<ProcessorPane />, { wrapper: createWrapper() })
+    const note = await screen.findByTestId("processor-spend-note")
+    expect(note.textContent).toMatch(/no cap set/i)
+    expect(note.textContent).not.toMatch(/NaN/)
+    expect(screen.queryByTestId("processor-spend-meter")).not.toBeInTheDocument()
+  })
+
+  it("renders a muted note instead of a bar when mode is not hybrid", async () => {
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "local", monthly_spend_usd: 0, cap_usd: 5 }),
+      isLoading: false,
+      isError: false,
+    })
+    render(<ProcessorPane />, { wrapper: createWrapper() })
+    const note = await screen.findByTestId("processor-spend-note")
+    expect(note.textContent).toMatch(/hybrid mode only/i)
+    expect(screen.queryByTestId("processor-spend-meter")).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // axe accessibility
 // ---------------------------------------------------------------------------
 
@@ -403,5 +541,29 @@ describe("ProcessorPane — axe-clean", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = await axe(container as any)
     expect(results).toHaveNoViolations()
+  })
+
+  it("is axe-clean in error state", async () => {
+    mockUseStatus.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+    const { container } = render(<ProcessorPane />, { wrapper: createWrapper() })
+    await waitFor(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const results = await axe(container as any)
+      expect(results).toHaveNoViolations()
+    })
+  })
+
+  it("is axe-clean in hybrid mode with the mode select and spend meter visible", async () => {
+    mockUseStatus.mockReturnValue({
+      data: makeStatus({ mode: "hybrid", monthly_spend_usd: 1.2, cap_usd: 5 }),
+      isLoading: false,
+      isError: false,
+    })
+    const { container } = render(<ProcessorPane />, { wrapper: createWrapper() })
+    await waitFor(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const results = await axe(container as any)
+      expect(results).toHaveNoViolations()
+    })
   })
 })

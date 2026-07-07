@@ -7,15 +7,18 @@ __all__ = [
     # Constants
     "MANIFEST_FILENAME", "ARTIFACTS_JSONL", "DOMAINS_JSONL",
     "RELATIONSHIPS_JSONL", "AUDIT_LOG_JSONL",
+    "MEMORIES_JSONL", "MEMORY_EDGES_JSONL", "ENTITIES_JSONL", "ENTITY_EDGES_JSONL",
     "NEO4J_SUBDIR", "CHROMA_SUBDIR", "BM25_SUBDIR", "REDIS_SUBDIR",
     "CHROMA_BATCH_SIZE",
     # Helpers
     "_default_sync_dir", "_ensure_dir", "_sha256_file",
     "_count_jsonl_lines", "_write_jsonl", "_iter_jsonl",
     # Export
-    "export_neo4j", "export_chroma", "export_bm25", "export_redis", "export_all",
+    "export_neo4j", "export_chroma", "export_bm25", "export_redis",
+    "export_memories", "export_entities", "export_conversations", "export_all",
     # Import
-    "import_neo4j", "import_chroma", "import_bm25", "import_redis", "import_all",
+    "import_neo4j", "import_chroma", "import_bm25", "import_redis",
+    "import_memories", "import_entities", "import_conversations", "import_all",
     # Import helpers (ChromaDB)
     "_chroma_ensure_collection", "_chroma_get_collection_id", "_chroma_get_all_ids",
     # Manifest
@@ -36,7 +39,11 @@ from app.sync._helpers import (  # noqa: F401,E402
     CHROMA_BATCH_SIZE,
     CHROMA_SUBDIR,
     DOMAINS_JSONL,
+    ENTITIES_JSONL,
+    ENTITY_EDGES_JSONL,
     MANIFEST_FILENAME,
+    MEMORIES_JSONL,
+    MEMORY_EDGES_JSONL,
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
@@ -58,6 +65,9 @@ from app.sync.export import (  # noqa: F401,E402
     export_all,
     export_bm25,
     export_chroma,
+    export_conversations,
+    export_entities,
+    export_memories,
     export_neo4j,
     export_redis,
 )
@@ -68,6 +78,9 @@ from app.sync.import_ import (  # noqa: F401,E402
     import_all,
     import_bm25,
     import_chroma,
+    import_conversations,
+    import_entities,
+    import_memories,
     import_neo4j,
     import_redis,
 )

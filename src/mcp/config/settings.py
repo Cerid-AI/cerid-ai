@@ -1202,6 +1202,19 @@ PRIVATE_MODE_ENABLED: bool = os.getenv("CERID_PRIVATE_MODE", "false").lower() ==
 PRIVATE_MODE_LEVEL: int = int(os.getenv("CERID_PRIVATE_MODE_LEVEL", "1"))
 
 # ---------------------------------------------------------------------------
+# Sensitive-Domain Retrieval (messages/imessage) — dedicated opt-in
+# ---------------------------------------------------------------------------
+# Orthogonal to the private-mode isolation ladder above (Task 1.2e): the
+# ladder controls how much of a session is persisted/exposed, while this
+# controls whether privacy-sensitive KB domains (iMessage) are ever eligible
+# to surface in retrieval at all. Defaults OFF — the privacy-safe direction.
+# Runtime-mutable via PATCH /settings (see app/routers/settings.py); a
+# restart resets to the env default, which is also the safe direction.
+SENSITIVE_DOMAIN_RETRIEVAL_ENABLED: bool = os.getenv(
+    "SENSITIVE_DOMAIN_RETRIEVAL_ENABLED", "false",
+).lower() in ("true", "1", "yes")
+
+# ---------------------------------------------------------------------------
 # Privacy — Email Header Anonymization
 # ---------------------------------------------------------------------------
 # When true, From/To/Cc headers in .eml/.mbox files are redacted during
@@ -1424,6 +1437,15 @@ GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
 MICROSOFT_OAUTH_CLIENT_ID = os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "")
 MICROSOFT_OAUTH_CLIENT_SECRET = os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET", "")
 MICROSOFT_OAUTH_TENANT = os.getenv("MICROSOFT_OAUTH_TENANT", "common")
+
+# ---------------------------------------------------------------------------
+# Background Processor — mode contract (docs/BACKGROUND_JOBS.md §9)
+# ---------------------------------------------------------------------------
+PROCESSOR_MODE = os.getenv("PROCESSOR_MODE", "local")  # local | hybrid | disabled
+PROCESSOR_API_THRESHOLD_TOKENS = int(os.getenv("PROCESSOR_API_THRESHOLD_TOKENS", "4000"))
+PROCESSOR_MONTHLY_CAP_USD = float(os.getenv("PROCESSOR_MONTHLY_CAP_USD", "5"))
+PROCESSOR_API_CAP_FALLBACK = os.getenv("PROCESSOR_API_CAP_FALLBACK", "local")  # local | hold
+WORKER_LOAD_CEILING = os.getenv("WORKER_LOAD_CEILING", "auto")  # auto | <float>
 
 if not NEO4J_PASSWORD:
     _config_logger.warning(

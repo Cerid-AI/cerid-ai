@@ -72,16 +72,19 @@ class TestFieldEncryptor:
         assert enc.decrypt(plain) == plain
 
     def test_different_keys_cannot_decrypt(self):
-        """Different keys cannot decrypt each other's ciphertext."""
-        from cryptography.fernet import InvalidToken
+        """Different keys cannot decrypt each other's ciphertext.
 
+        decrypt() fails open on InvalidToken (rotated/foreign-key ciphertext)
+        — this is exactly the shape of ciphertext the recovery/repair call
+        sites encounter after a key rotation, so it must degrade to
+        "return unchanged" rather than raise.
+        """
         enc1, _ = self._make_encryptor()
         enc2, _ = self._make_encryptor()
 
         encrypted = enc1.encrypt("secret data")
-        # enc2 should fail to decrypt — InvalidToken is raised
-        with pytest.raises(InvalidToken):
-            enc2.decrypt(encrypted)
+        result = enc2.decrypt(encrypted)
+        assert result == encrypted
 
     def test_key_hash_is_stable(self):
         """Same key produces same hash."""

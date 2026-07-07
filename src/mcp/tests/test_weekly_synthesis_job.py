@@ -224,6 +224,131 @@ class TestRunFailure:
 
 
 # ---------------------------------------------------------------------------
+# Claim verification — best-effort (Task 2.1b)
+# ---------------------------------------------------------------------------
+
+
+class TestClaimVerificationBestEffort:
+    """A verification failure must never block synthesis persistence."""
+
+    async def test_verification_failure_does_not_block_store(self):
+        job = _make_job()
+        record = _make_brief_record()
+        record.claim_ids = []
+
+        mock_service = AsyncMock()
+        mock_service.generate_weekly.return_value = record
+        mock_service.store.return_value = None
+
+        with (
+            _patch_service_factory(mock_service),
+            patch(
+                "app.processor.jobs.weekly_synthesis._get_neo4j",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis._build_vault_snapshot",
+                return_value="vault snapshot text",
+            ),
+            patch(
+                "app.services.contradiction_log.list_recent",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis._get_chroma",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis._get_redis",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.services.briefs.verification.verify_brief_claims",
+                new=AsyncMock(side_effect=RuntimeError("chroma down")),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis.log_swallowed_error"
+            ) as mock_log,
+        ):
+            result = await job.run(_noop_progress)
+
+        mock_service.store.assert_awaited_once()
+        stored_record = mock_service.store.call_args[0][0]
+        assert stored_record is record
+        assert stored_record.claim_ids == []
+        assert isinstance(result, JobResult)
+        assert result.metadata["brief_id"] == record.brief_id
+        assert result.metadata["status"] == record.status
+
+        mock_log.assert_called_once()
+        assert mock_log.call_args.args[0] == "processor.weekly_synthesis.verify_claims"
+
+    async def test_persist_failure_does_not_set_claim_ids(self):
+        """Verification succeeding but the Neo4j persist raising must not
+        leave ``record.claim_ids`` pointing at unpersisted claims — the
+        swallow boundary wraps both the verify AND the save call.
+        """
+        job = _make_job()
+        record = _make_brief_record()
+        record.claim_ids = []
+
+        mock_service = AsyncMock()
+        mock_service.generate_weekly.return_value = record
+        mock_service.store.return_value = None
+
+        surfaced_claims = [
+            {"claim_id": "c1", "text": "claim text", "band": "verified", "source_ids": []}
+        ]
+
+        with (
+            _patch_service_factory(mock_service),
+            patch(
+                "app.processor.jobs.weekly_synthesis._get_neo4j",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis._build_vault_snapshot",
+                return_value="vault snapshot text",
+            ),
+            patch(
+                "app.services.contradiction_log.list_recent",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis._get_chroma",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis._get_redis",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.services.briefs.verification.verify_brief_claims",
+                new=AsyncMock(return_value=surfaced_claims),
+            ),
+            patch(
+                "app.db.neo4j.briefs.save_verified_claims",
+                side_effect=RuntimeError("neo4j write failed"),
+            ),
+            patch(
+                "app.processor.jobs.weekly_synthesis.log_swallowed_error"
+            ) as mock_log,
+        ):
+            result = await job.run(_noop_progress)
+
+        mock_service.store.assert_awaited_once()
+        stored_record = mock_service.store.call_args[0][0]
+        assert stored_record is record
+        assert stored_record.claim_ids == []
+        assert isinstance(result, JobResult)
+        assert result.metadata["brief_id"] == record.brief_id
+        assert result.metadata["status"] == record.status
+
+        mock_log.assert_called_once()
+        assert mock_log.call_args.args[0] == "processor.weekly_synthesis.verify_claims"
+
+
+# ---------------------------------------------------------------------------
 # Patch helpers
 # ---------------------------------------------------------------------------
 
@@ -304,6 +429,33 @@ def _patch_neo4j_and_snapshot():
         patch(
             "app.processor.jobs.weekly_synthesis._build_vault_snapshot",
             return_value="vault snapshot text",
+        )
+    )
+    stack.enter_context(_patch_verification_deps())
+    return stack
+
+
+def _patch_verification_deps():
+    """Patch the Task 2.1b claim-verification dependencies.
+
+    Mirrors ``test_brief_generation_job._patch_verification_deps`` — no
+    real vector-store / cache connection, and ``verify_brief_claims``
+    itself stubbed to a no-op. Dedicated verification behavior is
+    covered by ``test_brief_verification.py``.
+    """
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(
+        patch("app.processor.jobs.weekly_synthesis._get_chroma", return_value=MagicMock())
+    )
+    stack.enter_context(
+        patch("app.processor.jobs.weekly_synthesis._get_redis", return_value=MagicMock())
+    )
+    stack.enter_context(
+        patch(
+            "app.services.briefs.verification.verify_brief_claims",
+            new=AsyncMock(return_value=[]),
         )
     )
     return stack

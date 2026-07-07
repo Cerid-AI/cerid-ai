@@ -5,7 +5,7 @@
 
 Endpoints
 ---------
-GET  /processor/status    — queue sizes, pause flag, 24h/7d metrics
+GET  /processor/status    — queue sizes, pause flag, 24h/7d metrics, mode/cap
 GET  /processor/recent    — recently completed/failed jobs
 POST /processor/pause     — halt new dequeues
 POST /processor/resume    — lift the pause
@@ -22,12 +22,15 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+import config
 from app.deps import get_redis
 from app.processor.metrics import (
     processor_cost_usd_7d,
+    processor_cost_usd_month,
     processor_jobs_completed_24h,
     processor_throttled_ticks,
 )
+from core.processor.mode import resolve_processor_mode
 from core.utils.swallowed import log_swallowed_error
 
 router = APIRouter(prefix="/processor", tags=["processor"])
@@ -102,12 +105,22 @@ async def processor_status(request: Request) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("processor.router.throttled_ticks", exc)
 
+    monthly_spend_usd = 0.0
+    if redis_client is not None:
+        try:
+            monthly_spend_usd = float(await processor_cost_usd_month(redis_client))
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("processor.router.monthly_spend", exc)
+
     return {
         "queue_sizes": queue_sizes,
         "paused": paused,
         "jobs_completed_24h": jobs_24h,
         "cost_usd_7d": cost_7d_float,
         "throttled_ticks_1h": throttled_1h,
+        "mode": resolve_processor_mode(config.settings.PROCESSOR_MODE),
+        "monthly_spend_usd": monthly_spend_usd,
+        "cap_usd": float(config.settings.PROCESSOR_MONTHLY_CAP_USD),
     }
 
 

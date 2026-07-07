@@ -19,6 +19,7 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from app.routers.artifacts import recategorize
 from app.routers.health import health_check, list_collections
 from app.services.ingestion import ingest_content, ingest_file
+from app.services.private_mode import private_blocks
 from app.tool_registry import (
     TOOL_REGISTRY,
     InvalidToolError,
@@ -994,6 +995,13 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
     elif name == "pkb_knowledge_pack_uninstall":
         from app.services.knowledge_packs import uninstall_pack_default
         return await uninstall_pack_default(arguments.get("pack_id", ""))
+    # Trading dispatcher — gated on CERID_TRADING_ENABLED at call time so a
+    # flag-off build never reaches it, even though the internal repo always
+    # imports it successfully.
+    if _trading_dispatcher is not None and config.settings.CERID_TRADING_ENABLED:
+        trading_result = await _trading_dispatcher(name, arguments)
+        if trading_result is not None:
+            return trading_result
     # Try extension tool dispatchers (registered by bootstrap)
     for _dispatcher in _tool_dispatchers:
         result = await _dispatcher(name, arguments)
@@ -1023,8 +1031,9 @@ async def execute_tool(name: str, arguments: dict) -> Any:
       Sentry errors bin per-tool in the dashboard.
 
     Resolution order: ``TOOL_REGISTRY`` first, then legacy if/elif,
-    then ``_tool_dispatchers`` chain (trading + external MCPs). Typed
-    errors propagate; the SSE transport maps them onto JSON-RPC codes.
+    then the trading dispatcher (only when ``CERID_TRADING_ENABLED``),
+    then the ``_tool_dispatchers`` chain (external MCPs). Typed errors
+    propagate; the SSE transport maps them onto JSON-RPC codes.
     Legacy callers that catch ``ValueError`` keep working because
     ``InvalidToolError`` derives from ``ToolError`` (not Exception
     subclassing ``ValueError``) — the SSE layer translates correctly.
@@ -1052,17 +1061,20 @@ async def execute_tool(name: str, arguments: dict) -> Any:
     finally:
         duration_ms = (time.monotonic() - start) * 1000.0
         # Audit log line — structured-by-keyword extras so structlog
-        # or log-shipping pipelines can parse them downstream.
-        _audit_logger.info(
-            "mcp.tool_call",
-            extra={
-                "tool_name": name,
-                "args_summary": _summarize_args(arguments),
-                "duration_ms": round(duration_ms, 2),
-                "outcome": outcome,
-                "error_class": error_class,
-            },
-        )
+        # or log-shipping pipelines can parse them downstream. Private
+        # Mode L3 ("skip audit") suppresses only this emit; duration/error
+        # accounting above and the metrics below are untouched.
+        if not private_blocks(3):
+            _audit_logger.info(
+                "mcp.tool_call",
+                extra={
+                    "tool_name": name,
+                    "args_summary": _summarize_args(arguments),
+                    "duration_ms": round(duration_ms, 2),
+                    "outcome": outcome,
+                    "error_class": error_class,
+                },
+            )
         # Metrics (fire-and-forget; never block tool call on metric write)
         try:
             from utils.metrics import get_metrics_collector
@@ -1109,12 +1121,27 @@ def get_all_tools() -> list[dict]:
       1. ``TOOL_REGISTRY`` entries (Phase 1.6+ decorator-registered).
       2. Legacy ``MCP_TOOLS`` entries (pre-Phase-1.6 list-of-dicts).
       3. External MCP server schemas (discovered at runtime).
+      4. Trading tools, only when ``CERID_TRADING_ENABLED`` is true
+         (checked at call time so the flag is respected at runtime;
+         empty/moot on public where ``_TRADING_TOOLS`` is always []).
 
     Each section is internally sorted for stability across requests
     so the LLM's tool-list cache stays warm.
     """
-    return [
+    tools = [
         *get_registered_schemas(),
         *MCP_TOOLS,
         *get_external_tool_schemas(),
     ]
+    if config.settings.CERID_TRADING_ENABLED:
+        tools.extend(_TRADING_TOOLS)
+    return tools
+
+
+# Trading dispatcher/palette defaults — declared ABOVE the hook marker so they
+# survive the to-public sync truncation (public: always None/[], since the
+# bootstrap below is stripped; internal: populated by the import below).
+# Referenced by get_all_tools() and _dispatch_raw() above; gated on
+# CERID_TRADING_ENABLED at *call* time.
+_trading_dispatcher: Any = None
+_TRADING_TOOLS: list[dict] = []

@@ -17,6 +17,10 @@ export type ProcessorPriority = "high" | "medium" | "low"
 
 export type JobState = "pending" | "running" | "completed" | "failed" | "paused"
 
+/** Background-processing mode (Task 2.5d). Governs whether large jobs may
+ *  route to a paid API within the monthly cap, or stay strictly on-device. */
+export type ProcessorMode = "local" | "hybrid" | "disabled"
+
 // ---------------------------------------------------------------------------
 // Response shapes
 // ---------------------------------------------------------------------------
@@ -34,6 +38,9 @@ export interface ProcessorStatus {
   jobs_completed_24h: number
   cost_usd_7d: number
   throttled_ticks_1h: number
+  mode: ProcessorMode
+  monthly_spend_usd: number
+  cap_usd: number
 }
 
 /**

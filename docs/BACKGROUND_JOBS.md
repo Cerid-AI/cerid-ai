@@ -35,10 +35,12 @@ Switch in: Monitoring → Processor → Settings.
 **Pausing is non-destructive.** Pending jobs stay queued. Resume picks
 up where it left off. Disabling pauses; it does not delete.
 
-**Mode-fallback safety:** if Hybrid mode hits the monthly cost cap, the
-processor auto-falls-back to local-only and surfaces a banner. In-flight
-API jobs are allowed to complete; pending API jobs hold or re-route to
-local based on `PROCESSOR_API_CAP_FALLBACK` policy.
+**Mode-fallback safety:** in Hybrid mode, each job is evaluated as it
+runs — while the month's recorded spend is under the cap, jobs whose token
+estimate exceeds `PROCESSOR_API_THRESHOLD_TOKENS` use the API model; once
+spend reaches the cap, they re-route to local or hold, per the
+`PROCESSOR_API_CAP_FALLBACK` policy (`local` | `hold`). The Monitoring
+pane shows the active mode and the current month's spend against the cap.
 
 ## 3. Throttling
 
@@ -63,17 +65,24 @@ not an error.** Options:
 
 ## 4. Cost
 
-In Hybrid mode, the processor projects per-job cost before enqueue and
-tracks actual cost after.
+In Hybrid mode, the processor estimates each job's cost from its token
+count and the chosen model, and records the actual cost after the job runs.
 
-- **Pricing table:** `src/mcp/core/processor/pricing.py`. Versioned;
-  sourced from each provider's posted rates.
-- **Pre-enqueue projection:** displayed in the activity card before any
-  API-routed job runs.
-- **Rolling tracking:** `processor_cost_usd_7d` in `/health.invariants`
-  + 7d/30d projected-vs-actual chart in Monitoring → Processor → Settings.
-- **Hard cap:** set in Settings. When monthly spend crosses the cap, mode
-  auto-falls-back to local-only with a banner.
+- **Pricing table:** `src/mcp/core/processor/cost.py` (`PricingTable`).
+  Versioned; sourced from each provider's posted rates. Model ids match
+  with or without the `openrouter/` prefix, and `:free` models price at zero.
+- **Per-job estimate:** stamped on the job record at enqueue
+  (`estimated_tokens_in/out`, `model`) via `BaseJob.new_record`.
+- **Rolling tracking:** `processor_cost_usd_7d` (7-day) and the current
+  month's spend, both on `GET /processor/status` and shown in the
+  Monitoring → Processor spend meter.
+- **Hard cap:** `PROCESSOR_MONTHLY_CAP_USD`, set in Settings or via
+  `PATCH /settings`. When the month's recorded spend reaches the cap, API
+  routing stops and jobs fall back per `PROCESSOR_API_CAP_FALLBACK`; the
+  spend meter turns red as the cap is approached.
+
+> Roadmap: a per-job pre-enqueue cost projection in the activity card and
+> a projected-vs-actual 7d/30d chart are planned Monitoring refinements.
 
 API keys are user-supplied. **Cerid never proxies through its own
 account.** Keyless APIs (Wikipedia, Wikidata, arXiv, OpenStreetMap)

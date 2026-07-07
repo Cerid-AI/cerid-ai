@@ -4,6 +4,7 @@
 import { Shield, Lock, Eye, EyeOff, AlertTriangle } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Switch } from "@/components/ui/switch"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -12,6 +13,8 @@ import {
 import { SettingRow, AdvancedDisclosure, ReadOnlyEnvHint } from "@/components/settings/settings-primitives"
 import { getDef } from "@/lib/settings-registry"
 import { useSettings } from "@/hooks/use-settings"
+import { DataEgressSection } from "@/components/settings/data-egress-section"
+import type { SettingsCategoryPageProps } from "./page-props"
 
 // ── Private Mode level metadata ───────────────────────────────────────────────
 
@@ -168,6 +171,36 @@ function PrivateModeSection() {
   )
 }
 
+// ── Retrieval Privacy section (Task 1.2e opt-in, made toggleable — 1.3c) ──────
+
+function RetrievalPrivacySection({ settings, patch }: Pick<SettingsCategoryPageProps, "settings" | "patch">) {
+  const enabled = settings.sensitive_domain_retrieval ?? false
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <span className="text-label-xs uppercase text-muted-foreground tracking-wider">Retrieval Privacy</span>
+      </CardHeader>
+      <CardContent className="density-stack">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Include private domains (iMessage) in answers</p>
+            <p className="text-label-xs text-muted-foreground">
+              Off by default. Independent of Private Mode — enabling this lets retrieval surface
+              content from sensitive domains, such as iMessage, when answering.
+            </p>
+          </div>
+          <Switch
+            aria-label="Include private domains (iMessage) in answers"
+            checked={enabled}
+            onCheckedChange={(next) => void patch({ sensitive_domain_retrieval: next })}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Data protection section ───────────────────────────────────────────────────
 
 function DataProtectionSection() {
@@ -202,10 +235,12 @@ function DataProtectionSection() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function PrivacyCategory() {
+export default function PrivacyCategory({ settings, patch }: SettingsCategoryPageProps) {
   return (
     <div className="density-stack">
       <PrivateModeSection />
+      <RetrievalPrivacySection settings={settings} patch={patch} />
+      <DataEgressSection />
       <DataProtectionSection />
     </div>
   )

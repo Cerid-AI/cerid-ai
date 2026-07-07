@@ -16,8 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Plus, X, Upload, Link as LinkIcon, FileText, Loader2 } from "lucide-react"
-import { useNavigation } from "@/contexts/navigation-context"
-import { uploadFile } from "@/lib/api/kb"
+import { uploadFile, ingestUrl } from "@/lib/api/kb"
 import { withViewTransition } from "@/lib/view-transitions"
 
 type CaptureMode = "url" | "note" | "upload"
@@ -30,7 +29,6 @@ export function QuickCaptureFab() {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const navigation = useNavigation()
 
   // Global Cmd-Shift-N / Ctrl-Shift-N
   useEffect(() => {
@@ -95,22 +93,21 @@ export function QuickCaptureFab() {
   const handleUrlIngest = useCallback(async () => {
     if (!url.trim()) return
     setBusy(true)
-    setStatus(`Fetching ${url}…`)
+    setStatus(`Capturing ${url}…`)
     try {
-      // POST /ingestion/url isn't yet in lib/api — surface a clear stub
-      // until that endpoint ships; route the user to the Sources library
-      // via the navigation map so they can paste it there.
-      navigation.goTo("sources", { entity: undefined })
-      setStatus("URL ingestion lands in Phase B Day 10 — Sources opened.")
+      await ingestUrl(url)
+      setStatus("Captured")
       window.setTimeout(() => {
         setOpen(false)
         setStatus(null)
         setUrl("")
       }, 1500)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "URL capture failed")
     } finally {
       setBusy(false)
     }
-  }, [url, navigation])
+  }, [url])
 
   // Drop handler (Files dragged onto the modal)
   const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {

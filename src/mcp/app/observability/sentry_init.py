@@ -5,6 +5,7 @@
 """Centralised Sentry init. No-op when SENTRY_DSN is unset — privacy-first default."""
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections import defaultdict
@@ -201,7 +202,12 @@ def init_sentry() -> bool:
             StarletteIntegration(transaction_style="endpoint"),
             HttpxIntegration(),
             RedisIntegration(),
-            LoggingIntegration(level=None, event_level=None),
+            # enable_logs=True forwards Python log records to Sentry Logs. Its
+            # default threshold is INFO, which shipped ~4.6M INFO records/30d
+            # from this project alone (2026-07-05 storage audit: INFO was ~90%
+            # of all Sentry log volume org-wide). Forward WARNING+ only — the
+            # INFO firehose has no diagnostic value; WARN/ERROR trails remain.
+            LoggingIntegration(level=None, event_level=None, sentry_logs_level=logging.WARNING),
         ],
         max_breadcrumbs=50,
         enable_logs=True,

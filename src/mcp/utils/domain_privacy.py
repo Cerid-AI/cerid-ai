@@ -1,16 +1,23 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Domain-level retrieval privacy filter (deferred Phase D.2 cleanup).
+"""Domain-level retrieval privacy filter.
 
 Some ingest domains carry data that must NOT surface in chat answers
-unless the user has explicitly opted in to a higher private-mode level:
+unless the user has explicitly opted in via the dedicated
+``SENSITIVE_DOMAIN_RETRIEVAL_ENABLED`` toggle:
 
-    "messages"  →  requires private_mode level ≥ 2
+    "messages" / "imessage"  →  surfaced only when the opt-in is on
+
+This opt-in is a standalone, orthogonal setting — it is INDEPENDENT of the
+private-mode isolation level (see app/services/private_mode.py). The
+isolation ladder controls how much of a session is persisted/exposed;
+raising it must never be the mechanism that reveals sensitive data. The
+opt-in defaults OFF, matching today's default-hidden behavior.
 
 The contract documented in docs/PRO_MESSAGES.md states the iMessage
 connector ingests opt-in conversations BUT retrieval will not surface
-their content unless the active session has private_mode Level 2+.
+their content unless ``SENSITIVE_DOMAIN_RETRIEVAL_ENABLED`` is also on.
 
 This module is the single source of truth for that filter. Callers
 into pkb_search_filtered, the /query + /sdk/v1/search endpoints, and any
@@ -24,20 +31,18 @@ import logging
 logger = logging.getLogger("ai-companion.domain_privacy")
 
 
-# Privacy-gated domains and the minimum private_mode level required to
-# include them in retrieval. Operators can extend the mapping via the
-# config layer; the defaults below match the documented contracts.
-DOMAIN_PRIVACY_FLOOR: dict[str, int] = {
-    "messages": 2,    # iMessage conversations
-    "imessage": 2,    # alias used by some early callers; kept for safety
-}
+# Domains hidden from retrieval unless the caller opts in via
+# sensitive_domains_opted_in(). Operators can extend the set via the config
+# layer; the defaults below match the documented contracts.
+SENSITIVE_DOMAINS: frozenset[str] = frozenset({"messages", "imessage"})
 
 
 def visible_domains(
     requested: list[str] | None,
-    private_mode_level: int,
+    *,
+    include_sensitive: bool,
 ) -> list[str] | None:
-    """Filter `requested` to the subset visible at `private_mode_level`.
+    """Filter `requested` to the subset visible given `include_sensitive`.
 
     - `requested=None` means "no explicit narrowing" — we return None
       so the caller continues to scan all configured domains.  Callers
@@ -46,43 +51,38 @@ def visible_domains(
     - Returns a new list (never mutates the input).
     - When the filter removes domains, logs a single INFO line so
       operators can correlate "missing iMessage results" with the
-      active private_mode level.
+      opt-in state.
     """
     if requested is None:
         return None
-    filtered = [d for d in requested if _domain_visible(d, private_mode_level)]
+    filtered = [d for d in requested if _domain_visible(d, include_sensitive)]
     dropped = set(requested) - set(filtered)
     if dropped:
         logger.info(
-            "domain_privacy: hid %d domain(s) at private_mode=%d: %s",
-            len(dropped), private_mode_level, sorted(dropped),
+            "domain_privacy: hid %d domain(s) (sensitive_domain_retrieval_enabled=%s): %s",
+            len(dropped), include_sensitive, sorted(dropped),
         )
     return filtered
 
 
-def _domain_visible(domain: str, level: int) -> bool:
-    floor = DOMAIN_PRIVACY_FLOOR.get(domain)
-    if floor is None:
+def _domain_visible(domain: str, include_sensitive: bool) -> bool:
+    if domain not in SENSITIVE_DOMAINS:
         return True  # not privacy-gated
-    return level >= floor
+    return include_sensitive
 
 
-def is_domain_visible(domain: str, private_mode_level: int) -> bool:
+def is_domain_visible(domain: str, *, include_sensitive: bool) -> bool:
     """Single-domain variant for callers that don't have a list."""
-    return _domain_visible(domain, private_mode_level)
+    return _domain_visible(domain, include_sensitive)
 
 
-def get_global_private_mode_level() -> int:
-    """Read the process-wide private_mode level from Redis. Returns 0
-    on any error or when Redis is unavailable (privacy-defaulting:
-    when in doubt, treat as "no elevated permissions").
+def sensitive_domains_opted_in() -> bool:
+    """Read the dedicated sensitive-domain-retrieval opt-in from config.
+
+    This is the sole visibility source for SENSITIVE_DOMAINS — replaces the
+    former private-mode-level coupling. Defaults False (hidden) unless the
+    operator has explicitly set SENSITIVE_DOMAIN_RETRIEVAL_ENABLED.
     """
-    try:
-        from app.deps import get_redis
-        redis = get_redis()
-        if redis is None:
-            return 0
-        raw = redis.get("cerid:private_mode:global")
-        return int(raw) if raw is not None else 0
-    except Exception:  # noqa: BLE001 — Redis/DI can fail many ways
-        return 0
+    import config.settings
+
+    return config.settings.SENSITIVE_DOMAIN_RETRIEVAL_ENABLED

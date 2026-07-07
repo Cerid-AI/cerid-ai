@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -124,16 +125,15 @@ async def processor_jobs_completed_24h(redis_client: Any) -> int:
         return 0
 
 
-def _sync_cost_usd_7d(redis_client: Any) -> Decimal:
-    now = time.time()
-    cutoff = now - _7D_S
-    members: list[Any] = redis_client.zrangebyscore(_COST_KEY, cutoff, "+inf")
+def _sum_cost_members(members: list[Any]) -> Decimal:
+    """Sum decimal costs from cost-log members shaped ``<job_id>:<decimal_str>``.
+
+    The job_id may contain hyphens (UUID) but never colons, so split on the
+    last colon; malformed rows are logged and skipped, not fatal.
+    """
     total = Decimal("0")
     for member in members:
         member_str = member.decode() if isinstance(member, bytes) else str(member)
-        # Format: "<job_id>:<decimal_str>"
-        # job_id itself may contain hyphens (UUID), not colons.
-        # Split on last colon to isolate the decimal part safely.
         parts = member_str.rsplit(":", 1)
         if len(parts) == 2:
             try:
@@ -143,12 +143,35 @@ def _sync_cost_usd_7d(redis_client: Any) -> Decimal:
     return total
 
 
+def _sync_cost_usd_7d(redis_client: Any) -> Decimal:
+    now = time.time()
+    cutoff = now - _7D_S
+    members: list[Any] = redis_client.zrangebyscore(_COST_KEY, cutoff, "+inf")
+    return _sum_cost_members(members)
+
+
 async def processor_cost_usd_7d(redis_client: Any) -> Decimal:
     """Return total actual cost in USD over the last 7 days."""
     try:
         return await asyncio.to_thread(_sync_cost_usd_7d, redis_client)
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error("processor.metrics.cost_usd_7d", exc)
+        return Decimal("0")
+
+
+def _sync_cost_usd_month(redis_client: Any) -> Decimal:
+    now = datetime.now(timezone.utc)
+    cutoff = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+    members: list[Any] = redis_client.zrangebyscore(_COST_KEY, cutoff, "+inf")
+    return _sum_cost_members(members)
+
+
+async def processor_cost_usd_month(redis_client: Any) -> Decimal:
+    """Return total actual cost in USD for the current UTC calendar month."""
+    try:
+        return await asyncio.to_thread(_sync_cost_usd_month, redis_client)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("processor.metrics.cost_usd_month", exc)
         return Decimal("0")
 
 

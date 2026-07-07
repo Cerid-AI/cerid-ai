@@ -9,17 +9,22 @@ This module is a thin router: Pydantic models + endpoint handlers.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from threading import Lock as _TLock
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 import config
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.services.ingestion import ingest_batch, ingest_content, ingest_file
+from core.ingest.sources.safe_fetch import guarded_get
+from core.knowledge.adapter_html_scrape import extract_html_content
 from core.utils import cache
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow
@@ -84,6 +89,15 @@ def _prune_stale() -> None:
 class IngestRequest(BaseModel):
     content: str
     domain: str = "general"
+
+
+class IngestUrlRequest(BaseModel):
+    """Payload for the quick-capture URL tab: fetch + ingest a single
+    operator-supplied URL (Task 2.3a). One URL → one artifact; no batch."""
+
+    url: str
+    domain: str = "general"
+    tags: list[str] | None = None
 
 
 class StructuredIngestRequest(BaseModel):
@@ -180,6 +194,58 @@ async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Requ
         asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
     except Exception as e:
         log_swallowed_error("routers.ingestion.ingest_structured_cache_invalidate", e)
+    return result
+
+
+_URL_INGEST_USER_AGENT = "CeridAI-UrlIngest/1.0"
+
+
+@router.post("/ingest/url")  # response-model-allowed: dynamic response (shape varies)
+async def ingest_url_endpoint(req: IngestUrlRequest):
+    """Fetch an operator-supplied URL through the SSRF-guarded fetcher and
+    ingest the extracted title + text as a single artifact (quick-capture
+    URL tab; Task 2.3a — frontend wiring is a separate task).
+    """
+    try:
+        resp = await guarded_get(req.url, user_agent=_URL_INGEST_USER_AGENT)
+        resp.raise_for_status()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"URL is not fetchable: {exc}")
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch URL: {exc}")
+
+    parsed_url = urlparse(req.url)
+    fallback_title = parsed_url.netloc + parsed_url.path
+    content_type = resp.headers.get("content-type", "").lower()
+    if "html" in content_type:
+        title, text = extract_html_content(resp.text)
+        title = title or fallback_title
+    else:
+        text = resp.text.strip()
+        title = fallback_title
+
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="No extractable text at URL")
+
+    metadata: dict[str, Any] = {
+        "source_type": "url",
+        "url": req.url,
+        "title": title,
+    }
+    if req.tags:
+        clean_tags = [t.strip().lower() for t in req.tags if isinstance(t, str) and t.strip()]
+        if clean_tags:
+            metadata["tags_json"] = json.dumps(clean_tags)
+
+    async with _ingest_semaphore:
+        result = await asyncio.to_thread(
+            ingest_content, text, req.domain, metadata, enrich=True,
+        )
+    try:
+        from utils.query_cache import invalidate_cache_non_blocking
+        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
+    except Exception as e:
+        log_swallowed_error("routers.ingestion.ingest_url_cache_invalidate", e)
     return result
 
 

@@ -22,6 +22,10 @@ from app.sync._helpers import (
     CHROMA_BATCH_SIZE,
     CHROMA_SUBDIR,
     DOMAINS_JSONL,
+    ENTITIES_JSONL,
+    ENTITY_EDGES_JSONL,
+    MEMORIES_JSONL,
+    MEMORY_EDGES_JSONL,
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
@@ -30,6 +34,7 @@ from app.sync._helpers import (
     _write_jsonl,
 )
 from app.sync.manifest import write_manifest
+from app.sync.user_state import read_conversations
 
 logger = logging.getLogger("ai-companion.sync")
 
@@ -318,6 +323,146 @@ def export_redis(redis_client, sync_dir: str | None = None) -> dict[str, Any]:
     }
 
 
+def export_memories(driver, sync_dir: str | None = None) -> dict[str, Any]:
+    """
+    Export :Memory nodes (the episodic-memory graph gap — memory *content*
+    embeddings already live in Chroma via export_chroma) plus their direct
+    provenance edges to {sync_dir}/neo4j/memories.jsonl and memory_edges.jsonl.
+
+    Full export only (no incremental *since* filter) — kept simple to match
+    the "state which" allowance in the task brief.
+    """
+    sync_dir = sync_dir or _default_sync_dir()
+    out_dir = _ensure_dir(os.path.join(sync_dir, NEO4J_SUBDIR))
+
+    memories: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (m:Memory)
+                RETURN m.id AS id, properties(m) AS props
+                ORDER BY m.created_at
+                """
+            )
+            for record in result:
+                memories.append(dict(record))
+
+            result = session.run(
+                """
+                MATCH (m:Memory)-[:EXTRACTED_FROM]->(c:Conversation)
+                RETURN m.id AS source_id, 'EXTRACTED_FROM' AS rel_type, c.id AS target_id
+                UNION
+                MATCH (m:Memory)-[:RELATES_TO]->(a:Artifact)
+                RETURN m.id AS source_id, 'RELATES_TO' AS rel_type, a.id AS target_id
+                """
+            )
+            for record in result:
+                edges.append(dict(record))
+
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.export', exc)
+        logger.error("Memory export failed: %s", exc)
+        return {"error": str(exc), "memories": 0, "memory_edges": 0}
+
+    m_count = _write_jsonl(str(out_dir / MEMORIES_JSONL), memories)
+    e_count = _write_jsonl(str(out_dir / MEMORY_EDGES_JSONL), edges)
+
+    logger.info("Memory export: %d memories, %d edges → %s", m_count, e_count, out_dir)
+    return {
+        "memories": m_count,
+        "memory_edges": e_count,
+        "output_dir": str(out_dir),
+    }
+
+
+def export_entities(driver, sync_dir: str | None = None) -> dict[str, Any]:
+    """
+    Export :Entity nodes (which drive wiki pages — wiki pages themselves are
+    computed from entities at read time and are NOT exported) plus their
+    direct MENTIONS provenance edges from Artifacts to
+    {sync_dir}/neo4j/entities.jsonl and entity_edges.jsonl.
+
+    Derived/computed entity-entity edges (CO_MENTIONED, SIMILAR_TO,
+    IN_COMMUNITY — all recomputed by community_detection.py /
+    semantic_edges.py) are intentionally excluded per YAGNI: only the direct,
+    non-recomputable MENTIONS provenance edge is exported.
+
+    Full export only (no incremental *since* filter) — kept simple to match
+    the "state which" allowance in the task brief.
+    """
+    sync_dir = sync_dir or _default_sync_dir()
+    out_dir = _ensure_dir(os.path.join(sync_dir, NEO4J_SUBDIR))
+
+    entities: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (e:Entity)
+                RETURN e.canonical_id AS canonical_id, properties(e) AS props
+                ORDER BY e.canonical_id
+                """
+            )
+            for record in result:
+                entities.append(dict(record))
+
+            result = session.run(
+                """
+                MATCH (a:Artifact)-[r:MENTIONS]->(e:Entity)
+                RETURN a.id AS source_id, 'MENTIONS' AS rel_type,
+                       e.canonical_id AS target_id, properties(r) AS props
+                """
+            )
+            for record in result:
+                edges.append(dict(record))
+
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.export', exc)
+        logger.error("Entity export failed: %s", exc)
+        return {"error": str(exc), "entities": 0, "entity_edges": 0}
+
+    e_count = _write_jsonl(str(out_dir / ENTITIES_JSONL), entities)
+    ed_count = _write_jsonl(str(out_dir / ENTITY_EDGES_JSONL), edges)
+
+    logger.info("Entity export: %d entities, %d edges → %s", e_count, ed_count, out_dir)
+    return {
+        "entities": e_count,
+        "entity_edges": ed_count,
+        "output_dir": str(out_dir),
+    }
+
+
+def export_conversations(sync_dir: str | None = None) -> dict[str, Any]:
+    """
+    Report conversations already present at {sync_dir}/user/conversations/
+    as a first-class, explicitly-counted part of the sync bundle.
+
+    Conversations are written directly to the sync dir by
+    app.sync.user_state.write_conversation (no separate local store to copy
+    from), so this is a count/report step rather than a data copy.
+    """
+    sync_dir = sync_dir or _default_sync_dir()
+
+    try:
+        conversations = read_conversations(sync_dir)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.export', exc)
+        logger.error("Conversation export failed: %s", exc)
+        return {"error": str(exc), "conversations": 0}
+
+    count = len(conversations)
+    logger.info("Conversation export: %d conversations present at %s", count, sync_dir)
+    return {"conversations": count, "output_dir": sync_dir}
+
+
 def export_all(
     driver,
     chroma_url: str | None = None,
@@ -353,6 +498,10 @@ def export_all(
     )
     bm25_result = export_bm25(sync_dir=sync_dir)
 
+    memories_result = export_memories(driver, sync_dir=sync_dir)
+    entities_result = export_entities(driver, sync_dir=sync_dir)
+    conversations_result = export_conversations(sync_dir=sync_dir)
+
     redis_result: dict[str, Any] = {"entries_exported": 0, "skipped": True}
     if redis_client is not None:
         redis_result = export_redis(redis_client, sync_dir=sync_dir)
@@ -381,6 +530,9 @@ def export_all(
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,
+        "memories": memories_result,
+        "entities": entities_result,
+        "conversations": conversations_result,
         "redis": redis_result,
         "tombstones": tombstone_result,
         "manifest": manifest,

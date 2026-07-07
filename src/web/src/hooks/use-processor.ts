@@ -21,8 +21,9 @@ import {
   pauseProcessor,
   resumeProcessor,
 } from "@/lib/api/processor"
+import { updateSettings } from "@/lib/api/settings"
 import { logSwallowedError } from "@/lib/log-swallowed"
-import type { ProcessorStatus, JobRecord, ProcessorPauseResponse } from "@/lib/types/processor"
+import type { ProcessorStatus, JobRecord, ProcessorPauseResponse, ProcessorMode } from "@/lib/types/processor"
 
 // ---------------------------------------------------------------------------
 // Status query
@@ -107,5 +108,46 @@ export function useProcessorMutations(): ProcessorMutations {
     pause: () => pauseMutation.mutateAsync(),
     resume: () => resumeMutation.mutateAsync(),
     isPending: pauseMutation.isPending || resumeMutation.isPending,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Processor mode / monthly cap mutation (Task 2.5d)
+// ---------------------------------------------------------------------------
+//
+// Reuses the existing PATCH /settings client (`updateSettings`, also used by
+// the Settings → Privacy panel's `sensitive_domain_retrieval` toggle) rather
+// than adding a second settings-PATCH client.
+
+export interface ProcessorSettingsMutation {
+  updateMode: (mode: ProcessorMode) => void
+  isPending: boolean
+}
+
+export function useProcessorSettingsMutation(): ProcessorSettingsMutation {
+  const queryClient = useQueryClient()
+
+  const mutation = useMutation({
+    mutationFn: (mode: ProcessorMode) => updateSettings({ processor_mode: mode }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["processor", "status"] })
+      void queryClient.invalidateQueries({ queryKey: ["settings"] })
+    },
+    onError: (err) => {
+      logSwallowedError(
+        err instanceof Error ? err : new Error(String(err)),
+        "use-processor.updateMode",
+      )
+    },
+  })
+
+  return {
+    // Fire-and-forget: failures surface via onError above, so callers never
+    // receive a rejecting promise (a bare `void mutateAsync()` would leak an
+    // unhandled rejection on network/backend failure).
+    updateMode: (mode) => {
+      mutation.mutate(mode)
+    },
+    isPending: mutation.isPending,
   }
 }
