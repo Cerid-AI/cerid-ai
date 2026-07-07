@@ -151,7 +151,7 @@ export function ActivityFeed({ className, maxHeight = "400px" }: ActivityFeedPro
           <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
         </Button>
       </div>
-      <ScrollArea style={{ maxHeight }}>
+      <ScrollArea style={{ maxHeight }}> {/* drift-allowed: maxHeight is a caller-supplied prop, no static equivalent */}
         <div className="space-y-1">
           {items.map((item) => {
             const source = SOURCE_CONFIG[item.source_type] ?? SOURCE_CONFIG.upload

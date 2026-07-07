@@ -3,6 +3,7 @@
 
 import { useReducer, useCallback, useEffect, useRef, useState, useMemo } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
+import { setSettingsMode } from "@/lib/settings-mode"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import {
@@ -473,10 +474,11 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   }, [])
 
   const handleFinish = useCallback(() => {
+    setSettingsMode(state.selectedMode)
     clearProgress()
     localStorage.setItem("cerid-onboarding-complete", "true")
     onComplete()
-  }, [onComplete])
+  }, [onComplete, state.selectedMode])
 
   const goNext = useCallback(() => {
     dispatch({ type: "SET_STEP", step: Math.min(state.step + 1, TOTAL_STEPS - 1) })

@@ -43,6 +43,7 @@ import {
 import { fetchIngestionProgress } from "@/lib/api/kb"
 import { fetchIngestHistory } from "@/lib/api/settings"
 import type { IngestionFileProgress, IngestHistoryEntry } from "@/lib/types"
+import { ProgressBar } from "@/components/ui/progress-bar"
 
 const ACTIVE_POLL_MS = 3_000
 const HISTORY_POLL_MS = 30_000
@@ -90,10 +91,7 @@ function ActiveRow({ file }: { file: IngestionFileProgress }) {
   const pct = Math.max(0, Math.min(100, file.progress ?? 0))
 
   return (
-    <li
-      className="rounded-lg border border-border bg-card/40 p-3 transition-shadow animate-in fade-in"
-      style={{ animation: "cerid-stream-glow 1.6s ease-out 1" }}
-    >
+    <li className="cerid-stream-glow-once rounded-lg border border-border bg-card/40 p-3 transition-shadow animate-in fade-in">
       <div className="flex items-start gap-2">
         {isError ? (
           <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
@@ -110,12 +108,7 @@ function ActiveRow({ file }: { file: IngestionFileProgress }) {
             </span>
           </div>
           {!isDone && !isError && (
-            <div className="h-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full bg-primary transition-[width] duration-500 ease-out"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
+            <ProgressBar pct={pct} size="sm" />
           )}
           {file.error && (
             <div className="text-label-xs text-destructive">{file.error}</div>
@@ -224,6 +217,9 @@ export function SourcesActivityStream() {
           0%   { box-shadow: 0 0 0 0 rgba(90,236,203,0.55); background-color: rgba(90,236,203,0.06); }
           70%  { box-shadow: 0 0 6px 2px rgba(90,236,203,0.35); }
           100% { box-shadow: 0 0 0 0 rgba(90,236,203,0); background-color: transparent; }
+        }
+        .cerid-stream-glow-once {
+          animation: cerid-stream-glow 1.6s ease-out 1;
         }
       `}</style>
       <div className="overflow-y-auto p-4">

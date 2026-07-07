@@ -227,7 +227,24 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
             Ingest a document and ask your first question to see RAG in action.
           </p>
 
-          {/* Drag-drop upload zone */}
+          {/* Drag-drop upload zone. The hidden file input lives outside this
+              role="button" wrapper — axe's nested-interactive rule flags an
+              <input> nested inside another interactive control, and this
+              input is a purely programmatic trigger (tabIndex=-1,
+              pointer-events-none, aria-hidden) for the labelled zone below,
+              never meant to receive focus or AT interaction directly. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED_EXTS}
+            className="pointer-events-none hidden"
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) handleIngestFile(file)
+            }}
+          />
           <div
             {...dragHandlers}
             role="button"
@@ -250,17 +267,6 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
             <Upload className="h-6 w-6 text-muted-foreground" />
             <p className="text-xs font-medium">Drop a file or click to upload</p>
             <p className="text-label-xs text-muted-foreground">PDF, TXT, MD, DOCX</p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_EXTS}
-              className="pointer-events-none hidden"
-              tabIndex={-1}
-              onChange={(e) => {
-                const file = e.target.files?.[0]
-                if (file) handleIngestFile(file)
-              }}
-            />
             {/* Full-zone overlay during drag to prevent OS file handler interception */}
             {isDragOver && (
               <div className="absolute inset-0 z-50" />
@@ -330,12 +336,14 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
                   onChange={(e) => setQueryText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") handleQuery(queryText) }}
                   placeholder="Or type your own question..."
+                  aria-label="Ask a question about your document"
                   className="flex-1 rounded-lg border bg-card px-3 py-2 text-xs placeholder:text-muted-foreground/50"
                 />
                 <Button
                   size="sm"
                   onClick={() => handleQuery(queryText)}
                   disabled={!queryText.trim() || queryLoading}
+                  aria-label="Send question"
                 >
                   {queryLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                 </Button>

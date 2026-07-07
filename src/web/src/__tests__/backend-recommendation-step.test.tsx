@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render as rtlRender, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
 import * as settingsApi from "@/lib/api/settings"
 import type { SystemCheckResponse } from "@/lib/types"
@@ -133,5 +134,43 @@ describe("BackendRecommendationStep", () => {
     expect(screen.getByText(/Ollama \(Local\)/i)).toBeInTheDocument()
     expect(screen.getByText(/Quenchforge \(Local, Mac \+ AMD\)/i)).toBeInTheDocument()
     expect(screen.getByText(/Cloud \(OpenRouter\)/i)).toBeInTheDocument()
+  })
+})
+
+describe("BackendRecommendationStep — axe-clean", () => {
+  it("is axe-clean with no selection (recommendation active)", async () => {
+    const { container } = render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    await screen.findByTestId("model-compat-compact")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with a user override selected", async () => {
+    const { container } = render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected="cloud"
+        onSelect={onSelect}
+      />,
+    )
+    await screen.findByTestId("model-compat-compact")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with null systemCheck", async () => {
+    const { container } = render(
+      <BackendRecommendationStep
+        systemCheck={null}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    await screen.findByTestId("model-compat-compact")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

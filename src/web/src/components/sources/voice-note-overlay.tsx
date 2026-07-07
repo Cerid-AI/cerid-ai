@@ -249,7 +249,7 @@ function VoiceNoteInner({
 
 function WaveformBar({ peaks, active }: { peaks: number[]; active: boolean }) {
   return (
-    <div className="flex h-16 items-center justify-center gap-[3px]">
+    <div className="flex h-16 items-center justify-center gap-[3px]"> {/* drift-allowed: gap pinned to exactly match sibling bar width (3px) for a symmetric waveform rhythm; nearest Tailwind gap step (gap-1=4px) breaks the visual match */}
       {peaks.map((p, i) => (
         <span
           key={i}
@@ -257,7 +257,7 @@ function WaveformBar({ peaks, active }: { peaks: number[]; active: boolean }) {
             "rounded-full bg-brand transition-all duration-100",
             !active && "bg-foreground/20",
           )}
-          style={{
+          style={{ // drift-allowed: waveform bar height/opacity computed per-frame from live audio peak amplitude; no static equivalent
             width: 3,
             height: `${Math.max(3, p * 56)}px`,
             opacity: active ? 0.4 + p * 0.6 : 0.5,

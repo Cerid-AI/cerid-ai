@@ -134,7 +134,7 @@ export function CostSankey({ windowDays = 30, tier = "community" }: CostSankeyPr
             linkCurvature={0.5}
             iterations={32}
             node={<SankeyNode />}
-            link={{ stroke: "#0891b2", strokeOpacity: 0.4 }}
+            link={{ stroke: "var(--chart-2)", strokeOpacity: 0.4 }}
           >
             <Tooltip
               formatter={((value: number) => [`$${value.toFixed(4)}`, "cost"]) as never}
@@ -184,7 +184,7 @@ function SankeyNode(props: SankeyNodeProps) {
         y={y}
         width={width}
         height={height}
-        fill="#06b6d4"
+        fill="var(--chart-1)"
         fillOpacity={0.9}
       />
       <text
@@ -192,7 +192,7 @@ function SankeyNode(props: SankeyNodeProps) {
         y={y + height / 2}
         textAnchor={isLeft ? "end" : "start"}
         dominantBaseline="middle"
-        className={cn("text-[10px] fill-foreground")}
+        className={cn("text-label-xxs fill-foreground")}
       >
         {payload?.name}
       </text>

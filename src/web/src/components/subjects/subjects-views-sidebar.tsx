@@ -111,7 +111,7 @@ export function SubjectsViewsSidebar({
         <h3 className="text-xs font-semibold uppercase tracking-wider">
           {mode} views
         </h3>
-        <span className="ml-auto text-[10px] text-muted-foreground font-mono tabular-nums">
+        <span className="ml-auto text-label-xs text-muted-foreground font-mono tabular-nums">
           {list.length}
           {!isPro && `/${freeTierCap}`}
         </span>
@@ -178,7 +178,7 @@ export function SubjectsViewsSidebar({
                 title={`${view.name} (${view.entity})`}
               >
                 <div className="font-medium truncate">{view.name}</div>
-                <div className="text-[10px] text-muted-foreground truncate">
+                <div className="text-label-xs text-muted-foreground truncate">
                   {view.hops}-hop
                   {(view.lenses?.length ?? 0) > 0 && ` · ${view.lenses?.join(", ")}`}
                 </div>
@@ -199,7 +199,7 @@ export function SubjectsViewsSidebar({
       </ScrollArea>
 
       {showCapHint && (
-        <footer className="border-t border-border bg-amber-500/5 px-3 py-2 text-[10px] text-amber-700 dark:text-amber-400">
+        <footer className="border-t border-border bg-amber-500/5 px-3 py-2 text-label-xs text-amber-700 dark:text-amber-400">
           Free tier supports {freeTierCap} pinned views. Upgrade to Pro for
           unlimited saved views across all modes.
         </footer>

@@ -299,7 +299,7 @@ export function ConversationList({
                 data-flip-item
                 role="button"
                 tabIndex={0}
-                style={{ ["--i" as string]: Math.min(idx, 8) }}
+                style={{ ["--i" as string]: Math.min(idx, 8) }} // drift-allowed: stagger index feeding .cerid-stagger-fast --i; list length is dynamic
                 className={cn(
                   "cerid-stagger-fast group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-muted",
                   activeId === convo.id && "bg-muted",
@@ -364,7 +364,7 @@ export function ConversationList({
                           <HighlightedText text={convo.title} query={debouncedQuery} />
                         </span>
                       </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-[360px] break-words">
+                      <TooltipContent side="right" className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps long conversation titles from sprawling */}
                         {convo.title}
                       </TooltipContent>
                     </Tooltip>

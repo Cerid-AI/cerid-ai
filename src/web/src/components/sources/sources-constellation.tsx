@@ -20,21 +20,12 @@ import { Loader2 } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import * as THREE from "three"
 import { listSources, type SourceRecord } from "@/lib/api/sources"
+import { SOURCE_FAMILY_HEX } from "@/theme/shader-tokens"
 
 // Source family → color (gold→teal palette, oklch).
-const FAMILY_COLORS: Record<string, string> = {
-  files: "#f0b860",
-  feeds: "#5ec5b6",
-  mail: "#7a9ad7",
-  calendar: "#c79a6e",
-  chat: "#b08adc",
-  media: "#e88373",
-  webhook: "#82c89a",
-  adapter: "#9fbfa3",
-  pack: "#dcc36a",
-}
+const FAMILY_COLORS: Record<string, string> = SOURCE_FAMILY_HEX
 
-const ANCHOR_COLOR = "#d4a44e" // Cerid gold
+const ANCHOR_COLOR = SOURCE_FAMILY_HEX.anchor
 const RING_RADIUS = 3.5
 
 interface SourcesConstellationProps {
@@ -168,7 +159,7 @@ function SourceNode({
   position: [number, number, number]
   onClick?: () => void
 }) {
-  const color = FAMILY_COLORS[source.family] ?? "#9fbfa3"
+  const color = FAMILY_COLORS[source.family] ?? SOURCE_FAMILY_HEX.adapter
   // Size by total_artifacts (log scale so a 10x corpus doesn't crush
   // smaller sources).
   const size = useMemo(() => {

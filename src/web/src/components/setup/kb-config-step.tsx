@@ -58,9 +58,10 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
       <div className="space-y-5">
         {/* Archive Path */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Archive Folder</Label>
+          <Label htmlFor="kb-archive-path" className="text-sm font-medium">Archive Folder</Label>
           <div className="flex gap-2">
             <Input
+              id="kb-archive-path"
               value={config.archivePath}
               onChange={(e) => onChange({ ...config, archivePath: e.target.value })}
               placeholder="~/cerid-archive"
@@ -89,8 +90,9 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
                   Lightweight mode disables Neo4j graph features for better performance on your system.
                 </p>
                 <div className="mt-2 flex items-center justify-between">
-                  <Label className="text-xs">Enable lightweight mode</Label>
+                  <Label htmlFor="kb-lightweight-mode" className="text-xs">Enable lightweight mode</Label>
                   <Switch
+                    id="kb-lightweight-mode"
                     checked={config.lightweightMode}
                     onCheckedChange={(checked) => onChange({ ...config, lightweightMode: checked })}
                   />
@@ -114,6 +116,7 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
             </p>
           </div>
           <Switch
+            aria-label="Auto-ingest new files"
             checked={config.watchFolder}
             onCheckedChange={(checked) => onChange({ ...config, watchFolder: checked })}
           />

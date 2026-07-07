@@ -2,7 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { X, Trash2, ChevronDown, ChevronUp, Filter } from "lucide-react"
+import {
+  X,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  Loader2,
+  Radio,
+  Search,
+  Split,
+  Combine,
+  Inbox,
+  Palette,
+  SearchCheck,
+  BookOpen,
+  Receipt,
+  Brush,
+  Wrench,
+  Cog,
+  type LucideIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -13,27 +33,27 @@ import type { AgentEvent } from "@/hooks/use-agent-console"
 // ---------------------------------------------------------------------------
 
 interface AgentStyle {
-  emoji: string
+  icon: LucideIcon
   color: string     // Tailwind text color
   bgColor: string   // Tailwind bg color (for filter buttons)
   label: string
 }
 
 const AGENT_STYLES: Record<string, AgentStyle> = {
-  query:        { emoji: "\uD83D\uDD0D", color: "text-teal-400",    bgColor: "bg-teal-500/20",    label: "Query" },
-  decomposer:   { emoji: "\uD83E\uDDE9", color: "text-blue-400",    bgColor: "bg-blue-500/20",    label: "Decomposer" },
-  assembler:    { emoji: "\u2702\uFE0F",  color: "text-emerald-400", bgColor: "bg-emerald-500/20", label: "Assembler" },
-  triage:       { emoji: "\uD83D\uDCE5", color: "text-amber-400",   bgColor: "bg-amber-500/20",   label: "Triage" },
-  curator:      { emoji: "\uD83C\uDFA8", color: "text-purple-400",  bgColor: "bg-purple-500/20",  label: "Curator" },
-  verification: { emoji: "\uD83D\uDD0E", color: "text-rose-400",    bgColor: "bg-rose-500/20",    label: "Verification" },
-  memory:       { emoji: "\uD83D\uDCDA", color: "text-cyan-400",    bgColor: "bg-cyan-500/20",    label: "Memory" },
-  audit:        { emoji: "\uD83D\uDCB0", color: "text-yellow-400",  bgColor: "bg-yellow-500/20",  label: "Audit" },
-  maintenance:  { emoji: "\uD83E\uDDF9", color: "text-zinc-400",    bgColor: "bg-zinc-500/20",    label: "Maintenance" },
-  rectify:      { emoji: "\uD83D\uDD27", color: "text-orange-400",  bgColor: "bg-orange-500/20",  label: "Rectify" },
+  query:        { icon: Search,      color: "text-teal-400",    bgColor: "bg-teal-500/20",    label: "Query" },
+  decomposer:   { icon: Split,       color: "text-blue-400",    bgColor: "bg-blue-500/20",    label: "Decomposer" },
+  assembler:    { icon: Combine,     color: "text-emerald-400", bgColor: "bg-emerald-500/20", label: "Assembler" },
+  triage:       { icon: Inbox,       color: "text-amber-400",   bgColor: "bg-amber-500/20",   label: "Triage" },
+  curator:      { icon: Palette,     color: "text-purple-400",  bgColor: "bg-purple-500/20",  label: "Curator" },
+  verification: { icon: SearchCheck, color: "text-rose-400",    bgColor: "bg-rose-500/20",    label: "Verification" },
+  memory:       { icon: BookOpen,    color: "text-cyan-400",    bgColor: "bg-cyan-500/20",    label: "Memory" },
+  audit:        { icon: Receipt,     color: "text-yellow-400",  bgColor: "bg-yellow-500/20",  label: "Audit" },
+  maintenance:  { icon: Brush,       color: "text-zinc-400",    bgColor: "bg-zinc-500/20",    label: "Maintenance" },
+  rectify:      { icon: Wrench,      color: "text-orange-400",  bgColor: "bg-orange-500/20",  label: "Rectify" },
 }
 
 const DEFAULT_STYLE: AgentStyle = {
-  emoji: "\u2699\uFE0F",
+  icon: Cog,
   color: "text-zinc-400",
   bgColor: "bg-zinc-500/20",
   label: "Agent",
@@ -55,6 +75,8 @@ function formatTime(ts: number): string {
 function LevelDot({ level }: { level: string }) {
   return (
     <span
+      role="img"
+      aria-label={level}
       className={cn(
         "inline-block h-1.5 w-1.5 rounded-full flex-shrink-0",
         level === "success" && "bg-green-500",
@@ -62,7 +84,6 @@ function LevelDot({ level }: { level: string }) {
         level === "error" && "bg-red-500",
         level === "info" && "bg-zinc-500",
       )}
-      aria-label={level}
     />
   )
 }
@@ -73,13 +94,14 @@ function LevelDot({ level }: { level: string }) {
 
 function EventRow({ event }: { event: AgentEvent }) {
   const style = getAgentStyle(event.agent)
+  const Icon = style.icon
   return (
     <div className="flex items-start gap-2 px-3 py-1 hover:bg-zinc-800/50 transition-colors text-xs leading-relaxed">
       <span className="text-zinc-600 font-mono tabular-nums flex-shrink-0 select-none">
         {formatTime(event.timestamp)}
       </span>
       <LevelDot level={event.level} />
-      <span className="flex-shrink-0 select-none">{style.emoji}</span>
+      <Icon className={cn("h-3 w-3 shrink-0", style.color)} aria-hidden="true" />
       <span className={cn("font-semibold flex-shrink-0", style.color)}>
         {style.label}
       </span>
@@ -155,10 +177,22 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
           <span className="font-mono tracking-wide uppercase text-label-xs">Agent Console</span>
         </button>
 
-        <span className={cn(
-          "h-1.5 w-1.5 rounded-full",
-          connected ? "bg-green-500" : "bg-red-500",
-        )} />
+        <span
+          role="status"
+          aria-label={connected ? "Live — connected to the agent stream" : "Disconnected — reconnecting"}
+          className="flex items-center gap-1"
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              connected ? "bg-green-500" : "bg-red-500",
+            )}
+          />
+          <span className="text-label-xs text-zinc-500">
+            {connected ? "Live" : "Reconnecting…"}
+          </span>
+        </span>
 
         <span className="text-label-xs text-zinc-600 tabular-nums">
           {filteredEvents.length} events
@@ -172,6 +206,7 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 text-zinc-500 hover:text-zinc-300"
+                  aria-label="Filter agents"
                   onClick={() => setShowFilters((f) => !f)}
                 >
                   <Filter className="h-3 w-3" />
@@ -186,6 +221,7 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 text-zinc-500 hover:text-zinc-300"
+                  aria-label="Clear console"
                   onClick={onClear}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -200,6 +236,7 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 text-zinc-500 hover:text-zinc-300"
+                  aria-label="Close console"
                   onClick={onClose}
                 >
                   <X className="h-3 w-3" />
@@ -216,19 +253,20 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
         <div className="flex flex-wrap gap-1 px-3 py-1.5 bg-zinc-900/50 border-b border-zinc-800">
           {Array.from(seenAgents).sort().map((agent) => {
             const style = getAgentStyle(agent)
+            const Icon = style.icon
             const isHidden = hiddenAgents.has(agent)
             return (
               <button
                 key={agent}
                 onClick={() => toggleAgent(agent)}
                 className={cn(
-                  "rounded px-2 py-0.5 text-label-xs font-medium transition-colors",
+                  "flex items-center gap-1 rounded px-2 py-0.5 text-label-xs font-medium transition-colors",
                   isHidden
                     ? "bg-zinc-800 text-zinc-600 line-through"
                     : `${style.bgColor} ${style.color}`,
                 )}
               >
-                {style.emoji} {style.label}
+                <Icon className="h-3 w-3 shrink-0" aria-hidden="true" /> {style.label}
               </button>
             )
           })}
@@ -243,9 +281,16 @@ export function AgentConsole({ events, connected, onClear, onClose }: AgentConso
           className="overflow-y-auto font-mono"
           style={{ maxHeight: 200, minHeight: 80 }}
         >
-          {filteredEvents.length === 0 ? (
-            <div className="flex items-center justify-center h-20 text-xs text-zinc-600">
-              No agent activity yet
+          {!connected && events.length === 0 ? (
+            <div className="flex items-center justify-center gap-1.5 h-20 text-xs text-zinc-600">
+              <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+              Connecting to agent stream…
+            </div>
+          ) : filteredEvents.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-0.5 h-20 text-xs text-zinc-600">
+              <Radio className="h-3.5 w-3.5 mb-1" aria-hidden="true" />
+              <span>No agent activity yet</span>
+              <span className="text-zinc-700">Agent events stream here as queries are processed.</span>
             </div>
           ) : (
             filteredEvents.map((event) => (

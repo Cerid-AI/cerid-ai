@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { axe } from "jest-axe"
 import { PermissionsStep } from "@/components/setup/permissions-step"
 
 interface PermissionState {
@@ -125,5 +126,23 @@ describe("PermissionsStep", () => {
     expect(onSkip).toHaveBeenCalled()
     await user.click(screen.getByRole("button", { name: /^continue$/i }))
     expect(onContinue).toHaveBeenCalled()
+  })
+})
+
+describe("PermissionsStep — axe-clean", () => {
+  it("is axe-clean in the web-only fallback (no window.cerid)", async () => {
+    delete (window as unknown as { cerid?: object }).cerid
+    const { container } = render(<PermissionsStep />)
+    await screen.findByText(/desktop app/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with a mix of granted/denied/not-determined rows", async () => {
+    mockGetAll.mockResolvedValue(
+      sampleAll({ microphone: "granted", calendar: "denied", "full-disk-access": "denied" }),
+    )
+    const { container } = render(<PermissionsStep />)
+    await screen.findByTestId("permission-row-microphone")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

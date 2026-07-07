@@ -146,8 +146,7 @@ function DomainCardsBlock({ onSelectDomain, includeInternal }: DomainCardsBlockP
             <Icon
               className="h-4 w-4 shrink-0"
               aria-hidden="true"
-              // drift-allowed: runtime domain slot color
-              style={{ color: `var(--color-domain-${slot})` }}
+              style={{ color: `var(--color-domain-${slot})` }} // drift-allowed: runtime domain slot color
             />
             <span className="min-w-0">
               <span className="block text-xs font-medium truncate">{titleCase(dc.name)}</span>

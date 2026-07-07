@@ -105,7 +105,7 @@ export function BuildKnowledgeStep({ state, onChange }: BuildKnowledgeStepProps)
         </div>
       )}
 
-      <ScrollArea className="max-h-[380px] pr-1">
+      <ScrollArea className="max-h-[380px] pr-1"> {/* drift-allowed: ScrollArea height cap gates overflow scroll for the registry list */}
         {registryQuery.isLoading && (
           <div className="flex items-center justify-center p-8 text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading registry…

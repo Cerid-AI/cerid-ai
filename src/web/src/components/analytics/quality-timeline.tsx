@@ -32,10 +32,10 @@ import {
 import { cn } from "@/lib/utils"
 
 const METRIC_META = {
-  ndcg: { label: "NDCG@10", color: "#06b6d4" },
-  faithfulness: { label: "Faithfulness", color: "#10b981" },
-  memory_recall: { label: "Memory recall", color: "#a78bfa" },
-  verification_accuracy: { label: "Verification", color: "#f59e0b" },
+  ndcg: { label: "NDCG@10", color: "var(--chart-1)" },
+  faithfulness: { label: "Faithfulness", color: "var(--chart-2)" },
+  memory_recall: { label: "Memory recall", color: "var(--chart-3)" },
+  verification_accuracy: { label: "Verification", color: "var(--chart-4)" },
 } as const
 
 interface QualityTimelineProps {
@@ -150,7 +150,7 @@ export function QualityTimeline({ windowDays = 90, tier = "community" }: Quality
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={trimmed}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
             <XAxis
               dataKey="date"
               tick={{ fontSize: 10 }}
@@ -208,7 +208,7 @@ function Header({ windowDays, latest }: { windowDays: number; latest: Record<str
             <span key={key} className="flex items-center gap-1">
               <span
                 className="inline-block w-2 h-2 rounded-full"
-                style={{ backgroundColor: meta.color }}
+                style={{ backgroundColor: meta.color }} // drift-allowed: runtime chart-series color swatch
               />
               <span className={cn(
                 "font-mono tabular-nums",

@@ -16,11 +16,14 @@ import { listIngestionSources, type SourceRecord } from "@/lib/api/sources"
 import { listConnectors } from "@/lib/api/connectors"
 import { fetchEmailStatus } from "@/lib/api/email"
 import { updateWatchedFolder } from "@/lib/api/settings"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PaneError } from "@/components/ui/pane-error"
 import { descriptorFor } from "./source-kind-icons"
 import { SourceDetailPane } from "./source-detail-pane"
 import { ConnectorDetail } from "./connector-detail"
 import { EmailDetail } from "./email-detail"
 import { AppleDetail } from "./apple-detail"
+import { SourcesEmptyGallery } from "./sources-empty-gallery"
 import { sourceToRow, connectorToRow, emailToRow, appleRows, type DisplayRow } from "./source-rows"
 import type { ConnectorStatus } from "@/lib/api/connectors"
 import type { AppleBridgeKind } from "./apple-detail"
@@ -106,29 +109,52 @@ function SourceRow({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function SourcesConnectors() {
+export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string) => void } = {}) {
   const qc = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
 
-  const { data: sources = [], refetch } = useQuery({
+  const {
+    data: sources = [],
+    isLoading: sourcesLoading,
+    isError: sourcesError,
+    refetch: refetchSources,
+  } = useQuery({
     queryKey: ["ingestion-sources"],
     queryFn: listIngestionSources,
     staleTime: 30_000,
   })
 
-  const { data: connectors = [] } = useQuery({
+  const {
+    data: connectors = [],
+    isLoading: connectorsLoading,
+    isError: connectorsError,
+    refetch: refetchConnectors,
+  } = useQuery({
     queryKey: ["connectors"],
     queryFn: listConnectors,
     staleTime: 30_000,
   })
 
-  const { data: emailStatus } = useQuery({
+  // Email status is an auxiliary row source — a failure here just omits the
+  // email row (see `emailStatus ? … : []` below), it never triggers the
+  // blocking error state.
+  const { data: emailStatus, refetch: refetchEmailStatus } = useQuery({
     queryKey: ["email-status"],
     queryFn: fetchEmailStatus,
     staleTime: 30_000,
   })
+
+  // List-driving queries gate loading/error; email is auxiliary.
+  const isLoading = sourcesLoading || connectorsLoading
+  const isError = sourcesError || connectorsError
+
+  const handleRetry = () => {
+    void refetchSources()
+    void refetchConnectors()
+    void refetchEmailStatus()
+  }
 
   // Unified row list: source rows, connector rows, email row, Apple bridge rows.
   // appleRows() returns [] in browser builds (no window.cerid.appleConnectors).
@@ -138,6 +164,14 @@ export function SourcesConnectors() {
     ...(emailStatus ? [emailToRow(emailStatus)] : []),
     ...appleRows(),
   ]
+
+  // "Configured" = a source the user actually added, or a connector/email/
+  // apple row that reached the connected state. The 7-entry connector
+  // catalog and the always-present email affordance are NOT configured on
+  // a fresh install, so rows.length alone can never be 0 — this is the
+  // definition that actually reaches the empty state.
+  const configured = rows.filter((r) => r.rowType === "source" || r.status === "connected")
+  const isEmpty = !isLoading && !isError && configured.length === 0
 
   const selectedRow = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null
 
@@ -167,20 +201,43 @@ export function SourcesConnectors() {
   const handleDeleted = () => {
     setSelectedId(null)
     setDetailOpen(false)
-    void refetch()
+    void refetchSources()
   }
 
-  if (rows.length === 0) {
+  if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center p-12">
-        <div className="max-w-md rounded-xl border border-dashed border-border bg-card/40 p-8 text-center">
-          <h2 className="text-lg font-semibold text-foreground">No connectors configured</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Add watched folders or connect other ingestion sources to populate this surface.
-          </p>
+      <div
+        data-testid="sources-loading"
+        className="grid h-full grid-cols-1 md:grid-cols-[280px_1fr]"
+      >
+        <div className="overflow-y-auto border-r bg-card/20 p-2">
+          <div className="flex flex-col gap-1.5">
+            {Array.from({ length: 5 }, (_, i) => (
+              <Skeleton key={i} className="h-9 w-full rounded-md" />
+            ))}
+          </div>
+        </div>
+        <div className="p-4" />
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <div className="w-full max-w-md">
+          <PaneError
+            title="Couldn't load sources"
+            description="The sources backend is unreachable."
+            onRetry={handleRetry}
+          />
         </div>
       </div>
     )
+  }
+
+  if (isEmpty) {
+    return <SourcesEmptyGallery onSelectKind={onAddSource ?? (() => {})} />
   }
 
   return (

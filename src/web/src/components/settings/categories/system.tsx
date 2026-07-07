@@ -277,7 +277,7 @@ function StorageSection() {
               <div
                 key={seg.key}
                 className={cn(SERVICE_COLORS[seg.key].bg, "h-full transition-all duration-500")}
-                style={{ width: `${Math.max(seg.pct, seg.mb > 0 ? 0.5 : 0)}%` }}
+                style={{ width: `${Math.max(seg.pct, seg.mb > 0 ? 0.5 : 0)}%` }} // drift-allowed: StorageBar stacked-segment width is runtime usage data, no static equivalent
               />
             ))}
           </div>

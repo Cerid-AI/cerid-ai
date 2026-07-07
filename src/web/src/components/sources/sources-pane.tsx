@@ -90,6 +90,14 @@ export default function SourcesPane() {
     setWizardOpen(true)
   }, [])
 
+  // F1 — the onboarding gallery already knows the kind; skip the family
+  // picker step and jump straight to the wizard's configure step.
+  const openWizardWithKind = useCallback((kind: string) => {
+    setWizardFamily(undefined)
+    setWizardKind(kind)
+    setWizardOpen(true)
+  }, [])
+
   // F10 — Sources hotkey suite. ⌘1-⌘4 jump to sub-tabs; the rest of
   // the documented hotkeys (⌘⇧S, ⌘⇧C, ⌘⇧V, etc.) bind in their
   // respective phase commits when their target surfaces ship.
@@ -198,7 +206,7 @@ export default function SourcesPane() {
               </div>
             }
           >
-            <SourcesConnectors />
+            <SourcesConnectors onAddSource={openWizardWithKind} />
           </Suspense>
         )}
       </div>

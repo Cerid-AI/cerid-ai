@@ -159,7 +159,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   return (
     <div
       className={cn(
-        "relative flex items-end gap-2 border-t bg-background p-4",
+        "relative flex items-end gap-2 border-t bg-background p-2 md:p-4",
         isDragOver && "ring-2 ring-primary ring-inset",
         isArtifactDragOver && "ring-2 ring-brand ring-inset bg-brand/5",
       )}
@@ -202,7 +202,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         aria-readonly={isStreaming || undefined}
         rows={1}
         disabled={disabled}
-        className="flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        className="min-h-11 flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring md:min-h-0"
       />
       {injectedCount > 0 && (
         <Popover>
@@ -246,11 +246,23 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         </Popover>
       )}
       {isStreaming ? (
-        <Button variant="destructive" size="icon" aria-label="Stop generation" onClick={onStop}>
+        <Button
+          variant="destructive"
+          size="icon"
+          className="size-11 md:size-9"
+          aria-label="Stop generation"
+          onClick={onStop}
+        >
           <Square className="h-4 w-4" />
         </Button>
       ) : (
-        <Button size="icon" aria-label="Send message" onClick={handleSend} disabled={!input.trim() || disabled}>
+        <Button
+          size="icon"
+          className="size-11 md:size-9"
+          aria-label="Send message"
+          onClick={handleSend}
+          disabled={!input.trim() || disabled}
+        >
           <Send className="h-4 w-4" />
         </Button>
       )}

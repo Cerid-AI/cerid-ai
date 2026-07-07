@@ -99,7 +99,7 @@ function ViewsPopoverButton({
         >
           <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />
           {count > 0 && (
-            <span className="min-w-[1rem] rounded-full bg-accent px-1 text-center text-[10px] font-medium leading-4 text-accent-foreground tabular-nums">
+            <span className="min-w-[1rem] rounded-full bg-accent px-1 text-center text-label-xs font-medium leading-4 text-accent-foreground tabular-nums"> {/* drift-allowed: min-w-[1rem] pins badge-centering width for single/double-digit counts */}
               {count}
             </span>
           )}
@@ -286,7 +286,7 @@ export default function SubjectsPane() {
         {focalEntity && mode !== "wiki" && (
           <span
             className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-0.5 text-label-xs font-medium text-foreground"
-            style={{ viewTransitionName: "focal-entity" }}
+            style={{ viewTransitionName: "focal-entity" }} // drift-allowed: View Transition API requires setting view-transition-name via inline style; no Tailwind utility exists
             aria-label={`Focal entity: ${focalEntity}`}
             title={focalEntity}
             data-testid="subjects-focal-entity-chip"

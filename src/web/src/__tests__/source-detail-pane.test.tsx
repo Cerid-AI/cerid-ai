@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 import React from "react"
 import { SourceDetailPane } from "@/components/sources/source-detail-pane"
 import type { SourceRecord } from "@/lib/api/sources"
@@ -205,5 +206,39 @@ describe("SourceDetailPane — invalidation bug fix", () => {
     )
     // Exactly ONE invalidation from the form's saveMut.onSuccess — not two
     expect(ingestCalls.length).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// axe-clean — one assertion per visually-distinct kind gating branch this
+// dialog renders (no fetch cycle; the policy/config gating IS the state).
+// ---------------------------------------------------------------------------
+
+describe("SourceDetailPane — axe-clean", () => {
+  it("is axe-clean for an editable, policy-enabled kind (rss)", async () => {
+    const source = makeSource({ kind: "rss", config: { url: "https://example.com/feed.xml" } })
+    const { container } = render(
+      <SourceDetailPane open source={source} onClose={() => {}} />,
+      { wrapper: wrap() },
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean for the folder kind (no policy, no Apply button)", async () => {
+    const source = makeSource({ kind: "folder", id: "folder:1", config: { path: "/notes" } })
+    const { container } = render(
+      <SourceDetailPane open source={source} onClose={() => {}} />,
+      { wrapper: wrap() },
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean for a non-editable-config kind (gmail)", async () => {
+    const source = makeSource({ kind: "gmail", config: {} })
+    const { container } = render(
+      <SourceDetailPane open source={source} onClose={() => {}} />,
+      { wrapper: wrap() },
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

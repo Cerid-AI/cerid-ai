@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
+import { axe } from "jest-axe"
 
 const fetchOllamaRecommendations = vi.fn().mockResolvedValue({ hardware: null, models: [] })
 
@@ -244,5 +245,64 @@ describe("LocalLLMStep — Cloud backend", () => {
     expect(screen.queryByText("All platforms")).not.toBeInTheDocument()
     // No quenchforge slot list
     expect(screen.queryByText("Default Quenchforge slots")).not.toBeInTheDocument()
+  })
+})
+
+// ---- axe-clean, one state per backend ----
+
+describe("LocalLLMStep — axe-clean", () => {
+  it("is axe-clean: Ollama backend, not detected", async () => {
+    const { container } = render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={false}
+        ollamaModels={[]}
+        state={DEFAULT_STATE}
+        onChange={onChange}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean: Ollama backend, detected with installed models", async () => {
+    const { container } = render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={["llama3.2:3b", "mistral:7b"]}
+        state={{ ...DEFAULT_STATE, detected: true, enabled: true, model: "llama3.2:3b" }}
+        onChange={onChange}
+      />,
+    )
+    await waitFor(() => expect(fetchOllamaRecommendations).toHaveBeenCalled())
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean: Quenchforge backend", async () => {
+    const { container } = render(
+      <LocalLLMStep
+        inferenceBackend="quenchforge"
+        ollamaDetected={true}
+        ollamaModels={["bge-reranker-v2-m3"]}
+        state={{ ...DEFAULT_STATE, detected: true, enabled: true }}
+        onChange={onChange}
+        hardwareGpu="AMD Radeon Pro Vega II"
+        hardwareGpuAcceleration="metal"
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean: Cloud backend", async () => {
+    const { container } = render(
+      <LocalLLMStep
+        inferenceBackend="cloud"
+        ollamaDetected={false}
+        ollamaModels={[]}
+        state={DEFAULT_STATE}
+        onChange={onChange}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

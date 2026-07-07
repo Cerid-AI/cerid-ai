@@ -39,7 +39,7 @@ export function QueryStats({ queries }: QueryStatsProps) {
                 contentStyle={CHART_TOOLTIP_STYLE}
                 formatter={(value) => [value ?? 0, "Queries"]}
               />
-              <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} />
+              <Bar dataKey="count" fill="var(--chart-2)" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (

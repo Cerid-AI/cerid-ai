@@ -26,8 +26,8 @@ function makeGraph(): Graph<AtlasNodeAttributes, AtlasEdgeAttributes> {
       y: 0,
       size: 10,
       label: `Node ${i}`,
-      color: "#FFFFFF",
-      haloColor: "#5AECCB",
+      color: "#FFFFFF", // drift-allowed: hex value required to satisfy the AtlasNodeAttributes interface in test stubs
+      haloColor: "#5AECCB", // drift-allowed: hex value required to satisfy the AtlasNodeAttributes interface in test stubs
       pulseIntensity: 0.5,
     })
   }

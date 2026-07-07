@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
+import { axe } from "jest-axe"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
 
 const DEFAULT_CONFIG = {
@@ -89,5 +90,43 @@ describe("KBConfigStep", () => {
       />,
     )
     expect(screen.queryByText("Enable lightweight mode")).not.toBeInTheDocument()
+  })
+})
+
+describe("KBConfigStep — axe-clean", () => {
+  it("is axe-clean in the default (no lightweight warning) state", async () => {
+    const { container } = render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with the lightweight mode warning shown", async () => {
+    const { container } = render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={true}
+        ramGb={8}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with auto-ingest enabled", async () => {
+    const { container } = render(
+      <KBConfigStep
+        config={{ ...DEFAULT_CONFIG, watchFolder: true }}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

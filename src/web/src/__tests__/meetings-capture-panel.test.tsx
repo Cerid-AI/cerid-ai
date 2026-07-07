@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { axe } from "jest-axe"
 import { MeetingsCapturePanel } from "@/components/sources/meetings-capture-panel"
 import type { MeetingJob } from "@/lib/api/meetings"
 
@@ -106,5 +107,55 @@ describe("MeetingsCapturePanel", () => {
     await user.click(await screen.findByTestId("meeting-view-j1"))
     expect(window.location.search).toContain("entity=meeting%3Aabc")
     expect(window.location.search).toContain("mode=wiki")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// axe-clean — one assertion per visually-distinct state (no fetch/loading/
+// error/empty pane cycle; drop zone + job-list states ARE the distinct
+// states this surface exposes).
+// ---------------------------------------------------------------------------
+
+describe("MeetingsCapturePanel — axe-clean", () => {
+  it("is axe-clean in the default drop-zone state", async () => {
+    const { container } = render(<MeetingsCapturePanel />)
+    await screen.findByTestId("meeting-drop-zone")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with the unsupported-file-type error alert shown", async () => {
+    const { container } = render(<MeetingsCapturePanel />)
+    await screen.findByTestId("meeting-drop-zone")
+    const input = screen.getByTestId("meeting-file-input") as HTMLInputElement
+    const file = new File(["x"], "note.txt", { type: "text/plain" })
+    Object.defineProperty(input, "files", { value: [file], writable: false })
+    fireEvent.change(input)
+    await screen.findByRole("alert")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with an in-progress job", async () => {
+    mockList.mockResolvedValue([
+      job({ stage: "transcribing", progress: 0.55, completed_at: null, artifact_id: null }),
+    ])
+    const { container } = render(<MeetingsCapturePanel />)
+    await screen.findByText(/Transcribing/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with a completed job", async () => {
+    mockList.mockResolvedValue([job({ duration_seconds: 90, speakers_detected: 2, calendar_event_id: "evt:abc" })])
+    const { container } = render(<MeetingsCapturePanel />)
+    await screen.findByText(/Meeting ingested/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with a failed job", async () => {
+    mockList.mockResolvedValue([
+      job({ stage: "failed", error: "Whisper crashed", artifact_id: null }),
+    ])
+    const { container } = render(<MeetingsCapturePanel />)
+    await screen.findByText(/Failed/i)
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

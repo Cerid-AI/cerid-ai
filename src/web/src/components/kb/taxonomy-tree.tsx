@@ -183,7 +183,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
         </div>
       )}
 
-      <ScrollArea className="max-h-[280px] w-full overflow-x-hidden">
+      <ScrollArea className="max-h-[280px] w-full overflow-x-hidden"> {/* drift-allowed: ScrollArea height cap gates overflow scroll for the taxonomy tree */}
         <div className="space-y-0.5 px-1 w-full overflow-hidden">
           {Object.entries(taxonomy.domains).map(([domain, info]) => {
             const isExpanded = expanded.has(domain)

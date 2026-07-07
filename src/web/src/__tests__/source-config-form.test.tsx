@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 import React from "react"
 import { SourceConfigForm } from "@/components/sources/source-config-form"
 import type { SourceRecord } from "@/lib/api/sources"
@@ -173,5 +174,42 @@ describe("SourceConfigForm — provider read-only on edit", () => {
     const source = makeSource({ kind: "chat_capture", config: { provider: "discord" } })
     render(<SourceConfigForm source={source} onSaved={() => {}} />, { wrapper: wrap() })
     expect(screen.getByText(/discord/i)).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// axe-clean — one assertion per visually-distinct config-kind variant this
+// form renders (no fetch cycle; the per-kind branch is the distinct state).
+// ---------------------------------------------------------------------------
+
+describe("SourceConfigForm — axe-clean", () => {
+  it("is axe-clean for an rss source", async () => {
+    const source = makeSource({ kind: "rss", config: { url: "https://example.com/feed.xml" } })
+    const { container } = render(<SourceConfigForm source={source} onSaved={() => {}} />, { wrapper: wrap() })
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean for a webhook source with a redacted secret", async () => {
+    const source = makeSource({
+      kind: "webhook",
+      config: { require_hmac: true, hmac_secret: "***redacted***" },
+    })
+    const { container } = render(<SourceConfigForm source={source} onSaved={() => {}} />, { wrapper: wrap() })
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean for a folder source", async () => {
+    const source = makeSource({
+      kind: "folder",
+      config: { path: "/home/user/notes", label: "Notes", exclude_patterns: ["*.tmp"] },
+    })
+    const { container } = render(<SourceConfigForm source={source} onSaved={() => {}} />, { wrapper: wrap() })
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean for a source with a read-only provider (edit mode)", async () => {
+    const source = makeSource({ kind: "chat_capture", config: { provider: "discord" } })
+    const { container } = render(<SourceConfigForm source={source} onSaved={() => {}} />, { wrapper: wrap() })
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -129,7 +129,7 @@ function MessageTOC({ headings }: { headings: TOCEntry[] }) {
           <button
             key={h.id}
             className="block w-full text-left text-xs text-primary/80 hover:text-primary hover:underline"
-            style={{ paddingLeft: `${(h.level - 1) * 12}px` }}
+            style={{ paddingLeft: `${(h.level - 1) * 12}px` }} // drift-allowed: heading-level indent depth (h1=0, h2=12px, …) has no static-CSS equivalent
             onClick={() => {
               document.getElementById(h.id)?.scrollIntoView({ behavior: "smooth", block: "start" })
             }}
@@ -609,7 +609,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
             <div className="flex items-center gap-1.5 py-2 px-1">
               <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "0ms" }} />
               <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "150ms" }} />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} /> {/* drift-allowed: typing-dot stagger delay, matches sibling dots' allowlisted pattern */}
             </div>
           ) : (
             <div ref={proseCallbackRef} className="prose prose-sm dark:prose-invert max-w-none">

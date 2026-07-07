@@ -43,9 +43,13 @@ test.describe("E-14 responsive layout", () => {
         if (vp.width < 768) {
           await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible()
           await page.getByRole("button", { name: "Open navigation" }).click()
-          await expect(page.getByRole("navigation")).toBeVisible()
+          // Task 3.7 added a persistent <md bottom tab bar, which is also a
+          // labelled `<nav aria-label="Primary">` landmark — scope this
+          // assertion to the sidebar's own nav (aria-label="Navigation")
+          // opened by the Sheet, to keep the two landmarks disambiguated.
+          await expect(page.getByRole("navigation", { name: "Navigation" })).toBeVisible()
         } else {
-          await expect(page.getByRole("navigation")).toBeVisible()
+          await expect(page.getByRole("navigation", { name: "Navigation" })).toBeVisible()
         }
       })
 

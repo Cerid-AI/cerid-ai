@@ -293,8 +293,8 @@ export function EntityCard({
     <div
       role={pinned ? "dialog" : "tooltip"}
       aria-label={`Entity details: ${attrs.name}`}
-      style={{ left, top, borderLeftColor: borderHex }}
-      className="fixed z-50 w-[260px] rounded-lg border border-border/60 border-l-4 bg-card/95 shadow-xl backdrop-blur"
+      style={{ left, top, borderLeftColor: borderHex }} // drift-allowed: anchor-measured position + resolveMapTokens-derived color, both runtime
+      className="fixed z-50 w-[260px] rounded-lg border border-border/60 border-l-4 bg-card/95 shadow-xl backdrop-blur" // drift-allowed: entity info card pinned width, sibling-aligned
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-1">
@@ -474,7 +474,7 @@ function PillToolbar({
             >
               <span
                 className="h-1.5 w-1.5 rounded-full shrink-0"
-                style={{ backgroundColor: lens.legendColor }}
+                style={{ backgroundColor: lens.legendColor }} // drift-allowed: CSS-token-derived via composeLensesWithTokens at runtime, no static value exists
                 aria-hidden="true"
               />
               {lens.label}

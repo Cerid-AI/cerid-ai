@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { axe } from "jest-axe"
 import { HFTokenStep } from "@/components/setup/hf-token-step"
 
 const mockFetchStatus = vi.fn()
@@ -142,5 +143,46 @@ describe("HFTokenStep", () => {
     await user.click(screen.getByTestId("hf-token-save"))
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Invalid token/i)
+  })
+})
+
+describe("HFTokenStep — axe-clean", () => {
+  it("is axe-clean in the default (not configured) state", async () => {
+    const { container } = render(<HFTokenStep />)
+    await screen.findByTestId("hf-token-save")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean when a token is already configured", async () => {
+    mockFetchStatus.mockResolvedValue({
+      configured: true,
+      last4: "wxyz",
+      updated_at: "2026-05-21T00:00:00Z",
+      model_access: null,
+    })
+    const { container } = render(<HFTokenStep />)
+    await screen.findByTestId("hf-token-test-stored")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in the invalid-token error state", async () => {
+    mockPut.mockResolvedValue({
+      configured: true,
+      last4: "wxyz",
+      updated_at: "2026-05-21T00:00:00Z",
+      model_access: null,
+    })
+    mockTest.mockResolvedValue({
+      valid: false,
+      gated_model_access: null,
+      error: "Invalid token (401)",
+    })
+    const user = userEvent.setup()
+    const { container } = render(<HFTokenStep />)
+    const input = await screen.findByLabelText(/Paste your token/i)
+    await user.type(input, "hf_test1234567890abcdwxyz")  // pragma: allowlist secret
+    await user.click(screen.getByTestId("hf-token-save"))
+    await screen.findByRole("alert")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

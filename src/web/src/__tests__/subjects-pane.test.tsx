@@ -8,6 +8,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 import SubjectsPane from "@/components/subjects/subjects-pane"
 import { NavigationProvider } from "@/contexts/navigation-context"
 
@@ -185,5 +186,32 @@ describe("SubjectsPane — Cycle 4 click contract", () => {
   it("?entity= writes to URL correctly", () => {
     renderSubjects("?entity=my-entity")
     expect(new URLSearchParams(window.location.search).get("entity")).toBe("my-entity")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// axe-clean — one assertion per visually-distinct mode/sub-mode this pane
+// exercises elsewhere in this suite (mode switcher, not a fetch/loading/
+// error/empty pane). Constellation/Timeline are excluded — they mount real
+// three.js/heavy sub-trees not stubbed in this suite.
+// ---------------------------------------------------------------------------
+
+describe("SubjectsPane — axe-clean", () => {
+  it("is axe-clean in Atlas overview mode (default)", async () => {
+    const { container } = renderSubjects()
+    expect(screen.getByTestId("decomposition-icicle-stub")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in Atlas neighborhood mode (?entity=)", async () => {
+    const { container } = renderSubjects("?entity=alex-smith")
+    expect(screen.getByTestId("atlas-neighborhood-stub")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in Wiki mode", async () => {
+    const { container } = renderSubjects("?mode=wiki")
+    await screen.findByTestId("wiki-stub")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

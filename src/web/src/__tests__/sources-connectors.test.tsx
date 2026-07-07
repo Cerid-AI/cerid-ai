@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import React from "react"
 
 vi.mock("@/lib/api/sources", () => ({
   listIngestionSources: vi.fn(),
+  listSourceKinds: vi.fn(),
   INGESTION_KINDS: [],
 }))
 vi.mock("@/lib/api/connectors", () => ({
@@ -23,7 +24,7 @@ vi.mock("@/lib/api/email", () => ({
   pollEmailNow: vi.fn(),
   deleteEmailSource: vi.fn(),
 }))
-import { listIngestionSources } from "@/lib/api/sources"
+import { listIngestionSources, listSourceKinds } from "@/lib/api/sources"
 import { listConnectors } from "@/lib/api/connectors"
 import { fetchEmailStatus } from "@/lib/api/email"
 import { SourcesConnectors } from "@/components/sources/sources-connectors"
@@ -31,6 +32,7 @@ import { SourcesConnectors } from "@/components/sources/sources-connectors"
 const mockSources = listIngestionSources as ReturnType<typeof vi.fn>
 const mockConnectors = listConnectors as ReturnType<typeof vi.fn>
 const mockFetchEmailStatus = fetchEmailStatus as ReturnType<typeof vi.fn>
+const mockListSourceKinds = listSourceKinds as ReturnType<typeof vi.fn>
 
 function wrap() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -224,5 +226,67 @@ describe("SourcesConnectors", () => {
       fireEvent.click(imsgTitle)
       expect(await screen.findByTestId("imessage-conversation-list")).toBeInTheDocument()
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Four-state matrix (Task 3.1) — loading / error / empty / success.
+// "Empty" is defined as no *configured* source (see sources-connectors.tsx):
+// the 7-entry connector catalog and the always-present email affordance are
+// not configured on a fresh install, so rows.length alone never reaches 0.
+// ---------------------------------------------------------------------------
+
+describe("SourcesConnectors — four-state matrix", () => {
+  it("loading: renders Skeleton rows, not the empty gallery", async () => {
+    mockSources.mockReturnValue(new Promise(() => {}))
+    mockConnectors.mockReturnValue(new Promise(() => {}))
+    const { container } = render(<SourcesConnectors />, { wrapper: wrap() })
+
+    expect(screen.getByTestId("sources-loading")).toBeInTheDocument()
+    expect(screen.queryByText(/Connect your first source/i)).not.toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("error: renders a destructive Alert with a Retry that re-invokes the queries", async () => {
+    mockConnectors.mockRejectedValue(new Error("boom"))
+    const { container } = render(<SourcesConnectors />, { wrapper: wrap() })
+
+    await waitFor(() => {
+      expect(screen.getByText(/Couldn't load sources/i)).toBeInTheDocument()
+    })
+    const retryButton = screen.getByRole("button", { name: /retry/i })
+    expect(await axe(container)).toHaveNoViolations()
+
+    mockConnectors.mockClear()
+    fireEvent.click(retryButton)
+    await waitFor(() => expect(mockConnectors).toHaveBeenCalled())
+  })
+
+  it("empty: renders the onboarding gallery; clicking a tile opens the add-source wizard", async () => {
+    mockSources.mockResolvedValue([])
+    mockConnectors.mockResolvedValue([])
+    mockFetchEmailStatus.mockResolvedValue({
+      configured: false, last_poll: null, messages_ingested: 0, errors: [],
+    })
+    mockListSourceKinds.mockResolvedValue([
+      { kind: "rss", family: "feeds", tier: "core", availability: "available" },
+    ])
+    const onAddSource = vi.fn()
+    const { container } = render(<SourcesConnectors onAddSource={onAddSource} />, { wrapper: wrap() })
+
+    expect(await screen.findByText(/Connect your first source/i)).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+
+    fireEvent.click(screen.getByRole("button", { name: /add rss/i }))
+    expect(onAddSource).toHaveBeenCalledWith("rss")
+  })
+
+  it("success: renders the row list, not the loading/error/empty states", async () => {
+    const { container } = render(<SourcesConnectors />, { wrapper: wrap() })
+
+    expect(await screen.findByText("Notes")).toBeInTheDocument()
+    expect(screen.queryByTestId("sources-loading")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Connect your first source/i)).not.toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

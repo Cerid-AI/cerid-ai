@@ -17,6 +17,7 @@ import { useFrame } from "@react-three/fiber"
 import type { EntityEmbedding3D } from "@/lib/api/embeddings-3d"
 import { degreeRadius } from "./palette"
 import { visibleLabelCount } from "./quality"
+import { LABEL_HEX, SURFACE_HEX } from "@/theme/shader-tokens"
 
 export interface HubLabelsProps {
   entities: EntityEmbedding3D[]
@@ -69,9 +70,9 @@ export function HubLabels({ entities, degrees, count = 18, hoveredIndex = null }
         <Billboard key={ent.id} position={[ent.x, ent.y + degreeRadius(degree) + 0.28, ent.z]}>
           <Text
             fontSize={0.34}
-            color={index === hoveredIndex ? "#8CF5DC" : "#C8D4E6"}
+            color={index === hoveredIndex ? LABEL_HEX.hover : LABEL_HEX.default}
             outlineWidth={0.012}
-            outlineColor="#0A1F3D"
+            outlineColor={SURFACE_HEX.vaultDeep}
             anchorX="center"
             anchorY="bottom"
             maxWidth={6}

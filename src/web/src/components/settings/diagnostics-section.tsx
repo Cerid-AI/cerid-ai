@@ -33,7 +33,7 @@ interface DiagnosticsSectionProps {
 
 function PaneLoader({ label }: { label: string }) {
   return (
-    <div className="flex h-full min-h-[300px] items-center justify-center text-muted-foreground">
+    <div className="flex h-full min-h-80 items-center justify-center text-muted-foreground">
       <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
       Loading {label}…
     </div>

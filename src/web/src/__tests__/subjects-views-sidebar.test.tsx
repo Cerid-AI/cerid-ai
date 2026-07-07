@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 import { SubjectsViewsSidebar } from "@/components/subjects/subjects-views-sidebar"
 
 const mockList = vi.fn()
@@ -109,5 +110,56 @@ describe("SubjectsViewsSidebar", () => {
     render(wrap(<SubjectsViewsSidebar mode="timeline" onRestore={vi.fn()} />))
     await screen.findByText("pro-1")
     expect(screen.queryByText(/Upgrade to Pro/i)).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// axe-clean — one assertion per visually-distinct state (loading / error /
+// empty / populated-with-cap-hint / populated-pro).
+// ---------------------------------------------------------------------------
+
+describe("SubjectsViewsSidebar — axe-clean", () => {
+  it("is axe-clean in loading state", async () => {
+    mockList.mockReturnValue(new Promise(() => {})) // never resolves
+    mockFetch.mockResolvedValue(healthResp())
+    const { container } = render(wrap(<SubjectsViewsSidebar mode="timeline" onRestore={vi.fn()} />))
+    await screen.findByText(/Loading/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in error state", async () => {
+    mockList.mockRejectedValue(new Error("fail"))
+    mockFetch.mockResolvedValue(healthResp())
+    const { container } = render(wrap(<SubjectsViewsSidebar mode="timeline" onRestore={vi.fn()} />))
+    await screen.findByText(/Failed to load views/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in empty state", async () => {
+    mockList.mockResolvedValue([])
+    mockFetch.mockResolvedValue(healthResp())
+    const { container } = render(wrap(<SubjectsViewsSidebar mode="wiki" onRestore={vi.fn()} />))
+    await screen.findByTestId("subjects-views-empty")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean when populated with the free-tier cap hint shown", async () => {
+    mockList.mockResolvedValue([
+      view({ view_id: "1", name: "v1" }),
+      view({ view_id: "2", name: "v2" }),
+      view({ view_id: "3", name: "v3" }),
+    ])
+    mockFetch.mockResolvedValue(healthResp({ pro_unlocked: false, free_tier_max_views: 3 }))
+    const { container } = render(wrap(<SubjectsViewsSidebar mode="timeline" onRestore={vi.fn()} />))
+    await screen.findByText(/Upgrade to Pro/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean when populated on Pro (no cap hint)", async () => {
+    mockList.mockResolvedValue([view({ view_id: "1", name: "pro-1" })])
+    mockFetch.mockResolvedValue(healthResp({ pro_unlocked: true }))
+    const { container } = render(wrap(<SubjectsViewsSidebar mode="timeline" onRestore={vi.fn()} />))
+    await screen.findByText("pro-1")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

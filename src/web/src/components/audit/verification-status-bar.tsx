@@ -527,12 +527,12 @@ export function VerificationStatusBar({
                     )}
                   </div>
                   {c.source_snippet && (
-                    <p className="ml-[18px] line-clamp-2 leading-tight text-muted-foreground italic">
+                    <p className="ml-[18px] line-clamp-2 leading-tight text-muted-foreground italic"> {/* drift-allowed: ml-[18px] aligns sub-content under the chevron icon column */}
                       &ldquo;{c.source_snippet.slice(0, 150)}&rdquo;
                     </p>
                   )}
                   {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
-                    <div className="ml-[18px] mt-0.5 rounded bg-green-500/10 px-2 py-1">
+                    <div className="ml-[18px] mt-0.5 rounded bg-green-500/10 px-2 py-1"> {/* drift-allowed: ml-[18px] aligns sub-content under the chevron icon column */}
                       <span className="text-label-xs font-medium text-green-700 dark:text-green-400">Found answer: </span>
                       <span className="text-label-xs leading-tight text-green-800 dark:text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                     </div>

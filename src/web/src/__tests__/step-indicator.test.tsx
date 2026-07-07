@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
+import { axe } from "jest-axe"
 import { StepIndicator } from "@/components/setup/step-indicator"
 import type { StepDef } from "@/components/setup/step-indicator"
 
@@ -69,5 +70,21 @@ describe("StepIndicator", () => {
     // Step 0 and step 2 should be completed (not skipped)
     expect(stepDivs[0]?.className).toContain("text-green-600")
     expect(stepDivs[2]?.className).toContain("text-green-600")
+  })
+})
+
+describe("StepIndicator — axe-clean", () => {
+  it("is axe-clean at the first step", async () => {
+    const { container } = render(
+      <StepIndicator steps={STEPS} currentStep={0} skippedSteps={new Set()} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with completed, active, and skipped steps mixed", async () => {
+    const { container } = render(
+      <StepIndicator steps={STEPS} currentStep={4} skippedSteps={new Set([1, 3])} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -51,11 +51,11 @@ export function packHex(hex: string, alpha = 1): number {
 // ---------------------------------------------------------------------------
 
 export const TRUST_HALO_HEX = {
-  verified: "#5AECCB",
-  partial: "#E8C56A",
-  unverified: "#D4AF37",
-  contradicted: "#FF6B6B",
-  unknown: "#5C6680",
+  verified: "#5AECCB", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  partial: "#E8C56A", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  unverified: "#D4AF37", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  contradicted: "#FF6B6B", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  unknown: "#5C6680", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
 } as const
 
 export type TrustState = keyof typeof TRUST_HALO_HEX
@@ -65,9 +65,9 @@ export type TrustState = keyof typeof TRUST_HALO_HEX
 // ---------------------------------------------------------------------------
 
 export const COMMUNITY_PALETTE_HEX: string[] = [
-  "#E5847A", "#E5A87A", "#E5C87A", "#D4AF37",
-  "#C8E57A", "#A8E57A", "#7AE5C8", "#7AC8E5",
-  "#7AA8E5", "#A87AE5", "#C87AE5", "#E57AC8",
+  "#E5847A", "#E5A87A", "#E5C87A", "#D4AF37", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  "#C8E57A", "#A8E57A", "#7AE5C8", "#7AC8E5", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  "#7AA8E5", "#A87AE5", "#C87AE5", "#E57AC8", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
 ]
 
 // ---------------------------------------------------------------------------
@@ -75,11 +75,11 @@ export const COMMUNITY_PALETTE_HEX: string[] = [
 // ---------------------------------------------------------------------------
 
 export const EDGE_HEX = {
-  mentions: "#7AC8E5",
-  works_on: "#D4AF37",
-  discussed_with: "#A8E57A",
-  contradicts: "#FF6B6B",
-  temporal: "#E8C56A",
+  mentions: "#7AC8E5", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  works_on: "#D4AF37", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  discussed_with: "#A8E57A", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  contradicts: "#FF6B6B", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  temporal: "#E8C56A", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
 } as const
 
 // ---------------------------------------------------------------------------
@@ -87,11 +87,40 @@ export const EDGE_HEX = {
 // ---------------------------------------------------------------------------
 
 export const SURFACE_HEX = {
-  vaultDeep: "#0A1F3D",
-  vaultSurface: "#142B52",
-  brandTeal: "#00E5D8",
-  brandGold: "#D4AF37",
-  graphiteFallback: "#5C6680",
+  vaultDeep: "#0A1F3D", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  vaultSurface: "#142B52", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  brandTeal: "#00E5D8", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  brandGold: "#D4AF37", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  graphiteFallback: "#5C6680", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+} as const
+
+// ---------------------------------------------------------------------------
+// Source-family palette (Sources Constellation tier-1 overview) — relocated
+// from components/sources/sources-constellation.tsx; Three.js `color` /
+// `emissive` props can't consume CSS vars.
+// ---------------------------------------------------------------------------
+
+export const SOURCE_FAMILY_HEX = {
+  files: "#f0b860", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  feeds: "#5ec5b6", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  mail: "#7a9ad7", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  calendar: "#c79a6e", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  chat: "#b08adc", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  media: "#e88373", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  webhook: "#82c89a", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  adapter: "#9fbfa3", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  pack: "#dcc36a", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  anchor: "#d4a44e", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var) — Cerid gold
+} as const
+
+// ---------------------------------------------------------------------------
+// Constellation hub/super-node label palette (troika text `color` /
+// `outlineColor` props — same GPU-consumption constraint as above)
+// ---------------------------------------------------------------------------
+
+export const LABEL_HEX = {
+  default: "#C8D4E6", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
+  hover: "#8CF5DC", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
 } as const
 
 // ---------------------------------------------------------------------------

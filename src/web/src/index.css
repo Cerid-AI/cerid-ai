@@ -73,6 +73,20 @@
     --color-chart-3: var(--chart-3);
     --color-chart-4: var(--chart-4);
     --color-chart-5: var(--chart-5);
+    /* Semantic dataviz tokens (Task 3.4a) — status colors + grid line +
+       heat ramp shared by analytics charts. Values in oklch (never hex,
+       per drift gate); reference bare as var(--chart-ok) etc, do NOT wrap
+       in hsl(...). */
+    --color-chart-ok: var(--chart-ok);
+    --color-chart-warn: var(--chart-warn);
+    --color-chart-fail: var(--chart-fail);
+    --color-chart-neutral: var(--chart-neutral);
+    --color-chart-grid: var(--chart-grid);
+    --color-chart-heat-0: var(--chart-heat-0);
+    --color-chart-heat-1: var(--chart-heat-1);
+    --color-chart-heat-2: var(--chart-heat-2);
+    --color-chart-heat-3: var(--chart-heat-3);
+    --color-chart-heat-4: var(--chart-heat-4);
     --color-sidebar: var(--sidebar);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar-primary: var(--sidebar-primary);
@@ -179,6 +193,20 @@
     --chart-3: oklch(0.398 0.07 227.392);
     --chart-4: oklch(0.828 0.189 84.429);
     --chart-5: oklch(0.769 0.188 70.08);
+    /* Dataviz semantic tokens — status colors for trust-sunburst + friends.
+       ok≈emerald-500, warn≈amber-500, fail≈red-500, neutral≈slate-500.
+       Grid line mirrors --border. Heat ramp preserves the growth-heatmap's
+       slate→teal/cyan progression (no-data → highest intensity). */
+    --chart-ok: oklch(0.696 0.17 162.48);
+    --chart-warn: oklch(0.769 0.188 70.08);
+    --chart-fail: oklch(0.637 0.237 25.331);
+    --chart-neutral: oklch(0.554 0.046 257.417);
+    --chart-grid: var(--border);
+    --chart-heat-0: oklch(0.28 0.03 240);
+    --chart-heat-1: oklch(0.45 0.09 195);
+    --chart-heat-2: oklch(0.55 0.11 195);
+    --chart-heat-3: oklch(0.68 0.13 195);
+    --chart-heat-4: oklch(0.80 0.14 195);
     /* Sidebar — darker slate with teal tint for clear separation */
     --sidebar: oklch(0.89 0.018 200);
     --sidebar-foreground: oklch(0.13 0.02 240);
@@ -226,6 +254,19 @@
     --chart-3: oklch(0.55 0.18 255);        /* Cobalt */
     --chart-4: oklch(0.627 0.265 303.9);
     --chart-5: oklch(0.645 0.246 16.439);
+    /* Dataviz semantic tokens — same hues as light mode (the analytics
+       charts previously used one hardcoded hex across both themes; keep
+       that behaviour so tokenising doesn't recolor anything). */
+    --chart-ok: oklch(0.696 0.17 162.48);
+    --chart-warn: oklch(0.769 0.188 70.08);
+    --chart-fail: oklch(0.637 0.237 25.331);
+    --chart-neutral: oklch(0.554 0.046 257.417);
+    --chart-grid: var(--border);
+    --chart-heat-0: oklch(0.28 0.03 240);
+    --chart-heat-1: oklch(0.45 0.09 195);
+    --chart-heat-2: oklch(0.55 0.11 195);
+    --chart-heat-3: oklch(0.68 0.13 195);
+    --chart-heat-4: oklch(0.80 0.14 195);
     /* Sidebar — deeper navy */
     --sidebar: oklch(0.14 0.03 240);
     --sidebar-foreground: oklch(0.93 0.01 230);

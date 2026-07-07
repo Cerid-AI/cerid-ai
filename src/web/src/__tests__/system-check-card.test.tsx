@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
+import { axe } from "jest-axe"
 import type { SystemCheckResponse } from "@/lib/types"
 
 const mockFetchSystemCheck = vi.fn<() => Promise<SystemCheckResponse>>()
@@ -82,5 +83,28 @@ describe("SystemCheckCard", () => {
     await waitFor(() => {
       expect(screen.getByText("Could not reach backend — is Docker running?")).toBeInTheDocument()
     })
+  })
+})
+
+describe("SystemCheckCard — axe-clean", () => {
+  it("is axe-clean while loading", async () => {
+    mockFetchSystemCheck.mockReturnValue(new Promise(() => {}))
+    const { container } = render(<SystemCheckCard onCheckComplete={vi.fn()} />)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean after a successful check", async () => {
+    const { container } = render(<SystemCheckCard onCheckComplete={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/16 GB/)).toBeInTheDocument())
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in the error/retrying state", async () => {
+    mockFetchSystemCheck.mockRejectedValue(new Error("Network error"))
+    const { container } = render(<SystemCheckCard onCheckComplete={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByText("Could not reach backend — is Docker running?")).toBeInTheDocument()
+    })
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

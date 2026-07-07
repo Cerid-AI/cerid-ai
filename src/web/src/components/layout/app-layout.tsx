@@ -7,6 +7,7 @@ import { clearForeignPaneParams } from "@/lib/url-state"
 import { Sidebar, type Pane } from "./sidebar"
 import { NavigationProvider } from "@/contexts/navigation-context"
 import { StatusBar } from "./status-bar"
+import { BottomTabBar } from "./bottom-tab-bar"
 import { AgentConsole } from "@/components/console/AgentConsole"
 import { ModelDownloadBanner } from "@/components/model-download-banner"
 import { useAgentConsole } from "@/hooks/use-agent-console"
@@ -101,43 +102,48 @@ export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChan
           has dismissed the banner. Sits above the main flex row so the
           layout shifts down when shown rather than overlapping. */}
       <ModelDownloadBanner />
-      <div className="flex flex-1 overflow-hidden">
-        {isPhone ? (
-          <Sheet open={sidebarSheetOpen} onOpenChange={setSidebarSheetOpen}>
-            <SheetContent side="left" className="w-52 p-0 flex flex-col">
-              <SheetTitle className="sr-only">Navigation</SheetTitle>
-              <Sidebar
-                activePane={activePane}
-                onPaneChange={(pane) => { handlePaneChange(pane); setSidebarSheetOpen(false) }}
-                collapsed={false}
-                onToggleCollapse={() => {}}
-                theme={theme}
-                onToggleTheme={toggleTheme}
-                featureTier={featureTier}
-                onCycleTier={onCycleTier}
-                activePanes={activePanes}
-              />
-            </SheetContent>
-          </Sheet>
-        ) : (
-          <Sidebar
-            activePane={activePane}
-            onPaneChange={handlePaneChange}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-            theme={theme}
-            onToggleTheme={toggleTheme}
-            featureTier={featureTier}
-            onCycleTier={onCycleTier}
-            activePanes={activePanes}
-          />
-        )}
-        <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden">
-          <NavigationProvider activePane={activePane} onPaneChange={handlePaneChange}>
+      <NavigationProvider activePane={activePane} onPaneChange={handlePaneChange}>
+        <div className="flex flex-1 overflow-hidden">
+          {isPhone ? (
+            <Sheet open={sidebarSheetOpen} onOpenChange={setSidebarSheetOpen}>
+              <SheetContent side="left" className="w-52 p-0 flex flex-col">
+                <SheetTitle className="sr-only">Navigation</SheetTitle>
+                <Sidebar
+                  activePane={activePane}
+                  onPaneChange={(pane) => { handlePaneChange(pane); setSidebarSheetOpen(false) }}
+                  collapsed={false}
+                  onToggleCollapse={() => {}}
+                  theme={theme}
+                  onToggleTheme={toggleTheme}
+                  featureTier={featureTier}
+                  onCycleTier={onCycleTier}
+                  activePanes={activePanes}
+                />
+              </SheetContent>
+            </Sheet>
+          ) : (
+            <Sidebar
+              activePane={activePane}
+              onPaneChange={handlePaneChange}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              featureTier={featureTier}
+              onCycleTier={onCycleTier}
+              activePanes={activePanes}
+            />
+          )}
+          <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"> {/* drift-allowed: safe-area-aware bottom-bar clearance (no static utility expresses env()) */}
             {children(activePane, () => setSidebarSheetOpen(true))}
-          </NavigationProvider>
-        </main>
-      </div>
+          </main>
+        </div>
+        {/* Task 3.7 — persistent Chat/Capture/Menu tab bar, <md only. Sits
+            below <main> (whose safe-area-aware bottom padding keeps content
+            clear of it) and covers StatusBar's screen position on mobile,
+            so StatusBar hides <md. */}
+        <BottomTabBar onOpenMenu={() => setSidebarSheetOpen(true)} />
+      </NavigationProvider>
       {consoleOpen && (
         <AgentConsole
           events={events}

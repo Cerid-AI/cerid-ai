@@ -314,6 +314,7 @@ export default function AutomationsPane() {
                         <Switch
                           checked={auto.enabled}
                           onCheckedChange={(v) => handleToggle(auto.id, v)}
+                          aria-label={`${auto.enabled ? "Disable" : "Enable"} ${auto.name}`}
                           className="shrink-0"
                         />
                       </div>

@@ -11,14 +11,14 @@ import { CHART_TOOLTIP_STYLE } from "@/lib/constants"
 
 /** Color palette for event types (stacked areas). */
 const EVENT_COLORS: Record<string, string> = {
-  ingest: "hsl(var(--chart-1))",
-  query: "hsl(var(--chart-2))",
-  duplicate: "hsl(var(--chart-3))",
-  recategorize: "hsl(var(--chart-4))",
-  memory_extraction: "hsl(var(--chart-5))",
+  ingest: "var(--chart-1)",
+  query: "var(--chart-2)",
+  duplicate: "var(--chart-3)",
+  recategorize: "var(--chart-4)",
+  memory_extraction: "var(--chart-5)",
 }
-const FALLBACK_COLOR = "hsl(var(--muted-foreground))"
-const ERROR_COLOR = "hsl(var(--destructive))"
+const FALLBACK_COLOR = "var(--muted-foreground)"
+const ERROR_COLOR = "var(--destructive)"
 
 function eventColor(event: string): string {
   if (event.includes("error")) return ERROR_COLOR
@@ -114,8 +114,8 @@ export function ActivityChart({ activity }: ActivityChartProps) {
                 <Area
                   type="monotone"
                   dataKey="count"
-                  stroke="hsl(var(--chart-1))"
-                  fill="hsl(var(--chart-1))"
+                  stroke="var(--chart-1)"
+                  fill="var(--chart-1)"
                   fillOpacity={0.2}
                 />
               )}

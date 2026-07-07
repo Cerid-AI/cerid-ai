@@ -8,6 +8,12 @@
 # To remove an entry: replace the inline style / arbitrary class with a token
 # in src/web/src/index.css or a named primitive in components/ui/.
 #
+# Prefer an inline `// drift-allowed: <reason>` comment at the violation site
+# over a new entry here — line-pinned entries rot whenever the file above the
+# pinned line grows or shrinks. This file is being wound down in favor of
+# inline annotations; only file-wide runtime-geometry patterns that recur
+# across many call sites still warrant a section here.
+#
 # Generated and re-validated by `scripts/lint-no-design-drift.py --root src/web/src --allow-file <this file>`.
 
 # --- Section: Runtime-derived inline styles ---------------------------------
@@ -25,18 +31,14 @@ src/web/src/components/chat/claim-overlay.tsx:152
 src/web/src/components/chat/claim-overlay.tsx:342
 src/web/src/components/chat/claim-overlay.tsx:359
 
-# Heading-level indent depth (h1=0, h2=12px, …) and animation stagger delays
-# Stagger-delay lines bumped after Phase 4 (V-P2.7 aria-label additions
-# shifted them +3 on top of the v0.92.2 +6 bump).  Bumped again after
-# Phase 9 (M-A.2 streaming caret) — +4 lines for the optional caret span.
-src/web/src/components/chat/message-bubble.tsx:131
-src/web/src/components/chat/message-bubble.tsx:609
+# Animation stagger delays (typing-indicator dots). Heading-level indent depth
+# and the message-bubble.tsx:131/609 stagger entries migrated to inline
+# `// drift-allowed:` annotations at their real lines (Task 3.5b).
 src/web/src/components/chat/message-bubble.tsx:610
 src/web/src/components/chat/message-bubble.tsx:611
 
 # Console / activity feed scroll heights from container measurements
-src/web/src/components/console/AgentConsole.tsx:244
-src/web/src/components/kb/ActivityFeed.tsx:153
+src/web/src/components/console/AgentConsole.tsx:282
 
 # Recharts tooltip API requires inline object styles
 src/web/src/components/monitoring/collection-chart.tsx:37
@@ -46,53 +48,34 @@ src/web/src/components/monitoring/collection-chart.tsx:48
 # Workflow canvas geometry pinned to viewBox / NODE_W / NODE_H constants
 src/web/src/components/workflows/workflow-canvas.tsx:178
 
-# StorageBar stacked-segment widths (tooltip+legend; doesn't fit single-fill ProgressBar)
-src/web/src/components/settings/categories/system.tsx:206
-
 # --- Section: TooltipContent max-width caps ---------------------------------
 # Pinned widths keep long invariant / claim / metadata strings from sprawling.
 
-src/web/src/components/kb/artifact-card.tsx:198
 src/web/src/components/kb/kb-context-panel.tsx:500
-src/web/src/components/kb/knowledge-console.tsx:305
-src/web/src/components/kb/knowledge-console.tsx:320
-src/web/src/components/kb/knowledge-console.tsx:335
-src/web/src/components/kb/knowledge-console.tsx:350
-src/web/src/components/kb/knowledge-pane.tsx:627
-src/web/src/components/setup/health-dashboard.tsx:83
 
 # --- Section: SelectTrigger / SelectContent pinned widths -------------------
 # Filter chips and model-select dropdowns lock width to align with siblings.
 
 src/web/src/components/chat/model-select.tsx:77
-src/web/src/components/kb/knowledge-pane.tsx:637
-src/web/src/components/kb/knowledge-pane.tsx:649
-src/web/src/components/monitoring/digest-card.tsx:84
 
 # --- Section: ScrollArea height caps ----------------------------------------
 # List / tree / library panels lock max-height to gate overflow scroll.
 
-src/web/src/components/kb/knowledge-library-dialog.tsx:124
-src/web/src/components/kb/knowledge-library-dialog.tsx:163
 src/web/src/components/kb/tag-filter.tsx:128
-src/web/src/components/kb/tag-manager.tsx:135
-src/web/src/components/kb/taxonomy-tree.tsx:184
 
 # --- Section: Verification-status-bar indent ---------------------------------
 # `ml-[18px]` aligns sub-content under the chevron icon column.
 # Line numbers bumped after Phase 4 (V-P0.1 nested-button → div+role=button
 # refactor expanded the summary row).  Bumped again after Phase 9 (M-A.6
 # current-step pulse) — +18/+19 lines for ClaimStatusIcon's `isCurrent`
-# prop and the IIFE wrapping the streaming claims list.
+# prop and the IIFE wrapping the streaming claims list. The other two
+# summary-row entries migrated to inline annotations (Task 3.5b).
 
 src/web/src/components/audit/verification-status-bar.tsx:184
-src/web/src/components/audit/verification-status-bar.tsx:522
-src/web/src/components/audit/verification-status-bar.tsx:527
 
 # --- Section: Truncated tag / metadata widths --------------------------------
 
 src/web/src/components/chat/web-search-indicator.tsx:55
-src/web/src/components/kb/artifact-card.tsx:246
 
 # --- Section: Responsive-breakpoint helpers ----------------------------------
 # `min-[320px]:` arbitrary breakpoint hides labels on the narrow KB header.
@@ -111,35 +94,14 @@ src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:288
 src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:335
 src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:731
 
-# --- Section: Subjects pane inline styles (shifted line numbers) ---------------
-# These are pre-existing allowlisted patterns from the original subjects-pane.tsx;
-# line numbers shifted after Cycle 4 rewrite. viewTransitionName is a View
-# Transition API attribute required at runtime; min-w-[1rem] is badge centering.
-src/web/src/components/subjects/subjects-pane.tsx:269
-src/web/src/components/subjects/subjects-pane.tsx:97
-
-# --- Section: Brand / sidebar layout chrome ----------------------------------
-# CERID wordmark + tier pill use brand-pinned type sizes.
-# Bumped after Phase 9 (M-A.5 View Transition wrapper) — +15 lines for
-# `triggerPaneChange` helper + per-button `viewTransitionName` style.
-
-src/web/src/components/layout/sidebar.tsx:147
-src/web/src/components/layout/sidebar.tsx:150
-
-# Notification-badge minimum width keeps single- and double-digit counts centered.
-# Line bumped after v0.92.2 (P0.3 Zap-icon swap added 3 lines).
-src/web/src/components/layout/status-bar.tsx:243
-
 # --- Section: Workflow editor + canvas chrome --------------------------------
 # Dropdown widths and SVG geometry tuned to fit agent/node names exactly.
+# workflow-editor.tsx's four pinned-width entries migrated to inline
+# annotations (Task 3.5b); workflow-canvas.tsx's stay here.
 
 src/web/src/components/workflows/workflow-canvas.tsx:182
 src/web/src/components/workflows/workflow-canvas.tsx:277
 src/web/src/components/workflows/workflow-canvas.tsx:301
-src/web/src/components/workflows/workflow-editor.tsx:250
-src/web/src/components/workflows/workflow-editor.tsx:274
-src/web/src/components/workflows/workflow-editor.tsx:367
-src/web/src/components/workflows/workflow-editor.tsx:401
 
 # --- Section: entity-hover-card test stubs (Task 4.3) -----------------------
 # Hex values are required to satisfy the MapTokens interface in test stubs;
@@ -159,4 +121,3 @@ src/web/src/__tests__/entity-hover-card.test.tsx:166
 src/web/src/__tests__/entity-hover-card.test.tsx:167
 src/web/src/__tests__/entity-hover-card.test.tsx:168
 src/web/src/__tests__/entity-hover-card.test.tsx:169
-

@@ -214,14 +214,14 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                       onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
                     >{deriveTitle(result.filename, result.content)}</p>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[360px] break-words">
+                  <TooltipContent side="top" className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps long titles from sprawling */}
                     {deriveTitle(result.filename, result.content)}
                     {isAutoChatId(result.filename) ? (
-                      <div className="mt-1 text-[10px] opacity-70">
+                      <div className="mt-1 text-label-xs opacity-70">
                         {normalizeFilename(result.filename)}
                       </div>
                     ) : null}
-                    <div className="mt-1 text-[10px] opacity-70">Double-click to rename</div>
+                    <div className="mt-1 text-label-xs opacity-70">Double-click to rename</div>
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -234,7 +234,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                         {chunkCount}
                       </Badge>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[200px] text-xs">
+                    <TooltipContent side="top" className="max-w-[200px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps chunk-count explanation from sprawling */}
                       {chunkCount} searchable segment{chunkCount !== 1 ? "s" : ""}. Documents are split into chunks for more precise retrieval.
                     </TooltipContent>
                   </Tooltip>
@@ -282,7 +282,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   const isAuto = tag.startsWith("~")
                   const label = isAuto ? tag.slice(1) : tag
                   return (
-                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-label-xs ${isAuto ? "bg-muted/50 italic text-muted-foreground/80" : "bg-muted text-muted-foreground"}`}>
+                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-label-xs ${isAuto ? "bg-muted/50 italic text-muted-foreground/80" : "bg-muted text-muted-foreground"}`}> {/* drift-allowed: truncated tag width pin */}
                       {label}
                     </span>
                   )
@@ -331,7 +331,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   {previewText.slice(0, 80)}
                 </p>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[360px] break-words">
+              <TooltipContent side="bottom" className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps content preview from sprawling */}
                 {previewText.slice(0, 320)}{previewText.length > 320 ? "…" : ""}
               </TooltipContent>
             </Tooltip>

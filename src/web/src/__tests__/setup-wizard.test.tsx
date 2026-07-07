@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 
 vi.mock("@/lib/api", () => ({
   applySetupConfig: vi.fn(),
@@ -225,5 +226,40 @@ describe("SetupWizard", () => {
     expect(
       screen.getByText(/Install a curated knowledge pack/i),
     ).toBeInTheDocument()
+  })
+})
+
+describe("SetupWizard — axe-clean", () => {
+  it("is axe-clean on the Welcome step (step 0)", async () => {
+    const { container } = renderWizard()
+    await waitFor(() => expect(fetchSystemCheck).toHaveBeenCalled())
+    await screen.findByText(/Not found/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean on the API Keys step (step 1) with a local backend detected", async () => {
+    vi.mocked(fetchSystemCheck).mockResolvedValueOnce({
+      ram_gb: 16,
+      docker_running: true,
+      env_exists: true,
+      env_keys_present: [],
+      ollama_detected: true,
+      ollama_url: "http://localhost:11434",
+      ollama_models: ["llama3.2:3b"],
+      lightweight_recommended: false,
+      archive_path_exists: false,
+      default_archive_path: "~/cerid-archive",
+      os: "darwin",
+      cpu: "Apple M1",
+      cpu_cores: 8,
+      gpu: "Apple M1 GPU",
+      gpu_acceleration: "metal",
+    })
+    const { container } = renderWizard()
+    await waitFor(() => expect(fetchSystemCheck).toHaveBeenCalled())
+    await screen.findByText(/Detected \(1 model\)/i)
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+    await screen.findByText("API Keys")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

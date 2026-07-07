@@ -262,12 +262,13 @@ function QuenchforgeBackendStep({
         {/* Enable toggle (drives pipeline routing) */}
         <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
           <div>
-            <Label className="text-xs font-medium">Enable Quenchforge for pipeline tasks</Label>
+            <Label htmlFor="quenchforge-enable-toggle" className="text-xs font-medium">Enable Quenchforge for pipeline tasks</Label>
             <p className="text-label-xs text-muted-foreground">
               Query routing, claim extraction, topic detection
             </p>
           </div>
           <Switch
+            id="quenchforge-enable-toggle"
             checked={state.enabled}
             onCheckedChange={(checked) =>
               onChange({
@@ -534,12 +535,13 @@ function OllamaBackendStep({
             {/* Enable toggle */}
             <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
               <div>
-                <Label className="text-xs font-medium">Enable for pipeline tasks</Label>
+                <Label htmlFor="ollama-enable-toggle" className="text-xs font-medium">Enable for pipeline tasks</Label>
                 <p className="text-label-xs text-muted-foreground">
                   Query routing, claim extraction, topic detection (not full verification)
                 </p>
               </div>
               <Switch
+                id="ollama-enable-toggle"
                 checked={state.enabled}
                 onCheckedChange={(checked) => onChange({ ...state, enabled: checked })}
               />

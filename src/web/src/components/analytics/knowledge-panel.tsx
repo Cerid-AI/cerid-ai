@@ -68,7 +68,7 @@ function MetricCard({ label, value, hint, icon, warn }: MetricCardProps) {
       )}
       data-testid={`knowledge-metric-${label.toLowerCase().replace(/\s+/g, "-")}`}
     >
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-label-xxs uppercase tracking-wider text-muted-foreground">
         {icon}
         {label}
       </div>
@@ -81,7 +81,7 @@ function MetricCard({ label, value, hint, icon, warn }: MetricCardProps) {
         {value}
       </div>
       {hint && (
-        <div className="text-[10px] text-muted-foreground leading-tight">{hint}</div>
+        <div className="text-label-xxs text-muted-foreground leading-tight">{hint}</div>
       )}
     </Card>
   )
@@ -159,7 +159,7 @@ export function KnowledgePanel() {
         >
           Knowledge architecture
         </h3>
-        <span className="ml-auto text-[10px] text-muted-foreground">
+        <span className="ml-auto text-label-xxs text-muted-foreground">
           Phase K6 metrics
         </span>
       </header>

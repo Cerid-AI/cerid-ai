@@ -131,7 +131,7 @@ export function KnowledgeLibraryDialog({ open, onOpenChange, onPackInstalled }: 
           </TabsList>
 
           <TabsContent value="available" className="mt-3">
-            <ScrollArea className="max-h-[460px] pr-2">
+            <ScrollArea className="max-h-[460px] pr-2"> {/* drift-allowed: ScrollArea height cap gates overflow scroll for the pack library list */}
               {registryQuery.isLoading && (
                 <div className="flex items-center justify-center p-8 text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading registry…
@@ -170,7 +170,7 @@ export function KnowledgeLibraryDialog({ open, onOpenChange, onPackInstalled }: 
           </TabsContent>
 
           <TabsContent value="installed" className="mt-3">
-            <ScrollArea className="max-h-[460px] pr-2">
+            <ScrollArea className="max-h-[460px] pr-2"> {/* drift-allowed: ScrollArea height cap gates overflow scroll for the pack library list */}
               {installedQuery.isLoading && (
                 <div className="flex items-center justify-center p-8 text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading installed packs…

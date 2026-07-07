@@ -5,6 +5,8 @@ import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { InfoTip } from "@/components/ui/info-tip"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PaneError } from "@/components/ui/pane-error"
 import { cn } from "@/lib/utils"
 import {
   Activity,
@@ -234,19 +236,24 @@ const ALL_STAGES: PipelineStage[] = [
 export function ObservabilityDashboard() {
   const [windowMinutes, setWindowMinutes] = useState(60)
 
-  const { data: metricsData, isLoading: metricsLoading } = useQuery({
+  const {
+    data: metricsData,
+    isLoading: metricsLoading,
+    isError: metricsError,
+    refetch: refetchMetrics,
+  } = useQuery({
     queryKey: ["observability-metrics", windowMinutes],
     queryFn: () => fetchObservabilityMetrics(windowMinutes),
     refetchInterval: 10_000,
   })
 
-  const { data: healthData } = useQuery({
+  const { data: healthData, refetch: refetchHealth } = useQuery({
     queryKey: ["observability-health", windowMinutes],
     queryFn: () => fetchObservabilityHealthScore(windowMinutes),
     refetchInterval: 10_000,
   })
 
-  const { data: healthStatus } = useQuery({
+  const { data: healthStatus, refetch: refetchHealthStatus } = useQuery({
     queryKey: ["health-status"],
     queryFn: fetchHealthStatus,
     refetchInterval: 15_000,
@@ -407,19 +414,27 @@ export function ObservabilityDashboard() {
           {Array.from({ length: 6 }).map((_, i) => (
             <Card key={i}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
-                <div className="h-3 w-20 animate-pulse rounded bg-muted" />
-                <div className="h-4 w-4 animate-pulse rounded bg-muted" />
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-4 w-4" />
               </CardHeader>
               <CardContent className="p-3 pt-0">
-                <div className="h-7 w-16 animate-pulse rounded bg-muted" />
-                <div className="mt-1.5 h-2.5 w-24 animate-pulse rounded bg-muted" />
+                <Skeleton className="h-7 w-16" />
+                <Skeleton className="mt-1.5 h-2.5 w-24" />
               </CardContent>
             </Card>
           ))}
         </div>
       )}
 
-      {!metricsLoading && !metrics && (
+      {!metricsLoading && metricsError && (
+        <PaneError
+          title="Metrics backend unreachable"
+          description="Check that the backend is running, then retry."
+          onRetry={() => { void refetchMetrics(); void refetchHealth(); void refetchHealthStatus() }}
+        />
+      )}
+
+      {!metricsLoading && !metricsError && !metrics && (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/25 py-12 text-center">
           <Activity className="mb-3 h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm font-medium text-muted-foreground">No metrics data available yet</p>
@@ -429,7 +444,7 @@ export function ObservabilityDashboard() {
         </div>
       )}
 
-      {!metricsLoading && metrics && (
+      {!metricsLoading && !metricsError && metrics && (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <MetricCard
           title="Query Latency (p50)"

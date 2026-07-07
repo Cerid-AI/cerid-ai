@@ -34,6 +34,7 @@ import type { CommunityHull } from "@/lib/api/graph-map"
 import { useNavigation } from "@/contexts/navigation-context"
 import { resolveMapTokens, type MapTokens } from "./map/community-layer"
 import type { MapLayout } from "@/lib/graph/cycle4-contracts"
+import { TRUST_HALO_HEX, SURFACE_HEX } from "@/theme/shader-tokens"
 
 // ---------------------------------------------------------------------------
 // View-mode persistence
@@ -963,8 +964,8 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
 
         {/* Ambient + key lights for material visibility */}
         <ambientLight intensity={0.35} />
-        <directionalLight position={[5, 5, 5]} intensity={0.6} color="#5AECCB" />
-        <directionalLight position={[-5, -5, -5]} intensity={0.3} color="#D4AF37" />
+        <directionalLight position={[5, 5, 5]} intensity={0.6} color={TRUST_HALO_HEX.verified} />
+        <directionalLight position={[-5, -5, -5]} intensity={0.3} color={SURFACE_HEX.brandGold} />
 
         {/* Starfield backdrop — drei's Stars is GPU-friendly */}
         {settings.starCount > 0 && (
@@ -1265,7 +1266,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           className="pointer-events-none fixed z-50 max-w-xs rounded-lg border border-border/60 bg-card/95 px-3 py-2 shadow-xl backdrop-blur"
           // Runtime-derived position must be inline (drift-allowlisted class
           // of style: popover absolute positioning).
-          style={{ left: hover.x + 14, top: hover.y + 14 }}
+          style={{ left: hover.x + 14, top: hover.y + 14 }} // drift-allowed: popover position derived from live hover coordinates
         >
           <div className="truncate text-sm font-semibold text-foreground">{hoveredEntity.name}</div>
           <div className="mt-0.5 flex items-center gap-2 text-label-xs text-muted-foreground">

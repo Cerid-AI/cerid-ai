@@ -24,6 +24,7 @@ import { Billboard, Text } from "@react-three/drei"
 import { Color, InstancedMesh, MeshStandardMaterial, Object3D, SphereGeometry } from "three"
 import { collapsedLevelForDistance, type SuperNode3D } from "./supernodes-3d"
 import { communityRgb } from "./palette"
+import { LABEL_HEX, SURFACE_HEX } from "@/theme/shader-tokens"
 
 export interface CollapseLODProps {
   /** Deepest Leiden level available (ancestorIx.maxLevel); -1 = hierarchy not loaded yet, never collapses. */
@@ -132,9 +133,9 @@ export function SuperNodes3D({ supers, onSelect }: SuperNodes3DProps) {
         <Billboard key={s.id} position={[s.x, s.y + s.radius + 0.3, s.z]}>
           <Text
             fontSize={0.42}
-            color="#C8D4E6"
+            color={LABEL_HEX.default}
             outlineWidth={0.014}
-            outlineColor="#0A1F3D"
+            outlineColor={SURFACE_HEX.vaultDeep}
             anchorX="center"
             anchorY="bottom"
             fillOpacity={0.92}

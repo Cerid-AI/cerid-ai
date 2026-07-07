@@ -23,17 +23,17 @@ import { getBandDisplay, type ComponentStatus } from "@/lib/types/trust-score"
 import { cn } from "@/lib/utils"
 
 const STATUS_COLOR: Record<ComponentStatus, string> = {
-  ok: "#10b981",          // emerald-500
-  warn: "#f59e0b",         // amber-500
-  fail: "#ef4444",         // red-500
-  not_available: "#64748b", // slate-500
+  ok: "var(--chart-ok)",
+  warn: "var(--chart-warn)",
+  fail: "var(--chart-fail)",
+  not_available: "var(--chart-neutral)",
 }
 
 const BAND_COLOR: Record<string, string> = {
-  high: "#10b981",
-  medium: "#f59e0b",
-  low: "#ef4444",
-  unavailable: "#64748b",
+  high: "var(--chart-ok)",
+  medium: "var(--chart-warn)",
+  low: "var(--chart-fail)",
+  unavailable: "var(--chart-neutral)",
 }
 
 export function TrustSunburst() {
@@ -167,7 +167,7 @@ export function TrustSunburst() {
             <span key={s.id} className="flex items-center gap-1">
               <span
                 className="inline-block w-2 h-2 rounded-full"
-                style={{ backgroundColor: s.fill }}
+                style={{ backgroundColor: s.fill }} // drift-allowed: runtime chart-series color swatch
               />
               {s.name}
             </span>

@@ -129,7 +129,22 @@ export function MeetingsCapturePanel() {
         </p>
       </div>
 
-      {/* Drop zone */}
+      {/* Drop zone. The hidden file input lives outside this role="button"
+          wrapper — axe's nested-interactive rule flags an <input> nested
+          inside another interactive control, and this input is a purely
+          programmatic trigger (tabIndex=-1, aria-hidden) for the labelled
+          zone below, never meant to receive focus or AT interaction
+          directly. */}
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPT}
+        className="pointer-events-none hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={handleInputChange}
+        data-testid="meeting-file-input"
+      />
       <Card
         className={cn(
           "p-8 border-dashed border-2 flex flex-col items-center justify-center gap-3 transition-colors cursor-pointer",
@@ -163,14 +178,6 @@ export function MeetingsCapturePanel() {
             .m4a, .mp3, .wav, .flac, .ogg, .webm, .mp4
           </p>
         </div>
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT}
-          className="hidden"
-          onChange={handleInputChange}
-          data-testid="meeting-file-input"
-        />
       </Card>
 
       {error && (
@@ -194,7 +201,11 @@ export function MeetingsCapturePanel() {
                   {Math.round(j.progress * 100)}%
                 </span>
               </div>
-              <ProgressBar pct={j.progress * 100} size="sm" />
+              <ProgressBar
+                pct={j.progress * 100}
+                size="sm"
+                label={`${STAGE_LABEL[j.stage]} — ${Math.round(j.progress * 100)}%`}
+              />
             </Card>
           ))}
         </div>

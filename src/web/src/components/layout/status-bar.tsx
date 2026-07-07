@@ -68,7 +68,9 @@ export function StatusBar({
     <TooltipProvider delayDuration={200}>
       <div
         className={cn(
-          "flex h-8 items-center gap-4 border-t bg-muted/40 px-4 text-xs text-muted-foreground",
+          // Task 3.7 — hidden <md so it doesn't collide with the fixed
+          // bottom tab bar, which occupies the same screen position.
+          "hidden h-8 items-center gap-4 border-t bg-muted/40 px-4 text-xs text-muted-foreground md:flex",
           tierGold ? "border-[rgba(212,175,55,0.22)]" : "border-border",
         )}
       >
@@ -253,7 +255,7 @@ export function StatusBar({
                 <Terminal className="h-3 w-3" />
                 <span className="hidden sm:inline">Console</span>
                 {!consoleOpen && consoleUnreadCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] animate-pulse items-center justify-center rounded-full bg-teal-500 px-1 text-label-xxs font-bold text-white">
+                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] animate-pulse items-center justify-center rounded-full bg-teal-500 px-1 text-label-xxs font-bold text-white"> {/* drift-allowed: notification-badge minimum width keeps single/double-digit counts centered */}
                     {consoleUnreadCount > 99 ? "99+" : consoleUnreadCount}
                   </span>
                 )}

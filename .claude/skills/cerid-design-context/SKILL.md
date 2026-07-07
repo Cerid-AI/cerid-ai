@@ -96,7 +96,7 @@ When designing a third surface that needs a "trust gradient", map to one of thes
 
 ## The 4-state UX matrix (required per pane)
 
-Every pane in `src/web/src/components/{chat,knowledge,monitoring,audit,memories,communities,agents,settings,wiki}` must explicitly handle:
+Every pane in `src/web/src/components/{chat,kb,sources,subjects,analytics,automations,briefs,memories,agents,audit,monitoring,processor,console,settings,setup,wiki,workflows}` must explicitly handle:
 
 1. **Loading** — `<Skeleton>` blocks matching the shape of the eventual content (not a centered spinner unless the pane is itself small).
 2. **Error** — `<Alert variant="destructive">` with retry where applicable. Operator-readable error text, not a stack trace.
@@ -105,12 +105,15 @@ Every pane in `src/web/src/components/{chat,knowledge,monitoring,audit,memories,
 
 D.2 has an axe-clean test contract — see `src/web/src/__tests__/*.test.tsx` for the pattern (each pane test file asserts all four states render and are axe-clean).
 
-## Design-drift gate (active)
+## Design-drift gate (BLOCKING)
 
-Soft-warn CI gate at `lint / no-design-drift` runs
+Blocking CI gate at `lint / no-design-drift` runs
 `scripts/lint-no-design-drift.py --root src/web/src --allow-file scripts/design_drift_allowlist.txt`.
 
-Currently reports `OK — 0 violations` against the allowlist.
+Reports `OK — 0 violations`. The gate is BLOCKING — any new drift fails CI
+(it gates `docker` via the `lint` job). Legitimate exceptions carry an inline
+`// drift-allowed: <reason>` annotation (content-stable); the `path:lineno`
+allowlist file is retained only for a small set of stable entries.
 
 **Hard rules** (gate flags as `arbitrary-tailwind` or `inline-style`):
 - No `text-[Npx]` — use `text-label-xxs / -xs / -sm` (≤11 px) or the standard `text-xs / -sm / -base / -lg / -xl` scale.
@@ -119,7 +122,7 @@ Currently reports `OK — 0 violations` against the allowlist.
 - No raw hex colour literals in JSX — define a token in `index.css` `@theme inline`.
 - No non-lucide icons.
 
-**Soft exceptions** (allowlist with section header rationale):
+**Soft exceptions** (suppress with an inline `// drift-allowed: <reason>` annotation — content-stable; the `path:lineno` allowlist is legacy/kept-minimal):
 - Runtime-derived inline styles (popover absolute positioning, animation stagger delays, Recharts API).
 - Pinned widths for `<TooltipContent>` / `<SelectTrigger>` / `<ScrollArea>` (sibling alignment).
 - Brand chrome (sidebar logo type sizes).

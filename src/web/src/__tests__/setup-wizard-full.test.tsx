@@ -3,6 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 
 vi.mock("@/lib/api", () => ({
   applySetupConfig: vi.fn(),
@@ -26,6 +28,16 @@ vi.mock("@/lib/api", () => ({
     lightweight_recommended: false,
     archive_path_exists: false,
     default_archive_path: "~/cerid-archive",
+  }),
+  // Needed once state.systemCheck resolves — the Welcome step then mounts
+  // BackendRecommendationStep, whose <ModelCompatStatus> useQuery calls this.
+  fetchModelDoctor: vi.fn().mockResolvedValue({
+    hardware_profile: "unknown",
+    ok: true,
+    findings: [],
+    known_good_local: {},
+    candidate_upgrades: {},
+    catalog_size: 0,
   }),
   uploadFile: vi.fn(),
   queryKB: vi.fn(),
@@ -210,5 +222,114 @@ describe("SetupWizard", () => {
     render(<SetupWizard open={true} onComplete={onComplete} />)
     // onComplete should not have been called yet
     expect(onComplete).not.toHaveBeenCalled()
+  })
+})
+
+// ---- Task 3.2: settings-mode persistence on finish ----
+//
+// Driving the wizard to step 8 (Mode Selection) the long way requires a
+// validated key + applied config + healthy services, all integration-test
+// territory. The wizard's own resume mechanism gives a shorter, still-real
+// path: seed the persisted-progress record it reads on mount (schema
+// version 5, per STORAGE_SCHEMA_VERSION) with step=8 and click "Resume" —
+// the resume handler dispatches straight to the Mode step, exercising the
+// real ModeSelectionStep + handleFinish wiring.
+describe("SetupWizard — settings-mode persistence (Task 3.2)", () => {
+  function seedResumeAtModeStep() {
+    localStorage.setItem(
+      "cerid-setup-progress",
+      JSON.stringify({
+        version: 5,
+        step: 8,
+        skippedSteps: [],
+        kbConfig: { archivePath: "~/cerid-archive", domains: ["general"], lightweightMode: false, watchFolder: false },
+        ollama: { detected: false, enabled: false, model: null, pulling: false },
+        selectedMode: "simple",
+        selectedBackend: null,
+        applied: false,
+        ts: Date.now(),
+      }),
+    )
+  }
+
+  it("persists 'advanced' to cerid-settings-mode when the wizard finishes with Advanced selected", async () => {
+    seedResumeAtModeStep()
+    render(<SetupWizard open={true} onComplete={noop} />)
+    fireEvent.click(await screen.findByRole("button", { name: /resume/i }))
+    fireEvent.click(screen.getByText("Advanced").closest("button")!)
+    fireEvent.click(screen.getByRole("button", { name: /open cerid ai/i }))
+    expect(localStorage.getItem("cerid-settings-mode")).toBe("advanced")
+  })
+
+  it("persists 'simple' to cerid-settings-mode when the wizard finishes with Simple selected", async () => {
+    seedResumeAtModeStep()
+    render(<SetupWizard open={true} onComplete={noop} />)
+    fireEvent.click(await screen.findByRole("button", { name: /resume/i }))
+    fireEvent.click(screen.getByRole("button", { name: /open cerid ai/i }))
+    expect(localStorage.getItem("cerid-settings-mode")).toBe("simple")
+  })
+})
+
+describe("SetupWizard — axe-clean", () => {
+  it("is axe-clean on the Welcome step (step 0), fully settled", async () => {
+    // Fully settle the Welcome step (system check resolved, backend
+    // recommendation + ModelCompatStatus mounted) — that surface needs a
+    // QueryClientProvider, unlike the rest of this file's synchronous checks.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <SetupWizard open={true} onComplete={noop} />
+      </QueryClientProvider>,
+    )
+    await screen.findByTestId("model-compat-compact")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean on the API Keys step (step 1)", async () => {
+    const { container } = render(<SetupWizard open={true} onComplete={noop} />)
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+    await screen.findByText("API Keys")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean on the resume prompt", async () => {
+    localStorage.setItem(
+      "cerid-setup-progress",
+      JSON.stringify({
+        version: 5,
+        step: 2,
+        skippedSteps: [],
+        kbConfig: { archivePath: "~/cerid-archive", domains: ["general"], lightweightMode: false, watchFolder: false },
+        ollama: { detected: false, enabled: false, model: null, pulling: false },
+        selectedMode: "simple",
+        selectedBackend: null,
+        applied: false,
+        ts: Date.now(),
+      }),
+    )
+    const { container } = render(<SetupWizard open={true} onComplete={noop} />)
+    await screen.findByText(/Welcome back/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean on the Mode Selection step (step 8, reached via resume)", async () => {
+    localStorage.setItem(
+      "cerid-setup-progress",
+      JSON.stringify({
+        version: 5,
+        step: 8,
+        skippedSteps: [],
+        kbConfig: { archivePath: "~/cerid-archive", domains: ["general"], lightweightMode: false, watchFolder: false },
+        ollama: { detected: false, enabled: false, model: null, pulling: false },
+        selectedMode: "simple",
+        selectedBackend: null,
+        applied: false,
+        ts: Date.now(),
+      }),
+    )
+    const { container } = render(<SetupWizard open={true} onComplete={noop} />)
+    fireEvent.click(await screen.findByRole("button", { name: /resume/i }))
+    await screen.findByText("Choose Your Mode")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

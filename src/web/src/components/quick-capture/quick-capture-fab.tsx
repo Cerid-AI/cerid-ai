@@ -45,6 +45,15 @@ export function QuickCaptureFab() {
     return () => document.removeEventListener("keydown", onKey)
   }, [open])
 
+  // Task 3.7 — mobile bottom-tab-bar "Capture" tab opens this same modal via
+  // a decoupled custom event (no prop threading / context needed). The FAB
+  // keeps owning its own `open` state; the bottom bar just fires the event.
+  useEffect(() => {
+    const onQuickCapture = () => { void withViewTransition(() => setOpen(true)) }
+    window.addEventListener("cerid:quick-capture", onQuickCapture)
+    return () => window.removeEventListener("cerid:quick-capture", onQuickCapture)
+  }, [])
+
   const handleFile = useCallback(async (file: File) => {
     setBusy(true)
     setStatus(`Ingesting ${file.name}…`)
@@ -118,15 +127,17 @@ export function QuickCaptureFab() {
 
   return (
     <>
-      {/* The FAB itself — only visible when modal is closed */}
+      {/* The FAB itself — only visible when modal is closed. Hidden <md so
+          it doesn't collide with the bottom-tab-bar's Capture tab, which
+          opens the same modal via the cerid:quick-capture event above. */}
       {!open && (
         <button
           type="button"
           onClick={() => withViewTransition(() => setOpen(true))}
           aria-label="Quick capture"
           title="Quick capture (⌘⇧N)"
-          style={{ viewTransitionName: "quick-capture-surface" }}
-          className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform hover:scale-105 hover:bg-primary/90"
+          style={{ viewTransitionName: "quick-capture-surface" }} // drift-allowed: View Transition API requires setting view-transition-name via inline style; no Tailwind utility exists
+          className="fixed bottom-6 right-6 z-40 hidden h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform hover:scale-105 hover:bg-primary/90 md:inline-flex"
         >
           <Plus className="h-5 w-5" aria-hidden="true" />
         </button>
@@ -148,7 +159,7 @@ export function QuickCaptureFab() {
           }}
         >
           <div
-            style={{ viewTransitionName: "quick-capture-surface" }}
+            style={{ viewTransitionName: "quick-capture-surface" }} // drift-allowed: View Transition API requires setting view-transition-name via inline style; no Tailwind utility exists
             className="liquid-glass w-full max-w-lg rounded-xl"
             onDragOver={(e) => e.preventDefault()}
             onDrop={onDrop}

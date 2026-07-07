@@ -248,7 +248,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
             Templates <ChevronDown className="h-3 w-3 ml-1" />
           </Button>
           {showTemplates && templates.length > 0 && (
-            <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-lg min-w-[260px]">
+            <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-lg min-w-[260px]"> {/* drift-allowed: agent dropdown pinned width fits longest agent name */}
               {templates.map((t) => (
                 <button
                   key={t.id}
@@ -272,7 +272,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
             <Plus className="h-3.5 w-3.5 mr-1" /> Add Node
           </Button>
           {showAddNode && (
-            <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-lg min-w-[200px] max-h-[300px] overflow-y-auto">
+            <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-lg min-w-[200px] max-h-[300px] overflow-y-auto"> {/* drift-allowed: node dropdown pinned width fits longest node name */}
               <div className="px-3 py-1.5 text-label-xs uppercase tracking-wider text-zinc-500 font-semibold">
                 Agents
               </div>
@@ -365,7 +365,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Workflow name..."
-              className="max-w-[240px] h-8 text-sm bg-zinc-900 border-zinc-700"
+              className="max-w-[240px] h-8 text-sm bg-zinc-900 border-zinc-700" // drift-allowed: node-name input pinned width matches canvas chrome sizing
             />
             <Input
               value={description}
@@ -399,7 +399,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
 
         {/* ── Right sidebar: node config ─────────────────────────────── */}
         {selectedNode && (
-          <div className="w-[260px] border-l border-zinc-800 bg-zinc-900/40 p-3 flex flex-col gap-3">
+          <div className="w-[260px] border-l border-zinc-800 bg-zinc-900/40 p-3 flex flex-col gap-3"> {/* drift-allowed: node-config side panel pinned width matches canvas chrome sizing */}
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
                 <Settings2 className="h-3.5 w-3.5 text-teal-400" />

@@ -90,7 +90,7 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
           defaultValue="24"
           onValueChange={handlePeriodChange}
         >
-          <SelectTrigger className="h-7 w-[140px] text-xs">
+          <SelectTrigger className="h-7 w-[140px] text-xs"> {/* drift-allowed: SelectTrigger pinned width for the digest period dropdown */}
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

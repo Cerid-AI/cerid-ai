@@ -670,7 +670,7 @@ export function KnowledgePane() {
                   <CircleHelp className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[220px] text-xs">
+              <TooltipContent side="bottom" className="max-w-[220px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps search-help text from sprawling */}
                 Search your knowledge base. Results are ranked by semantic relevance.
               </TooltipContent>
             </Tooltip>
@@ -680,7 +680,7 @@ export function KnowledgePane() {
         {/* Client source + date filter row */}
         <div className="flex items-center gap-2">
           <Select value={clientSource} onValueChange={setClientSource}>
-            <SelectTrigger className="h-7 w-[130px] text-xs" aria-label="Filter by source">
+            <SelectTrigger className="h-7 w-[130px] text-xs" aria-label="Filter by source"> {/* drift-allowed: SelectTrigger pinned width aligns with the sibling date-filter dropdown */}
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -692,7 +692,7 @@ export function KnowledgePane() {
             </SelectContent>
           </Select>
           <Select value={dateFilter} onValueChange={setDateFilter}>
-            <SelectTrigger className="h-7 w-[120px] text-xs" aria-label="Filter by date">
+            <SelectTrigger className="h-7 w-[120px] text-xs" aria-label="Filter by date"> {/* drift-allowed: SelectTrigger pinned width aligns with the sibling source-filter dropdown */}
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

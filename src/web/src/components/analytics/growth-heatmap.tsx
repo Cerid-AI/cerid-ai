@@ -148,7 +148,7 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
           <span
             key={i}
             className="inline-block w-3 h-3 rounded-sm"
-            style={{ backgroundColor: b.fill }}
+            style={{ backgroundColor: b.fill }} // drift-allowed: runtime chart-series color swatch
           />
         ))}
         <span>More</span>
@@ -158,11 +158,11 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
 }
 
 const INTENSITY_BUCKETS = [
-  { threshold: 0, fill: "#1e293b" },   // slate-800 (cells with no data)
-  { threshold: 0.01, fill: "#0e7490" }, // cyan-700 (very low)
-  { threshold: 0.25, fill: "#0891b2" }, // cyan-600
-  { threshold: 0.5, fill: "#06b6d4" },  // cyan-500
-  { threshold: 0.75, fill: "#22d3ee" }, // cyan-400 (high)
+  { threshold: 0, fill: "var(--chart-heat-0)" },    // no data
+  { threshold: 0.01, fill: "var(--chart-heat-1)" }, // very low
+  { threshold: 0.25, fill: "var(--chart-heat-2)" },
+  { threshold: 0.5, fill: "var(--chart-heat-3)" },
+  { threshold: 0.75, fill: "var(--chart-heat-4)" }, // high
 ]
 
 function intensityBucket(intensity: number): typeof INTENSITY_BUCKETS[0] {

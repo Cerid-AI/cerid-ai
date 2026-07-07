@@ -306,7 +306,7 @@ function ConsoleConfigBar({
                 <TooltipTrigger asChild>
                   <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">Self-RAG</Label>
                 </TooltipTrigger>
-                <TooltipContent side="left" className="max-w-[200px] text-xs">
+                <TooltipContent side="left" className="max-w-[200px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps pipeline-setting help text from sprawling */}
                   Validates response claims against KB. Adds ~1s latency.
                 </TooltipContent>
               </Tooltip>
@@ -321,7 +321,7 @@ function ConsoleConfigBar({
                 <TooltipTrigger asChild>
                   <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">Query Decomposition</Label>
                 </TooltipTrigger>
-                <TooltipContent side="left" className="max-w-[200px] text-xs">
+                <TooltipContent side="left" className="max-w-[200px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps pipeline-setting help text from sprawling */}
                   Splits complex queries into sub-queries for better coverage.
                 </TooltipContent>
               </Tooltip>
@@ -336,7 +336,7 @@ function ConsoleConfigBar({
                 <TooltipTrigger asChild>
                   <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">Semantic Cache</Label>
                 </TooltipTrigger>
-                <TooltipContent side="left" className="max-w-[200px] text-xs">
+                <TooltipContent side="left" className="max-w-[200px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps pipeline-setting help text from sprawling */}
                   Caches similar queries to skip repeated retrieval. Saves ~500ms on cache hits.
                 </TooltipContent>
               </Tooltip>
@@ -351,7 +351,7 @@ function ConsoleConfigBar({
                 <TooltipTrigger asChild>
                   <Label className="text-label-sm cursor-help border-b border-dotted border-muted-foreground/40">NLI Verification</Label>
                 </TooltipTrigger>
-                <TooltipContent side="left" className="max-w-[220px] text-xs">
+                <TooltipContent side="left" className="max-w-[220px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps pipeline-setting help text from sprawling */}
                   NLI entailment model validates KB evidence. Threshold: 0.7 entailment / 0.6 contradiction.
                 </TooltipContent>
               </Tooltip>

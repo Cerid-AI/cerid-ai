@@ -310,8 +310,8 @@ function PlainChatMessages(props: ChatMessagesProps) {
   }, [messages])
 
   return (
-    <ScrollArea className="min-h-0 flex-1 px-4" ref={scrollRef}>
-      <div className="mx-auto max-w-4xl py-4">
+    <ScrollArea className="min-h-0 flex-1 px-2 md:px-4" ref={scrollRef}>
+      <div className="mx-auto max-w-none py-4 md:max-w-4xl">
         {messages.length === 0 && (
           onPickSuggestion ? (
             <FirstRunSuggestions onPickSuggestion={onPickSuggestion} />
@@ -439,8 +439,8 @@ function VirtualizedChatMessages(props: ChatMessagesProps) {
   // doesn't have to fight to render zero items.
   if (messages.length === 0) {
     return (
-      <ScrollArea className="min-h-0 flex-1 px-4" ref={scrollRef}>
-        <div className="mx-auto max-w-4xl py-4">
+      <ScrollArea className="min-h-0 flex-1 px-2 md:px-4" ref={scrollRef}>
+        <div className="mx-auto max-w-none py-4 md:max-w-4xl">
           {onPickSuggestion ? (
             <FirstRunSuggestions onPickSuggestion={onPickSuggestion} />
           ) : (
@@ -454,10 +454,10 @@ function VirtualizedChatMessages(props: ChatMessagesProps) {
   }
 
   return (
-    <ScrollArea className="min-h-0 flex-1 px-4" ref={scrollRef}>
-      <div className="mx-auto max-w-4xl py-4">
+    <ScrollArea className="min-h-0 flex-1 px-2 md:px-4" ref={scrollRef}>
+      <div className="mx-auto max-w-none py-4 md:max-w-4xl">
         <div
-          style={{
+          style={{ // drift-allowed: TanStack Virtual requires per-item height/position from live measurement
             height: `${totalSize}px`,
             position: "relative",
             width: "100%",
@@ -470,7 +470,7 @@ function VirtualizedChatMessages(props: ChatMessagesProps) {
                 key={msg.id}
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
-                style={{
+                style={{ // drift-allowed: TanStack Virtual requires per-item height/position from live measurement
                   position: "absolute",
                   top: 0,
                   left: 0,

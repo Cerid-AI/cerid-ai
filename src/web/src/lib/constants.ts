@@ -10,9 +10,9 @@ import type { CSSProperties } from "react"
 export const CHART_TOOLTIP_STYLE: CSSProperties = {
   fontSize: 12,
   borderRadius: 8,
-  backgroundColor: "hsl(var(--popover))",
-  color: "hsl(var(--popover-foreground))",
-  border: "1px solid hsl(var(--border))",
+  backgroundColor: "var(--popover)",
+  color: "var(--popover-foreground)",
+  border: "1px solid var(--border)",
 }
 
 /**

@@ -297,7 +297,7 @@ export default function WikiPane() {
                 <button
                   type="button"
                   onClick={() => handleSelectDomain(domainForBc)}
-                  className="text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded truncate max-w-[120px]"
+                  className="text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded truncate max-w-[120px]" // drift-allowed: truncated breadcrumb domain-segment width pin
                 >
                   {titleCase(domainForBc)}
                 </button>
@@ -306,7 +306,7 @@ export default function WikiPane() {
             {bcLabel && (
               <>
                 <span className="text-muted-foreground" aria-hidden="true">›</span>
-                <span className="truncate max-w-[180px] text-muted-foreground font-medium" aria-current="page">
+                <span className="truncate max-w-[180px] text-muted-foreground font-medium" aria-current="page"> {/* drift-allowed: truncated breadcrumb current-page width pin */}
                   {bcLabel}
                 </span>
               </>

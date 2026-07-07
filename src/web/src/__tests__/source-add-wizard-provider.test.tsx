@@ -8,6 +8,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 
 import { SourceAddWizard } from "@/components/sources/source-add-wizard"
 import type { SourceKindMeta } from "@/lib/api/sources"
@@ -56,5 +57,20 @@ describe("SourceAddWizard — provider picker", () => {
 
     fireEvent.change(select, { target: { value: "slack" } })
     expect(connect).toBeEnabled()
+  })
+})
+
+describe("SourceAddWizard — axe-clean", () => {
+  it("is axe-clean before a provider is picked (Connect disabled)", async () => {
+    const { container } = renderWizard()
+    await screen.findByLabelText(/provider/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean after a provider is picked (Connect enabled)", async () => {
+    const { container } = renderWizard()
+    const select = await screen.findByLabelText(/provider/i)
+    fireEvent.change(select, { target: { value: "slack" } })
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

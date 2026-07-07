@@ -8,16 +8,16 @@ import { BarChart3 } from "lucide-react"
 import type { MaintenanceCollections } from "@/lib/types"
 
 const DOMAIN_COLORS: Record<string, string> = {
-  coding: "hsl(var(--chart-1))",
-  finance: "hsl(var(--chart-2))",
-  research: "hsl(var(--chart-3))",
-  personal: "hsl(var(--chart-4))",
-  general: "hsl(var(--chart-5))",
+  coding: "var(--chart-1)",
+  finance: "var(--chart-2)",
+  research: "var(--chart-3)",
+  personal: "var(--chart-4)",
+  general: "var(--chart-5)",
   trading: "hsl(142 76% 36%)",
   conversations: "hsl(215 20% 65%)",
 }
 
-const FALLBACK_COLOR = "hsl(var(--chart-1))"
+const FALLBACK_COLOR = "var(--chart-1)"
 
 function getDomainColor(domain: string): string {
   return DOMAIN_COLORS[domain] ?? FALLBACK_COLOR
@@ -37,9 +37,9 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
       style={{
         fontSize: 12,
         borderRadius: 8,
-        backgroundColor: "hsl(var(--popover))",
-        color: "hsl(var(--popover-foreground))",
-        border: "1px solid hsl(var(--border))",
+        backgroundColor: "var(--popover)",
+        color: "var(--popover-foreground)",
+        border: "1px solid var(--border)",
         padding: "8px 12px",
       }}
     >
@@ -93,7 +93,7 @@ export function CollectionChart({ collections }: CollectionChartProps) {
           <BarChart data={data}>
             <XAxis dataKey="name" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip content={<CustomTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--muted)" }} />
             <Bar dataKey="chunks" radius={[4, 4, 0, 0]}>
               {data.map((entry) => (
                 <Cell key={entry.name} fill={getDomainColor(entry.name)} />

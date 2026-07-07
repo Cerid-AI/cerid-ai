@@ -81,7 +81,7 @@ function ServiceRow({
               <TooltipTrigger asChild>
                 <Info className="h-3 w-3 shrink-0 text-muted-foreground/50" />
               </TooltipTrigger>
-              <TooltipContent side="top" className="max-w-[240px] text-xs">
+              <TooltipContent side="top" className="max-w-[240px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps health-metric help text from sprawling */}
                 {meta.tooltip}
               </TooltipContent>
             </Tooltip>

@@ -73,8 +73,8 @@ export function AtlasContextMenu({ target, onClose, onCite, onOpenWiki }: AtlasC
       ref={menuRef}
       role="menu"
       aria-label={`Actions for ${target.entityName}`}
-      style={{ left, top }}
-      className="fixed z-50 w-[220px] rounded-lg border border-border bg-popover py-1 text-sm shadow-xl"
+      style={{ left, top }} // drift-allowed: viewport-clamped position derived from anchor DOM measurements
+      className="fixed z-50 w-[220px] rounded-lg border border-border bg-popover py-1 text-sm shadow-xl" // drift-allowed: context menu pinned width
     >
       <div className="flex items-center gap-2 border-b px-3 py-2 text-label-xs uppercase tracking-wide text-muted-foreground">
         <span className="grow truncate" title={target.entityName}>

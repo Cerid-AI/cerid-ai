@@ -23,6 +23,7 @@ import Sigma from "sigma"
 import { adaptNeighborhood } from "@/lib/graph/graphology-adapter"
 import { resolveMapTokens } from "@/lib/graph/identity"
 import { applyLayout } from "@/lib/graph/apply-layout"
+import { SURFACE_HEX } from "@/theme/shader-tokens"
 import {
   ATLAS_DEFAULT_EDGE_TYPE,
   ATLAS_DEFAULT_NODE_TYPE,
@@ -97,14 +98,15 @@ export default function AtlasPerfHarness() {
       if (cancelled) return
       const t0 = performance.now()
       const fixture = generateSyntheticGraph({ nodes: nodeCount, seed: 42 + seedKey })
-      const graph = adaptNeighborhood(fixture, resolveMapTokens(document.documentElement))
+      const tokens = resolveMapTokens(document.documentElement)
+      const graph = adaptNeighborhood(fixture, tokens)
 
       const sigma = new Sigma(graph, container, {
         renderLabels: nodeCount <= 1000,  // labels at scale tank FPS
         labelSize: 11,
-        defaultNodeColor: "#5C6680",
-        defaultEdgeColor: "#3D4760",
-        labelColor: { color: "#A8B5C8" },
+        defaultNodeColor: SURFACE_HEX.graphiteFallback,
+        defaultEdgeColor: "#3D4760", // drift-allowed: dev perf-harness Sigma color (exact-value baseline mirror of CartographerMap)
+        labelColor: { color: "#A8B5C8" }, // drift-allowed: dev perf-harness Sigma color (exact-value baseline mirror of CartographerMap)
         nodeProgramClasses: ATLAS_NODE_PROGRAM_CLASSES,
         edgeProgramClasses: ATLAS_EDGE_PROGRAM_CLASSES,
         defaultNodeType: ATLAS_DEFAULT_NODE_TYPE,

@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { axe } from "jest-axe"
 
 const queryKB = vi.fn().mockResolvedValue({ results: [{ content: "doc answer" }], total_results: 1, domains_searched: ["general"] })
 
@@ -86,5 +87,21 @@ describe("FirstDocumentStep", () => {
     // queryKB(query, domains, topK, conversationMessages, opts)
     const opts = queryKB.mock.calls[0]?.[4] as { contextSources?: { external?: boolean } }
     expect(opts?.contextSources?.external).toBe(false)
+  })
+})
+
+describe("FirstDocumentStep — axe-clean", () => {
+  it("is axe-clean in the default (choose) phase", async () => {
+    const { container } = render(
+      <FirstDocumentStep state={DEFAULT_STATE} onChange={onChange} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in the chat phase (document already ingested)", async () => {
+    const { container } = render(
+      <FirstDocumentStep state={{ ...DEFAULT_STATE, ingested: true }} onChange={onChange} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

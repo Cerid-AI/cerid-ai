@@ -133,7 +133,7 @@ export function TagManager({ open, onOpenChange, localTags }: TagManagerProps) {
             <p className="rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground">{result}</p>
           )}
 
-          <ScrollArea className="h-[300px]">
+          <ScrollArea className="h-[300px]"> {/* drift-allowed: ScrollArea height cap gates overflow scroll for the tag list */}
             {isLoading && (
               <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" /> Loading tags...

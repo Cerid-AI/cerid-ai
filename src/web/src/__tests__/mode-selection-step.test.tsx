@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { axe } from "jest-axe"
 import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
 
 const DEFAULT_SUMMARY = {
@@ -132,5 +133,49 @@ describe("ModeSelectionStep", () => {
     // omitted entirely so a reranker model can't be mislabelled as a chat LLM.
     expect(screen.queryByText(/not configured/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Local LLM:/)).not.toBeInTheDocument()
+  })
+})
+
+describe("ModeSelectionStep — axe-clean", () => {
+  it("is axe-clean with Clean & Simple selected (default)", async () => {
+    const { container } = render(
+      <ModeSelectionStep
+        selectedMode="simple"
+        onSelectMode={onSelectMode}
+        configSummary={DEFAULT_SUMMARY}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with Advanced selected", async () => {
+    const { container } = render(
+      <ModeSelectionStep
+        selectedMode="advanced"
+        onSelectMode={onSelectMode}
+        configSummary={DEFAULT_SUMMARY}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with a populated config summary and hardware recommendation", async () => {
+    const { container } = render(
+      <ModeSelectionStep
+        selectedMode="simple"
+        onSelectMode={onSelectMode}
+        configSummary={{
+          providerCount: 2,
+          providerNames: ["OpenRouter", "Anthropic"],
+          domainCount: 4,
+          ollamaEnabled: true,
+          ollamaModel: "llama3.2:3b",
+          documentCount: 3,
+          inferenceBackend: "ollama",
+        }}
+        hardware={{ ram_gb: 32, cpu: "Apple M2 Max", gpu: "Apple M2 Max", gpu_acceleration: "metal" }}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

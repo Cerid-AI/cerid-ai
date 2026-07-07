@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query"
 import {
   MessageSquare, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
-  Shield, Compass, Files, Newspaper,
+  Shield, Compass, Files, Newspaper, Gauge, SlidersHorizontal,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -19,6 +19,7 @@ import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { fetchModelUpdatesFull } from "@/lib/api"
 import { fetchHealth } from "@/lib/api/settings"
+import { useSettingsMode, setSettingsMode } from "@/lib/settings-mode"
 
 export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities" | "subjects" | "sources" | "briefs"
 
@@ -74,6 +75,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     bulkDelete, bulkArchive, active,
   } = useConversationsContext()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
+  const settingsMode = useSettingsMode()
   const { data: modelUpdates } = useQuery({
     queryKey: ["model-updates"],
     queryFn: fetchModelUpdatesFull,
@@ -137,10 +139,10 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
             ) : (
               <div className="flex items-center gap-2.5">
                 <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-10 w-10 shrink-0" />
-                <span className="text-[21px] font-bold tracking-tight leading-none">
+                <span className="text-[21px] font-bold tracking-tight leading-none"> {/* drift-allowed: brand-pinned CERID wordmark type size */}
                   <span className="text-brand-shine">{tier.wordmark}</span>
                   {" "}
-                  <span className={cn("font-semibold text-[20px]", tier.tierClass)}>{tier.tierWord}</span>
+                  <span className={cn("font-semibold text-[20px]", tier.tierClass)}>{/* drift-allowed: brand-pinned tier-word type size */}{tier.tierWord}</span>
                 </span>
               </div>
             )
@@ -151,7 +153,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
         </div>
 
         {/* Nav items */}
-        <nav className="space-y-1 p-2">
+        <nav aria-label="Navigation" className="space-y-1 p-2">
           {visibleNav.map(({ pane, icon: Icon, label }) => {
             const showBadge = pane === "settings" && updateCount > 0
             const navButton = (
@@ -297,6 +299,31 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
               </Button>
             </TooltipTrigger>
             {collapsed && <TooltipContent side="right">Toggle theme</TooltipContent>}
+          </Tooltip>
+
+          {/* Settings-mode toggle — makes the setup wizard's "You can change
+              this anytime from the sidebar" copy true (Task 3.2). Reads/writes
+              the global `@/lib/settings-mode` store directly; a control, not a
+              layout-conditional consumer, so it stays compliant with that
+              store's "no other conditional may read it" discipline. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("w-full", !collapsed && "justify-start gap-3 px-3")}
+                aria-label={`Switch to ${settingsMode === "simple" ? "Advanced" : "Simple"} view`}
+                onClick={() => setSettingsMode(settingsMode === "simple" ? "advanced" : "simple")}
+              >
+                {settingsMode === "advanced" ? <SlidersHorizontal className="h-4 w-4 shrink-0" /> : <Gauge className="h-4 w-4 shrink-0" />}
+                {!collapsed && <span>{settingsMode === "advanced" ? "Advanced view" : "Simple view"}</span>}
+              </Button>
+            </TooltipTrigger>
+            {collapsed && (
+              <TooltipContent side="right">
+                Simple hides advanced settings; Advanced reveals all controls.
+              </TooltipContent>
+            )}
           </Tooltip>
 
           {/* Tier toggle (dev/demo) — hidden in production builds */}

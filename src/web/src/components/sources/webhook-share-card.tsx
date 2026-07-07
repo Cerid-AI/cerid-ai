@@ -97,7 +97,7 @@ function CopyableRow({
 
   return (
     <div className={cn("flex items-center gap-2", className)}>
-      <code className="flex-1 truncate rounded bg-background/40 px-2 py-1 font-mono text-[11px] text-foreground">
+      <code className="flex-1 truncate rounded bg-background/40 px-2 py-1 font-mono text-label-sm text-foreground">
         {value}
       </code>
       <Button

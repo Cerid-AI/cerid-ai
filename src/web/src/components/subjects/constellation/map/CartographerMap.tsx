@@ -1473,7 +1473,7 @@ export function CartographerMap({
         const drilled = data.communities?.find((c) => String(c.id) === drilledCommunityId)
         return (
           <div className="absolute left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border/60 bg-card/95 px-3 py-1.5 text-label-xs text-foreground shadow-lg backdrop-blur">
-            <span className="max-w-[18rem] truncate">
+            <span className="max-w-[18rem] truncate"> {/* drift-allowed: drill-down breadcrumb pinned width, sibling-aligned */}
               Drilled into <span className="font-semibold">{drilled?.label ?? "community"}</span>
             </span>
             <button
