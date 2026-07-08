@@ -71,8 +71,18 @@ def test_temporal_prompt_demands_derivation_not_abstention() -> None:
 
 def test_aggregation_prompt_enumerates_then_counts() -> None:
     user = build_answer_messages("q?", "mem", AnswerMode.AGGREGATION)[-1]["content"].lower()
-    assert "enumerate" in user
+    assert "exhaustive" in user
     assert "do not abstain" in user
+
+
+def test_analytical_modes_use_chain_of_note_json() -> None:
+    for mode in (AnswerMode.TEMPORAL, AnswerMode.AGGREGATION, AnswerMode.PREFERENCE):
+        user = build_answer_messages("q?", "mem", mode)[-1]["content"].lower()
+        assert "step 1" in user and "step 2" in user
+        assert "json note" in user
+    # extractive stays concise — no two-step note protocol
+    ext = build_answer_messages("q?", "mem", AnswerMode.EXTRACTIVE)[-1]["content"].lower()
+    assert "step 1" not in ext
 
 
 def test_preference_prompt_applies_not_refuses() -> None:
@@ -90,9 +100,33 @@ def test_build_messages_includes_memory_block_and_question() -> None:
 
 def test_suggested_max_tokens_scales_for_reasoning() -> None:
     assert suggested_max_tokens(AnswerMode.EXTRACTIVE, 256) == 256
-    assert suggested_max_tokens(AnswerMode.TEMPORAL, 256) == 512
-    assert suggested_max_tokens(AnswerMode.AGGREGATION, 256) == 512
-    assert suggested_max_tokens(AnswerMode.PREFERENCE, 256) == 256
+    # all analytical modes need room for CoN notes + derivation + answer
+    assert suggested_max_tokens(AnswerMode.TEMPORAL, 256) == 768
+    assert suggested_max_tokens(AnswerMode.AGGREGATION, 256) == 768
+    assert suggested_max_tokens(AnswerMode.PREFERENCE, 256) == 768
+
+
+def test_chronological_sort_orders_by_recorded_date() -> None:
+    from core.agents.answer_synthesis import chronological_sort
+
+    docs = [
+        "[recorded 2023/05/15] later fact",
+        "[recorded 2021/01/01] earliest fact",
+        "[recorded 2022/06/30] middle fact",
+    ]
+    out = chronological_sort(docs)
+    assert out[0].endswith("earliest fact")
+    assert out[1].endswith("middle fact")
+    assert out[2].endswith("later fact")
+
+
+def test_chronological_sort_undated_go_last_stably() -> None:
+    from core.agents.answer_synthesis import chronological_sort
+
+    docs = ["no date A", "[recorded 2023/01/01] dated", "no date B"]
+    out = chronological_sort(docs)
+    assert out[0].endswith("dated")
+    assert out[1] == "no date A" and out[2] == "no date B"  # stable order preserved
 
 
 def test_extract_final_answer_pulls_marker() -> None:

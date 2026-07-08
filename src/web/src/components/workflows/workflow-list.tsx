@@ -9,18 +9,20 @@ import {
   fetchWorkflowRuns,
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PaneError } from "@/components/ui/pane-error"
 import {
   Plus,
   Pencil,
   Trash2,
   Copy,
   Loader2,
-  AlertCircle,
   RefreshCw,
   GitBranch,
   ChevronDown,
@@ -63,7 +65,7 @@ function RunStatusBadge({ status }: { status: string }) {
     },
     pending: {
       label: "Pending",
-      className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+      className: "bg-muted-foreground/15 text-muted-foreground border-muted-foreground/30",
       icon: <Clock className="h-3 w-3" />,
     },
   }
@@ -85,6 +87,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
   const [error, setError] = useState<string | null>(null)
   const [expandedRuns, setExpandedRuns] = useState<Record<string, WorkflowRun[]>>({})
   const [loadingRuns, setLoadingRuns] = useState<string | null>(null)
+  const [runsError, setRunsError] = useState<Record<string, string>>({})
   const [deleting, setDeleting] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -125,11 +128,17 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
       return
     }
     setLoadingRuns(wfId)
+    setRunsError((prev) => {
+      const next = { ...prev }
+      delete next[wfId]
+      return next
+    })
     try {
       const runs = await fetchWorkflowRuns(wfId, 5)
       setExpandedRuns((prev) => ({ ...prev, [wfId]: runs }))
-    } catch {
-      // silently fail
+    } catch (e) {
+      logSwallowedError(e, "workflow-list.fetchWorkflowRuns", { workflowId: wfId })
+      setRunsError((prev) => ({ ...prev, [wfId]: e instanceof Error ? e.message : "Failed to load run history" }))
     } finally {
       setLoadingRuns(null)
     }
@@ -139,20 +148,18 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48 text-zinc-500">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading workflows...
+      <div className="space-y-2 p-3" role="status" aria-label="Loading workflows">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 w-full rounded-lg" />
+        ))}
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-48 gap-3">
-        <AlertCircle className="h-6 w-6 text-red-700 dark:text-red-400" />
-        <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-        <Button variant="outline" size="sm" onClick={load}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Retry
-        </Button>
+      <div className="p-3">
+        <PaneError title="Failed to load workflows" description={error} onRetry={load} />
       </div>
     )
   }
@@ -160,8 +167,8 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-zinc-800">
-        <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
+      <div className="flex items-center justify-between p-3 border-b border-border">
+        <h2 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <GitBranch className="h-4 w-4 text-teal-400" />
           Workflows
           <Badge variant="outline" className="ml-1.5 text-label-xs">{workflows.length}</Badge>
@@ -186,18 +193,18 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
         <ScrollArea className="flex-1">
           <div className="p-3 space-y-2">
             {workflows.map((wf) => (
-              <Card key={wf.id} className="bg-zinc-900/60 border-zinc-800 hover:border-zinc-700 transition-colors">
+              <Card key={wf.id} className="bg-card border-border hover:border-muted-foreground/40 transition-colors">
                 <CardContent className="p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <button
-                        className="text-sm font-medium text-zinc-100 hover:text-teal-300 transition-colors text-left truncate block w-full"
+                        className="text-sm font-medium text-foreground hover:text-teal-300 transition-colors text-left truncate block w-full"
                         onClick={() => onEdit(wf)}
                       >
                         {wf.name}
                       </button>
                       {wf.description && (
-                        <p className="text-xs text-zinc-500 mt-0.5 truncate">{wf.description}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{wf.description}</p>
                       )}
                       <div className="flex items-center gap-2 mt-1.5">
                         <Badge variant="outline" className="text-label-xs">
@@ -214,10 +221,10 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
 
                     <div className="flex items-center gap-1 shrink-0">
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Edit workflow" onClick={() => onEdit(wf)}>
-                        <Pencil className="h-3.5 w-3.5 text-zinc-400" />
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                       </Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Duplicate workflow" onClick={() => onDuplicate(wf)}>
-                        <Copy className="h-3.5 w-3.5 text-zinc-400" />
+                        <Copy className="h-3.5 w-3.5 text-muted-foreground" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -228,9 +235,9 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                         disabled={deleting === wf.id}
                       >
                         {deleting === wf.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                         ) : (
-                          <Trash2 className="h-3.5 w-3.5 text-zinc-400 hover:text-red-700 dark:text-red-400" />
+                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-red-700 dark:text-red-400" />
                         )}
                       </Button>
                     </div>
@@ -238,7 +245,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
 
                   {/* Expandable run history */}
                   <button
-                    className="flex items-center gap-1 text-label-xs text-zinc-500 hover:text-zinc-300 mt-2"
+                    className="flex items-center gap-1 text-label-xs text-muted-foreground hover:text-foreground mt-2"
                     onClick={() => toggleRuns(wf.id)}
                   >
                     {expandedRuns[wf.id] ? (
@@ -250,12 +257,12 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                   </button>
 
                   {expandedRuns[wf.id] && (
-                    <div className="mt-1.5 space-y-1 pl-3 border-l border-zinc-800">
+                    <div className="mt-1.5 space-y-1 pl-3 border-l border-border">
                       {expandedRuns[wf.id].length === 0 ? (
-                        <p className="text-label-xs text-zinc-600">No runs yet</p>
+                        <p className="text-label-xs text-muted-foreground/70">No runs yet</p>
                       ) : (
                         expandedRuns[wf.id].map((run) => (
-                          <div key={run.id} className="flex items-center gap-2 text-label-xs text-zinc-500">
+                          <div key={run.id} className="flex items-center gap-2 text-label-xs text-muted-foreground">
                             <RunStatusBadge status={run.status} />
                             <span className="font-mono">{run.id.slice(0, 8)}</span>
                             <span>{new Date(run.started_at).toLocaleString()}</span>
@@ -263,6 +270,10 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                         ))
                       )}
                     </div>
+                  )}
+
+                  {runsError[wf.id] && (
+                    <p className="mt-1.5 pl-3 text-label-xs text-destructive">{runsError[wf.id]}</p>
                   )}
                 </CardContent>
               </Card>

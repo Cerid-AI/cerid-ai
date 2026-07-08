@@ -110,6 +110,12 @@ _GROUNDING = (
     "facts."
 )
 
+# Analytical modes use a two-step Chain-of-Note + JSON reading protocol: extract
+# the relevant facts as structured notes FIRST, then derive the answer from the
+# notes. The LongMemEval paper found CoN-then-JSON reading worth ~+10 absolute
+# points (gpt-4o), and it is the common thread across the >0.80 systems. The
+# extractive mode stays concise (single-hop fact lookup is already strong; CoN
+# there only adds cost/noise risk).
 _MODE_INSTRUCTIONS: dict[AnswerMode, str] = {
     AnswerMode.EXTRACTIVE: (
         "- If the answer is in the memories, respond concisely with no preamble.\n"
@@ -117,41 +123,53 @@ _MODE_INSTRUCTIONS: dict[AnswerMode, str] = {
         "I don't know."
     ),
     AnswerMode.TEMPORAL: (
-        "This is a TEMPORAL question — the answer must be derived from dates.\n"
-        "- Identify each event the question refers to and its recorded date.\n"
-        "- Compute the answer from those dates (e.g. the number of days/weeks/"
-        "months between them, or which happened first).\n"
-        "- Briefly show the dates you used, then end with a line 'Answer: <result>'.\n"
-        "- If the relevant dated events are present, DERIVE the answer — do not say "
-        "you don't know merely because the result isn't stated verbatim. Only "
-        "respond 'I don't know.' if the events themselves are absent."
+        "This is a TEMPORAL question — the answer is derived from dates. Work in "
+        "two steps.\n"
+        "Step 1 — Notes: for each memory mentioning an event relevant to the "
+        "question, emit one JSON note "
+        '{\"memory\": <n>, \"date\": \"<ISO YYYY-MM-DD>\", \"event\": \"<what happened>\"}. '
+        "Skip irrelevant memories.\n"
+        "Step 2 — Compute: from your notes, take the exact dates of the events the "
+        "question asks about and compute the result CAREFULLY (count the days/"
+        "weeks/months between them, or decide which came first). Show the "
+        "subtraction explicitly.\n"
+        "Then end with one line: 'Answer: <result>'.\n"
+        "If the relevant events are present, DERIVE the answer — only respond "
+        "'Answer: I don't know.' if the events themselves are absent."
     ),
     AnswerMode.AGGREGATION: (
-        "This is an AGGREGATION question — counting or combining across memories "
-        "that may span multiple sessions.\n"
-        "- Enumerate EVERY distinct item the question asks about, scanning all the "
-        "memories (the relevant items are often spread across sessions).\n"
-        "- Briefly list the items you found, then end with a line "
-        "'Answer: <count or combined result>'.\n"
-        "- If the items are present, count/combine them — do not abstain just "
-        "because no single memory states the total. Only respond 'I don't know.' "
-        "if no relevant items are present."
+        "This is an AGGREGATION question — counting or combining items that may "
+        "span multiple sessions. Work in two steps.\n"
+        "Step 1 — Notes: scan EVERY memory and emit one JSON note per distinct "
+        'item the question asks about {\"memory\": <n>, \"item\": \"<the item>\"}. '
+        "Be exhaustive across all sessions.\n"
+        "Step 2 — Combine: deduplicate notes that refer to the same item, then "
+        "count or combine them.\n"
+        "Then end with one line: 'Answer: <count or combined result>'.\n"
+        "If items are present, count them — do not abstain because no single "
+        "memory states the total. Only respond 'Answer: I don't know.' if no "
+        "relevant items are present."
     ),
     AnswerMode.PREFERENCE: (
-        "This is a PREFERENCE-APPLICATION question — the memories contain the "
-        "user's stated preferences.\n"
-        "- Identify the user's relevant preference(s) from the memories.\n"
-        "- Answer by APPLYING them: state what the user would prefer, or make a "
-        "recommendation consistent with their stated preferences.\n"
-        "- Do not refuse just because the memories contain no ready-made answer — "
-        "the expected answer is the preference applied to the request."
+        "This is a PREFERENCE-APPLICATION question — the memories hold the user's "
+        "stated preferences. Work in two steps.\n"
+        "Step 1 — Notes: for each stated preference relevant to the request, emit "
+        'a JSON note {\"memory\": <n>, \"date\": \"<ISO YYYY-MM-DD>\", '
+        '\"preference\": \"<the exact preference>\"}.\n'
+        "Step 2 — Apply: using the MOST RECENT relevant preference, answer by "
+        "applying it — state what the user would prefer, or recommend options "
+        "consistent with it.\n"
+        "Then end with one line: 'Answer: <the applied preference / recommendation>'.\n"
+        "Do not refuse because the memories contain no ready-made answer — the "
+        "expected answer is the preference applied to the request."
     ),
 }
 
 _SYSTEM = (
     "You are a precise assistant that answers questions grounded in the user's "
-    "supplied memories, reasoning step by step when the answer must be derived "
-    "from multiple pieces of evidence."
+    "supplied memories. For analytical questions you first extract the relevant "
+    "facts as structured notes, then derive the answer from those notes, "
+    "reasoning step by step."
 )
 
 
@@ -172,10 +190,31 @@ def build_answer_messages(
 
 
 def suggested_max_tokens(mode: AnswerMode, extractive_default: int = 256) -> int:
-    """Analytical modes need room to reason step by step before the final answer."""
-    if mode in (AnswerMode.TEMPORAL, AnswerMode.AGGREGATION):
-        return max(extractive_default, 512)
+    """Analytical modes need room for the JSON notes + the derivation + answer."""
+    if mode is not AnswerMode.EXTRACTIVE:
+        return max(extractive_default, 768)
     return extractive_default
+
+
+_DATE_TAG_RE = re.compile(r"\[recorded\s+(\d{4}[-/]\d{1,2}[-/]\d{1,2})")
+
+
+def chronological_sort(documents: list[str]) -> list[str]:
+    """Stable-sort date-tagged documents ascending by recorded date.
+
+    Chronological ordering helps the reader reason about event order and apply
+    the most-recent fact on conflict (paper: chronological sort + recency).
+    Documents are tagged ``[recorded YYYY/MM/DD …]`` at ingest; undated docs keep
+    their original order at the end (stable). No-op shape for dateless inputs.
+    """
+    def sort_key(item: tuple[int, str]) -> tuple[int, str, int]:
+        i, doc = item
+        m = _DATE_TAG_RE.search(doc)
+        if m:
+            return (0, m.group(1).replace("/", "-"), i)
+        return (1, "", i)
+
+    return [doc for _, doc in sorted(enumerate(documents), key=sort_key)]
 
 
 def extract_final_answer(text: str) -> str:

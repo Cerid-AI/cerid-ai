@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query"
 import {
   MessageSquare, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
-  Shield, Compass, Files, Newspaper, Gauge, SlidersHorizontal,
+  Shield, Compass, Files, Newspaper, Gauge, SlidersHorizontal, Workflow,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -21,7 +21,7 @@ import { fetchModelUpdatesFull } from "@/lib/api"
 import { fetchHealth } from "@/lib/api/settings"
 import { useSettingsMode, setSettingsMode } from "@/lib/settings-mode"
 
-export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities" | "subjects" | "sources" | "briefs"
+export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities" | "subjects" | "sources" | "briefs" | "workflows"
 
 interface SidebarProps {
   activePane: Pane
@@ -49,6 +49,7 @@ const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "chat", icon: MessageSquare, label: "Chat" },
   { pane: "subjects", icon: Compass, label: "Subjects" },
   { pane: "briefs", icon: Newspaper, label: "Briefs" },
+  { pane: "workflows", icon: Workflow, label: "Workflows" },
   { pane: "sources", icon: Files, label: "Sources" },
   { pane: "settings", icon: Settings, label: "Settings" },
 ]

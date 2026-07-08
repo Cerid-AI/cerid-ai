@@ -36,6 +36,7 @@ const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 const SubjectsPane = lazy(() => import("@/components/subjects/subjects-pane"))
 const SourcesPane = lazy(() => import("@/components/sources/sources-pane"))
 const BriefsPane = lazy(() => import("@/components/briefs/briefs-pane"))
+const WorkflowsPane = lazy(() => import("@/components/workflows/workflows-pane"))
 const AtlasPerfHarness = lazy(() => import("@/components/dev/atlas-perf-harness"))
 
 /**
@@ -193,6 +194,7 @@ export default function App() {
           case "subjects":
           case "sources":
           case "briefs":
+          case "workflows":
             return (
               <PaneErrorBoundary label={activePane} queryClient={queryClient}>
                 <Suspense fallback={<PaneLoader />}>
@@ -200,6 +202,7 @@ export default function App() {
                   {activePane === "subjects" && <SubjectsPane />}
                   {activePane === "sources" && <SourcesPane />}
                   {activePane === "briefs" && <BriefsPane />}
+                  {activePane === "workflows" && <WorkflowsPane />}
                 </Suspense>
               </PaneErrorBoundary>
             )

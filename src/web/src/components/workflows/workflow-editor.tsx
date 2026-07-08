@@ -17,10 +17,20 @@ import {
   runWorkflow,
   fetchWorkflowTemplates,
 } from "@/lib/api"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
 import WorkflowCanvas from "./workflow-canvas"
 import {
   Plus,
@@ -32,6 +42,7 @@ import {
   ChevronDown,
   X,
   Settings2,
+  AlertCircle,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -75,14 +86,18 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
   const [runResult, setRunResult] = useState<WorkflowRun | null>(null)
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, "pending" | "running" | "completed" | "failed">>({})
   const [edgeMode, setEdgeMode] = useState<string | null>(null) // source_id when connecting
-  const [showAddNode, setShowAddNode] = useState(false)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
-  const [showTemplates, setShowTemplates] = useState(false)
+  const [templatesError, setTemplatesError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Load templates on mount
   useEffect(() => {
-    fetchWorkflowTemplates().then(setTemplates).catch((e) => console.error("Failed to load workflow templates:", e))
+    fetchWorkflowTemplates()
+      .then(setTemplates)
+      .catch((e) => {
+        logSwallowedError(e, "workflow-editor.fetchWorkflowTemplates")
+        setTemplatesError(e instanceof Error ? e.message : "Failed to load templates")
+      })
   }, [])
 
   // Reset state when workflow changes
@@ -112,7 +127,6 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
     }
     setNodes((prev) => [...prev, newNode])
     setSelectedNodeId(id)
-    setShowAddNode(false)
   }, [nodes])
 
   const deleteSelected = useCallback(() => {
@@ -163,7 +177,6 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
     setDescription(template.description)
     setNodes(template.nodes)
     setEdges(template.edges)
-    setShowTemplates(false)
     setSelectedNodeId(null)
   }, [])
 
@@ -231,76 +244,62 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
   return (
     <div className="flex flex-col h-full">
       {/* ── Top toolbar ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 p-3 border-b border-zinc-800 bg-zinc-900/60 flex-wrap">
+      <div className="flex items-center gap-2 p-3 border-b bg-muted/40 flex-wrap">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <X className="h-4 w-4 mr-1" /> Back
         </Button>
 
-        <div className="h-4 w-px bg-zinc-700" />
+        <div className="h-4 w-px bg-border" />
 
         {/* Template selector */}
-        <div className="relative">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowTemplates(!showTemplates)}
-          >
-            Templates <ChevronDown className="h-3 w-3 ml-1" />
-          </Button>
-          {showTemplates && templates.length > 0 && (
-            <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-lg min-w-[260px]"> {/* drift-allowed: agent dropdown pinned width fits longest agent name */}
-              {templates.map((t) => (
-                <button
-                  key={t.id}
-                  className="block w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 first:rounded-t-md last:rounded-b-md"
-                  onClick={() => applyTemplate(t)}
-                >
-                  <span className="font-medium text-zinc-100">{t.name}</span>
-                  <br />
-                  <span className="text-xs text-zinc-500">{t.description}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              Templates <ChevronDown className="h-3 w-3 ml-1" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-[260px]"> {/* drift-allowed: template dropdown pinned width fits longest template name */}
+            {templates.length === 0 ? (
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">No templates available</div>
+            ) : (
+              templates.map((t) => (
+                <DropdownMenuItem key={t.id} onSelect={() => applyTemplate(t)} className="flex-col items-start gap-0.5">
+                  <span className="font-medium text-foreground">{t.name}</span>
+                  <span className="text-xs text-muted-foreground">{t.description}</span>
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {templatesError && (
+          <span className="text-label-xs text-muted-foreground">Templates unavailable</span>
+        )}
 
-        <div className="h-4 w-px bg-zinc-700" />
+        <div className="h-4 w-px bg-border" />
 
         {/* Add node */}
-        <div className="relative">
-          <Button variant="outline" size="sm" onClick={() => setShowAddNode(!showAddNode)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Add Node
-          </Button>
-          {showAddNode && (
-            <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-lg min-w-[200px] max-h-[300px] overflow-y-auto"> {/* drift-allowed: node dropdown pinned width fits longest node name */}
-              <div className="px-3 py-1.5 text-label-xs uppercase tracking-wider text-zinc-500 font-semibold">
-                Agents
-              </div>
-              {AGENT_NAMES.map((a) => (
-                <button
-                  key={a}
-                  className="block w-full text-left px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
-                  onClick={() => addNode("agent", a)}
-                >
-                  {a}
-                </button>
-              ))}
-              <div className="border-t border-zinc-700 my-1" />
-              <div className="px-3 py-1.5 text-label-xs uppercase tracking-wider text-zinc-500 font-semibold">
-                Other
-              </div>
-              {NODE_TYPE_OPTIONS.filter((o) => o.type !== "agent").map((o) => (
-                <button
-                  key={o.type}
-                  className="block w-full text-left px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
-                  onClick={() => addNode(o.type, o.label.toLowerCase())}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add Node
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-[200px] max-h-[300px] overflow-y-auto"> {/* drift-allowed: node dropdown pinned width fits longest node name */}
+            <DropdownMenuLabel>Agents</DropdownMenuLabel>
+            {AGENT_NAMES.map((a) => (
+              <DropdownMenuItem key={a} onSelect={() => addNode("agent", a)}>
+                {a}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Other</DropdownMenuLabel>
+            {NODE_TYPE_OPTIONS.filter((o) => o.type !== "agent").map((o) => (
+              <DropdownMenuItem key={o.type} onSelect={() => addNode(o.type, o.label.toLowerCase())}>
+                {o.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Add edge mode */}
         <Button
@@ -349,9 +348,16 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
 
       {/* Error banner */}
       {error && (
-        <div className="px-3 py-2 bg-red-500/10 border-b border-red-500/30 text-red-700 dark:text-red-400 text-sm">
-          {error}
-          <button className="ml-2 underline text-xs" onClick={() => setError(null)}>dismiss</button>
+        <div className="px-3 pt-2">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" aria-hidden="true" />
+            <AlertDescription className="flex items-center justify-between gap-2">
+              <span>{error}</span>
+              <button className="shrink-0 text-xs underline" onClick={() => setError(null)}>
+                dismiss
+              </button>
+            </AlertDescription>
+          </Alert>
         </div>
       )}
 
@@ -365,13 +371,13 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Workflow name..."
-              className="max-w-[240px] h-8 text-sm bg-zinc-900 border-zinc-700" // drift-allowed: node-name input pinned width matches canvas chrome sizing
+              className="max-w-[240px] h-8 text-sm" // drift-allowed: node-name input pinned width matches canvas chrome sizing
             />
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Description (optional)"
-              className="flex-1 h-8 text-sm bg-zinc-900 border-zinc-700"
+              className="flex-1 h-8 text-sm"
             />
           </div>
 
@@ -386,8 +392,8 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
 
           {/* Run result summary */}
           {runResult && (
-            <div className="mt-2 p-2 rounded bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
-              Run <span className="text-zinc-200 font-mono">{runResult.id.slice(0, 8)}</span>
+            <div className="mt-2 p-2 rounded bg-muted/40 border text-xs text-muted-foreground">
+              Run <span className="text-foreground font-mono">{runResult.id.slice(0, 8)}</span>
               {" — "}
               <Badge variant={runResult.status === "completed" ? "default" : "destructive"} className="text-label-xs">
                 {runResult.status}
@@ -399,59 +405,59 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
 
         {/* ── Right sidebar: node config ─────────────────────────────── */}
         {selectedNode && (
-          <div className="w-[260px] border-l border-zinc-800 bg-zinc-900/40 p-3 flex flex-col gap-3"> {/* drift-allowed: node-config side panel pinned width matches canvas chrome sizing */}
+          <div className="w-[260px] border-l bg-muted/30 p-3 flex flex-col gap-3"> {/* drift-allowed: node-config side panel pinned width matches canvas chrome sizing */}
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                 <Settings2 className="h-3.5 w-3.5 text-teal-400" />
                 Node Config
               </h3>
-              <button aria-label="Close node config" onClick={() => setSelectedNodeId(null)} className="text-zinc-500 hover:text-zinc-300">
+              <button aria-label="Close node config" onClick={() => setSelectedNodeId(null)} className="text-muted-foreground hover:text-foreground">
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
 
             <div>
-              <Label className="text-xs text-zinc-400">Name</Label>
+              <Label className="text-xs text-muted-foreground">Name</Label>
               <Input
                 value={selectedNode.name}
                 onChange={(e) => updateNodeName(e.target.value)}
-                className="mt-1 h-8 text-sm bg-zinc-900 border-zinc-700"
+                className="mt-1 h-8 text-sm"
               />
             </div>
 
             <div>
-              <Label className="text-xs text-zinc-400">Type</Label>
+              <Label className="text-xs text-muted-foreground">Type</Label>
               <div className="mt-1">
                 <Badge className="text-xs capitalize">{selectedNode.type}</Badge>
               </div>
             </div>
 
             <div>
-              <Label className="text-xs text-zinc-400">ID</Label>
-              <p className="text-xs text-zinc-500 font-mono mt-1">{selectedNode.id}</p>
+              <Label className="text-xs text-muted-foreground">ID</Label>
+              <p className="text-xs text-muted-foreground font-mono mt-1">{selectedNode.id}</p>
             </div>
 
             {/* Config fields */}
             {selectedNode.type === "condition" && (
               <div>
-                <Label className="text-xs text-zinc-400">Expression</Label>
+                <Label className="text-xs text-muted-foreground">Expression</Label>
                 <Input
                   value={(selectedNode.config.expression as string) ?? ""}
                   onChange={(e) => updateNodeConfig("expression", e.target.value)}
                   placeholder="confidence > 0.5"
-                  className="mt-1 h-8 text-sm bg-zinc-900 border-zinc-700 font-mono"
+                  className="mt-1 h-8 text-sm font-mono"
                 />
               </div>
             )}
 
             {/* Connected edges */}
             <div>
-              <Label className="text-xs text-zinc-400">Connections</Label>
+              <Label className="text-xs text-muted-foreground">Connections</Label>
               <div className="mt-1 space-y-1">
                 {edges
                   .filter((e) => e.source_id === selectedNode.id || e.target_id === selectedNode.id)
                   .map((e, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs text-zinc-500">
+                    <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>
                         {e.source_id === selectedNode.id ? `→ ${e.target_id}` : `← ${e.source_id}`}
                       </span>
@@ -469,7 +475,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
                     </div>
                   ))}
                 {edges.filter((e) => e.source_id === selectedNode.id || e.target_id === selectedNode.id).length === 0 && (
-                  <p className="text-xs text-zinc-600">No connections</p>
+                  <p className="text-xs text-muted-foreground/70">No connections</p>
                 )}
               </div>
             </div>

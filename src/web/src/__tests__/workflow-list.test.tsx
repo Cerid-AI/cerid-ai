@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { axe } from "jest-axe"
 
 vi.mock("@/lib/api", () => ({
   fetchWorkflows: vi.fn(),
@@ -67,5 +69,70 @@ describe("WorkflowList", () => {
     render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
     await screen.findByText("Ingestion Pipeline")
     expect(screen.getByText("disabled")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.2: four-state matrix — loading (Skeleton) / error (PaneError)
+// ---------------------------------------------------------------------------
+
+describe("WorkflowList — four-state matrix (D.2)", () => {
+  it("loading: shows Skeleton rows while fetching", () => {
+    vi.mocked(fetchWorkflows).mockReturnValue(new Promise(() => {})) // never resolves
+    render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    expect(screen.getByRole("status", { name: /loading workflows/i })).toBeInTheDocument()
+  })
+
+  it("error: shows PaneError (destructive Alert) with Retry on fetch failure", async () => {
+    vi.mocked(fetchWorkflows).mockRejectedValue(new Error("Connection refused"))
+    render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await waitFor(() => {
+      expect(screen.getByText(/failed to load workflows/i)).toBeInTheDocument()
+    })
+    expect(screen.getByText("Connection refused")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+  })
+
+  it("error: Retry re-invokes the fetch", async () => {
+    vi.mocked(fetchWorkflows).mockRejectedValueOnce(new Error("Connection refused"))
+    vi.mocked(fetchWorkflows).mockResolvedValueOnce({ workflows: mockWorkflows, total: 2 })
+    const user = userEvent.setup()
+    render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await screen.findByRole("button", { name: /retry/i })
+    await user.click(screen.getByRole("button", { name: /retry/i }))
+    expect(await screen.findByText("Ingestion Pipeline")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.3: axe-clean
+// ---------------------------------------------------------------------------
+
+describe("WorkflowList — axe-clean (D.3)", () => {
+  it("is axe-clean in loading state", async () => {
+    vi.mocked(fetchWorkflows).mockReturnValue(new Promise(() => {}))
+    const { container } = render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in error state", async () => {
+    vi.mocked(fetchWorkflows).mockRejectedValue(new Error("fail"))
+    const { container } = render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await waitFor(() => screen.getByText(/failed to load workflows/i))
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in empty state", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue({ workflows: [], total: 0 })
+    const { container } = render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await screen.findByText(/no workflows yet/i)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in success (populated) state", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue({ workflows: mockWorkflows, total: 2 })
+    const { container } = render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await screen.findByText("Ingestion Pipeline")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })
