@@ -92,7 +92,7 @@ quotequail>=0.4,<1
 
 # Utilities
 cryptography>=48.0.1,<49  # 48.0.1 fixes GHSA-537c-gmf6-5ccf (HIGH)
-python-multipart>=0.0.27,<1
+python-multipart>=0.0.32,<1
 
 # Plugins (Pro tier — system deps: tesseract-ocr, ffmpeg in Dockerfile)
 # optional (Pro OCR plugin): pytesseract>=0.3.10
