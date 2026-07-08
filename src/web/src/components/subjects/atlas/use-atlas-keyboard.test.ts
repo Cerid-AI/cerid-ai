@@ -17,6 +17,7 @@ function makeGraph(): Graph<AtlasNodeAttributes, AtlasEdgeAttributes> {
       id: `n${i}`,
       name: `Node ${i}`,
       type: "haloed",
+      entityType: "Person",
       community: null,
       mention_count: 1,
       trust_state: "verified",

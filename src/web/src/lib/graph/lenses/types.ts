@@ -16,6 +16,7 @@ export type LensId =
   | "provenance"
   | "quality"
   | "domain"
+  | "bridges"
 
 export interface Lens {
   id: LensId

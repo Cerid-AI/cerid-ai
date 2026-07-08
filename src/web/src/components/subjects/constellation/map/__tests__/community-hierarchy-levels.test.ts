@@ -53,6 +53,31 @@ describe("buildLevelCommunities", () => {
     const levels = buildLevelCommunities(L0, undefined)
     expect(levels).toEqual([L0])
   })
+
+  it("labels a summary-less L1 from its c-TF-IDF top_terms before the dominant child (A3)", () => {
+    const hier: CommunityHierarchy = {
+      levels: 2,
+      nodes: [
+        { community_id: "0:1", level: 0, parent_id: "1:9", member_count: 10, summary: null },
+        { community_id: "0:2", level: 0, parent_id: "1:9", member_count: 30, summary: null },
+        { community_id: "1:9", level: 1, parent_id: null, member_count: 40, summary: null, top_terms: ["python", "asyncio", "typing"] },
+      ],
+    }
+    const l1 = buildLevelCommunities(L0, hier)[1][0]
+    expect(l1.label).toBe("python · asyncio · typing")
+  })
+
+  it("prefers a real summary over top_terms when both exist", () => {
+    const hier: CommunityHierarchy = {
+      levels: 2,
+      nodes: [
+        { community_id: "0:1", level: 0, parent_id: "1:9", member_count: 10, summary: null },
+        { community_id: "1:9", level: 1, parent_id: null, member_count: 10, summary: "Platform cluster", top_terms: ["python"] },
+      ],
+    }
+    const l1 = buildLevelCommunities([hull("0:1", [0, 0], 10)], hier)[1][0]
+    expect(l1.label).toContain("Platform")
+  })
 })
 
 describe("cleanSummaryLabel", () => {

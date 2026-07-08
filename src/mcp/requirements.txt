@@ -31,6 +31,11 @@ graphdatascience>=1.21,<2
 # AI / NLP
 tiktoken>=0.5,<1
 langgraph>=0.3.0,<2.0  # langgraph 1.x OK — audit verified: only StateGraph/END from langgraph.graph (triage.py)
+# Semantic layout preset (Graph Living-Map A7) — PaCMAP 2D projection of entity
+# embeddings for /graph/map?layout=semantic. Import is runtime-guarded in
+# compute_umap_3d._semantic_layout; the FA2-over-SIMILAR_TO fallback keeps the
+# preset serving if this dep is ever absent.
+pacmap>=0.9.1,<1
 
 # File parsing
 pdfplumber>=0.11.9,<0.12

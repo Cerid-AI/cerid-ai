@@ -29,6 +29,13 @@ export interface LayoutOptions {
    * and the promise rejects with an AbortError.
    */
   signal?: AbortSignal
+  /**
+   * Warm-start (A5 ego migration): ship each node's current x/y to the
+   * worker as its FA2 starting position instead of random init, so the
+   * layout relaxes from the existing mental map. Callers must seed
+   * positions first (all-zero coords would stack every node).
+   */
+  warmStart?: boolean
 }
 
 export interface LayoutResult {
@@ -60,6 +67,7 @@ export async function applyLayout(
   const nodes = graph.mapNodes((id, attrs) => ({
     id,
     mention_count: attrs.mention_count,
+    ...(options.warmStart ? { x: attrs.x, y: attrs.y } : {}),
   }))
   const edges = graph.mapEdges((_key, attrs) => ({
     source: attrs.source,

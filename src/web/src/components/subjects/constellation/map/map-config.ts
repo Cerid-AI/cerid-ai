@@ -8,14 +8,20 @@ const STORAGE_KEY = "cerid-map-config"
 
 export type EdgeBudget = "off" | "2k" | "8k" | "all"
 export type LabelDensity = "sparse" | "normal" | "rich"
+/**
+ * Community/domain region rendering (A4): "nebula" = the canvas hull overlay
+ * (radial-gradient fills + labels), "contours" = GPU metaball territories via
+ * @sigma/layer-webgl, "off" = no region layer.
+ */
+export type TerritoryMode = "off" | "nebula" | "contours"
 
 export interface MapConfig {
   /** Edge budget — limits edges rendered at rest by weight percentile */
   edgeBudget: EdgeBudget
   /** Label density — controls sigma labelDensity */
   labelDensity: LabelDensity
-  /** Show community hull fills + labels */
-  hullsVisible: boolean
+  /** Community/domain region rendering mode (replaces legacy hullsVisible) */
+  territories: TerritoryMode
   /** Run the live ForceAtlas2 simulation (warm + breathing). Reduced-motion overrides. */
   liveLayout: boolean
   /** Hide degree-0 (orphan) nodes from the graph. */
@@ -28,10 +34,16 @@ export interface MapConfig {
 export const MAP_CONFIG_DEFAULTS: MapConfig = {
   edgeBudget: "8k",
   labelDensity: "normal",
-  hullsVisible: true,
+  territories: "nebula",
   liveLayout: true,
   hideOrphans: false,
   collapseCommunities: true,
+}
+
+export const TERRITORY_LABELS: Record<TerritoryMode, string> = {
+  off: "Off",
+  nebula: "Nebula",
+  contours: "Contours",
 }
 
 export const EDGE_BUDGET_LABELS: Record<EdgeBudget, string> = {
@@ -58,8 +70,14 @@ export function loadMapConfig(): MapConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<MapConfig>
-      return { ...MAP_CONFIG_DEFAULTS, ...parsed }
+      const parsed = JSON.parse(raw) as Partial<MapConfig> & { hullsVisible?: boolean }
+      const merged = { ...MAP_CONFIG_DEFAULTS, ...parsed }
+      // Migrate pre-A4 configs: the boolean hull toggle becomes the
+      // territories tri-state (explicit stored territories always wins).
+      if (parsed.territories === undefined && parsed.hullsVisible !== undefined) {
+        merged.territories = parsed.hullsVisible ? "nebula" : "off"
+      }
+      return merged
     }
   } catch {
     // localStorage unavailable (private mode) — fall through to defaults

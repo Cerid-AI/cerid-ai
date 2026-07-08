@@ -106,9 +106,8 @@ src/web/src/components/workflows/workflow-canvas.tsx:301
 # --- Section: entity-hover-card test stubs (Task 4.3) -----------------------
 # Hex values are required to satisfy the MapTokens interface in test stubs;
 # no design tokens exist for neutral placeholder colors in jsdom-rendered tests.
-src/web/src/__tests__/entity-hover-card.test.tsx:149
 src/web/src/__tests__/entity-hover-card.test.tsx:150
-src/web/src/__tests__/entity-hover-card.test.tsx:157
+src/web/src/__tests__/entity-hover-card.test.tsx:151
 src/web/src/__tests__/entity-hover-card.test.tsx:158
 src/web/src/__tests__/entity-hover-card.test.tsx:159
 src/web/src/__tests__/entity-hover-card.test.tsx:160
@@ -121,3 +120,4 @@ src/web/src/__tests__/entity-hover-card.test.tsx:166
 src/web/src/__tests__/entity-hover-card.test.tsx:167
 src/web/src/__tests__/entity-hover-card.test.tsx:168
 src/web/src/__tests__/entity-hover-card.test.tsx:169
+src/web/src/__tests__/entity-hover-card.test.tsx:170

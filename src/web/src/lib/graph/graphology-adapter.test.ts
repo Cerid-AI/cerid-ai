@@ -215,6 +215,12 @@ describe("adaptNeighborhood", () => {
     expect(alex.type).toBe("bordered")
   })
 
+  it("preserves the API entity type as entityType (attrs.type is the sigma program key)", () => {
+    const g = adaptNeighborhood(mkResponse(), TOKENS)
+    expect(g.getNodeAttribute("alex", "entityType")).toBe("Person")
+    expect(g.getNodeAttribute("api_redesign", "entityType")).toBe("Project")
+  })
+
   it("edge color = tokens.edge (neutral in rest state)", () => {
     const g = adaptNeighborhood(mkResponse(), TOKENS)
     const edges = g.mapEdges((_key, attrs) => attrs)

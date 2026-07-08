@@ -16,8 +16,8 @@ import { useMemo, useRef, useState } from "react"
 import { useFrame } from "@react-three/fiber"
 import type { EntityEmbedding3D } from "@/lib/api/embeddings-3d"
 import { degreeRadius } from "./palette"
-import { visibleLabelCount } from "./quality"
-import { LABEL_HEX, SURFACE_HEX } from "@/theme/shader-tokens"
+import { visibleLabelCount, labelFillOpacity } from "./quality"
+import { LABEL_HEX, LABEL_HEX_LIGHT, SURFACE_HEX } from "@/theme/shader-tokens"
 
 export interface HubLabelsProps {
   entities: EntityEmbedding3D[]
@@ -27,6 +27,10 @@ export interface HubLabelsProps {
   count?: number
   /** Hovered entity index — its label brightens. */
   hoveredIndex?: number | null
+  /** Pinned entity index — its label is always drawn (B2), even below the LOD count cull. */
+  pinnedIndex?: number | null
+  /** Resolved theme (B2): dark labels use the light-on-dark palette, light labels the dark-on-light one. */
+  dark?: boolean
 }
 
 // Distance bucket boundaries — a re-render is only triggered when the camera
@@ -40,7 +44,14 @@ function distanceBucket(d: number): number {
   return DISTANCE_BUCKETS.length
 }
 
-export function HubLabels({ entities, degrees, count = 18, hoveredIndex = null }: HubLabelsProps) {
+export function HubLabels({
+  entities,
+  degrees,
+  count = 18,
+  hoveredIndex = null,
+  pinnedIndex = null,
+  dark = true,
+}: HubLabelsProps) {
   // Camera distance sampled per-frame, only triggers a re-render when the
   // bucket (zoom level) changes — avoids per-frame React reconciliation.
   const [cameraDist, setCameraDist] = useState(30)
@@ -55,6 +66,13 @@ export function HubLabels({ entities, degrees, count = 18, hoveredIndex = null }
   })
 
   const visibleCount = visibleLabelCount(cameraDist, count)
+  // Surviving labels soften as the camera pulls back — a gentle LOD fade
+  // rather than a hard pop when a label crosses the count cull.
+  const baseOpacity = labelFillOpacity(cameraDist)
+  // Theme-routed palette: light-on-dark vs dark-on-light with a bright halo.
+  const palette = dark
+    ? { default: LABEL_HEX.default, hover: LABEL_HEX.hover, outline: SURFACE_HEX.vaultDeep }
+    : { default: LABEL_HEX_LIGHT.default, hover: LABEL_HEX_LIGHT.hover, outline: LABEL_HEX_LIGHT.outline }
 
   const hubs = useMemo(() => {
     return entities
@@ -64,24 +82,38 @@ export function HubLabels({ entities, degrees, count = 18, hoveredIndex = null }
       .filter((h) => h.degree > 0)
   }, [entities, degrees, count])
 
+  // The pinned node's label is always drawn (B2) — force it in even when it
+  // ranks below the LOD count cull, so the current selection is never nameless.
+  const visible = useMemo(() => {
+    const chosen = hubs.slice(0, visibleCount)
+    if (pinnedIndex !== null && pinnedIndex >= 0 && !chosen.some((h) => h.index === pinnedIndex)) {
+      const ent = entities[pinnedIndex]
+      if (ent) chosen.push({ ent, index: pinnedIndex, degree: degrees?.[pinnedIndex] ?? 0 })
+    }
+    return chosen
+  }, [hubs, visibleCount, pinnedIndex, entities, degrees])
+
   return (
     <group>
-      {hubs.slice(0, visibleCount).map(({ ent, index, degree }) => (
-        <Billboard key={ent.id} position={[ent.x, ent.y + degreeRadius(degree) + 0.28, ent.z]}>
-          <Text
-            fontSize={0.34}
-            color={index === hoveredIndex ? LABEL_HEX.hover : LABEL_HEX.default}
-            outlineWidth={0.012}
-            outlineColor={SURFACE_HEX.vaultDeep}
-            anchorX="center"
-            anchorY="bottom"
-            maxWidth={6}
-            fillOpacity={index === hoveredIndex ? 1 : 0.78}
-          >
-            {ent.name}
-          </Text>
-        </Billboard>
-      ))}
+      {visible.map(({ ent, index, degree }) => {
+        const focused = index === hoveredIndex || index === pinnedIndex
+        return (
+          <Billboard key={ent.id} position={[ent.x, ent.y + degreeRadius(degree) + 0.28, ent.z]}>
+            <Text
+              fontSize={0.34}
+              color={focused ? palette.hover : palette.default}
+              outlineWidth={0.012}
+              outlineColor={palette.outline}
+              anchorX="center"
+              anchorY="bottom"
+              maxWidth={6}
+              fillOpacity={focused ? 1 : baseOpacity}
+            >
+              {ent.name}
+            </Text>
+          </Billboard>
+        )
+      })}
     </group>
   )
 }

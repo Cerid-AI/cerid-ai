@@ -69,3 +69,17 @@ export function lodEdgeMinSize(tier: "overview" | "mid" | "detail"): number {
     case "overview": return 2.2
   }
 }
+
+/**
+ * Continuous edge alpha for a LOD tier: 0 at/below the tier floor, ramping to
+ * 1 across a fixed fade band above it. Lets edges FADE out as the camera pulls
+ * back instead of popping at the binary `lodEdgeMinSize` floor; the reducer
+ * treats 0 as hidden.
+ */
+const LOD_EDGE_FADE_BAND = 0.4
+
+export function lodEdgeAlpha(tier: "overview" | "mid" | "detail", size: number): number {
+  if (tier === "detail") return 1
+  const floor = lodEdgeMinSize(tier)
+  return Math.max(0, Math.min(1, (size - floor) / LOD_EDGE_FADE_BAND))
+}

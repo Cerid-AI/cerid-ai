@@ -147,3 +147,18 @@ export function visibleLabelCount(cameraDistance: number, max: number): number {
   if (cameraDistance >= 28) return Math.min(12, max)
   return max
 }
+
+/**
+ * Base fill-opacity for a persistent hub label at a given camera distance (B2).
+ * Surviving labels also soften as the camera pulls away, so the LOD reads as a
+ * gentle fade rather than a hard pop-out when a label crosses the count cull in
+ * visibleLabelCount. Never returns 0 — the far tier stays faintly legible.
+ * Shares the 28/40/55 distance bands with visibleLabelCount for a coherent LOD.
+ * Hovered/pinned labels override this to 1.0 in the component.
+ */
+export function labelFillOpacity(cameraDistance: number): number {
+  if (cameraDistance >= 55) return 0.5
+  if (cameraDistance >= 40) return 0.62
+  if (cameraDistance >= 28) return 0.75
+  return 0.85
+}

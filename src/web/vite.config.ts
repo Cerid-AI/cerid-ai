@@ -11,6 +11,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // @cosmos.gl/graph (B8 Live mode) imports a default from gl-bench, but
+      // the resolver picks gl-bench's UMD build (a global-assign IIFE with no
+      // ESM default export), which breaks the production build. Force its
+      // proper ESM build (dist/gl-bench.module.js — has `export default`).
+      "gl-bench": path.resolve(__dirname, "./node_modules/gl-bench/dist/gl-bench.module.js"),
     },
   },
   test: {
@@ -52,7 +57,12 @@ export default defineConfig({
             return "vendor-r3f"
           }
           if (id.includes("node_modules/three") || id.includes("/three/three.")) return "vendor-three"
-          if (id.includes("/gsap/")) return "vendor-gsap"
+          // cosmos.gl "Live" mode (B8) + its luma.gl renderer — lazy chunk,
+          // only loaded when the user switches to the self-organizing scene.
+          // Its transitive d3-* deps are caught by the d3 rule above (also lazy).
+          if (id.includes("node_modules/@cosmos.gl/") || id.includes("node_modules/@luma.gl/")) {
+            return "vendor-cosmos"
+          }
           // 2026-05-24 (rc1 beta finding F6) — peel Atlas dependencies out
           // of the main bundle. sigma.js + graphology + umap together
           // account for ~157KB minified. The Atlas pane is one of four;

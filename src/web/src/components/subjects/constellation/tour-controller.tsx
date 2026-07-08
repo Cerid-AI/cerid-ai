@@ -17,10 +17,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { useThree } from "@react-three/fiber"
 import { useFrame } from "@react-three/fiber"
-import { Vector3 } from "three"
+import { PerspectiveCamera, Vector3 } from "three"
 import { Play, Pause, Volume2, VolumeX, Loader2 } from "lucide-react"
 import { generateTour, type TourArc, type TourStop } from "@/lib/api/graph-tour"
-import { cameraTargetFor, type Vec3 } from "./camera-focus-3d"
+import { cameraTargetFor, fovForProgress, type Vec3 } from "./camera-focus-3d"
 
 type TourState =
   | { kind: "idle" }
@@ -116,6 +116,9 @@ export function FocusCameraAnimator({ center, radius, instant, controlsRef }: Fo
   const fromTarget = useRef(new Vector3())
   const toTarget = useRef(new Vector3())
   const startedAt = useRef<number | null>(null)
+  // Base FOV captured at tween start for the B3 dolly-zoom swell; null when no
+  // FOV animation is active (idle, or instant/reduced-motion snap).
+  const baseFovRef = useRef<number | null>(null)
   // Value-keyed (not reference-keyed) so a re-render that recomputes an
   // equal-valued center/radius (new array identity, same numbers) doesn't
   // restart the tween from the camera's current mid-flight position.
@@ -145,8 +148,12 @@ export function FocusCameraAnimator({ center, radius, instant, controlsRef }: Fo
         controlsRef.current.update()
       }
       startedAt.current = null
+      baseFovRef.current = null
     } else {
       startedAt.current = performance.now()
+      // Capture the resting FOV so the dolly-zoom swells from it and settles
+      // back to it — only for a perspective camera (R3F's default).
+      baseFovRef.current = camera instanceof PerspectiveCamera ? camera.fov : null
     }
   }, [center, radius, instant, camera, controlsRef])
 
@@ -162,7 +169,22 @@ export function FocusCameraAnimator({ center, radius, instant, controlsRef }: Fo
       controlsRef.current.update()
     }
 
-    if (t >= 1) startedAt.current = null
+    // B3 dolly-zoom: swell the FOV toward the peak at the tween midpoint and
+    // settle back to base as the camera arrives — a cinematic push-in.
+    if (baseFovRef.current !== null && camera instanceof PerspectiveCamera) {
+      camera.fov = fovForProgress(t, baseFovRef.current)
+      camera.updateProjectionMatrix()
+    }
+
+    if (t >= 1) {
+      startedAt.current = null
+      // Snap the FOV exactly to base so no floating-point residual lingers.
+      if (baseFovRef.current !== null && camera instanceof PerspectiveCamera) {
+        camera.fov = baseFovRef.current
+        camera.updateProjectionMatrix()
+      }
+      baseFovRef.current = null
+    }
   })
 
   return null

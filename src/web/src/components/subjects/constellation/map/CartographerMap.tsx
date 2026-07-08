@@ -35,11 +35,17 @@ import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import { HOVER_INTENT_DELAY_MS } from "@/lib/graph/hover-intent"
 import { useNavigation } from "@/contexts/navigation-context"
 import { domainColor } from "@/lib/graph/identity"
+import { bridgesColor, normalizeScores } from "@/lib/graph/bridges"
+import { computeBetweenness } from "@/lib/graph/compute-betweenness"
 import { createHealController } from "@/lib/graph/interactions/drag-heal"
+import { createFocusSpotlight, focusNodeAlpha, focusNodeSize } from "@/lib/graph/interactions/focus-spotlight"
+import { morphPositions, type MorphHandle, type MorphTargets } from "@/lib/graph/interactions/position-morph"
 import { nodeBaseAlpha, ISOLATED_COMMUNITY_ID } from "../palette"
 import type { OnInspect, OnFocusEntity } from "@/lib/graph/cycle4-contracts"
 import { useForceLayout } from "./use-force-layout"
 import { matchesSearch } from "./filter-predicates"
+import { memberHidden, edgeHidden } from "./combo-collapse"
+import { timeNodeState, bornBetween, type TimeFilter } from "./time-window"
 import { cameraTargetForPoints, lodTier, lodEdgeMinSize } from "./semantic-zoom"
 // ---------------------------------------------------------------------------
 // 2D cathedral programs — mirroring atlas-programs.ts (3D uses same libs).
@@ -189,7 +195,7 @@ function clusterColor(communityId: string | null, tokens: MapTokens): string {
 // Lens coloring
 // ---------------------------------------------------------------------------
 
-export type ColorLens = "cluster" | "trust" | "type" | "domain"
+export type ColorLens = "cluster" | "trust" | "type" | "domain" | "bridges"
 
 const TYPE_SLOT: Record<string, number> = {
   PERSON: 0, Person: 0,
@@ -203,7 +209,13 @@ function lensColor(
   entity: { type: string; community: string | null; trust_state: string; primary_domain?: string | null },
   lens: ColorLens,
   tokens: MapTokens,
+  bridgeScore = 0,
 ): string {
+  if (lens === "bridges") {
+    // Betweenness ramp (C1): dim (peripheral) → interaction (connector hub).
+    // Score is 0 until the worker finishes (all nodes read dim meanwhile).
+    return bridgesColor(bridgeScore, tokens.dim, tokens.interaction)
+  }
   if (lens === "type") {
     const slot = TYPE_SLOT[entity.type]
     return slot !== undefined ? (tokens.clusters[slot] ?? tokens.clusterOther) : tokens.clusterOther
@@ -303,6 +315,12 @@ export interface CartographerMapProps {
    */
   onFocusEntity?: OnFocusEntity
   onCommunityClick?: (community: CommunityHull) => void
+  /** Per-community combos (A10): level-0 community ids collapsed into a disc. */
+  manualCollapsed?: ReadonlySet<string>
+  /** Called when a manual combo disc is clicked (parent removes it from the set). */
+  onManualExpand?: (id: string) => void
+  /** Timebar/timelapse filter (A8/A9): out-of-window nodes dim, not-yet-born hide. */
+  timeFilter?: TimeFilter | null
   /**
    * The requested server layout ("force" | "wells" | "domain"). Drives the
    * position re-seed guard so a preset switch actually applies new coordinates.
@@ -318,6 +336,8 @@ export interface CartographerMapProps {
   onPinnedNodesChange?: (pinnedNodes: Record<string, { x: number; y: number }>) => void
   /** Live search query — non-matching nodes dim to the search-miss state. */
   search?: string
+  /** Structural-gaps highlight (C2): when set, communities NOT in this set recede so the two bridged hulls stand out. */
+  highlightCommunities?: ReadonlySet<string>
 }
 
 // ---------------------------------------------------------------------------
@@ -337,10 +357,14 @@ export function CartographerMap({
   onInspect,
   onFocusEntity: _onFocusEntity, // eslint-disable-line @typescript-eslint/no-unused-vars
   onCommunityClick,
+  manualCollapsed,
+  onManualExpand,
+  timeFilter,
   layout,
   layoutFallback,
   onPinnedNodesChange,
   search,
+  highlightCommunities,
 }: CartographerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
@@ -422,6 +446,10 @@ export function CartographerMap({
   })
   const forceCtrlRef = useRef(forceCtrl)
   forceCtrlRef.current = forceCtrl
+  // Heal controller handle (set by the build effect) + in-flight preset morph
+  // (A6) — both cancellable from the layout-switch effect.
+  const healCtrlRef = useRef<ReturnType<typeof createHealController> | null>(null)
+  const layoutMorphRef = useRef<MorphHandle | null>(null)
 
   // Pulse ring state: map from nodeId → start timestamp
   const [pulseMap, setPulseMap] = useState<Map<string, number>>(new Map())
@@ -620,6 +648,9 @@ export function CartographerMap({
       },
       reducedMotion,
     })
+    // Exposed so the layout-morph effect (A6) can cancel an in-flight heal
+    // before tweening every node to its new preset coordinates.
+    healCtrlRef.current = healCtrl
 
     // ---------------------------------------------------------------------------
     // downNode — begin drag (beside clickNode per sigma grounding doc)
@@ -822,22 +853,53 @@ export function CartographerMap({
     const seedKey = `${dataNodeKey}:${servedLayout}`
     if (seededKeyRef.current === seedKey) return
     const graph = sigma.getGraph()
-    let moved = false
-    for (const e of data.entities) {
-      if (graph.hasNode(e.id)) {
-        graph.setNodeAttribute(e.id, "x", e.x)
-        graph.setNodeAttribute(e.id, "y", e.y)
-        moved = true
-      }
-    }
+    // A preset switch on the SAME node set animates (A6); a node-set change
+    // means sigma was just rebuilt at the served coordinates — snap silently.
+    const sameNodeSet = seededKeyRef.current.startsWith(`${dataNodeKey}:`)
     seededKeyRef.current = seedKey
-    if (moved) sigma.refresh({ skipIndexation: false })
-    // Only the default force layout gets the organic settle warm. The wells /
-    // domain presets carry a deliberate arrangement (e.g. domains pulled apart);
-    // re-warming FA2 would drag them back toward the community disc, so we apply
-    // their coordinates and leave the sim frozen.
-    if (servedLayout === "force") forceCtrlRef.current.reheat()
-  }, [data, dataNodeKey, layout])
+
+    if (!sameNodeSet || reducedMotion) {
+      let moved = false
+      for (const e of data.entities) {
+        if (graph.hasNode(e.id)) {
+          graph.setNodeAttribute(e.id, "x", e.x)
+          graph.setNodeAttribute(e.id, "y", e.y)
+          moved = true
+        }
+      }
+      if (moved) sigma.refresh({ skipIndexation: false })
+      // Only the default force layout gets the organic settle warm. The wells /
+      // domain presets carry a deliberate arrangement (e.g. domains pulled apart);
+      // re-warming FA2 would drag them back toward the community disc, so we apply
+      // their coordinates and leave the sim frozen.
+      if (servedLayout === "force") forceCtrlRef.current.reheat()
+      return
+    }
+
+    // Preset morph (A6): pause the live sim and cancel any in-flight drag
+    // heal so nothing fights the tween, glide every node to its new preset
+    // coordinate in place (object constancy — the user tracks clusters
+    // reorganising instead of re-reading a new map), then reheat only the
+    // force preset on settle.
+    forceCtrlRef.current.pause()
+    healCtrlRef.current?.cancel()
+    const targets: MorphTargets = new Map()
+    for (const e of data.entities) {
+      if (graph.hasNode(e.id)) targets.set(e.id, { x: e.x, y: e.y })
+    }
+    layoutMorphRef.current?.cancel()
+    layoutMorphRef.current = morphPositions(graph, targets, {
+      durationMs: 800,
+      onFrame: () => sigmaRef.current?.refresh({ skipIndexation: true }),
+      onDone: () => {
+        sigmaRef.current?.refresh()
+        if (servedLayout === "force") forceCtrlRef.current.reheat()
+      },
+    })
+    return () => {
+      layoutMorphRef.current?.cancel()
+    }
+  }, [data, dataNodeKey, layout, reducedMotion])
 
   // ---------------------------------------------------------------------------
   // Node/edge reducers for lens + filter + hover dimming (installed ONCE per
@@ -857,8 +919,22 @@ export function CartographerMap({
   pinnedIdRef.current = pinnedId
   const searchRef = useRef(search ?? "")
   searchRef.current = search ?? ""
+  // Bridges lens (C1): normalized betweenness per node, computed off-thread and
+  // cached for the node set it was computed on. The reducer reads this ref.
+  const betweennessRef = useRef<Record<string, number>>({})
+  const betweennessKeyRef = useRef<string>("")
+  const [computingBridges, setComputingBridges] = useState(false)
+  // Structural-gaps highlight (C2): communities to keep prominent; others recede.
+  const highlightCommunitiesRef = useRef<ReadonlySet<string> | undefined>(highlightCommunities)
+  highlightCommunitiesRef.current = highlightCommunities
   const configRef = useRef(config)
   configRef.current = config
+  // Per-community combos (A10): read by both reducers to hide collapsed members.
+  const manualCollapsedRef = useRef<ReadonlySet<string>>(manualCollapsed ?? new Set())
+  manualCollapsedRef.current = manualCollapsed ?? new Set()
+  // Timebar/timelapse (A8/A9): read by the node reducer per evaluation.
+  const timeFilterRef = useRef<TimeFilter | null>(timeFilter ?? null)
+  timeFilterRef.current = timeFilter ?? null
 
   // (collapsedRef declared earlier, before useForceLayout, so the controller
   // can read it to stay paused while collapsed.)
@@ -876,68 +952,27 @@ export function CartographerMap({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const focusCameraOnPointsRef = useRef<((pts: [number, number][]) => void) | null>(null)
 
-  // Memoized focus neighbourhood: recomputed ONCE whenever the hover/pin
-  // center changes (recomputeFocusNeighbors), then READ by the node/edge
-  // reducers. Previously each reducer rebuilt this set per-element on every
-  // refresh (O(degree×N) per hover frame) — the source of the hover jank.
-  const focusNeighborsRef = useRef<Set<string> | null>(null)
-  // Focus fade progress 0..1 — ramps up when a node is hovered/pinned and back
-  // down on leave, so the neighbourhood emphasis eases in/out instead of
-  // snapping (the "abrupt / jarring" hover the reducers read this to interpolate
-  // the non-focus fade). reduced-motion jumps straight to the target.
-  const focusProgressRef = useRef(0)
-  const focusRafRef = useRef<number | null>(null)
-  const FOCUS_FADE_MS = 180
-  const rampFocusProgress = useCallback((target: number) => {
-    if (focusRafRef.current !== null) {
-      cancelAnimationFrame(focusRafRef.current)
-      focusRafRef.current = null
-    }
-    if (reducedMotion) {
-      focusProgressRef.current = target
-      if (target === 0) focusNeighborsRef.current = null
-      sigmaRef.current?.refresh({ skipIndexation: true })
-      return
-    }
-    const start = performance.now()
-    const from = focusProgressRef.current
-    const step = () => {
-      const t = Math.min(1, (performance.now() - start) / FOCUS_FADE_MS)
-      // easeOutCubic for a soft settle
-      const e = 1 - Math.pow(1 - t, 3)
-      focusProgressRef.current = from + (target - from) * e
-      if (t >= 1) {
-        focusRafRef.current = null
-        // Clear the held neighbourhood only AFTER the fade-out completes, so
-        // non-focus nodes ease back to full rather than snapping.
-        if (target === 0) focusNeighborsRef.current = null
-      } else {
-        focusRafRef.current = requestAnimationFrame(step)
-      }
-      sigmaRef.current?.refresh({ skipIndexation: true })
-    }
-    focusRafRef.current = requestAnimationFrame(step)
-  }, [reducedMotion])
+  // Hover/pin spotlight controller (Living-Map S1): owns the memoized focus
+  // neighbourhood + the 0→1 eased fade ramp; reducers READ progress()/
+  // neighbors() per refresh. Callbacks resolve sigmaRef lazily so one
+  // controller survives sigma rebuilds.
+  const spotlight = useMemo(
+    () =>
+      createFocusSpotlight({
+        getNeighbors: (id) => sigmaRef.current?.getGraph().neighbors(id) ?? [],
+        hasNode: (id) => sigmaRef.current?.getGraph().hasNode(id) ?? false,
+        refresh: () => sigmaRef.current?.refresh({ skipIndexation: true }),
+        reducedMotion,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reducedMotion],
+  )
+  const spotlightRef = useRef(spotlight)
+  spotlightRef.current = spotlight
+  useEffect(() => () => spotlight.dispose(), [spotlight])
   const recomputeFocusNeighbors = useCallback(() => {
-    const sigma = sigmaRef.current
-    if (!sigma) {
-      focusNeighborsRef.current = null
-      return
-    }
-    const graph = sigma.getGraph()
-    const focusCenter = pinnedIdRef.current ?? hoverIdRef.current ?? null
-    if (focusCenter && graph.hasNode(focusCenter)) {
-      const set = new Set<string>()
-      graph.forEachNeighbor(focusCenter, (n) => set.add(n))
-      set.add(focusCenter)
-      focusNeighborsRef.current = set
-      rampFocusProgress(1)
-    } else {
-      // Keep the prior neighbourhood set until the fade-out ramp finishes
-      // (rampFocusProgress clears it at progress 0) so the un-dim is smooth.
-      rampFocusProgress(0)
-    }
-  }, [rampFocusProgress])
+    spotlightRef.current.setCenter(pinnedIdRef.current ?? hoverIdRef.current ?? null)
+  }, [])
 
   const pulseMapRef = useRef(pulseMap)
   pulseMapRef.current = pulseMap
@@ -966,6 +1001,25 @@ export function CartographerMap({
       const entity = entityByIdMap.get(node)
       if (!entity) return { ...attrs, hidden: true }
 
+      // Per-community combo (A10): members of a manually-collapsed community
+      // hide behind the disc drawn by the supernode layer.
+      if (memberHidden(entity.community, manualCollapsedRef.current)) {
+        return { ...attrs, hidden: true }
+      }
+
+      // Timebar/timelapse (A8/A9): not-yet-born nodes hide; out-of-window
+      // nodes recede to a dim ghost (context, not gone).
+      const timeState = timeNodeState(entity.created_at, timeFilterRef.current)
+      if (timeState === "hidden") return { ...attrs, hidden: true }
+      if (timeState === "dim") {
+        return {
+          ...attrs,
+          color: tokensRef.current.dim,
+          label: "",
+          size: Math.max(HIT_SIZE_MIN, attrs.size * 0.5),
+        }
+      }
+
       // Drill-down (Model B): when a region is drilled, everything outside it is
       // hidden so only its members remain. A drilled community matches on
       // community id; a drilled domain region matches on primary_domain (the two
@@ -980,6 +1034,12 @@ export function CartographerMap({
 
       const currentTokens = tokensRef.current
       const currentLens = lensRef.current
+      // Structural-gaps highlight (C2): while a gap is hovered, recede every
+      // community except the two being bridged so their hulls read clearly.
+      const gapHighlight = highlightCommunitiesRef.current
+      if (gapHighlight && gapHighlight.size > 0 && !gapHighlight.has(String(entity.community ?? ""))) {
+        return { ...attrs, color: currentTokens.dim, label: "", size: Math.max(HIT_SIZE_MIN, attrs.size * 0.5) }
+      }
       const currentTypeFilter = typeFilterRef.current
       const currentPinnedId = pinnedIdRef.current
       const hoverId = hoverIdRef.current
@@ -987,11 +1047,11 @@ export function CartographerMap({
       const currentDragId = dragRef.current.nodeId
       const isPermanentPin = node in pinnedNodesRef.current
 
-      // Focus neighbourhood is precomputed once per hover/pin change
-      // (recomputeFocusNeighbors) — read it here instead of rebuilding the
-      // set for every node on every refresh.
+      // Focus neighbourhood is precomputed once per hover/pin change (the
+      // spotlight controller) — read it here instead of rebuilding the set
+      // for every node on every refresh.
       const focusCenter = currentPinnedId ?? hoverId ?? null
-      const focusNeighbors = focusNeighborsRef.current
+      const focusNeighbors = spotlightRef.current.neighbors()
 
       // Deliberate filters (instant, neutral-dim): type chip, search miss, and —
       // in the domain lens — entities with no domain (so the domained structure
@@ -1009,7 +1069,7 @@ export function CartographerMap({
 
       // Lens color + confidence alpha, computed up-front so the focus fade can
       // preserve hue (fade alpha) instead of graying out.
-      const baseColor = lensColor(entity, currentLens, currentTokens)
+      const baseColor = lensColor(entity, currentLens, currentTokens, betweennessRef.current[node] ?? 0)
       const baseAlpha = nodeBaseAlpha(entity.mention_count ?? 1)
       const withAlpha = (a: number) =>
         baseColor.startsWith("#") && baseColor.length === 7
@@ -1037,15 +1097,15 @@ export function CartographerMap({
         }
       }
       // Hover/pin focus: non-neighbours EASE out — hue-preserving alpha fade +
-      // gentle shrink, strength driven by focusProgressRef (0→1 over ~180ms) so
-      // the emphasis glides in/out instead of snapping.
+      // gentle shrink, strength driven by the spotlight's eased progress
+      // (0→1 over ~180ms) so the emphasis glides in/out instead of snapping.
       if (!inFocus && hasFocus) {
-        const p = focusProgressRef.current
+        const p = spotlightRef.current.progress()
         return {
           ...attrs,
-          color: withAlpha(baseAlpha * (1 - 0.8 * p)),
+          color: withAlpha(focusNodeAlpha(baseAlpha, p)),
           label: "",
-          size: Math.max(HIT_SIZE_MIN, attrs.size * (1 - 0.4 * p)),
+          size: focusNodeSize(attrs.size, p, HIT_SIZE_MIN),
         }
       }
 
@@ -1082,6 +1142,15 @@ export function CartographerMap({
 
     sigma.setSetting("edgeReducer", (edge, attrs) => {
       if (collapsedRef.current) return { ...attrs, hidden: true }
+      // Hide edges incident to a manually-collapsed community's members.
+      if (manualCollapsedRef.current.size > 0) {
+        const graph = sigma.getGraph()
+        const src = entityByIdMap.get(graph.source(edge))
+        const tgt = entityByIdMap.get(graph.target(edge))
+        if (edgeHidden(src?.community, tgt?.community, manualCollapsedRef.current)) {
+          return { ...attrs, hidden: true }
+        }
+      }
       const currentPinnedId = pinnedIdRef.current
       const hoverId = hoverIdRef.current
       const focusCenter = currentPinnedId ?? hoverId ?? null
@@ -1098,7 +1167,7 @@ export function CartographerMap({
       if (!focusCenter) return { ...attrs, color: baseColor, hidden: sizeBelowFloor }
 
       // Read the precomputed focus neighbourhood (null when no valid center).
-      const focusNeighbors = focusNeighborsRef.current
+      const focusNeighbors = spotlightRef.current.neighbors()
       if (!focusNeighbors) return { ...attrs, color: baseColor, hidden: sizeBelowFloor }
 
       const graph = sigma.getGraph()
@@ -1124,7 +1193,38 @@ export function CartographerMap({
     if (!sigmaInstance) return
     recomputeFocusNeighbors()
     sigmaInstance.refresh({ skipIndexation: true })
-  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, drilledCommunityId, pulseMap, isDragging, search, config.hideOrphans, recomputeFocusNeighbors])
+  }, [sigmaInstance, lens, typeFilter, tokens, pinnedId, drilledCommunityId, pulseMap, isDragging, search, config.hideOrphans, manualCollapsed, timeFilter, highlightCommunities, recomputeFocusNeighbors])
+
+  // Bridges lens (C1): compute betweenness centrality off-thread when the lens
+  // is active and the node set changed. Cached per dataNodeKey — betweenness
+  // depends only on structure, not on hover/filter/theme, so it never recomputes
+  // on a lens re-select or theme swap. The reducer reads betweennessRef; all
+  // nodes read dim (score 0) until the worker resolves.
+  useEffect(() => {
+    if (lens !== "bridges" || !data) return
+    if (betweennessKeyRef.current === dataNodeKey) return
+    const controller = new AbortController()
+    setComputingBridges(true)
+    const nodeIds = data.entities.map((e) => e.id)
+    const edges: Array<[string, string]> = []
+    for (const [si, ti] of data.links) {
+      const s = data.entities[si]?.id
+      const t = data.entities[ti]?.id
+      if (s && t && s !== t) edges.push([s, t])
+    }
+    computeBetweenness(nodeIds, edges, { signal: controller.signal })
+      .then((scores) => {
+        betweennessRef.current = normalizeScores(scores)
+        betweennessKeyRef.current = dataNodeKey
+        setComputingBridges(false)
+        sigmaRef.current?.refresh({ skipIndexation: true })
+      })
+      .catch((err) => {
+        // Abort on unmount/lens-change is expected; anything else clears the chip.
+        if ((err as Error)?.name !== "AbortError") setComputingBridges(false)
+      })
+    return () => controller.abort()
+  }, [lens, data, dataNodeKey])
 
   // Esc exits a community drill (Model B).
   useEffect(() => {
@@ -1147,16 +1247,17 @@ export function CartographerMap({
   }, [sigmaInstance, search, config.hideOrphans, typeFilter])
 
   // ---------------------------------------------------------------------------
-  // Ingest pulse: fire when newEntityIds changes
+  // Pulse trigger — shared by the ingest pulse (newEntityIds) and the
+  // timelapse birth ripple (A8). Adds entries and runs the fade-out loop.
   // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!newEntityIds || newEntityIds.size === 0) return
+  const triggerPulses = useCallback((ids: Iterable<string>) => {
     const now = Date.now()
-    const newEntries: PulseEntry[] = []
-    for (const id of newEntityIds) {
-      newEntries.push({ nodeId: id, startMs: now })
+    let added = 0
+    for (const id of ids) {
+      pulseEntriesRef.current.push({ nodeId: id, startMs: now })
+      added++
     }
-    pulseEntriesRef.current.push(...newEntries)
+    if (added === 0) return
 
     const newMap = new Map<string, number>()
     for (const entry of pulseEntriesRef.current) {
@@ -1181,12 +1282,32 @@ export function CartographerMap({
     }
     if (pulseRafRef.current !== null) cancelAnimationFrame(pulseRafRef.current)
     pulseRafRef.current = requestAnimationFrame(cleanup)
-  }, [newEntityIds])
+  }, [])
+
+  // Ingest pulse: fire when newEntityIds changes
+  useEffect(() => {
+    if (!newEntityIds || newEntityIds.size === 0) return
+    triggerPulses(newEntityIds)
+  }, [newEntityIds, triggerPulses])
+
+  // Timelapse birth ripple (A8): entities crossing the playback cursor this
+  // step pulse with the same teal ring as fresh ingests — the corpus visibly
+  // "arrives" in creation order. Capped per step (bornBetween) so a dense
+  // step ripples, not floods. Only advancing cursors fire (reset/stop don't).
+  const prevCursorRef = useRef<number | null>(null)
+  useEffect(() => {
+    const cursor = timeFilter?.cursor ?? null
+    const prev = prevCursorRef.current
+    prevCursorRef.current = cursor
+    if (cursor === null || !data) return
+    if (prev !== null && cursor <= prev) return
+    triggerPulses(bornBetween(data.entities, prev, cursor))
+  }, [timeFilter?.cursor, data, triggerPulses])
 
   useEffect(() => {
     return () => {
       if (pulseRafRef.current !== null) cancelAnimationFrame(pulseRafRef.current)
-      if (focusRafRef.current !== null) cancelAnimationFrame(focusRafRef.current)
+      spotlightRef.current.dispose()
     }
   }, [])
 
@@ -1241,10 +1362,61 @@ export function CartographerMap({
     sigma: sigmaInstance,
     communities: activeHulls,
     tokens,
-    hullsVisible: config.hullsVisible,
+    hullsVisible: config.territories === "nebula",
     onCommunityClick: wrappedOnCommunityClick,
     colorFor: regionColorFor,
   })
+
+  // GPU density contours (A4): ONE @sigma/layer-webgl layer over all nodes,
+  // banded by metaball field strength — the Nomic-Atlas-style density
+  // underlay. One layer is a hard constraint: each bound layer owns a WebGL
+  // context and browsers cap ~16 per page — binding one per community
+  // evicted sigma's own contexts ("Too many active WebGL contexts", blank
+  // map). Per-region HUE stays the nebula mode's job; contours read
+  // STRUCTURE. Lazy import keeps WebGL out of jsdom.
+  useEffect(() => {
+    const sigma = sigmaInstance
+    if (!sigma || !data || config.territories !== "contours") return
+    let disposed = false
+    let cleanup: (() => void) | null = null
+    void import("@sigma/layer-webgl").then(({ bindWebGLLayer, createContoursProgram }) => {
+      if (disposed || sigmaRef.current !== sigma) return
+      const graph = sigma.getGraph()
+      const present = data.entities.map((e) => e.id).filter((id) => graph.hasNode(id))
+      if (present.length === 0) return
+      const tint = tokens.interaction
+      // The layer canvas composites PREMULTIPLIED alpha but the contours
+      // shader writes level colors straight — low-alpha hex renders as a
+      // saturated wash unless the channels are premultiplied here.
+      const premult = (a: number): string => {
+        if (!tint.startsWith("#") || tint.length !== 7) return tint
+        const ch = (o: number) =>
+          Math.round(parseInt(tint.slice(o, o + 2), 16) * a)
+            .toString(16)
+            .padStart(2, "0")
+        const alphaByte = Math.round(a * 255).toString(16).padStart(2, "0")
+        return `#${ch(1)}${ch(3)}${ch(5)}${alphaByte}`
+      }
+      cleanup = bindWebGLLayer(
+        "territories",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sigma as any, // layer-webgl types against default Sigma generics
+        createContoursProgram(present, {
+          radius: 30,
+          levels: [
+            { threshold: 1.2, color: premult(0.05) },
+            { threshold: 4, color: premult(0.09) },
+            { threshold: 10, color: premult(0.14) },
+          ],
+          border: { color: premult(0.3), thickness: 1 },
+        }),
+      )
+    })
+    return () => {
+      disposed = true
+      cleanup?.()
+    }
+  }, [sigmaInstance, data, config.territories, tokens])
 
   useSuperNodeLayer({
     sigma: sigmaInstance,
@@ -1253,6 +1425,8 @@ export function CartographerMap({
     tokens,
     enabled: config.collapseCommunities,
     onCommunityClick: wrappedOnCommunityClick,
+    manualCollapsed,
+    onManualDiscClick: onManualExpand,
     onCollapsedChange: (collapsed) => {
       collapsedRef.current = collapsed
       // Pause the live FA2 sim while collapsed — every member node/edge is
@@ -1273,7 +1447,7 @@ export function CartographerMap({
     ),
     // Fade the highlight in/out with the same eased focus progress as the node
     // dimming, so hover emphasis is one smooth gesture, not an abrupt flash.
-    getFocusProgress: useCallback(() => focusProgressRef.current, []),
+    getFocusProgress: useCallback(() => spotlightRef.current.progress(), []),
   })
 
   // ---------------------------------------------------------------------------
@@ -1636,6 +1810,14 @@ export function CartographerMap({
       {allTrustUnknown && (
         <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-card/80 px-3 py-1.5 text-label-xs text-muted-foreground backdrop-blur">
           Trust lens: no verification data yet
+        </div>
+      )}
+
+      {/* Bridges lens: betweenness computing indicator (C1) */}
+      {lens === "bridges" && computingBridges && (
+        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 flex items-center gap-1.5 rounded-md bg-card/80 px-3 py-1.5 text-label-xs text-muted-foreground backdrop-blur">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+          Finding bridges…
         </div>
       )}
 

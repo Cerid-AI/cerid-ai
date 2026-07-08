@@ -15,6 +15,7 @@
 import { useEffect, useRef } from "react"
 import type Sigma from "sigma"
 import type { CommunityHull } from "@/lib/api/graph-map"
+import { selectVisibleLabels, type LabelRect } from "./label-collision"
 
 interface CommunityLayerProps {
   sigma: Sigma | null
@@ -234,6 +235,23 @@ export function useCommunityLayer({
       // Label alpha: far=80%, mid=35%, near=0%
       const labelAlpha = isFar ? 0.80 : isNear ? 0 : Math.max(0, (cameraRatio - nearThreshold) / (farThreshold - nearThreshold) * 0.35)
 
+      // Collision pass (A3): decide which labels are legible at this zoom
+      // BEFORE drawing, so the largest communities keep their labels and
+      // overlapping smaller ones are suppressed instead of colliding.
+      let visibleLabels: Set<string> | null = null
+      if (labelAlpha > 0) {
+        const rects: LabelRect[] = []
+        for (const community of communities) {
+          if (community.hull.length < 3) continue
+          const vAnchor = s.graphToViewport({ x: community.anchor[0], y: community.anchor[1] })
+          const fontSize = Math.max(11, Math.min(20, 11 + Math.sqrt(community.count) * 0.5))
+          ctx.font = `500 ${fontSize}px ${tokens.fontSans}`
+          const w = ctx.measureText(community.label.toUpperCase()).width + 6
+          rects.push({ id: community.id, cx: vAnchor.x, cy: vAnchor.y, w, h: fontSize + 4, priority: community.count })
+        }
+        visibleLabels = selectVisibleLabels(rects, 4)
+      }
+
       for (const community of communities) {
         if (community.hull.length < 3) continue
         const clusterColor = colorForRef.current
@@ -272,8 +290,9 @@ export function useCommunityLayer({
         ctx.lineWidth = 1.25
         ctx.stroke()
 
-        // Community label at anchor (reuses vAnchor from the fill above)
-        if (labelAlpha > 0) {
+        // Community label at anchor (reuses vAnchor from the fill above).
+        // Only labels the collision pass accepted are drawn.
+        if (labelAlpha > 0 && visibleLabels?.has(community.id)) {
           const labelText = community.label.toUpperCase()
           const fontSize = Math.max(11, Math.min(20, 11 + Math.sqrt(community.count) * 0.5))
           ctx.font = `500 ${fontSize}px ${tokens.fontSans}`

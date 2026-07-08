@@ -797,6 +797,7 @@ class EntityEmbedding3D(BaseModel):
     trust_state: str = "unknown"
     projection: str = "fallback"  # "umap" or "fallback" (pre-backfill)
     primary_domain: str | None = None
+    created_at: str | None = None  # entity birth timestamp; drives the timebar/timelapse
 
 
 class Embeddings3DResponse(BaseModel):
@@ -819,10 +820,11 @@ def _embeddings_3d_cache_key(
     entities_csv: str,
     include_isolated: bool = False,
 ) -> str:
-    # v5 suffix: links changed from 3-tuple to 4-tuple (added kind tag) —
-    # versioning prevents a stale v4 payload with 3-tuple links masking the
-    # new field for 24 h.  Also folding include_isolated into the hash
-    # prevents a toggle flip serving a stale cached payload.
+    # v6 suffix: entities gained per-node created_at (entity birth timestamp
+    # for the timebar/timelapse) — versioning prevents a stale v5 payload
+    # missing the field from masking it for 24 h.  (v5 added the 4-tuple link
+    # kind tag.)  Also folding include_isolated into the hash prevents a
+    # toggle flip serving a stale cached payload.
     # The shared bust pattern cerid:graph:emb3d:* still matches.
     iso_tag = ":iso" if include_isolated else ""
     if filter_str or entities_csv:
@@ -830,8 +832,8 @@ def _embeddings_3d_cache_key(
             f"{filter_str}|{entities_csv}".encode("utf-8"),
             usedforsecurity=False,
         ).hexdigest()[:12]
-        return f"cerid:graph:emb3d:v5:{h}{iso_tag}"
-    return f"cerid:graph:emb3d:v5:all{iso_tag}"
+        return f"cerid:graph:emb3d:v6:{h}{iso_tag}"
+    return f"cerid:graph:emb3d:v6:all{iso_tag}"
 
 
 @router.get("/embeddings/3d", response_model=Embeddings3DResponse)
@@ -894,6 +896,7 @@ async def get_embeddings_3d(
             trust_state=r.get("trust_state") or "unknown",
             projection=r.get("method") or "fallback",
             primary_domain=r.get("primary_domain"),
+            created_at=r.get("created_at"),
         )
         for r in rows
     ]
@@ -1034,7 +1037,8 @@ async def _query_embeddings_3d(
             e.umap_z AS z,
             coalesce(e.umap_method, 'fallback') AS method,
             e.umap_computed_at AS computed_at,
-            e.primary_domain AS primary_domain
+            e.primary_domain AS primary_domain,
+            e.created_at AS created_at
         LIMIT $max_entities
     """
 
@@ -1121,12 +1125,14 @@ class GraphMapResponse(BaseModel):
 # Per-layout cache keys — keyed under the emb3d wildcard bust pattern
 # cerid:graph:emb3d:* so the nightly job invalidates all of them.
 # Omitting the ?layout param is byte-identical to ?layout=force.
+# v6: entities gained per-node created_at (entity birth timestamp).
 # v5: links changed from 3-tuple to 4-tuple (added kind tag).
-_VALID_LAYOUTS = frozenset({"force", "wells", "domain"})
-_LAYOUT_MAP_CACHE_KEY_TMPL = "cerid:graph:emb3d:v5:map:{layout}{iso}"
+_VALID_LAYOUTS = frozenset({"force", "wells", "domain", "semantic"})
+_LAYOUT_MAP_CACHE_KEY_TMPL = "cerid:graph:emb3d:v6:map:{layout}{iso}"
 _LAYOUT_COMMUNITY_REDIS_KEY_TMPL = "cerid:graph:map:communities:{layout}"
 
-_COMMUNITY_HIERARCHY_REDIS_KEY = "cerid:graph:community-hierarchy:v1"
+# v2: nodes gained top_terms (A3 c-TF-IDF fallback labels).
+_COMMUNITY_HIERARCHY_REDIS_KEY = "cerid:graph:community-hierarchy:v2"
 _COMMUNITY_HIERARCHY_TTL_SECONDS = 300
 
 
@@ -1134,7 +1140,7 @@ _COMMUNITY_HIERARCHY_TTL_SECONDS = 300
 async def get_graph_map(
     layout: str | None = Query(
         default=None,
-        description="Layout basis: force (default), wells, or domain. "
+        description="Layout basis: force (default), wells, domain, or semantic. "
                     "Omitting is byte-identical to force. Unknown value → 422.",
     ),
     include_isolated: bool = Query(False, description="Include degree-0 isolated nodes"),
@@ -1145,11 +1151,11 @@ async def get_graph_map(
     the precomputed community hull/anchor/trust-mix artifacts from the
     compute_umap_3d nightly job into one cached response.
 
-    Supports ``?layout=force|wells|domain``.  Omitting the parameter is
-    byte-identical to ``?layout=force``.  Unknown values return 422.
+    Supports ``?layout=force|wells|domain|semantic``.  Omitting the parameter
+    is byte-identical to ``?layout=force``.  Unknown values return 422.
 
     Cache: Redis SETEX ``GRAPH_EMBEDDINGS_3D_CACHE_TTL`` (default 24h).
-    Per-layout cache keys ``cerid:graph:emb3d:v3:map:{layout}`` match the
+    Per-layout cache keys ``cerid:graph:emb3d:v6:map:{layout}`` match the
     ``cerid:graph:emb3d:*`` bust pattern so a job recompute invalidates all
     of them automatically.
 
@@ -1262,6 +1268,7 @@ async def get_graph_map(
             trust_state=r.get("trust_state") or "unknown",
             projection=r.get("method") or "fallback",
             primary_domain=r.get("primary_domain"),
+            created_at=r.get("created_at"),
         )
         for r in rows
     ]
@@ -2887,8 +2894,10 @@ async def get_community_hierarchy() -> CommunityHierarchy:
     cached hierarchy; rebuilt from Neo4j every 5 minutes.
 
     Returns: levels (int), nodes (list of community_id/level/parent_id/
-    member_count/summary). Top-level communities carry parent_id=null;
-    level-0 (finest) communities point to their level-1 parent.
+    member_count/summary/top_terms). Top-level communities carry
+    parent_id=null; level-0 (finest) communities point to their level-1
+    parent. top_terms is the c-TF-IDF fallback label source (null until
+    the nightly job computes it).
     """
     redis = get_redis()
     if redis is not None:
@@ -2909,3 +2918,364 @@ async def get_community_hierarchy() -> CommunityHierarchy:
             ex=_COMMUNITY_HIERARCHY_TTL_SECONDS,
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Structural gaps (Phase 5 "C2") — structural holes: community pairs that are
+# semantically close but weakly linked ("topics that should connect but don't").
+# ---------------------------------------------------------------------------
+
+# 24h TTL — recomputed on the same cadence as the nightly graph jobs. Key lives
+# under the cerid:graph:emb3d:* bust namespace so compute_umap_3d /
+# community_refresh / derive_domains invalidate it on any data change.
+_STRUCTURAL_GAPS_TTL_SECONDS = int(os.getenv("GRAPH_STRUCTURAL_GAPS_CACHE_TTL", str(86400)))
+# v1: initial structural-holes payload. Bump on any breaking shape change.
+_STRUCTURAL_GAPS_CACHE_KEY = "cerid:graph:emb3d:v2:structural-gaps"
+# Cap the community fan-out so pair enumeration stays O(top^2) manageable.
+_STRUCTURAL_GAPS_TOP_COMMUNITIES = int(os.getenv("GRAPH_STRUCTURAL_GAPS_TOP_COMMUNITIES", "40"))
+_STRUCTURAL_GAPS_DEFAULT_N = 8
+_STRUCTURAL_GAPS_MAX_N = 20
+_STRUCTURAL_GAPS_BRIDGE_MIN = 2
+_STRUCTURAL_GAPS_BRIDGE_MAX = 4
+_STRUCTURAL_GAPS_MIN_COMMUNITIES = 2  # a gap needs a pair
+_GAP_LABEL_MAX_CHARS = 60  # keep pair labels scannable in the panel
+
+
+class GapEntity(BaseModel):
+    """A bridge-candidate entity — a member of one community closest to the other."""
+
+    id: str
+    name: str
+
+
+class GapCommunity(BaseModel):
+    """One side of a structural-hole pair."""
+
+    id: str
+    label: str
+    count: int
+
+
+class StructuralGap(BaseModel):
+    """A single close-but-weakly-linked community pair (a structural hole)."""
+
+    community_a: GapCommunity
+    community_b: GapCommunity
+    semantic_similarity: float  # 0..1 — centroid cosine
+    link_strength: float        # 0..1 — normalized inter-community CO_MENTIONED
+    gap_score: float            # 0..1 — semantic_similarity * (1 - link_strength)
+    bridging_candidates: list[GapEntity]
+
+
+class StructuralGapsResponse(BaseModel):
+    """Shape returned by GET /graph/structural-gaps."""
+
+    gaps: list[StructuralGap]
+
+
+def _fetch_community_members(driver: Any) -> list[dict[str, Any]]:
+    """Rows: one per (community, member entity) carrying the entity embedding.
+
+    Community membership is the Leiden ``community_id`` property on the Entity
+    node (same property the neighborhood / emb3d / strata queries read). Only
+    entities with a parseable ``embedding`` (the JSON-encoded L2-normalised
+    float list written by compute_entity_embeddings) are returned — mirrors
+    the read shape in app.db.neo4j.semantic_edges.build_similarity_edges.
+    """
+    if driver is None:
+        return []
+    cypher = """
+        MATCH (e:Entity)
+        WHERE e.community_id IS NOT NULL
+          AND e.embedding IS NOT NULL
+          AND e.canonical_id IS NOT NULL
+        RETURN
+            toString(e.community_id)     AS community_id,
+            e.canonical_id               AS canonical_id,
+            coalesce(e.name, e.canonical_id) AS name,
+            e.embedding                  AS embedding
+    """
+    try:
+        with driver.session() as session:
+            return list(session.run(cypher).data())
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.structural_gaps_members", exc)
+        return []
+
+
+def _fetch_community_labels(driver: Any) -> list[dict[str, Any]]:
+    """Rows: (community_id, summary, top_terms) for the label ladder."""
+    if driver is None:
+        return []
+    cypher = """
+        MATCH (c:Community)
+        RETURN c.id AS community_id, c.summary AS summary, c.top_terms AS top_terms
+    """
+    try:
+        with driver.session() as session:
+            return list(session.run(cypher).data())
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.structural_gaps_labels", exc)
+        return []
+
+
+def _fetch_inter_community_links(driver: Any) -> list[dict[str, Any]]:
+    """Rows: (a, b, weight) inter-community CO_MENTIONED connection strength.
+
+    Sums CO_MENTIONED edge weight across every entity pair whose endpoints
+    live in different communities, grouped by the unordered community pair.
+    """
+    if driver is None:
+        return []
+    cypher = """
+        MATCH (e1:Entity)-[r:CO_MENTIONED]-(e2:Entity)
+        WHERE e1.community_id IS NOT NULL AND e2.community_id IS NOT NULL
+          AND toString(e1.community_id) < toString(e2.community_id)
+        RETURN
+            toString(e1.community_id) AS a,
+            toString(e2.community_id) AS b,
+            sum(coalesce(r.weight, 1)) AS weight
+    """
+    try:
+        with driver.session() as session:
+            return list(session.run(cypher).data())
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.structural_gaps_links", exc)
+        return []
+
+
+def _community_label(
+    community_id: str,
+    label_map: dict[str, dict[str, Any]],
+    ordinal: int,
+) -> str:
+    """Label ladder (short-first, so gap pairs stay scannable in the panel):
+    top_terms join → truncated Community.summary → "Cluster N"."""
+    meta = label_map.get(community_id) or {}
+    top_terms = meta.get("top_terms")
+    if top_terms:
+        return " · ".join(str(t) for t in top_terms[:3])
+    summary = meta.get("summary")
+    if summary:
+        text = str(summary).strip()
+        if len(text) <= _GAP_LABEL_MAX_CHARS:
+            return text
+        return text[: _GAP_LABEL_MAX_CHARS - 3].rstrip() + "…"
+    return f"Cluster {ordinal}"
+
+
+@router.get("/structural-gaps", response_model=StructuralGapsResponse)
+async def get_structural_gaps(
+    limit: int = Query(
+        _STRUCTURAL_GAPS_DEFAULT_N,
+        ge=1,
+        le=_STRUCTURAL_GAPS_MAX_N,
+        description="Max number of gap pairs to return (default 8, cap 20).",
+    ),
+) -> StructuralGapsResponse:
+    """Structural holes — community pairs that are semantically close but weakly linked.
+
+    For each unordered pair of the top communities (by member count, capped at
+    ~40), computes ``gap_score = semantic_similarity * (1 - link_strength)``
+    where semantic_similarity is the cosine between the two communities'
+    embedding centroids and link_strength is the inter-community CO_MENTIONED
+    weight normalized against the corpus maximum. High gap = topics close in
+    meaning but barely co-mentioned = a structural hole worth bridging.
+
+    ``bridging_candidates`` are the 2-4 member entities of one community whose
+    embeddings sit closest to the OTHER community's centroid — the entities
+    most "between" the two.
+
+    Cache: Redis SETEX 24h under ``cerid:graph:emb3d:v2:structural-gaps`` which
+    matches the ``cerid:graph:emb3d:*`` bust pattern, so a nightly graph
+    recompute invalidates it automatically.
+
+    Degrades to ``{"gaps": []}`` (200, not an error) when there are too few
+    communities or embeddings to compute anything.
+    """
+    redis = get_redis()
+
+    # 1. Cache fast-path — the full response is limit-independent (we cap the
+    #    superset then slice), so cache the top-N superset and slice per request.
+    cached_gaps: list[dict[str, Any]] | None = None
+    if redis:
+        try:
+            cached_raw = redis.get(_STRUCTURAL_GAPS_CACHE_KEY)
+            if cached_raw:
+                payload = json.loads(
+                    cached_raw if isinstance(cached_raw, str)
+                    else cached_raw.decode("utf-8"),
+                )
+                cached_gaps = payload.get("gaps") or []
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
+            # silent-catch-allowed: cache miss is non-fatal — recompute.
+            logger.info("graph.structural_gaps.cache_read_miss: %s", exc)
+
+    if cached_gaps is not None:
+        return StructuralGapsResponse(
+            gaps=[StructuralGap(**g) for g in cached_gaps[:limit]],
+        )
+
+    # 2. Cache miss → compute from Neo4j.
+    try:
+        driver = get_neo4j()
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.graph.structural_gaps_neo4j_unavailable", exc)
+        return StructuralGapsResponse(gaps=[])
+
+    if driver is None:
+        return StructuralGapsResponse(gaps=[])
+
+    gaps = await asyncio.to_thread(_compute_structural_gaps, driver)
+
+    # 3. Populate cache with the full superset (best-effort).
+    if redis:
+        try:
+            redis.set(
+                _STRUCTURAL_GAPS_CACHE_KEY,
+                json.dumps({"gaps": [g.model_dump() for g in gaps]}),
+                ex=_STRUCTURAL_GAPS_TTL_SECONDS,
+            )
+        except (OSError, ValueError) as exc:
+            # silent-catch-allowed: cache-write failure is non-fatal.
+            logger.info("graph.structural_gaps.cache_write_failed: %s", exc)
+
+    return StructuralGapsResponse(gaps=gaps[:limit])
+
+
+def _compute_structural_gaps(driver: Any) -> list[StructuralGap]:
+    """Pure compute — top structural holes across the community graph.
+
+    Split out so the route stays thin and this stays unit-testable. Returns
+    the full ranked superset (the route slices to ``limit``). Empty list when
+    there are fewer than two communities with embeddings.
+    """
+    import numpy as np  # noqa: PLC0415 — heavy import deferred to call time
+
+    member_rows = _fetch_community_members(driver)
+    if not member_rows:
+        return []
+
+    # Group parsed embeddings + member metadata per community.
+    comm_vecs: dict[str, list[Any]] = {}
+    comm_members: dict[str, list[dict[str, str]]] = {}
+    for row in member_rows:
+        cid = str(row.get("community_id") or "")
+        if not cid:
+            continue
+        try:
+            vec = np.asarray(json.loads(row["embedding"]), dtype=np.float32)
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
+            log_swallowed_error(
+                "app.routers.graph.structural_gaps_parse_embedding",
+                exc,
+                context={"canonical_id": str(row.get("canonical_id") or "")},
+            )
+            continue
+        comm_vecs.setdefault(cid, []).append(vec)
+        comm_members.setdefault(cid, []).append({
+            "id": str(row.get("canonical_id") or ""),
+            "name": str(row.get("name") or row.get("canonical_id") or ""),
+            "vec": vec,  # type: ignore[dict-item]
+        })
+
+    # Keep the top communities by member count to bound pair enumeration.
+    ranked_cids = sorted(
+        comm_vecs.keys(), key=lambda c: len(comm_vecs[c]), reverse=True,
+    )[:_STRUCTURAL_GAPS_TOP_COMMUNITIES]
+    if len(ranked_cids) < _STRUCTURAL_GAPS_MIN_COMMUNITIES:
+        return []
+
+    # Centroids (L2-normalised so cosine == dot product).
+    centroids: dict[str, Any] = {}
+    for cid in ranked_cids:
+        centroid = np.mean(np.stack(comm_vecs[cid], axis=0), axis=0)
+        norm = float(np.linalg.norm(centroid)) or 1.0
+        centroids[cid] = centroid / norm
+
+    # Inter-community link strength, normalized against the corpus max.
+    link_map: dict[frozenset[str], float] = {}
+    max_link = 0.0
+    for row in _fetch_inter_community_links(driver):
+        a = str(row.get("a") or "")
+        b = str(row.get("b") or "")
+        if not a or not b or a == b:
+            continue
+        w = float(row.get("weight") or 0.0)
+        link_map[frozenset({a, b})] = link_map.get(frozenset({a, b}), 0.0) + w
+        max_link = max(max_link, link_map[frozenset({a, b})])
+
+    # Community labels via the shared ladder.
+    label_rows = _fetch_community_labels(driver)
+    label_map: dict[str, dict[str, Any]] = {
+        str(r.get("community_id") or ""): r for r in label_rows
+    }
+    ordinal_of = {cid: i for i, cid in enumerate(ranked_cids)}
+
+    gaps: list[StructuralGap] = []
+    for i in range(len(ranked_cids)):
+        for j in range(i + 1, len(ranked_cids)):
+            cid_a, cid_b = ranked_cids[i], ranked_cids[j]
+            sim = float(np.dot(centroids[cid_a], centroids[cid_b]))
+            # Cosine of L2-normalised vectors is in [-1, 1]; clamp negatives to
+            # 0 so semantic_similarity stays a clean 0..1 closeness score.
+            sim = max(0.0, min(1.0, sim))
+
+            raw_link = link_map.get(frozenset({cid_a, cid_b}), 0.0)
+            link_strength = (raw_link / max_link) if max_link > 0 else 0.0
+            gap_score = sim * (1.0 - link_strength)
+
+            gaps.append(StructuralGap(
+                community_a=GapCommunity(
+                    id=cid_a,
+                    label=_community_label(cid_a, label_map, ordinal_of[cid_a]),
+                    count=len(comm_vecs[cid_a]),
+                ),
+                community_b=GapCommunity(
+                    id=cid_b,
+                    label=_community_label(cid_b, label_map, ordinal_of[cid_b]),
+                    count=len(comm_vecs[cid_b]),
+                ),
+                semantic_similarity=round(sim, 6),
+                link_strength=round(link_strength, 6),
+                gap_score=round(gap_score, 6),
+                bridging_candidates=_bridging_candidates(
+                    comm_members[cid_a], comm_members[cid_b],
+                    centroids[cid_a], centroids[cid_b], np,
+                ),
+            ))
+
+    gaps.sort(key=lambda g: g.gap_score, reverse=True)
+    return gaps
+
+
+def _bridging_candidates(
+    members_a: list[dict[str, Any]],
+    members_b: list[dict[str, Any]],
+    centroid_a: Any,
+    centroid_b: Any,
+    np: Any,
+) -> list[GapEntity]:
+    """Pick the 2-4 member entities most "between" the two communities.
+
+    Scores every member of A by cosine to B's centroid and every member of B
+    by cosine to A's centroid, then takes the highest-scoring across both —
+    the entities whose embeddings sit closest to the opposite pole.
+    """
+    scored: list[tuple[float, str, str]] = []
+    for m in members_a:
+        scored.append((float(np.dot(m["vec"], centroid_b)), m["id"], m["name"]))
+    for m in members_b:
+        scored.append((float(np.dot(m["vec"], centroid_a)), m["id"], m["name"]))
+    scored.sort(key=lambda t: t[0], reverse=True)
+
+    out: list[GapEntity] = []
+    seen: set[str] = set()
+    for _, eid, name in scored:
+        if not eid or eid in seen:
+            continue
+        seen.add(eid)
+        out.append(GapEntity(id=eid, name=name))
+        if len(out) >= _STRUCTURAL_GAPS_BRIDGE_MAX:
+            break
+    return out[:_STRUCTURAL_GAPS_BRIDGE_MAX] if len(out) >= _STRUCTURAL_GAPS_BRIDGE_MIN else out

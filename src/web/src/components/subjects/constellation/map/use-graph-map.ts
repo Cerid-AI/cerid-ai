@@ -12,7 +12,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useRef } from "react"
 import { fetchGraphMap } from "@/lib/api/graph-map"
-import type { MapLayout } from "@/lib/graph/cycle4-contracts"
+import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
 
 export function useGraphMap(layout?: MapLayout, includeIsolated?: boolean) {
   const seenIdsRef = useRef<Set<string>>(new Set())
@@ -28,7 +28,20 @@ export function useGraphMap(layout?: MapLayout, includeIsolated?: boolean) {
 
   const queryResult = useQuery({
     queryKey,
-    queryFn: ({ signal }) => fetchGraphMap(layout ?? "force", includeIsolated, signal),
+    queryFn: async ({ signal }) => {
+      try {
+        return await fetchGraphMap(layout ?? "force", includeIsolated, signal)
+      } catch (err) {
+        // Version-skew guard: a server that predates the requested preset
+        // 422s on it (e.g. "semantic" before the backend ships). Degrade to
+        // the force layout — layout_fallback in the response then drives the
+        // existing "still computing" affordance — instead of blanking the map.
+        if (layout && layout !== "force" && err instanceof Error && /\b422\b|unknown layout/i.test(err.message)) {
+          return await fetchGraphMap("force", includeIsolated, signal)
+        }
+        throw err
+      }
+    },
     staleTime: 60 * 1000,
     refetchInterval: 75 * 1000,
     placeholderData: (prev) => prev,

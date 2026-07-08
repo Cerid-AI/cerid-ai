@@ -8,6 +8,11 @@ export interface CommunityHierarchyNode {
   parent_id: string | null
   member_count: number
   summary: string | null
+  /**
+   * c-TF-IDF keywords for the community (A3). Fallback label source when the
+   * LLM summary is absent; joined into a "term · term · term" chip.
+   */
+  top_terms?: string[] | null
 }
 
 export interface CommunityHierarchy {

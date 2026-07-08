@@ -210,7 +210,7 @@ function createWrapper() {
 const DEFAULT_CONFIG = {
   edgeBudget: "8k" as const,
   labelDensity: "normal" as const,
-  hullsVisible: true,
+  territories: "nebula" as const,
   liveLayout: true,
   hideOrphans: false,
   collapseCommunities: true,
@@ -407,15 +407,15 @@ describe("MapConfig — localStorage persistence", () => {
   })
 
   it("persists config to localStorage via saveMapConfig", () => {
-    saveMapConfig({ edgeBudget: "2k", labelDensity: "sparse", hullsVisible: false, liveLayout: false, hideOrphans: false, collapseCommunities: false })
+    saveMapConfig({ edgeBudget: "2k", labelDensity: "sparse", territories: "off" as const, liveLayout: false, hideOrphans: false, collapseCommunities: false })
     const loaded = loadMapConfig()
     expect(loaded.edgeBudget).toBe("2k")
     expect(loaded.labelDensity).toBe("sparse")
-    expect(loaded.hullsVisible).toBe(false)
+    expect(loaded.territories).toBe("off")
   })
 
   it("round-trips all config fields", () => {
-    const config = { edgeBudget: "all" as const, labelDensity: "rich" as const, hullsVisible: true, liveLayout: true, hideOrphans: false, collapseCommunities: true }
+    const config = { edgeBudget: "all" as const, labelDensity: "rich" as const, territories: "nebula" as const, liveLayout: true, hideOrphans: false, collapseCommunities: true }
     saveMapConfig(config)
     expect(loadMapConfig()).toEqual(config)
   })

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect } from "vitest"
-import { bboxOf, lodTier, cameraTargetForPoints, lodEdgeMinSize } from "../semantic-zoom"
+import { bboxOf, lodTier, cameraTargetForPoints, lodEdgeMinSize, lodEdgeAlpha } from "../semantic-zoom"
 
 describe("bboxOf", () => {
   it("returns the centroid of a point set as the camera target", () => {
@@ -58,5 +58,28 @@ describe("lodEdgeMinSize", () => {
     expect(lodEdgeMinSize("detail")).toBe(0)
     expect(lodEdgeMinSize("mid")).toBeGreaterThan(lodEdgeMinSize("detail"))
     expect(lodEdgeMinSize("overview")).toBeGreaterThanOrEqual(lodEdgeMinSize("mid"))
+  })
+})
+
+describe("lodEdgeAlpha", () => {
+  it("returns full alpha for every edge at detail tier", () => {
+    expect(lodEdgeAlpha("detail", 0.1)).toBe(1)
+    expect(lodEdgeAlpha("detail", 2.5)).toBe(1)
+  })
+  it("returns 0 at or below the tier floor (edge fully faded = hidden)", () => {
+    expect(lodEdgeAlpha("mid", lodEdgeMinSize("mid"))).toBe(0)
+    expect(lodEdgeAlpha("overview", 1.0)).toBe(0)
+  })
+  it("ramps continuously from 0 to 1 across the fade band above the floor", () => {
+    const floor = lodEdgeMinSize("mid")
+    const midBand = lodEdgeAlpha("mid", floor + 0.2)
+    expect(midBand).toBeGreaterThan(0)
+    expect(midBand).toBeLessThan(1)
+    // Monotone: thicker edges are more opaque within the band.
+    expect(lodEdgeAlpha("mid", floor + 0.3)).toBeGreaterThan(lodEdgeAlpha("mid", floor + 0.1))
+  })
+  it("saturates at 1 for edges well above the band", () => {
+    expect(lodEdgeAlpha("mid", 2.5)).toBe(1)
+    expect(lodEdgeAlpha("overview", 2.5)).toBeCloseTo(0.75, 5)
   })
 })

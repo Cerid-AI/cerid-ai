@@ -66,6 +66,13 @@ export function cleanSummaryLabel(summary: string | null): string | null {
   return clause.slice(0, 36)
 }
 
+/** Join the top c-TF-IDF keywords into a compact "a · b · c" label (A3). */
+export function topTermsLabel(terms: string[] | null | undefined): string | null {
+  if (!terms || terms.length === 0) return null
+  const chip = terms.slice(0, 3).join(" · ").trim()
+  return chip.length > 0 ? chip.slice(0, 36) : null
+}
+
 export function buildLevelCommunities(
   communities: CommunityHull[],
   hierarchy: CommunityHierarchy | undefined,
@@ -103,10 +110,14 @@ export function buildLevelCommunities(
         for (const p of h.hull) hullPts.push(p)
         if (h.count > dominant.count) dominant = h
       }
-      // Prefer a de-boilerplated summary; else name the cluster by its biggest
-      // sub-community (a crisp L0 label like "PYTHON"); else a generic id.
+      // Label source order (A3): de-boilerplated LLM summary → c-TF-IDF
+      // top_terms chip → biggest sub-community's crisp L0 label → generic id.
       const nid = node.community_id.split(":")[1] ?? node.community_id
-      const label = cleanSummaryLabel(node.summary) ?? dominant.label ?? `Cluster ${nid}`
+      const label =
+        cleanSummaryLabel(node.summary) ??
+        topTermsLabel(node.top_terms) ??
+        dominant.label ??
+        `Cluster ${nid}`
       out.push({
         id: node.community_id,
         count: byNode.get(node.community_id)?.member_count ?? descendantL0.reduce((s, h) => s + h.count, 0),

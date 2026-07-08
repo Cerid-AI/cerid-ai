@@ -96,6 +96,30 @@ function slot(id: string): number {
   return Math.abs(hash) % 8
 }
 
+/** Draw one community disc + label at viewport point `p`. Shared by the global
+ *  zoom-collapse overview and the per-community combo path (A10). */
+function drawDisc(
+  ctx: CanvasRenderingContext2D,
+  c: CommunityHull,
+  p: { x: number; y: number },
+  tokens: MapTokens,
+): void {
+  const r = superNodeRadius(c.count)
+  const color = tokens.clusters[slot(c.id)] ?? tokens.clusterOther
+  ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+  ctx.globalAlpha = 0.85; ctx.fillStyle = color; ctx.fill()
+  ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = tokens.background; ctx.stroke()
+  const label = c.label.toUpperCase()
+  const fontSize = Math.max(10, Math.min(16, r * 0.5))
+  ctx.font = `600 ${fontSize}px ${tokens.fontSans ?? "system-ui, sans-serif"}`
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"
+  ctx.fillStyle = tokens.background; ctx.globalAlpha = 0.9
+  const tw = ctx.measureText(label).width + 6
+  ctx.fillRect(p.x - tw / 2, p.y + r + 2, tw, fontSize + 4)
+  ctx.globalAlpha = 1; ctx.fillStyle = color
+  ctx.fillText(label, p.x, p.y + r + 2 + (fontSize + 4) / 2)
+}
+
 export function useSuperNodeLayer(args: {
   sigma: Sigma | null
   levels: CommunityHull[][]
@@ -106,6 +130,10 @@ export function useSuperNodeLayer(args: {
   levelStep?: number
   onCommunityClick?: (c: CommunityHull) => void
   onCollapsedChange?: (collapsed: boolean) => void
+  /** Per-community combos (A10): level-0 community ids collapsed into a disc. */
+  manualCollapsed?: ReadonlySet<string>
+  /** Called when the user clicks a manual combo disc (to expand it). */
+  onManualDiscClick?: (id: string) => void
 }): void {
   const {
     sigma,
@@ -117,11 +145,17 @@ export function useSuperNodeLayer(args: {
     levelStep = LEVEL_STEP_DEFAULT,
     onCommunityClick,
     onCollapsedChange,
+    manualCollapsed,
+    onManualDiscClick,
   } = args
   const clickRef = useRef(onCommunityClick)
   clickRef.current = onCommunityClick
   const collapsedChangeRef = useRef(onCollapsedChange)
   collapsedChangeRef.current = onCollapsedChange
+  const manualCollapsedRef = useRef<ReadonlySet<string>>(manualCollapsed ?? new Set())
+  manualCollapsedRef.current = manualCollapsed ?? new Set()
+  const manualClickRef = useRef(onManualDiscClick)
+  manualClickRef.current = onManualDiscClick
   const lastCollapsedRef = useRef<boolean | null>(null)
 
   useEffect(() => {
@@ -162,7 +196,21 @@ export function useSuperNodeLayer(args: {
         lastCollapsedRef.current = collapsed
         collapsedChangeRef.current?.(collapsed)
       }
-      if (!collapsed) return
+      if (!collapsed) {
+        // Per-community combos (A10): outside the global zoom-collapse, draw a
+        // disc for each manually-collapsed community at its REAL anchor (no
+        // spread — these sit exactly where the hidden members were).
+        const manual = manualCollapsedRef.current
+        if (manual.size === 0 || !levels[0]) return
+        ctx.save()
+        ctx.scale(dpr, dpr)
+        for (const c of levels[0]) {
+          if (!manual.has(c.id)) continue
+          drawDisc(ctx, c, s.graphToViewport({ x: c.anchor[0], y: c.anchor[1] }), tokens)
+        }
+        ctx.restore()
+        return
+      }
       // Pick the active Leiden level for this camera ratio.
       const lvl = levelForRatio(ratio, levels.length, threshold, levelStep)
       const communities = levels[lvl] ?? levels[0]
@@ -197,22 +245,7 @@ export function useSuperNodeLayer(args: {
 
       // discs + labels
       for (const c of communities) {
-        const p = at(c)
-        const r = superNodeRadius(c.count)
-        const color = tokens.clusters[slot(c.id)] ?? tokens.clusterOther
-        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
-        ctx.globalAlpha = 0.85; ctx.fillStyle = color; ctx.fill()
-        ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = tokens.background; ctx.stroke()
-        // label
-        const label = c.label.toUpperCase()
-        const fontSize = Math.max(10, Math.min(16, r * 0.5))
-        ctx.font = `600 ${fontSize}px ${tokens.fontSans ?? "system-ui, sans-serif"}`
-        ctx.textAlign = "center"; ctx.textBaseline = "middle"
-        ctx.fillStyle = tokens.background; ctx.globalAlpha = 0.9
-        const tw = ctx.measureText(label).width + 6
-        ctx.fillRect(p.x - tw / 2, p.y + r + 2, tw, fontSize + 4)
-        ctx.globalAlpha = 1; ctx.fillStyle = color
-        ctx.fillText(label, p.x, p.y + r + 2 + (fontSize + 4) / 2)
+        drawDisc(ctx, c, at(c), tokens)
       }
       ctx.restore()
     }
@@ -221,9 +254,25 @@ export function useSuperNodeLayer(args: {
     draw()
 
     const handleClick = (evt: MouseEvent) => {
-      if (!clickRef.current) return
       const ratio = s.getCamera().ratio
-      if (!(enabled && levels[0] && levels[0].length > 0 && isCollapsed(ratio, threshold))) return
+      const globallyCollapsed = enabled && levels[0] && levels[0].length > 0 && isCollapsed(ratio, threshold)
+      if (!globallyCollapsed) {
+        // Manual combo mode: a click on a collapsed community's disc expands it.
+        const manual = manualCollapsedRef.current
+        if (manual.size === 0 || !manualClickRef.current || !levels[0]) return
+        const rect = container.getBoundingClientRect()
+        const cx = evt.clientX - rect.left, cy = evt.clientY - rect.top
+        for (const c of levels[0]) {
+          if (!manual.has(c.id)) continue
+          const p = s.graphToViewport({ x: c.anchor[0], y: c.anchor[1] })
+          if (Math.hypot(cx - p.x, cy - p.y) <= superNodeRadius(c.count)) {
+            manualClickRef.current(c.id)
+            return
+          }
+        }
+        return
+      }
+      if (!clickRef.current) return
       // Pick the active level — must match draw() so hit regions align.
       const lvl = levelForRatio(ratio, levels.length, threshold, levelStep)
       const communities = levels[lvl] ?? levels[0]

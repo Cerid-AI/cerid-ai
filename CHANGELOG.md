@@ -2,6 +2,49 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Graph Living-Map: Obsidian-class knowledge exploration (2026-07-07)
+
+The Subjects graph surfaces (Atlas ego explorer, Constellation map/3D) become a
+living knowledge space: animated exploration, semantic structure, time, cinema,
+and advisory intelligence — all on the existing sigma.js v3 + R3F stack.
+
+### Added
+
+- **Animated ego re-centering (Atlas).** Refocusing no longer rebuilds the
+  graph: common nodes morph to their new layout (warm-started force-atlas2 in
+  the worker), newcomers grow in, departures shrink out, and the camera eases
+  to the new focal entity.
+- **Semantic structure on the map.** GPU density contours ("Regions"
+  tri-state), c-TF-IDF `top_terms` community labels with a collision pass, a
+  server-computed **Semantics** layout preset (PaCMAP over entity embeddings,
+  FA2-over-SIMILAR_TO fallback, Procrustes-aligned), and per-community
+  Collapse/Expand combo discs.
+- **Time.** `created_at` now ships on `/graph/map` + `/graph/embeddings/3d`; a
+  timebar histogram supports drag-to-filter, and a timelapse playback sweeps
+  the corpus in creation order with birth pulses.
+- **3D cinema.** Theme-aware post chain (dark: bloom + vignette; light: N8AO
+  ambient occlusion, no bloom), fresnel-rim node lighting, parallax starfield
+  + procedural brand nebula, dolly-zoom focus choreography, distance-faded SDF
+  labels, lens-switch color crossfades, and a kNN "similar neighbors" panel
+  with fly-to on node select.
+- **Live mode.** A third Constellation sub-mode feeds the corpus into
+  cosmos.gl's GPU force simulation — watch the graph self-organize, re-run the
+  big bang, tune repulsion (lazy chunk; own WebGL context).
+- **Graph intelligence.** A **Bridges** lens colors nodes by betweenness
+  centrality (worker-computed) in both the map and Atlas; a **Gaps** panel
+  surfaces semantically-close but weakly-linked community pairs from the new
+  `GET /graph/structural-gaps` endpoint, with hull highlighting and an
+  "Explore in chat" handoff.
+
+### Changed
+
+- Atlas hover/pin spotlight, zoom-LOD edge fading, and layout-preset morphs are
+  unified on shared, tested interaction controllers; unused `gsap` removed.
+- Community label ladders prefer short `top_terms` over summary paragraphs
+  where scannability matters (structural gaps).
+- All new motion honors `prefers-reduced-motion` (snap/paused paths), and every
+  new color routes through theme tokens (drift gate: 0 violations).
+
 ## Unreleased — LAN/remote access + thin desktop client + mail auto-poll (2026-06-19)
 
 Run the service on one machine and connect from another on the LAN (e.g. service

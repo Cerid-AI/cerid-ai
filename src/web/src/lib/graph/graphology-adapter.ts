@@ -70,6 +70,9 @@ function nodeAttrs(node: GraphNode, tokens: MapTokens): AtlasNodeAttributes {
     borderColor: trustColor(tokens, node.trust_state),
     haloColor: trustColor(tokens, node.trust_state),  // kept for NodeHaloProgram fallback
     pulseIntensity: pulseIntensity(node),
+    // node.type (the API entity type) is shadowed by the sigma program key —
+    // preserve it for the type-chip toolbar + reducers.
+    entityType: node.type,
     type: "bordered",
   }
 }

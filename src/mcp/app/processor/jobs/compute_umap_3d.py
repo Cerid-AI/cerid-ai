@@ -63,6 +63,8 @@ _MAX_EDGES = int(os.getenv("UMAP_MAX_EDGES", "100000"))
 _UMAP_N_NEIGHBORS = int(os.getenv("UMAP_N_NEIGHBORS", "15"))
 _UMAP_MIN_DIST = float(os.getenv("UMAP_MIN_DIST", "0.1"))
 _FALLBACK_SCALE = 10.0  # bounding-box radius for the connected core
+_EPS_DISTANCE = 1e-9  # degenerate-geometry guard (zero radius / coincident nodes)
+_EPS_NORM = 1e-12  # zero-variance guard in the Procrustes scale normalisation
 _FORCE_ITERATIONS = int(os.getenv("UMAP_FORCE_ITERATIONS", "150"))
 _FORCE_REPULSION = float(os.getenv("UMAP_FORCE_REPULSION", "0.12"))
 _FORCE_GRAVITY = float(os.getenv("UMAP_FORCE_GRAVITY", "0.08"))  # harmonic (strong) gravity — see _force_layout; tuned live for a near-uniform disc
@@ -127,6 +129,20 @@ _DOMAIN_CROSS_EDGE_SCALE = float(os.getenv("UMAP_DOMAIN_CROSS_EDGE_SCALE", "0.0"
 _DOMAIN_RING_RADIUS = float(os.getenv("UMAP_DOMAIN_RING_RADIUS", "11.5"))
 # Very light gravity for the domain pass — anchors do the centering.
 _DOMAIN_GRAVITY = float(os.getenv("UMAP_DOMAIN_GRAVITY", "0.01"))
+
+# Semantic layout (A7): position ≈ meaning. Primary method projects the stored
+# entity embeddings to 2D with PaCMAP; on import/data failure the layout falls
+# back to FA2-LinLog over the SIMILAR_TO graph (weight = cosine score) so the
+# preset never goes missing from /graph/map.
+_SEMANTIC_METHOD = os.getenv("UMAP_SEMANTIC_METHOD", "pacmap")
+# Below this many embedded entities the PaCMAP neighborhood structure is
+# degenerate — fall through to the FA2 fallback instead.
+_SEMANTIC_MIN_EMBEDDINGS = 20
+_SEMANTIC_RANDOM_STATE = 42  # fixed so nightly recomputes are reproducible
+
+# c-TF-IDF community labels (A3): top terms persisted to Community.top_terms
+# as the fallback label source when the LLM summary is absent.
+_TOP_TERMS_PER_COMMUNITY = 5
 
 
 class ComputeUmap3DJob(BaseJob):
@@ -236,6 +252,34 @@ class ComputeUmap3DJob(BaseJob):
             logger.info("compute_umap_3d.domain_layout wrote count=%d", len(domain_coords))
         except Exception as exc:  # noqa: BLE001 — non-default layout is best-effort
             log_swallowed_error("processor.compute_umap_3d.domain_layout", exc)
+
+        # Semantic layout pass: PaCMAP over entity embeddings, with automatic
+        # FA2-over-SIMILAR_TO fallback (A7). Position ≈ meaning.
+        try:
+            semantic_coords = await asyncio.to_thread(
+                self._semantic_layout, entities, driver
+            )
+            semantic_pos2d = np.array(
+                [[c["x"], c["y"]] for c in semantic_coords], dtype=np.float64
+            )
+            self._store_community_artifacts(
+                entities, semantic_pos2d, degree_map, driver=driver, layout="semantic"
+            )
+            self._store_layout_positions(semantic_coords, layout="semantic")
+            logger.info(
+                "compute_umap_3d.semantic_layout wrote count=%d method=%s",
+                len(semantic_coords),
+                semantic_coords[0]["method"] if semantic_coords else "none",
+            )
+        except Exception as exc:  # noqa: BLE001 — non-default layout is best-effort
+            log_swallowed_error("processor.compute_umap_3d.semantic_layout", exc)
+
+        # c-TF-IDF top_terms per community (A3) — the fallback label source
+        # when the LLM summary is absent. Additive; never touches summaries.
+        try:
+            await asyncio.to_thread(self._write_community_top_terms, driver)
+        except Exception as exc:  # noqa: BLE001 — best-effort, never blocks
+            log_swallowed_error("processor.compute_umap_3d.top_terms", exc)
 
         # L1 community summary batch — generate summaries for the 262 L1
         # communities that currently have none (level=1, skip_with_existing=True).
@@ -473,6 +517,70 @@ class ComputeUmap3DJob(BaseJob):
             log_swallowed_error("compute_umap_3d._fetch_edges", exc)
             return []
 
+    def _fetch_similar_edges(self, driver: Any) -> list[tuple[str, str, float]]:
+        """SIMILAR_TO pairs + cosine score — springs for the semantic FA2 fallback.
+
+        Unlike _fetch_edges, scores are NOT down-weighted: in the semantic
+        layout the similarity graph IS the structure, not a garnish.
+        """
+        cypher = f"""
+            MATCH (a:Entity)-[r:SIMILAR_TO]->(b:Entity)
+            WHERE a.canonical_id IS NOT NULL AND b.canonical_id IS NOT NULL
+            RETURN a.canonical_id AS s, b.canonical_id AS t,
+                   coalesce(r.score, 1.0) AS w
+            LIMIT {_MAX_EDGES}
+        """
+        try:
+            with driver.session() as session:
+                return [
+                    (row["s"], row["t"], float(row["w"]))
+                    for row in session.run(cypher).data()
+                ]
+        except (OSError, RuntimeError, ValueError) as exc:
+            log_swallowed_error("compute_umap_3d._fetch_similar_edges", exc)
+            return []
+
+    def _fetch_embeddings(self, driver: Any) -> tuple[list[str], Any]:
+        """Entity embedding matrix for the semantic layout.
+
+        Embeddings are stored JSON-encoded, L2-normalised on
+        ``(:Entity).embedding`` (same contract as
+        app/db/neo4j/semantic_edges.py). Unparseable rows are skipped.
+        Returns ([], None) when nothing usable exists.
+        """
+        import numpy as np  # noqa: PLC0415
+
+        cypher = f"""
+            MATCH (e:Entity)
+            WHERE e.embedding IS NOT NULL AND e.canonical_id IS NOT NULL
+            RETURN e.canonical_id AS id, e.embedding AS embedding
+            LIMIT {_MAX_ENTITIES}
+        """
+        try:
+            with driver.session() as session:
+                rows = list(session.run(cypher).data())
+        except (OSError, RuntimeError, ValueError) as exc:
+            log_swallowed_error("compute_umap_3d._fetch_embeddings", exc)
+            return [], None
+
+        ids: list[str] = []
+        vecs: list[Any] = []
+        for row in rows:
+            try:
+                vec = np.asarray(json.loads(row["embedding"]), dtype=np.float32)
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                log_swallowed_error(
+                    "compute_umap_3d._fetch_embeddings.parse",
+                    exc,
+                    context={"canonical_id": row["id"]},
+                )
+                continue
+            ids.append(row["id"])
+            vecs.append(vec)
+        if not ids:
+            return [], None
+        return ids, np.stack(vecs, axis=0)
+
     def _force_layout(
         self,
         entities: list[dict[str, Any]],
@@ -631,7 +739,7 @@ class ComputeUmap3DJob(BaseJob):
 
         # Rescale core to _FALLBACK_SCALE.
         radius = float(np.sqrt((pos * pos).sum(axis=1)).max())
-        if radius > 1e-9:
+        if radius > _EPS_DISTANCE:
             pos *= _FALLBACK_SCALE / radius
         pos_all[connected] = pos
 
@@ -706,7 +814,7 @@ class ComputeUmap3DJob(BaseJob):
                         dy_ij = pos[j, 1] - pos[i, 1]
                         dist = math.sqrt(dx_ij * dx_ij + dy_ij * dy_ij)
                         min_dist = radii[i] + radii[j]
-                        if dist < min_dist and dist > 1e-9:
+                        if dist < min_dist and dist > _EPS_DISTANCE:
                             overlap = (min_dist - dist) * 0.5
                             ux = dx_ij / dist
                             uy = dy_ij / dist
@@ -715,7 +823,7 @@ class ComputeUmap3DJob(BaseJob):
                             pos[j, 0] += ux * overlap
                             pos[j, 1] += uy * overlap
                             moved = True
-                        elif dist < 1e-9:
+                        elif dist < _EPS_DISTANCE:
                             # Coincident nodes — push apart deterministically.
                             offset = min_dist * 0.5 + 1e-6
                             pos[i, 0] -= offset
@@ -764,7 +872,7 @@ class ComputeUmap3DJob(BaseJob):
         # Scale normalisation.
         scale_A = float(np.sqrt((A * A).sum()))
         scale_B = float(np.sqrt((B * B).sum()))
-        if scale_A < 1e-12 or scale_B < 1e-12:
+        if scale_A < _EPS_NORM or scale_B < _EPS_NORM:
             return new_pos
         A_n = A / scale_A
         B_n = B / scale_B
@@ -1141,6 +1249,254 @@ class ComputeUmap3DJob(BaseJob):
             })
         return result
 
+    def _semantic_layout(
+        self,
+        entities: list[dict[str, Any]],
+        driver: Any,
+    ) -> list[dict[str, Any]]:
+        """Semantic layout: position ≈ meaning (A7).
+
+        Primary (``UMAP_SEMANTIC_METHOD=pacmap``): PaCMAP projection of the
+        stored entity embeddings to 2D.  Fallback: FA2-LinLog over the
+        SIMILAR_TO graph (weight = cosine score) — the force machinery with
+        semantic springs instead of co-mention springs.
+
+        Both paths Procrustes-align onto the previous force positions
+        (umap_x/y) so switching presets preserves the mental map, and rescale
+        to _FALLBACK_SCALE like the other layouts.
+        """
+        if _SEMANTIC_METHOD == "pacmap":
+            try:
+                coords = self._semantic_pacmap(entities, driver)
+                if coords is not None:
+                    return coords
+            except Exception as exc:  # noqa: BLE001 — any pacmap failure → FA2 fallback
+                log_swallowed_error("processor.compute_umap_3d.semantic_pacmap", exc)
+        return self._semantic_fa2(entities, driver)
+
+    def _semantic_pacmap(
+        self,
+        entities: list[dict[str, Any]],
+        driver: Any,
+    ) -> list[dict[str, Any]] | None:
+        """PaCMAP projection of entity embeddings.  None → caller falls back."""
+        import numpy as np  # noqa: PLC0415
+
+        try:
+            import pacmap  # noqa: PLC0415
+        except ImportError as exc:
+            log_swallowed_error("processor.compute_umap_3d.pacmap_import", exc)
+            return None
+
+        ids, emb = self._fetch_embeddings(driver)
+        if emb is None or len(ids) < _SEMANTIC_MIN_EMBEDDINGS:
+            logger.info(
+                "compute_umap_3d.semantic_pacmap: %d embeddings < %d minimum, "
+                "falling back to fa2",
+                len(ids), _SEMANTIC_MIN_EMBEDDINGS,
+            )
+            return None
+
+        reducer = pacmap.PaCMAP(
+            n_components=2, random_state=_SEMANTIC_RANDOM_STATE
+        )
+        proj = np.asarray(reducer.fit_transform(emb), dtype=np.float64)
+
+        # Centre + rescale the embedded core to _FALLBACK_SCALE (consistent
+        # with the other layouts' bounding radius).
+        proj -= proj.mean(axis=0)
+        radius = float(np.sqrt((proj * proj).sum(axis=1)).max())
+        if radius > 1e-9:
+            proj *= _FALLBACK_SCALE / radius
+
+        n = len(entities)
+        proj_by_id = {eid: proj[k] for k, eid in enumerate(ids)}
+        pos_all = np.zeros((n, 2), dtype=np.float64)
+        embedded = np.zeros(n, dtype=bool)
+        for i, ent in enumerate(entities):
+            p = proj_by_id.get(ent["id"])
+            if p is not None:
+                pos_all[i] = p
+                embedded[i] = True
+
+        # Embedding-less entities: place at their community's mean projected
+        # position (+ deterministic jitter) — the best semantic estimate we
+        # have.  No embedded community peers → outer shell, matching the
+        # isolated-shell convention of the other layouts.
+        comm_sums: dict[str, Any] = {}
+        comm_counts: dict[str, int] = {}
+        for i in range(n):
+            if not embedded[i]:
+                continue
+            key = str(entities[i].get("community") or "")
+            if key:
+                comm_sums[key] = comm_sums.get(key, np.zeros(2)) + pos_all[i]
+                comm_counts[key] = comm_counts.get(key, 0) + 1
+        jitter = _FALLBACK_SCALE * 0.03
+        for i, ent in enumerate(entities):
+            if embedded[i]:
+                continue
+            key = str(ent.get("community") or "")
+            if key in comm_counts:
+                centre = comm_sums[key] / comm_counts[key]
+                pos_all[i, 0] = centre[0] + (self._hash01(f"{ent['id']}:sx") - 0.5) * 2.0 * jitter
+                pos_all[i, 1] = centre[1] + (self._hash01(f"{ent['id']}:sy") - 0.5) * 2.0 * jitter
+            else:
+                theta = 2.0 * math.pi * self._hash01(ent["id"])
+                shell_r = _FALLBACK_SCALE * 1.45
+                pos_all[i, 0] = math.cos(theta) * shell_r
+                pos_all[i, 1] = math.sin(theta) * shell_r
+
+        # Procrustes alignment to the previous force positions.
+        old_x = np.array([e.get("old_x") for e in entities], dtype=object)
+        old_y = np.array([e.get("old_y") for e in entities], dtype=object)
+        pos_all = self._procrustes_align(pos_all, old_x, old_y)
+
+        z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
+        result: list[dict[str, Any]] = []
+        for i in range(n):
+            z_val = self._compute_z_recency(entities[i], z_amplitude)
+            result.append({
+                "id": entities[i]["id"],
+                "x": float(pos_all[i, 0]),
+                "y": float(pos_all[i, 1]),
+                "z": z_val,
+                "method": "semantic_pacmap",
+            })
+        return result
+
+    def _semantic_fa2(
+        self,
+        entities: list[dict[str, Any]],
+        driver: Any,
+    ) -> list[dict[str, Any]]:
+        """FA2-LinLog over the SIMILAR_TO graph — semantic-layout fallback.
+
+        Same spring machinery as _force_layout, but the springs are the
+        SIMILAR_TO cosine edges (full weight, no co-mention edges) and there
+        is no domain pull — meaning alone drives adjacency.
+        """
+        import numpy as np  # noqa: PLC0415
+
+        n = len(entities)
+        index_of = {e["id"]: i for i, e in enumerate(entities)}
+
+        seed = self._fallback_layout(entities)
+        pos_all = np.array([[r["x"], r["y"]] for r in seed], dtype=np.float64)
+
+        edges = self._fetch_similar_edges(driver)
+        src, dst, wgt = [], [], []
+        max_w = 1.0
+        for s, t, w in edges:
+            si, ti = index_of.get(s), index_of.get(t)
+            if si is None or ti is None or si == ti:
+                continue
+            src.append(si)
+            dst.append(ti)
+            wgt.append(w)
+            max_w = max(max_w, w)
+
+        if not src:
+            return self._enrich_z(seed, entities)
+
+        src_all = np.array(src, dtype=np.int64)
+        dst_all = np.array(dst, dtype=np.int64)
+        w_all = np.log1p(np.array(wgt)) / math.log1p(max_w)
+
+        degree = np.zeros(n)
+        np.add.at(degree, src_all, 1)
+        np.add.at(degree, dst_all, 1)
+
+        connected = np.where(degree > 0)[0]
+        isolated = np.where(degree == 0)[0]
+        remap = -np.ones(n, dtype=np.int64)
+        remap[connected] = np.arange(connected.size)
+
+        pos = pos_all[connected].copy()
+        mass = 1.0 + np.sqrt(degree[connected])
+        src_a = remap[src_all]
+        dst_a = remap[dst_all]
+        w_a = w_all
+        m = connected.size
+
+        # Community index per connected node (same convention as _force_layout).
+        comm_of: dict[str, int] = {}
+        comm_idx = np.zeros(m, dtype=np.int64)
+        for local_i, global_i in enumerate(connected):
+            key = str(entities[int(global_i)].get("community") or f"__solo:{global_i}")
+            if key not in comm_of:
+                comm_of[key] = len(comm_of)
+            comm_idx[local_i] = comm_of[key]
+        n_comms = len(comm_of)
+        comm_counts = np.bincount(comm_idx, minlength=n_comms).astype(np.float64)
+
+        kr = _FORCE_REPULSION
+        kg = _FORCE_GRAVITY
+        kp = _FORCE_COMMUNITY_PULL
+        extent = float(np.sqrt((pos * pos).sum(axis=1)).max()) or _FALLBACK_SCALE
+        temperature = extent / 5.0
+        cooling = (0.015 / temperature) ** (1.0 / _FORCE_ITERATIONS)
+        chunk = 512
+
+        for _ in range(_FORCE_ITERATIONS):
+            disp = np.zeros_like(pos)
+
+            for start in range(0, m, chunk):
+                end = min(start + chunk, m)
+                delta = pos[start:end, None, :] - pos[None, :, :]
+                dist2 = (delta * delta).sum(axis=2)
+                np.clip(dist2, 1e-4, None, out=dist2)
+                f = kr * (mass[start:end, None] * mass[None, :]) / dist2
+                disp[start:end] += (f[:, :, None] * delta).sum(axis=1)
+
+            delta_e = pos[src_a] - pos[dst_a]
+            dist_e = np.sqrt((delta_e * delta_e).sum(axis=1)) + 1e-9
+            pull = (w_a * np.log1p(dist_e) / dist_e)[:, None] * delta_e
+            np.subtract.at(disp, src_a, pull)
+            np.add.at(disp, dst_a, pull)
+
+            disp -= (kg * mass)[:, None] * pos
+
+            if kp > 0:
+                centroids = np.zeros((n_comms, 2))
+                np.add.at(centroids, comm_idx, pos)
+                centroids /= comm_counts[:, None]
+                disp += kp * (centroids[comm_idx] - pos)
+
+            length = np.sqrt((disp * disp).sum(axis=1)) + 1e-9
+            step = np.minimum(length, temperature)
+            pos += disp / length[:, None] * step[:, None]
+            temperature *= cooling
+
+        pos = self._noverlap(pos, degree[connected])
+
+        radius = float(np.sqrt((pos * pos).sum(axis=1)).max())
+        if radius > 1e-9:
+            pos *= _FALLBACK_SCALE / radius
+        pos_all[connected] = pos
+
+        if isolated.size:
+            iso = pos_all[isolated]
+            iso_r = np.sqrt((iso * iso).sum(axis=1)) + 1e-9
+            pos_all[isolated] = iso / iso_r[:, None] * (_FALLBACK_SCALE * 1.45)
+
+        old_x = np.array([e.get("old_x") for e in entities], dtype=object)
+        old_y = np.array([e.get("old_y") for e in entities], dtype=object)
+        pos_all = self._procrustes_align(pos_all, old_x, old_y)
+
+        z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
+        result: list[dict[str, Any]] = []
+        for i in range(n):
+            z_val = self._compute_z_recency(entities[i], z_amplitude)
+            result.append({
+                "id": entities[i]["id"],
+                "x": float(pos_all[i, 0]),
+                "y": float(pos_all[i, 1]),
+                "z": z_val,
+                "method": "semantic_fa2",
+            })
+        return result
+
     # -----------------------------------------------------------------
     # Community map artifacts
     # -----------------------------------------------------------------
@@ -1368,10 +1724,106 @@ class ComputeUmap3DJob(BaseJob):
         except Exception as exc:  # noqa: BLE001 — non-fatal best-effort
             log_swallowed_error("processor.compute_umap_3d.store_layout_positions", exc)
 
+    def _write_community_top_terms(self, driver: Any) -> None:
+        """Compute + persist c-TF-IDF ``top_terms`` on (:Community) nodes (A3).
+
+        Member names come from the IN_COMMUNITY edges community_detection
+        maintains for every hierarchy level; the c-TF-IDF corpus is built per
+        level so terms discriminate against same-level peers.  Additive only —
+        ``Community.summary`` (the preferred label source) is never touched.
+        """
+        cypher = """
+            MATCH (c:Community)<-[:IN_COMMUNITY]-(e:Entity)
+            RETURN c.id AS cid, c.level AS level,
+                   collect(coalesce(e.name, e.canonical_id)) AS names
+        """
+        try:
+            with driver.session() as session:
+                rows = list(session.run(cypher).data())
+        except (OSError, RuntimeError, ValueError) as exc:
+            log_swallowed_error("compute_umap_3d._write_community_top_terms.fetch", exc)
+            return
+        if not rows:
+            return
+
+        docs_by_level: dict[int, dict[str, list[str]]] = {}
+        for row in rows:
+            level = int(row.get("level") or 0)
+            docs_by_level.setdefault(level, {})[str(row["cid"])] = list(row["names"] or [])
+
+        updates: list[dict[str, Any]] = []
+        for level_docs in docs_by_level.values():
+            for cid, terms in _community_top_terms(level_docs).items():
+                if terms:
+                    updates.append({"id": cid, "terms": terms})
+        if not updates:
+            return
+
+        write_cypher = """
+            UNWIND $rows AS row
+            MATCH (c:Community {id: row.id})
+            SET c.top_terms = row.terms
+        """
+        try:
+            with driver.session() as session:
+                session.run(write_cypher, rows=updates)
+        except (OSError, RuntimeError, ValueError) as exc:
+            log_swallowed_error("compute_umap_3d._write_community_top_terms.write", exc)
+            return
+        logger.info("compute_umap_3d.top_terms wrote count=%d", len(updates))
+
 
 # -----------------------------------------------------------------
 # Pure-numpy geometry helpers (module-level for testability)
 # -----------------------------------------------------------------
+
+def _community_top_terms(
+    docs: dict[str, list[str]],
+    top_n: int = _TOP_TERMS_PER_COMMUNITY,
+) -> dict[str, list[str]]:
+    """c-TF-IDF top terms per community from member entity names (A3).
+
+    Each community's member names form one document (BERTopic-style
+    class-based TF-IDF)::
+
+        score(t, c) = tf(t, c) · log(1 + A / cf(t))
+
+    where ``tf`` is the term count within the community, ``cf`` the term
+    count across all communities, and ``A`` the average token count per
+    community.  Tokenisation: lowercase alphanumeric runs, tokens ≥ 3 chars.
+    Ties break alphabetically so output is deterministic.
+    """
+    import re  # noqa: PLC0415
+    from collections import Counter  # noqa: PLC0415
+
+    tf: dict[str, Counter[str]] = {}
+    global_counts: Counter[str] = Counter()
+    total_tokens = 0
+    for comm_id, names in docs.items():
+        counts: Counter[str] = Counter()
+        for name in names:
+            for tok in re.findall(r"[a-z0-9]+", str(name).lower()):
+                if len(tok) < 3:
+                    continue
+                counts[tok] += 1
+        tf[comm_id] = counts
+        global_counts.update(counts)
+        total_tokens += sum(counts.values())
+
+    if not docs or total_tokens == 0:
+        return {comm_id: [] for comm_id in docs}
+
+    avg_tokens = total_tokens / len(docs)
+    out: dict[str, list[str]] = {}
+    for comm_id, counts in tf.items():
+        scored = [
+            (count * math.log1p(avg_tokens / global_counts[tok]), tok)
+            for tok, count in counts.items()
+        ]
+        scored.sort(key=lambda pair: (-pair[0], pair[1]))
+        out[comm_id] = [tok for _score, tok in scored[:top_n]]
+    return out
+
 
 def _convex_hull(pts: Any) -> Any:
     """Andrew's monotone chain convex hull.  Returns hull vertices in CCW order.

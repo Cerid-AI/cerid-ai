@@ -35,6 +35,7 @@ import type { EntityEmbedding3D } from "@/lib/api/embeddings-3d"
 import { planeIntersect, type Vec3 } from "./drag-plane"
 import { FLOAT3_GLSL } from "./float3"
 import { communityRgb, degreeRadius, hash01 } from "./palette"
+import { colorTweenK, mixChannel, COLOR_TWEEN_S } from "./color-tween"
 
 const GROW_DURATION_S = 0.9
 
@@ -193,6 +194,14 @@ export function InstancedNodes({
   const clockStart = useRef<number | null>(null)
   const growthEndsAt = useRef(0)
 
+  // Lens-switch color crossfade (B6). colorFrom holds the previous per-instance
+  // color set; writeInstances lerps from it to the current lensColors over
+  // COLOR_TWEEN_S starting at colorTweenStart. Null when no tween is active.
+  const prevLensColors = useRef<Float32Array | undefined>(undefined)
+  const colorFrom = useRef<Float32Array | null>(null)
+  const colorTweenStart = useRef(-Infinity)
+  const colorTweenEndsAt = useRef(0)
+
   // Stable geometry + material for the sphere layer.
   const geometry = useMemo(() => new SphereGeometry(1, 12, 12), [])
   // Shared uniform objects so the per-frame tick (useFrame) reaches the
@@ -237,6 +246,20 @@ export function InstancedNodes({
             "gl_Position = projectionMatrix * mvPosition;",
           ].join("\n"),
         )
+      // Fresnel rim (B1): a faint teal-white backlight at grazing angles, so
+      // each sphere separates from its neighbors and the scene reads as lit
+      // volumes rather than flat discs. Anchored to <emissivemap_fragment>
+      // (a stable public chunk marker, appended-after not replaced) — `normal`
+      // and `vViewPosition` are both in scope there. The tint matches the glow
+      // sprite core (GLOW_FRAGMENT); low strength keeps light mode calm.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <emissivemap_fragment>",
+        [
+          "#include <emissivemap_fragment>",
+          "float rimTerm = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), 3.0);",
+          "totalEmissiveRadiance += vec3(0.85, 1.0, 0.95) * rimTerm * 0.18;",
+        ].join("\n"),
+      )
     }
     return mat
     // sphereFloatUniforms is a stable ref-identity object (created once above);
@@ -407,6 +430,18 @@ export function InstancedNodes({
       } else {
         ;[r, g, b] = communityRgb(ent.community)
       }
+      // Lens-switch crossfade (B6): while a tween is active, lerp from the
+      // previous color set to the current one. k reaches 1 (target) outside
+      // the window or under reduced motion, so this is a no-op at rest.
+      const from = colorFrom.current
+      if (from && from.length === entities.length * 3) {
+        const k = animate ? colorTweenK(t, colorTweenStart.current, COLOR_TWEEN_S) : 1
+        if (k < 1) {
+          r = mixChannel(from[i * 3], r, k)
+          g = mixChannel(from[i * 3 + 1], g, k)
+          b = mixChannel(from[i * 3 + 2], b, k)
+        }
+      }
       tmpColor.setRGB(r * brightness, g * brightness, b * brightness)
       mesh.setColorAt(i, tmpColor)
     }
@@ -420,6 +455,29 @@ export function InstancedNodes({
       mesh.computeBoundingSphere()
     }
   }
+
+  // Lens-switch crossfade trigger (B6). Declared BEFORE the writeInstances
+  // effect below so that, on a lensColors change, the tween refs are armed
+  // first — the immediate snap-write then already renders the tween's k=0
+  // (previous colors) instead of flashing the target for one frame. Only tweens
+  // when motion is on and the color set is a same-length in-place swap (a lens
+  // or theme change); an entity-count change snaps.
+  useEffect(() => {
+    const prev = prevLensColors.current
+    if (
+      animate && prev && lensColors &&
+      prev !== lensColors &&
+      prev.length === lensColors.length &&
+      prev.length === entities.length * 3
+    ) {
+      colorFrom.current = prev
+      colorTweenStart.current = matTime.current
+      colorTweenEndsAt.current = matTime.current + COLOR_TWEEN_S
+    } else {
+      colorFrom.current = null
+    }
+    prevLensColors.current = lensColors
+  }, [lensColors, animate, entities.length])
 
   // Initial population, on entity-list change, and on hover-focus change.
   // recomputeBounds=true so the instanced bounding sphere is fresh after each
@@ -458,7 +516,10 @@ export function InstancedNodes({
     glowMaterial.uniforms.uFloatAmp.value = floatOn ? 1 : 0
     sphereFloatUniforms.uTime.value = matTime.current
     sphereFloatUniforms.uFloatAmp.value = floatOn ? 1 : 0
-    if (matTime.current <= growthEndsAt.current) {
+    if (matTime.current <= growthEndsAt.current || matTime.current <= colorTweenEndsAt.current) {
+      // Growth OR an active lens-color crossfade (B6) keeps the per-frame
+      // rewrite alive. The color tween shifts no positions, so it needs no
+      // bounds recompute.
       writeInstances(matTime.current)
     } else if (growthBoundsComputedAt.current < growthEndsAt.current) {
       // Growth just finished — do one final bounds recompute so culling is

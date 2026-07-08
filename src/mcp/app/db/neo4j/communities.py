@@ -14,6 +14,7 @@ Existing Community node shape (from community_detection.py + community_summaries
         native_id,              # int — GDS-assigned community id
         summary,                # str | None — LLM-generated theme summary
         summary_generated_at,   # ISO str | None — when summary was written
+        top_terms,              # list[str] | None — c-TF-IDF fallback labels (compute_umap_3d A3)
         created_at,             # ISO str
         updated_at,             # ISO str
     })
@@ -283,6 +284,7 @@ class CommunityHierarchyNode(BaseModel):
     parent_id: str | None = None
     member_count: int
     summary: str | None = None
+    top_terms: list[str] | None = None
 
 
 class CommunityHierarchy(BaseModel):
@@ -317,11 +319,12 @@ def community_hierarchy(
            ELSE null
          END AS parent_id
     RETURN
-        c.id      AS community_id,
-        c.level   AS level,
-        parent_id AS parent_id,
+        c.id        AS community_id,
+        c.level     AS level,
+        parent_id   AS parent_id,
         member_count,
-        c.summary AS summary
+        c.summary   AS summary,
+        c.top_terms AS top_terms
     ORDER BY c.level ASC, member_count DESC
     """
     try:
@@ -340,6 +343,7 @@ def community_hierarchy(
                         parent_id=r.get("parent_id"),
                         member_count=int(r.get("member_count", 0)),
                         summary=r.get("summary"),
+                        top_terms=r.get("top_terms"),
                     )
                 )
             return CommunityHierarchy(levels=max_level + 1 if nodes else 0, nodes=nodes)

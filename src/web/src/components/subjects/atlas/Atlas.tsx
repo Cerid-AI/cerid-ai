@@ -27,6 +27,8 @@ import {
   ATLAS_V2_DEFAULT_EDGE_TYPE as ATLAS_DEFAULT_EDGE_TYPE,
 } from "@/lib/graph/atlas-programs"
 import { composeLensesWithTokens, LENS_ORDER, type LensId } from "@/lib/graph/lenses"
+import { computeBetweenness } from "@/lib/graph/compute-betweenness"
+import { normalizeScores } from "@/lib/graph/bridges"
 import {
   resolveMapTokens,
   applyParallelEdgeCurvature,
@@ -34,6 +36,12 @@ import {
 } from "@/lib/graph/identity"
 import { makeDrawNodeHover } from "@/lib/graph/draw-node-hover"
 import { HOVER_INTENT_DELAY_MS } from "@/lib/graph/hover-intent"
+import { createFocusSpotlight } from "@/lib/graph/interactions/focus-spotlight"
+import { morphPositions, type MorphHandle } from "@/lib/graph/interactions/position-morph"
+import { buildAtlasNodeReducer, buildAtlasEdgeReducer, type LodTier } from "./atlas-reducers"
+import { seedWarmPositions, planMigrationTargets, syncCommonNodeAttrs, syncEdges, EXIT_SIZE } from "./atlas-migrate"
+import { useHighlightEdges } from "@/components/subjects/constellation/map/highlight-edges"
+import { lodTier } from "@/components/subjects/constellation/map/semantic-zoom"
 import type { AtlasEdgeAttributes, AtlasNodeAttributes } from "@/lib/types/graph"
 import { useAtlasKeyboard } from "./use-atlas-keyboard"
 import { AtlasA11yTree } from "./atlas-a11y-tree"
@@ -699,6 +707,43 @@ export function Atlas({
   const [hoverNode, setHoverNode] = useState<{ id: string; pos: { x: number; y: number } } | null>(null)
   const [pinnedNode, setPinnedNode] = useState<{ id: string; pos: { x: number; y: number } } | null>(null)
 
+  // Hover/pin spotlight (Living-Map A1). hoverIdRef tracks hover IMMEDIATELY
+  // (the tooltip card keeps its intent delay); the spotlight center follows
+  // pin > hover. One controller survives sigma rebuilds via lazy sigmaRef
+  // callbacks; reducers read it through spotlightRef.
+  const reducedMotion =
+    typeof window !== "undefined"
+      ? (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false)
+      : false
+  const hoverIdRef = useRef<string | null>(null)
+  const pinnedIdRef = useRef<string | null>(null)
+  // Zoom-LOD tier (A2) — updated by the camera listener below; guards
+  // sigma.refresh against a per-frame storm (fires on tier CHANGE only).
+  const lodTierRef = useRef<LodTier>("mid")
+  // In-flight ego-migration morph (A5) — cancelled on refocus/unmount.
+  const morphRef = useRef<MorphHandle | null>(null)
+  const spotlight = useMemo(
+    () =>
+      createFocusSpotlight({
+        getNeighbors: (id) => sigmaRef.current?.getGraph().neighbors(id) ?? [],
+        hasNode: (id) => sigmaRef.current?.getGraph().hasNode(id) ?? false,
+        refresh: () => sigmaRef.current?.refresh({ skipIndexation: true }),
+        reducedMotion,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lazy sigmaRef callbacks; only reducedMotion matters
+    [reducedMotion],
+  )
+  const spotlightRef = useRef(spotlight)
+  spotlightRef.current = spotlight
+  useEffect(() => () => spotlight.dispose(), [spotlight])
+  const syncSpotlight = useCallback(() => {
+    spotlightRef.current.setCenter(pinnedIdRef.current ?? hoverIdRef.current ?? null)
+  }, [])
+  useEffect(() => {
+    pinnedIdRef.current = pinnedNode?.id ?? null
+    syncSpotlight()
+  }, [pinnedNode, syncSpotlight])
+
   // Theme tokens — resolve on mount and re-resolve on theme change
   const [tokens, setTokens] = useState<MapTokens>(() =>
     typeof document !== "undefined" ? resolveMapTokens(document.documentElement) : {
@@ -724,9 +769,10 @@ export function Atlas({
     const observer = new MutationObserver(() => {
       const fresh = resolveMapTokens(document.documentElement)
       setTokens(fresh)
-      // Push new colors into sigma settings + graph
+      // Push new colors into sigma settings + the LIVE graph (A5: the
+      // graphInstance snapshot is for React consumers, not rendering).
       const s = sigmaRef.current
-      const g = graphInstance
+      const g = s?.getGraph() ?? null
       if (s && g) {
         recolorGraph(g, fresh)
         s.setSetting("labelColor", { color: fresh.foreground })
@@ -749,7 +795,7 @@ export function Atlas({
     const hopsParam = params.get("hops")
     if (lensParam) {
       const ids = lensParam.split(",").filter((id): id is LensId =>
-        ["contradiction", "open-question", "provenance", "quality", "domain"].includes(id)
+        ["contradiction", "open-question", "provenance", "quality", "domain", "bridges"].includes(id)
       )
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot URL param read on mount; no subscriptions, no cascading renders
       if (ids.length) setActiveLenses(new Set(ids))
@@ -798,12 +844,18 @@ export function Atlas({
     if (!graphInstance) return new Map()
     const counts = new Map<string, number>()
     graphInstance.forEachNode((_, attrs) => {
-      counts.set(attrs.type, (counts.get(attrs.type) ?? 0) + 1)
+      counts.set(attrs.entityType, (counts.get(attrs.entityType) ?? 0) + 1)
     })
     return counts
   }, [graphInstance])
 
-  // Graph build + Sigma lifecycle (AMENDMENT 4: structurally preserved from v1)
+  // Graph build + Sigma lifecycle (AMENDMENT 4 → Living-Map A5).
+  // Sigma is constructed ONCE and persists across data changes — a second
+  // `new Sigma` in the same container drops node-program registration
+  // (sigma v3 bug; see CartographerMap dataNodeKey). On refocus the LIVE
+  // graph MIGRATES: warm-started FA2 in the worker, then an eased in-place
+  // morph (TheBrain-style re-centering) — enters grow in at a neighbor,
+  // exits shrink out, common nodes glide to their new positions.
   useEffect(() => {
     const container = containerRef.current
     if (!container || !data) return
@@ -813,16 +865,110 @@ export function Atlas({
     abortRef.current = new AbortController()
 
     const currentTokens = resolveMapTokens(document.documentElement)
-    const graph = adaptNeighborhood(data, currentTokens)
+    // Fresh snapshot per data change — React consumers (lens compose, type
+    // chips, a11y tree) key off its identity. The live graph inside sigma
+    // is a separate persistent instance.
+    const next = adaptNeighborhood(data, currentTokens)
+    setGraphInstance(next)
+
+    // Focal node emphasis (both paths — the migrate plan reads next sizes)
+    if (next.hasNode(entity)) {
+      const currentSize = next.getNodeAttribute(entity, "size")
+      next.setNodeAttribute(entity, "size", Math.max(currentSize, 12))
+      next.setNodeAttribute(entity, "forceLabel", true)
+    }
+
+    // ------------------- MIGRATE path (sigma already alive) -------------------
+    if (sigmaRef.current) {
+      const live = sigmaRef.current.getGraph()
+      if (next.order === 0) {
+        morphRef.current?.cancel()
+        live.clear()
+        sigmaRef.current.refresh()
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
+        setStatus({ state: "ready", message: "No entities in scope" })
+        return
+      }
+      const spawns = seedWarmPositions(next, live, entity)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
+      setStatus({ state: "laying-out", progressPercent: 0 })
+      applyLayout(next, {
+        iterations: next.order > 500 ? 150 : 250,
+        warmStart: true,
+        signal: abortRef.current.signal,
+        onProgress: (iter, total) => {
+          if (!cancelled) {
+            setStatus({ state: "laying-out", progressPercent: Math.round((iter / total) * 100) })
+          }
+        },
+      })
+        .then(() => {
+          if (cancelled || !sigmaRef.current) return
+          const liveGraph = sigmaRef.current.getGraph()
+          const plan = planMigrationTargets(liveGraph, next)
+          syncCommonNodeAttrs(
+            liveGraph,
+            next,
+            next.nodes().filter((id) => liveGraph.hasNode(id)),
+          )
+          // The bulk sync can't CLEAR the previous focal's forceLabel (the
+          // attr is simply absent on snapshot nodes) — reset it explicitly.
+          liveGraph.forEachNode((id) => {
+            liveGraph.setNodeAttribute(id, "forceLabel", id === entity)
+          })
+          // Entering nodes join at their spawn point, tiny + transparent,
+          // then grow in during the morph (spawnProgress drives the fade).
+          for (const id of plan.enter) {
+            const spawn = spawns.get(id)
+            liveGraph.addNode(id, {
+              ...next.getNodeAttributes(id),
+              ...(spawn ?? {}),
+              size: EXIT_SIZE,
+              spawnProgress: 0,
+            })
+          }
+          syncEdges(liveGraph, next)
+          void applyParallelEdgeCurvature(liveGraph)
+          morphRef.current?.cancel()
+          morphRef.current = morphPositions(liveGraph, plan.targets, {
+            durationMs: 600,
+            reducedMotion,
+            onFrame: () => sigmaRef.current?.refresh({ skipIndexation: true }),
+            onDone: () => {
+              const g = sigmaRef.current?.getGraph()
+              if (g) {
+                for (const id of plan.exit) {
+                  if (g.hasNode(id)) g.dropNode(id)
+                }
+              }
+              sigmaRef.current?.refresh()
+              setStatus({ state: "ready" })
+              setArrivalPingKey((k) => k + 1)
+              // Ease the camera to the new focal once the morph settles.
+              const nd = sigmaRef.current?.getNodeDisplayData(entity)
+              if (nd) {
+                sigmaRef.current?.getCamera().animate({ x: nd.x, y: nd.y }, { duration: 500 })
+              }
+            },
+          })
+        })
+        .catch((err) => {
+          if (cancelled) return
+          if ((err as Error).name === "AbortError") return
+          setStatus({ state: "error", message: err instanceof Error ? err.message : "Layout failed" })
+        })
+      return () => {
+        cancelled = true
+        abortRef.current?.abort()
+        morphRef.current?.cancel()
+      }
+    }
+
+    // ------------------- CONSTRUCT path (first data arrival) -------------------
+    const graph = next
     // Parallel edge fanning is async (lazy dynamic import to avoid WebGL in tests)
     void applyParallelEdgeCurvature(graph)
-    setGraphInstance(graph)
 
-    if (sigmaRef.current) {
-      sigmaRef.current.kill()
-      sigmaRef.current = null
-      setSigmaInstance(null)
-    }
     if (graph.order === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setStatus({ state: "ready", message: "No entities in scope" })
@@ -850,13 +996,6 @@ export function Atlas({
     sigmaRef.current = sigma
     setSigmaInstance(sigma)
 
-    // Focal node emphasis
-    if (graph.hasNode(entity)) {
-      const currentSize = graph.getNodeAttribute(entity, "size")
-      graph.setNodeAttribute(entity, "size", Math.max(currentSize, 12))
-      graph.setNodeAttribute(entity, "forceLabel", true)
-    }
-
     sigma.on("clickNode", ({ node, event }) => {
       const original = event.original as MouseEvent | undefined
       const pos = { x: original?.clientX ?? 0, y: original?.clientY ?? 0 }
@@ -879,6 +1018,9 @@ export function Atlas({
     sigma.on("enterNode", ({ node, event }) => {
       const original = event.original as MouseEvent | undefined
       const pos = { x: original?.clientX ?? 0, y: original?.clientY ?? 0 }
+      // Spotlight responds immediately; the tooltip card keeps its delay.
+      hoverIdRef.current = node
+      syncSpotlight()
       // 300ms intent delay
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
       hoverTimerRef.current = setTimeout(() => {
@@ -889,6 +1031,8 @@ export function Atlas({
 
     sigma.on("leaveNode", ({ node }) => {
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+      hoverIdRef.current = null
+      syncSpotlight()
       setHoverNode(null)
       try { graph.setNodeAttribute(node, "highlighted", false) } catch { /* ok */ }
     })
@@ -915,6 +1059,19 @@ export function Atlas({
     sigma.on("doubleClickStage", ({ event }) => {
       try { (event.original as MouseEvent | undefined)?.preventDefault?.() } catch { /* ok */ }
     })
+
+    // Zoom-LOD camera listener (A2) — refresh ONLY on tier change so thin
+    // edges fade/hide as the camera pulls back without a refresh storm.
+    const camera = sigma.getCamera()
+    const onCameraUpdate = () => {
+      const tier = lodTier(camera.ratio)
+      if (tier !== lodTierRef.current) {
+        lodTierRef.current = tier
+        sigma.refresh({ skipIndexation: true })
+      }
+    }
+    camera.on("updated", onCameraUpdate)
+    onCameraUpdate()
 
     setStatus({ state: "laying-out", progressPercent: 0 })
 
@@ -950,49 +1107,105 @@ export function Atlas({
     return () => {
       cancelled = true
       abortRef.current?.abort()
-      sigmaRef.current?.kill()
-      sigmaRef.current = null
     }
-    // Callbacks are read via refs (F2). Only `data` triggers full rebuild + relayout.
+    // Callbacks are read via refs (F2). Only `data` triggers construct/migrate.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: config.labelDensity changes don't need full rebuild
   }, [data])
 
-  // Re-bind sigma reducers when active lens set / type chips change
+  // Unmount-only teardown (A5): the persistent sigma instance is killed
+  // exactly once — never between data changes (kill() also detaches the
+  // camera LOD listener and all sigma event handlers).
+  useEffect(
+    () => () => {
+      morphRef.current?.cancel()
+      sigmaRef.current?.kill()
+      sigmaRef.current = null
+    },
+    [],
+  )
+
+  // Bridges lens scores (C1b): betweenness centrality over the ego graph,
+  // computed off-thread when the lens is active. Keyed on the graphInstance
+  // snapshot — a refocus/hop change produces a new snapshot and recomputes;
+  // toggling the lens back on for the same snapshot reuses the state as-is.
+  const [bridgeScores, setBridgeScores] = useState<Record<string, number> | null>(null)
+  const [bridgesComputing, setBridgesComputing] = useState(false)
+  useEffect(() => {
+    if (!activeLenses.has("bridges") || !graphInstance || graphInstance.order === 0) return
+    const controller = new AbortController()
+    setBridgesComputing(true)
+    const nodeIds = graphInstance.nodes()
+    const edges: Array<[string, string]> = []
+    graphInstance.forEachEdge((_edge, _attrs, source, target) => {
+      if (source !== target) edges.push([source, target])
+    })
+    computeBetweenness(nodeIds, edges, { signal: controller.signal })
+      .then((scores) => {
+        setBridgeScores(normalizeScores(scores))
+        setBridgesComputing(false)
+      })
+      .catch((err) => {
+        // Abort on refocus/lens-off is expected; anything else clears the chip.
+        if ((err as Error)?.name !== "AbortError") setBridgesComputing(false)
+      })
+    return () => controller.abort()
+  }, [activeLenses, graphInstance])
+
+  // Reducer chain — ALWAYS installed (Living-Map A1): lens compose →
+  // type-chip dim → hover/pin spotlight fade (atlas-reducers.ts). Spotlight
+  // state lives in the controller and is read per evaluation, so hover only
+  // refreshes — reducers are reinstalled solely on lens/chip/token changes.
   useEffect(() => {
     if (!sigmaInstance || !graphInstance) return
     const lensIds = Array.from(activeLenses)
-
-    // Type chip dimming: ghost filtered-out nodes
-    const hasTChips = activeTypeChips.size > 0
-
-    if (lensIds.length === 0 && !hasTChips) {
-      sigmaInstance.setSetting("nodeReducer", null)
-      sigmaInstance.setSetting("edgeReducer", null)
-    } else if (lensIds.length > 0) {
-      const { nodeReducer, edgeReducer } = composeLensesWithTokens(lensIds, tokens, graphInstance)
-      sigmaInstance.setSetting("nodeReducer", hasTChips
-        ? (node: string, attrs: AtlasNodeAttributes) => {
-            const reduced = nodeReducer(node, attrs)
-            if (!activeTypeChips.has(attrs.type)) {
-              return { ...reduced, color: tokens.clusterOther, size: Math.max(reduced.size * 0.5, 3) }
-            }
-            return reduced
-          }
-        : nodeReducer,
-      )
-      sigmaInstance.setSetting("edgeReducer", edgeReducer)
-    } else {
-      // Only type chip dimming
-      sigmaInstance.setSetting("nodeReducer", (_node: string, attrs: AtlasNodeAttributes) => {
-        if (!activeTypeChips.has(attrs.type)) {
-          return { ...attrs, color: tokens.clusterOther, size: Math.max(attrs.size * 0.5, 3) }
-        }
-        return attrs
-      })
-      sigmaInstance.setSetting("edgeReducer", null)
+    const lens =
+      lensIds.length > 0
+        ? composeLensesWithTokens(lensIds, tokens, graphInstance, {
+            betweenness: bridgeScores ?? undefined,
+          })
+        : null
+    const spotlightReader = {
+      neighbors: () => spotlightRef.current.neighbors(),
+      progress: () => spotlightRef.current.progress(),
     }
+    const reducerTokens = { clusterOther: tokens.clusterOther, edge: tokens.edge }
+    sigmaInstance.setSetting(
+      "nodeReducer",
+      buildAtlasNodeReducer({
+        lensNodeReducer: lens?.nodeReducer,
+        typeChips: activeTypeChips,
+        tokens: reducerTokens,
+        spotlight: spotlightReader,
+      }),
+    )
+    sigmaInstance.setSetting(
+      "edgeReducer",
+      buildAtlasEdgeReducer({
+        lensEdgeReducer: lens?.edgeReducer,
+        typeChips: activeTypeChips,
+        tokens: reducerTokens,
+        spotlight: spotlightReader,
+        // Edge keys belong to the LIVE graph (exit edges mid-fade aren't in
+        // the snapshot) — resolve endpoints lazily against sigma's graph.
+        graph: {
+          source: (e: string) => sigmaRef.current?.getGraph().source(e) ?? "",
+          target: (e: string) => sigmaRef.current?.getGraph().target(e) ?? "",
+        },
+        getLodTier: () => lodTierRef.current,
+      }),
+    )
     sigmaInstance.refresh()
-  }, [sigmaInstance, graphInstance, activeLenses, activeTypeChips, tokens])
+  }, [sigmaInstance, graphInstance, activeLenses, activeTypeChips, tokens, bridgeScores])
+
+  // Focus-edge highlight overlay (shared with Cartographer): draws the
+  // spotlight center's incident edges above the node mesh, fading with the
+  // same eased progress as the node dimming.
+  useHighlightEdges({
+    sigma: sigmaInstance as unknown as Sigma | null,
+    tokens,
+    getFocusCenter: useCallback(() => pinnedIdRef.current ?? hoverIdRef.current ?? null, []),
+    getFocusProgress: useCallback(() => spotlightRef.current.progress(), []),
+  })
 
   const handleLensToggle = useCallback((id: LensId) => {
     setActiveLenses((prev) => {
@@ -1193,6 +1406,13 @@ export function Atlas({
             aria-hidden="true"
           />
           Computing layout… {renderedStatus.progressPercent ?? 0}%
+        </div>
+      )}
+      {/* Bridges lens: betweenness computing indicator (C1b) */}
+      {activeLenses.has("bridges") && bridgesComputing && renderedStatus.state === "ready" && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full border border-border/60 bg-card/90 px-3 py-1.5 text-label-xs text-muted-foreground backdrop-blur">
+          <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" aria-hidden="true" />
+          Finding bridges…
         </div>
       )}
       {renderedStatus.state === "error" && (

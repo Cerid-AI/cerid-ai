@@ -20,6 +20,9 @@ import forceAtlas2 from "graphology-layout-forceatlas2"
 interface LayoutNode {
   id: string
   mention_count: number
+  /** Warm-start position (A5 ego migration) — random when omitted. */
+  x?: number
+  y?: number
 }
 interface LayoutEdge {
   source: string
@@ -61,8 +64,10 @@ function runLayout(payload: LayoutRequest["payload"]): void {
   const graph = new Graph({ multi: false, allowSelfLoops: false })
   for (const node of payload.nodes) {
     graph.addNode(node.id, {
-      x: Math.random(),
-      y: Math.random(),
+      // Warm-start positions (A5) preserve the mental map — FA2 relaxes
+      // from where nodes already are instead of re-rolling the layout.
+      x: node.x ?? Math.random(),
+      y: node.y ?? Math.random(),
       // forceatlas2 reads "size" if present; map from mention_count
       size: 1 + Math.log1p(node.mention_count),
     })

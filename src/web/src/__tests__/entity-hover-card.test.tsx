@@ -137,6 +137,7 @@ function makeAttrs(overrides: Partial<AtlasNodeAttributes> = {}): AtlasNodeAttri
     id: "entity:alpha",
     name: "Alpha Entity",
     type: "bordered",
+    entityType: "Person",
     mention_count: 5,
     trust_state: "verified",
     community: null,

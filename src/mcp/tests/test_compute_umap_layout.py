@@ -430,6 +430,237 @@ def test_force_layout_fills_disc_not_ring():
     assert inner_frac > 0.10, f"hollow ring: only {inner_frac:.1%} of nodes inside 0.4*maxR"
 
 
+# ---- semantic layout (A7) ---------------------------------------------------
+
+
+def _semantic_entities(n_comms: int = 4, per: int = 8) -> list[dict]:
+    return [
+        {"id": f"e{c}:{m}", "community": f"0:{c}", "old_x": None, "old_y": None}
+        for c in range(n_comms)
+        for m in range(per)
+    ]
+
+
+def _install_pacmap_stub(monkeypatch) -> None:
+    """Inject a deterministic fake pacmap module (projection = first 2 dims)."""
+    import sys
+    import types
+
+    class _StubPaCMAP:
+        def __init__(self, n_components: int = 2, random_state: int | None = None, **_kw):
+            assert n_components == 2
+            assert random_state is not None, "semantic layout must fix random_state"
+
+        def fit_transform(self, X):  # noqa: N803 — sklearn-style API
+            return np.asarray(X)[:, :2].astype(np.float64)
+
+    stub = types.ModuleType("pacmap")
+    stub.PaCMAP = _StubPaCMAP  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pacmap", stub)
+
+
+def test_semantic_layout_fa2_fallback_without_pacmap(monkeypatch):
+    """No pacmap installed → FA2-over-SIMILAR_TO fallback covers every entity."""
+    import sys
+
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    # `import pacmap` raises ImportError when sys.modules entry is None.
+    monkeypatch.setitem(sys.modules, "pacmap", None)
+
+    entities = _semantic_entities()
+    edges = [
+        (f"e{c}:0", f"e{c}:{m}", 0.8)
+        for c in range(4)
+        for m in range(1, 8)
+    ]
+    job = ComputeUmap3DJob()
+    job._fetch_similar_edges = lambda driver: edges  # type: ignore[method-assign]
+    out = job._semantic_layout(entities, driver=None)
+
+    assert len(out) == len(entities)
+    assert all(o["method"] == "semantic_fa2" for o in out)
+    assert all(math.isfinite(o["x"]) and math.isfinite(o["y"]) for o in out)
+
+
+def test_semantic_layout_pacmap_primary(monkeypatch):
+    """With pacmap importable and enough embeddings, the primary path runs."""
+    from app.processor.jobs.compute_umap_3d import (
+        _FALLBACK_SCALE,
+        _SEMANTIC_MIN_EMBEDDINGS,
+        ComputeUmap3DJob,
+    )
+
+    _install_pacmap_stub(monkeypatch)
+
+    n = max(30, _SEMANTIC_MIN_EMBEDDINGS + 10)
+    entities = [
+        {"id": f"e{i}", "community": f"0:{i % 3}", "old_x": None, "old_y": None}
+        for i in range(n)
+    ]
+    ids = [f"e{i}" for i in range(n)]
+    rng = np.random.default_rng(3)
+    emb = rng.standard_normal((n, 4)).astype(np.float32)
+
+    job = ComputeUmap3DJob()
+    job._fetch_embeddings = lambda driver: (ids, emb)  # type: ignore[method-assign]
+    out = job._semantic_layout(entities, driver=None)
+
+    assert len(out) == n
+    assert all(o["method"] == "semantic_pacmap" for o in out)
+    # Rescaled consistently with the other layouts: core max radius = scale.
+    radii = [math.hypot(o["x"], o["y"]) for o in out]
+    assert abs(max(radii) - _FALLBACK_SCALE) < 1e-6
+
+
+def test_semantic_layout_pacmap_places_unembedded_at_community(monkeypatch):
+    """Entities without embeddings land near their community's projected mean."""
+    from app.processor.jobs.compute_umap_3d import (
+        _SEMANTIC_MIN_EMBEDDINGS,
+        ComputeUmap3DJob,
+    )
+
+    _install_pacmap_stub(monkeypatch)
+
+    n_emb = _SEMANTIC_MIN_EMBEDDINGS
+    entities = [
+        {"id": f"e{i}", "community": "0:0" if i % 2 == 0 else "0:1",
+         "old_x": None, "old_y": None}
+        for i in range(n_emb)
+    ]
+    # One extra entity per community with no embedding, one with no community.
+    entities.append({"id": "no-emb-a", "community": "0:0", "old_x": None, "old_y": None})
+    entities.append({"id": "orphan", "community": None, "old_x": None, "old_y": None})
+
+    ids = [f"e{i}" for i in range(n_emb)]
+    # Community 0:0 members embed near (+5, 0); community 0:1 near (-5, 0).
+    emb = np.array(
+        [[5.0, 0.0, 0.0] if i % 2 == 0 else [-5.0, 0.0, 0.0] for i in range(n_emb)],
+        dtype=np.float32,
+    )
+
+    job = ComputeUmap3DJob()
+    job._fetch_embeddings = lambda driver: (ids, emb)  # type: ignore[method-assign]
+    out = job._semantic_layout(entities, driver=None)
+    by_id = {o["id"]: o for o in out}
+
+    # The unembedded 0:0 member sits on the same side as its community.
+    assert by_id["no-emb-a"]["x"] > 0
+    # The orphan is pushed to the outer shell (beyond the embedded core).
+    core_max = max(
+        math.hypot(o["x"], o["y"]) for o in out if o["id"].startswith("e")
+    )
+    assert math.hypot(by_id["orphan"]["x"], by_id["orphan"]["y"]) > core_max
+
+
+def test_semantic_layout_min_embeddings_falls_back(monkeypatch):
+    """Fewer embeddings than the minimum → FA2 fallback even with pacmap present."""
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    _install_pacmap_stub(monkeypatch)
+
+    entities = _semantic_entities(n_comms=2, per=5)
+    edges = [(f"e{c}:0", f"e{c}:{m}", 0.9) for c in range(2) for m in range(1, 5)]
+
+    job = ComputeUmap3DJob()
+    job._fetch_embeddings = lambda driver: (["e0:0"], np.zeros((1, 4), dtype=np.float32))  # type: ignore[method-assign]
+    job._fetch_similar_edges = lambda driver: edges  # type: ignore[method-assign]
+    out = job._semantic_layout(entities, driver=None)
+
+    assert all(o["method"] == "semantic_fa2" for o in out)
+
+
+def test_fetch_similar_edges_scores_not_downweighted():
+    """_fetch_similar_edges returns SIMILAR_TO cosine scores at full weight."""
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    rows = [{"s": "a", "t": "b", "w": 0.91}]
+    driver = _make_mock_driver(rows)
+    job = ComputeUmap3DJob()
+    edges = job._fetch_similar_edges(driver)
+
+    assert edges == [("a", "b", 0.91)]
+
+
+# ---- c-TF-IDF top terms (A3) -------------------------------------------------
+
+
+def test_community_top_terms_basic():
+    """Dominant per-community tokens surface; short tokens are dropped."""
+    from app.processor.jobs.compute_umap_3d import _community_top_terms
+
+    docs = {
+        "0:1": ["Kubernetes Cluster", "Kubernetes Deployment", "Helm Chart"],
+        "0:2": ["Interest Rate", "Rate Hike", "Federal Reserve"],
+    }
+    out = _community_top_terms(docs)
+
+    assert set(out.keys()) == {"0:1", "0:2"}
+    assert "kubernetes" in out["0:1"][:2]
+    assert "rate" in out["0:2"][:2]
+    assert all(len(t) >= 3 for terms in out.values() for t in terms)
+    assert all(len(terms) <= 5 for terms in out.values())
+
+
+def test_community_top_terms_discriminative():
+    """A community-exclusive term outranks an equally frequent shared term."""
+    from app.processor.jobs.compute_umap_3d import _community_top_terms
+
+    docs = {
+        "a": ["common alpha", "common alpha"],
+        "b": ["common beta", "common beta"],
+    }
+    out = _community_top_terms(docs)
+    assert out["a"][0] == "alpha"
+    assert out["b"][0] == "beta"
+
+
+def test_community_top_terms_empty_and_short_tokens():
+    """Empty input → empty dict; all-short tokens → empty term list."""
+    from app.processor.jobs.compute_umap_3d import _community_top_terms
+
+    assert _community_top_terms({}) == {}
+    out = _community_top_terms({"a": ["ab cd", "x y"], "b": ["longword here"]})
+    assert out["a"] == []
+    assert "longword" in out["b"]
+
+
+def test_write_community_top_terms_persists_all_levels():
+    """top_terms are computed per level and written via one UNWIND batch."""
+    from unittest.mock import MagicMock
+
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    read_rows = [
+        {"cid": "0:1", "level": 0, "names": ["Kubernetes Cluster", "Kubernetes Node"]},
+        {"cid": "0:2", "level": 0, "names": ["Interest Rate", "Rate Hike"]},
+        {"cid": "1:7", "level": 1, "names": ["Kubernetes Cluster", "Interest Rate"]},
+    ]
+    calls: list[tuple[str, dict]] = []
+    session = MagicMock()
+    session.__enter__ = MagicMock(return_value=session)
+    session.__exit__ = MagicMock(return_value=False)
+
+    def _run(query, **kwargs):
+        calls.append((query, kwargs))
+        result = MagicMock()
+        result.data.return_value = read_rows
+        return result
+
+    session.run = _run
+    driver = MagicMock()
+    driver.session.return_value = session
+
+    ComputeUmap3DJob()._write_community_top_terms(driver)
+
+    write_calls = [c for c in calls if "UNWIND" in c[0] and "top_terms" in c[0]]
+    assert len(write_calls) == 1
+    by_id = {r["id"]: r["terms"] for r in write_calls[0][1]["rows"]}
+    assert "kubernetes" in by_id["0:1"]
+    assert "rate" in by_id["0:2"]
+    assert "1:7" in by_id  # every level present gets terms
+
+
 # ---- module-level import needed for test ----
 from app.processor.jobs.compute_umap_3d import (  # noqa: E402
     _NOVERLAP_BASE_RADIUS,

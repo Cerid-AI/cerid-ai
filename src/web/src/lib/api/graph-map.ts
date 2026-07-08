@@ -7,7 +7,7 @@
 
 import { mcpUrl, mcpHeaders, extractError } from "./common"
 import type { EntityEmbedding3D } from "./embeddings-3d"
-import type { MapLayout } from "@/lib/graph/cycle4-contracts"
+import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
 
 // Re-export the entity type so map consumers don't have to import two modules.
 export type { EntityEmbedding3D }

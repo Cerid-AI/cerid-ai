@@ -6,7 +6,7 @@
 // pure functions that require no WebGL or jsdom context.
 
 import { describe, it, expect } from "vitest"
-import { degradeTier, upgradeTier, visibleLabelCount, QUALITY_TIERS } from "../quality"
+import { degradeTier, upgradeTier, visibleLabelCount, labelFillOpacity, QUALITY_TIERS } from "../quality"
 
 describe("degradeTier", () => {
   it("ultra steps down to high", () => {
@@ -112,5 +112,42 @@ describe("visibleLabelCount", () => {
   it("respects max=0 at all distances", () => {
     expect(visibleLabelCount(0, 0)).toBe(0)
     expect(visibleLabelCount(100, 0)).toBe(0)
+  })
+})
+
+describe("labelFillOpacity", () => {
+  it("is brightest when close in (< 28)", () => {
+    expect(labelFillOpacity(10)).toBeCloseTo(0.85)
+    expect(labelFillOpacity(27)).toBeCloseTo(0.85)
+  })
+
+  it("dims by one step at the default viewing band (28–39)", () => {
+    expect(labelFillOpacity(28)).toBeCloseTo(0.75)
+    expect(labelFillOpacity(39)).toBeCloseTo(0.75)
+  })
+
+  it("dims further when zoomed out (40–54)", () => {
+    expect(labelFillOpacity(40)).toBeCloseTo(0.62)
+    expect(labelFillOpacity(54)).toBeCloseTo(0.62)
+  })
+
+  it("is faintest very far out (>= 55) but never fully invisible", () => {
+    expect(labelFillOpacity(55)).toBeCloseTo(0.5)
+    expect(labelFillOpacity(1000)).toBeCloseTo(0.5)
+  })
+
+  it("decreases monotonically with distance", () => {
+    const samples = [5, 27, 28, 39, 40, 54, 55, 200].map(labelFillOpacity)
+    for (let i = 1; i < samples.length; i++) {
+      expect(samples[i]).toBeLessThanOrEqual(samples[i - 1])
+    }
+  })
+
+  it("always returns a value in [0, 1]", () => {
+    for (const d of [-5, 0, 30, 60, 500]) {
+      const o = labelFillOpacity(d)
+      expect(o).toBeGreaterThanOrEqual(0)
+      expect(o).toBeLessThanOrEqual(1)
+    }
   })
 })

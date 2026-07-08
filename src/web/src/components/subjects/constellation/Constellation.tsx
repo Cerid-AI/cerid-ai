@@ -10,21 +10,30 @@
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react"
 import { Canvas } from "@react-three/fiber"
-import { AdaptiveDpr, OrbitControls, PerformanceMonitor, Stars } from "@react-three/drei"
+import { AdaptiveDpr, OrbitControls, PerformanceMonitor } from "@react-three/drei"
 import { useQuery } from "@tanstack/react-query"
-import { Loader2 } from "lucide-react"
+import { Loader2, Minimize2, Maximize2, Play, Pause, Shuffle, GitMerge } from "lucide-react"
+import { Slider } from "@/components/ui/slider"
 import { fetchEmbeddings3D } from "@/lib/api/embeddings-3d"
 import type { Vec3 } from "./drag-plane"
 import { InstancedNodes } from "./instanced-nodes"
 import { NeuralLinks } from "./neural-links"
 import { HubLabels } from "./hub-labels"
 import { AmbientParticles } from "./ambient-particles"
+import { ParallaxStarfield } from "./starfield"
+import { NebulaBackdrop } from "./nebula-backdrop"
+import { SimilarNeighborsPanel } from "./similar-neighbors-panel"
+import { rankSimilarNeighbors } from "./similar-neighbors"
 import { TourCameraAnimator, TourControlPanel, useTourState, FocusCameraAnimator, FocusExitSampler } from "./tour-controller"
 import { QUALITY_SETTINGS, QUALITY_TIERS, degradeTier, upgradeTier, loadQuality, saveQuality, type QualityTier } from "./quality"
 import { communityRgb, trustRgb, typeRgb, domainRgb, nodeBaseAlpha } from "./palette"
 import { CartographerMap } from "./map/CartographerMap"
 import { useGraphMap } from "./map/use-graph-map"
 import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
+import { Timebar } from "./map/timebar"
+import { buildTimeHistogram } from "./map/time-window"
+import { StructuralGapsPanel } from "./map/structural-gaps-panel"
+import { fetchStructuralGaps, type StructuralGap } from "@/lib/api/graph-structural-gaps"
 import { useCommunityHierarchy } from "./map/use-community-hierarchy"
 import { buildAncestorIndex } from "./map/community-hierarchy-levels"
 import { buildSuperNodes3D } from "./supernodes-3d"
@@ -32,21 +41,23 @@ import { CollapseLOD, SuperNodes3D } from "./supernodes-layer"
 import { boundingSphere, framingDistanceFor } from "./camera-focus-3d"
 import type { CommunityHull } from "@/lib/api/graph-map"
 import { useNavigation } from "@/contexts/navigation-context"
+import { useTheme } from "@/hooks/use-theme"
 import { resolveMapTokens, type MapTokens } from "./map/community-layer"
-import type { MapLayout } from "@/lib/graph/cycle4-contracts"
+import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
 import { TRUST_HALO_HEX, SURFACE_HEX } from "@/theme/shader-tokens"
 
 // ---------------------------------------------------------------------------
 // View-mode persistence
 // ---------------------------------------------------------------------------
 
-type ViewMode = "map" | "3d"
+type ViewMode = "map" | "3d" | "live"
 const VIEW_MODE_KEY = "cerid-constellation-mode"
+const VIEW_MODE_LABEL: Record<ViewMode, string> = { map: "Map", "3d": "3D", live: "Live" }
 
 function loadViewMode(): ViewMode {
   try {
     const stored = localStorage.getItem(VIEW_MODE_KEY)
-    if (stored === "map" || stored === "3d") return stored
+    if (stored === "map" || stored === "3d" || stored === "live") return stored
   } catch {
     // storage unavailable
   }
@@ -61,16 +72,23 @@ function saveViewMode(mode: ViewMode): void {
   }
 }
 
-type ColorLens = "cluster" | "trust" | "type" | "domain"
-const COLOR_LENSES: { id: ColorLens; label: string; hint: string }[] = [
+type ColorLens = "cluster" | "trust" | "type" | "domain" | "bridges"
+// mapOnly lenses need the 2D graph structure (e.g. betweenness) and aren't
+// offered in the 3D toolbar, which has no graphology graph to compute over.
+const COLOR_LENSES: { id: ColorLens; label: string; hint: string; mapOnly?: boolean }[] = [
   { id: "cluster", label: "Clusters", hint: "Color by knowledge community" },
   { id: "trust", label: "Trust", hint: "Verification bands: green verified · amber partial · red unverified" },
   { id: "type", label: "Types", hint: "Color by entity type" },
   { id: "domain", label: "Domains", hint: "Color by primary knowledge domain (hash-stable; icon + label identify collisions)" },
+  { id: "bridges", label: "Bridges", hint: "Betweenness centrality — highlights the connector entities that bridge otherwise-separate clusters", mapOnly: true },
 ]
 
 // Postprocessing only loads for Ultra — nobody else pays for the bundle.
 const UltraEffects = lazy(() => import("./ultra-effects"))
+
+// cosmos.gl "Live" mode (B8) is its own lazy chunk (vendor-cosmos) — only
+// loaded when the user switches to the self-organizing scene.
+const CosmosLive = lazy(() => import("./cosmos-live"))
 
 // Community drill-down (B4.4): alpha applied to every entity outside the
 // focused community once a super-node is clicked. Reuses the same
@@ -166,16 +184,28 @@ function MapConfigPanel({
               </div>
             </div>
 
-            {/* Hulls toggle */}
-            <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={config.hullsVisible}
-                onChange={(e) => onChange({ hullsVisible: e.target.checked })}
-                className="rounded border-border/60"
-              />
-              Show community regions
-            </label>
+            {/* Territories mode (A4): nebula = canvas hulls, contours = GPU metaballs */}
+            <div>
+              <div className="mb-1 text-label-xs font-medium text-muted-foreground">Regions</div>
+              <div className="flex gap-0.5" role="radiogroup" aria-label="Region rendering">
+                {(["off", "nebula", "contours"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={config.territories === v}
+                    onClick={() => onChange({ territories: v })}
+                    className={`rounded px-1.5 py-0.5 text-label-xs capitalize transition-colors ${
+                      config.territories === v
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/30"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Live layout toggle */}
             <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
@@ -236,7 +266,7 @@ function MapConfigPanel({
 // ---------------------------------------------------------------------------
 
 export default function Constellation({ focalEntity, filter, onNodeClick }: ConstellationProps) {
-  const { goTo } = useNavigation()
+  const { goTo, composeChat } = useNavigation()
 
   // ---------------------------------------------------------------------------
   // View mode: "map" (Cartographer 2D) | "3d" (R3F scene)
@@ -288,10 +318,64 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   // Community card state (shown when a hull/community label is clicked)
   // ---------------------------------------------------------------------------
   const [pinnedCommunity, setPinnedCommunity] = useState<CommunityHull | null>(null)
+  // Per-community combos (A10): level-0 community ids collapsed into a disc.
+  const [manualCollapsed, setManualCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  // Timebar (A9) window + timelapse (A8) cursor. The cursor advances in
+  // discrete steps (not per-frame) so playback never churns React.
+  const [timeWindow, setTimeWindow] = useState<[number, number] | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [playCursor, setPlayCursor] = useState<number | null>(null)
+  const toggleManualCollapsed = useCallback((id: string) => {
+    setManualCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  // Effective time filter read by the map's node reducer: brush window +
+  // playback cursor (cursor only while playing).
+  const timeFilter = useMemo(
+    () =>
+      timeWindow || playing
+        ? { window: timeWindow, cursor: playing ? playCursor : null }
+        : null,
+    [timeWindow, playing, playCursor],
+  )
 
   const handleCommunityClick = useCallback((community: CommunityHull) => {
     setPinnedCommunity((prev) => (prev?.id === community.id ? null : community))
   }, [])
+
+  // ---------------------------------------------------------------------------
+  // Structural gaps (C2): the advisory panel. Fetches only when open + in map
+  // mode. Hovering a gap highlights its two hulls; "Explore in chat" seeds the
+  // composer to reason about bridging them.
+  // ---------------------------------------------------------------------------
+  const [showGaps, setShowGaps] = useState(false)
+  const [gapHighlight, setGapHighlight] = useState<ReadonlySet<string> | undefined>(undefined)
+  const gapsQuery = useQuery({
+    queryKey: ["graph-structural-gaps"],
+    queryFn: ({ signal }) => fetchStructuralGaps(8, signal),
+    enabled: viewMode === "map" && showGaps,
+    staleTime: 10 * 60 * 1000,
+  })
+  const handleGapHover = useCallback((gap: StructuralGap | null) => {
+    setGapHighlight(gap ? new Set([gap.community_a.id, gap.community_b.id]) : undefined)
+  }, [])
+  const handleGapExplore = useCallback(
+    (gap: StructuralGap) => {
+      const bridges = gap.bridging_candidates.map((c) => c.name).join(", ")
+      composeChat({
+        text:
+          `My knowledge graph shows "${gap.community_a.label}" and "${gap.community_b.label}" are closely related in meaning ` +
+          `but barely connected. How are they linked, and what should I capture to bridge them?` +
+          (bridges ? ` Possible bridging entities: ${bridges}.` : ""),
+      })
+    },
+    [composeChat],
+  )
 
   // ---------------------------------------------------------------------------
   // 3D mode: existing R3F data query (still needed when viewMode === "3d")
@@ -306,8 +390,9 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     staleTime: 60 * 1000,
     refetchInterval: 75 * 1000,
     placeholderData: (prev) => prev,
-    // Only fetch for 3D mode
-    enabled: viewMode === "3d",
+    // Fetch for the 3D scene and the cosmos "Live" scene (both consume the
+    // same embeddings + links payload).
+    enabled: viewMode === "3d" || viewMode === "live",
   })
 
   // ---------------------------------------------------------------------------
@@ -526,14 +611,82 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   const focusIndex = pinned ?? hover?.index ?? null
   const pinnedEntity = pinned !== null ? data?.entities[pinned] : undefined
 
+  // kNN neighbors panel (B5): the pinned node's strongest SIMILAR_TO neighbors,
+  // ranked client-side from the links already in hand. The pinned node's
+  // incident edges (similar included) already brighten via focusIndex → the
+  // neural-links aDim channel, so the panel only needs to surface the ranking.
+  const similarNeighbors = useMemo(() => {
+    if (pinned === null || !data) return []
+    return rankSimilarNeighbors(pinned, data.links ?? [], data.entities, 10)
+  }, [pinned, data])
+
+  // One-shot camera fly-to a picked neighbor (B5). Fed to a dedicated
+  // FocusCameraAnimator; cleared on unpin so it never re-fires.
+  const [flyToNode, setFlyToNode] = useState<Vec3 | null>(null)
+  useEffect(() => {
+    if (pinned === null) setFlyToNode(null)
+  }, [pinned])
+  const handlePickNeighbor = useCallback(
+    (index: number) => {
+      const ent = data?.entities[index]
+      setPinned(index)
+      // A node fly-to supersedes any community drill-down focus.
+      setFocus(null)
+      if (ent) setFlyToNode([ent.x, ent.y, ent.z])
+    },
+    [data],
+  )
+
   // Reduced motion collapses growth, pulses, breathing, and auto-rotate.
   const animate = useMemo(
     () => !(typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches),
     [],
   )
 
+  // Resolved theme drives the cinema pass (B1): dark → bloom + vignette;
+  // light → ambient occlusion, no bloom. Also gates the dark-only nebula (B4)
+  // and picks the label palette (B2). Reactive via useTheme's external store.
+  const { theme } = useTheme()
+  const isDark = theme === "dark"
+
+  // cosmos.gl "Live" mode controls (B8). Starts frozen under reduced motion.
+  const [liveRunning, setLiveRunning] = useState(() => animate)
+  const [liveRepulsion, setLiveRepulsion] = useState(1.0)
+  const [liveBigBang, setLiveBigBang] = useState(0)
+
   // Ambient mode = opt-in glow/neon; forced off under reduced-motion (Cycle 4 §5).
   const effectiveAmbient = ambientMode && animate
+
+  // Timelapse playback (A8): step a growth cursor over the entity birth span
+  // in discrete frames (~48 over 12s) so nodes appear in creation order.
+  // Discrete steps, not per-frame rAF, keep React churn negligible.
+  const togglePlay = useCallback(() => setPlaying((p) => !p), [])
+  useEffect(() => {
+    if (!playing) {
+      setPlayCursor(null)
+      return
+    }
+    const hist = buildTimeHistogram(mapData?.entities ?? [], 48)
+    if (!hist) {
+      setPlaying(false)
+      return
+    }
+    const STEPS = 48
+    const STEP_MS = 250
+    let step = 0
+    setPlayCursor(hist.minMs)
+    const id = setInterval(() => {
+      step += 1
+      const t = hist.minMs + ((hist.maxMs - hist.minMs) * step) / STEPS
+      setPlayCursor(t)
+      if (step >= STEPS) {
+        clearInterval(id)
+        // Hold the full corpus for a beat, then stop.
+        setTimeout(() => setPlaying(false), 600)
+      }
+    }, STEP_MS)
+    return () => clearInterval(id)
+  }, [playing, mapData])
 
   // Quality tier — Low (flat 2D) → Ultra (AAA bloom). Persisted per machine.
   const [quality, setQuality] = useState<QualityTier>(loadQuality)
@@ -740,10 +893,43 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           newEntityIds={newIds.size > 0 ? newIds : undefined}
           onInspect={onNodeClick}
           onCommunityClick={handleCommunityClick}
+          manualCollapsed={manualCollapsed}
+          onManualExpand={toggleManualCollapsed}
+          timeFilter={timeFilter}
           layout={layout}
           layoutFallback={mapData?.layout_fallback}
           search={search}
+          highlightCommunities={gapHighlight}
         />
+
+        {/* Structural-gaps advisory panel (C2) — top-left, over the map */}
+        {showGaps && (
+          <StructuralGapsPanel
+            gaps={gapsQuery.data?.gaps ?? []}
+            isLoading={gapsQuery.isLoading}
+            isError={gapsQuery.isError}
+            errorMessage={gapsQuery.error instanceof Error ? gapsQuery.error.message : undefined}
+            onClose={() => {
+              setShowGaps(false)
+              setGapHighlight(undefined)
+            }}
+            onHoverGap={handleGapHover}
+            onExplore={handleGapExplore}
+          />
+        )}
+
+        {/* Timebar (A9 filter + A8 timelapse) — bottom-center over the map */}
+        <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+          <Timebar
+            entities={mapData?.entities ?? []}
+            window={timeWindow}
+            onWindowChange={setTimeWindow}
+            cursor={playing ? playCursor : null}
+            playing={playing}
+            onTogglePlay={togglePlay}
+            canPlay={animate}
+          />
+        </div>
 
         {/* Community card (shown when a hull is clicked) */}
         {pinnedCommunity && (
@@ -784,15 +970,34 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
                 </div>
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                if (pinnedCommunity.top_hubs[0]) onNodeClick?.(pinnedCommunity.top_hubs[0].id)
-              }}
-              className="mt-2 w-full rounded-md bg-accent px-2 py-1.5 text-label-xs font-medium text-accent-foreground hover:bg-accent/80"
-            >
-              Open in Atlas
-            </button>
+            <div className="mt-2 flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => toggleManualCollapsed(pinnedCommunity.id)}
+                className="flex flex-1 items-center justify-center gap-1 rounded-md border border-border/60 px-2 py-1.5 text-label-xs font-medium text-foreground hover:bg-accent/40"
+              >
+                {manualCollapsed.has(pinnedCommunity.id) ? (
+                  <>
+                    <Maximize2 className="size-3" aria-hidden="true" />
+                    Expand
+                  </>
+                ) : (
+                  <>
+                    <Minimize2 className="size-3" aria-hidden="true" />
+                    Collapse
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (pinnedCommunity.top_hubs[0]) onNodeClick?.(pinnedCommunity.top_hubs[0].id)
+                }}
+                className="flex-1 rounded-md bg-accent px-2 py-1.5 text-label-xs font-medium text-accent-foreground hover:bg-accent/80"
+              >
+                Open in Atlas
+              </button>
+            </div>
           </div>
         )}
 
@@ -809,6 +1014,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
                 { id: "force", label: "Default map", hint: "Force-directed layout (default)" },
                 { id: "wells", label: "Tight clusters", hint: "Well-separated cluster layout" },
                 { id: "domain", label: "Domains apart", hint: "Domain-separated layout" },
+                { id: "semantic", label: "Semantics", hint: "Embedding-space layout — position reflects meaning" },
               ] as { id: MapLayout; label: string; hint: string }[]
             ).map((preset) => (
               <button
@@ -829,6 +1035,25 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             ))}
           </div>
 
+          {/* Structural gaps toggle (C2) */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowGaps((v) => !v)
+              if (showGaps) setGapHighlight(undefined)
+            }}
+            aria-pressed={showGaps}
+            title="Structural gaps — topics that should connect but don't yet"
+            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-label-xs backdrop-blur transition-colors ${
+              showGaps
+                ? "border-accent bg-accent/30 text-accent-foreground"
+                : "border-border/60 bg-card/80 text-muted-foreground hover:bg-accent/40"
+            }`}
+          >
+            <GitMerge className="h-3 w-3" aria-hidden="true" />
+            Gaps
+          </button>
+
           {/* Map config popover */}
           <MapConfigPanel
             config={mapConfig}
@@ -844,7 +1069,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             role="radiogroup"
             aria-label="View mode"
           >
-            {(["map", "3d"] as ViewMode[]).map((m) => (
+            {(["map", "3d", "live"] as ViewMode[]).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -857,7 +1082,130 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
                     : "text-muted-foreground hover:bg-accent/40"
                 }`}
               >
-                {m === "map" ? "Map" : "3D"}
+                {VIEW_MODE_LABEL[m]}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Live mode (B8) — cosmos.gl self-organizing GPU force layout. Shares the 3D
+  // embeddings query; its own canvas/WebGL context (never shared with sigma/R3F).
+  // ---------------------------------------------------------------------------
+  if (viewMode === "live") {
+    return (
+      <div
+        className="relative h-full w-full"
+        style={{ background: tokens3D.background }} // drift-allowed: token-routed runtime value
+        role="application"
+        aria-roledescription="Live self-organizing knowledge graph"
+        aria-label={`Live constellation of ${data?.count ?? 0} entities`}
+      >
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Loading live graph…
+          </div>
+        ) : isError ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error instanceof Error ? error.message : "Failed to load the live graph."}
+            </div>
+          </div>
+        ) : !data || data.entities.length === 0 ? (
+          <div className="flex h-full items-center justify-center p-12">
+            <div className="max-w-md rounded-xl border border-dashed border-border bg-card/40 p-8 text-center">
+              <h2 className="text-lg font-semibold text-foreground">No graph to simulate yet</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Live mode self-organizes your entities in real time. Ingest a
+                document and the projection recomputes within a few minutes.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Warming up the simulation…
+              </div>
+            }
+          >
+            <CosmosLive
+              entities={data.entities}
+              links={data.links ?? []}
+              colors={nodeColors}
+              playing={liveRunning}
+              repulsion={liveRepulsion}
+              bigBangNonce={liveBigBang}
+              reducedMotion={!animate}
+              background={tokens3D.background}
+              onNodeClick={(id) => onNodeClick?.(id)}
+            />
+            {/* Live controls — play/pause, re-run big bang, repulsion. */}
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+              <div className="liquid-glass pointer-events-auto flex items-center gap-3 rounded-full px-3 py-1.5">
+                <button
+                  type="button"
+                  onClick={() => setLiveRunning((v) => !v)}
+                  aria-pressed={liveRunning}
+                  aria-label={liveRunning ? "Pause simulation" : "Run simulation"}
+                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-label-xs text-foreground hover:bg-accent/40"
+                >
+                  {liveRunning ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                  {liveRunning ? "Pause" : "Run"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLiveBigBang((n) => n + 1)
+                    setLiveRunning(true)
+                  }}
+                  aria-label="Re-run big bang"
+                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-label-xs text-muted-foreground hover:bg-accent/40"
+                >
+                  <Shuffle className="h-3.5 w-3.5" />
+                  Big Bang
+                </button>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-label-xs text-muted-foreground">Repulsion</span>
+                  <Slider
+                    aria-label="Simulation repulsion"
+                    value={[liveRepulsion]}
+                    onValueChange={([v]) => setLiveRepulsion(v)}
+                    min={0.1}
+                    max={2}
+                    step={0.1}
+                    className="w-24"
+                  />
+                </div>
+              </div>
+            </div>
+          </Suspense>
+        )}
+
+        {/* View mode toggle (bottom-right) */}
+        <div className="absolute bottom-3 right-3">
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/80 p-0.5 backdrop-blur"
+            role="radiogroup"
+            aria-label="View mode"
+          >
+            {(["map", "3d", "live"] as ViewMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={viewMode === m}
+                onClick={() => handleViewMode(m)}
+                className={`rounded-md px-2 py-1 text-label-xs transition-colors ${
+                  viewMode === m ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/40"
+                }`}
+              >
+                {VIEW_MODE_LABEL[m]}
               </button>
             ))}
           </div>
@@ -959,26 +1307,28 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
 
         <color attach="background" args={[tokens3D.background]} />
         {/* Fog starts past the structure at the default viewing distance —
-            it should swallow the starfield's depth, not the graph itself. */}
-        {!settings.flat && <fog attach="fog" args={[tokens3D.background, 34, 95]} />}
+            it should swallow the starfield's depth, not the graph itself.
+            Dark: tight fog (34→95) so the nebula/starfield fade into the void.
+            Light: pushed out (44→150) so ambient-occluded spheres stay crisp
+            against the bright background instead of muddying into the fog. */}
+        {!settings.flat && (
+          <fog attach="fog" args={isDark ? [tokens3D.background, 34, 95] : [tokens3D.background, 44, 150]} />
+        )}
 
         {/* Ambient + key lights for material visibility */}
         <ambientLight intensity={0.35} />
         <directionalLight position={[5, 5, 5]} intensity={0.6} color={TRUST_HALO_HEX.verified} />
         <directionalLight position={[-5, -5, -5]} intensity={0.3} color={SURFACE_HEX.brandGold} />
 
-        {/* Starfield backdrop — drei's Stars is GPU-friendly */}
+        {/* Parallax starfield backdrop (B4) — 2-3 drei Stars shells at
+            differing radius/speed for real depth; budget from the tier. */}
         {settings.starCount > 0 && (
-          <Stars
-            radius={50}
-            depth={50}
-            count={settings.starCount}
-            factor={3}
-            saturation={0.2}
-            fade
-            speed={0.5}
-          />
+          <ParallaxStarfield count={settings.starCount} animate={animate} ultra={effectiveQuality === "ultra"} />
         )}
+
+        {/* Brand nebula (B4) — faint procedural gas clouds behind the graph.
+            Dark-theme only; additive low-alpha color is invisible on light. */}
+        {!settings.flat && isDark && settings.starCount > 0 && <NebulaBackdrop />}
 
         <Suspense fallback={null}>
           {settings.particles && showMembers && (
@@ -1019,7 +1369,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
                 onDragStateChange={setDragging}
                 onNodeMoved={handleNodeMoved}
               />
-              <HubLabels entities={sceneEntities} degrees={degrees} hoveredIndex={focusIndex} />
+              <HubLabels entities={sceneEntities} degrees={degrees} hoveredIndex={focusIndex} pinnedIndex={pinned} dark={isDark} />
             </>
           ) : (
             // Zoomed-out overview: individual members + links are hidden;
@@ -1056,7 +1406,16 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             framingDistance={focusFramingDistance}
             onExit={handleFocusExit}
           />
-          {settings.postprocessing && <UltraEffects />}
+          {/* Node fly-to (B5): eases the camera to a neighbor picked from the
+              kNN panel. Idles (center === null) otherwise. Small radius frames
+              the single node close-up; reduced motion snaps. */}
+          <FocusCameraAnimator
+            center={flyToNode}
+            radius={2.5}
+            instant={!animate}
+            controlsRef={controlsRef}
+          />
+          {settings.postprocessing && <UltraEffects dark={isDark} />}
         </Suspense>
 
         <OrbitControls
@@ -1083,6 +1442,16 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
         />
       </Canvas>
 
+      {/* kNN neighbors panel (B5) — top-right when a node is pinned. */}
+      {pinned !== null && pinnedEntity && (
+        <SimilarNeighborsPanel
+          pinnedName={pinnedEntity.name}
+          neighbors={similarNeighbors}
+          onPick={handlePickNeighbor}
+          onClose={() => setPinned(null)}
+        />
+      )}
+
       {/* Exploration toolbar — lens + type filter (top-left) */}
       <div className="absolute left-3 top-3 flex flex-col gap-1.5">
         <div
@@ -1090,7 +1459,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           role="radiogroup"
           aria-label="Color lens"
         >
-          {COLOR_LENSES.map((l) => (
+          {COLOR_LENSES.filter((l) => !l.mapOnly).map((l) => (
             <button
               key={l.id}
               type="button"
@@ -1241,7 +1610,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           role="radiogroup"
           aria-label="View mode"
         >
-          {(["map", "3d"] as ViewMode[]).map((m) => (
+          {(["map", "3d", "live"] as ViewMode[]).map((m) => (
             <button
               key={m}
               type="button"
@@ -1254,7 +1623,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
                   : "text-muted-foreground hover:bg-accent/40"
               }`}
             >
-              {m === "map" ? "Map" : "3D"}
+              {VIEW_MODE_LABEL[m]}
             </button>
           ))}
         </div>

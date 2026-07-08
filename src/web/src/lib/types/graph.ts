@@ -97,6 +97,12 @@ export interface AtlasNodeAttributes extends GraphNode {
    */
   type: "haloed" | "bordered"
   /**
+   * The API entity type (Person / Project / Topic / …). GraphNode.type is
+   * shadowed by the sigma program key above, so the adapter re-homes it
+   * here — the type-chip toolbar and reducers read THIS field.
+   */
+  entityType: string
+  /**
    * Sigma built-in node attribute toggled by hover handlers (`enterNode`
    * / `leaveNode`). When true, sigma renders the node above its peers
    * and applies the default highlight palette. Declared optional so
@@ -108,6 +114,11 @@ export interface AtlasNodeAttributes extends GraphNode {
    * regardless of the label density setting. Used for the focal node.
    */
   forceLabel?: boolean
+  /**
+   * Growth tween 0→1 for nodes entering during an A5 ego migration; the
+   * node reducer fades alpha by it. Undefined (or 1) = fully arrived.
+   */
+  spawnProgress?: number
 }
 
 /** Atlas-internal edge attributes */
@@ -116,4 +127,6 @@ export interface AtlasEdgeAttributes extends GraphEdge {
   size: number
   /** Edge color hex (relationship type palette per design-system-v2 §3.4) */
   color: string
+  /** Sigma built-in: set by the zoom-LOD edge reducer below the tier floor. */
+  hidden?: boolean
 }

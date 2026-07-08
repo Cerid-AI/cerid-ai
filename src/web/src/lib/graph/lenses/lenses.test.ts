@@ -8,22 +8,45 @@
 import { describe, expect, it } from "vitest"
 import Graph from "graphology"
 import type { AtlasEdgeAttributes, AtlasNodeAttributes } from "@/lib/types/graph"
+import type { MapTokens } from "@/components/subjects/constellation/map/community-layer"
 import {
   composeLenses,
+  composeLensesWithTokens,
   contradictionLens,
   openQuestionLens,
   provenanceLens,
   qualityLens,
   domainLens,
+  bridgesLens,
+  makeBridgesLens,
   LENS_ORDER,
   LENS_REGISTRY,
 } from "./index"
+
+// Minimal resolved-token fixture for the token-aware factories.
+const TOKENS: MapTokens = {
+  clusters: Array(8).fill("#888888") as string[], // drift-allowed: test fixture only
+  clusterOther: "#888888", // drift-allowed: test fixture only
+  domains: Array(12).fill("#888888") as string[], // drift-allowed: test fixture only
+  domainOther: "#666666", // drift-allowed: test fixture only
+  edge: "#888888", // drift-allowed: test fixture only
+  dim: "#333333", // drift-allowed: test fixture only
+  interaction: "#00c8b4", // drift-allowed: test fixture only
+  foreground: "#111111", // drift-allowed: test fixture only
+  background: "#f5f5f5", // drift-allowed: test fixture only
+  trustVerified: "#555555", // drift-allowed: test fixture only
+  trustPartial: "#777777", // drift-allowed: test fixture only
+  trustUnverified: "#999999", // drift-allowed: test fixture only
+  graphite: "#6b7080", // drift-allowed: test fixture only
+  grid: "#eeeeee", // drift-allowed: test fixture only
+}
 
 function mkNode(overrides: Partial<AtlasNodeAttributes> = {}): AtlasNodeAttributes {
   return {
     id: "n",
     name: "Node",
     type: "bordered",
+    entityType: "Person",
     community: "c1",
     mention_count: 10,
     trust_state: "verified",
@@ -269,14 +292,70 @@ describe("domainLens (static fallback)", () => {
   })
 })
 
+describe("makeBridgesLens (C1b)", () => {
+  it("colors a zero-score node exactly the dim token", () => {
+    const lens = makeBridgesLens(TOKENS, { betweenness: { a: 0 } })
+    const g = mkGraph()
+    const out = lens.transformNode("a", g.getNodeAttributes("a"), g)
+    expect(out.color).toBe(TOKENS.dim)
+    expect(out.haloColor).toBe(TOKENS.dim)
+  })
+
+  it("colors a max-score node exactly the interaction token", () => {
+    const lens = makeBridgesLens(TOKENS, { betweenness: { a: 1 } })
+    const g = mkGraph()
+    const out = lens.transformNode("a", g.getNodeAttributes("a"), g)
+    expect(out.color).toBe(TOKENS.interaction)
+  })
+
+  it("treats nodes missing from the score map as score 0 (dim)", () => {
+    const lens = makeBridgesLens(TOKENS, { betweenness: { b: 0.9 } })
+    const g = mkGraph()
+    const out = lens.transformNode("a", g.getNodeAttributes("a"), g)
+    expect(out.color).toBe(TOKENS.dim)
+  })
+
+  it("with no context (scores still computing) every node reads dim", () => {
+    const lens = makeBridgesLens(TOKENS)
+    const g = mkGraph()
+    const out = lens.transformNode("a", g.getNodeAttributes("a"), g)
+    expect(out.color).toBe(TOKENS.dim)
+  })
+
+  it("leaves edges untouched", () => {
+    const lens = makeBridgesLens(TOKENS, { betweenness: { a: 1 } })
+    const g = mkGraph()
+    const before = g.getEdgeAttributes("a-b")
+    expect(lens.transformEdge("a-b", before, g)).toBe(before)
+  })
+
+  it("composeLensesWithTokens threads the betweenness context through", () => {
+    const g = mkGraph()
+    const { nodeReducer } = composeLensesWithTokens(["bridges"], TOKENS, g, {
+      betweenness: { a: 1, b: 0 },
+    })
+    expect(nodeReducer("a", g.getNodeAttributes("a")).color).toBe(TOKENS.interaction)
+    expect(nodeReducer("b", g.getNodeAttributes("b")).color).toBe(TOKENS.dim)
+  })
+})
+
+describe("bridgesLens (static fallback)", () => {
+  it("passes node attrs through untouched (no scores available statically)", () => {
+    const g = mkGraph()
+    const attrs = g.getNodeAttributes("a")
+    expect(bridgesLens.transformNode("a", attrs, g)).toEqual(attrs)
+  })
+})
+
 describe("LENS_REGISTRY", () => {
-  it("contains all 5 named lenses", () => {
-    expect(Object.keys(LENS_REGISTRY)).toHaveLength(5)
+  it("contains all 6 named lenses", () => {
+    expect(Object.keys(LENS_REGISTRY)).toHaveLength(6)
     expect(LENS_REGISTRY["contradiction"]).toBeDefined()
     expect(LENS_REGISTRY["open-question"]).toBeDefined()
     expect(LENS_REGISTRY["provenance"]).toBeDefined()
     expect(LENS_REGISTRY["quality"]).toBeDefined()
     expect(LENS_REGISTRY["domain"]).toBeDefined()
+    expect(LENS_REGISTRY["bridges"]).toBeDefined()
   })
 
   it("LENS_ORDER matches the registry contents", () => {

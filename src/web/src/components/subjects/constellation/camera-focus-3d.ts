@@ -31,6 +31,18 @@ export function framingDistanceFor(radius: number, fovDeg = 55): number {
   return Math.max(4, (radius / Math.sin(half)) * 1.3 + 2)
 }
 
+/**
+ * Dolly-zoom FOV bump for a focus tween (B3). A subtle cinematic "whoosh":
+ * the field of view swells from `baseFov` to `peakFov` at the tween midpoint
+ * and settles back to base at the end (a half-sine, so t=0 and t=1 both return
+ * base — the tween self-settles with no residual FOV). `t` is the tween
+ * progress in [0, 1]; out-of-range values clamp. No three.js — unit-testable.
+ */
+export function fovForProgress(t: number, baseFov = 55, peakFov = 62): number {
+  const c = Math.min(1, Math.max(0, t))
+  return baseFov + (peakFov - baseFov) * Math.sin(Math.PI * c)
+}
+
 export function cameraTargetFor(
   center: Vec3,
   radius: number,

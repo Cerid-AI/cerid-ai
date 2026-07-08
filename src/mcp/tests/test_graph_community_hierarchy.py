@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 def _hierarchy_rows():
     # Two level-0 communities, one level-1 parent.
     return [
-        {"community_id": "0:1", "level": 0, "parent_id": "1:7", "member_count": 12, "summary": "Infra"},
-        {"community_id": "0:2", "level": 0, "parent_id": "1:7", "member_count": 8, "summary": "Models"},
-        {"community_id": "1:7", "level": 1, "parent_id": None, "member_count": 20, "summary": "Platform"},
+        {"community_id": "0:1", "level": 0, "parent_id": "1:7", "member_count": 12, "summary": "Infra", "top_terms": ["kubernetes", "cluster", "helm"]},
+        {"community_id": "0:2", "level": 0, "parent_id": "1:7", "member_count": 8, "summary": "Models", "top_terms": None},
+        {"community_id": "1:7", "level": 1, "parent_id": None, "member_count": 20, "summary": "Platform", "top_terms": ["platform"]},
     ]
 
 
@@ -61,6 +61,11 @@ def test_community_hierarchy_200_shape():
     assert ids["0:1"]["parent_id"] == "1:7"
     assert ids["1:7"]["parent_id"] is None
     assert ids["0:1"]["member_count"] == 12
+    # A3: c-TF-IDF top_terms surface additively (None when not yet computed).
+    assert ids["0:1"]["top_terms"] == ["kubernetes", "cluster", "helm"]
+    assert ids["0:2"]["top_terms"] is None
+    # Cache key carries the v2 suffix (schema gained top_terms).
+    assert "cerid:graph:community-hierarchy:v2" in redis._state
 
 
 def test_community_hierarchy_served_from_cache_on_second_call():
@@ -69,7 +74,7 @@ def test_community_hierarchy_served_from_cache_on_second_call():
     app = FastAPI()
     app.include_router(graph_router.router)
     redis = _make_redis()
-    redis._state["cerid:graph:community-hierarchy:v1"] = json.dumps(
+    redis._state["cerid:graph:community-hierarchy:v2"] = json.dumps(
         {"levels": 1, "nodes": [{"community_id": "0:9", "level": 0, "parent_id": None, "member_count": 3, "summary": None}]}
     )
     driver = _make_driver([])  # would yield nothing if hit

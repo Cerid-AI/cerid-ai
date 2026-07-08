@@ -42,6 +42,7 @@ def _make_row(eid: str, *, has_coords: bool = True) -> dict:
         "z": 0.5 if has_coords else None,
         "method": "force",
         "computed_at": "2026-06-09T00:00:00+00:00",
+        "created_at": "2026-06-01T00:00:00+00:00",
     }
 
 
@@ -131,6 +132,9 @@ def test_map_returns_200_with_entities_links_communities(mock_redis, fake_driver
     payload = r.json()
     assert payload["count"] == 2
     assert {e["id"] for e in payload["entities"]} == {"a", "b"}
+    # created_at (entity birth timestamp) drives the timebar/timelapse.
+    for e in payload["entities"]:
+        assert e["created_at"] == "2026-06-01T00:00:00+00:00"
     assert payload["links"] == [[0, 1, 3.0, "co_mention"]]
     assert len(payload["communities"]) == 1
     comm = payload["communities"][0]

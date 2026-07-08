@@ -13,6 +13,16 @@ import type { MapTokens } from "@/components/subjects/constellation/map/communit
 import { composeLenses as _composeLenses } from "./types"
 import type { Lens, LensId } from "./types"
 import { domainColor } from "@/lib/graph/identity"
+import { bridgesColor } from "@/lib/graph/bridges"
+
+/**
+ * Optional per-composition context (C1b) — data a lens needs that isn't a
+ * node/edge attribute. Additive: existing lenses ignore it.
+ */
+export interface LensContext {
+  /** Normalized betweenness centrality (0..1) per node id — bridges lens input. */
+  betweenness?: Record<string, number>
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -155,6 +165,31 @@ export function makeDomainLens(tokens: MapTokens): Lens {
   }
 }
 
+export function makeBridgesLens(tokens: MapTokens, ctx?: LensContext): Lens {
+  const scores = ctx?.betweenness
+  const dimColor = tokens.dim
+  const hotColor = tokens.interaction
+  return {
+    id: "bridges",
+    label: "Bridges",
+    description: "Colors nodes by betweenness centrality — the connectors bridging otherwise-separate clusters.",
+    legendColor: hotColor,
+    transformNode: (node, attrs) => {
+      // Score 0 (or scores still computing) reads exactly dim; the true
+      // connectors climb the sqrt-gamma ramp toward the interaction hue.
+      const score = scores?.[node] ?? 0
+      const color = bridgesColor(score, dimColor, hotColor)
+      return {
+        ...attrs,
+        color,
+        haloColor: color,
+        pulseIntensity: Math.max(0.05, score),
+      }
+    },
+    transformEdge: (_edge, attrs) => attrs,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Default static instances (tokens-free, for use in tests and lens panel)
 // The legend colors are approximate token approximations; when composeLenses
@@ -248,6 +283,21 @@ export const domainLens: Lens = {
   transformEdge: (_edge, attrs) => attrs,
 }
 
+const BRIDGES_LEGEND = "#00C8B4" // drift-allowed: legend-only fallback; overridden by makeBridgesLens(tokens) at runtime
+
+export const bridgesLens: Lens = {
+  id: "bridges",
+  label: "Bridges",
+  description: "Colors nodes by betweenness centrality — the connectors bridging otherwise-separate clusters.",
+  legendColor: BRIDGES_LEGEND,
+  transformNode: (_node, attrs) => {
+    // Static fallback: betweenness scores arrive via LensContext at runtime
+    // (makeBridgesLens); without them attrs pass through unchanged.
+    return attrs
+  },
+  transformEdge: (_edge, attrs) => attrs,
+}
+
 // ---------------------------------------------------------------------------
 // Registry — single source of truth for lens lookups + ordered listings.
 // ---------------------------------------------------------------------------
@@ -258,6 +308,7 @@ export const LENS_REGISTRY: Record<string, Lens> = {
   provenance: provenanceLens,
   quality: qualityLens,
   domain: domainLens,
+  bridges: bridgesLens,
 }
 
 export const LENS_ORDER: Lens[] = [
@@ -266,16 +317,20 @@ export const LENS_ORDER: Lens[] = [
   provenanceLens,
   qualityLens,
   domainLens,
+  bridgesLens,
 ]
 
 /**
  * Compose lenses with token-resolved accent colors.
  * Prefer this over composeLenses when tokens are available.
+ * `ctx` (additive, optional) carries non-attribute lens inputs — currently the
+ * bridges lens's betweenness scores.
  */
 export function composeLensesWithTokens(
   lensIds: LensId[],
   tokens: MapTokens,
   graph: Parameters<typeof _composeLenses>[1],
+  ctx?: LensContext,
 ) {
   const resolved = lensIds.map((id) => {
     switch (id) {
@@ -284,6 +339,7 @@ export function composeLensesWithTokens(
       case "provenance":     return makeProvenanceLens(tokens)
       case "quality":        return makeQualityLens(tokens)
       case "domain":         return makeDomainLens(tokens)
+      case "bridges":        return makeBridgesLens(tokens, ctx)
     }
   })
   return _composeLenses(resolved, graph)

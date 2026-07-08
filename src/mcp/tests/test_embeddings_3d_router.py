@@ -82,6 +82,7 @@ def _make_row(entity_id: str, *, has_coords: bool = True, method: str = "fallbac
         "z": 3.0 if has_coords else None,
         "method": method,
         "computed_at": "2026-05-21T08:00:00+00:00",
+        "created_at": "2026-05-01T00:00:00+00:00",
     }
 
 
@@ -97,8 +98,24 @@ def test_embeddings_3d_returns_projected_entities(client, mock_neo4j_with_rows):
     for e in payload["entities"]:
         assert e["x"] == 1.0 and e["y"] == 2.0 and e["z"] == 3.0
         assert e["projection"] == "fallback"
+        # created_at (entity birth timestamp) drives the timebar/timelapse.
+        assert e["created_at"] == "2026-05-01T00:00:00+00:00"
     assert payload["cached"] is False
     assert payload["computed_at"] == "2026-05-21T08:00:00+00:00"
+
+
+def test_embeddings_3d_created_at_null_when_missing(client, mock_neo4j_with_rows):
+    """created_at is present but may be null when the Entity has no birth timestamp."""
+    _, set_rows = mock_neo4j_with_rows
+    row = _make_row("a")
+    row["created_at"] = None
+    set_rows([row])
+
+    r = client.get("/graph/embeddings/3d")
+    assert r.status_code == 200
+    entity = r.json()["entities"][0]
+    assert "created_at" in entity
+    assert entity["created_at"] is None
 
 
 def test_embeddings_3d_drops_rows_missing_coords(client, mock_neo4j_with_rows):
@@ -144,8 +161,8 @@ def test_embeddings_3d_filter_changes_cache_key(client, mock_neo4j_with_rows):
 def test_embeddings_3d_corrupt_cache_falls_through_to_neo4j(client, mock_neo4j_with_rows, mock_redis):
     _, set_rows = mock_neo4j_with_rows
     set_rows([_make_row("a")])
-    # Plant corrupt JSON into the cache slot (v5 key — payload carries links + isolated_count)
-    mock_redis._state["cerid:graph:emb3d:v5:all"] = "not-json{"
+    # Plant corrupt JSON into the cache slot (v6 key — payload carries links + isolated_count)
+    mock_redis._state["cerid:graph:emb3d:v6:all"] = "not-json{"
 
     r = client.get("/graph/embeddings/3d")
     assert r.status_code == 200

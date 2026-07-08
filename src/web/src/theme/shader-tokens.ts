@@ -123,6 +123,16 @@ export const LABEL_HEX = {
   hover: "#8CF5DC", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var)
 } as const
 
+// Light-theme label palette (B2): dark text + a near-white outline halo so
+// persistent hub labels keep WCAG-AA contrast on the bright constellation
+// background. troika text `color` / `outlineColor` props can't consume CSS
+// vars, so the light variants live here beside the dark defaults.
+export const LABEL_HEX_LIGHT = {
+  default: "#2A3550", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var) — dark slate, AA on light bg
+  hover: "#0A7D70", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var) — darkened brand teal, AA on light bg
+  outline: "#F2F6FF", // drift-allowed: brand shader/Sigma color registry (color prop can't use CSS var) — near-white halo
+} as const
+
 // ---------------------------------------------------------------------------
 // Aggregate export — single object the shader-tokens generator emits
 // ---------------------------------------------------------------------------

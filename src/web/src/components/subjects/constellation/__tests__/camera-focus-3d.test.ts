@@ -1,5 +1,37 @@
 import { describe, it, expect } from "vitest"
-import { boundingSphere, cameraTargetFor } from "../camera-focus-3d"
+import { boundingSphere, cameraTargetFor, fovForProgress } from "../camera-focus-3d"
+
+describe("fovForProgress (B3 dolly-zoom)", () => {
+  it("returns the base FOV at the endpoints (t=0 and t=1)", () => {
+    expect(fovForProgress(0)).toBeCloseTo(55)
+    expect(fovForProgress(1)).toBeCloseTo(55)
+  })
+
+  it("peaks at the tween midpoint (t=0.5)", () => {
+    expect(fovForProgress(0.5)).toBeCloseTo(62)
+  })
+
+  it("swells then settles (rises to midpoint, falls back)", () => {
+    const a = fovForProgress(0.25)
+    const peak = fovForProgress(0.5)
+    const b = fovForProgress(0.75)
+    expect(a).toBeGreaterThan(55)
+    expect(a).toBeLessThan(peak)
+    expect(peak).toBeGreaterThan(b)
+    expect(b).toBeGreaterThan(55)
+  })
+
+  it("clamps out-of-range progress to the base FOV", () => {
+    expect(fovForProgress(-1)).toBeCloseTo(55)
+    expect(fovForProgress(2)).toBeCloseTo(55)
+  })
+
+  it("honors custom base and peak", () => {
+    expect(fovForProgress(0, 50, 70)).toBeCloseTo(50)
+    expect(fovForProgress(0.5, 50, 70)).toBeCloseTo(70)
+    expect(fovForProgress(1, 50, 70)).toBeCloseTo(50)
+  })
+})
 
 describe("boundingSphere", () => {
   it("contains all points", () => {

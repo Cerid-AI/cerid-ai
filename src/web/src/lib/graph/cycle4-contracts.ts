@@ -175,6 +175,12 @@ export interface DecompositionCommunityPayload {
  */
 export type MapLayout = "force" | "wells" | "domain"
 
+// added: Living-Map A7 (2026-07-07) — the server gained the "semantic"
+// (PaCMAP embedding-space) layout preset. MapLayout above stays frozen;
+// consumers migrate to MapLayoutV2. The layout_fallback machinery in
+// GraphMapLayoutExtensions covers a not-yet-computed semantic artifact.
+export type MapLayoutV2 = MapLayout | "semantic"
+
 /**
  * GET /graph/map response shape additions for Cycle 4.
  * Extends the existing GraphMapResponse from lib/api/graph-map.ts.

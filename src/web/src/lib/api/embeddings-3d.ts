@@ -26,6 +26,8 @@ export interface EntityEmbedding3D {
   projection: "umap" | "pca"
   /** Primary domain derived by DeriveDomainsJob; null until first derivation run */
   primary_domain?: string | null
+  /** Entity birth timestamp (ISO); drives the timebar filter + timelapse (A8/A9). */
+  created_at?: string | null
 }
 
 export interface Embeddings3DResponse {

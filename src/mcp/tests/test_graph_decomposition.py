@@ -525,7 +525,7 @@ def test_map_unknown_layout_returns_422():
 
 
 def test_map_force_layout_uses_force_cache_key():
-    """?layout=force → cache key is cerid:graph:emb3d:v5:map:force."""
+    """?layout=force → cache key is cerid:graph:emb3d:v6:map:force."""
     from app.routers import graph as graph_router
 
     redis = _make_redis()
@@ -537,7 +537,7 @@ def test_map_force_layout_uses_force_cache_key():
         r = TestClient(app).get("/graph/map?layout=force")
 
     assert r.status_code == 200
-    assert "cerid:graph:emb3d:v5:map:force" in redis._state
+    assert "cerid:graph:emb3d:v6:map:force" in redis._state
 
 
 def test_map_omit_layout_same_as_force():
@@ -558,7 +558,7 @@ def test_map_omit_layout_same_as_force():
     assert r1.status_code == 200
     assert r2.status_code == 200
     # Both should end up in the same cache key
-    assert "cerid:graph:emb3d:v5:map:force" in redis._state
+    assert "cerid:graph:emb3d:v6:map:force" in redis._state
 
 
 def test_map_non_default_layout_fallback_when_no_artifact():
@@ -578,11 +578,27 @@ def test_map_non_default_layout_fallback_when_no_artifact():
     assert r.json()["layout_fallback"] is True
 
 
+def test_map_semantic_layout_fallback_when_no_artifact():
+    """?layout=semantic before the job has computed it → graceful force fallback."""
+    from app.routers import graph as graph_router
+
+    redis = _make_redis()
+    driver = _make_map_driver()
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=redis), \
+         patch("app.routers.graph.get_neo4j", return_value=driver):
+        r = TestClient(app).get("/graph/map?layout=semantic")
+
+    assert r.status_code == 200
+    assert r.json()["layout_fallback"] is True
+
+
 def test_map_valid_layouts_return_200():
     """All valid layout values return 200."""
     from app.routers import graph as graph_router
 
-    for layout in ("force", "wells", "domain"):
+    for layout in ("force", "wells", "domain", "semantic"):
         redis = _make_redis()
         driver = _make_map_driver()
         app = FastAPI()

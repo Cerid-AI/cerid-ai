@@ -24,7 +24,7 @@ import {
   type AtlasView,
 } from "@/lib/api/atlas-views"
 import { mcpUrl, mcpHeaders } from "@/lib/api/common"
-import type { MapLayout } from "@/lib/graph/cycle4-contracts"
+import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
 
 export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki"
 
@@ -34,6 +34,7 @@ const LAYOUT_PRESETS: { id: MapLayout; label: string; hint: string }[] = [
   { id: "force", label: "Default map", hint: "Force-directed layout (default)" },
   { id: "wells", label: "Tight clusters", hint: "Well-separated cluster layout" },
   { id: "domain", label: "Domains apart", hint: "Domain-separated layout" },
+  { id: "semantic", label: "Semantics", hint: "Embedding-space layout — position reflects meaning" },
 ]
 
 interface SubjectsViewsSidebarProps {
