@@ -21,7 +21,7 @@ redis>=4.0,<8
 
 # GraphRAG retrieval scaffolding (Workstream E Phase 4a) — wraps neo4j-driver
 # 6.x against Neo4j 2026.04 calver server; pure-python wheel, no compile.
-neo4j-graphrag>=1.17.0,<2
+neo4j-graphrag>=1.18.0,<2
 
 # Neo4j GDS Python client (Workstream E Phase 4b) — wraps the GDS plugin's
 # Cypher procedures with a typed Python API; needed for Leiden community
