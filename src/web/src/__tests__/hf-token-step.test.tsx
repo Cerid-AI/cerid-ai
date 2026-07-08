@@ -17,19 +17,24 @@ vi.mock("@/lib/api/settings", () => ({
   testHFToken: (...args: unknown[]) => mockTest(...args),
 }))
 
-describe("HFTokenStep", () => {
-  beforeEach(() => {
-    mockFetchStatus.mockReset()
-    mockPut.mockReset()
-    mockTest.mockReset()
-    mockFetchStatus.mockResolvedValue({
-      configured: false,
-      last4: null,
-      updated_at: null,
-      model_access: null,
-    })
+// Top-level (NOT inside a describe): every suite in this file — including the
+// axe-clean one — must start from the default not-configured status. A
+// describe-scoped beforeEach never fires for tests skipped by a `-t` filter,
+// so the CI a11y job (`vitest -t "axe-clean"`) would otherwise mount the
+// component with an implementation-less mock (fetch returns undefined).
+beforeEach(() => {
+  mockFetchStatus.mockReset()
+  mockPut.mockReset()
+  mockTest.mockReset()
+  mockFetchStatus.mockResolvedValue({
+    configured: false,
+    last4: null,
+    updated_at: null,
+    model_access: null,
   })
+})
 
+describe("HFTokenStep", () => {
   it("renders both gated-model links", async () => {
     render(<HFTokenStep />)
     expect(await screen.findByText(/Speaker Diarization 3.1/)).toBeInTheDocument()

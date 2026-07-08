@@ -31,13 +31,17 @@ const job = (overrides: Partial<MeetingJob> = {}): MeetingJob => ({
   ...overrides,
 })
 
-describe("MeetingsCapturePanel", () => {
-  beforeEach(() => {
-    mockUpload.mockReset()
-    mockList.mockReset()
-    mockList.mockResolvedValue([])
-  })
+// Top-level (NOT inside a describe): the axe-clean suite below must also start
+// from the empty-jobs default. A describe-scoped beforeEach never fires for
+// tests skipped by a `-t` filter, so the CI a11y job (`vitest -t "axe-clean"`)
+// would otherwise mount the panel with an implementation-less list mock.
+beforeEach(() => {
+  mockUpload.mockReset()
+  mockList.mockReset()
+  mockList.mockResolvedValue([])
+})
 
+describe("MeetingsCapturePanel", () => {
   it("renders drop zone with accepted formats", async () => {
     render(<MeetingsCapturePanel />)
     expect(await screen.findByTestId("meeting-drop-zone")).toBeInTheDocument()
