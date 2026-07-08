@@ -224,7 +224,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Use same Python image as Dockerfile to ensure identical pip-compile output
-    container: python:3.11-slim
+    # (Dockerfile is on python:3.12; sync-repos.py regenerates the lock in
+    # python:3.12-slim — a 3.11 resolver here picks different transitives,
+    # e.g. scipy 1.17 vs 1.18).
+    container: python:3.12-slim
     steps:
       - uses: actions/checkout@v6
       - run: pip install pip-tools==7.5.3
