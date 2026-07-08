@@ -9,6 +9,11 @@ import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { AppLayout } from "@/components/layout/app-layout"
 import type { Pane } from "@/components/layout/sidebar"
 import { ChatPanel } from "@/components/chat/chat-panel"
+// Eager (not lazy): the bottom-tab-bar Capture button opens this via a
+// fire-and-forget `cerid:quick-capture` window event, so the FAB's listener
+// must be attached at first mount — a lazy chunk that loads a beat later would
+// miss an early tap and silently no-op (caught by the mobile e2e).
+import { QuickCaptureFab } from "@/components/quick-capture/quick-capture-fab"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
 import { ConversationsProvider } from "@/contexts/conversations-context"
 import { AuthProvider } from "@/contexts/auth-context"
@@ -31,9 +36,6 @@ const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 const SubjectsPane = lazy(() => import("@/components/subjects/subjects-pane"))
 const SourcesPane = lazy(() => import("@/components/sources/sources-pane"))
 const BriefsPane = lazy(() => import("@/components/briefs/briefs-pane"))
-const QuickCaptureFab = lazy(() =>
-  import("@/components/quick-capture/quick-capture-fab").then((m) => ({ default: m.QuickCaptureFab })),
-)
 const AtlasPerfHarness = lazy(() => import("@/components/dev/atlas-perf-harness"))
 
 /**
@@ -216,9 +218,7 @@ export default function App() {
         Briefs (a reading surface — no capture affordance needed there).
         ⌘⇧N still opens quick capture from the excluded panes. */}
     {currentPane !== "sources" && currentPane !== "subjects" && currentPane !== "briefs" && (
-      <Suspense fallback={null}>
-        <QuickCaptureFab />
-      </Suspense>
+      <QuickCaptureFab />
     )}
     </KBInjectionProvider>
     </ConversationsProvider>
