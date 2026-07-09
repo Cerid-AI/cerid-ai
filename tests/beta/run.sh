@@ -55,6 +55,44 @@ for arg in "$@"; do
   esac
 done
 
+# ─────────────────────────────────────────────────
+# Docker-network resolution + MCP reachability (shared by container tiers)
+# ─────────────────────────────────────────────────
+# The internal ai-companion-mcp runs on the bare `llm-network`. Resolve that
+# name from the live container instead of guessing — a wrong network makes
+# every in-container test fail with ConnectError ("Name or service not known"),
+# which reads as a mass test failure when it is really ONE infra problem. So we
+# resolve, then probe /health once up front, and skip the whole tier with a
+# single clear message rather than emitting N identical per-case connection
+# errors (the 2026-07-08 eval run's "65 failures" were exactly this).
+resolve_mcp_network() {
+  docker inspect ai-companion-mcp \
+    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
+    | grep -m1 'llm-network'
+}
+
+mcp_reachable() {  # $1 = docker network name
+  docker run --rm --network "$1" python:3.11-slim \
+    python -c "import urllib.request; urllib.request.urlopen('http://ai-companion-mcp:8888/health', timeout=10)" \
+    >/dev/null 2>&1
+}
+
+# Echo the resolved network on success; on failure print the reason to stderr
+# and return 1. Callers: DOCKER_NETWORK=$(mcp_network_or_skip 2>err) || skip.
+mcp_network_or_skip() {
+  local net
+  net=$(resolve_mcp_network)
+  if [[ -z "$net" ]]; then
+    echo "ai-companion-mcp container not found on any llm-network — is the internal stack up? (docker ps | grep ai-companion-mcp)" >&2
+    return 1
+  fi
+  if ! mcp_reachable "$net"; then
+    echo "ai-companion-mcp:8888/health unreachable on network '$net' — stack unhealthy or misattached network." >&2
+    return 1
+  fi
+  echo "$net"
+}
+
 # Ensure reports directory exists
 mkdir -p "${SCRIPT_DIR}/reports"
 
@@ -75,6 +113,36 @@ echo "Report: ${REPORT}"
 echo ""
 
 OVERALL_EXIT=0
+
+# Resolve the MCP docker network + verify reachability up front (informational).
+# Each container tier (functional / integration / eval) RE-probes right before
+# it runs via mcp_network_or_skip — the tiers run over many minutes and the MCP
+# can restart under load mid-run (observed 2026-07-08: RestartCount=2 during a
+# --full run), so a stale up-front check would let a tier fire 65 per-case
+# ConnectErrors against a down MCP. Re-probing per tier turns that into ONE
+# clean skip. Host-side tiers (smoke / performance / security / e2e) hit
+# localhost and don't need it.
+MCP_NET=""
+MCP_NET_ERR=""
+if MCP_NET=$(mcp_network_or_skip 2>/tmp/cerid-beta-neterr); then
+  echo "MCP network: ${MCP_NET} (ai-companion-mcp:8888 reachable)"
+else
+  MCP_NET_ERR=$(cat /tmp/cerid-beta-neterr 2>/dev/null)
+  MCP_NET=""
+  echo "⛔ ${MCP_NET_ERR}"
+fi
+echo ""
+
+# Emit a skip section for a container tier when the MCP is unreachable.
+# $1 = report section title, $2 = short tier name for the issue id.
+skip_tier_mcp_unreachable() {
+  report_section "$1"
+  report_text "\n> **MCP unreachable — ${2} tier skipped:** ${MCP_NET_ERR:-docker/stack unavailable}\n"
+  report_issue "critical" "MCP unreachable (${2})" "infrastructure" "INFRA-NET" "infra" \
+    "Bring up the internal stack (scripts/start-cerid.sh), then rerun" \
+    "ai-companion-mcp:8888 reachable on llm-network" "${MCP_NET_ERR:-unavailable}"
+  OVERALL_EXIT=1
+}
 
 # ─────────────────────────────────────────────────
 # TIER 1: SMOKE TESTS
@@ -109,24 +177,12 @@ fi
 # ─────────────────────────────────────────────────
 # TIER 2: FUNCTIONAL API TESTS
 # ─────────────────────────────────────────────────
-if $RUN_FUNCTIONAL; then
+if $RUN_FUNCTIONAL && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-neterr); then
   echo ""
   echo "╔══════════════════════════════════════╗"
   echo "║   FUNCTIONAL API TESTS               ║"
   echo "╚══════════════════════════════════════╝"
   echo ""
-
-  # Determine Docker network name
-  # Resolve the network the live ai-companion-mcp container is on —
-  # multiple compose projects share the substring "llm-network" so a
-  # naive grep can return a sibling network the container isn't on.
-  DOCKER_NETWORK=$(docker inspect ai-companion-mcp \
-    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
-    | grep 'llm-network' | head -1)
-  if [[ -z "$DOCKER_NETWORK" ]]; then
-    echo "⚠️  llm-network not found, trying cerid-ai_llm-network"
-    DOCKER_NETWORK="cerid-ai_llm-network"
-  fi
 
   # Run functional tests in Docker
   FUNC_AUTH_FLAG=""
@@ -192,25 +248,21 @@ for tc in root.iter('testcase'):
   fi
 
   [[ "$STOP_AFTER" == "functional" ]] && { report_finalize; exit $OVERALL_EXIT; }
+elif $RUN_FUNCTIONAL; then
+  MCP_NET_ERR=$(cat /tmp/cerid-beta-neterr 2>/dev/null)
+  skip_tier_mcp_unreachable "Functional API Tests" "functional"
+  [[ "$STOP_AFTER" == "functional" ]] && { report_finalize; exit $OVERALL_EXIT; }
 fi
 
 # ─────────────────────────────────────────────────
 # TIER 3: INTEGRATION TESTS
 # ─────────────────────────────────────────────────
-if $RUN_INTEGRATION; then
+if $RUN_INTEGRATION && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-neterr); then
   echo ""
   echo "╔══════════════════════════════════════╗"
   echo "║   INTEGRATION TESTS                  ║"
   echo "╚══════════════════════════════════════╝"
   echo ""
-
-  # Resolve the network the live ai-companion-mcp container is on —
-  # multiple compose projects share the substring "llm-network" so a
-  # naive grep can return a sibling network the container isn't on.
-  DOCKER_NETWORK=$(docker inspect ai-companion-mcp \
-    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
-    | grep 'llm-network' | head -1)
-  [[ -z "$DOCKER_NETWORK" ]] && DOCKER_NETWORK="cerid-ai_llm-network"
 
   docker run --rm --network "$DOCKER_NETWORK" \
     -e CERID_API_KEY \
@@ -255,6 +307,9 @@ for tc in root.iter('testcase'):
   fi
 
   [[ $INT_EXIT -ne 0 ]] && OVERALL_EXIT=1
+elif $RUN_INTEGRATION; then
+  MCP_NET_ERR=$(cat /tmp/cerid-beta-neterr 2>/dev/null)
+  skip_tier_mcp_unreachable "Integration Tests" "integration"
 fi
 
 # ─────────────────────────────────────────────────
@@ -350,9 +405,13 @@ for tc in root.iter('testcase'):
     fi
 
     if [[ "${E2E_EXIT:-0}" -ne 0 ]]; then
+      # The e2e tier counts toward GO/NO-GO — a green API surface with a red
+      # browser surface is not a passing run (V1 Task 6.1: "50/50 GO" was
+      # printed on 2026-06-28 while e2e failed 6/17).
+      OVERALL_EXIT=1
       report_issue "high" "playwright_e2e" "browser_e2e" "E-XX" "infra" \
         "Investigate failing E2E test(s) in tests/beta/reports/e2e-html/" \
-        "All E-01..E-10 pass" \
+        "All E-01..E-17 pass" \
         "Playwright reported failures — open the HTML report or rerun with --headed."
     fi
   fi
@@ -361,20 +420,12 @@ fi
 # ─────────────────────────────────────────────────
 # TIER 7: EVALUATION & EFFICACY SUITE
 # ─────────────────────────────────────────────────
-if ${RUN_EVAL:-false}; then
+if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-neterr); then
   echo ""
   echo "╔══════════════════════════════════════╗"
   echo "║   EVALUATION & EFFICACY SUITE        ║"
   echo "╚══════════════════════════════════════╝"
   echo ""
-
-  # Resolve the network the live ai-companion-mcp container is on —
-  # multiple compose projects share the substring "llm-network" so a
-  # naive grep can return a sibling network the container isn't on.
-  DOCKER_NETWORK=$(docker inspect ai-companion-mcp \
-    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
-    | grep 'llm-network' | head -1)
-  [[ -z "$DOCKER_NETWORK" ]] && DOCKER_NETWORK="cerid-ai_llm-network"
 
   mkdir -p "${SCRIPT_DIR}/eval/reports"
 
@@ -474,6 +525,9 @@ print('Report: eval/reports/eval-report-latest.md')
     cp "${SCRIPT_DIR}/eval/reports/eval-report-latest.md" "$EVAL_REPORT"
 
   [[ $EVAL_EXIT -ne 0 ]] && OVERALL_EXIT=1
+elif ${RUN_EVAL:-false}; then
+  MCP_NET_ERR=$(cat /tmp/cerid-beta-neterr 2>/dev/null)
+  skip_tier_mcp_unreachable "Evaluation & Efficacy Suite" "eval"
 fi
 
 # ─────────────────────────────────────────────────

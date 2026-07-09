@@ -4,19 +4,19 @@
 import { test, expect, suppressFirstRun } from "./fixtures"
 
 /**
- * E-08 — Search palette opens via the Subjects empty-state CTA.
+ * E-08 — Search palette opens from the Subjects toolbar.
  *
- * The palette is intentionally pane-scoped: keyboard binding lives on
- * Subjects; the "Open search palette" button is the discoverable
- * entry point from the empty state. The palette opens with Liquid
- * Glass treatment and a search input.
+ * The palette is pane-scoped: the persistent "Search subjects" toolbar
+ * button (⌘K hint) is the discoverable entry point regardless of whether
+ * the KB is empty or populated. The palette opens with Liquid Glass
+ * treatment and a search input.
  */
 test("E-08 search palette opens + accepts input", async ({ page }) => {
   await suppressFirstRun(page)
   await page.goto("/")
   await page.getByRole("button", { name: "Subjects", exact: true }).click()
 
-  await page.getByRole("button", { name: /open search palette/i }).click()
+  await page.getByRole("button", { name: /search subjects/i }).click()
 
   // The palette mounts as a Radix Dialog. Wait for the dialog
   // container so we don't race against the open animation.

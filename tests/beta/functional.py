@@ -106,6 +106,9 @@ def test_f12_ingest_content(client: httpx.Client) -> None:
             "content": f"Beta test content {uid}",
             "domain": "general",
         },
+        # Ingest runs synchronous enrichment (LLM categorization) and can exceed
+        # the 30s client default under load — match the file's slow-op timeout.
+        timeout=60.0,
     )
     assert resp.status_code == 200
     assert "artifact_id" in resp.json()

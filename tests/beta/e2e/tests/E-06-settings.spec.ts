@@ -20,8 +20,12 @@ test("E-06 settings — SEXTANT shell: categories, mode toggle, search reveal, w
   await page.goto("/")
   await page.getByRole("button", { name: "Settings", exact: true }).click()
 
-  // Sidebar: 8 intent categories + Diagnostics console entry.
+  // Sidebar: 8 intent categories + Diagnostics console entry. Scope to the
+  // category rail — the content area renders overview cards whose accessible
+  // names collide with category names (e.g. "Models · Connect models" vs the
+  // "Models" nav button), which trips strict-mode on an unscoped /^Models/.
   const main = page.getByRole("main")
+  const catNav = page.getByRole("navigation", { name: "Settings categories" })
   for (const cat of [
     /^Models/,
     /^Knowledge/,
@@ -32,12 +36,12 @@ test("E-06 settings — SEXTANT shell: categories, mode toggle, search reveal, w
     /^Plan & Billing/,
     /^System/,
   ]) {
-    await expect(main.getByRole("button", { name: cat })).toBeVisible({ timeout: 15_000 })
+    await expect(catNav.getByRole("button", { name: cat })).toBeVisible({ timeout: 15_000 })
   }
-  await expect(main.getByRole("button", { name: "Diagnostics" })).toBeVisible()
+  await expect(catNav.getByRole("button", { name: "Diagnostics" })).toBeVisible()
 
   // U-1: Simple (default) keeps advanced groups collapsed; Advanced opens them.
-  await main.getByRole("button", { name: /^Models/ }).click()
+  await catNav.getByRole("button", { name: /^Models/ }).click()
   const disclosure = main.getByRole("button", { name: /^Advanced — \d+ setting/ }).first()
   await expect(disclosure).toBeVisible({ timeout: 15_000 })
   const detailLevel = page.getByRole("radiogroup", { name: "Settings detail level" })
@@ -56,32 +60,36 @@ test("E-06 settings — SEXTANT shell: categories, mode toggle, search reveal, w
   await expect(main.getByText("CHUNK_MAX_TOKENS").first()).toBeVisible({ timeout: 10_000 })
 
   // Backend write round-trip: flip Self-RAG off, reload, confirm the server
-  // kept it, then restore.
-  await main.getByRole("button", { name: /^Retrieval & Answers/ }).click()
+  // kept it, then restore. The switch is server-bound (checked reflects the
+  // persisted setting, not an optimistic flip), so the aria-checked change only
+  // lands after the PATCH + settings refetch — give it a load-tolerant window
+  // (the full suite can have the backend busy from the ingest/atlas tiers).
+  await catNav.getByRole("button", { name: /^Retrieval & Answers/ }).click()
   const selfRag = main.getByRole("switch", { name: "Self-RAG validation" })
   await expect(selfRag).toBeVisible({ timeout: 15_000 })
   const initial = await selfRag.getAttribute("aria-checked")
   await selfRag.click()
   const flipped = initial === "true" ? "false" : "true"
-  await expect(selfRag).toHaveAttribute("aria-checked", flipped, { timeout: 10_000 })
+  await expect(selfRag).toHaveAttribute("aria-checked", flipped, { timeout: 20_000 })
 
   await page.reload()
   await page.getByRole("button", { name: "Settings", exact: true }).click()
   const main2 = page.getByRole("main")
-  await main2.getByRole("button", { name: /^Retrieval & Answers/ }).click()
+  const catNav2 = page.getByRole("navigation", { name: "Settings categories" })
+  await catNav2.getByRole("button", { name: /^Retrieval & Answers/ }).click()
   const selfRag2 = main2.getByRole("switch", { name: "Self-RAG validation" })
   await expect(selfRag2).toBeVisible({ timeout: 15_000 })
-  await expect(selfRag2).toHaveAttribute("aria-checked", flipped, { timeout: 10_000 })
+  await expect(selfRag2).toHaveAttribute("aria-checked", flipped, { timeout: 20_000 })
   await selfRag2.click()
-  await expect(selfRag2).toHaveAttribute("aria-checked", initial!, { timeout: 10_000 })
+  await expect(selfRag2).toHaveAttribute("aria-checked", initial!, { timeout: 20_000 })
 
   // Privacy: canonical L0–L4 contract (same scale as the chat toolbar).
-  await main2.getByRole("button", { name: /^Privacy/ }).click()
+  await catNav2.getByRole("button", { name: /^Privacy/ }).click()
   await expect(main2.getByRole("button", { name: /L1 — Skip saves & sync/ })).toBeVisible({ timeout: 10_000 })
   await expect(main2.getByRole("button", { name: /L4 — Full ephemeral/ })).toBeVisible()
 
   // Appearance: theme triad present.
-  await main2.getByRole("button", { name: /^Appearance/ }).click()
+  await catNav2.getByRole("button", { name: /^Appearance/ }).click()
   for (const theme of ["Light", "Dark", "System"]) {
     await expect(main2.getByRole("radio", { name: theme }).or(main2.getByRole("button", { name: theme, exact: true })).first()).toBeVisible({ timeout: 10_000 })
   }

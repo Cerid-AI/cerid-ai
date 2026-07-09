@@ -18,7 +18,10 @@ test("E-01 cold-start render", async ({ page }) => {
   await suppressFirstRun(page)
   await page.goto("/")
 
-  await expect(page).toHaveTitle(/Cerid AI/i)
+  // Tier-agnostic: the document title tracks feature_tier
+  // (community "Cerid AI" / pro "Cerid Pro" / enterprise "Cerid Vault").
+  // The test asserts the app booted, not which tier the stack happens to run.
+  await expect(page).toHaveTitle(/Cerid (AI|Pro|Vault)/i)
 
   // The 4-pane sidebar buttons must be present (Phase C consolidation).
   for (const pane of ["Chat", "Subjects", "Sources", "Settings"]) {

@@ -19,13 +19,29 @@ test.use({ reducedMotion: "reduce" })
  */
 test("E-17 Atlas mounts via Wiki cross-link, hovers a node, drives lenses/hops/chips", async ({ page }) => {
   await suppressFirstRun(page)
+
+  // Data-agnostic: E-17 exercises the Wiki→Atlas cross-link + Atlas chrome for
+  // ANY entity with a neighborhood, not a hardcoded one. Skip only when the KB
+  // is genuinely empty (nothing to cross-link from).
+  const entitiesResp = await page.request.get("/api/mcp/wiki/entities?limit=1")
+  const entities = entitiesResp.ok() ? await entitiesResp.json() : []
+  test.skip(!Array.isArray(entities) || entities.length === 0, "no wiki entities seeded in the KB")
+
   await page.goto("/")
   await page.getByRole("button", { name: "Subjects", exact: true }).click()
   await page.getByRole("tab", { name: "Wiki" }).click()
 
-  // Open the Python wiki page, then jump via the identity capsule.
-  await page.getByRole("button", { name: "Python", exact: true }).first().click()
-  const capsuleLink = page.getByRole("button", { name: /Open .+ in Atlas/ })
+  // Open the A–Z index and pick the first entity (deterministic, name-agnostic).
+  // Entity rows carry a data-completeness attribute — a stable row selector
+  // that domain-filter/action buttons don't.
+  await page.getByRole("button", { name: /A.Z Index/ }).click()
+  const firstEntity = page.locator("button[data-completeness]").first()
+  await expect(firstEntity).toBeVisible({ timeout: 15_000 })
+  await firstEntity.click()
+
+  // Jump via the identity capsule. Two "Open … in Atlas" affordances render
+  // (the infobox capsule + the MiniGraph header); either takes us to Atlas.
+  const capsuleLink = page.getByRole("button", { name: /Open .+ in Atlas/ }).first()
   await expect(capsuleLink).toBeVisible({ timeout: 15_000 })
   await capsuleLink.click()
 
