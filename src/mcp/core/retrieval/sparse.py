@@ -338,6 +338,27 @@ def is_available() -> bool:
     return _get_encoder() is not None
 
 
+def encode_path_available() -> bool:
+    """True when SOME sparse encode path could run once the flag is enabled.
+
+    Unlike :func:`is_available` this ignores the flag and the model file —
+    it answers "would enabling sparse retrieval actually do anything on
+    this deployment?" (V1 Task 4.3: the recommendation card must not
+    steer operators into a silent no-op). The sidecar downloads the model
+    itself; the in-process path documents the download in
+    docs/MODEL_PRELOAD.md — deps are the honest minimum either way.
+    """
+    if _deps_available():
+        return True
+    try:
+        from utils.inference_config import get_inference_config
+        cfg = get_inference_config()
+    except Exception as exc:  # noqa: BLE001 — probe failure → path unavailable
+        log_swallowed_error("core.retrieval.sparse.encode_path_probe", exc)
+        return False
+    return cfg.provider == "fastembed-sidecar" and bool(cfg.sidecar_available)
+
+
 def _try_sidecar_encode_batch(texts: list[str]) -> list[dict[int, float]] | None:
     """Route sparse encoding through the cerid sidecar when it's selected.
 

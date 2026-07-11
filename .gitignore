@@ -28,8 +28,14 @@ src/mcp/docs/inventory/
 *.db.new
 stacks/bifrost/config.db.*
 
-# Runtime data & volumes
-data/
+# Runtime data & volumes. data/* (not data/) so the eval-corpus
+# exception below can re-include a subtree — git cannot re-include
+# children of an excluded DIRECTORY, only of an excluded glob.
+data/*
+# Exception: the frozen synthetic eval corpus is CI input
+# (eval-exploratory seeds it on GH runners — gitignored data/
+# meant the workflow could never pass remotely; 2026-07-10).
+!data/eval-corpus/
 src/mcp/data/
 .cerid-state/
 src/mcp/.cerid-state/
@@ -51,7 +57,10 @@ logs/
 stacks/infrastructure/data/
 artifacts/
 artifacts
-data
+# Nested runtime data dirs (the old bare `data` rule matched any depth;
+# scoped to the known ones so the root data/eval-corpus carve-out works).
+src/mcp/app/data/
+src/mcp/tests/eval/longmemeval/data/
 
 # Node
 node_modules/

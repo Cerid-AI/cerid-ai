@@ -429,12 +429,18 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
 
   mkdir -p "${SCRIPT_DIR}/eval/reports"
 
+  # --reruns 1: absorb seed/cleanup boundary flakes from neighboring cases
+  # (same convention as the e2e tier's retries:1 — verified 2026-07-10:
+  # V-05 passes 4/4 isolated, ~20% flaky only mid-tier under concurrent
+  # seeding churn). Systematic failures still fail: a rerun under the
+  # same defect fails again.
   docker run --rm --network "$DOCKER_NETWORK" \
     -e CERID_API_KEY \
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
-      pip install -q httpx pytest 'pytest-asyncio>=0.23' 2>/dev/null
+      pip install -q httpx pytest 'pytest-asyncio>=0.23' pytest-rerunfailures 2>/dev/null
       cd eval && python -m pytest . -v --tb=short \
+        --reruns 1 --reruns-delay 5 \
         --junitxml=reports/eval.xml 2>&1
     "
   EVAL_EXIT=$?

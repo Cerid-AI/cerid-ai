@@ -439,6 +439,34 @@ class TestTemporalPatternExpansion:
         result = _reclassify_recency(claim, "factual")
         assert result == "factual"
 
+    def test_historical_since_year_stays_factual(self):
+        """'since 1983' anchoring a durable fact is NOT recency (eval V-54)."""
+        claim = (
+            "The speed of light in vacuum is exactly 299,792,458 meters per "
+            "second, a value fixed by definition of the metre in the SI "
+            "system since 1983"
+        )
+        result = _reclassify_recency(claim, "factual")
+        assert result == "factual"
+
+    def test_historical_as_of_year_stays_factual(self):
+        """'as of 1990' references settled history, not time-sensitive data."""
+        claim = "As of 1990, the treaty had been ratified by 40 countries"
+        result = _reclassify_recency(claim, "factual")
+        assert result == "factual"
+
+    def test_recent_since_year_still_recency(self):
+        """'since <recent year>' remains time-sensitive → recency."""
+        claim = "Since 2025, the new regulation applies to all imports"
+        result = _reclassify_recency(claim, "factual")
+        assert result == "recency"
+
+    def test_future_as_of_year_still_recency(self):
+        """'as of <future year>' is inherently time-sensitive → recency."""
+        claim = "As of 2031, the standard will require dual attestation"
+        result = _reclassify_recency(claim, "factual")
+        assert result == "recency"
+
     def test_just_recently_pattern(self):
         """'just announced a new product' detected as current-event."""
         claim = "Apple just announced a new product line"
@@ -554,3 +582,26 @@ class TestStreamingTimeoutPreservation:
         remaining = 40.0
         claim_timeout = min(expert_per_claim, max(remaining - 2.0, 3.0))
         assert claim_timeout == 30.0  # min(30, max(38, 3)) = 30.0
+
+
+class TestTransportFailureVerdictNotCacheable:
+    """2026-07-10: outage verdicts must never enter the claim cache."""
+
+    def test_failure_methods_flagged(self):
+        from core.agents.hallucination.verification import (
+            _is_transport_failure_verdict,
+        )
+        for method in ("timeout", "credit_exhausted", "circuit_open", "none",
+                       "cross_model_failed", "web_search_failed"):
+            assert _is_transport_failure_verdict(
+                {"status": "uncertain", "verification_method": method}
+            ), method
+
+    def test_genuine_verdicts_cacheable(self):
+        from core.agents.hallucination.verification import (
+            _is_transport_failure_verdict,
+        )
+        for method in ("cross_model", "web_search", "kb_nli", "kb"):
+            assert not _is_transport_failure_verdict(
+                {"status": "uncertain", "verification_method": method}
+            ), method

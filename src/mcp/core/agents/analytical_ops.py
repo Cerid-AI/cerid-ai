@@ -144,6 +144,13 @@ _ORDERING_RE = re.compile(
     re.I,
 )
 
+# "How much <amount>" asks for a quantity/price/degree — len(items) can never
+# answer it (arm A 2026-07-09: "how much did the drone cost" gold "$2,000"
+# answered "7" = distinct-mention count). Synthesis extracts the stated value
+# WITH its unit. "how much time" is already routed temporal upstream; the
+# lookahead keeps this guard from shadowing it if it ever lands here.
+_AMOUNT_RE = re.compile(r"\bhow much\b(?!\s+time)", re.I)
+
 
 # ---------------------------------------------------------------------------
 # LLM-driven extraction → deterministic compute
@@ -190,13 +197,18 @@ Memories:
 Question: {question}
 
 Return ONLY a JSON object:
-{{"answerable": true or false, "items": ["distinct item 1", "distinct item 2"]}}
+{{"answerable": true or false, "stated_total": <number or null>,
+  "items": ["distinct item 1", "distinct item 2"]}}
 
 Rules:
+- stated_total: if a memory EXPLICITLY states a cumulative total that directly
+  answers the question (e.g. "I have now bought five tops", "completed 50
+  episodes so far"), return that number (digits or the exact word used). The
+  most recent stated total wins. Otherwise null — never infer or add one up.
 - List each DISTINCT item exactly once (merge items that refer to the same thing;
   keep genuinely different items separate).
 - Be exhaustive — scan EVERY memory across all sessions.
-- answerable=false only if no relevant items are present.
+- answerable=false only if no relevant items are present AND no total is stated.
 """
 
 
@@ -313,17 +325,48 @@ async def compute_temporal_answer(
     )
 
 
+_WORD_NUMBERS = {
+    w: i for i, w in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve "
+        "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
+    )
+}
+
+
+def _parse_total(value: Any) -> int | None:
+    """Parse a stated total: int, digit string, or a small word-number."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    s = str(value).strip().lower()
+    if s.isdigit():
+        return int(s)
+    return _WORD_NUMBERS.get(s)
+
+
 async def _count_once(
     question: str, memory_block: str, temperature: float,
 ) -> tuple[int, str] | None:
-    """One extraction → dedup → ``len()``. Returns ``(count, rendered)``; the
-    vote key is the COUNT (the answer), not the decorated item list — two
+    """One extraction → stated-total-or-``len()``. Returns ``(count, rendered)``;
+    the vote key is the COUNT (the answer), not the decorated item list — two
     samples that agree on 5 must not split the vote over surface-form drift."""
     data = await _extract_json(
         question, memory_block, _COUNT_PROMPT, "", temperature,
     )
     if not data or not data.get("answerable"):
         return None
+    # Stated-total precedence (2026-07-09 arm A regression): "how many X have
+    # I <verbed>" questions whose memories STATE a cumulative total ("bought
+    # five tops", "completed 50 episodes") are value-recall — enumerating
+    # distinct mentions yields the mention count, not the answer, and also
+    # undercounts whenever retrieval misses sessions. A user's own stated
+    # total is authoritative when present.
+    total = _parse_total(data.get("stated_total"))
+    if total is not None:
+        return total, str(total)
     raw_items = data.get("items")
     if not isinstance(raw_items, list):
         return None
@@ -348,6 +391,8 @@ async def compute_count_answer(question: str, memory_block: str) -> str | None:
     """
     if _FREQUENCY_RE.search(question):
         return None  # "how often" → synthesis returns the current rate, not a count
+    if _AMOUNT_RE.search(question):
+        return None  # "how much" → synthesis extracts the stated amount + unit
     return await _self_consistent(
         lambda t: _count_once(question, memory_block, t),
     )

@@ -3,6 +3,20 @@
     "schemas": {
       "AgentQueryRequest": {
         "properties": {
+          "budget_seconds": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-request retrieval wall-clock budget override (seconds). None = the server's interactive default (AGENT_QUERY_BUDGET_SECONDS, 20s). For offline/batch callers \u2014 eval harnesses, SDK batch jobs \u2014 that prefer completeness over latency.",
+            "title": "Budget Seconds"
+          },
           "context_sources": {
             "anyOf": [
               {

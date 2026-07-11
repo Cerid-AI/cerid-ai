@@ -63,6 +63,46 @@ async def seeded_benchmark(aclient: httpx.AsyncClient) -> list[dict]:
         await cleanup_artifact(aclient, entry["artifact_id"])
 
 
+async def _query_full_rag(
+    aclient: httpx.AsyncClient, payload: dict, attempts: int = 3
+) -> dict:
+    """POST /agent/query, retrying budget-degraded envelopes.
+
+    Under CPU load the query agent hits its wall-clock budget and returns an
+    HTTP-200 *degraded* envelope (``budget_exceeded: true``, kb/memory
+    ``timeout``, external-fallback-only sources with empty artifact_ids).
+    Scoring those as rankings produced the 2026-07-08 flat NDCG@5=0.000 —
+    a measurement artifact, not retrieval quality. Retry, then fail LOUDLY:
+    an unmeasurable metric must never score as zero.
+    """
+    data: dict = {}
+    for attempt in range(attempts):
+        if attempt:
+            await asyncio.sleep(5 * attempt)
+        # The benchmark measures RANKING quality, not latency (benchmark-slo
+        # owns latency) — opt into a patient budget so ambient load on the
+        # shared local-inference backend can't make the metric unmeasurable.
+        # The client read timeout must exceed the server budget, else the
+        # transport gives up on queries the server would have completed.
+        resp = await aclient.post(
+            "/agent/query",
+            json={**payload, "budget_seconds": 60},
+            timeout=90.0,
+        )
+        assert resp.status_code == 200, f"Query failed: {resp.text}"
+        data = resp.json()
+        kb_status = (data.get("source_status") or {}).get("kb", "ok")
+        if not data.get("budget_exceeded") and kb_status == "ok":
+            return data
+    pytest.fail(
+        f"KB retrieval degraded on all {attempts} attempts for "
+        f"{payload['query']!r} (budget_exceeded="
+        f"{data.get('budget_exceeded')}, source_status="
+        f"{data.get('source_status')}) — retrieval quality is UNMEASURABLE "
+        "under this load; re-run the eval tier when the stack is quiet."
+    )
+
+
 @pytest.mark.asyncio
 async def test_retrieval_metrics(aclient: httpx.AsyncClient, seeded_benchmark: list[dict]) -> None:
     """Phase B: Retrieval quality — NDCG@5 and MRR across seeded benchmark."""
@@ -70,12 +110,7 @@ async def test_retrieval_metrics(aclient: httpx.AsyncClient, seeded_benchmark: l
     mrr_scores = []
 
     for q in seeded_benchmark:
-        resp = await aclient.post("/agent/query", json={
-            "query": q["query"],
-            "top_k": 20,
-        })
-        assert resp.status_code == 200, f"Query failed: {resp.text}"
-        data = resp.json()
+        data = await _query_full_rag(aclient, {"query": q["query"], "top_k": 20})
         # /agent/query returns both "sources" and "results" — use sources for artifact IDs
         sources = data.get("sources", data.get("results", []))
         ranked_ids = [r["artifact_id"] for r in sources]
@@ -107,11 +142,8 @@ async def test_ragas_quality(aclient: httpx.AsyncClient, seeded_benchmark: list[
 
     # Test first 5 queries for cost control
     for q in seeded_benchmark[:5]:
-        # Get RAG context
-        rag_resp = await aclient.post("/agent/query", json={
-            "query": q["query"], "top_k": 5,
-        })
-        rag_data = rag_resp.json()
+        # Get RAG context (budget-degraded envelopes retried — see _query_full_rag)
+        rag_data = await _query_full_rag(aclient, {"query": q["query"], "top_k": 5})
         contexts = [r["content"] for r in rag_data.get("sources", rag_data.get("results", []))]
 
         # Generate answer via chat

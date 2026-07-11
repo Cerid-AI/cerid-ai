@@ -1655,6 +1655,19 @@ async def _enrich_summaries(
     return results
 
 
+async def _nli_gate_scores(pairs: list[tuple[str, str]]) -> list[dict[str, Any]]:
+    """Run the NLI gate's batch inference OFF the event loop.
+
+    DeBERTa ONNX over up to 15 pairs takes tens of seconds on a contended
+    CPU; called in-loop it stalls the heartbeat past the 45s watchdog,
+    which force-exits the process mid-request (the 2026-07-08/2026-07-10
+    MCP crash root cause). ``asyncio.to_thread`` keeps the loop serving.
+    """
+    from core.utils import nli as _nli_mod
+
+    return await asyncio.to_thread(_nli_mod.batch_nli_score, pairs)
+
+
 async def _apply_quality_and_summaries(
     results: list[dict[str, Any]],
     neo4j_driver: Any | None = None,
@@ -1782,6 +1795,7 @@ async def agent_query(
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
     exclude_packs: bool = False,
+    budget_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Budget-gated public entry for multi-domain query.
 
@@ -1791,8 +1805,18 @@ async def agent_query(
     45s watchdog. On timeout, returns a structured "degraded" response
     rather than raising — the caller (frontend or downstream pipeline) can
     surface a helpful message and let the user retry or narrow the query.
+
+    ``budget_seconds`` overrides the configured ceiling per request:
+    offline/batch callers (the eval harness, SDK batch jobs) opt into
+    patience without touching the interactive default. Bounds are enforced
+    at the API boundary (1–120s in the router schema); internal callers
+    are trusted.
     """
-    budget = getattr(config, "AGENT_QUERY_BUDGET_SECONDS", 20.0)
+    budget = (
+        budget_seconds
+        if budget_seconds is not None
+        else getattr(config, "AGENT_QUERY_BUDGET_SECONDS", 20.0)
+    )
     try:
         return await asyncio.wait_for(
             _agent_query_impl(
@@ -1856,6 +1880,7 @@ async def agent_query_full(
     external_augmentation: bool = True,
     response_text: str | None = None,
     enable_self_rag: bool | None = None,
+    budget_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Canonical full agentic-retrieval path.
 
@@ -1902,6 +1927,7 @@ async def agent_query_full(
             skip_cache=skip_cache,
             metadata_filter=metadata_filter,
             exclude_packs=exclude_packs,
+            budget_seconds=budget_seconds,
         )
 
     # B2a: capture KB-only confidence BEFORE any external augmentation.
@@ -2614,9 +2640,8 @@ async def _agent_query_impl(
     # Step 5.65: NLI contradiction gate — remove results that contradict the query
     with timer.step("nli_gate"):
         try:
-            from core.utils.nli import batch_nli_score
             _nli_pairs = [(r.get("content", "")[:512], query) for r in results[:15]]
-            _nli_scores = batch_nli_score(_nli_pairs)
+            _nli_scores = await _nli_gate_scores(_nli_pairs)
             _nli_filtered = []
             # results[:15] are already relevance-sorted (Step 5.4). Exempt the
             # top-K matches from the contradiction drop: NLI on (doc, query)

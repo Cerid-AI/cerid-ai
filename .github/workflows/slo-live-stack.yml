@@ -1,0 +1,124 @@
+# Reusable live-stack SLO benchmark. Called from two places:
+#   - ci.yml `benchmark-slo` — the merge-time latency gate (rule 7)
+#   - nightly-eval.yml `slo` — the nightly drift signal (V1 plan Task 4.4)
+# Extracted 2026-07-09 so the two cadences share one definition instead of
+# drifting copies. Callers own their trigger conditions; this workflow owns
+# the stack boot + benchmark + teardown.
+name: slo-live-stack
+
+on:
+  workflow_call:
+    secrets:
+      OPENROUTER_API_KEY:
+        required: true
+
+jobs:
+  slo:
+    # Latency SLO regression against a freshly-booted isolated stack.
+    #
+    # Budgets per docs/TIER_MATRIX.md (R5-1: cold 3s / warm 300ms /
+    # TTFT 2s — see test_latency_slo.py).
+    #
+    # Stack boot mirrors the preservation gate (docker-compose.yml +
+    # docker-compose.ci.yml, llm-network created up front, REDIS/NEO4J
+    # passwords seeded so compose interpolation succeeds).
+    name: benchmark / slo (live stack)
+    # Rule 8 fallback: default to ubuntu-latest (GitHub-hosted) so this live-stack
+    # gate still runs when the self-hosted Mac Pro pool is offline. Route back to
+    # the Mac Pro by setting repo variable
+    # LIVESTACK_RUNNER='["self-hosted","mac-pro","docker"]' once it is online.
+    runs-on: ${{ vars.LIVESTACK_RUNNER && fromJSON(vars.LIVESTACK_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 25
+    # Same dev-stack isolation as the preservation gate — see docker-compose.ci.yml.
+    env:
+      COMPOSE_PROJECT_NAME: cerid-ci
+      CERID_PORT_MCP: "18888"
+      CERID_PORT_NEO4J: "17474"
+      CERID_PORT_NEO4J_BOLT: "17687"
+      CERID_PORT_CHROMA: "18001"
+      CERID_PORT_REDIS: "16379"
+      CERID_PORT_GUI: "13000"
+    steps:
+      - uses: actions/checkout@v6
+      # ubuntu fallback: GitHub-hosted setup-python is fine (passwordless sudo).
+      # On the self-hosted Mac Pro we SKIP it — setup-python's macOS tool-cache
+      # step runs `sudo` regardless of AGENT_TOOLSDIRECTORY, and the runner has
+      # no passwordless sudo ("sudo: a password is required"). Instead we build a
+      # venv from the runner's own python3.12 and prepend it to PATH, so the
+      # `pip`/`python` commands in later steps resolve to it. No sudo, no
+      # host-config dependency.
+      - uses: actions/setup-python@v6
+        if: ${{ !vars.LIVESTACK_RUNNER }}
+        with: { python-version: "3.12" }
+      - name: Set up Python venv (self-hosted runner)
+        if: ${{ vars.LIVESTACK_RUNNER }}
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/ci-venv"
+          echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
+      - name: Install benchmark deps on the runner
+        # Benchmarks talk to the stack over HTTP only; no in-process imports
+        # of cerid modules. Keep host deps minimal — same approach as the
+        # preservation gate, but adds pytest-benchmark for SLO assertions.
+        run: pip install --quiet "pytest>=8" pytest-benchmark httpx
+      - name: Seed .env from .env.example
+        env:
+          # Env-var indirection keeps the secret out of the shell script text.
+          # The previous inline `$${{ secrets... }}` form wrote a PID-prefixed
+          # (invalid) key into .env — fixed 2026-07-09 (V1 Task 4.4).
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          cp .env.example .env
+          echo "NEO4J_PASSWORD=sloCIpassword" >> .env
+          echo "REDIS_PASSWORD=sloCIpassword" >> .env
+          echo "OPENROUTER_API_KEY=$OPENROUTER_KEY" >> .env
+          # Pre-create a world-writable sync dir so /sync bind mount works
+          # for the cerid uid 1000 inside the container (see preservation
+          # gate for full rationale).
+          mkdir -p /tmp/cerid-sync/user
+          chmod -R 777 /tmp/cerid-sync
+          echo "CERID_SYNC_DIR_HOST=/tmp/cerid-sync" >> .env
+      - name: Boot Cerid stack
+        run: |
+          docker network create llm-network 2>/dev/null || true
+          # Reuse cached images instead of rebuilding under the cerid-ci project
+          # name (see the preservation gate for the full rationale). No-op on the
+          # ubuntu-latest fallback, where compose builds fresh.
+          docker tag cerid-ai-internal-mcp-server:latest cerid-ci-mcp-server:latest 2>/dev/null || true
+          docker tag cerid-ai-internal-cerid-web:latest cerid-ci-cerid-web:latest 2>/dev/null || true
+          # docker-compose.ci.yml lowers neo4j cpus to fit GH Actions runners.
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait --wait-timeout 300
+          # v0.92: extended timeout from 60s → 180s. The Phase P background
+          # processor lifespan, brief scheduler wiring, and 7 new router
+          # registrations measurably increase startup time on CI runners.
+          for i in {1..90}; do
+            if curl -sf http://localhost:18888/health | grep -q '"status":"healthy"'; then
+              echo "stack ready after $i attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Stack did not reach /health healthy within 180s"
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail 200
+          exit 1
+      - name: Run SLO benchmarks
+        env:
+          CERID_MCP_URL: http://localhost:18888
+        run: |
+          cd src/mcp
+          pytest tests/test_latency_slo.py -m benchmark_slo \
+            --benchmark-only \
+            --benchmark-json=../../slo-benchmark.json \
+            -v
+      - name: Upload benchmark JSON
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slo-benchmark-${{ github.run_id }}
+          path: slo-benchmark.json
+          if-no-files-found: ignore
+      - name: Capture logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail 500
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v

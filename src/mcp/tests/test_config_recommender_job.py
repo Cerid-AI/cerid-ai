@@ -139,10 +139,28 @@ def test_corpus_below_threshold_fires_nothing():
 
 def test_corpus_at_threshold_fires_sparse(monkeypatch):
     monkeypatch.setattr(rec_module, "_THRESHOLD_SPARSE", 100)
+    # The sparse card additionally requires a runnable encode path
+    # (V1 Task 4.3); pin it available so this test stays about the
+    # corpus threshold.
+    import core.retrieval.sparse as sparse_mod
+    monkeypatch.setattr(sparse_mod, "encode_path_available", lambda: True)
     stats = CorpusStats(artifact_count=100, flags_enabled=frozenset())
     hits = evaluate(stats)
     ids = {spec.id for spec, _ in hits}
     assert "sparse_retrieval" in ids
+
+
+def test_sparse_not_recommended_without_encode_path(monkeypatch):
+    """V1 Task 4.3: no sidecar + no in-process deps → enabling sparse would
+    be a silent no-op, so the card must not surface — while unrelated
+    recommendations still do."""
+    monkeypatch.setattr(rec_module, "_THRESHOLD_SPARSE", 100)
+    import core.retrieval.sparse as sparse_mod
+    monkeypatch.setattr(sparse_mod, "encode_path_available", lambda: False)
+    stats = CorpusStats(artifact_count=500, flags_enabled=frozenset())
+    ids = {spec.id for spec, _ in evaluate(stats)}
+    assert "sparse_retrieval" not in ids
+    assert "hype_indexing" in ids  # other cards unaffected by the sparse gate
 
 
 def test_flag_already_on_skips_recommendation():
@@ -203,6 +221,10 @@ def test_recommender_writes_redis_hash_when_threshold_crossed(monkeypatch):
     monkeypatch.delenv("RETRIEVAL_HYPE_ENABLED", raising=False)
     monkeypatch.delenv("PARENT_CHILD_ENABLED", raising=False)
     monkeypatch.delenv("HYBRID_FUSION_MODE", raising=False)
+    # Pin the sparse encode path available so this test is about the
+    # threshold plumbing on every CI image (deps vary by environment).
+    import core.retrieval.sparse as sparse_mod
+    monkeypatch.setattr(sparse_mod, "encode_path_available", lambda: True)
 
     redis = _FakeRedis()
     driver = _FakeNeo4jDriver(count=150)

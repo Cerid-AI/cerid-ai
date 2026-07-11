@@ -121,6 +121,24 @@ def _at(n: int, flag: str) -> Callable[[CorpusStats], bool]:
     return _cond
 
 
+def _sparse_at(n: int, flag: str) -> Callable[[CorpusStats], bool]:
+    """Sparse-retrieval condition: corpus threshold AND flag off AND an
+    encode path that could actually run (V1 Task 4.3 — enabling the flag
+    on a deployment with no sidecar and no in-process deps is a silent
+    no-op, and the card must not recommend one)."""
+
+    base = _at(n, flag)
+
+    def _cond(stats: CorpusStats) -> bool:
+        if not base(stats):
+            return False
+        from core.retrieval.sparse import encode_path_available
+
+        return encode_path_available()
+
+    return _cond
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -136,7 +154,7 @@ RECOMMENDATIONS: tuple[RecommendationSpec, ...] = (
             "synonym matches that BM25 and dense vectors miss; turning it "
             "on adds a third retriever and fuses all three via RRF."
         ),
-        condition_fn=_at(_THRESHOLD_SPARSE, "RETRIEVAL_SPARSE_ENABLED"),
+        condition_fn=_sparse_at(_THRESHOLD_SPARSE, "RETRIEVAL_SPARSE_ENABLED"),
     ),
     RecommendationSpec(
         id="hype_indexing",

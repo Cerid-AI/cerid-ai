@@ -120,6 +120,77 @@ async def test_count_answer_none_when_empty() -> None:
         assert await compute_count_answer("q", "mem") is None
 
 
+# --- Stated-total precedence (2026-07-09 arm A regression: knowledge-update
+# 'how many X have I <verbed>' questions whose memories STATE a cumulative
+# total; enumerating distinct mentions yields the mention count, not the
+# answer, and T0.1's bare-count finalization made that misfire fatal) ---
+
+
+@pytest.mark.asyncio
+async def test_count_prefers_stated_total_over_enumeration() -> None:
+    """'completed 50 episodes' in memory answers the question; the 2 distinct
+    mentions the extractor found must not become the answer."""
+    mock = AsyncMock(return_value=(
+        '{"answerable": true, "stated_total": 50,'
+        ' "items": ["episode 10 of the Science series",'
+        ' "completed 50 episodes milestone"]}'
+    ))
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        ans = await compute_count_answer(
+            "How many episodes of the Science series have I completed?", "mem",
+        )
+    assert ans == "50"
+
+
+@pytest.mark.asyncio
+async def test_count_stated_total_word_number_parsed() -> None:
+    """Stated totals arrive as words too ('five tops from H&M')."""
+    mock = AsyncMock(return_value=(
+        '{"answerable": true, "stated_total": "five",'
+        ' "items": ["three tops from H&M", "five tops from H&M"]}'
+    ))
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        ans = await compute_count_answer("How many tops have I bought from H&M?", "mem")
+    assert ans == "5"
+
+
+@pytest.mark.asyncio
+async def test_count_enumerates_when_no_stated_total() -> None:
+    """stated_total null/absent → enumeration behavior unchanged."""
+    mock = AsyncMock(return_value=(
+        '{"answerable": true, "stated_total": null, "items": ["a", "b", "c"]}'
+    ))
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        assert await compute_count_answer("How many distinct things?", "mem") == "3"
+
+
+@pytest.mark.asyncio
+async def test_count_ignores_garbage_stated_total() -> None:
+    """A non-numeric stated_total must not crash or win — fall back to items."""
+    mock = AsyncMock(return_value=(
+        '{"answerable": true, "stated_total": "several", "items": ["a", "b"]}'
+    ))
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        assert await compute_count_answer("How many?", "mem") == "2"
+
+
+@pytest.mark.asyncio
+async def test_count_abstains_on_how_much_amount_question() -> None:
+    r"""'how much did X cost' asks for an AMOUNT — len(items) can never answer
+    it (arm A 2026-07-09: gold '\$2,000' answered '7' = mention count). The
+    operator must abstain BEFORE any LLM call so synthesis extracts the
+    stated value with its unit."""
+    mock = AsyncMock(return_value='{"answerable": true, "items": ["a", "b"]}')
+    with patch("core.agents.analytical_ops.call_internal_llm", new=mock):
+        assert await compute_count_answer(
+            "How much did the drone cost?", "mem",
+        ) is None
+        assert await compute_count_answer(
+            "How much weight have I lost since March?", "mem",
+        ) is None
+    mock.assert_not_called()
+
+
 # --- Tier 1 routing self-guards (deterministic; abstain → synthesis) ---
 
 

@@ -91,6 +91,24 @@ def test_preference_prompt_applies_not_refuses() -> None:
     assert "do not refuse" in user
 
 
+def test_extractive_prompt_forces_answer_when_span_exists() -> None:
+    """T3.9 (class G over-abstention): a supporting span in the memories must
+    force an answer — never IDK with the evidence present — and the answer is
+    the bare fact/value (Tier-0 finalization: no sentence wrapper)."""
+    user = build_answer_messages("q?", "mem", AnswerMode.EXTRACTIVE)[-1]["content"].lower()
+    assert "span" in user
+    assert "must answer" in user
+    assert "just the fact" in user or "value only" in user or "just the value" in user
+    assert "i don't know" in user  # the escape survives for the no-span case
+
+
+def test_preference_prompt_names_the_applied_preference() -> None:
+    """T3.8 (application signal): the answer must reference the stated
+    preference it applies, so the application is visible, not implicit."""
+    user = build_answer_messages("q?", "mem", AnswerMode.PREFERENCE)[-1]["content"].lower()
+    assert "name the stated preference" in user or "reference the stated preference" in user
+
+
 def test_build_messages_includes_memory_block_and_question() -> None:
     msgs = build_answer_messages("How many cats?", "[recorded 2023/01/01]\nA cat", AnswerMode.AGGREGATION)
     assert msgs[0]["role"] == "system"

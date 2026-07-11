@@ -73,12 +73,19 @@ def _reclassify_recency(claim_text: str, claim_type: str) -> str:
             ):
                 return "recency"
 
+    # "as of YYYY" / "since YYYY" is only time-sensitive when the anchor year
+    # is recent or future — "since 1983" pins settled history (eval V-54: the
+    # SI metre definition), while "since 2025" describes a live state. Same
+    # 2-year window as the past-tense block below.
+    anchor = re.search(r"\b(?:as of|since)\s+(\d{4})\b", text_lower)
+    if anchor and int(anchor.group(1)) >= _current_year() - 2:
+        return "recency"
+
     # Check for explicit temporal markers that suggest time-sensitive info
     recency_markers = [
         r"\b(current|currently|now|today|this year|this month)\b",
         r"\b(recent|recently|latest|newest|just)\b",
         r"\b(upcoming|forthcoming|soon|next)\b",
-        r"\b(as of \d{4}|since \d{4})\b",
         # Month + year (e.g., "in March 2026", "January 2025 report")
         r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20[2-9]\d\b",
         # Quarter references (e.g., "Q1 2026", "Q4 2025 earnings")

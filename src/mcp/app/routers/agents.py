@@ -94,6 +94,15 @@ class AgentQueryRequest(BaseModel):
     skip_cache: bool = Field(False, description="Bypass semantic cache and query cache (for fresh-data scenarios like setup wizard)")
     metadata_filter: dict | None = Field(None, description="ChromaDB where-clause for metadata filtering (e.g. {\"filename\": \"report.pdf\"})")
     exclude_packs: bool = Field(False, description="When True, drop knowledge-pack chunks from retrieval (personal-first: answer from your own data only). Slice 7.3.")
+    budget_seconds: float | None = Field(
+        None, ge=1, le=120,
+        description=(
+            "Per-request retrieval wall-clock budget override (seconds). "
+            "None = the server's interactive default (AGENT_QUERY_BUDGET_"
+            "SECONDS, 20s). For offline/batch callers — eval harnesses, SDK "
+            "batch jobs — that prefer completeness over latency."
+        ),
+    )
     # --- Context source gates (absolute on/off per source) ---
     context_sources: dict | None = Field(
         None,
@@ -406,6 +415,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 external_augmentation=_cs.get("external", True),
                 response_text=req.response_text,
                 enable_self_rag=req.enable_self_rag,
+                budget_seconds=req.budget_seconds,
             )
 
         # Phase 4.3 — retrieval-quality proxy into the time-series collector
@@ -425,7 +435,11 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         except Exception as _exc:  # noqa: BLE001 — metrics recording must never block the query response
             log_swallowed_error("app.routers.agents.retrieval_ndcg", _exc)
 
-        if not has_context and not req.skip_cache:
+        # Never cache a budget-degraded envelope: it holds fallback-only
+        # results (kb/memory timed out), and a cache hit would keep serving
+        # them after the load transient passes.
+        degraded = isinstance(result, dict) and bool(result.get("budget_exceeded"))
+        if not has_context and not req.skip_cache and not degraded:
             set_cached(req.query, domain_key, req.top_k, result)
         return result
     except ValueError as e:

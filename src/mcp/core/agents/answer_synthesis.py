@@ -118,9 +118,14 @@ _GROUNDING = (
 # there only adds cost/noise risk).
 _MODE_INSTRUCTIONS: dict[AnswerMode, str] = {
     AnswerMode.EXTRACTIVE: (
-        "- If the answer is in the memories, respond concisely with no preamble.\n"
-        "- If the memories do not contain enough information, respond exactly: "
-        "I don't know."
+        "- First locate the exact span in the memories that answers the "
+        "question.\n"
+        "- If such a span exists you MUST answer — never say 'I don't know' "
+        "when a supporting span exists. Respond with just the fact/value the "
+        "question asks for: no preamble, no restatement of the question, no "
+        "sentence wrapper.\n"
+        "- Only if NO span in the memories answers the question, respond "
+        "exactly: I don't know."
     ),
     AnswerMode.TEMPORAL: (
         "This is a TEMPORAL question — the answer is derived from dates. Work in "
@@ -158,7 +163,9 @@ _MODE_INSTRUCTIONS: dict[AnswerMode, str] = {
         '\"preference\": \"<the exact preference>\"}.\n'
         "Step 2 — Apply: using the MOST RECENT relevant preference, answer by "
         "applying it — state what the user would prefer, or recommend options "
-        "consistent with it.\n"
+        "consistent with it. Briefly name the stated preference you are "
+        "applying (e.g. 'Since you prefer X, ...') so the application is "
+        "visible, not implicit.\n"
         "Then end with one line: 'Answer: <the applied preference / recommendation>'.\n"
         "Do not refuse because the memories contain no ready-made answer — the "
         "expected answer is the preference applied to the request."

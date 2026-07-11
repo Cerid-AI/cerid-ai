@@ -76,6 +76,9 @@ _SYSTEM_DIRECT_VERIFICATION = (
     "You are a factual claim verifier. You are verifying a claim made by a "
     "different AI model. Your job is to independently assess accuracy — do not "
     "assume the claim is correct just because another AI generated it.\n\n"
+    "Judge ONLY the quoted claim. Surrounding text and other claims from the "
+    "same response are context for resolving references — do NOT refute the "
+    "claim because something ELSE in the response is wrong.\n\n"
     "Respond with ONLY a JSON object — no other text:\n"
     '{"verdict": "supported"|"refuted"|"insufficient_info", '
     '"confidence": 0.0-1.0, '
@@ -1409,6 +1412,21 @@ async def _verify_claim_externally(
             }
 
 
+def _is_transport_failure_verdict(result: dict[str, Any]) -> bool:
+    """True when the verdict is an outage artifact, not a judgment.
+
+    Timeout / 402 credit exhaustion / open breaker / provider-error paths
+    all return status "uncertain" with a failure verification_method —
+    caching those keeps serving the outage after it passes (2026-07-10:
+    a credit exhaustion poisoned cached verdicts across eval runs).
+    """
+    method = result.get("verification_method", "") or ""
+    return (
+        method in ("timeout", "credit_exhausted", "circuit_open", "none")
+        or method.endswith("_failed")
+    )
+
+
 # ---------------------------------------------------------------------------
 # KB source field extraction
 # ---------------------------------------------------------------------------
@@ -1431,6 +1449,9 @@ def _kb_source_fields(top_result: dict[str, Any] | None) -> dict[str, Any]:
 
 _SYSTEM_BATCH_VERIFICATION = (
     "You are a fact-checking engine. Verify each claim for factual accuracy. "
+    "Judge each claim ONLY on its own text — other claims in the batch and "
+    "any provided context are for resolving references, and an error in one "
+    "claim must not change another claim's verdict. "
     "Respond with ONLY a JSON array, one object per claim in order. "
     "Each: {\"claim_index\": N, \"verdict\": \"supported\"|\"refuted\"|\"insufficient_info\", "
     "\"confidence\": 0.0-1.0, \"reasoning\": \"brief explanation\"}"
@@ -1706,11 +1727,13 @@ async def verify_claim(
 
         Uncertain claims are also cached (with shorter TTL) to prevent
         repeated API calls for claims that are genuinely unverifiable.
-        Timeout results are NOT cached — they should be retried by the sweep.
+        Transport-failure verdicts are NOT cached — a 402/breaker/timeout
+        "uncertain" is an outage artifact, not a judgment, and caching one
+        keeps serving it after the outage passes (2026-07-10: a credit
+        exhaustion poisoned V-06/V-94/EX-02/JV-05 across eval runs).
         """
         status = result.get("status")
-        method = result.get("verification_method", "")
-        if status in ("verified", "unverified", "uncertain") and method != "timeout":
+        if status in ("verified", "unverified", "uncertain") and not _is_transport_failure_verdict(result):
             # Key on the same (model, tier, response_context) the reader uses
             # above — otherwise cache writes never match cache reads.
             await cache_verdict(

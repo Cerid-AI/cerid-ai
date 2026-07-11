@@ -1,0 +1,94 @@
+# Nightly eval drift signals (V1 plan Task 4.4, 2026-07-09).
+#
+# Lives in its own workflow — ci.yml's schedule cron runs the full unguarded
+# suite (weekly full-suite drift check), so adding a nightly cron THERE would
+# 7x the whole pipeline's hosted-runner cost. This file scopes the nightly
+# cadence to exactly the two eval jobs.
+#
+# Cost-mitigation policy: see ~/dotfiles/CLAUDE.md <github_actions_policy>.
+name: nightly-eval
+
+on:
+  schedule:
+    # why: nightly eval drift signal (RAGAS faithfulness + latency SLO)
+    # consumed daily during the v1 launch window (V1 plan Task 4.4).
+    # Both jobs land on the self-hosted mac-pro runner via
+    # vars.LIVESTACK_RUNNER (zero hosted-runner minutes; ubuntu-latest
+    # fallback when the pool is offline). 06:00 UTC = overnight US-East,
+    # an hour clear of ci.yml's Monday 07:00 weekly cron.
+    # RULE 5: every schedule cron carries a `# why:` comment.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+# RULE 1: nightly runs never overlap (24h apart), but dispatch + cron can;
+# no published artifacts, so superseded runs are safe to cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ragas-eval:
+    name: nightly / ragas-eval
+    # LLM-as-judge faithfulness + context_precision gates against the golden
+    # dataset (src/mcp/tests/eval/golden_dataset.json). Costs OpenRouter
+    # credits per run, so it ONLY fires on the nightly cron or manual
+    # dispatch — never on PR/push. (Schedule/dispatch events cannot come
+    # from forks, so the rule-8 fork guard is structurally satisfied.)
+    runs-on: ${{ vars.LIVESTACK_RUNNER && fromJSON(vars.LIVESTACK_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── self-hosted mac-pro path: containerized ─────────────────────────
+      # The eval imports the full MCP runtime; current onnxruntime releases
+      # ship no mac-intel wheels (see scripts/regen-lock.sh rationale), so
+      # host pip cannot install it on the Mac Pro. Run inside the cached
+      # linux runtime image instead, with the fresh checkout mounted over
+      # the image's baked-in code.
+      - name: Run RAGAS gate (containerized, self-hosted)
+        if: ${{ vars.LIVESTACK_RUNNER }}
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          docker run --rm \
+            -e OPENROUTER_API_KEY \
+            -e PYTHONPATH=/eval-src \
+            -v "$GITHUB_WORKSPACE/src/mcp:/eval-src" \
+            -w /eval-src \
+            --entrypoint bash \
+            cerid-ai-internal-mcp-server:latest \
+            -c "pip install -q -r requirements-eval.txt pytest pytest-asyncio && python -m pytest tests/eval/ragas_eval.py -m eval -v --tb=short"
+
+      # ── ubuntu fallback path: host pip (linux wheels exist) ─────────────
+      - uses: actions/setup-python@v6
+        if: ${{ !vars.LIVESTACK_RUNNER }}
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/mcp/requirements.lock
+      - name: Install runtime + eval deps (ubuntu fallback)
+        if: ${{ !vars.LIVESTACK_RUNNER }}
+        run: |
+          pip install -r src/mcp/requirements.txt
+          pip install -r src/mcp/requirements-eval.txt
+          pip install pytest pytest-asyncio
+      - name: Run RAGAS gate (ubuntu fallback)
+        if: ${{ !vars.LIVESTACK_RUNNER }}
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          cd src/mcp
+          python -m pytest tests/eval/ragas_eval.py -m eval -v --tb=short
+
+      - name: Upload baselines artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ragas-baselines
+          path: src/mcp/tests/eval/baselines/ragas.json
+
+  slo:
+    # Nightly latency-drift twin of ci.yml's merge-time benchmark-slo gate —
+    # one shared definition (rule: no drifting copies).
+    uses: ./.github/workflows/slo-live-stack.yml
+    secrets: inherit

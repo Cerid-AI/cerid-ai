@@ -75,6 +75,20 @@ def extract_env_vars(source: str) -> list[tuple[str, str | None]]:
     return sorted(seen.items())
 
 
+# Compose-interpolation vars: consumed by docker-compose.yml port/bind
+# stanzas, never read by settings.py, so the AST walk cannot discover
+# them. Registered explicitly (V1 Task 4.3 — INSTALL.md points operators
+# here for port collisions). Keep in sync with docker-compose.yml.
+COMPOSE_VARS: list[tuple[str, str]] = [
+    ("CERID_PORT_MCP", "8888"),
+    ("CERID_PORT_GUI", "3000"),
+    ("CERID_PORT_NEO4J", "7474"),
+    ("CERID_PORT_NEO4J_BOLT", "7687"),
+    ("CERID_PORT_CHROMA", "8001"),
+    ("CERID_PORT_REDIS", "6379"),
+]
+
+
 def render_env_example(entries: list[tuple[str, str | None]]) -> str:
     lines = [
         "# .env.example — auto-generated from src/mcp/config/settings.py",
@@ -87,6 +101,13 @@ def render_env_example(entries: list[tuple[str, str | None]]) -> str:
             lines.append(f"{name}={default}")
         else:
             lines.append(f"{name}=")
+    lines += [
+        "",
+        "# Host port overrides — consumed by docker-compose.yml, not the app.",
+        "# Change these when a default port collides with another service.",
+    ]
+    for name, default in sorted(COMPOSE_VARS):
+        lines.append(f"{name}={default}")
     return "\n".join(lines) + "\n"
 
 
