@@ -108,6 +108,9 @@ _TICK = {  # tier -> (Core, Pro, Enterprise)
 }
 
 
+_PLANNED: frozenset = frozenset()
+
+
 def _label(flag: str) -> str:
     return LABELS.get(flag, flag.replace("_", " ").capitalize())
 
@@ -118,8 +121,11 @@ def _collect() -> list[tuple[str, list[tuple[str, str]]]]:
     from config.features import (  # noqa: PLC0415
         FEATURE_BUCKETS,
         FEATURE_FLAGS,
+        PLANNED_FEATURES,
         _get_feature_tier,
     )
+    global _PLANNED
+    _PLANNED = PLANNED_FEATURES
 
     flag_bucket = {fl: b for b, flags in FEATURE_BUCKETS.items() for fl in flags}
     tier = {fl: _get_feature_tier(fl) for fl in FEATURE_FLAGS}
@@ -188,6 +194,10 @@ def _render(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
         out.append("| Feature | Core | Pro | Enterprise | Gate |")
         out.append("|---------|------|-----|------------|------|")
         for flag, tier in rows:
+            if flag in _PLANNED:
+                planned = "Coming in 1.0.x"
+                out.append(f"| {_label(flag)} | {planned} | {planned} | {planned} | `{flag}` |")
+                continue
             core, pro, ent = _TICK[tier]
             out.append(f"| {_label(flag)} | {core} | {pro} | {ent} | `{flag}` |")
         out.append("")

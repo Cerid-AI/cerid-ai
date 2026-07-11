@@ -156,7 +156,7 @@ BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 # "rrf" uses Reciprocal Rank Fusion (Cormack/Clarke/Buettcher 2009 — the
 # 2026 default in Elastic, OpenSearch, Azure AI Search, neo4j-graphrag).
 # "tri_rrf" (Cycle 3.2 / v0.93.3) extends RRF to three ranking lists —
-# vector + BM25 + SPLADE-v3 sparse. Opt-in via this knob; auto-picked
+# vector + BM25 + SPLADE++ learned-sparse. Opt-in via this knob; auto-picked
 # when the sparse retrieval toggle flips on in the Settings pane.
 HYBRID_FUSION_MODE = os.getenv("HYBRID_FUSION_MODE", "weighted_sum")
 HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
@@ -164,10 +164,11 @@ HYBRID_RRF_VECTOR_WEIGHT = float(os.getenv("HYBRID_RRF_VECTOR_WEIGHT", "1.0"))
 HYBRID_RRF_BM25_WEIGHT = float(os.getenv("HYBRID_RRF_BM25_WEIGHT", "1.0"))
 HYBRID_RRF_SPARSE_WEIGHT = float(os.getenv("HYBRID_RRF_SPARSE_WEIGHT", "1.0"))
 
-# SPLADE-v3 sparse retrieval (C3.2). RETRIEVAL_SPARSE_ENABLED is read
+# SPLADE++ sparse retrieval (C3.2; model swapped to the Apache-2.0
+# Qdrant/Splade_PP_en_v1 2026-07-10). RETRIEVAL_SPARSE_ENABLED is read
 # directly in core/retrieval/sparse.py (mirror of the HyPE /
 # parent-child pattern). The settings below are infrastructure knobs.
-SPLADE_MODEL_PATH = os.getenv("SPLADE_MODEL_PATH", "data/models/splade-v3")
+SPLADE_MODEL_PATH = os.getenv("SPLADE_MODEL_PATH", "data/models/splade-pp-en-v1")
 SPLADE_ONNX_FILENAME = os.getenv("SPLADE_ONNX_FILENAME", "model.onnx")
 SPLADE_TOP_K_TERMS = int(os.getenv("SPLADE_TOP_K_TERMS", "256"))
 SPARSE_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "sparse")
@@ -912,8 +913,9 @@ ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv(
 ).lower() in ("true", "1")
 
 # Layout-aware parser dispatch (Workstream E Phase 2b — default flipped
-# 2026-05-03 after eval validation against seeded eval-corpus v1; see
-# docs/EVAL_BASELINES.md ledger for delta vs legacy chunker).
+# 2026-05-03 after eval validation against seeded eval-corpus v1; headline
+# numbers incl. the delta vs the legacy chunker are published in
+# docs/EVAL_BASELINES_PUBLIC.md).
 # When true, ingest_file + ingest_content (when caller pre-dispatches)
 # route supported extensions (.csv, .md, .markdown, .py) through the
 # core/ingest/parsers/ + chunker registry — each CSV row, Markdown

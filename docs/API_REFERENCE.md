@@ -182,10 +182,11 @@ Versioned facade for external consumers. Delegates to existing agent endpoints b
 
 | Client ID | `/agent/` & `/sdk/` | `/ingest` | `/recategorize` |
 |-----------|---------------------|-----------|-----------------|
-| `gui` (default) | 20 req/min | 10 req/min | 10 req/min |
-| `_default` (unknown) | 10 req/min | 5 req/min | 5 req/min |
+| `gui` (default) | 120 req/min | 10 req/min | 10 req/min |
+| `cli-ingest` | — | 60 req/min | 30 req/min |
+| `_default` (unknown) | 120 req/min | 10 req/min | 10 req/min |
 
-Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry.
+Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry. Buckets are keyed on client ID + IP + path prefix; GET requests are exempt except on the `/admin/*` and `/observability/*` polling surfaces.
 
 ---
 
@@ -197,7 +198,7 @@ Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-
 
 - `manual` — Domain from folder name only, no AI
 - `smart` — Free model (Llama 3.3 70B Instruct via OpenRouter) for classification
-- `pro` — Premium model (Claude Sonnet 4 via OpenRouter)
+- `pro` — Premium model (Claude Sonnet 4.6 via OpenRouter)
 
 AI calls are token-efficient: only first ~1500 chars sent for classification. Response format enforced as JSON.
 

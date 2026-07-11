@@ -11,8 +11,8 @@
 > wiki / STRATA atlas), Apple ecosystem baseline, meeting-capture runtime, cloud
 > connectors, Swift CLI helpers, metamorphic verification, Custom Smart RAG, AI inbox
 > triage, daily digest, advanced analytics, Tour, the Knowledge
-> Architecture program, Pro billing/checkout + license activation. 60 MCP tools, 5,910+
-> Python tests, 1,411+ frontend cases, 113 preservation tests. Full ledger:
+> Architecture program, Pro billing/checkout + license activation. 60 MCP tools (55 with
+> trading disabled), 7,029+ Python tests, 2,531+ frontend cases, 114 preservation tests. Full ledger:
 > [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md).
 > **Shipped releases:** [CHANGELOG.md](../CHANGELOG.md) and the
 > [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.

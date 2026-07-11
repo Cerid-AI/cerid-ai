@@ -75,9 +75,9 @@ The script will:
 
 - Verify Docker is running and has enough resources.
 - Prompt for your LLM API key (OpenRouter recommended; see `docs/PROVIDERS.md`
-  for alternatives).
-- Start the infrastructure, Bifrost, MCP server, and web UI in the correct
-  order.
+  for alternatives, including fully local inference with no cloud key).
+- Generate a random `NEO4J_PASSWORD` automatically when yours is empty.
+- Start the infrastructure, MCP server, and web UI in the correct order.
 - Run a post-startup reachability check on every service.
 
 When it finishes, open <http://localhost:3000> in your browser.
@@ -176,9 +176,9 @@ Cerid AI uses the following ports by default:
 |---------|------|
 | React GUI | 3000 |
 | MCP Server | 8888 |
-| Bifrost | 8080 |
-| Neo4j | 7474 / 7687 |
 | ChromaDB | 8001 |
+| Neo4j HTTP | 7474 |
+| Neo4j Bolt | 7687 |
 | Redis | 6379 |
 
 If another application is using one of these ports, stop that application

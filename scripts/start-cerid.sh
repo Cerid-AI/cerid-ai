@@ -285,8 +285,17 @@ preflight_checks() {
         local val
         val=$(grep "^${var}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "")
         if [ -z "$val" ]; then
-            echo "  ERROR: $var is empty in .env"
-            fail=1
+            if [ "$var" = "NEO4J_PASSWORD" ]; then
+                # Auto-generate instead of failing so the README quickstart
+                # (cp .env.example .env && ./scripts/start-cerid.sh) works as
+                # written. Non-TTY safe — unlike setup.sh's interactive path.
+                val=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
+                sed "s|^NEO4J_PASSWORD=.*|NEO4J_PASSWORD=$val|" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
+                echo "  Generated NEO4J_PASSWORD (random) and wrote it to .env"
+            else
+                echo "  ERROR: $var is empty in .env"
+                fail=1
+            fi
         fi
     done
 

@@ -116,9 +116,15 @@ FEATURE_FLAGS = {
     # All True if platform supports them; runtime macOS check at use-site
     "voice_memos_watch":         True,
     "spotlight_integration":     True,
-    "share_sheet":               True,
-    "shortcuts_actions":         True,
-    "quicklook_preview":         True,
+    # Honesty gate (V1 Task 5.3, 2026-07-10): these three ship in the
+    # tier matrix but were never built — they need Xcode .appex/App
+    # Intents infrastructure SPM cannot produce (docs/PHASE_G_DEFERRED.md).
+    # False + PLANNED_FEATURES renders them "Coming in 1.0.x" instead of
+    # claiming availability; flip back True the day the .appexes land
+    # (plan: docs/superpowers/plans/2026-07-10-macos-integrations-plan.md).
+    "share_sheet":               False,
+    "shortcuts_actions":         False,
+    "quicklook_preview":         False,
     "safari_reading_list":       True,
     "menu_bar_mode":             True,
     "keychain_secrets":          True,
@@ -451,6 +457,17 @@ def log_feature_toggles() -> None:
 # Tier-based feature gating (canonical location)
 # ---------------------------------------------------------------------------
 
+# Features announced for a near-term release but not yet built: runtime
+# behavior is plain False (is_feature_enabled fails closed); the tier
+# matrix renders them "Coming in 1.0.x" so the docs neither claim nor
+# hide them. Membership here REQUIRES the flag to be False above.
+PLANNED_FEATURES: frozenset[str] = frozenset({
+    "share_sheet",
+    "shortcuts_actions",
+    "quicklook_preview",
+})
+
+
 def is_feature_enabled(feature_name: str) -> bool:
     """Check if a tier-gated feature is enabled (fail-closed for unknown)."""
     if feature_name not in FEATURE_FLAGS:
@@ -609,7 +626,14 @@ def is_bucket_enabled(bucket_name: str) -> bool:
     members = FEATURE_BUCKETS.get(bucket_name)
     if not members:
         return False
-    return all(FEATURE_FLAGS.get(flag, False) for flag in members)
+    # Planned features (announced, not yet built — honesty gate, V1 Task
+    # 5.3) don't disable their bucket: the bucket is "available" when
+    # every BUILT member is on. A bucket that is entirely planned is
+    # not available.
+    built = [f for f in members if f not in PLANNED_FEATURES]
+    if not built:
+        return False
+    return all(FEATURE_FLAGS.get(flag, False) for flag in built)
 
 
 def get_bucket_status() -> dict[str, dict]:

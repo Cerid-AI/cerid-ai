@@ -13,9 +13,9 @@ Two ONNX models that drive cerid's retrieval quality:
 |---|---|---|
 | `cross-encoder/ms-marco-MiniLM-L-6-v2` (+ quantised int8 variant) | ~75 MB | Reranking the top-N retrieval candidates |
 | `Snowflake/snowflake-arctic-embed-m-v1.5` | ~300 MB | Sentence embedding (768-dim) |
-| `naver/splade-v3` (optional, Cycle 3.2 / v0.93.3) | ~140 MB FP32 / ~50 MB INT8 | SPLADE-v3 learned-sparse retrieval (third retriever for `tri_rrf` fusion) |
+| `Qdrant/Splade_PP_en_v1` (optional, Cycle 3.2; Apache-2.0 swap 2026-07-10) | ~507 MB FP32 | SPLADE++ learned-sparse retrieval (third retriever for `tri_rrf` fusion). Download: `huggingface-cli download Qdrant/Splade_PP_en_v1 --local-dir data/models/splade-pp-en-v1` |
 
-Combined Docker image overhead with the reranker + embedder pre-baked: **~3 GB** (incl. HuggingFace cache metadata + tokenisers + the int8 reranker variant). SPLADE-v3 is OPT-IN — only downloaded when `RETRIEVAL_SPARSE_ENABLED=true`. The encoder lazy-loads on first query/ingest so a cold install pays a one-time stall but never blocks startup. See `core/retrieval/sparse.py` for the lazy-init contract and the full-model-vs-bolted-head branch picker.
+Combined Docker image overhead with the reranker + embedder pre-baked: **~3 GB** (incl. HuggingFace cache metadata + tokenisers + the int8 reranker variant). The sparse model is OPT-IN — downloaded by the operator when enabling `RETRIEVAL_SPARSE_ENABLED=true` (the sidecar auto-downloads; the in-process path uses the command above). The encoder lazy-loads on first query/ingest so a cold install pays a one-time stall but never blocks startup. See `core/retrieval/sparse.py` for the lazy-init contract and the full-model-vs-bolted-head branch picker.
 
 ## The two ways to deliver them
 

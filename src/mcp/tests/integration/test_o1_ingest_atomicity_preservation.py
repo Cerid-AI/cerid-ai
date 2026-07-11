@@ -63,9 +63,16 @@ def _make_tracked_collection() -> MagicMock:
             _store.pop(cid, None)
 
     coll.add.side_effect = _add
+    # Idempotent ingest (#144, 2026-06-06) writes via upsert with
+    # content-addressed ids — same tracking semantics as add here.
+    coll.upsert.side_effect = _add
     coll.update.side_effect = _update
     coll.get.side_effect = _get
     coll.delete.side_effect = _delete
+    # Real int (not an auto-MagicMock): production code branches on
+    # count() comparisons, and a truthy mock steered it into the
+    # semantic-dedup path against real host state (found 2026-07-10).
+    coll.count.side_effect = lambda: len(_store)
     coll._store = _store
     return coll
 
@@ -119,6 +126,9 @@ def test_i19b_neo4j_failure_leaves_chunks_pending():
     # atomicity branch this test targets.
     with (
         patch("app.services.ingestion._check_duplicate", return_value=None),
+        # Hermetic: semantic dedup consults BM25/embedding state outside
+        # this test's fakes; the contract under test is atomicity, not dedup.
+        patch("utils.dedup.check_semantic_duplicate", return_value=None),
         patch("app.services.ingestion.get_redis", return_value=MagicMock()),
         patch("app.services.ingestion.get_neo4j", return_value=MagicMock()),
         patch("app.services.ingestion.get_chroma") as mock_chroma,

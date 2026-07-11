@@ -169,3 +169,24 @@ class TestProVisualizationFlags:
 
         feat._refresh_flags()
         assert is_feature_enabled("pro_visualization_tour") is True
+
+
+class TestPlannedFeaturesHonestyGate:
+    """V1 Task 5.3: planned features must be disabled at runtime."""
+
+    def test_planned_features_are_disabled(self):
+        from config.features import FEATURE_FLAGS, PLANNED_FEATURES
+
+        for flag in PLANNED_FEATURES:
+            assert flag in FEATURE_FLAGS, flag
+            assert FEATURE_FLAGS[flag] is False, (
+                f"{flag} is in PLANNED_FEATURES but enabled — a planned "
+                "feature claiming availability is the exact lie the "
+                "honesty gate exists to prevent"
+            )
+
+    def test_planned_features_fail_closed_at_check(self):
+        from config.features import PLANNED_FEATURES, is_feature_enabled
+
+        for flag in PLANNED_FEATURES:
+            assert is_feature_enabled(flag) is False, flag

@@ -67,10 +67,10 @@
 | Apple Silicon ML acceleration | ✓ | ✓ | ✓ | `apple_silicon_ml` |
 | Keychain secrets | ✓ | ✓ | ✓ | `keychain_secrets` |
 | Menu-bar mode | ✓ | ✓ | ✓ | `menu_bar_mode` |
-| QuickLook preview | ✓ | ✓ | ✓ | `quicklook_preview` |
+| QuickLook preview | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `quicklook_preview` |
 | Safari Reading List | ✓ | ✓ | ✓ | `safari_reading_list` |
-| Share Sheet | ✓ | ✓ | ✓ | `share_sheet` |
-| Shortcuts actions | ✓ | ✓ | ✓ | `shortcuts_actions` |
+| Share Sheet | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `share_sheet` |
+| Shortcuts actions | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `shortcuts_actions` |
 | Sparkle auto-updates | ✓ | ✓ | ✓ | `sparkle_updates` |
 | Spotlight integration | ✓ | ✓ | ✓ | `spotlight_integration` |
 | TCC permissions wizard | ✓ | ✓ | ✓ | `tcc_wizard` |

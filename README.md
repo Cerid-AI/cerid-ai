@@ -39,7 +39,7 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 | **9 specialized agents**       | ✅ Query, Triage, Rectify, Audit, Hallucination, Memory, etc. | Limited           | None             | None             |
 | **Tiered local inference**     | ✅ Ollama + GPU sidecar + auto-fallback | Basic             | None             | Basic            |
 | **Graph + vector + BM25**      | ✅ Full hybrid with Neo4j relationships | Vector only       | Vector only      | Vector only      |
-| **Clean architecture (v0.91)** | ✅ 35 integration tests + canonical models | Growing           | Growing          | Older            |
+| **Clean architecture (v0.91)** | ✅ 114 preservation tests + canonical models | Growing           | Growing          | Older            |
 | **5-min Docker start**         | ✅ One-command                    | ✅                   | ✅                | ✅                |
 | **Multi-domain KB**            | ✅ coding / finance / projects / personal | ✅                | Limited          | ✅                |
 
@@ -78,7 +78,7 @@ MCP Server (:8888) — FastAPI + 9 agents + hybrid retrieval
 ChromaDB (vectors) + Neo4j (graph) + Redis (cache + audit)
 ```
 
-Core is cleanly separated from app layer (Phase C architecture). 35 integration tests guard every capability on every commit.
+Core is cleanly separated from app layer (Phase C architecture). 114 preservation tests across 25 files guard every capability at merge time (push to main + merge queue).
 
 ---
 
@@ -117,9 +117,9 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 - **v0.93.5 — Chat virtualization + L4 backend + Dependabot batch.** `@tanstack/react-virtual` exact-pinned to a pre-supply-chain-attack version, three-tier rendering with shared MessageRow component, recommender surfaces toggle at 200-message conversations. L4 ("Full ephemeral") Private Mode contract closed end-to-end. 11 Dependabot bumps absorbed.
 - **v0.93.3 — SPLADE-v3 sparse retrieval + adaptive recommender.** Third retriever alongside dense + BM25, RRF-fused via `tri_rrf`. General adaptive-recommendation engine surfaces gated features at corpus-size thresholds (sparse / HyPE / parent-child @ 100 docs, RRF @ 500). Pivoted from BGE-M3 per literature evidence (smaller, faster, better quality on BEIR).
 - **v0.93.0–v0.93.2 — RAG Cycle 1-3.** HyPE wiring fixes, Obsidian-style wikilink + frontmatter + vault profile ingestion, bidirectional vault writeback with `cerid-synthesis` loop-breaker.
-- **`benchmark-slo` is a PR-blocking merge gate.** Real-OpenRouter latency drift now fails CI alongside the deterministic budget-plumbing tests.
+- **`benchmark-slo` is a merge-time gate.** Real-OpenRouter latency drift fails CI on push-to-main and in the merge queue (deterministic budget-plumbing tests still run on every PR); a nightly twin of the same job tracks drift between merges.
 - **`/sdk/v1/memory/extract` SLO bounded.** Per-stage `asyncio.wait_for` budgets on the three internal LLM calls + a server-side `MEMORY_QUEUE_MODE=async` path that returns 202 + `Location` header; callers poll `GET /sdk/v1/memory/extract/jobs/{job_id}`. The sync `?wait=true` escape hatch preserves binary compatibility.
-- **Pro-tier Stripe checkout end-to-end.** Hosted Checkout flow shipped; webhook coverage extends to `customer.subscription.updated` (deactivates on `past_due` / `unpaid` / `canceled` / `incomplete_expired`).
+- **Pro-tier Stripe checkout end-to-end.** Hosted Checkout flow shipped; webhook coverage extends to `customer.subscription.updated` (deactivates on `past_due` / `unpaid` / `canceled` / `incomplete_expired`). Billing itself runs on the hosted cerid.ai service — the self-hosted stack ships a graceful billing stub by design (your data plane never depends on our billing plane).
 - **`mode=fast | thorough` on `/agent/hallucination`.** Fast mode skips cross-model NLI entirely, returns claims marked `status='uncertain'` with `nli_skipped=true` — useful for post-fact annotations that don't want to wait 60-100s.
 - **`slo_budget_ms` on `/sdk/v1/llm/complete`.** Smart-router filters tiers by their empirical p95 latency profile; if no tier fits, returns `503` + `Retry-After`. Never silently downgrades.
 - **Schema contracts hardened.** Object envelope on `/agent/memory/recall`; `min_length=1` on required `conversation_id` fields. Drift gate keeps every constraint stable across releases.

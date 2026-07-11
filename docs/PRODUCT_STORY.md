@@ -1,6 +1,6 @@
 # Cerid AI — Product Story
 
-> **Last reviewed:** 2026-05-15 (v0.95.1 release — primitive descriptions still reflect shipped behaviour; cerid-kb MCP overhaul did not change the five primitives, only the surface area).
+> **Last reviewed:** 2026-07-10 (V1 Task 5.2 reference-number reconciliation — TrustScore section updated to the six live components, the 7-day verification window, and the actual eval cadences; the five primitives are unchanged).
 > **Canonical narrative.** Drift gate: `scripts/lint-product-story.py`
 > asserts this file exists, has a `## Last reviewed:` line within 90 days
 > of the most recent release tag, and references the five primitives.
@@ -43,15 +43,16 @@ own surfaces and do not bundle into the per-claim badge.
 ### 2. TrustScore — system evaluation posture
 
 A single chip in the app header summarizes Cerid's overall evaluation
-posture as a number 0–100 with five disclosed components:
+posture as a number 0–100 with six disclosed components:
 
-- **Faithfulness** (nightly RAGAS, target ≥ 0.90)
-- **Retrieval quality** (nightly IR NDCG@10 vs baseline)
-- **Memory recall** (weekly LongMemEval run, target ≥ 0.80)
-- **Verification coverage** (rolling 24 h, ≥ 95 %)
+- **Faithfulness** (nightly RAGAS via `nightly-eval.yml`, target ≥ 0.90)
+- **Retrieval quality** (IR NDCG@10 vs baseline; re-measured on pushes
+  that touch retrieval paths, with a weekly backstop)
+- **Memory recall** (LongMemEval harness runs recorded in
+  `docs/EVAL_BASELINES.md`, target ≥ 0.80)
+- **Verification coverage** (rolling 7 d, ≥ 95 %)
 - **Preservation health** (last `main` CI, all gates passing)
-
-A sixth — **User agreement** — joins once the feedback loop ships.
+- **User agreement** (rolling 7 d of feedback ratings, target ≥ 0.80)
 
 The score is the straight mean of the normalized components. No learned
 weights. No proprietary formula. Honesty over cleverness. Hover discloses

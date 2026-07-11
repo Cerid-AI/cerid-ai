@@ -46,8 +46,8 @@ PORT = int(os.getenv("CERID_SIDECAR_PORT", "8889"))
 # /encode/sparse request — operators who don't enable sparse pay no
 # cold-start cost.  Matches the model + ONNX file conventions used by
 # the in-process encoder at core/retrieval/sparse.py.
-SPARSE_MODEL = os.getenv("SIDECAR_SPARSE_MODEL", "naver/splade-v3")
-SPARSE_ONNX = os.getenv("SIDECAR_SPARSE_ONNX", "onnx/model.onnx")
+SPARSE_MODEL = os.getenv("SIDECAR_SPARSE_MODEL", "Qdrant/Splade_PP_en_v1")
+SPARSE_ONNX = os.getenv("SIDECAR_SPARSE_ONNX", "model.onnx")
 SPARSE_TOP_K_TERMS = int(os.getenv("SIDECAR_SPARSE_TOP_K_TERMS", "256"))
 
 # ---------------------------------------------------------------------------

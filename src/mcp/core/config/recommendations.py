@@ -98,7 +98,7 @@ class RecommendationSpec:
 #
 # Each registry entry reads its corpus-size threshold from an env var
 # so an operator can tune without code. The defaults track the C1 eval
-# ledger and the C3.2 sparse-retrieval thresholds in the SPLADE-v3
+# ledger and the C3.2 sparse-retrieval thresholds in the SPLADE
 # paper; raise / lower per your corpus.
 
 _THRESHOLD_SPARSE = int(os.getenv("CERID_RECOMMEND_SPARSE_AT", "100"))
@@ -146,13 +146,14 @@ def _sparse_at(n: int, flag: str) -> Callable[[CorpusStats], bool]:
 RECOMMENDATIONS: tuple[RecommendationSpec, ...] = (
     RecommendationSpec(
         id="sparse_retrieval",
-        label="SPLADE-v3 sparse retrieval",
+        label="SPLADE++ sparse retrieval",
         flag_env_var="RETRIEVAL_SPARSE_ENABLED",
         enable_payload={"enable_sparse_retrieval": True, "hybrid_fusion_mode": "tri_rrf"},
         reason_template=(
-            "Your corpus is now {count} documents. SPLADE-v3 catches "
-            "synonym matches that BM25 and dense vectors miss; turning it "
-            "on adds a third retriever and fuses all three via RRF."
+            "Your corpus is now {count} documents. SPLADE++ learned-sparse "
+            "retrieval catches synonym matches that BM25 and dense vectors "
+            "miss; turning it on adds a third retriever and fuses all "
+            "three via RRF (Apache-2.0 model, ~500 MB one-time download)."
         ),
         condition_fn=_sparse_at(_THRESHOLD_SPARSE, "RETRIEVAL_SPARSE_ENABLED"),
     ),

@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-SPLADE-v3 learned-sparse encoder for hybrid retrieval (Cycle 3.2).
+SPLADE++ learned-sparse encoder for hybrid retrieval (Cycle 3.2).
 
 Produces sparse term-weight vectors keyed by BERT-vocab token id. The
 formula is ``log(1 + ReLU(max_pool_over_tokens(MLM_logits)))`` applied
-to the per-token logits emitted by ``naver/splade-v3``. The output is
+to the per-token logits emitted by the sparse MLM model — default
+``Qdrant/Splade_PP_en_v1`` (Apache-2.0, ungated; swapped from the
+CC-BY-NC-SA gated ``naver/splade-v3`` on 2026-07-10 so commercial
+deployments can actually enable the feature). The output is
 trimmed to ``SPLADE_TOP_K_TERMS`` non-zero terms per document — the
 empirical sweet-spot from the SPLADE-v3 paper (Formal et al. 2024)
 that keeps storage in line with BM25 while preserving recall.
@@ -64,7 +67,7 @@ def _flag_enabled() -> bool:
 
 
 SPARSE_ENABLED = _flag_enabled()
-SPLADE_MODEL_PATH = os.getenv("SPLADE_MODEL_PATH", "data/models/splade-v3")  # env-capture-allowed: SPLADE model path — startup-only model location
+SPLADE_MODEL_PATH = os.getenv("SPLADE_MODEL_PATH", "data/models/splade-pp-en-v1")  # env-capture-allowed: SPLADE model path — startup-only model location
 SPLADE_ONNX_FILENAME = os.getenv("SPLADE_ONNX_FILENAME", "model.onnx")  # env-capture-allowed: SPLADE ONNX filename — startup-only model location
 SPLADE_TOP_K_TERMS = int(os.getenv("SPLADE_TOP_K_TERMS", "256"))
 
@@ -74,7 +77,7 @@ SPLADE_TOP_K_TERMS = int(os.getenv("SPLADE_TOP_K_TERMS", "256"))
 # ---------------------------------------------------------------------------
 
 _onnxruntime_available = True
-_transformers_available = True
+_tokenizers_available = True
 _numpy_available = True
 
 try:
@@ -83,9 +86,9 @@ except ImportError:
     _onnxruntime_available = False
 
 try:
-    from transformers import AutoTokenizer  # noqa: F401
+    from tokenizers import Tokenizer  # noqa: F401
 except ImportError:
-    _transformers_available = False
+    _tokenizers_available = False
 
 try:
     import numpy as _np  # noqa: F401
@@ -94,7 +97,7 @@ except ImportError:
 
 
 def _deps_available() -> bool:
-    return _onnxruntime_available and _transformers_available and _numpy_available
+    return _onnxruntime_available and _tokenizers_available and _numpy_available
 
 
 # ---------------------------------------------------------------------------
@@ -120,12 +123,12 @@ class SpladeEncoder:
     def __init__(self, model_path: str, onnx_filename: str = "model.onnx") -> None:
         if not _deps_available():
             raise RuntimeError(
-                "SPLADE-v3 requires onnxruntime + transformers + numpy",
+                "Sparse retrieval requires onnxruntime + tokenizers + numpy",
             )
 
         import numpy as np
         import onnxruntime as ort
-        from transformers import AutoTokenizer
+        from tokenizers import Tokenizer
 
         self._model_path = Path(model_path)
         self._onnx_path = self._model_path / onnx_filename
@@ -136,7 +139,18 @@ class SpladeEncoder:
             )
 
         self._np = np
-        self._tokenizer = AutoTokenizer.from_pretrained(str(self._model_path))
+        # tokenizers (not transformers): the fast tokenizer ships in the
+        # runtime image already — this keeps the in-process encode path
+        # deployable without the heavyweight transformers dependency.
+        tok_path = self._model_path / "tokenizer.json"
+        if not tok_path.exists():
+            raise FileNotFoundError(
+                f"SPLADE tokenizer not found at {tok_path}. "
+                "See docs/MODEL_PRELOAD.md for the download step.",
+            )
+        self._tokenizer = Tokenizer.from_file(str(tok_path))
+        self._tokenizer.enable_truncation(max_length=512)
+        self._tokenizer.enable_padding()
         sess_opts = ort.SessionOptions()
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self._session = ort.InferenceSession(
@@ -163,7 +177,7 @@ class SpladeEncoder:
             extra={
                 "branch": "full_model" if self._has_logits_head else "bolted_head",
                 "outputs": output_names,
-                "vocab_size": self._tokenizer.vocab_size,
+                "vocab_size": self._tokenizer.get_vocab_size(),
                 "top_k_terms": SPLADE_TOP_K_TERMS,
             },
         )
@@ -210,19 +224,19 @@ class SpladeEncoder:
             return []
 
         with self._lock:
-            enc = self._tokenizer(
-                texts,
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_tensors="np",
+            np = self._np
+            encs = self._tokenizer.encode_batch(texts)
+            input_ids = np.asarray([e.ids for e in encs], dtype="int64")
+            attention_mask = np.asarray(
+                [e.attention_mask for e in encs], dtype="int64",
             )
             feeds = {
-                "input_ids": enc["input_ids"].astype("int64"),
-                "attention_mask": enc["attention_mask"].astype("int64"),
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "token_type_ids": np.asarray(
+                    [e.type_ids for e in encs], dtype="int64",
+                ),
             }
-            if "token_type_ids" in enc:
-                feeds["token_type_ids"] = enc["token_type_ids"].astype("int64")
 
             # Some exports only expect input_ids + attention_mask; filter to
             # what the session actually requires.
@@ -242,7 +256,7 @@ class SpladeEncoder:
                 assert w is not None and b is not None, "bolted head must be loaded"
                 logits = hidden @ w.T + b
 
-            return self._splade_from_logits(logits, enc["attention_mask"])
+            return self._splade_from_logits(logits, attention_mask)
 
     def encode_text(self, text: str) -> dict[int, float]:
         results = self.encode_batch([text])

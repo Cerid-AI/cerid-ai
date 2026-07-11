@@ -191,7 +191,7 @@ Cerid doesn't ship audio features yet, but Quenchforge exposes
 
 ---
 
-## SPLADE-v3 sparse (NOT Quenchforge-routable)
+## SPLADE sparse (NOT Quenchforge-routable)
 
 Quenchforge has no sparse-encode endpoint as of v0.8.0 (still none).  Cerid's own
 sidecar (`scripts/cerid-sidecar.py`) serves SPLADE at `/encode/sparse`,
@@ -199,7 +199,7 @@ giving GPU acceleration on Mac ARM64 (CoreML) and Linux (CUDA/ROCm) —
 but NOT on Intel Mac + AMD where ONNX runtime has no execution
 provider.
 
-On Intel Mac + AMD, SPLADE-v3 runs CPU-only.  This is acceptable
+On Intel Mac + AMD, the SPLADE encoder runs CPU-only.  This is acceptable
 because:
 * SPLADE is opt-in (`RETRIEVAL_SPARSE_ENABLED=true`)
 * The recommender surfaces it at 100+ docs

@@ -282,7 +282,7 @@ class SettingsUpdateRequest(BaseModel):
     enable_sparse_retrieval: bool | None = Field(
         None,
         description=(
-            "Toggle SPLADE-v3 learned-sparse retrieval (third retriever "
+            "Toggle SPLADE++ learned-sparse retrieval (third retriever "
             "alongside vector + BM25). Defaults OFF; recommended once "
             "the corpus crosses CERID_RECOMMEND_SPARSE_AT documents."
         ),
@@ -368,7 +368,7 @@ class SettingsUpdateRequest(BaseModel):
     )
     hybrid_rrf_sparse_weight: float | None = Field(
         None, ge=0.0, le=5.0,
-        description="Per-retriever weight for SPLADE-v3 in tri_rrf fusion.",
+        description="Per-retriever weight for the SPLADE sparse leg in tri_rrf fusion.",
     )
 
     # Task 2.5c — background processor mode/cap operator surface

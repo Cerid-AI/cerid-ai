@@ -140,7 +140,7 @@ N-way Reciprocal Rank Fusion:
 
 1. **Dense bi-encoder** — ChromaDB vector search (existing).
 2. **BM25** — `core/retrieval/bm25.py` per-domain inverted index.
-3. **SPLADE-v3 learned-sparse** — `core/retrieval/sparse.py` encoder +
+3. **SPLADE++ learned-sparse** — `core/retrieval/sparse.py` encoder +
    `core/retrieval/sparse_index.py` per-domain inverted index. Default
    OFF. Enabled via `RETRIEVAL_SPARSE_ENABLED=true` AND
    `HYBRID_FUSION_MODE=tri_rrf`. The Settings PATCH endpoint sets both
@@ -182,7 +182,7 @@ Cross-encoder reranking
       ├─ cfg.provider=fastembed-sidecar  → /rerank (CoreML / CUDA)
       └─ else                            → in-process ONNX (CPU)
 
-SPLADE-v3 sparse
+SPLADE++ sparse
   └─ core.retrieval.sparse.encode_batch
       ├─ cfg.provider=fastembed-sidecar  → /encode/sparse (CoreML / CUDA)
       └─ else                            → in-process ONNX (CPU)
@@ -203,7 +203,7 @@ tier.
 Three workloads stay CPU on Intel Mac + AMD even with Quenchforge
 configured:
 
-* **SPLADE-v3 sparse encoding** — Quenchforge has no sparse endpoint
+* **SPLADE sparse encoding** — Quenchforge has no sparse endpoint
   (verified against the routing table in upstream `gateway.go`).
 * **NLI verification** — no GPU path exists in cerid's stack today.
   Adding NLI to cerid's own sidecar would unlock CoreML / CUDA but

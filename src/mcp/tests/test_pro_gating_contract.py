@@ -108,18 +108,26 @@ def test_feature_buckets_well_formed() -> None:
 
 
 def test_bucket_intersection_semantics() -> None:
-    """A bucket is enabled iff ALL its member flags are enabled."""
+    """A bucket is enabled iff ALL its BUILT member flags are enabled.
+
+    Planned features (PLANNED_FEATURES — announced for a near-term
+    release, not yet built; V1 Task 5.3 honesty gate) are excluded from
+    the intersection: they must not disable an otherwise-available
+    bucket. A bucket whose members are all planned is unavailable.
+    """
     from config.features import (
         FEATURE_BUCKETS,
         FEATURE_FLAGS,
+        PLANNED_FEATURES,
         is_bucket_enabled,
     )
 
     for bucket, flags in FEATURE_BUCKETS.items():
-        expected = all(FEATURE_FLAGS.get(f, False) for f in flags)
+        built = [f for f in flags if f not in PLANNED_FEATURES]
+        expected = bool(built) and all(FEATURE_FLAGS.get(f, False) for f in built)
         assert is_bucket_enabled(bucket) == expected, (
             f"Bucket {bucket!r} enabled-state ({is_bucket_enabled(bucket)}) "
-            f"does not match all-of member flags ({expected})"
+            f"does not match all-of built member flags ({expected})"
         )
 
 

@@ -321,15 +321,24 @@ Redis tracks per-user request counts with hourly buckets:
 
 ## Rate Limiting
 
-In-memory sliding window rate limiter, per client IP.
+In-memory sliding window rate limiter. Buckets are keyed on client ID
+(`X-Client-ID`, default `gui`) + resolved client IP + path prefix, from
+`config.settings.CONSUMER_REGISTRY`. GET requests are exempt except on
+the `/admin/*` and `/observability/*` polling surfaces.
 
-### Limits
+### Limits (`gui` / unknown-client default)
 
 | Path | Max Requests | Window |
 |------|-------------|--------|
-| `/agent/*` | 20 | 60 seconds |
+| `/agent/*`, `/sdk/*` | 120 | 60 seconds |
 | `/ingest*` | 10 | 60 seconds |
 | `/recategorize*` | 10 | 60 seconds |
+| `/setup/*`, `/admin/*` | 20 | 60 seconds |
+| `/observability/*` | 120 | 60 seconds |
+
+The `cli-ingest` consumer gets `/ingest*` 60 req/min and `/recategorize*`
+30 req/min; other consumers (trading-agent, cerid-finance, webhook, …)
+carry their own budgets in the registry.
 
 ### Response Headers (IETF standard)
 
@@ -348,7 +357,7 @@ Set `TRUSTED_PROXIES` (comma-separated CIDRs) to extract real client IP from `X-
 
 - **In-memory only:** Rate limit state is lost on container restart. No warm-up period — limits reset to zero.
 - **Single instance:** No distributed rate limiting. If running multiple MCP instances behind a load balancer, each tracks limits independently.
-- **IP-based by default:** When `CERID_MULTI_USER=false`, all requests from the same IP share a single counter. When `CERID_MULTI_USER=true`, rate limits are keyed by authenticated user ID.
+- **Client-ID + IP keyed:** requests sharing the same `X-Client-ID` and IP share one counter per path prefix. Unknown client IDs collapse onto the shared `_default` budget so header rotation cannot mint fresh buckets.
 
 **File:** `src/mcp/middleware/rate_limit.py`
 
