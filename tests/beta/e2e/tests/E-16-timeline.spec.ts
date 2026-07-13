@@ -24,8 +24,12 @@ test("E-16 Stratigraph mounts, hovers a stratum, switches lens and filters", asy
   await page.getByRole("button", { name: "Subjects", exact: true }).click()
   await page.getByRole("tab", { name: "Timeline" }).click()
 
-  // The application region proves the strata payload arrived (totals > 0).
-  const app = page.getByRole("application", { name: /Stratigraph of [\d,]+ mentions/ })
+  // The application region proves a NON-EMPTY strata payload arrived.
+  // [1-9] leading digit: "Stratigraph of 0 mentions" satisfied [\d,]+ and
+  // let the whole spec run against a dead-empty canvas (2026-07-10) — an
+  // empty corpus must fail here loudly (or the pane shows its empty state
+  // and this locator times out, equally loud).
+  const app = page.getByRole("application", { name: /Stratigraph of [1-9][\d,]* mentions/ })
   await expect(app).toBeVisible({ timeout: 20_000 })
 
   const canvas = app.locator("canvas").first()
@@ -33,23 +37,24 @@ test("E-16 Stratigraph mounts, hovers a stratum, switches lens and filters", asy
   const box = await canvas.boundingBox()
   if (!box) throw new Error("canvas has no bounding box")
 
-  // Strata bands have a continuous 2px floor and bursts near the data's
-  // dense columns; sweep along a horizontal line through the upper third
-  // (the top stratum's band) until the bucket tooltip appears.
+  // Bucket hit-entries exist at every (bucket-column x, stratum-midline y)
+  // pair regardless of count, with a 20px hit radius — but midlines are
+  // sqrt-scaled and data-dependent, so fixed rows rot as the KB evolves
+  // (drift found 2026-07-10). A VERTICAL descent at a bucket column is
+  // structurally guaranteed to cross every midline; stop spacing stays
+  // under the hit radius. Try a few x phases to land within a column.
   const tooltip = page.getByText(/ · \d{4}-\d{2}-\d{2} · \d+ mention/)
   let hovered = false
-  for (const fx of [0.72, 0.6, 0.5, 0.8, 0.4, 0.35]) {
-    for (const fy of [0.12, 0.2, 0.3, 0.45, 0.6]) {
-      const x = box.x + box.width * fx
-      const y = box.y + box.height * fy
-      await page.mouse.move(x - 20, y, { steps: 2 })
-      await page.mouse.move(x, y, { steps: 4 })
-      try {
-        await expect(tooltip).toBeVisible({ timeout: 700 })
+  const stepPx = 16
+  for (const fx of [0.6, 0.62, 0.58, 0.64, 0.56]) {
+    const x = box.x + box.width * fx
+    await page.mouse.move(x, box.y + 2, { steps: 2 })
+    for (let y = box.y + 8; y < box.y + box.height - 4; y += stepPx) {
+      await page.mouse.move(x, y, { steps: 2 })
+      await page.waitForTimeout(80)
+      if (await tooltip.isVisible().catch(() => false)) {
         hovered = true
         break
-      } catch {
-        // miss — next probe
       }
     }
     if (hovered) break

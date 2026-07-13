@@ -647,3 +647,81 @@ async def test_install_pack_recompute_queue_failure_does_not_raise(tmp_path):
     assert record.pack_id == manifest.id, (
         "install_pack must succeed even when the recompute enqueue fails"
     )
+
+
+# ── Processor-queue introspection (async install status) ─────────────────
+
+
+class _FakeQueueRedis:
+    """Minimal stand-in for the processor queue's Redis key layout."""
+
+    def __init__(self) -> None:
+        self.lists: dict[str, list[str]] = {}
+        self.sets: dict[str, set[str]] = {}
+        self.hashes: dict[str, dict[str, str]] = {}
+
+    def lrange(self, key, start, end):
+        return list(self.lists.get(key, []))
+
+    def smembers(self, key):
+        return set(self.sets.get(key, set()))
+
+    def hget(self, key, field):
+        return self.hashes.get(key, {}).get(field)
+
+    def add_job(self, job_id: str, *, job_type: str, pack_id: str, where: str):
+        self.hashes[f"cerid:proc:job:{job_id}"] = {
+            "job_type": job_type,
+            "payload": json.dumps({"pack_id": pack_id}),
+        }
+        if where == "running":
+            self.sets.setdefault("cerid:proc:running", set()).add(job_id)
+        else:
+            self.lists.setdefault(f"cerid:proc:queue:{where}", []).append(job_id)
+
+
+def test_active_install_jobs_reports_queued_and_running():
+    from app.services.knowledge_packs import active_install_jobs
+
+    r = _FakeQueueRedis()
+    r.add_job("j1", job_type="knowledge_pack_install", pack_id="pack-a", where="high")
+    r.add_job("j2", job_type="knowledge_pack_install", pack_id="pack-b", where="running")
+    r.add_job("j3", job_type="wiki_refresh", pack_id="pack-c", where="high")
+
+    active = active_install_jobs(redis_client=r)
+    assert active == {"pack-a": "j1", "pack-b": "j2"}
+
+
+def test_active_install_jobs_empty_queue():
+    from app.services.knowledge_packs import active_install_jobs
+
+    assert active_install_jobs(redis_client=_FakeQueueRedis()) == {}
+
+
+def test_active_install_jobs_tolerates_malformed_payload():
+    from app.services.knowledge_packs import active_install_jobs
+
+    r = _FakeQueueRedis()
+    r.add_job("j1", job_type="knowledge_pack_install", pack_id="pack-a", where="high")
+    r.hashes["cerid:proc:job:j1"]["payload"] = "{ not json"
+
+    assert active_install_jobs(redis_client=r) == {}
+
+
+def test_enqueue_install_job_persists_payload():
+    from app.services.knowledge_packs import active_install_jobs, enqueue_install_job
+
+    class _RecordingRedis(_FakeQueueRedis):
+        def hset(self, key, mapping=None):
+            self.hashes[key] = dict(mapping or {})
+
+        def lpush(self, key, value):
+            self.lists.setdefault(key, []).insert(0, value)
+
+    r = _RecordingRedis()
+    job_id = enqueue_install_job("pack-x", redis_client=r)
+
+    assert job_id
+    # The enqueued job must round-trip through the introspection helper —
+    # the registry endpoint's "installing" flag depends on this.
+    assert active_install_jobs(redis_client=r) == {"pack-x": job_id}

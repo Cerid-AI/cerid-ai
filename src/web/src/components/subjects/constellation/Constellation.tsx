@@ -13,6 +13,7 @@ import { Canvas } from "@react-three/fiber"
 import { AdaptiveDpr, OrbitControls, PerformanceMonitor } from "@react-three/drei"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2, Minimize2, Maximize2, Play, Pause, Shuffle, GitMerge } from "lucide-react"
+import { PaneError } from "@/components/ui/pane-error"
 import { Slider } from "@/components/ui/slider"
 import { fetchEmbeddings3D } from "@/lib/api/embeddings-3d"
 import type { Vec3 } from "./drag-plane"
@@ -311,6 +312,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     isLoading: mapLoading,
     isError: mapError,
     error: mapErrorObj,
+    refetch: refetchMap,
     drainNewIds,
   } = useGraphMap(layout, includeIsolated)
 
@@ -380,7 +382,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   // ---------------------------------------------------------------------------
   // 3D mode: existing R3F data query (still needed when viewMode === "3d")
   // ---------------------------------------------------------------------------
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["constellation-embeddings-3d", focalEntity ?? null, filter ?? null, includeIsolated],
     queryFn: ({ signal }) => fetchEmbeddings3D({ filter, includeIsolated, signal }),
     // The corpus is alive: the on-ingest subscriber + manual Run-now both
@@ -890,6 +892,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           isLoading={mapLoading}
           isError={mapError}
           errorMessage={mapErrorObj instanceof Error ? mapErrorObj.message : undefined}
+          onRetry={() => void refetchMap()}
           newEntityIds={newIds.size > 0 ? newIds : undefined}
           onInspect={onNodeClick}
           onCommunityClick={handleCommunityClick}
@@ -1110,11 +1113,12 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             Loading live graph…
           </div>
         ) : isError ? (
-          <div className="flex h-full items-center justify-center p-6">
-            <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              {error instanceof Error ? error.message : "Failed to load the live graph."}
-            </div>
-          </div>
+          <PaneError
+            fullPage
+            title="Failed to load the live graph"
+            description={error instanceof Error ? error.message : undefined}
+            onRetry={() => void refetch()}
+          />
         ) : !data || data.entities.length === 0 ? (
           <div className="flex h-full items-center justify-center p-12">
             <div className="max-w-md rounded-xl border border-dashed border-border bg-card/40 p-8 text-center">
@@ -1227,11 +1231,12 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   }
   if (isError) {
     return (
-      <div className="flex h-full items-center justify-center p-6">
-        <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error instanceof Error ? error.message : "Failed to load 3D embedding."}
-        </div>
-      </div>
+      <PaneError
+        fullPage
+        title="Failed to load the 3D projection"
+        description={error instanceof Error ? error.message : undefined}
+        onRetry={() => void refetch()}
+      />
     )
   }
   if (!data || data.entities.length === 0) {

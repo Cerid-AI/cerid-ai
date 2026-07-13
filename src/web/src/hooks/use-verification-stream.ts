@@ -5,7 +5,15 @@ import { useEffect, useRef, useState } from "react"
 import { streamVerification } from "@/lib/api"
 import type { StreamingClaim, HallucinationReport } from "@/lib/types"
 
-export type VerificationPhase = "idle" | "extracting" | "verifying" | "done" | "error"
+export type VerificationPhase = "idle" | "extracting" | "verifying" | "done" | "degraded" | "error"
+
+/** Idle budget between received SSE chunks. The backend emits keepalive
+ *  comments every ~15s while long verifications run, so 45s of true silence
+ *  means the stream is gone — three missed keepalives. */
+export const VERIFICATION_IDLE_TIMEOUT_MS = 45_000
+
+/** Absolute ceiling for a single verification run, regardless of traffic. */
+export const VERIFICATION_MAX_DURATION_MS = 300_000
 
 export interface ActivityLogEntry {
   time: string
@@ -221,18 +229,35 @@ export function useVerificationStream(
       )
     }
 
-    // Timeout: abort verification if it takes too long.
-    // Backend total deadline is 60s (fast-path for no-KB claims + 10s per-claim
-    // timeouts).  60s frontend timeout matches the backend ceiling.
-    const STREAM_TIMEOUT_MS = 60_000
-    const timeoutId = setTimeout(() => {
-      if (!cancelled) {
-        cancelled = true
-        abort()
-        finalizePendingClaims("verification timed out")
-        setPhase("error")
-      }
-    }, STREAM_TIMEOUT_MS)
+    // Timeouts: the old fixed 60s wall-clock deadline from stream start
+    // killed healthy slow-but-alive streams — the backend sends keepalive
+    // comments every ~15s under load, and the premature client abort showed
+    // up live as nginx 499 + backend CancelledError. Instead run an IDLE
+    // timeout that re-arms on every received chunk (keepalives included),
+    // plus a generous absolute ceiling as a backstop. On timeout, degrade
+    // (partial results + retry affordance via the orchestrator's manual
+    // re-verify) instead of hard-erroring.
+    let idleTimerId: ReturnType<typeof setTimeout> | undefined
+    const onStreamTimeout = (reason: string) => {
+      if (cancelled) return
+      cancelled = true
+      abort()
+      finalizePendingClaims("verification stalled — partial result, retry to re-verify")
+      setPhase("degraded")
+      logEntry(`${reason} — showing partial results, use Retry to re-verify`, "error")
+    }
+    const armIdleTimer = () => {
+      clearTimeout(idleTimerId)
+      idleTimerId = setTimeout(
+        () => onStreamTimeout(`No data from verifier for ${VERIFICATION_IDLE_TIMEOUT_MS / 1000}s`),
+        VERIFICATION_IDLE_TIMEOUT_MS,
+      )
+    }
+    armIdleTimer()
+    const maxDurationTimerId = setTimeout(
+      () => onStreamTimeout(`Verification exceeded ${VERIFICATION_MAX_DURATION_MS / 60_000} minutes`),
+      VERIFICATION_MAX_DURATION_MS,
+    )
 
     async function processStream() {
       try {
@@ -252,6 +277,11 @@ export function useVerificationStream(
         while (true) {
           const { done, value } = await reader.read()
           if (done || cancelled) break
+
+          // Any received bytes — including keepalive comment lines, which the
+          // parser below skips — prove the stream is alive; re-arm the idle
+          // timer here so keepalives feed it.
+          armIdleTimer()
 
           buffer += decoder.decode(value, { stream: true })
 
@@ -416,7 +446,8 @@ export function useVerificationStream(
           setPhase("error")
         }
       } finally {
-        clearTimeout(timeoutId)
+        clearTimeout(idleTimerId)
+        clearTimeout(maxDurationTimerId)
       }
     }
 
@@ -424,7 +455,8 @@ export function useVerificationStream(
     processStream()
 
     return () => {
-      clearTimeout(timeoutId)
+      clearTimeout(idleTimerId)
+      clearTimeout(maxDurationTimerId)
       cancelled = true
       abort()
     }

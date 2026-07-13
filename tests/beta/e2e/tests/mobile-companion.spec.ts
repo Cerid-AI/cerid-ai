@@ -71,7 +71,9 @@ test.describe("mobile companion (390x844)", () => {
   })
 
   test("tap Capture in the bottom bar and save a note", async ({ page }) => {
-    test.setTimeout(30_000)
+    // Note save rides the synchronous /upload ingest (~11s idle, longer
+    // under suite load) — same slow-ingest allowance as F13/E-04.
+    test.setTimeout(90_000)
     await suppressFirstRun(page)
     await page.goto("/")
 
@@ -87,7 +89,7 @@ test.describe("mobile companion (390x844)", () => {
     await page.getByLabel("Note content").fill(note)
     await page.getByRole("button", { name: /save note/i }).click()
 
-    await expect(page.getByText("Note saved")).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText("Note saved")).toBeVisible({ timeout: 60_000 })
   })
 
   test("tap Menu in the bottom bar opens the sidebar navigation", async ({ page }) => {

@@ -23,6 +23,7 @@ import asyncio
 import json as _json
 import logging
 import os
+import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -57,29 +58,48 @@ def llm_call_override(provider: str, model: str) -> Iterator[None]:
         _llm_override.reset(token)
 
 
-# Shared connection pool for Ollama calls (avoids per-request TCP handshake)
+# Shared connection pool for Ollama calls (avoids per-request TCP handshake).
+# The client's transport binds to the event loop that first uses it, and
+# ``is_closed`` stays False when that loop dies — so the singleton must be
+# keyed to its owning loop. Ingestion helpers (``contextual._run_coro_isolated``)
+# run coroutines on short-lived per-call loops that close on completion;
+# reusing a client bound to such a loop raised
+# ``RuntimeError: Event loop is closed`` (swallowed under
+# ``ingestion.ai_categorize``; 2026-07-12 beta triage). Mirrors the
+# per-loop pattern in ``core.utils.llm_client._get_client``. The guard is
+# a ``threading.Lock`` (not ``asyncio.Lock``) because asyncio primitives
+# themselves bind to a loop on first use — the same cross-loop hazard.
 _ollama_client: httpx.AsyncClient | None = None
-_ollama_client_lock = asyncio.Lock()
+_ollama_client_loop: asyncio.AbstractEventLoop | None = None
+_ollama_client_guard = threading.Lock()
 
 
 async def _get_ollama_client() -> httpx.AsyncClient:
-    global _ollama_client
-    if _ollama_client is not None and not _ollama_client.is_closed:
-        return _ollama_client
-    async with _ollama_client_lock:
-        if _ollama_client is None or _ollama_client.is_closed:
+    global _ollama_client, _ollama_client_loop
+    loop = asyncio.get_running_loop()
+    with _ollama_client_guard:
+        if (
+            _ollama_client is None
+            or _ollama_client.is_closed
+            or _ollama_client_loop is not loop
+        ):
+            # A stale client bound to another loop cannot be aclose()'d
+            # from here; drop the reference and let GC reap its sockets
+            # (same trade-off as llm_client's per-loop replacement).
             _ollama_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0, connect=5.0),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
-    return _ollama_client
+            _ollama_client_loop = loop
+        return _ollama_client
 
 
 async def close_ollama_client() -> None:
-    global _ollama_client
+    global _ollama_client, _ollama_client_loop
     if _ollama_client and not _ollama_client.is_closed:
         await _ollama_client.aclose()
-        _ollama_client = None
+    _ollama_client = None
+    _ollama_client_loop = None
 
 
 def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:

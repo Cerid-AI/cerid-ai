@@ -68,6 +68,29 @@ class TestListConnectors:
             assert "missing_env" in c
             assert "instruction_doc" in c
 
+    def test_each_carries_explainer_fields(self, client):
+        """P0-C.4 — every connector explains what it reads, its sync
+        semantics (one-time import vs watch vs on-demand), and where the
+        data lands. Non-empty strings so the UI never renders blanks."""
+        connectors = client.get("/connectors").json()["connectors"]
+        for c in connectors:
+            for field in ("imports_desc", "sync_semantics", "lands_in"):
+                assert field in c, f"{c['slug']} missing {field}"
+                assert isinstance(c[field], str) and c[field].strip(), (
+                    f"{c['slug']}.{field} must be a non-empty explainer string"
+                )
+
+    def test_explainer_semantics_name_the_sync_model(self, client):
+        """Each sync_semantics string must actually state the model
+        (on-demand / one-time / continuous / watch) rather than marketing."""
+        connectors = client.get("/connectors").json()["connectors"]
+        for c in connectors:
+            text = c["sync_semantics"].lower()
+            assert any(
+                token in text
+                for token in ("on-demand", "one-time", "continuous", "watch")
+            ), f"{c['slug']}.sync_semantics does not name its sync model: {text!r}"
+
     def test_missing_env_reported_for_gmail(self, client):
         connectors = client.get("/connectors").json()["connectors"]
         gmail = next(c for c in connectors if c["slug"] == "gmail")

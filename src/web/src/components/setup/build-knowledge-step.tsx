@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState, useCallback } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -11,9 +11,13 @@ import { Library, Download, Loader2, CheckCircle2, AlertCircle, Info } from "luc
 import { formatFileSize } from "@/lib/utils"
 import {
   fetchKnowledgePackRegistry,
-  installKnowledgePack,
   type KnowledgePackSummary,
 } from "@/lib/api/knowledge-packs"
+import {
+  packInstallFlags,
+  registryHasInstalling,
+  useWizardPackInstall,
+} from "@/components/setup/use-wizard-pack-install"
 import type { FirstDocState } from "@/components/setup/first-document-step"
 
 // ---------------------------------------------------------------------------
@@ -43,44 +47,46 @@ function isPlanned(pack: KnowledgePackSummary): boolean {
 // ---------------------------------------------------------------------------
 
 export function BuildKnowledgeStep({ state, onChange }: BuildKnowledgeStepProps) {
-  const queryClient = useQueryClient()
-  const [busyPackId, setBusyPackId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  // Async install contract (202 job + registry polling); the hook also
+  // handles legacy synchronous 200 and "already_installed" responses and
+  // invalidates the registry/artifact caches when an install settles.
+  const { install, installingPackId } = useWizardPackInstall()
 
   const registryQuery = useQuery({
     queryKey: ["knowledge-packs", "registry"],
     queryFn: fetchKnowledgePackRegistry,
+    // Track installs started by other surfaces (or an earlier session) at
+    // the same ~2s cadence the install hook polls with.
+    refetchInterval: (query) => (registryHasInstalling(query.state.data) ? 2000 : false),
   })
 
-  const installMutation = useMutation({
-    mutationFn: (packId: string) => installKnowledgePack(packId),
-    onMutate: (packId) => {
-      setBusyPackId(packId)
+  const handleInstall = useCallback(
+    async (pack: KnowledgePackSummary) => {
       setErrorMessage(null)
+      try {
+        await install(pack.id)
+        const newInstalledIds = state.installedPackIds.includes(pack.id)
+          ? state.installedPackIds
+          : [...state.installedPackIds, pack.id]
+        onChange({
+          ...state,
+          installedPackIds: newInstalledIds,
+          firstDoc: {
+            ...state.firstDoc,
+            ingested: true,
+            // Async installs return no artifact_count in the POST body —
+            // use the registry's count for the Review/Mode summaries.
+            documentCount: Math.max(state.firstDoc.documentCount, pack.artifact_count ?? 0),
+          },
+        })
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : String(err))
+      }
     },
-    onSuccess: (data, packId) => {
-      queryClient.invalidateQueries({ queryKey: ["knowledge-packs"] })
-      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-
-      const newInstalledIds = state.installedPackIds.includes(packId)
-        ? state.installedPackIds
-        : [...state.installedPackIds, packId]
-
-      const artifactCount = data.artifact_count ?? 0
-
-      onChange({
-        ...state,
-        installedPackIds: newInstalledIds,
-        firstDoc: {
-          ...state.firstDoc,
-          ingested: true,
-          documentCount: Math.max(state.firstDoc.documentCount, artifactCount),
-        },
-      })
-    },
-    onError: (err: Error) => setErrorMessage(err.message),
-    onSettled: () => setBusyPackId(null),
-  })
+    [install, onChange, state],
+  )
 
   const packsByDomain = registryQuery.data?.packs_by_domain ?? {}
   const sortedDomains = Object.keys(packsByDomain).sort()
@@ -131,8 +137,12 @@ export function BuildKnowledgeStep({ state, onChange }: BuildKnowledgeStepProps)
             <div className="space-y-2">
               {packsByDomain[domain].map((pack) => {
                 const planned = isPlanned(pack)
-                const installed = state.installedPackIds.includes(pack.id)
-                const busy = busyPackId === pack.id
+                const flags = packInstallFlags(pack)
+                // Installed = tracked locally this session OR reported by the
+                // registry (newer backends) — fixes Install buttons showing
+                // for packs already on the instance (beta triage P0-A #3).
+                const installed = state.installedPackIds.includes(pack.id) || flags.installed
+                const busy = installingPackId === pack.id || flags.installing
 
                 return (
                   <div
@@ -179,15 +189,16 @@ export function BuildKnowledgeStep({ state, onChange }: BuildKnowledgeStepProps)
                         <Button
                           size="sm"
                           disabled={busy}
-                          onClick={() => installMutation.mutate(pack.id)}
+                          onClick={() => handleInstall(pack)}
                           aria-label={`Install ${pack.name}`}
+                          aria-busy={busy}
                         >
                           {busy ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
                             <Download className="h-3.5 w-3.5" />
                           )}
-                          <span className="ml-1">Install</span>
+                          <span className="ml-1">{busy ? "Installing…" : "Install"}</span>
                         </Button>
                       )}
                     </div>

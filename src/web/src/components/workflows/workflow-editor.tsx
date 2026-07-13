@@ -16,7 +16,9 @@ import {
   updateWorkflow,
   runWorkflow,
   fetchWorkflowTemplates,
+  fetchWorkflowNodeTypes,
 } from "@/lib/api"
+import type { WorkflowNodeCatalog } from "@/lib/api/workflows"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,6 +34,8 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import WorkflowCanvas from "./workflow-canvas"
+import WorkflowLegend from "./workflow-legend"
+import { FALLBACK_NODE_CATALOG, describeNode } from "./node-catalog"
 import {
   Plus,
   Trash2,
@@ -43,6 +47,7 @@ import {
   X,
   Settings2,
   AlertCircle,
+  Lightbulb,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -60,6 +65,16 @@ const NODE_TYPE_OPTIONS: { type: WorkflowNodeType; label: string }[] = [
   { type: "tool", label: "Tool" },
   { type: "condition", label: "Condition" },
 ]
+
+// localStorage key for the dismissible builder hint
+const BUILDER_HINT_KEY = "cerid.workflows.builder-hint-dismissed"
+
+/** Compact read-only rendering of a config value for the detail panel. */
+function formatConfigValue(value: unknown): string {
+  if (value === null || value === undefined) return "—"
+  if (typeof value === "string") return value
+  return JSON.stringify(value)
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -89,6 +104,8 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [templatesError, setTemplatesError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [catalog, setCatalog] = useState<WorkflowNodeCatalog>(FALLBACK_NODE_CATALOG)
+  const [hintDismissed, setHintDismissed] = useState(() => localStorage.getItem(BUILDER_HINT_KEY) === "1")
 
   // Load templates on mount
   useEffect(() => {
@@ -98,6 +115,21 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
         logSwallowedError(e, "workflow-editor.fetchWorkflowTemplates")
         setTemplatesError(e instanceof Error ? e.message : "Failed to load templates")
       })
+  }, [])
+
+  // Load the node-type catalog on mount; the static fallback keeps tooltips
+  // and the detail panel working when the endpoint is unavailable.
+  useEffect(() => {
+    fetchWorkflowNodeTypes()
+      .then(setCatalog)
+      .catch((e) => {
+        logSwallowedError(e, "workflow-editor.fetchWorkflowNodeTypes")
+      })
+  }, [])
+
+  const dismissHint = useCallback(() => {
+    setHintDismissed(true)
+    localStorage.setItem(BUILDER_HINT_KEY, "1")
   }, [])
 
   // Reset state when workflow changes
@@ -112,6 +144,11 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
   }, [workflow])
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null
+  const selectedDesc = selectedNode ? describeNode(selectedNode, catalog) : null
+  const selectedRunResult =
+    selectedNode && runResult
+      ? (runResult.results[selectedNode.id] as Record<string, unknown> | undefined)
+      : undefined
 
   // ── Node operations ──────────────────────────────────────────────────
 
@@ -346,6 +383,27 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
         </Button>
       </div>
 
+      {/* Builder hint — dismissible orientation for the key actions */}
+      {!hintDismissed && (
+        <div className="mx-3 mt-2 flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <Lightbulb className="h-3.5 w-3.5 mt-0.5 shrink-0 text-teal-400" aria-hidden="true" />
+          <p className="flex-1">
+            Build a workflow in three steps: add steps with <span className="font-medium text-foreground">Add Node</span>,
+            select a node and connect it to the next step with <span className="font-medium text-foreground">Add Edge</span>,
+            then <span className="font-medium text-foreground">Save</span> and <span className="font-medium text-foreground">Run</span> to
+            execute the pipeline. Templates give you a working starting point.
+          </p>
+          <button
+            type="button"
+            aria-label="Dismiss builder hint"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={dismissHint}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Error banner */}
       {error && (
         <div className="px-3 pt-2">
@@ -388,7 +446,11 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
             nodeStatuses={nodeStatuses}
             onNodeClick={handleNodeClick}
             onNodeMove={handleNodeMove}
+            catalog={catalog}
           />
+
+          {/* Node-type legend */}
+          <WorkflowLegend catalog={catalog} className="mt-2" />
 
           {/* Run result summary */}
           {runResult && (
@@ -403,22 +465,23 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
           )}
         </div>
 
-        {/* ── Right sidebar: node config ─────────────────────────────── */}
-        {selectedNode && (
-          <div className="w-[260px] border-l bg-muted/30 p-3 flex flex-col gap-3"> {/* drift-allowed: node-config side panel pinned width matches canvas chrome sizing */}
+        {/* ── Right sidebar: node details ────────────────────────────── */}
+        {selectedNode && selectedDesc && (
+          <div className="w-[260px] border-l bg-muted/30 p-3 flex flex-col gap-3 overflow-y-auto"> {/* drift-allowed: node-config side panel pinned width matches canvas chrome sizing */}
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                 <Settings2 className="h-3.5 w-3.5 text-teal-400" />
-                Node Config
+                Node Details
               </h3>
-              <button aria-label="Close node config" onClick={() => setSelectedNodeId(null)} className="text-muted-foreground hover:text-foreground">
+              <button aria-label="Close node details" onClick={() => setSelectedNodeId(null)} className="text-muted-foreground hover:text-foreground">
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
 
             <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Label htmlFor="workflow-node-name" className="text-xs text-muted-foreground">Name</Label>
               <Input
+                id="workflow-node-name"
                 value={selectedNode.name}
                 onChange={(e) => updateNodeName(e.target.value)}
                 className="mt-1 h-8 text-sm"
@@ -433,6 +496,25 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
             </div>
 
             <div>
+              <Label className="text-xs text-muted-foreground">Purpose</Label>
+              <p className="text-xs text-foreground/90 mt-1 leading-relaxed">{selectedDesc.purpose}</p>
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground">Data flow</Label>
+              <dl className="mt-1 space-y-1 text-xs">
+                <div>
+                  <dt className="font-medium text-foreground/80">Receives</dt>
+                  <dd className="text-muted-foreground">{selectedDesc.inputs}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground/80">Produces</dt>
+                  <dd className="text-muted-foreground">{selectedDesc.outputs}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div>
               <Label className="text-xs text-muted-foreground">ID</Label>
               <p className="text-xs text-muted-foreground font-mono mt-1">{selectedNode.id}</p>
             </div>
@@ -440,13 +522,64 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
             {/* Config fields */}
             {selectedNode.type === "condition" && (
               <div>
-                <Label className="text-xs text-muted-foreground">Expression</Label>
+                <Label htmlFor="workflow-node-expression" className="text-xs text-muted-foreground">Expression</Label>
                 <Input
+                  id="workflow-node-expression"
                   value={(selectedNode.config.expression as string) ?? ""}
                   onChange={(e) => updateNodeConfig("expression", e.target.value)}
                   placeholder="confidence > 0.5"
                   className="mt-1 h-8 text-sm font-mono"
                 />
+                {selectedDesc.configSummary && (
+                  <p className="text-label-xs text-muted-foreground/80 mt-1 leading-relaxed">{selectedDesc.configSummary}</p>
+                )}
+              </div>
+            )}
+
+            {/* Current configuration (read-only) */}
+            <div>
+              <Label className="text-xs text-muted-foreground">Configuration</Label>
+              {Object.keys(selectedNode.config).length === 0 ? (
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  No configuration set — this node runs with its defaults.
+                </p>
+              ) : (
+                <dl className="mt-1 space-y-1 text-xs">
+                  {Object.entries(selectedNode.config).map(([key, value]) => (
+                    <div key={key} className="flex items-baseline justify-between gap-2">
+                      <dt className="font-medium text-foreground/80 shrink-0">{key}</dt>
+                      <dd className="text-muted-foreground font-mono truncate" title={formatConfigValue(value)}>
+                        {formatConfigValue(value)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </div>
+
+            {/* Last run result for this node (populated after Run) */}
+            {selectedRunResult && (
+              <div>
+                <Label className="text-xs text-muted-foreground">Last run</Label>
+                <div className="mt-1 space-y-1">
+                  <Badge
+                    variant={selectedRunResult.status === "completed" || selectedRunResult.passed === true ? "default" : selectedRunResult.type === "skipped" ? "outline" : "destructive"}
+                    className="text-label-xs capitalize"
+                  >
+                    {selectedRunResult.type === "skipped"
+                      ? "skipped"
+                      : selectedNode.type === "condition"
+                        ? selectedRunResult.passed
+                          ? "passed"
+                          : "did not pass"
+                        : String(selectedRunResult.status ?? "unknown")}
+                  </Badge>
+                  {selectedRunResult.output !== undefined && (
+                    <pre className="text-label-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto rounded bg-muted/40 border p-1.5">
+                      {JSON.stringify(selectedRunResult.output, null, 1)?.slice(0, 600)}
+                    </pre>
+                  )}
+                </div>
               </div>
             )}
 

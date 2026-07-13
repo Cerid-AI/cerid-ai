@@ -18,8 +18,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
-import { useVerificationStream } from "@/hooks/use-verification-stream"
+import { renderHook, waitFor, act } from "@testing-library/react"
+import {
+  useVerificationStream,
+  VERIFICATION_IDLE_TIMEOUT_MS,
+  VERIFICATION_MAX_DURATION_MS,
+} from "@/hooks/use-verification-stream"
 
 // ---------------------------------------------------------------------------
 // Mock streamVerification
@@ -495,5 +499,123 @@ describe("useVerificationStream", () => {
     expect(result.current.claims).toHaveLength(2)
     expect(result.current.summary?.verified).toBe(1)
     expect(result.current.summary?.total).toBe(2)
+  })
+
+  // --- Idle-based timeout (P0-B beta triage) ---
+  //
+  // Regression: a fixed 60s AbortController armed at stream start killed
+  // healthy slow-but-alive streams — the backend sends keepalive comments
+  // every ~15s under load, and the premature client abort surfaced live as
+  // nginx 499 + backend CancelledError. The timeout must be IDLE-based
+  // (re-armed by every received chunk, keepalives included) with a large
+  // absolute ceiling, and must degrade (partial results + retry) instead of
+  // hard-erroring.
+
+  describe("idle-based timeout", () => {
+    function makeControlledStream() {
+      const abort = vi.fn()
+      let controller!: ReadableStreamDefaultController<Uint8Array>
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c
+        },
+      })
+      const response = Promise.resolve({ ok: true, status: 200, body } as unknown as Response)
+      return {
+        response,
+        abort,
+        enqueue: (s: string) => controller.enqueue(new TextEncoder().encode(s)),
+      }
+    }
+
+    const flush = async (ms = 0) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+      })
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it("keepalive-only chunks keep the stream alive past the old 60s deadline", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-alive", true, 1),
+      )
+
+      await flush()
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[0])}\n\n`)
+      await flush()
+      expect(result.current.phase).toBe("verifying")
+
+      // 90s of keepalive-only traffic arriving every 30s — inside the idle
+      // budget, but well past the old fixed 60s wall-clock deadline.
+      for (let i = 0; i < 3; i++) {
+        await flush(30_000)
+        stream.enqueue(": keepalive\n\n")
+        await flush()
+      }
+
+      expect(stream.abort).not.toHaveBeenCalled()
+      expect(result.current.phase).toBe("verifying")
+    })
+
+    it("degrades with partial results and settled claims when the stream goes silent past the idle budget", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-dead", true, 1),
+      )
+
+      await flush()
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[0])}\n\n`)
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[1])}\n\n`)
+      await flush()
+      expect(result.current.phase).toBe("verifying")
+
+      // True silence — no data, no keepalives — past the idle budget.
+      await flush(VERIFICATION_IDLE_TIMEOUT_MS + 1_000)
+
+      expect(stream.abort).toHaveBeenCalled()
+      expect(result.current.phase).toBe("degraded")
+      expect(result.current.loading).toBe(false)
+      // Partial results retained; pending claims settled (no infinite spinner)
+      expect(result.current.claims).toHaveLength(1)
+      expect(result.current.claims[0].status).toBe("uncertain")
+      expect(typeof result.current.claims[0].reason).toBe("string")
+    })
+
+    it("caps even a keepalive-active stream at the absolute ceiling with the degraded state", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-cap", true, 1),
+      )
+
+      await flush()
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[0])}\n\n`)
+      await flush()
+      expect(result.current.phase).toBe("verifying")
+
+      // Keepalives every 30s forever — the absolute cap must still end the run.
+      const iterations = VERIFICATION_MAX_DURATION_MS / 30_000 + 1
+      for (let i = 0; i < iterations; i++) {
+        await flush(30_000)
+        stream.enqueue(": keepalive\n\n")
+        await flush()
+      }
+
+      expect(stream.abort).toHaveBeenCalled()
+      expect(result.current.phase).toBe("degraded")
+    })
   })
 })

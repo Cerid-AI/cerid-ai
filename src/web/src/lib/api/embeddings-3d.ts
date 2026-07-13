@@ -6,6 +6,58 @@
 
 import { mcpUrl, mcpHeaders, extractError } from "./common"
 
+/**
+ * Ceiling for graph payload fetches. Without it a slow backend leaves the
+ * request hanging until TanStack supersedes it (nginx 499) and the view
+ * shows a spinner forever instead of the error card + Retry.
+ */
+export const GRAPH_FETCH_TIMEOUT_MS = 30_000
+
+/**
+ * Compose the caller's (React Query) signal with a hard timeout. Prefers
+ * native AbortSignal.any/timeout; falls back to manual composition where
+ * either is missing (older WebKit/jsdom).
+ */
+export function withRequestTimeout(signal?: AbortSignal, timeoutMs = GRAPH_FETCH_TIMEOUT_MS): AbortSignal {
+  if (typeof AbortSignal.any === "function" && typeof AbortSignal.timeout === "function") {
+    const timeout = AbortSignal.timeout(timeoutMs)
+    return signal ? AbortSignal.any([signal, timeout]) : timeout
+  }
+  return composeTimeoutSignal(signal, timeoutMs)
+}
+
+/** Manual fallback for withRequestTimeout — exported for direct unit testing. */
+export function composeTimeoutSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, "TimeoutError"))
+  }, timeoutMs)
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timer)
+      controller.abort(signal.reason)
+    } else {
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer)
+          controller.abort(signal.reason)
+        },
+        { once: true },
+      )
+    }
+  }
+  return controller.signal
+}
+
+/** Map an abort caused by the timeout signal to an actionable error. */
+export function timeoutToError(err: unknown, what: string): unknown {
+  if (err instanceof DOMException && err.name === "TimeoutError") {
+    return new Error(`${what} timed out — the backend may still be computing. Retry in a moment.`)
+  }
+  return err
+}
+
 export interface EntityEmbedding3D {
   /** Canonical entity id */
   id: string
@@ -67,7 +119,12 @@ export async function fetchEmbeddings3D(
     // Omit the param when false to keep default URLs cache-stable.
     ...(options.includeIsolated ? { include_isolated: "true" } : {}),
   })
-  const res = await fetch(url.toString(), { headers: mcpHeaders(), signal: options.signal })
+  let res: Response
+  try {
+    res = await fetch(url.toString(), { headers: mcpHeaders(), signal: withRequestTimeout(options.signal) })
+  } catch (err) {
+    throw timeoutToError(err, "3D embeddings fetch")
+  }
   if (!res.ok) throw new Error(await extractError(res, `3D embeddings fetch failed: ${res.status}`))
   return res.json() as Promise<Embeddings3DResponse>
 }

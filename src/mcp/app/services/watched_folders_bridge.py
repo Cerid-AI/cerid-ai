@@ -6,7 +6,7 @@ write-through delegation; the watched-folders scanner stays the ingest
 engine of record (folder is NOT in scheduler._POLLABLE_KINDS)."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, cast
 
 _PREFIX = "folder:"
 
@@ -24,12 +24,33 @@ async def create_folder_source(
     """Create a watched folder via the router's validated handler and return
     the projected SourceRecord dict. Path validation + _ALLOWED_ROOTS is
     enforced by ``create_watched_folder``; redis is fetched inside that
-    handler so the ``redis`` parameter here is accepted but unused."""
-    from app.routers.watched_folders import WatchedFolderCreate, create_watched_folder
+    handler so the ``redis`` parameter here is accepted but unused.
+
+    Raises ``ValueError`` (→ 422 at the /sources router) when ``config.path``
+    is missing/blank or ``import_mode`` is invalid, so a bad wizard payload
+    surfaces as a friendly validation error instead of a 502."""
+    from app.routers.watched_folders import (
+        _ALLOWED_ROOTS,
+        WatchedFolderCreate,
+        create_watched_folder,
+    )
+
+    path = str(config.get("path") or "").strip()
+    if not path:
+        roots = ", ".join(str(r) for r in _ALLOWED_ROOTS)
+        raise ValueError(
+            "Folder sources need config.path — an absolute directory path "
+            f"inside the Cerid container (allowed roots: {roots})."
+        )
+
+    raw_mode = str(config.get("import_mode") or "watch")
+    if raw_mode not in ("watch", "once"):
+        raise ValueError('import_mode must be "watch" or "once"')
+    import_mode = cast(Literal["watch", "once"], raw_mode)
 
     detail = await create_watched_folder(
         WatchedFolderCreate(
-            path=config["path"],
+            path=path,
             label=display_name,
             domain_override=config.get("domain_override"),
             exclude_patterns=config.get("exclude_patterns")
@@ -37,6 +58,7 @@ async def create_folder_source(
             search_enabled=config.get("search_enabled", True),
             is_vault=bool(config.get("is_vault")),
             vault_config=config.get("vault_config"),
+            import_mode=import_mode,
         )
     )
     rec = detail if isinstance(detail, dict) else detail.model_dump()
@@ -124,6 +146,7 @@ def folder_record_to_source(rec: dict[str, Any]) -> dict[str, Any]:
             "vault_config": rec.get("vault_config"),
             "domain_override": rec.get("domain_override"),
             "search_enabled": rec.get("search_enabled", True),
+            "import_mode": rec.get("import_mode") or "watch",
         },
         "sync_cursor": {},
         "total_artifacts": int(stats.get("ingested", 0)),

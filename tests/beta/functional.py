@@ -127,7 +127,9 @@ def test_f13_file_upload(client: httpx.Client) -> None:
     with httpx.Client(
         base_url=MCP_BASE_URL,
         headers=upload_headers,
-        timeout=30.0,
+        # File ingest runs synchronous enrichment — same slow-op convention
+        # as test_f12 (30s default flaked on a cold-cache corpus, 2026-07-10).
+        timeout=60.0,
     ) as upload_client:
         with open(sample, "rb") as f:
             resp = upload_client.post("/upload", files={"file": ("sample.txt", f, "text/plain")})

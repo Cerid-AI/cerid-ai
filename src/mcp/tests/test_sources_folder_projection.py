@@ -59,6 +59,39 @@ def test_create_folder_delegates_to_watched_folders():
     assert r.json()["kind"] == "folder"
 
 
+def test_create_folder_missing_path_is_422():
+    """The add wizard used to omit path → bridge KeyError → opaque 502.
+    Now a friendly 422 naming config.path + the allowed roots."""
+    with patch("app.routers.sources.get_redis", return_value=MagicMock()):
+        r = _client().post("/sources", json={
+            "kind": "folder", "display_name": "Notes", "config": {},
+        })
+    assert r.status_code == 422
+    assert "config.path" in r.json()["detail"]
+
+
+def test_create_folder_nonexistent_path_is_422():
+    with patch("app.routers.sources.get_redis", return_value=MagicMock()):
+        r = _client().post("/sources", json={
+            "kind": "folder", "display_name": "Notes",
+            "config": {"path": "/definitely/not/a/real/dir"},
+        })
+    assert r.status_code == 422
+    assert "not found" in r.json()["detail"].lower()
+
+
+def test_create_folder_disallowed_path_is_422(tmp_path):
+    # tmp_path exists but lies outside _ALLOWED_ROOTS → 400 from the
+    # watched-folders handler, surfaced as 422 by the sources router.
+    with patch("app.routers.sources.get_redis", return_value=MagicMock()):
+        r = _client().post("/sources", json={
+            "kind": "folder", "display_name": "Notes",
+            "config": {"path": str(tmp_path)},
+        })
+    assert r.status_code == 422
+    assert "allowed" in r.json()["detail"].lower()
+
+
 def test_delete_folder_delegates():
     with patch("app.routers.sources.get_redis", return_value=MagicMock()), \
          patch("app.routers.sources.delete_folder_source") as rm:

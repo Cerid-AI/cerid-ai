@@ -30,16 +30,16 @@ import {
   startConnectorAuth,
   getConnectorAuthStatus,
   disconnectConnector,
-  type ConnectorStatus,
   type OAuthStartResponse,
 } from "@/lib/api/connectors"
+import type { ConnectorStatusExt } from "./source-rows"
 
 // ---------------------------------------------------------------------------
 // Public props
 // ---------------------------------------------------------------------------
 
 interface ConnectorDetailProps {
-  connector: ConnectorStatus
+  connector: ConnectorStatusExt
   open: boolean
   onClose: () => void
 }
@@ -72,7 +72,7 @@ function ConnectorDetailInner({
   connector,
   onClose,
 }: {
-  connector: ConnectorStatus
+  connector: ConnectorStatusExt
   onClose: () => void
 }) {
   const qc = useQueryClient()
@@ -152,6 +152,24 @@ function ConnectorDetailInner({
       </DialogHeader>
 
       <div className="space-y-5 px-5 py-4">
+        {/* Explainer — what connecting this actually does (P0-C.4).
+            Fields are optional so older backend payloads render without it. */}
+        {(connector.imports_desc || connector.sync_semantics || connector.lands_in) && (
+          <Section title="How this connector works">
+            <dl className="space-y-1.5">
+              {connector.imports_desc && (
+                <ExplainerRow label="Reads" value={connector.imports_desc} />
+              )}
+              {connector.sync_semantics && (
+                <ExplainerRow label="Sync" value={connector.sync_semantics} />
+              )}
+              {connector.lands_in && (
+                <ExplainerRow label="Data destination" value={connector.lands_in} />
+              )}
+            </dl>
+          </Section>
+        )}
+
         {/* Status section */}
         <Section title="Status">
           <ul className="space-y-1">
@@ -296,6 +314,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div>
       <h3 className="mb-1 text-sm font-medium text-foreground">{title}</h3>
       {children}
+    </div>
+  )
+}
+
+function ExplainerRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[7rem_1fr] gap-2">
+      <dt className="text-label-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="text-label-xs leading-relaxed text-foreground/90">{value}</dd>
     </div>
   )
 }

@@ -12,7 +12,7 @@
  */
 
 import { Fragment, type ReactNode, type RefObject } from "react"
-import { Lock, Search, SearchX } from "lucide-react"
+import { Search, SearchX } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -20,16 +20,24 @@ import { Input } from "@/components/ui/input"
 import { useEntitlements } from "@/hooks/use-entitlements"
 import { categoryLabel, type SearchMatch, type SettingDef } from "@/lib/settings-registry"
 import { cn } from "@/lib/utils"
-import { FOCUS_RING } from "./settings-primitives"
+import { FOCUS_RING, TierLockBadge } from "./settings-primitives"
 
 export function SettingsSearchInput({
   value,
   onChange,
   inputRef,
+  placeholder = "Search settings…",
+  ariaLabel = "Search settings",
+  className,
 }: {
   value: string
   onChange: (value: string) => void
   inputRef?: RefObject<HTMLInputElement | null>
+  /** Override for elevated placements (e.g. the Overview page). */
+  placeholder?: string
+  /** Distinct accessible name when a second instance is mounted. */
+  ariaLabel?: string
+  className?: string
 }) {
   return (
     <div className="relative">
@@ -42,9 +50,9 @@ export function SettingsSearchInput({
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Search settings…"
-        aria-label="Search settings"
-        className="h-8 pl-8 text-sm"
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        className={cn("h-8 pl-8 text-sm", className)}
       />
     </div>
   )
@@ -124,12 +132,7 @@ export function SettingsSearchResults({
             </p>
             <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
               {highlightTokens(def.label, query)}
-              {locked && (
-                <Badge variant="outline" className="gap-1 text-label-xs">
-                  <Lock className="h-2.5 w-2.5" aria-hidden="true" />
-                  {entitlement.requiredTier === "enterprise" ? "Enterprise" : "Pro"}
-                </Badge>
-              )}
+              {locked && <TierLockBadge requiredTier={entitlement.requiredTier} />}
               {def.writer.kind === "env" && (
                 <Badge variant="outline" className="font-mono text-label-xs">
                   {def.writer.envVar}

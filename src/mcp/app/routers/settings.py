@@ -1029,6 +1029,23 @@ async def set_tier(req: TierRequest):
     # Single mutation point — set_tier rebinds the canonical global, recomputes
     # FEATURE_FLAGS, and syncs the config-namespace copy so no reader goes stale.
     features_mod.set_tier(req.tier)
+    # Persist across restarts: config.features boots FEATURE_TIER from the
+    # CERID_TIER env var, so write the override through the setup router's
+    # env-file writer (honours CERID_ENV_FILE — the file compose feeds back
+    # into the container environment). Without this, a restart silently
+    # reset the tier to the boot default (beta triage 2026-07-12 P0-B5:
+    # an OOM restart wiped a live Pro override).
+    try:
+        from app.routers.setup import _update_env_file
+        _update_env_file({"CERID_TIER": req.tier})
+        os.environ["CERID_TIER"] = req.tier
+    except OSError as exc:
+        log_swallowed_error("app.routers.settings.persist_tier", exc)
+        logger.warning(
+            "Tier '%s' applied for this process but not persisted to the "
+            "env file — it will reset on restart: %s",
+            req.tier, exc,
+        )
     logger.info("Feature tier updated to '%s', flags refreshed", req.tier)
     return {"tier": req.tier, "feature_flags": config.FEATURE_FLAGS}
 

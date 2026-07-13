@@ -6,7 +6,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import React from "react"
-import { SourceConfigForm } from "@/components/sources/source-config-form"
+import { KindSpecificFields, SourceConfigForm } from "@/components/sources/source-config-form"
 import type { SourceRecord } from "@/lib/api/sources"
 
 const mockPatchSourceConfig = vi.fn()
@@ -155,6 +155,88 @@ describe("SourceConfigForm — folder source", () => {
     render(<SourceConfigForm source={source} onSaved={() => {}} />, { wrapper: wrap() })
     const labelInput = screen.getByLabelText(/label/i)
     expect((labelInput as HTMLInputElement).value).toBe("My Notes")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Folder source — ADD mode (wizard): editable path + import-mode radio
+// ---------------------------------------------------------------------------
+
+/** Stateful harness — KindSpecificFields is controlled via config/onConfig. */
+function FolderAddHarness({
+  initial = {},
+  allowedRoots,
+  onConfigSpy,
+}: {
+  initial?: Record<string, unknown>
+  allowedRoots?: string[]
+  onConfigSpy?: (v: Record<string, unknown>) => void
+}) {
+  const [config, setConfig] = React.useState<Record<string, unknown>>(initial)
+  return (
+    <KindSpecificFields
+      kind="folder"
+      providers={[]}
+      config={config}
+      onConfig={(v) => {
+        onConfigSpy?.(v)
+        setConfig(v)
+      }}
+      allowedRoots={allowedRoots}
+    />
+  )
+}
+
+describe("KindSpecificFields — folder ADD mode", () => {
+  it("renders an editable path input and writes config.path", () => {
+    const spy = vi.fn()
+    render(<FolderAddHarness onConfigSpy={spy} />)
+    const input = screen.getByLabelText(/folder path/i)
+    fireEvent.change(input, { target: { value: "/archive/notes" } })
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ path: "/archive/notes" }))
+    expect((screen.getByLabelText(/folder path/i) as HTMLInputElement).value).toBe("/archive/notes")
+  })
+
+  it("explains container-path semantics and lists the allowed roots", () => {
+    render(<FolderAddHarness allowedRoots={["/archive", "/root/cerid-archive"]} />)
+    expect(screen.getByText(/inside the Cerid container/i)).toBeInTheDocument()
+    expect(screen.getByText(/allowed roots:/i)).toHaveTextContent("/archive, /root/cerid-archive")
+  })
+
+  it("offers watch vs one-time import modes, defaulting to watch", () => {
+    const spy = vi.fn()
+    render(<FolderAddHarness onConfigSpy={spy} />)
+    const watch = screen.getByRole("radio", { name: /watch folder/i })
+    const once = screen.getByRole("radio", { name: /one-time import/i })
+    expect(watch).toBeChecked()
+    expect(once).not.toBeChecked()
+    fireEvent.click(once)
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ import_mode: "once" }))
+    expect(screen.getByRole("radio", { name: /one-time import/i })).toBeChecked()
+  })
+
+  it("is axe-clean in add mode", async () => {
+    const { container } = render(<FolderAddHarness allowedRoots={["/archive"]} />)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe("KindSpecificFields — folder EDIT mode keeps path immutable", () => {
+  it("does not render the editable path input in edit mode", () => {
+    render(
+      <KindSpecificFields
+        kind="folder"
+        providers={[]}
+        config={{ path: "/data/notes" }}
+        onConfig={() => {}}
+        editMode
+      />,
+    )
+    expect(screen.queryByLabelText(/folder path/i)).not.toBeInTheDocument()
+    expect(screen.getByText("/data/notes")).toBeInTheDocument()
+    expect(screen.getByText(/cannot be changed after creation/i)).toBeInTheDocument()
+    // Import mode is a creation-time choice; hidden in edit mode.
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument()
   })
 })
 

@@ -78,6 +78,13 @@ class AppleMailConnector(SourceConnector):
 
     kind = "apple_mail"
     tier = "pro"
+    # Ingestion runs through the ceridmail desktop helper; /sources/kinds
+    # reports availability="requires_desktop" when it is absent.
+    requires_desktop = True
+
+    def desktop_available(self) -> bool:
+        """Availability probe for /sources/kinds — is the helper on PATH?"""
+        return _helper_path() is not None
 
     async def connect(self, config: dict[str, Any]) -> ConnectResult:
         bin_path = _helper_path()

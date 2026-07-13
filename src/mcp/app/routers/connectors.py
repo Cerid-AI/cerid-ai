@@ -49,6 +49,12 @@ class ConnectorMeta(BaseModel):
     requires_sibling: str | None  # e.g. "google_workspace" / "ms365" / None for Apple
     data_source_name: str | None  # registry key; None if not a DataSource (e.g. spotlight_donor)
     instruction_doc: str  # relative path to operator-facing docs
+    # Operator-facing explainer (P0-C.4): what the connector reads, whether
+    # it syncs continuously / imports once / reads on demand, and where the
+    # resulting data lands. Rendered in ConnectorDetail + the connector rows.
+    imports_desc: str  # what it reads/imports
+    sync_semantics: str  # continuous-sync vs one-time vs on-demand
+    lands_in: str  # where the data ends up
 
 
 _CONNECTORS: dict[str, ConnectorMeta] = {
@@ -61,6 +67,9 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         requires_sibling="google_workspace",
         data_source_name="gmail",
         instruction_doc="docs/PRO_GMAIL.md",
+        imports_desc="Email messages and threads matching your queries.",
+        sync_semantics="On-demand lookup while connected — searches your mailbox when a question needs it. No one-time import, no watch folder; your mailbox is never bulk-copied.",
+        lands_in="Chat answers with citations; inbox-triage briefs when that automation is enabled. Nothing is written to the knowledge base.",
     ),
     "google_calendar": ConnectorMeta(
         slug="google_calendar",
@@ -71,6 +80,9 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         requires_sibling="google_workspace",
         data_source_name="google_calendar",
         instruction_doc="docs/PRO_GOOGLE_CALENDAR.md",
+        imports_desc="Calendar events (titles, times, attendees).",
+        sync_semantics="On-demand lookup while connected — events are fetched when a question or a meeting capture needs them. No one-time import; your calendar is never bulk-copied.",
+        lands_in="Chat answers and meeting-capture context. Nothing is written to the knowledge base.",
     ),
     "outlook": ConnectorMeta(
         slug="outlook",
@@ -81,6 +93,9 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         requires_sibling="ms365",
         data_source_name="outlook",
         instruction_doc="docs/PRO_OUTLOOK.md",
+        imports_desc="Email messages and threads matching your queries.",
+        sync_semantics="On-demand lookup while connected — searches your mailbox when a question needs it. No one-time import, no watch folder; your mailbox is never bulk-copied.",
+        lands_in="Chat answers with citations. Nothing is written to the knowledge base.",
     ),
     "outlook_calendar": ConnectorMeta(
         slug="outlook_calendar",
@@ -91,6 +106,9 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         requires_sibling="ms365",
         data_source_name="outlook_calendar",
         instruction_doc="docs/PRO_OUTLOOK.md",
+        imports_desc="Calendar events (titles, times, attendees).",
+        sync_semantics="On-demand lookup while connected — events are fetched when a question or a meeting capture needs them. No one-time import; your calendar is never bulk-copied.",
+        lands_in="Chat answers and meeting-capture context. Nothing is written to the knowledge base.",
     ),
     "apple_calendar": ConnectorMeta(
         slug="apple_calendar",
@@ -101,6 +119,9 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         requires_sibling=None,
         data_source_name="apple_calendar",
         instruction_doc="docs/PRO_APPLE_CALENDAR.md",
+        imports_desc="Calendar events read locally via the EventKit helper.",
+        sync_semantics="On-demand local read while access is granted — events are read from this Mac when a question needs them. No import step; nothing leaves the machine.",
+        lands_in="Chat answers and meeting-capture context. Nothing is written to the knowledge base.",
     ),
     "apple_photos": ConnectorMeta(
         slug="apple_photos",
@@ -111,6 +132,9 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         requires_sibling=None,
         data_source_name="apple_photos",
         instruction_doc="docs/PRO_APPLE_PHOTOS.md",
+        imports_desc="Photo metadata (dates, places, albums) via the PhotoKit helper — never image files.",
+        sync_semantics="On-demand local read while access is granted — metadata is read from this Mac when a question needs it. No import step; photos are not copied.",
+        lands_in="Chat answers. Nothing is written to the knowledge base.",
     ),
     "apple_reminders": ConnectorMeta(
         slug="apple_reminders",
@@ -121,6 +145,9 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         requires_sibling=None,
         data_source_name="apple_reminders",
         instruction_doc="docs/PRO_APPLE_REMINDERS.md",
+        imports_desc="Reminders and their due dates read locally via the EventKit helper.",
+        sync_semantics="On-demand local read while access is granted — reminders are read from this Mac when a question needs them. No import step; nothing leaves the machine.",
+        lands_in="Chat answers. Nothing is written to the knowledge base.",
     ),
 }
 
@@ -147,6 +174,9 @@ class ConnectorStatus(BaseModel):
     sibling_circuit_open: bool | None
     auth_kind: str
     instruction_doc: str
+    imports_desc: str
+    sync_semantics: str
+    lands_in: str
 
 
 class ConnectorListResponse(BaseModel):
@@ -227,6 +257,9 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
         sibling_circuit_open=sibling_circuit_open,
         auth_kind=meta.auth_kind,
         instruction_doc=meta.instruction_doc,
+        imports_desc=meta.imports_desc,
+        sync_semantics=meta.sync_semantics,
+        lands_in=meta.lands_in,
     )
 
 

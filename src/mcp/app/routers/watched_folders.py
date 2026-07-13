@@ -17,7 +17,7 @@ import os
 import pathlib
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
@@ -74,6 +74,13 @@ class WatchedFolderCreate(BaseModel):
             "UI-form fallback for vault folder names (mocs_folders, daily_folders, "
             "templates_folders, attachments_folders, skip_folders, default_domain). "
             "A .cerid-vault.yaml at the vault root takes precedence."
+        ),
+    )
+    import_mode: Literal["watch", "once"] = Field(
+        "watch",
+        description=(
+            "'watch' keeps the folder under continuous scheduled scanning; "
+            "'once' ingests the current contents on the next scan, then disables the folder."
         ),
     )
 
@@ -180,6 +187,7 @@ async def create_watched_folder(body: WatchedFolderCreate):
         "search_enabled": body.search_enabled,
         "is_vault": body.is_vault,
         "vault_config": body.vault_config or None,
+        "import_mode": body.import_mode,
         "last_scanned_at": None,
         "stats": {"ingested": 0, "skipped": 0, "errored": 0},
         "created_at": now,

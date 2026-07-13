@@ -73,6 +73,35 @@ describe("WorkflowList", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Empty state — "how to build" guidance
+// ---------------------------------------------------------------------------
+
+describe("WorkflowList — empty-state guidance", () => {
+  it("explains what a workflow is and lists the build steps", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue({ workflows: [], total: 0 })
+    render(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await screen.findByText(/no workflows yet/i)
+
+    expect(screen.getByText(/chains cerid's agents into a repeatable pipeline/i)).toBeInTheDocument()
+    const steps = screen.getByRole("list", { name: /how to build a workflow/i })
+    expect(steps).toBeInTheDocument()
+    expect(screen.getByText("Create")).toBeInTheDocument()
+    expect(screen.getByText("Compose")).toBeInTheDocument()
+    expect(screen.getByText("Run")).toBeInTheDocument()
+  })
+
+  it("offers a create action that invokes onCreate", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue({ workflows: [], total: 0 })
+    const onCreate = vi.fn()
+    render(<WorkflowList onEdit={noop} onCreate={onCreate} onDuplicate={noop} />)
+    await screen.findByText(/no workflows yet/i)
+
+    await userEvent.setup().click(screen.getByRole("button", { name: /create your first workflow/i }))
+    expect(onCreate).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // D.2: four-state matrix — loading (Skeleton) / error (PaneError)
 // ---------------------------------------------------------------------------
 

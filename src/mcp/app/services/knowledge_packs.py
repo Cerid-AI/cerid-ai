@@ -511,3 +511,69 @@ async def uninstall_pack_default(pack_id: str) -> dict[str, Any]:
         state_path=default_state_path(),
         delete=_default_delete,
     )
+
+
+# ── Processor-queue introspection (async install status) ─────────────────
+
+def active_install_jobs(redis_client: Any | None = None) -> dict[str, str]:
+    """Return ``{pack_id: job_id}`` for queued or running pack-install jobs.
+
+    Drives the registry endpoint's ``installing`` flag and lets the
+    install endpoint return the existing job instead of double-enqueueing
+    when the wizard fires the same install twice. Reads the processor
+    queue's own key layout (pending priority lists + running set) so no
+    parallel bookkeeping can drift from the queue.
+    """
+    from app.db.redis.processor_queue import (  # noqa: PLC0415
+        _RUNNING_KEY,
+        _job_key,
+        _queue_key,
+    )
+    from app.processor.jobs.knowledge_pack_install import (  # noqa: PLC0415
+        KnowledgePackInstallJob,
+    )
+    from core.processor.priority import priority_order  # noqa: PLC0415
+
+    if redis_client is None:
+        from app.deps import get_redis  # noqa: PLC0415
+        redis_client = get_redis()
+
+    def _s(v: Any) -> str:
+        return v.decode() if isinstance(v, bytes) else str(v)
+
+    job_ids: list[str] = []
+    for priority in priority_order():
+        job_ids.extend(_s(j) for j in redis_client.lrange(_queue_key(priority), 0, -1))
+    job_ids.extend(_s(j) for j in redis_client.smembers(_RUNNING_KEY))
+
+    active: dict[str, str] = {}
+    for job_id in job_ids:
+        job_type = redis_client.hget(_job_key(job_id), "job_type")
+        if job_type is None or _s(job_type) != KnowledgePackInstallJob.job_type:
+            continue
+        payload_raw = redis_client.hget(_job_key(job_id), "payload")
+        if not payload_raw:
+            continue
+        try:
+            payload = json.loads(_s(payload_raw))
+        except (ValueError, TypeError) as exc:
+            log_swallowed_error("app.services.knowledge_packs.active_jobs", exc)
+            continue
+        pack_id = payload.get("pack_id")
+        if pack_id:
+            active[str(pack_id)] = job_id
+    return active
+
+
+def enqueue_install_job(pack_id: str, redis_client: Any | None = None) -> str:
+    """Enqueue a :class:`KnowledgePackInstallJob` and return its job id."""
+    from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+    from app.processor.jobs.knowledge_pack_install import (  # noqa: PLC0415
+        KnowledgePackInstallJob,
+    )
+
+    return enqueue_job(
+        KnowledgePackInstallJob(pack_id=pack_id),
+        payload={"pack_id": pack_id},
+        redis_client=redis_client,
+    )

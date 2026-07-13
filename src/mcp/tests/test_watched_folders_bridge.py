@@ -142,6 +142,91 @@ async def test_update_folder_source_ignores_path():
     assert not hasattr(update_body, "path") or getattr(update_body, "path", "SENTINEL") == "SENTINEL"
 
 
+# ---------------------------------------------------------------------------
+# create_folder_source — path validation + import_mode threading
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_folder_source_missing_path_raises_value_error():
+    """No config.path → friendly ValueError (→ 422 at /sources), not KeyError (→ 502)."""
+    from app.services.watched_folders_bridge import create_folder_source
+
+    with pytest.raises(ValueError, match="config.path"):
+        await create_folder_source(redis=object(), display_name="Notes", config={})
+
+
+@pytest.mark.asyncio
+async def test_create_folder_source_blank_path_raises_value_error():
+    from app.services.watched_folders_bridge import create_folder_source
+
+    with pytest.raises(ValueError, match="allowed roots"):
+        await create_folder_source(
+            redis=object(), display_name="Notes", config={"path": "   "},
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_folder_source_rejects_bogus_import_mode():
+    from app.services.watched_folders_bridge import create_folder_source
+
+    with pytest.raises(ValueError, match="import_mode"):
+        await create_folder_source(
+            redis=object(),
+            display_name="Notes",
+            config={"path": "/data/notes", "import_mode": "sometimes"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_folder_source_threads_import_mode():
+    from unittest.mock import AsyncMock
+
+    from app.services.watched_folders_bridge import create_folder_source
+
+    created = {**_REC, "import_mode": "once"}
+    with patch(
+        "app.routers.watched_folders.create_watched_folder",
+        new=AsyncMock(return_value=created),
+    ) as mock_create:
+        result = await create_folder_source(
+            redis=object(),
+            display_name="Notes",
+            config={"path": "/data/notes", "import_mode": "once"},
+        )
+    body = mock_create.call_args[0][0]
+    assert body.import_mode == "once"
+    assert body.path == "/data/notes"
+    assert result["config"]["import_mode"] == "once"
+
+
+@pytest.mark.asyncio
+async def test_create_folder_source_defaults_to_watch_mode():
+    from unittest.mock import AsyncMock
+
+    from app.services.watched_folders_bridge import create_folder_source
+
+    with patch(
+        "app.routers.watched_folders.create_watched_folder",
+        new=AsyncMock(return_value={**_REC}),
+    ) as mock_create:
+        result = await create_folder_source(
+            redis=object(), display_name="Notes", config={"path": "/data/notes"},
+        )
+    assert mock_create.call_args[0][0].import_mode == "watch"
+    # Legacy records without import_mode project as "watch" too.
+    assert result["config"]["import_mode"] == "watch"
+
+
+def test_projection_defaults_import_mode_to_watch():
+    assert folder_record_to_source(_REC)["config"]["import_mode"] == "watch"
+
+
+def test_projection_carries_import_mode():
+    rec = {**_REC, "import_mode": "once"}
+    assert folder_record_to_source(rec)["config"]["import_mode"] == "once"
+
+
 @pytest.mark.asyncio
 async def test_update_folder_source_strips_prefix_for_lookup():
     """folder: prefix is stripped before calling update_watched_folder."""

@@ -12,7 +12,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.routers.workflows import (
+    AGENT_CATALOG,
     AVAILABLE_AGENTS,
+    NODE_TYPE_CATALOG,
     WORKFLOW_TEMPLATES,
     NodeType,
     RunStatus,
@@ -24,6 +26,7 @@ from app.routers.workflows import (
     _evaluate_condition,
     _make_chain,
     execute_workflow,
+    list_node_types,
     topological_sort,
     validate_dag,
 )
@@ -390,3 +393,42 @@ class TestAvailableAgents:
         expected = {"query", "curator", "triage", "rectify", "audit",
                     "maintenance", "hallucination", "memory", "self_rag"}
         assert set(AVAILABLE_AGENTS) == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests: Node-type catalog (GET /workflows/node-types)
+# ---------------------------------------------------------------------------
+
+
+class TestNodeTypeCatalog:
+    def test_every_node_type_documented(self):
+        assert set(NODE_TYPE_CATALOG) == {t.value for t in NodeType}
+        for info in NODE_TYPE_CATALOG.values():
+            assert info["label"]
+            assert info["description"]
+            assert info["inputs"]
+            assert info["outputs"]
+
+    def test_every_agent_documented(self):
+        assert set(AGENT_CATALOG) == set(AVAILABLE_AGENTS)
+        for info in AGENT_CATALOG.values():
+            assert info["description"]
+            assert info["inputs"]
+            assert info["outputs"]
+
+    def test_condition_documents_expression_config(self):
+        summary = NODE_TYPE_CATALOG["condition"]["config_schema_summary"]
+        assert summary is not None
+        assert "expression" in summary
+
+    def test_endpoint_returns_full_catalog(self):
+        loop = asyncio.new_event_loop()
+        resp = loop.run_until_complete(list_node_types())
+        loop.close()
+
+        assert {nt.type for nt in resp.node_types} == {t.value for t in NodeType}
+        assert [a.name for a in resp.agents] == AVAILABLE_AGENTS
+        condition = next(nt for nt in resp.node_types if nt.type == "condition")
+        assert condition.config_schema_summary is not None
+        agent = next(nt for nt in resp.node_types if nt.type == "agent")
+        assert agent.config_schema_summary is None

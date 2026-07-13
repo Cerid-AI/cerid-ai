@@ -13,12 +13,27 @@ export type AppleRow = { bridgeKind: AppleBridgeKind }
 /** EmailRow backing is the EmailStatus snapshot returned by /data-sources/email/status. */
 export type EmailRow = EmailStatus
 
+/** Per-connector explainer fields served by /connectors (connectors.py
+    ConnectorMeta). Optional so payloads from older backends still parse. */
+export interface ConnectorExplainer {
+  /** What the connector reads/imports. */
+  imports_desc?: string
+  /** One-time import vs continuous sync vs on-demand lookup. */
+  sync_semantics?: string
+  /** Where the data ends up (chat answers, briefs, KB domain…). */
+  lands_in?: string
+}
+
+export type ConnectorStatusExt = ConnectorStatus & ConnectorExplainer
+
 export interface DisplayRow {
   id: string
   rowType: "source" | "connector" | "email" | "apple"
   kind: string
   displayName: string
   status: "connected" | "paused" | "available" | "error"
+  /** Optional secondary line for the list row (e.g. a connector's sync semantics). */
+  detail?: string
   backing: SourceRecord | ConnectorStatus | EmailRow | AppleRow
 }
 
@@ -56,7 +71,7 @@ export function sourceToRow(s: SourceRecord): DisplayRow {
   }
 }
 
-export function connectorToRow(c: ConnectorStatus): DisplayRow {
+export function connectorToRow(c: ConnectorStatusExt): DisplayRow {
   const status = ((): DisplayRow["status"] => {
     if (c.data_source_configured) return "connected"
     if (c.env_complete) return "available"
@@ -69,6 +84,9 @@ export function connectorToRow(c: ConnectorStatus): DisplayRow {
     kind: c.slug,
     displayName: c.display_name,
     status,
+    // Surface the sync model right in the list so "what will connecting
+    // this actually do?" is answered before opening the detail dialog.
+    detail: c.sync_semantics,
     backing: c,
   }
 }

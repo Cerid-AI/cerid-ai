@@ -7,15 +7,18 @@
  *
  * Flow:
  *   1. Fetches the pack catalog (GET /knowledge_packs/registry).
- *   2. Shows 4 featured packs as selectable cards.
- *   3. User clicks "Install" on a card → usePackInstall mutation runs.
+ *   2. Shows 4 featured packs as selectable cards. Packs the registry
+ *      reports as installed render a disabled "Installed ✓" state.
+ *   3. User clicks "Install" on a card → useWizardPackInstall runs the
+ *      async install contract (202 job + ~2s registry polling; legacy
+ *      synchronous 200 and "already_installed" resolve immediately).
  *   4. On success → transitions to <DemoQueriesPanel>.
  *   5. User clicks "Continue to chat" → calls onComplete(packId).
  *
  * Design constraints:
  * - shadcn/ui + lucide icons only; no hex literals; no inline style={{}}
  * - aria-live on all loading/error transitions; keyboard reachable
- * - React 19 + tanstack-react-query (useQuery for catalog, useMutation via hook)
+ * - React 19 + tanstack-react-query (useQuery for catalog)
  */
 
 import { useState, useCallback } from "react"
@@ -37,7 +40,11 @@ import {
   fetchKnowledgePackRegistry,
   type KnowledgePackSummary,
 } from "@/lib/api/knowledge-packs"
-import { usePackInstall } from "@/hooks/use-pack-install"
+import {
+  packInstallFlags,
+  registryHasInstalling,
+  useWizardPackInstall,
+} from "@/components/setup/use-wizard-pack-install"
 import { DemoQueriesPanel } from "@/components/setup/demo-queries-panel"
 
 // ---------------------------------------------------------------------------
@@ -76,9 +83,11 @@ interface PackCardProps {
   onInstall: (pack: KnowledgePackSummary) => void
   isInstalling: boolean
   isInstallingThisPack: boolean
+  /** Registry (or local) install state — renders a disabled "Installed ✓" card. */
+  installed: boolean
 }
 
-function PackCard({ pack, onInstall, isInstalling, isInstallingThisPack }: PackCardProps) {
+function PackCard({ pack, onInstall, isInstalling, isInstallingThisPack, installed }: PackCardProps) {
   return (
     <div
       className={cn(
@@ -123,23 +132,35 @@ function PackCard({ pack, onInstall, isInstalling, isInstallingThisPack }: PackC
         </span>
       </div>
 
-      <Button
-        size="sm"
-        className="h-7 w-full text-xs"
-        onClick={() => onInstall(pack)}
-        disabled={isInstalling}
-        aria-label={`Install ${pack.name}`}
-        aria-busy={isInstallingThisPack}
-      >
-        {isInstallingThisPack ? (
-          <>
-            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden="true" />
-            Installing...
-          </>
-        ) : (
-          "Install"
-        )}
-      </Button>
+      {installed ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 w-full text-xs"
+          disabled
+          aria-label={`${pack.name} already installed`}
+        >
+          Installed ✓
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          className="h-7 w-full text-xs"
+          onClick={() => onInstall(pack)}
+          disabled={isInstalling || isInstallingThisPack}
+          aria-label={`Install ${pack.name}`}
+          aria-busy={isInstallingThisPack}
+        >
+          {isInstallingThisPack ? (
+            <>
+              <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden="true" />
+              Installing...
+            </>
+          ) : (
+            "Install"
+          )}
+        </Button>
+      )}
     </div>
   )
 }
@@ -161,13 +182,16 @@ interface SamplePackTabProps {
 export function SamplePackTab({ onComplete }: SamplePackTabProps) {
   const [selectedPack, setSelectedPack] = useState<KnowledgePackSummary | null>(null)
 
-  const { install, isPending, isSuccess, error, installedPackId, reset } = usePackInstall()
+  const { install, isPending, isSuccess, error, installedPackId, reset } = useWizardPackInstall()
 
   // Fetch the catalog; re-use the same cache key as the KB-admin pane.
+  // While the registry reports an in-flight install (this tab's or another
+  // surface's), poll ~2s so the card flags track the async job.
   const { data: registry, isLoading: catalogLoading, isError: catalogError } = useQuery({
     queryKey: ["knowledge-pack-registry"],
     queryFn: fetchKnowledgePackRegistry,
     staleTime: 60_000,
+    refetchInterval: (query) => (registryHasInstalling(query.state.data) ? 2000 : false),
   })
 
   // Flatten all packs from all domains and filter to featured set.
@@ -181,13 +205,13 @@ export function SamplePackTab({ onComplete }: SamplePackTabProps) {
   const handleInstall = useCallback(async (pack: KnowledgePackSummary) => {
     setSelectedPack(pack)
     reset()
-    // install() calls mutateAsync which rethrows on failure; catch here so the
-    // error surfaces through the mutation's `error` state instead of propagating
+    // install() rethrows on failure (incl. poll timeout); catch here so the
+    // error surfaces through the hook's `error` state instead of propagating
     // as an unhandled rejection in the component tree.
     try {
       await install(pack.id)
     } catch {
-      // error is available via the `error` field returned by usePackInstall
+      // error is available via the `error` field returned by useWizardPackInstall
     }
   }, [install, reset])
 
@@ -260,15 +284,21 @@ export function SamplePackTab({ onComplete }: SamplePackTabProps) {
               No featured packs found in the catalog. Check your registry.
             </p>
           ) : (
-            featuredPacks.map((pack) => (
-              <PackCard
-                key={pack.id}
-                pack={pack}
-                onInstall={handleInstall}
-                isInstalling={isPending}
-                isInstallingThisPack={isPending && selectedPack?.id === pack.id}
-              />
-            ))
+            featuredPacks.map((pack) => {
+              const flags = packInstallFlags(pack)
+              return (
+                <PackCard
+                  key={pack.id}
+                  pack={pack}
+                  onInstall={handleInstall}
+                  isInstalling={isPending}
+                  isInstallingThisPack={
+                    (isPending && selectedPack?.id === pack.id) || flags.installing
+                  }
+                  installed={flags.installed}
+                />
+              )
+            })
           )}
         </div>
       )}

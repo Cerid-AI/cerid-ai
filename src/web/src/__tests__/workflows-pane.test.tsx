@@ -7,15 +7,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import type { Workflow } from "@/lib/types"
 
-vi.mock("@/lib/api", () => ({
-  fetchWorkflows: vi.fn(),
-  deleteWorkflow: vi.fn(),
-  fetchWorkflowRuns: vi.fn().mockResolvedValue([]),
-  createWorkflow: vi.fn(),
-  updateWorkflow: vi.fn(),
-  runWorkflow: vi.fn(),
-  fetchWorkflowTemplates: vi.fn().mockResolvedValue([]),
-}))
+vi.mock("@/lib/api", async () => {
+  const { FALLBACK_NODE_CATALOG } = await import("@/components/workflows/node-catalog")
+  return {
+    fetchWorkflows: vi.fn(),
+    deleteWorkflow: vi.fn(),
+    fetchWorkflowRuns: vi.fn().mockResolvedValue([]),
+    createWorkflow: vi.fn(),
+    updateWorkflow: vi.fn(),
+    runWorkflow: vi.fn(),
+    fetchWorkflowTemplates: vi.fn().mockResolvedValue([]),
+    fetchWorkflowNodeTypes: vi.fn().mockResolvedValue(FALLBACK_NODE_CATALOG),
+  }
+})
 
 import { fetchWorkflows } from "@/lib/api"
 import WorkflowsPane from "@/components/workflows/workflows-pane"

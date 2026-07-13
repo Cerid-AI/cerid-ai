@@ -381,32 +381,118 @@ async def _run_tombstone_purge() -> None:
         logger.error("Scheduled tombstone purge failed: %s", e)
 
 
+def _load_watched_folder_records() -> list[dict[str, Any]]:
+    """Snapshot the watched-folders Redis store. Returns [] when the store is
+    empty or unreachable so the scheduled scan can fall back to the legacy
+    SCAN_PATHS behavior."""
+    try:
+        from app.routers.watched_folders import _list_folder_ids, _load_folder
+
+        redis = get_redis()
+        records: list[dict[str, Any]] = []
+        for fid in _list_folder_ids(redis):
+            rec = _load_folder(redis, fid)
+            if rec is not None:
+                records.append(rec)
+        return records
+    except Exception as e:
+        log_swallowed_error('app.scheduler', e)
+        return []
+
+
+def _finalize_watched_folder_scan(
+    folder_id: str, stats: dict[str, int], *, disable: bool,
+) -> None:
+    """Persist per-folder scan stats + timestamp; disable one-time-import
+    folders after their scan so they don't rescan on the next cadence."""
+    try:
+        from app.routers.watched_folders import _load_folder, _save_folder
+
+        redis = get_redis()
+        rec = _load_folder(redis, folder_id)
+        if rec is None:
+            return
+        rec["stats"] = stats
+        rec["last_scanned_at"] = utcnow_iso()
+        if disable:
+            rec["enabled"] = False
+        _save_folder(redis, folder_id, rec)
+    except Exception as e:
+        log_swallowed_error('app.scheduler', e)
+
+
 async def _run_folder_scan() -> None:
-    """Scheduled folder scan — ingests new files from configured paths."""
+    """Scheduled folder scan — ingests new files from the enabled watched
+    folders in the store. When no folders are registered, falls back to the
+    legacy SCAN_PATHS / ARCHIVE_PATH env configuration (the pre-store
+    behavior). Folders created with ``import_mode="once"`` are scanned a
+    single time and then disabled."""
     start = time.time()
     try:
-        from app.services.folder_scanner import scan_folder
+        from app.services.folder_scanner import scan_folder, scan_vault
 
-        scan_paths = config.SCAN_PATHS.split(":") if hasattr(config, "SCAN_PATHS") else [config.ARCHIVE_PATH]
         total_ingested = 0
         total_skipped = 0
         total_errored = 0
 
-        for path in scan_paths:
-            if not Path(path).is_dir():
-                logger.warning(f"Scan path not found: {path}")
-                continue
-            async for result in scan_folder(
-                path,
-                min_quality=getattr(config, "SCAN_MIN_QUALITY", 0.4),
-                max_file_size_mb=getattr(config, "SCAN_MAX_FILE_SIZE_MB", 50),
-            ):
-                if result.status == "ingested":
-                    total_ingested += 1
-                elif result.status in ("duplicate", "low_quality", "skipped"):
-                    total_skipped += 1
-                elif result.status == "error":
-                    total_errored += 1
+        folders = _load_watched_folder_records()
+        if folders:
+            for rec in folders:
+                if not rec.get("enabled", True):
+                    continue
+                path = rec.get("path", "")
+                if not Path(path).is_dir():
+                    logger.warning(f"Watched folder path not found: {path}")
+                    continue
+                ingested = skipped = errored = 0
+                try:
+                    if rec.get("is_vault"):
+                        scan_iter = scan_vault(
+                            path,
+                            rec.get("vault_config"),
+                            exclude_patterns=set(rec.get("exclude_patterns") or []),
+                        )
+                    else:
+                        scan_iter = scan_folder(
+                            path,
+                            exclude_patterns=set(rec.get("exclude_patterns") or []),
+                        )
+                    async for result in scan_iter:
+                        if result.status == "ingested":
+                            ingested += 1
+                        elif result.status in ("duplicate", "low_quality", "skipped", "unsupported"):
+                            skipped += 1
+                        elif result.status == "error":
+                            errored += 1
+                except Exception as e:  # one bad folder must not abort the sweep
+                    log_swallowed_error('app.scheduler', e)
+                    errored += 1
+                total_ingested += ingested
+                total_skipped += skipped
+                total_errored += errored
+                _finalize_watched_folder_scan(
+                    rec["id"],
+                    {"ingested": ingested, "skipped": skipped, "errored": errored},
+                    disable=rec.get("import_mode") == "once",
+                )
+        else:
+            # Legacy behavior — no watched folders registered.
+            scan_paths = config.SCAN_PATHS.split(":") if hasattr(config, "SCAN_PATHS") else [config.ARCHIVE_PATH]
+            for path in scan_paths:
+                if not Path(path).is_dir():
+                    logger.warning(f"Scan path not found: {path}")
+                    continue
+                async for result in scan_folder(
+                    path,
+                    min_quality=getattr(config, "SCAN_MIN_QUALITY", 0.4),
+                    max_file_size_mb=getattr(config, "SCAN_MAX_FILE_SIZE_MB", 50),
+                ):
+                    if result.status == "ingested":
+                        total_ingested += 1
+                    elif result.status in ("duplicate", "low_quality", "skipped"):
+                        total_skipped += 1
+                    elif result.status == "error":
+                        total_errored += 1
 
         duration = time.time() - start
         detail = f"ingested={total_ingested} skipped={total_skipped} errored={total_errored}"

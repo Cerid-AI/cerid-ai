@@ -14,18 +14,23 @@
  */
 
 import { useEffect } from "react"
-import { Clock, Lock, Settings2 } from "lucide-react"
+import { Cable, Clock, Lock, Monitor } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
-import { listSourceKinds, type SourceKindMeta } from "@/lib/api/sources"
+import { listSourceKinds } from "@/lib/api/sources"
+import type { SourceKindMetaExt } from "./source-kind-meta"
 import { descriptorFor } from "./source-kind-icons"
 
 interface SourcesEmptyGalleryProps {
   onSelectKind: (kind: string) => void
+  /** Opens the ConnectorDetail flow for an OAuth/system-permission kind.
+      When omitted, oauth tiles stay disabled with copy naming the
+      Sources → Connectors tab (where the connector rows live). */
+  onOpenConnector?: (kind: string) => void
 }
 
-export function SourcesEmptyGallery({ onSelectKind }: SourcesEmptyGalleryProps) {
-  const { data: kinds, isLoading } = useQuery<SourceKindMeta[]>({
+export function SourcesEmptyGallery({ onSelectKind, onOpenConnector }: SourcesEmptyGalleryProps) {
+  const { data: kinds, isLoading } = useQuery<SourceKindMetaExt[]>({
     queryKey: ["source-kinds"],
     queryFn: listSourceKinds,
     staleTime: 60_000,
@@ -59,14 +64,14 @@ export function SourcesEmptyGallery({ onSelectKind }: SourcesEmptyGalleryProps) 
       <SectionTitle label="Core" subtitle={`${core.length} included with Cerid`} />
       <div className="cerid-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {core.map((k) => (
-          <Tile key={k.kind} meta={k} onClick={() => onSelectKind(k.kind)} />
+          <Tile key={k.kind} meta={k} onClick={() => onSelectKind(k.kind)} onOpenConnector={onOpenConnector} />
         ))}
       </div>
 
       <SectionTitle label="Pro" subtitle={`${pro.length} unlock with upgrade`} className="mt-8" />
       <div className="cerid-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {pro.map((k) => (
-          <Tile key={k.kind} meta={k} onClick={() => onSelectKind(k.kind)} />
+          <Tile key={k.kind} meta={k} onClick={() => onSelectKind(k.kind)} onOpenConnector={onOpenConnector} />
         ))}
       </div>
     </div>
@@ -93,20 +98,25 @@ function SectionTitle({
 function Tile({
   meta,
   onClick,
+  onOpenConnector,
 }: {
-  meta: SourceKindMeta
+  meta: SourceKindMetaExt
   onClick: () => void
+  onOpenConnector?: (kind: string) => void
 }) {
   const desc = descriptorFor(meta.kind)
   const Icon = desc.icon
   const isPro = meta.tier === "pro"
   const availability = meta.availability ?? "available"
-  const selectable = availability === "available"
+  // oauth kinds connect via the ConnectorDetail flow on this same
+  // Sources → Connectors tab — actionable when the host wires it.
+  const oauthActionable = availability === "oauth" && !!onOpenConnector
+  const selectable = availability === "available" || oauthActionable
 
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={oauthActionable ? () => onOpenConnector(meta.kind) : onClick}
       disabled={!selectable}
       className={cn(
         "group relative flex flex-col items-start gap-2 rounded-lg border border-border/60 bg-card/40 px-4 py-3 text-left transition-colors",
@@ -116,11 +126,15 @@ function Tile({
           : "cursor-not-allowed opacity-55",
       )}
       aria-label={
-        selectable
-          ? `Add ${desc.label}${isPro ? " (Pro)" : ""}`
-          : availability === "oauth"
-            ? `${desc.label} — connect in Settings`
-            : `${desc.label} — coming soon`
+        availability === "oauth"
+          ? oauthActionable
+            ? `Connect ${desc.label}${isPro ? " (Pro)" : ""}`
+            : `${desc.label} — set up in Sources → Connectors`
+          : selectable
+            ? `Add ${desc.label}${isPro ? " (Pro)" : ""}`
+            : availability === "requires_desktop"
+              ? `${desc.label} — requires the Cerid desktop app`
+              : `${desc.label} — coming soon`
       }
     >
       <div className="flex w-full items-center justify-between">
@@ -133,13 +147,21 @@ function Tile({
             <Clock className="h-2.5 w-2.5" aria-hidden="true" />
             Soon
           </span>
+        ) : availability === "requires_desktop" ? (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-label-xs font-medium text-muted-foreground"
+            aria-label="Requires the Cerid desktop app"
+          >
+            <Monitor className="h-2.5 w-2.5" aria-hidden="true" />
+            Desktop app
+          </span>
         ) : availability === "oauth" ? (
           <span
             className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-label-xs font-medium text-muted-foreground"
-            aria-label="Connect in Settings"
+            aria-label="Connects from the Sources → Connectors tab"
           >
-            <Settings2 className="h-2.5 w-2.5" aria-hidden="true" />
-            Settings
+            <Cable className="h-2.5 w-2.5" aria-hidden="true" />
+            Connector
           </span>
         ) : isPro ? (
           <span
@@ -153,7 +175,13 @@ function Tile({
       </div>
       <div>
         <div className="text-sm font-medium text-foreground">{desc.label}</div>
-        <div className="text-label-xs text-muted-foreground">{desc.blurb}</div>
+        <div className="text-label-xs text-muted-foreground">
+          {availability === "oauth"
+            ? oauthActionable
+              ? "OAuth or system permission — click to open the connector setup."
+              : "OAuth or system permission — set up from the Sources → Connectors tab."
+            : desc.blurb}
+        </div>
       </div>
     </button>
   )

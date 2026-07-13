@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Cpu, ExternalLink, Loader2, Check, Download, Star, HardDrive, Copy, Zap } from "lucide-react"
 import { pullOllamaModel, fetchOllamaRecommendations } from "@/lib/api"
+import { isModelInstalled } from "@/lib/model-alias"
 import type { RecommendedLocalBackend } from "@/lib/types"
 
 interface OllamaState {
@@ -131,28 +132,6 @@ function CloudBackendStep() {
 // Quenchforge backend: GPU-aware, no Ollama Pull buttons, model labels match the
 // actual quenchforge slot aliases (llama3.1-8b, bge-reranker-v2-m3, etc).
 // ---------------------------------------------------------------------------
-
-// GGUF quant suffix, case-insensitive: ".Q8_0", "-q4_K_M", "_Q5_0", etc.
-const QUANT_SUFFIX_RE = /[._-]q\d+(?:_[a-z0-9]+)*$/i
-
-/**
- * Normalize a model name for cross-matching recommended (Ollama colon-tag,
- * e.g. `llama3.2:3b`) against installed (local Quenchforge dash-alias, e.g.
- * `llama3.2-3b`) forms. Collapses `:`/`-` to a single separator and strips
- * any trailing GGUF quant suffix so quant variants match the base model.
- */
-function normalizeModelId(name: string): string {
-  return name.replace(QUANT_SUFFIX_RE, "").replace(/[:-]/g, "-").toLowerCase()
-}
-
-/** True when an installed model corresponds to a recommended model id. */
-function isModelInstalled(recommendedId: string, installed: string[]): boolean {
-  const target = normalizeModelId(recommendedId)
-  return installed.some((om) => {
-    const norm = normalizeModelId(om)
-    return norm === target || norm.startsWith(`${target}-`)
-  })
-}
 
 function gpuLooksAccelerated(gpu: string | null | undefined, accel: string | null | undefined): boolean {
   if (accel && accel !== "none") return true

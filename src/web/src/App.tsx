@@ -75,6 +75,11 @@ export default function App() {
   // Capture FAB is hidden there to avoid the two overlapping (BETA-001).
   const [currentPane, setCurrentPane] = useState<Pane>("chat")
   const tierCycling = useRef(false)
+  // Initial value comes from the localStorage cache; the backend's
+  // setup-status response overrides it below (server-side flag is the
+  // source of truth — beta triage 2026-07-12 P0-B4: localStorage-only
+  // gating re-ran the wizard in every fresh browser on a configured
+  // instance and let it clobber live env config).
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
   })
@@ -111,6 +116,20 @@ export default function App() {
           setSetupRequired(true)
         } else {
           setSetupRequired(false)
+        }
+        // Backend onboarding flag wins over the localStorage cache. Older
+        // backends omit the field — keep the cached behavior then.
+        if (typeof status.onboarding_complete === "boolean") {
+          setShowOnboarding(!status.onboarding_complete)
+          try {
+            if (status.onboarding_complete) {
+              localStorage.setItem("cerid-onboarding-complete", "true")
+            } else {
+              localStorage.removeItem("cerid-onboarding-complete")
+            }
+          } catch {
+            // localStorage unavailable (private mode) — state alone suffices
+          }
         }
       })
       .catch(() => {

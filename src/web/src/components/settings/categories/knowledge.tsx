@@ -4,7 +4,7 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  FolderOpen, Database,
+  FolderOpen, ArrowRight,
   Plus, Scan, Trash2, AlertTriangle, CheckCircle,
   ChevronDown, ChevronRight, RefreshCw,
 } from "lucide-react"
@@ -19,13 +19,13 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { EmptyState } from "@/components/ui/empty-state"
 import {
-  SettingRow, AdvancedDisclosure, ConfirmActionButton, ToggleRow, ReadOnlyEnvHint,
+  SettingRow, AdvancedDisclosure, ConfirmActionButton, ToggleRow,
 } from "@/components/settings/settings-primitives"
 import { getDef } from "@/lib/settings-registry"
+import { useNavigation } from "@/contexts/navigation-context"
 import {
   fetchWatchedFolders, addWatchedFolder, removeWatchedFolder, scanWatchedFolder,
   updateWatchedFolder,
-  fetchDataSources, enableDataSource, disableDataSource,
   fetchBriefSettings, updateBriefSettings,
   fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain,
   type WatchedFolder, type VaultConfig,
@@ -414,90 +414,30 @@ function WatchedFoldersGroup() {
   )
 }
 
-// ── Data Sources ─────────────────────────────────────────────────────────────
+// ── Data Sources (pointer — toggles unified into Extensions → Knowledge Providers) ──
 
 function DataSourcesGroup() {
-  const qc = useQueryClient()
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["data-sources"],
-    queryFn: fetchDataSources,
-    staleTime: 30_000,
-  })
-  const [errors, setErrors] = useState<Record<string, string>>({})
-
-  const handleToggle = async (name: string, enabled: boolean) => {
-    setErrors((prev) => ({ ...prev, [name]: "" }))
-    try {
-      if (enabled) {
-        await enableDataSource(name)
-      } else {
-        await disableDataSource(name)
-      }
-      await qc.invalidateQueries({ queryKey: ["data-sources"] })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Toggle failed"
-      setErrors((prev) => ({ ...prev, [name]: msg }))
-      logSwallowedError(err, "knowledge.toggleDataSource")
-    }
-  }
-
+  const { goTo } = useNavigation()
   const def = getDef("knowledge.sources.enable")!
-  const sources = data?.sources ?? []
 
   return (
     <SectionCard title="Data Sources">
-      {isLoading && (
-        <div className="density-stack">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-md" />)}
-        </div>
-      )}
-      {isError && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            Failed to load data sources.{" "}
-            <button type="button" onClick={() => void refetch()} className="underline">Retry</button>
-          </AlertDescription>
-        </Alert>
-      )}
-      {!isLoading && !isError && sources.length === 0 && (
-        <EmptyState
-          icon={Database}
-          title="No data sources configured"
-          description="Data sources appear once your deployment includes external API adapters."
-        />
-      )}
-      {sources.map((src) => (
-        <div key={src.name}>
-          <SettingRow def={def}>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium">{src.name}</span>
-                  {src.description && (
-                    <p className="text-label-xs text-muted-foreground">{src.description}</p>
-                  )}
-                  {!src.configured && src.api_key_env_var && (
-                    <ReadOnlyEnvHint envVar={src.api_key_env_var} />
-                  )}
-                </div>
-                <Switch
-                  checked={src.enabled}
-                  onCheckedChange={(checked) => void handleToggle(src.name, checked)}
-                  disabled={!src.configured}
-                  aria-label={`${src.enabled ? "Disable" : "Enable"} ${src.name}`}
-                  className="shrink-0"
-                />
-              </div>
-              {errors[src.name] && (
-                <Alert variant="destructive">
-                  <AlertDescription className="text-label-xs">{errors[src.name]}</AlertDescription>
-                </Alert>
-              )}
-            </div>
-          </SettingRow>
-        </div>
-      ))}
+      <SettingRow def={def}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => goTo("settings", { category: "extensions", setting: "extensions.externalApis.enable" })}
+          className="gap-1.5"
+        >
+          <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          Open Knowledge Providers
+        </Button>
+      </SettingRow>
+      <p className="text-label-xs text-muted-foreground">
+        Enable/disable toggles for chat lookup tools and enrichment providers
+        now live together in Extensions &rarr; Knowledge Providers, so each
+        service is switched in one place with its scope labelled.
+      </p>
     </SectionCard>
   )
 }

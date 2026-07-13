@@ -12,7 +12,9 @@ and executes jobs via their ``BaseJob.run`` interface.
 Throttling
 ----------
 System-load throttling is based on ``os.getloadavg()[0]``.  The default
-ceiling is ``cpu_count × 0.7``; callers may override via the
+ceiling is ``effective_cpus × 0.7`` where the effective CPU count comes
+from the cgroup v2 quota (``/sys/fs/cgroup/cpu.max``) when readable,
+falling back to ``os.cpu_count()``.  Callers may override via the
 ``load_ceiling`` constructor parameter.  On Windows (no getloadavg)
 throttling is disabled.
 
@@ -29,6 +31,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.processor.model_policy import resolve_job_model
@@ -46,6 +49,36 @@ logger = logging.getLogger("ai-companion.processor.worker")
 _DEFAULT_MAX_RETRIES = 3
 # Graceful-stop drain timeout in seconds.
 _STOP_TIMEOUT_S = 30.0
+# cgroup v2 CPU quota file: "<quota_us> <period_us>" or "max <period_us>".
+_CGROUP_CPU_MAX_PATH = "/sys/fs/cgroup/cpu.max"
+
+
+def _effective_cpu_count(cpu_max_path: str = _CGROUP_CPU_MAX_PATH) -> float:
+    """Return the CPU count the process can actually use.
+
+    ``os.cpu_count()`` reports the HOST's cores even inside a CPU-quota'd
+    container (observed live: ceiling 16.8 in a 2-CPU cgroup, so the load
+    throttle could mathematically never engage and the container OOM'd).
+    Prefer the cgroup v2 quota when readable; ``"max"`` (no quota) and any
+    read/parse failure fall back to ``os.cpu_count()``.
+    """
+    fallback = float(os.cpu_count() or 1)
+    try:
+        raw = Path(cpu_max_path).read_text().strip()
+    except OSError:
+        return fallback
+    parts = raw.split()
+    if parts and parts[0] == "max":
+        return fallback
+    try:
+        quota_raw, period_raw = parts
+        quota = float(quota_raw)
+        period = float(period_raw)
+    except ValueError:
+        return fallback
+    if quota <= 0 or period <= 0:
+        return fallback
+    return quota / period
 
 
 class ProcessorWorker:
@@ -66,7 +99,8 @@ class ProcessorWorker:
         Seconds to sleep between queue polls when idle.
     load_ceiling
         Override the system-load throttle ceiling.  Defaults to
-        ``cpu_count × 0.7``.  ``None`` forces the default.
+        ``effective_cpus × 0.7`` (cgroup-quota aware).  ``None`` forces
+        the default.
     redis_client
         Optional Redis client for metrics recording.  If ``None``, metrics
         writes are skipped silently.
@@ -94,10 +128,10 @@ class ProcessorWorker:
 
         # Compute default load ceiling once at init
         try:
-            cpu = os.cpu_count() or 1
+            cpu = _effective_cpu_count()
         except Exception as exc:
             log_swallowed_error('app.processor.worker', exc)
-            cpu = 1
+            cpu = 1.0
         self._load_ceiling = load_ceiling if load_ceiling is not None else cpu * 0.7
 
         self._stop_flag = False

@@ -18,16 +18,16 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import config
-from app.deps import get_chroma, get_neo4j, get_redis
+from app.deps import get_redis
 from app.services.ingestion import ingest_batch, ingest_content, ingest_file
 from core.ingest.sources.safe_fetch import guarded_get
 from core.knowledge.adapter_html_scrape import extract_html_content
 from core.utils import cache
 from core.utils.swallowed import log_swallowed_error
-from core.utils.time import utcnow
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -335,94 +335,52 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
 
 @router.post("/ingest/feedback")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
-    """Ingest a chat turn into the conversations domain for the feedback loop."""
+    """Queue a chat turn for ingestion into the conversations domain.
+
+    The full ingest (chunk → embed → store) ran inline here until it
+    504'd through the web proxy under beta load (2026-07-12 triage).
+    The heavy tail now runs as a ``FeedbackIngestJob`` on the background
+    processor; the cheap parts (feature gate + conversation-metrics
+    write) stay synchronous and the endpoint acks 202 immediately.
+    Feedback is fire-and-forget in the UI — callers treat 202 as success.
+    """
     # Backend gate: reject if feedback loop is disabled server-side
     if not config.ENABLE_FEEDBACK_LOOP:
         return {"status": "skipped", "reason": "Feedback loop disabled (ENABLE_FEEDBACK_LOOP=false)"}
 
-    try:
-        convo_prefix = req.conversation_id[:8] if req.conversation_id else "unknown"
-        timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
-        filename = f"chat_{convo_prefix}_{timestamp}"
-        content = (
-            f"User: {req.user_message}\n\n"
-            f"Assistant ({req.model}): {req.assistant_response}"
-        )
-        metadata = {
-            "filename": filename,
-            "conversation_id": req.conversation_id,
-            "model": req.model,
-            "summary": req.user_message[:200],
-        }
-        async with _ingest_semaphore:
-            result = await asyncio.to_thread(ingest_content, content, "conversations", metadata)
-
+    # Fast synchronous ack: conversation metrics are a cheap Redis write
+    # and power the live usage panes, so they land at request time.
+    if req.input_tokens or req.output_tokens:
         try:
-            cache.log_event(
+            from core.utils.cache import log_conversation_metrics
+            log_conversation_metrics(
                 get_redis(),
-                event_type="feedback",
-                artifact_id=result.get("artifact_id", ""),
-                domain="conversations",
-                filename=filename,
                 conversation_id=req.conversation_id,
+                model=req.model,
+                input_tokens=req.input_tokens,
+                output_tokens=req.output_tokens,
+                latency_ms=req.latency_ms,
             )
         except Exception as e:
             log_swallowed_error(
-                "routers.ingestion.feedback_audit_log",
+                "routers.ingestion.feedback_conversation_metrics",
                 e,
                 redis_client=get_redis(),
             )
 
-        try:
-            from utils.query_cache import invalidate_all
-            invalidate_all()
-        except Exception as e:
-            log_swallowed_error(
-                "routers.ingestion.feedback_cache_invalidate",
-                e,
-                redis_client=get_redis(),
-            )
-
-        # Trigger hallucination check if enabled (async, non-blocking)
-        if config.ENABLE_HALLUCINATION_CHECK and result.get("status") == "success":
-            try:
-                from core.agents.hallucination import check_hallucinations
-                asyncio.get_running_loop().create_task(
-                    check_hallucinations(
-                        response_text=req.assistant_response,
-                        conversation_id=req.conversation_id,
-                        chroma_client=get_chroma(),
-                        neo4j_driver=get_neo4j(),
-                        redis_client=get_redis(),
-                        model=req.model,
-                    )
-                )
-            except RuntimeError:
-                pass  # no running loop
-
-        # Log conversation metrics if tokens provided
-        if req.input_tokens or req.output_tokens:
-            try:
-                from core.utils.cache import log_conversation_metrics
-                log_conversation_metrics(
-                    get_redis(),
-                    conversation_id=req.conversation_id,
-                    model=req.model,
-                    input_tokens=req.input_tokens,
-                    output_tokens=req.output_tokens,
-                    latency_ms=req.latency_ms,
-                )
-            except Exception as e:
-                log_swallowed_error(
-                    "routers.ingestion.feedback_conversation_metrics",
-                    e,
-                    redis_client=get_redis(),
-                )
-
-        return result
+    try:
+        from app.processor.jobs.feedback_ingest import enqueue_feedback_ingest_job
+        job_id = await asyncio.to_thread(
+            enqueue_feedback_ingest_job,
+            user_message=req.user_message,
+            assistant_response=req.assistant_response,
+            model=req.model,
+            conversation_id=req.conversation_id,
+        )
     except Exception as e:
-        logger.error(f"Feedback ingest error: {e}")
+        logger.error(f"Feedback ingest enqueue error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    return JSONResponse(status_code=202, content={"status": "queued", "job_id": job_id})
 
 
 @router.get("/ingest_log")  # response-model-allowed: dynamic response (shape varies)

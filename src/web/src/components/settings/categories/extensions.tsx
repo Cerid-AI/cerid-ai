@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
+import { InfoTip } from "@/components/ui/info-tip"
 import {
   SettingRow, AdvancedDisclosure, ConfirmActionButton, ReadOnlyEnvHint,
 } from "@/components/settings/settings-primitives"
@@ -24,6 +25,7 @@ import { getDef } from "@/lib/settings-registry"
 import {
   fetchPlugins, enablePlugin, disablePlugin, scanPlugins, getPluginConfig, updatePluginConfig,
   fetchExternalAPIs, toggleExternalAPI,
+  fetchDataSources, enableDataSource, disableDataSource,
   listProAutomations, updateProAutomation, runProAutomationNow,
   type AutomationState,
 } from "@/lib/api"
@@ -605,81 +607,158 @@ function McpSection() {
   )
 }
 
-// ── External APIs ─────────────────────────────────────────────────────────────
+// ── Knowledge Providers (unified: enrichment adapters + chat lookup tools) ────
 
-function ExternalApisSection() {
+type ProviderScope = "enrichment" | "chat-tool"
+
+interface ProviderRowData {
+  key: string
+  /** Sort/adjacency key — duplicate slugs (wikipedia, openlibrary) sort together. */
+  slug: string
+  name: string
+  scope: ProviderScope
+  effect: string
+  enabled: boolean
+  needsKey: boolean
+  envVar?: string
+  toggle: (enabled: boolean) => Promise<void>
+}
+
+const SCOPE_META: Record<ProviderScope, { badge: string; term: string }> = {
+  enrichment: { badge: "Enrichment", term: "provider-scope-enrichment" },
+  "chat-tool": { badge: "Chat tool", term: "provider-scope-chat-tool" },
+}
+
+function ProviderRow({ row, error, onToggle }: {
+  row: ProviderRowData
+  error?: string
+  onToggle: (row: ProviderRowData, enabled: boolean) => void
+}) {
+  const meta = SCOPE_META[row.scope]
+  return (
+    <div className="border rounded-md p-3 density-stack">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium">{row.name}</span>
+            <Badge variant={row.scope === "enrichment" ? "outline" : "secondary"} className="text-label-xs">
+              {meta.badge}
+            </Badge>
+            <InfoTip term={meta.term} />
+          </div>
+          <p className="text-label-xs text-muted-foreground mt-0.5">{row.effect}</p>
+          {row.needsKey && (
+            row.envVar
+              ? <ReadOnlyEnvHint envVar={row.envVar} />
+              : <p className="text-label-xs text-muted-foreground">Needs API key env var to enable.</p>
+          )}
+        </div>
+        <Switch
+          checked={row.enabled}
+          onCheckedChange={(checked) => onToggle(row, checked)}
+          disabled={row.needsKey}
+          aria-label={`${row.enabled ? "Disable" : "Enable"} ${row.name} (${meta.badge})`}
+          className="shrink-0"
+        />
+      </div>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-label-xs">{error}</AlertDescription>
+        </Alert>
+      )}
+    </div>
+  )
+}
+
+function KnowledgeProvidersSection() {
   const qc = useQueryClient()
-  const { data, isLoading, isError, refetch } = useQuery({
+  const external = useQuery({
     queryKey: ["external-apis"],
-    queryFn: fetchExternalAPIs,
+    queryFn: () => fetchExternalAPIs(),
+    staleTime: 30_000,
+  })
+  const dataSources = useQuery({
+    queryKey: ["data-sources"],
+    queryFn: () => fetchDataSources(),
     staleTime: 30_000,
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const def = getDef("extensions.externalApis.enable")!
-  const adapters = data ?? []
 
-  const handleToggle = async (slug: string, enabled: boolean) => {
-    setErrors((prev) => ({ ...prev, [slug]: "" }))
-    try {
-      await toggleExternalAPI(slug, enabled)
-      await qc.invalidateQueries({ queryKey: ["external-apis"] })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Toggle failed"
-      setErrors((prev) => ({ ...prev, [slug]: msg }))
-      logSwallowedError(err, "extensions.toggleExternalAPI")
-    }
+  const isLoading = external.isLoading || dataSources.isLoading
+  const isError = external.isError || dataSources.isError
+  const handleRetry = () => {
+    if (external.isError) void external.refetch()
+    if (dataSources.isError) void dataSources.refetch()
+  }
+
+  const rows: ProviderRowData[] = [
+    ...(external.data ?? []).map((api): ProviderRowData => ({
+      key: `enrichment:${api.slug}`,
+      slug: api.slug,
+      name: api.display_name,
+      scope: "enrichment",
+      effect: "Used when enriching wiki entities and verifying answers.",
+      enabled: api.enabled,
+      needsKey: api.requires_key && !api.key_configured,
+      toggle: async (enabled) => { await toggleExternalAPI(api.slug, enabled) },
+    })),
+    ...(dataSources.data?.sources ?? []).map((src): ProviderRowData => ({
+      key: `chat-tool:${src.name}`,
+      slug: src.name,
+      name: src.name,
+      scope: "chat-tool",
+      effect: "Available to chat as a live lookup tool when answering.",
+      enabled: src.enabled,
+      needsKey: src.requires_api_key && !src.configured,
+      envVar: src.api_key_env_var || undefined,
+      toggle: async (enabled) => {
+        if (enabled) await enableDataSource(src.name)
+        else await disableDataSource(src.name)
+      },
+    })),
+  ].sort((a, b) =>
+    a.slug.localeCompare(b.slug) || a.scope.localeCompare(b.scope))
+
+  const handleToggle = (row: ProviderRowData, enabled: boolean) => {
+    setErrors((prev) => ({ ...prev, [row.key]: "" }))
+    void row.toggle(enabled)
+      .then(() => qc.invalidateQueries({
+        queryKey: [row.scope === "enrichment" ? "external-apis" : "data-sources"],
+      }))
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Toggle failed"
+        setErrors((prev) => ({ ...prev, [row.key]: msg }))
+        logSwallowedError(err, "extensions.toggleKnowledgeProvider")
+      })
   }
 
   return (
     <SectionCard
-      title="External Knowledge Providers"
-      description="Read-only knowledge sources (Wikipedia, arXiv, GitHub, and more) the retrieval pipeline can search. Not tool servers."
+      title="Knowledge Providers"
+      description="Read-only public sources Cerid can consult, in two scopes: Enrichment providers feed wiki enrichment and answer verification; Chat tools are queried live during conversations. The same service (e.g. Wikipedia) can appear once per scope — the toggles are independent."
     >
+      <SettingRow def={def} />
       {isLoading && (
         <div className="density-stack">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-md" />)}
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full rounded-md" />)}
         </div>
       )}
       {isError && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            Failed to load external APIs.{" "}
-            <button type="button" onClick={() => void refetch()} className="underline">Retry</button>
+            Failed to load knowledge providers.{" "}
+            <button type="button" onClick={handleRetry} className="underline">Retry</button>
           </AlertDescription>
         </Alert>
       )}
-      {!isLoading && !isError && adapters.length === 0 && (
-        <EmptyState icon={Globe} title="No external API adapters" description="External API adapters appear when your deployment includes them." />
+      {!isLoading && !isError && rows.length === 0 && (
+        <EmptyState icon={Globe} title="No knowledge providers" description="Providers appear when your deployment includes external adapters or data sources." />
       )}
-      {adapters.map((api) => (
-        <div key={api.slug}>
-          <SettingRow def={def}>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium">{api.display_name}</span>
-                  {api.requires_key && !api.key_configured && (
-                    <p className="text-label-xs text-muted-foreground">Needs API key env var to enable.</p>
-                  )}
-                </div>
-                <Switch
-                  checked={api.enabled}
-                  onCheckedChange={(checked) => void handleToggle(api.slug, checked)}
-                  disabled={api.requires_key && !api.key_configured}
-                  aria-label={`${api.enabled ? "Disable" : "Enable"} ${api.display_name}`}
-                  className="shrink-0"
-                />
-              </div>
-              {errors[api.slug] && (
-                <Alert variant="destructive">
-                  <AlertDescription className="text-label-xs">{errors[api.slug]}</AlertDescription>
-                </Alert>
-              )}
-            </div>
-          </SettingRow>
-        </div>
+      {!isLoading && !isError && rows.map((row) => (
+        <ProviderRow key={row.key} row={row} error={errors[row.key]} onToggle={handleToggle} />
       ))}
     </SectionCard>
   )
@@ -850,14 +929,14 @@ export default function ExtensionsCategory() {
           <p className="text-label-sm leading-relaxed text-muted-foreground">
             Extend Cerid four ways — local capability packs installed on the server,
             external tool providers connected over MCP for agents to call, read-only
-            knowledge sources the retrieval pipeline can search, and scheduled
+            knowledge providers (enrichment + chat lookup), and scheduled
             background automations. Each has its own section below.
           </p>
         </CardContent>
       </Card>
       <PluginsSection />
       <McpSection />
-      <ExternalApisSection />
+      <KnowledgeProvidersSection />
       <AutomationsSection />
     </div>
   )

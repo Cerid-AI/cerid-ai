@@ -83,3 +83,20 @@ async def test_external_augmentation_noop_when_registry_unwired():
     # Gate would fire (weak KB) but firing is a no-op → result unchanged + stamped.
     assert out["sources"] == [{"source_type": "kb"}]
     assert out["low_confidence"] is True
+
+@pytest.mark.asyncio
+async def test_confidence_clamped_to_unit_interval():
+    """Quality boost + small-corpus BM25 blends can push relevance past 1;
+    confidence is a 0-1 contract (the SDK response model 500'd on 4.79,
+    2026-07-10) — the computation site clamps."""
+    from core.agents.query_agent import agent_query_full
+
+    fake = {
+        "results": [{"relevance": 4.7872}],
+        "sources": [{"relevance": 4.7872}],
+        "confidence": 4.7872,
+    }
+    with patch("core.agents.query_agent.agent_query", new=AsyncMock(return_value=fake)):
+        out = await agent_query_full(query="q", external_augmentation=False)
+
+    assert 0.0 <= out["confidence"] <= 1.0

@@ -6,6 +6,19 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
+
+const mockGoTo = vi.fn()
+vi.mock("@/contexts/navigation-context", async (orig) => ({
+  ...(await orig<typeof import("@/contexts/navigation-context")>()),
+  useNavigation: () => ({
+    activePane: "settings",
+    goTo: mockGoTo,
+    composeChat: vi.fn(),
+    consumeChatSeed: () => null,
+    navVersion: 0,
+  }),
+}))
+
 import KnowledgeCategory from "@/components/settings/categories/knowledge"
 import type { ServerSettings } from "@/lib/types"
 import type { SettingsCategoryPageProps } from "@/components/settings/categories/page-props"
@@ -77,6 +90,7 @@ function mockApis() {
 beforeEach(() => {
   localStorage.clear()
   vi.restoreAllMocks()
+  mockGoTo.mockClear()
 })
 
 describe("KnowledgeCategory — 4-state matrix", () => {
@@ -94,9 +108,9 @@ describe("KnowledgeCategory — 4-state matrix", () => {
     expect(screen.getByText("Ingestion")).toBeInTheDocument()
   })
 
-  it("error: data-sources failure renders retry link", async () => {
+  it("error: watched-folders failure renders retry link", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/data-sources")) {
+      if (url.includes("/watched-folders")) {
         return Promise.reject(new Error("network error"))
       }
       return mockApis()(url)
@@ -148,25 +162,33 @@ describe("KnowledgeCategory — add folder flow", () => {
   })
 })
 
-describe("KnowledgeCategory — data sources", () => {
-  it("success: shows empty list for zero data sources", async () => {
-    vi.stubGlobal("fetch", mockApis())
+describe("KnowledgeCategory — data sources pointer (P0-C.4)", () => {
+  it("no longer fetches /data-sources or renders inline toggles", async () => {
+    const fetchMock = mockApis()
+    vi.stubGlobal("fetch", fetchMock)
     render(<KnowledgeCategory {...defaultProps} />, { wrapper })
     await screen.findByText("Data Sources")
     await waitFor(() => {
       expect(screen.queryByText(/Loading/i)).toBeNull()
     })
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/data-sources"))).toBe(false)
   })
 
-  it("shows data source toggle when sources are present", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/data-sources")) {
-        return ok({ sources: [{ name: "Confluence", description: "Confluence connector", enabled: true, configured: true, requires_api_key: false, api_key_env_var: "", domains: [] }], total: 1 })
-      }
-      return mockApis()(url)
-    }))
+  it("renders a pointer to the unified Knowledge Providers section", async () => {
+    vi.stubGlobal("fetch", mockApis())
     render(<KnowledgeCategory {...defaultProps} />, { wrapper })
-    expect(await screen.findByText("Confluence")).toBeInTheDocument()
+    await screen.findByText("Data Sources")
+    expect(screen.getByRole("button", { name: /open knowledge providers/i })).toBeInTheDocument()
+    expect(screen.getByText(/Extensions/)).toBeInTheDocument()
+  })
+
+  it("pointer navigates to Settings → Extensions via useNavigation", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    const user = userEvent.setup()
+    render(<KnowledgeCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Data Sources")
+    await user.click(screen.getByRole("button", { name: /open knowledge providers/i }))
+    expect(mockGoTo).toHaveBeenCalledWith("settings", expect.objectContaining({ category: "extensions" }))
   })
 })
 

@@ -64,10 +64,21 @@ def test_digests_endpoint_shape(http_client):
     assert r.status_code in (200, 403), f"/digests/latest {r.status_code}: {r.text[:200]}"
 
 
-def test_run_now_blocked_without_feature(http_client):
-    """POST /digests/run-now must reject (403) when feature off.
-    When on, the test environment may not have neo4j → we accept any
-    non-500 response since the agent's neo4j-unavailable path is
-    tested in the unit suite."""
+def test_run_now_feature_gate(http_client):
+    """POST /digests/run-now: 403 when the feature is off, 202 when on.
+
+    Digest generation now runs as a background processor job
+    (``DigestRunJob``) — the endpoint just enqueues (or returns the
+    already-active job) and acks 202, so the feature-on branch is cheap
+    to assert. The pre-async version of this test had to structured-skip
+    feature-on instances because the inline digest ran for minutes
+    (observed 2026-07-12 against the pro-tier master)."""
+    probe = http_client.get("/digests/latest")
     r = http_client.post("/digests/run-now")
-    assert r.status_code in (200, 403, 422)
+    if probe.status_code == 403:
+        assert r.status_code == 403, f"/digests/run-now {r.status_code}: {r.text[:200]}"
+    else:
+        assert r.status_code == 202, f"/digests/run-now {r.status_code}: {r.text[:200]}"
+        body = r.json()
+        assert body.get("status") == "queued"
+        assert body.get("job_id")

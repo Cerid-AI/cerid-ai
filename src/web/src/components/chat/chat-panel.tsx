@@ -36,6 +36,7 @@ import { useQuery } from "@tanstack/react-query"
 import { fetchSetupStatus } from "@/lib/api/settings"
 import { deriveDefaultModel } from "@/lib/derive-defaults"
 import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices, MCP_BASE, mcpHeaders } from "@/lib/api"
+import { findInstalledModel, isModelInstalled } from "@/lib/model-alias"
 import { notifyError } from "@/lib/query-client"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
@@ -212,35 +213,55 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       steps[1] = { ...steps[1], status: "active" }
       setSetupSteps([...steps])
 
-      let modelToPull = status.default_model || "llama3.2:3b"
+      let modelToUse = status.default_model || "llama3.2:3b"
       try {
         const recs = await fetchOllamaRecommendations()
-        modelToPull = recs.recommended
+        modelToUse = recs.recommended
         steps[1] = { label: `${recs.hardware.ram_gb}GB RAM detected \u2014 using ${recs.models.find(m => m.id === recs.recommended)?.name ?? recs.recommended}`, status: "done" }
       } catch {
-        steps[1] = { label: `Using ${modelToPull}`, status: "done" }
+        steps[1] = { label: `Using ${modelToUse}`, status: "done" }
       }
       setSetupSteps([...steps])
 
-      // Pull if not already installed
-      if (!status.models.includes(modelToPull)) {
-        steps[2] = { label: `Pulling ${modelToPull}...`, status: "active" }
+      // The gateway may serve the target under a different alias (Ollama
+      // colon-tags `llama3.1:8b` vs Quenchforge dash-aliases `llama3.1-8b`),
+      // so resolve against the served list before deciding to pull, and
+      // address the backend by the alias it actually serves.
+      const servedMatch = findInstalledModel(modelToUse, status.models)
+      if (servedMatch) {
+        modelToUse = servedMatch
+      } else {
+        steps[2] = { label: `Pulling ${modelToUse}...`, status: "active" }
         setSetupSteps([...steps])
-        const pullRes = await pullOllamaModel(modelToPull)
-        if (!pullRes.ok) throw new Error("Model pull failed")
-        const reader = pullRes.body?.getReader()
-        if (reader) {
-          while (true) {
-            const { done } = await reader.read()
-            if (done) break
+        try {
+          const pullRes = await pullOllamaModel(modelToUse)
+          if (!pullRes.ok) throw new Error("Model pull failed")
+          const reader = pullRes.body?.getReader()
+          if (reader) {
+            while (true) {
+              const { done } = await reader.read()
+              if (done) break
+            }
           }
+        } catch (pullErr) {
+          // Pull can be structurally unsupported (Quenchforge answers
+          // not_implemented) -- fall back to a model the backend already
+          // serves instead of failing the whole setup. Only fail when
+          // nothing is served at all.
+          const fallback = status.default_model && isModelInstalled(status.default_model, status.models)
+            ? status.default_model
+            : status.models[0]
+          if (!fallback) throw pullErr
+          modelToUse = fallback
+          steps[1] = { label: `Model pull unavailable \u2014 using served model ${fallback}`, status: "done" }
+          setSetupSteps([...steps])
         }
       }
 
       // Step 3: Enable with selected model
       steps[2] = { label: "Enabling local pipeline...", status: "active" }
       setSetupSteps([...steps])
-      await enableOllama(modelToPull)
+      await enableOllama(modelToUse)
       steps[2] = { label: "\u2713 Local pipeline enabled", status: "done" }
 
       // Step 4: Done
@@ -255,10 +276,14 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     } catch (err) {
       const activeIdx = steps.findIndex(s => s.status === "active")
       if (activeIdx >= 0) {
+        // Surface the backend's remediation hint (ModelPullError.hint) so
+        // "pull unsupported + nothing served" failures tell the user what
+        // to actually do next.
+        const hint = err instanceof Error ? (err as Error & { hint?: string }).hint : undefined
         steps[activeIdx] = {
           ...steps[activeIdx],
           status: "done",
-          label: "\u2717 Setup failed: " + (err instanceof Error ? err.message : "unknown error"),
+          label: "\u2717 Setup failed: " + (err instanceof Error ? err.message : "unknown error") + (hint ? ` \u2014 ${hint}` : ""),
         }
       }
       setSetupSteps([...steps])
@@ -670,7 +695,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       )}
 
       {/* Expert verification cost indicator */}
-      {expertVerification && hallucinationEnabled && verification.phase !== "idle" && verification.phase !== "done" && (
+      {expertVerification && hallucinationEnabled && (verification.phase === "extracting" || verification.phase === "verifying") && (
         <div className="flex items-center gap-2 px-3 py-1 text-label-sm text-amber-500 bg-amber-500/5 border-b border-amber-500/10">
           <ShieldCheck className="h-3 w-3" />
           Expert verification active — ~15× standard cost
@@ -838,11 +863,28 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         </div>
       )}
 
-      {/* Verification status bar */}
+      {/* Verification degraded (stream idle timeout) — distinct from the hard
+          error state: the backend was alive-but-slow, results shown are
+          partial, and re-verifying usually succeeds. Retry routes through the
+          orchestrator's manual re-verify (manualVerifyBump). */}
+      {hallucinationEnabled && verification.phase === "degraded" && (
+        <div className="flex items-center gap-2 border-t bg-amber-500/10 px-4 py-1">
+          <Clock className="h-3 w-3 shrink-0 text-amber-500" />
+          <span className="flex-1 text-xs text-amber-700 dark:text-amber-400">
+            Verification is taking longer than expected — showing partial results.
+          </span>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={handleVerifyMessage}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Verification status bar (suppressed while degraded — the banner
+          above owns that state; the bar's fallback rows would contradict it) */}
       <VerificationStatusBar
         report={halReport}
         loading={halLoading}
-        featureEnabled={hallucinationEnabled}
+        featureEnabled={hallucinationEnabled && verification.phase !== "degraded"}
         streamPhase={verification.phase}
         verifiedCount={verification.verifiedCount}
         totalClaims={verification.totalClaims}

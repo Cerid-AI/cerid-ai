@@ -138,3 +138,4 @@ test-results/
 
 # Playwright MCP runtime output
 .playwright-mcp/
+docker-compose.override.yml

@@ -1112,10 +1112,15 @@ export function StratigraphCanvas({
     return () => window.removeEventListener("keydown", handler)
   }, [])
 
-  // Rebuild quadtree once on first render with data
+  // Rebuild the quadtree after EVERY strata-layout pass. The layout effect
+  // nulls qtRef on each run (data/lens/filter/pin/budget/extension/height),
+  // and several of those inputs settle asynchronously right after mount —
+  // rebuilding only on [data] left the quadtree null until a zoom-end,
+  // which killed hover/tooltips for real users (found via E-16, 2026-07-10).
+  // Effect order guarantees layout has repopulated strataRef before this runs.
   useEffect(() => {
     if (data.bucket_dates.length > 0) rebuildQuadtree()
-  }, [data, rebuildQuadtree])
+  }, [data, rebuildQuadtree, lens, typeFilter, pinnedIds, frozenOrder, trackBudget, strataExtension])
 
   // ---------------------------------------------------------------------------
   // Gutter labels (DOM)

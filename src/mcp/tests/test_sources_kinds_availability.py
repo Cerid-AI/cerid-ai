@@ -11,13 +11,16 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from app.routers.connectors import oauth_connector_kinds
 from app.routers.sources import (
     CreateSourceRequest,
+    HealthProbeResult,
     _kind_availability,
     _kind_providers,
+    _kind_requires_desktop,
     create_source,
 )
 
@@ -52,9 +55,92 @@ def test_every_source_kind_classified():
     from core.ingest.sources.kinds import SOURCE_KINDS
 
     oauth = oauth_connector_kinds()
-    valid = {"available", "oauth", "coming_soon"}
-    for k in SOURCE_KINDS:
-        assert _kind_availability(k, oauth) in valid
+    valid = {"available", "oauth", "coming_soon", "requires_desktop"}
+    # Pin the clipboard heartbeat probe so this stays hermetic (no Redis).
+    with patch(
+        "app.routers.sources._check_clipboard_daemon",
+        return_value=HealthProbeResult(ok=True, detail="heartbeat 1s ago"),
+    ):
+        for k in SOURCE_KINDS:
+            assert _kind_availability(k, oauth) in valid
+
+
+# --- desktop-helper-backed kinds (apple_mail / apple_reminders / clipboard) ---
+
+
+def test_helper_kinds_flagged_requires_desktop():
+    assert _kind_requires_desktop("apple_mail") is True
+    assert _kind_requires_desktop("apple_reminders") is True
+    assert _kind_requires_desktop("clipboard") is True
+    assert _kind_requires_desktop("rss") is False
+    assert _kind_requires_desktop("folder") is False
+
+
+def test_helper_kind_requires_desktop_when_helper_missing(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
+    oauth = oauth_connector_kinds()
+    assert _kind_availability("apple_mail", oauth) == "requires_desktop"
+    assert _kind_availability("apple_reminders", oauth) == "requires_desktop"
+
+
+def test_helper_kind_available_when_helper_present(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: "/usr/local/bin/helper")
+    oauth = oauth_connector_kinds()
+    assert _kind_availability("apple_mail", oauth) == "available"
+    assert _kind_availability("apple_reminders", oauth) == "available"
+
+
+def test_clipboard_requires_desktop_when_daemon_heartbeat_absent():
+    with patch(
+        "app.routers.sources._check_clipboard_daemon",
+        return_value=HealthProbeResult(ok=False, detail="daemon heartbeat absent"),
+    ):
+        assert _kind_availability("clipboard", oauth_connector_kinds()) == "requires_desktop"
+
+
+def test_clipboard_available_when_daemon_heartbeat_fresh():
+    with patch(
+        "app.routers.sources._check_clipboard_daemon",
+        return_value=HealthProbeResult(ok=True, detail="heartbeat 2s ago"),
+    ):
+        assert _kind_availability("clipboard", oauth_connector_kinds()) == "available"
+
+
+def _kinds_client() -> TestClient:
+    from app.routers.sources import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_kinds_endpoint_reports_requires_desktop_and_allowed_roots(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
+    with patch(
+        "app.routers.sources._check_clipboard_daemon",
+        return_value=HealthProbeResult(ok=False, detail="daemon heartbeat absent"),
+    ):
+        r = _kinds_client().get("/sources/kinds")
+    assert r.status_code == 200
+    by_kind = {k["kind"]: k for k in r.json()}
+
+    for kind in ("apple_mail", "apple_reminders", "clipboard"):
+        assert by_kind[kind]["requires_desktop"] is True
+        assert by_kind[kind]["availability"] == "requires_desktop"
+
+    assert by_kind["rss"]["requires_desktop"] is False
+    assert by_kind["rss"]["availability"] == "available"
+    assert by_kind["rss"]["allowed_roots"] == []
+
+    # folder metadata carries the container-side allowed roots for the wizard.
+    assert by_kind["folder"]["allowed_roots"]
+    assert by_kind["folder"]["availability"] == "available"
 
 
 # --- webhook-backed kinds (chat_capture / dev_events) ---

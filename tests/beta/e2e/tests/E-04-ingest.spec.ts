@@ -19,6 +19,11 @@ import { test, expect } from "@playwright/test"
 // explicit ceiling rather than letting the config default fail them.
 const INGEST_TIMEOUT = 60_000
 
+// The TEST budget must exceed the ingest allowance plus the search polls —
+// the default 30s test timeout tripped while the 60s ingest action was
+// still legitimately in flight (cold-cache corpus, 2026-07-10).
+test.setTimeout(120_000)
+
 test("E-04 ingest + search round trip", async ({ request }) => {
   const marker = `e2e-marker-${Date.now()}`
   const ingestResponse = await request.post("/api/mcp/sdk/v1/ingest", {

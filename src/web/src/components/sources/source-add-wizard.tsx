@@ -31,9 +31,9 @@ import { cn } from "@/lib/utils"
 import {
   createSource,
   listSourceKinds,
-  type SourceKindMeta,
   type SourceRecord,
 } from "@/lib/api/sources"
+import type { SourceKindMetaExt } from "./source-kind-meta"
 import { descriptorFor } from "./source-kind-icons"
 import { WebhookShareCard } from "./webhook-share-card"
 import { KindSpecificFields } from "./source-config-form"
@@ -83,7 +83,7 @@ function SourceAddWizardInner({
 
   const queryClient = useQueryClient()
 
-  const { data: kinds } = useQuery<SourceKindMeta[]>({
+  const { data: kinds } = useQuery<SourceKindMetaExt[]>({
     queryKey: ["source-kinds"],
     queryFn: listSourceKinds,
     staleTime: 60_000,
@@ -96,12 +96,16 @@ function SourceAddWizardInner({
     return kinds
   }, [kinds, initialFamily])
 
-  // Recipe providers for the selected webhook-backed kind (chat_capture /
-  // dev_events). Empty for kinds with no provider choice.
-  const providers = useMemo(
-    () => kinds?.find((k) => k.kind === kind)?.providers ?? [],
+  const selectedMeta = useMemo(
+    () => kinds?.find((k) => k.kind === kind),
     [kinds, kind],
   )
+
+  // Recipe providers for the selected webhook-backed kind (chat_capture /
+  // dev_events). Empty for kinds with no provider choice.
+  const providers = selectedMeta?.providers ?? []
+  // Folder kind: container-side roots a watched-folder path must live under.
+  const allowedRoots = selectedMeta?.allowed_roots ?? []
 
   const createMut = useMutation({
     mutationFn: () => {
@@ -147,6 +151,7 @@ function SourceAddWizardInner({
           <ConfigureStep
             kind={kind}
             providers={providers}
+            allowedRoots={allowedRoots}
             displayName={displayName}
             onDisplayName={setDisplayName}
             config={config}
@@ -174,7 +179,7 @@ function PickStep({
   kinds,
   onPick,
 }: {
-  kinds: SourceKindMeta[]
+  kinds: SourceKindMetaExt[]
   onPick: (kind: string) => void
 }) {
   return (
@@ -189,9 +194,11 @@ function PickStep({
             ? "Soon · "
             : availability === "oauth"
               ? "Settings · "
-              : k.tier === "pro"
-                ? "Pro · "
-                : ""
+              : availability === "requires_desktop"
+                ? "Desktop app · "
+                : k.tier === "pro"
+                  ? "Pro · "
+                  : ""
         return (
           <button
             key={k.kind}
@@ -209,7 +216,9 @@ function PickStep({
                 ? `Add ${desc.label}`
                 : availability === "oauth"
                   ? `${desc.label} — connect in Settings`
-                  : `${desc.label} — coming soon`
+                  : availability === "requires_desktop"
+                    ? `${desc.label} — requires the Cerid desktop app`
+                    : `${desc.label} — coming soon`
             }
           >
             <Icon className="h-4 w-4 text-foreground/70" aria-hidden="true" />
@@ -232,6 +241,7 @@ function PickStep({
 function ConfigureStep({
   kind,
   providers,
+  allowedRoots,
   displayName,
   onDisplayName,
   config,
@@ -243,6 +253,7 @@ function ConfigureStep({
 }: {
   kind: string
   providers: string[]
+  allowedRoots: string[]
   displayName: string
   onDisplayName: (v: string) => void
   config: Record<string, unknown>
@@ -253,8 +264,10 @@ function ConfigureStep({
   error: string | null
 }) {
   // Webhook-backed typed kinds require a provider; the backend 422s without
-  // one, so gate the Connect button until it's picked.
+  // one, so gate the Connect button until it's picked. Folder sources
+  // likewise 422 without a path — gate until one is typed.
   const providerMissing = providers.length > 0 && !config.provider
+  const pathMissing = kind === "folder" && !String(config.path ?? "").trim()
   return (
     <div className="space-y-4">
       <div>
@@ -273,6 +286,7 @@ function ConfigureStep({
       <KindSpecificFields
         kind={kind}
         providers={providers}
+        allowedRoots={allowedRoots}
         config={config}
         onConfig={onConfig}
       />
@@ -287,7 +301,7 @@ function ConfigureStep({
         <Button variant="ghost" onClick={onBack} disabled={isSubmitting}>
           Back
         </Button>
-        <Button onClick={onSubmit} disabled={isSubmitting || providerMissing}>
+        <Button onClick={onSubmit} disabled={isSubmitting || providerMissing || pathMissing}>
           {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-3 w-3 animate-spin" aria-hidden="true" />

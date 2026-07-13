@@ -6,6 +6,7 @@
 // artifacts for the flat 2D map view.
 
 import { mcpUrl, mcpHeaders, extractError } from "./common"
+import { withRequestTimeout, timeoutToError } from "./embeddings-3d"
 import type { EntityEmbedding3D } from "./embeddings-3d"
 import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
 
@@ -67,10 +68,15 @@ export async function fetchGraphMap(
   if (includeIsolated) params.include_isolated = "true"
 
   const url = mcpUrl("/graph/map", params)
-  const res = await fetch(url.toString(), {
-    headers: mcpHeaders(),
-    signal,
-  })
+  let res: Response
+  try {
+    res = await fetch(url.toString(), {
+      headers: mcpHeaders(),
+      signal: withRequestTimeout(signal),
+    })
+  } catch (err) {
+    throw timeoutToError(err, "Graph map fetch")
+  }
   if (!res.ok) {
     throw new Error(await extractError(res, `Graph map fetch failed: ${res.status}`))
   }

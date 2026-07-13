@@ -44,6 +44,12 @@ vi.mock("@/lib/api", () => ({
   pullOllamaModel: vi.fn(),
 }))
 
+vi.mock("@/lib/api/setup", () => ({
+  applySetupConfiguration: vi.fn().mockResolvedValue({ success: true }),
+  completeOnboarding: vi.fn().mockResolvedValue({ onboarding_complete: true }),
+  startPackInstall: vi.fn().mockResolvedValue({ status: "installed", jobId: null }),
+}))
+
 vi.mock("@/hooks/use-drag-drop", () => ({
   useDragDrop: () => ({ isDragOver: false, dragHandlers: {} }),
 }))

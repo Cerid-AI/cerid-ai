@@ -23,7 +23,8 @@ import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
 import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
 import { QuenchforgeInstallStep } from "@/components/setup/quenchforge-install-step"
 import { StepIndicator, type StepDef } from "@/components/setup/step-indicator"
-import { applySetupConfig, fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
+import { fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
+import { applySetupConfiguration, completeOnboarding } from "@/lib/api/setup"
 import { assessCapabilities, fromWizardState, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import type { CapabilityAssessment, Warning as ProviderWarning } from "@/lib/provider-capabilities"
 import { cn } from "@/lib/utils"
@@ -322,6 +323,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   const [state, dispatch] = useReducer(wizardReducer, undefined, createInitialState)
   const [showResumePrompt, setShowResumePrompt] = useState(false)
   const [resumeStep, setResumeStep] = useState(0)
+  // Already-configured guard (beta triage 2026-07-12 P0-B4): applying the
+  // wizard on a configured backend must be an explicit, confirmed overwrite.
+  const [backendConfigured, setBackendConfigured] = useState(false)
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false)
   const healthTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
 
   // Check for saved progress on mount — but only if backend hasn't been reset
@@ -354,6 +359,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   useEffect(() => {
     fetchSetupStatus()
       .then((status) => {
+        setBackendConfigured(!!status.configured)
         // Use unified provider_status map when available (WP2 fix)
         const ps = status.provider_status
         if (ps && Object.keys(ps).length > 0) {
@@ -433,7 +439,15 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   // Only show warnings after user has entered at least one key
   const hasInteractedWithKeys = Object.values(state.keys).some((k) => k.key.length > 0 || k.valid)
 
-  const handleApply = useCallback(async () => {
+  const handleApply = useCallback(async (opts?: { force?: boolean }) => {
+    // Re-running the wizard on a configured instance must not silently
+    // rewrite live env config — require an explicit overwrite confirmation
+    // and only then send force=true (the backend 409s without it).
+    if (backendConfigured && !opts?.force) {
+      setConfirmOverwrite(true)
+      return
+    }
+    setConfirmOverwrite(false)
     dispatch({ type: "SET_APPLYING", applying: true })
     dispatch({ type: "SET_APPLY_ERROR", error: null })
     try {
@@ -445,7 +459,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
         // (defence-in-depth) but we never want this string on the wire.
         if (valid && key && !PLACEHOLDER_KEYS.has(key)) config[provider] = key
       }
-      const result = await applySetupConfig({
+      const result = await applySetupConfiguration({
         keys: config,
         archive_path: state.kbConfig.archivePath,
         domains: state.kbConfig.domains,
@@ -453,12 +467,18 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
         watch_folder: state.kbConfig.watchFolder,
         ollama_enabled: state.ollama.enabled,
         ollama_model: state.ollama.model ?? undefined,
-      })
+      }, { force: opts?.force ?? false })
       if (result.success) {
         // M-A.7: drop the 800ms `setTimeout` gate — the new step's wrapper
         // animates in on key change so the visual transition is the feedback.
         dispatch({ type: "SET_APPLIED" })
         dispatch({ type: "SET_STEP", step: 5 })
+      } else if (result.conflict) {
+        // Backend's 409 already-configured guard — surface its message.
+        dispatch({
+          type: "SET_APPLY_ERROR",
+          error: result.error ?? "This instance is already configured — pass force to reconfigure.",
+        })
       } else {
         dispatch({ type: "SET_APPLY_ERROR", error: "Configuration failed — check backend logs" })
       }
@@ -467,7 +487,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
     } finally {
       dispatch({ type: "SET_APPLYING", applying: false })
     }
-  }, [state.keys, state.kbConfig, state.ollama])
+  }, [state.keys, state.kbConfig, state.ollama, backendConfigured])
 
   const handleAllHealthy = useCallback(() => {
     dispatch({ type: "SET_ALL_HEALTHY" })
@@ -476,7 +496,15 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   const handleFinish = useCallback(() => {
     setSettingsMode(state.selectedMode)
     clearProgress()
-    localStorage.setItem("cerid-onboarding-complete", "true")
+    try {
+      localStorage.setItem("cerid-onboarding-complete", "true")
+    } catch (err) {
+      logSwallowedError(err, "localStorage.setItem", { key: "cerid-onboarding-complete" })
+    }
+    // Server-side flag is the source of truth (fresh browsers must not
+    // re-enter the wizard on a configured instance) — persist best-effort;
+    // the localStorage cache above covers an unreachable backend.
+    completeOnboarding().catch((err) => logSwallowedError(err, "setup.onboarding-complete"))
     onComplete()
   }, [onComplete, state.selectedMode])
 
@@ -900,10 +928,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   inferenceBackend={state.selectedBackend}
                 />
 
-                {!state.applied && (
+                {!state.applied && !confirmOverwrite && (
                   <Button
                     className="w-full bg-brand text-brand-foreground hover:bg-brand/90"
-                    onClick={handleApply}
+                    onClick={() => handleApply()}
                     disabled={state.applying || !canProceedFromKeys}
                   >
                     {state.applying ? (
@@ -915,6 +943,34 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                       "Apply Configuration"
                     )}
                   </Button>
+                )}
+
+                {/* Overwrite confirmation — shown instead of the Apply button
+                    when the backend is already configured (P0-B4 guard). */}
+                {!state.applied && confirmOverwrite && (
+                  <div className="space-y-2 rounded-lg border border-yellow-500/40 bg-yellow-500/5 p-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
+                      <p className="text-xs leading-relaxed text-yellow-700 dark:text-yellow-400">
+                        This instance is already configured — overwrite settings?
+                        Applying will rewrite the stored configuration with the
+                        values above.
+                      </p>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setConfirmOverwrite(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={state.applying}
+                        onClick={() => handleApply({ force: true })}
+                      >
+                        Overwrite Settings
+                      </Button>
+                    </div>
+                  </div>
                 )}
 
                 {state.applied && (

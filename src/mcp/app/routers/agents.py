@@ -418,6 +418,25 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 budget_seconds=req.budget_seconds,
             )
 
+        # Envelope invariant (preservation I2): every /agent/query response
+        # carries source_breakdown. The orchestrated path builds the full
+        # kb/memory/external split; the manual path only picked one up when
+        # low confidence detoured through CRAG enrichment — high-confidence
+        # answers on a rich corpus returned a slim envelope (surfaced by the
+        # 2026-07-12 master-instance preservation run; CI's near-empty corpus
+        # always took the enriched path, hiding it). Manual = kb-only lanes.
+        if isinstance(result, dict):
+            if "source_breakdown" not in result:
+                result["source_breakdown"] = {
+                    "kb": result.get("sources", []),
+                    "memory": [],
+                    "external": [],
+                }
+            # "strategy" is likewise only stamped on the special paths
+            # (conversation_only / disabled / error); the standard success
+            # path describes itself by the surface that served it.
+            result.setdefault("strategy", result.get("surface_route") or "retrieval")
+
         # Phase 4.3 — retrieval-quality proxy into the time-series collector
         # /observability/quality reads. Proxy = mean relevance of the returned
         # results. Best-effort; never blocks the response. REST-only observability

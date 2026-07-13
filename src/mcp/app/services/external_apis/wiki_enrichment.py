@@ -86,6 +86,91 @@ _PYPI_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$")
 _NPM_SCOPED_RE = re.compile(r"^@[a-zA-Z0-9-]+/[a-zA-Z0-9._-]+$")
 _GITHUB_REPO_RE = re.compile(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
 
+# ---------------------------------------------------------------------------
+# Candidate-title validity filter
+# ---------------------------------------------------------------------------
+# Live logs showed the enrichment loop querying the Wikipedia summary API
+# with obvious non-titles — full URLs, "Q3 2024", "5 CFR 1320.3(h)3",
+# whole sentences — wasting rate-limited calls and spamming 404 warnings
+# (2026-07-12 beta triage). This is a cheap structural pre-flight, not an
+# existence check: it only rejects shapes that cannot be encyclopedia
+# titles.
+
+_MAX_TITLE_WORDS = 8
+
+# Domain-shaped: dotted labels with an optional path ("example.com",
+# "docs.python.org/3"). Software names like "Node.js" also match, so a
+# dotted name is only rejected when it carries a path or ends in a
+# well-known TLD. Plain string walk rather than a regex — the natural
+# pattern (nested +) is exactly the shape the DUO138 ReDoS gate rejects.
+_MIN_DOMAIN_LABELS = 2  # "example.com" — a single label is a word, not a host
+
+
+def _is_domainish(name: str) -> bool:
+    host, slash, path = name.partition("/")
+    if slash and any(ch.isspace() for ch in path):
+        return False
+    labels = host.split(".")
+    if len(labels) < _MIN_DOMAIN_LABELS:
+        return False
+    return all(
+        label and all(ch.isalnum() or ch in "_-" for ch in label)
+        for label in labels
+    )
+_BARE_DOMAIN_TLDS = frozenset((
+    "com", "org", "net", "io", "gov", "edu", "mil", "int", "info", "biz",
+    "co", "us", "uk", "de", "fr", "jp", "cn", "ru", "in", "au", "ca",
+    "ai", "dev", "app", "xyz", "site", "online", "tech", "cloud",
+))
+
+_QUARTER_RE = re.compile(r"^(?:Q[1-4]\s+\d{4}|\d{4}\s+Q[1-4])$", re.IGNORECASE)
+_NUMERIC_DATE_RE = re.compile(
+    r"^(?:\d{4}|\d{4}-\d{2}(?:-\d{2})?|\d{1,2}[/.]\d{1,2}[/.]\d{2,4})$"
+)
+_MONTHS = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?"
+    r"|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?"
+    r"|nov(?:ember)?|dec(?:ember)?)"
+)
+_DATE_LIKE_RE = re.compile(
+    rf"^(?:\d{{1,2}}\s+)?{_MONTHS}\.?(?:\s+\d{{1,2}})?,?\s*\d{{4}}$",
+    re.IGNORECASE,
+)
+# Regulation-style citations: "5 CFR 1320.3(h)3", "42 U.S.C. 1983", "§ 230".
+_REGULATION_RE = re.compile(r"\b\d+\s+(?:C\.?\s?F\.?\s?R\.?|U\.?\s?S\.?\s?C\.?)|§")
+
+
+def is_plausible_wikipedia_title(candidate: str) -> bool:
+    """Return False for candidates that structurally cannot be page titles.
+
+    Rejects: URLs and bare domains, pure date / quarter expressions,
+    regulation-style citations, and sentence-length strings
+    (> ``_MAX_TITLE_WORDS`` words). Everything else passes — this is a
+    junk gate, not a relevance ranker.
+    """
+    name = candidate.strip()
+    if not name:
+        return False
+    if "://" in name or name.lower().startswith("www."):
+        return False
+    if _is_domainish(name):
+        host = name.split("/", 1)[0]
+        tld = host.rsplit(".", 1)[-1].lower()
+        if "/" in name or tld in _BARE_DOMAIN_TLDS:
+            return False
+    if (
+        _QUARTER_RE.match(name)
+        or _NUMERIC_DATE_RE.match(name)
+        or _DATE_LIKE_RE.match(name)
+    ):
+        return False
+    if _REGULATION_RE.search(name):
+        return False
+    if len(name.split()) > _MAX_TITLE_WORDS:
+        return False
+    return True
+
+
 # Place-indicator words (heuristic — not exhaustive)
 _PLACE_WORDS = frozenset(
     w.lower() for w in (
@@ -389,6 +474,14 @@ async def enrich(
 
 
     for slug in slugs_to_consult:
+        # Junk gate BEFORE any registry probe or HTTP call — URLs, dates,
+        # regulation cites and sentence-like strings can never be titles.
+        if slug == "wikipedia" and not is_plausible_wikipedia_title(entity_name):
+            logger.debug(
+                "wiki_enrichment.skip_implausible_title entity=%r", entity_name,
+            )
+            continue
+
         # Check enabled state via registry module
         try:
             enabled = registry.is_enabled(slug)

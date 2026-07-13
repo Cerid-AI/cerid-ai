@@ -215,6 +215,48 @@ describe("ConnectorDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("renders the per-connector explainer block when the backend provides it (P0-C.4)", () => {
+    const connector = {
+      ...makeConnector(),
+      imports_desc: "Files and docs matching your queries.",
+      sync_semantics: "On-demand lookup while connected — no one-time import.",
+      lands_in: "Chat answers with citations.",
+    }
+    render(
+      <ConnectorDetail connector={connector} open onClose={vi.fn()} />,
+      { wrapper: wrap() },
+    )
+    expect(screen.getByText("How this connector works")).toBeInTheDocument()
+    expect(screen.getByText("Reads")).toBeInTheDocument()
+    expect(screen.getByText("Files and docs matching your queries.")).toBeInTheDocument()
+    expect(screen.getByText("Sync")).toBeInTheDocument()
+    expect(screen.getByText("On-demand lookup while connected — no one-time import.")).toBeInTheDocument()
+    expect(screen.getByText("Data destination")).toBeInTheDocument()
+    expect(screen.getByText("Chat answers with citations.")).toBeInTheDocument()
+  })
+
+  it("omits the explainer block for older payloads without the fields", () => {
+    render(
+      <ConnectorDetail connector={makeConnector()} open onClose={vi.fn()} />,
+      { wrapper: wrap() },
+    )
+    expect(screen.queryByText("How this connector works")).not.toBeInTheDocument()
+  })
+
+  it("is axe-clean with the explainer block present", async () => {
+    const connector = {
+      ...makeConnector(),
+      imports_desc: "Files and docs matching your queries.",
+      sync_semantics: "On-demand lookup while connected.",
+      lands_in: "Chat answers with citations.",
+    }
+    const { container } = render(
+      <ConnectorDetail connector={connector} open onClose={vi.fn()} />,
+      { wrapper: wrap() },
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
   it("is axe-clean for not-configured connector", async () => {
     const { container } = render(
       <ConnectorDetail connector={makeConnector()} open onClose={vi.fn()} />,

@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.processor.worker import ProcessorWorker, build_default_registry
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobRecord, JobResult, JobState
@@ -397,3 +399,71 @@ def test_build_default_registry_covers_every_job_module():
     registered = set(build_default_registry().keys())
     missing = declared - registered
     assert not missing, f"job_types on disk but not registered: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# _effective_cpu_count — cgroup-aware load ceiling (2026-07-12 triage:
+# os.cpu_count() reported the HOST's cores inside a 2-CPU cgroup, giving a
+# ceiling of 16.8 that could never throttle)
+# ---------------------------------------------------------------------------
+
+
+def test_effective_cpu_count_parses_cgroup_quota(tmp_path):
+    from app.processor.worker import _effective_cpu_count
+
+    cpu_max = tmp_path / "cpu.max"
+    cpu_max.write_text("200000 100000\n")
+    assert _effective_cpu_count(str(cpu_max)) == 2.0
+
+
+def test_effective_cpu_count_fractional_quota(tmp_path):
+    from app.processor.worker import _effective_cpu_count
+
+    cpu_max = tmp_path / "cpu.max"
+    cpu_max.write_text("50000 100000\n")
+    assert _effective_cpu_count(str(cpu_max)) == 0.5
+
+
+def test_effective_cpu_count_max_falls_back_to_host(tmp_path):
+    import os
+
+    from app.processor.worker import _effective_cpu_count
+
+    cpu_max = tmp_path / "cpu.max"
+    cpu_max.write_text("max 100000\n")
+    assert _effective_cpu_count(str(cpu_max)) == float(os.cpu_count() or 1)
+
+
+def test_effective_cpu_count_missing_file_falls_back_to_host(tmp_path):
+    import os
+
+    from app.processor.worker import _effective_cpu_count
+
+    assert _effective_cpu_count(str(tmp_path / "does-not-exist")) == float(
+        os.cpu_count() or 1
+    )
+
+
+def test_effective_cpu_count_garbage_falls_back_to_host(tmp_path):
+    import os
+
+    from app.processor.worker import _effective_cpu_count
+
+    cpu_max = tmp_path / "cpu.max"
+    cpu_max.write_text("not numbers\n")
+    assert _effective_cpu_count(str(cpu_max)) == float(os.cpu_count() or 1)
+
+    cpu_max.write_text("0 100000\n")  # zero quota can't be trusted either
+    assert _effective_cpu_count(str(cpu_max)) == float(os.cpu_count() or 1)
+
+
+def test_default_load_ceiling_uses_effective_cpus():
+    with patch("app.processor.worker._effective_cpu_count", return_value=2.0):
+        worker = ProcessorWorker(AsyncMock(), {})
+    assert worker._load_ceiling == pytest.approx(1.4)  # 2 cpus × 0.7
+
+
+def test_explicit_load_ceiling_override_wins():
+    with patch("app.processor.worker._effective_cpu_count", return_value=2.0):
+        worker = ProcessorWorker(AsyncMock(), {}, load_ceiling=12.5)
+    assert worker._load_ceiling == 12.5

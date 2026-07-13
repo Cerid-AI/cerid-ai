@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AlertTriangle, ChevronRight, Info, Loader2, Lock, RotateCcw } from "lucide-react"
 import { useNavigation } from "@/contexts/navigation-context"
+import type { FeatureTier } from "@/lib/api/billing"
 import { useEntitlements, type EntitlementInfo } from "@/hooks/use-entitlements"
 import { defsForGroup, type SettingDef } from "@/lib/settings-registry"
 import { useSettingsMode } from "@/lib/settings-mode"
@@ -68,6 +69,28 @@ export function SectionHeading({
       <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
       <h3 className="text-sm font-medium">{label}</h3>
     </button>
+  )
+}
+
+/**
+ * Monochrome OUTLINE tier badge — the one lock treatment (J-3: amber and
+ * status colours stay reserved for verification bands). Optional `count`
+ * prefixes the tier name for aggregate surfaces ("2 Pro" on a category row
+ * of the settings overview).
+ */
+export function TierLockBadge({
+  requiredTier,
+  count,
+}: {
+  requiredTier?: FeatureTier
+  count?: number
+}) {
+  const label = requiredTier === "enterprise" ? "Enterprise" : "Pro"
+  return (
+    <Badge variant="outline" className="gap-1 text-label-xs">
+      <Lock className="h-2.5 w-2.5" aria-hidden="true" />
+      {count !== undefined ? `${count} ${label}` : label}
+    </Badge>
   )
 }
 

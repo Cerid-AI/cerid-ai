@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.routers import knowledge_packs as router_mod
-from core.knowledge.packs import InstalledPack, PackError, PackManifest
+from core.knowledge.packs import InstalledPack
 
 VALID_PACK = {
     "id": "router-test",
@@ -40,6 +40,24 @@ def _write_registry(tmp_path, entries):
     return p
 
 
+def _write_state(tmp_path, records):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({
+        "schema_version": 1,
+        "packs": [r.to_dict() for r in records],
+    }))
+    return p
+
+
+def _installed(pack_id: str, version: str = "1.0.0") -> InstalledPack:
+    return InstalledPack(
+        pack_id=pack_id, version=version,
+        installed_at="2026-05-10T00:00:00+00:00",
+        domain="general", sha256="a" * 64,
+        artifact_ids=("art-1",),
+    )
+
+
 # ── /knowledge_packs/registry ───────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -49,6 +67,8 @@ async def test_get_registry_groups_by_domain(tmp_path, monkeypatch):
     pack_c = {**VALID_PACK, "id": "pack-c", "domain": "general"}
     registry_path = _write_registry(tmp_path, [pack_a, pack_b, pack_c])
     monkeypatch.setattr(router_mod, "default_registry_path", lambda: registry_path)
+    monkeypatch.setattr(router_mod, "default_state_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(router_mod, "active_install_jobs", lambda: {})
 
     resp = await router_mod.get_registry_endpoint()
     assert resp.schema_version == 1
@@ -56,6 +76,47 @@ async def test_get_registry_groups_by_domain(tmp_path, monkeypatch):
     general_ids = [p.id for p in resp.packs_by_domain["general"]]
     assert general_ids == ["pack-a", "pack-c"]  # sorted by id within domain
     assert resp.packs_by_domain["coding"][0].id == "pack-b"
+
+
+@pytest.mark.asyncio
+async def test_get_registry_reports_installed_and_installing(tmp_path, monkeypatch):
+    pack_a = {**VALID_PACK, "id": "pack-a", "domain": "general"}
+    pack_b = {**VALID_PACK, "id": "pack-b", "domain": "general"}
+    pack_c = {**VALID_PACK, "id": "pack-c", "domain": "general"}
+    registry_path = _write_registry(tmp_path, [pack_a, pack_b, pack_c])
+    state_path = _write_state(tmp_path, [_installed("pack-a")])
+    monkeypatch.setattr(router_mod, "default_registry_path", lambda: registry_path)
+    monkeypatch.setattr(router_mod, "default_state_path", lambda: state_path)
+    monkeypatch.setattr(router_mod, "active_install_jobs", lambda: {"pack-b": "job-1"})
+
+    resp = await router_mod.get_registry_endpoint()
+    by_id = {p.id: p for p in resp.packs_by_domain["general"]}
+    assert by_id["pack-a"].installed is True
+    assert by_id["pack-a"].installing is False
+    assert by_id["pack-b"].installed is False
+    assert by_id["pack-b"].installing is True
+    assert by_id["pack-c"].installed is False
+    assert by_id["pack-c"].installing is False
+
+
+@pytest.mark.asyncio
+async def test_get_registry_flag_lookups_are_best_effort(tmp_path, monkeypatch):
+    """A broken state file or dead Redis must not 500 the catalogue."""
+    registry_path = _write_registry(tmp_path, [VALID_PACK])
+    bad_state = tmp_path / "state.json"
+    bad_state.write_text("{ not json")
+    monkeypatch.setattr(router_mod, "default_registry_path", lambda: registry_path)
+    monkeypatch.setattr(router_mod, "default_state_path", lambda: bad_state)
+
+    def _boom():
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(router_mod, "active_install_jobs", _boom)
+
+    resp = await router_mod.get_registry_endpoint()
+    entry = resp.packs_by_domain["general"][0]
+    assert entry.installed is False
+    assert entry.installing is False
 
 
 @pytest.mark.asyncio
@@ -112,41 +173,76 @@ async def test_install_endpoint_404_when_pack_missing(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_install_endpoint_happy_path(tmp_path, monkeypatch):
+async def test_install_endpoint_queues_job(tmp_path, monkeypatch):
     registry_path = _write_registry(tmp_path, [VALID_PACK])
     monkeypatch.setattr(router_mod, "default_registry_path", lambda: registry_path)
+    monkeypatch.setattr(router_mod, "default_state_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(router_mod, "active_install_jobs", lambda: {})
 
     captured: dict = {}
 
-    async def fake_install(pack: PackManifest, *, keep_staging: bool = False):
-        captured["pack_id"] = pack.id
-        return InstalledPack(
-            pack_id=pack.id, version=pack.version,
-            installed_at="2026-05-10T00:00:00+00:00",
-            domain=pack.domain, sha256=pack.sha256,
-            artifact_ids=("a", "b", "c"),
-        )
+    def fake_enqueue(pack_id: str):
+        captured["pack_id"] = pack_id
+        return "job-123"
 
-    monkeypatch.setattr(router_mod, "install_pack_default", fake_install)
+    monkeypatch.setattr(router_mod, "enqueue_install_job", fake_enqueue)
 
     resp = await router_mod.install_pack_endpoint("router-test")
-    assert resp.pack_id == "router-test"
-    assert resp.artifact_count == 3
+    assert resp.job_id == "job-123"
+    assert resp.status == "queued"
     assert captured["pack_id"] == "router-test"
 
 
 @pytest.mark.asyncio
-async def test_install_endpoint_translates_pack_error_to_422(tmp_path, monkeypatch):
+async def test_install_endpoint_200_when_already_installed(tmp_path, monkeypatch):
+    registry_path = _write_registry(tmp_path, [VALID_PACK])
+    state_path = _write_state(tmp_path, [_installed("router-test", version="1.0.0")])
+    monkeypatch.setattr(router_mod, "default_registry_path", lambda: registry_path)
+    monkeypatch.setattr(router_mod, "default_state_path", lambda: state_path)
+
+    def _unexpected():
+        raise AssertionError("must not touch the queue when already installed")
+
+    monkeypatch.setattr(router_mod, "active_install_jobs", _unexpected)
+    monkeypatch.setattr(router_mod, "enqueue_install_job", _unexpected)
+
+    resp = await router_mod.install_pack_endpoint("router-test")
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == {"status": "already_installed"}
+
+
+@pytest.mark.asyncio
+async def test_install_endpoint_queues_upgrade_for_new_version(tmp_path, monkeypatch):
+    """Same pack id at an older version → enqueue (version upgrade path)."""
+    registry_path = _write_registry(tmp_path, [VALID_PACK])  # version 1.0.0
+    state_path = _write_state(tmp_path, [_installed("router-test", version="0.9.0")])
+    monkeypatch.setattr(router_mod, "default_registry_path", lambda: registry_path)
+    monkeypatch.setattr(router_mod, "default_state_path", lambda: state_path)
+    monkeypatch.setattr(router_mod, "active_install_jobs", lambda: {})
+    monkeypatch.setattr(router_mod, "enqueue_install_job", lambda pack_id: "job-up")
+
+    resp = await router_mod.install_pack_endpoint("router-test")
+    assert resp.job_id == "job-up"
+    assert resp.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_install_endpoint_dedupes_active_job(tmp_path, monkeypatch):
     registry_path = _write_registry(tmp_path, [VALID_PACK])
     monkeypatch.setattr(router_mod, "default_registry_path", lambda: registry_path)
+    monkeypatch.setattr(router_mod, "default_state_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(
+        router_mod, "active_install_jobs", lambda: {"router-test": "job-9"},
+    )
 
-    async def fake_install(pack: PackManifest, *, keep_staging: bool = False):
-        raise PackError("archive sha256 mismatch")
+    def _unexpected(pack_id: str):
+        raise AssertionError("must not double-enqueue an active install")
 
-    monkeypatch.setattr(router_mod, "install_pack_default", fake_install)
-    with pytest.raises(HTTPException) as exc_info:
-        await router_mod.install_pack_endpoint("router-test")
-    assert exc_info.value.status_code == 422
+    monkeypatch.setattr(router_mod, "enqueue_install_job", _unexpected)
+
+    resp = await router_mod.install_pack_endpoint("router-test")
+    assert resp.job_id == "job-9"
+    assert resp.status == "queued"
 
 
 # ── /knowledge_packs/{pack_id} (DELETE) ────────────────────────────────

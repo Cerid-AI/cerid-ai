@@ -13,6 +13,8 @@ import type {
 
 // --- Feedback Loop ---
 
+// Fire-and-forget: the backend queues the ingest as a processor job and
+// acks 202 {status:"queued", job_id} — any 2xx counts as success here.
 export async function ingestFeedback(
   userMessage: string,
   assistantResponse: string,

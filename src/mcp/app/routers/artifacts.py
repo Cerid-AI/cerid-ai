@@ -242,6 +242,7 @@ async def list_artifacts_endpoint(
     client_source: str | None = Query(None, description="Filter by ingestion client (e.g. 'gui', 'trading-agent')"),
     since: str | None = Query(None, description="ISO date — only return artifacts ingested after this date"),
     min_quality: float | None = Query(None, ge=0, le=1, description="Minimum quality score (0-1)"),
+    search: str | None = Query(None, min_length=1, max_length=200, description="Case-insensitive substring match over filename and summary"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(50, ge=1, le=500),
 ):
@@ -255,6 +256,7 @@ async def list_artifacts_endpoint(
             client_source=client_source,
             since=since,
             min_quality=min_quality,
+            search=search,
             offset=offset,
             limit=limit,
         )

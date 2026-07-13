@@ -145,6 +145,15 @@ describe("buildAtlasEdgeReducer", () => {
   const graph = {
     source: (e: string) => (e === "e-in" ? "a" : "x"),
     target: (e: string) => (e === "e-in" ? "b" : "y"),
+    getNodeAttribute: () => undefined as unknown,
+  }
+
+  /** Graph stub whose nodes carry spawnProgress (A5 migration tween). */
+  function mkSpawnGraph(spawn: Record<string, number | undefined>) {
+    return {
+      ...graph,
+      getNodeAttribute: (node: string, attr: string) => (attr === "spawnProgress" ? spawn[node] : undefined),
+    }
   }
 
   it("returns lens output untouched when no focus is active", () => {
@@ -211,5 +220,39 @@ describe("buildAtlasEdgeReducer", () => {
     const kept = reduce("e-in", mkEdgeAttrs({ size: 1 }))
     expect(kept.hidden).toBeFalsy()
     expect(kept.color).toBe("#CCCCCC") // drift-allowed: test stub only
+  })
+
+  it("fades an edge by its weaker endpoint's spawnProgress (A5 enter/exit tween)", () => {
+    const reduce = buildAtlasEdgeReducer({
+      typeChips: new Set(),
+      tokens: TOKENS,
+      spotlight: mkSpotlight(null),
+      graph: mkSpawnGraph({ a: 0.5, b: 1 }),
+    })
+    const out = reduce("e-in", mkEdgeAttrs())
+    expect(out.color).toBe(hexWithAlpha("#CCCCCC", 0.5)) // drift-allowed: test stub only
+  })
+
+  it("leaves edges between fully-arrived endpoints untouched", () => {
+    const reduce = buildAtlasEdgeReducer({
+      typeChips: new Set(),
+      tokens: TOKENS,
+      spotlight: mkSpotlight(null),
+      graph: mkSpawnGraph({ a: 1 }), // b has no spawnProgress → treated as 1
+    })
+    const attrs = mkEdgeAttrs()
+    expect(reduce("e-in", attrs)).toEqual(attrs)
+  })
+
+  it("multiplies the migration fade into the spotlight fade for outside edges", () => {
+    const reduce = buildAtlasEdgeReducer({
+      typeChips: new Set(),
+      tokens: TOKENS,
+      spotlight: mkSpotlight(new Set(["a", "b"]), 1),
+      graph: mkSpawnGraph({ x: 0.5 }),
+    })
+    const out = reduce("e-out", mkEdgeAttrs())
+    // spotlight outside fade (focusNodeAlpha·0.6) × exit tween (0.5)
+    expect(out.color).toBe(hexWithAlpha("#CCCCCC", focusNodeAlpha(1, 1) * 0.6 * 0.5)) // drift-allowed: test stub only
   })
 })

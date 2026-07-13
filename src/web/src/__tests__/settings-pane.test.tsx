@@ -148,7 +148,7 @@ describe("SettingsPane shell — state matrix", () => {
     expect(localStorage.getItem("cerid-settings-category")).toBe("analytics")
   })
 
-  it("defaults to the Overview tab and renders the active-config snapshot", async () => {
+  it("defaults to the Overview tab with elevated search and the explore map", async () => {
     vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
     const nav = await screen.findByRole("navigation", { name: "Settings categories" })
@@ -156,7 +156,33 @@ describe("SettingsPane shell — state matrix", () => {
       "aria-current",
       "page",
     )
-    expect(await screen.findByRole("navigation", { name: /jump to a category/i })).toBeInTheDocument()
+    expect(screen.getByRole("searchbox", { name: "Search all settings" })).toBeInTheDocument()
+    expect(await screen.findByRole("navigation", { name: /explore settings/i })).toBeInTheDocument()
+  })
+
+  it("Overview map rows click through to the owning category page", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    const map = await screen.findByRole("navigation", { name: /explore settings/i })
+
+    await userEvent.click(within(map).getByTestId("settings-overview-appearance"))
+    expect(await screen.findByRole("radiogroup", { name: "Theme" })).toBeInTheDocument()
+    expect(localStorage.getItem("cerid-settings-category")).toBe("appearance")
+
+    const sidebar = screen.getByRole("navigation", { name: "Settings categories" })
+    expect(within(sidebar).getByRole("button", { name: /Appearance/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    )
+  })
+
+  it("Overview map reaches the Diagnostics console entry", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    const map = await screen.findByRole("navigation", { name: /explore settings/i })
+    await userEvent.click(within(map).getByTestId("settings-overview-diagnostics"))
+    expect(await screen.findByTestId("diagnostics-console")).toBeInTheDocument()
+    expect(localStorage.getItem("cerid-settings-category")).toBe("diagnostics")
   })
 
   it("success: is axe-clean (D.3)", async () => {
@@ -252,13 +278,36 @@ describe("SettingsPane shell — search", () => {
     })
   })
 
-  it("'/' focuses the search input", async () => {
+  it("'/' focuses the elevated Overview search when on Overview", async () => {
     vi.stubGlobal("fetch", mockFetch())
     render(<SettingsPane />, { wrapper })
     await screen.findByRole("navigation", { name: "Settings categories" })
 
     await userEvent.keyboard("/")
+    expect(screen.getByRole("searchbox", { name: "Search all settings" })).toHaveFocus()
+  })
+
+  it("'/' falls back to the sidebar search on a category page", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    const nav = await screen.findByRole("navigation", { name: "Settings categories" })
+    await userEvent.click(within(nav).getByRole("button", { name: /Models/ }))
+
+    await userEvent.keyboard("/")
     expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus()
+  })
+
+  it("typing in the elevated Overview search keeps focus and shows results in place", async () => {
+    vi.stubGlobal("fetch", mockFetch())
+    render(<SettingsPane />, { wrapper })
+    await screen.findByRole("navigation", { name: /explore settings/i })
+
+    const elevated = screen.getByRole("searchbox", { name: "Search all settings" })
+    await userEvent.type(elevated, "dark mode")
+    const results = await screen.findByRole("list", { name: "Search results" })
+    expect(within(results).getByRole("listitem")).toHaveTextContent("Appearance › theme")
+    expect(screen.getByRole("searchbox", { name: "Search all settings" })).toHaveFocus()
+    expect(screen.queryByRole("navigation", { name: /explore settings/i })).not.toBeInTheDocument()
   })
 })
 

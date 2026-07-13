@@ -45,6 +45,11 @@ class ClipboardConnector(SourceConnector):
 
     kind = "clipboard"
     tier = "core"
+    # Ingestion depends on the host-side clipboard daemon. The actual
+    # presence probe (Redis heartbeat) lives in the router layer — core
+    # cannot touch app-owned store clients; this flag only marks the kind
+    # as helper-backed for /sources/kinds.
+    requires_desktop = True
 
     async def connect(self, config: dict[str, Any]) -> ConnectResult:
         min_length = int(config.get("min_length", 50))

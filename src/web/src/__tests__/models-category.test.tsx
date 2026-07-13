@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import ModelsCategory from "@/components/settings/categories/models"
+import { ModelSelect } from "@/components/chat/model-select"
+import { MODELS } from "@/lib/types"
 import type { ServerSettings } from "@/lib/types"
 import type { SettingsCategoryPageProps } from "@/components/settings/categories/page-props"
 
@@ -181,5 +184,109 @@ describe("ModelsCategory — accessibility", () => {
     const { container } = render(<ModelsCategory {...defaultProps} />, { wrapper })
     await screen.findByText(/Providers/i)
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ModelSelect — routing-provider gating (P0-B beta triage).
+//
+// The catalog ids are all "openrouter/<vendor>/<model>" while
+// configured_providers holds registry names (openrouter/openai/anthropic/
+// xai/ollama). The old gate matched the display BRAND ("Google", "Meta")
+// against that set, so those rows were permanently disabled and a configured
+// OpenRouter key was ignored. Gating must use the routing provider (first
+// id segment), with the brand as a fallback for direct-key setups.
+// ---------------------------------------------------------------------------
+
+/** Fetch stub serving GET /providers/configured with the given provider rows. */
+function mockConfiguredProvidersApi(
+  providers: Array<{ name: string; models: string[] }>,
+) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (url.includes("/providers/configured")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({
+          providers: providers.map((p) => ({
+            name: p.name,
+            display_name: p.name,
+            requires_api_key: true,
+            key_set: true,
+            key_preview: null,
+            models: p.models,
+          })),
+          total: providers.length,
+        }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve("{}") })
+  })
+}
+
+async function openModelSelect(configuredProviders?: string[]) {
+  const user = userEvent.setup()
+  render(
+    <ModelSelect value={MODELS[0].id} onChange={() => {}} configuredProviders={configuredProviders} />,
+    { wrapper },
+  )
+  await user.click(screen.getByRole("combobox"))
+  return screen.findAllByRole("option")
+}
+
+describe("ModelSelect — routing-provider gating", () => {
+  it("enables ALL catalog rows when only 'openrouter' is configured", async () => {
+    vi.stubGlobal("fetch", mockConfiguredProvidersApi([
+      { name: "openrouter", models: MODELS.map((m) => m.id) },
+    ]))
+    const options = await openModelSelect(["openrouter"])
+    expect(options).toHaveLength(MODELS.length)
+    for (const opt of options) {
+      expect(opt).not.toHaveAttribute("data-disabled")
+    }
+    expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument()
+  })
+
+  it("renders 'Unavailable' (not 'Not configured') for an id absent from the provider's advertised list", async () => {
+    const missingId = "openrouter/openai/o3-mini"
+    vi.stubGlobal("fetch", mockConfiguredProvidersApi([
+      { name: "openrouter", models: MODELS.map((m) => m.id).filter((id) => id !== missingId) },
+    ]))
+    const options = await openModelSelect(["openrouter"])
+    // Row stays selectable — absence from the advertised subset is a hint,
+    // not a hard gate (the provider may serve models beyond its default list).
+    const target = options.find((o) => o.textContent?.includes("o3-mini"))
+    expect(target).toBeDefined()
+    await waitFor(() => {
+      expect(within(target!).getByText(/unavailable/i)).toBeInTheDocument()
+    })
+    expect(target).not.toHaveAttribute("data-disabled")
+    expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument()
+    // Advertised rows carry no hint
+    const ok = options.find((o) => o.textContent?.includes("GPT-4o Mini"))
+    expect(within(ok!).queryByText(/unavailable/i)).not.toBeInTheDocument()
+  })
+
+  it("still enables brand-matched rows for direct-key setups (brand fallback)", async () => {
+    vi.stubGlobal("fetch", mockConfiguredProvidersApi([]))
+    const options = await openModelSelect(["anthropic"])
+    for (const opt of options) {
+      if (opt.textContent?.includes("Claude")) {
+        expect(opt).not.toHaveAttribute("data-disabled")
+      } else {
+        expect(opt).toHaveAttribute("data-disabled")
+      }
+    }
+    // Non-configured groups keep the "Not configured" label
+    expect(screen.getAllByText(/not configured/i).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("disables everything and labels groups 'Not configured' when nothing is configured", async () => {
+    vi.stubGlobal("fetch", mockConfiguredProvidersApi([]))
+    const options = await openModelSelect([])
+    for (const opt of options) {
+      expect(opt).toHaveAttribute("data-disabled")
+    }
+    expect(screen.getAllByText(/not configured/i).length).toBeGreaterThanOrEqual(1)
   })
 })

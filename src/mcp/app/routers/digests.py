@@ -7,13 +7,20 @@ Three endpoints for the chat UI + notification surfaces:
 
   GET    /digests/latest         → most recent digest as JSON
   GET    /digests/{date}         → digest for a specific ISO date
-  POST   /digests/run-now        → trigger a fresh digest pass
+  POST   /digests/run-now        → queue a fresh digest pass (202)
 
 Pro-tier gated. Reads from KB artifacts in domain="digests" written
 by `core.agents.daily_digest.generate_daily_digest`.
+
+Run-now is a queued processor job (``DigestRunJob``). It used to run
+the full digest inline — minutes on a populated corpus, which timed
+out clients during beta (2026-07-12 triage) — so the endpoint now
+returns 202 with a ``job_id`` and clients poll ``GET /digests/latest``
+until ``generated_at`` advances.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -43,19 +50,11 @@ class DigestSummary(BaseModel):
     persisted_artifact_id: str | None = None
 
 
-class DigestFull(BaseModel):
-    digest_id: str
-    generated_at: str
-    window_hours: int
-    artifact_count: int
-    flagged_count: int
-    inbox_urgent_count: int
-    top_categories: list[dict[str, Any]]
-    key_threads: list[dict[str, Any]]
-    urgent: list[dict[str, Any]]
-    action_items: list[str]
-    quality_alerts: list[dict[str, Any]]
-    persisted_artifact_id: str | None = None
+class DigestQueuedResponse(BaseModel):
+    """202 body — digest generation now runs as a background processor job."""
+
+    job_id: str
+    status: str = "queued"
 
 
 # ── helpers ───────────────────────────────────────────────────────────
@@ -164,34 +163,32 @@ async def get_digest_by_date(date: str) -> DigestSummary | None:
     return None
 
 
-@router.post("/run-now", response_model=DigestFull)
-async def run_digest_now() -> DigestFull:
-    """Trigger a digest pass immediately. Bypasses the
-    CERID_DAILY_DIGEST_ENABLED toggle (the user explicitly opted in
-    by hitting this endpoint) but still honors the feature flag."""
+@router.post("/run-now", status_code=202, response_model=DigestQueuedResponse)
+async def run_digest_now() -> DigestQueuedResponse:
+    """Queue a digest pass. Bypasses the CERID_DAILY_DIGEST_ENABLED
+    toggle (the user explicitly opted in by hitting this endpoint) but
+    still honors the feature flag.
+
+    * 202 ``{"job_id": ..., "status": "queued"}`` — job enqueued (or a
+      digest pass is already queued/running; its job_id is returned).
+
+    Clients poll ``GET /digests/latest`` until ``generated_at`` advances
+    past the pre-trigger value, then render.
+    """
     if not _feature_on():
         raise HTTPException(status_code=403, detail="daily_digest is Pro-tier.")
 
-    from core.agents.daily_digest import generate_daily_digest
-
-    result = await generate_daily_digest(persist=True)
-    return DigestFull(
-        digest_id=result.digest_id,
-        generated_at=result.generated_at,
-        window_hours=result.window_hours,
-        artifact_count=result.artifact_count,
-        flagged_count=result.flagged_count,
-        inbox_urgent_count=result.inbox_urgent_count,
-        top_categories=result.top_categories,
-        key_threads=[{
-            "title": s.title, "body": s.body, "artifact_ids": s.artifact_ids,
-        } for s in result.key_threads],
-        urgent=[{
-            "title": s.title, "body": s.body, "artifact_ids": s.artifact_ids,
-        } for s in result.urgent],
-        action_items=result.action_items,
-        quality_alerts=[{
-            "title": s.title, "body": s.body, "artifact_ids": s.artifact_ids,
-        } for s in result.quality_alerts],
-        persisted_artifact_id=result.persisted_artifact_id,
+    from app.processor.jobs.digest_run import (
+        active_digest_run_jobs,
+        enqueue_digest_run_job,
     )
+
+    try:
+        active = await asyncio.to_thread(active_digest_run_jobs)
+        if active:
+            return DigestQueuedResponse(job_id=active[0])
+        job_id = await asyncio.to_thread(enqueue_digest_run_job)
+    except Exception as exc:
+        logger.exception("digest run-now enqueue failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Digest enqueue failed: {exc}")
+    return DigestQueuedResponse(job_id=job_id)

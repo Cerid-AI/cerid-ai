@@ -123,14 +123,16 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   // Scroll card into view when expanded. Gated by useEffect so React Compiler
   // doesn't see a render-phase ref write (prior code updated prevExpanded in
   // the render body), and the RAF is cancelled on unmount or rapid re-expand
-  // so two quick toggles don't queue two scroll animations.
+  // so two quick toggles don't queue two scroll animations. Compact cards
+  // never expand in place (click opens the preview instead), so the scroll
+  // is suppressed there.
   useEffect(() => {
-    if (!expanded) return
+    if (!expanded || compact) return
     const rafId = requestAnimationFrame(() => {
       cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
     })
     return () => cancelAnimationFrame(rafId)
-  }, [expanded])
+  }, [expanded, compact])
   const relevancePct = Math.round(result.relevance * 100)
   const showRelevance = result.relevance > 0
   const isBrowseMode = result.relevance === 0
@@ -175,10 +177,23 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         e.dataTransfer.effectAllowed = "copy"
       }}
       onClick={() => {
+        // Compact cards have no in-card expansion (all expandable regions are
+        // gated !compact) — open the artifact preview instead so the Library
+        // grid's cards aren't inert.
+        if (compact && onPreview) {
+          onPreview(result.artifact_id)
+          return
+        }
         setExpanded((prev) => !prev)
         onSelect()
       }}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          if (compact && onPreview) onPreview(result.artifact_id)
+          else onSelect()
+        }
+      }}
     >
       <CardContent className={cn("min-w-0 overflow-hidden", compact ? "px-2 py-1.5" : "px-3 py-2")}>
         {/* Header row */}
@@ -214,7 +229,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                       onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
                     >{deriveTitle(result.filename, result.content)}</p>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps long titles from sprawling */}
+                  <TooltipContent side="top" sideOffset={6} className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps long titles from sprawling */}
                     {deriveTitle(result.filename, result.content)}
                     {isAutoChatId(result.filename) ? (
                       <div className="mt-1 text-label-xs opacity-70">
@@ -331,7 +346,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   {previewText.slice(0, 80)}
                 </p>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps content preview from sprawling */}
+              <TooltipContent side="bottom" sideOffset={6} className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps content preview from sprawling */}
                 {previewText.slice(0, 320)}{previewText.length > 320 ? "…" : ""}
               </TooltipContent>
             </Tooltip>

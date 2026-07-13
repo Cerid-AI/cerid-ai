@@ -33,7 +33,8 @@ import { Input } from "@/components/ui/input"
 import { DomainFilter } from "./domain-filter"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { cn } from "@/lib/utils"
-import { fetchDataSources, enableDataSource, disableDataSource, updateSettings } from "@/lib/api"
+import { fetchDataSources, updateSettings } from "@/lib/api"
+import { useNavigation } from "@/contexts/navigation-context"
 import { CustomApiDialog } from "./custom-api-dialog"
 import { IngestionProgress } from "./ingestion-progress"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
@@ -177,40 +178,36 @@ function ExternalSourceCard({ result }: { result: ExternalSourceResult }) {
   )
 }
 
-/** Compact data source status list — shows enabled APIs with inline toggles. */
+/** Compact data source status list — read-only. Enable/disable moved to the
+    unified Settings → Extensions → Knowledge Providers section (P0-C.4) so
+    each service is toggled in one place with its scope labelled. */
 function DataSourceIndicator() {
-  const { data, refetch } = useQuery({
+  const { goTo } = useNavigation()
+  const { data } = useQuery({
     queryKey: ["data-sources"],
-    queryFn: fetchDataSources,
+    queryFn: () => fetchDataSources(),
     staleTime: 60_000,
   })
-  const [toggling, setToggling] = useState<string | null>(null)
 
   if (!data?.sources?.length) return null
-
-  const handleToggle = async (name: string, currentlyEnabled: boolean) => {
-    setToggling(name)
-    try {
-      if (currentlyEnabled) {
-        await disableDataSource(name)
-      } else {
-        await enableDataSource(name)
-      }
-      await refetch()
-    } catch (e) {
-      console.warn("Data source toggle failed:", e)
-    } finally {
-      setToggling(null)
-    }
-  }
 
   const enabledCount = data.sources.filter((s) => s.enabled && s.configured).length
 
   return (
     <div className="mt-1.5 space-y-1">
-      <p className="text-label-xs text-muted-foreground font-medium">
-        APIs ({enabledCount}/{data.sources.length} active)
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-label-xs text-muted-foreground font-medium">
+          APIs ({enabledCount}/{data.sources.length} active)
+        </p>
+        <button
+          type="button"
+          onClick={() => goTo("settings", { category: "extensions", setting: "extensions.externalApis.enable" })}
+          className="text-label-xs text-primary hover:underline shrink-0"
+          aria-label="Manage knowledge providers in Settings"
+        >
+          Manage
+        </button>
+      </div>
       {data.sources.map((src) => (
         <div key={src.name} className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -220,12 +217,6 @@ function DataSourceIndicator() {
               <Badge variant="outline" className="text-label-xxs px-1 py-0 text-amber-600 dark:text-yellow-400 border-yellow-500/30">key needed</Badge>
             )}
           </div>
-          <Switch
-            checked={src.enabled}
-            onCheckedChange={() => handleToggle(src.name, src.enabled)}
-            disabled={toggling === src.name || (src.requires_api_key && !src.configured)}
-            className="scale-[0.6]"
-          />
         </div>
       ))}
     </div>

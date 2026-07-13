@@ -300,3 +300,67 @@ async def test_llm_call_override_resets_after_context_exit():
     with mod.llm_call_override("openrouter", "openrouter/foo"):
         assert mod._llm_override.get() == ("openrouter", "openrouter/foo")
     assert mod._llm_override.get() is None
+
+
+# ---------------------------------------------------------------------------
+# _get_ollama_client — per-loop singleton
+# (2026-07-12 "Event loop is closed" regression: ingestion's
+# _run_coro_isolated runs ai_categorize on short-lived loops; a client
+# cached from one of those loops must never be reused on another loop.)
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaClientLoopAffinity:
+    @pytest.fixture(autouse=True)
+    def _reset_singleton(self):
+        yield
+        mod._ollama_client = None
+        mod._ollama_client_loop = None
+
+    def test_new_client_per_event_loop(self):
+        import asyncio
+
+        async def _grab():
+            return await mod._get_ollama_client()
+
+        # Two asyncio.run calls = two distinct loops, the first of which is
+        # closed by the time the second runs — exactly the
+        # _run_coro_isolated lifecycle.
+        client_a = asyncio.run(_grab())
+        client_b = asyncio.run(_grab())
+        assert client_a is not client_b
+
+    def test_same_loop_reuses_client(self):
+        import asyncio
+
+        async def _grab_twice():
+            first = await mod._get_ollama_client()
+            second = await mod._get_ollama_client()
+            return first, second
+
+        first, second = asyncio.run(_grab_twice())
+        assert first is second
+
+    def test_closed_client_is_replaced_on_same_loop(self):
+        import asyncio
+
+        async def _scenario():
+            first = await mod._get_ollama_client()
+            await first.aclose()
+            second = await mod._get_ollama_client()
+            return first, second
+
+        first, second = asyncio.run(_scenario())
+        assert first is not second
+        assert not second.is_closed
+
+    def test_close_resets_loop_tracking(self):
+        import asyncio
+
+        async def _scenario():
+            await mod._get_ollama_client()
+            await mod.close_ollama_client()
+
+        asyncio.run(_scenario())
+        assert mod._ollama_client is None
+        assert mod._ollama_client_loop is None

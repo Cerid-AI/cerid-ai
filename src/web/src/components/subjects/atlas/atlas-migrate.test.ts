@@ -93,8 +93,9 @@ describe("planMigrationTargets", () => {
     expect(plan.targets.get("keep")).toMatchObject({ x: 20, y: 30, size: 12 })
     // Enter node tweens size 0→final and spawnProgress 0→1
     expect(plan.targets.get("fresh")).toMatchObject({ x: 15, size: 8, spawnProgress: 1 })
-    // Exit node shrinks in place
-    expect(plan.targets.get("gone")).toMatchObject({ size: EXIT_SIZE })
+    // Exit node shrinks AND fades in place (spawnProgress 1→0 drives the
+    // reducers' node + incident-edge alpha fade)
+    expect(plan.targets.get("gone")).toMatchObject({ size: EXIT_SIZE, spawnProgress: 0 })
   })
 })
 
@@ -123,5 +124,24 @@ describe("syncEdges", () => {
     expect(live.hasEdge("focal::gone::mentions")).toBe(false) // dropped
     expect(live.hasEdge("keep::fresh::mentions")).toBe(true) // added
     expect(live.getEdgeAttribute("keep::fresh::mentions", "size")).toBe(2)
+  })
+
+  it("defers drops for edges incident to exit nodes (they fall with dropNode on settle)", () => {
+    const live = mkLive()
+    const next = mkNext()
+    live.addNode("fresh", attrs())
+    // Stale live-only edge between two SURVIVING nodes must still drop now.
+    live.addEdgeWithKey("keep::focal::works_on", "keep", "focal", { color: "#CCCCCC", size: 1 }) // drift-allowed: test stub only
+    syncEdges(live, next, new Set(["gone"]))
+    // Exit-incident edge survives the sync — exit nodes keep their edges
+    // for the whole morph instead of reading as de-linked.
+    expect(live.hasEdge("focal::gone::mentions")).toBe(true)
+    // Non-exit live-only edge still drops immediately.
+    expect(live.hasEdge("keep::focal::works_on")).toBe(false)
+    // Next-only edges still arrive.
+    expect(live.hasEdge("keep::fresh::mentions")).toBe(true)
+    // The deferred edge falls automatically with the exit node on settle.
+    live.dropNode("gone")
+    expect(live.hasEdge("focal::gone::mentions")).toBe(false)
   })
 })

@@ -66,9 +66,13 @@ function SourceRow({
         aria-pressed={selected}
       >
         <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="grow">
+        <span className="grow min-w-0">
           <span className="block truncate text-sm" title={row.displayName}>{row.displayName}</span>
-          <span className="block text-label-xxs text-muted-foreground">{desc.label}</span>
+          {/* Connector rows carry a sync-semantics explainer; other rows show
+              the kind label. Hover title only for the (truncated) explainer. */}
+          <span className="block truncate text-label-xxs text-muted-foreground" title={row.detail}>
+            {row.detail ?? desc.label}
+          </span>
         </span>
       </button>
       {/* Toggle — only for folder sources */}
@@ -237,7 +241,30 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
   }
 
   if (isEmpty) {
-    return <SourcesEmptyGallery onSelectKind={onAddSource ?? (() => {})} />
+    // The gallery replaces the row list, but connector rows still back the
+    // catalog — oauth tiles open the matching ConnectorDetail directly so
+    // "connect in Settings" dead-end copy is replaced with the actual flow.
+    return (
+      <>
+        <SourcesEmptyGallery
+          onSelectKind={onAddSource ?? (() => {})}
+          onOpenConnector={(kind) => {
+            const id = `connector:${kind}`
+            if (rows.some((r) => r.id === id)) {
+              setSelectedId(id)
+              setDetailOpen(true)
+            }
+          }}
+        />
+        {selectedRow?.rowType === "connector" && (
+          <ConnectorDetail
+            open={detailOpen}
+            connector={selectedRow.backing as ConnectorStatus}
+            onClose={() => setDetailOpen(false)}
+          />
+        )}
+      </>
+    )
   }
 
   return (

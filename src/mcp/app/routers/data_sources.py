@@ -48,32 +48,49 @@ logger = logging.getLogger("ai-companion.data_sources")
 
 @router.get("/data-sources", response_model=DataSourceListResponse)
 async def list_data_sources():
-    """List all registered data sources with their status."""
-    from app.data_sources import registry
+    """List all registered data sources with their status.
+
+    Enabled flags are hydrated from Redis on first access so persisted
+    toggles survive process restarts (parity with /external-apis).
+    """
+    from app.data_sources import hydrate_enabled_state, registry
+    hydrate_enabled_state()
     sources = registry.list_sources()
     return {"sources": sources, "total": len(sources)}
 
 
 @router.post("/data-sources/{name}/enable", response_model=DataSourceToggleResponse)
 async def enable_source(name: str):
-    """Enable a registered data source by name."""
-    from app.data_sources import registry
-    for s in registry._sources.values():
-        if s.name == name:
-            s.enabled = True
-            return {"status": "enabled", "name": name}
-    raise HTTPException(status_code=404, detail=f"Source '{name}' not found")
+    """Enable a registered data source by name.
+
+    The flip is applied in-memory and written through to Redis. When Redis
+    is unavailable the in-memory flip still succeeds (pre-persistence
+    behaviour), so the response shape and status codes are unchanged.
+    """
+    from app.data_sources import hydrate_enabled_state, persist_enabled_state, registry
+    hydrate_enabled_state()
+    source = registry.get(name)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"Source '{name}' not found")
+    source.enabled = True
+    persist_enabled_state(name, True)
+    return {"status": "enabled", "name": name}
 
 
 @router.post("/data-sources/{name}/disable", response_model=DataSourceToggleResponse)
 async def disable_source(name: str):
-    """Disable a registered data source by name."""
-    from app.data_sources import registry
-    for s in registry._sources.values():
-        if s.name == name:
-            s.enabled = False
-            return {"status": "disabled", "name": name}
-    raise HTTPException(status_code=404, detail=f"Source '{name}' not found")
+    """Disable a registered data source by name.
+
+    Same persistence semantics as :func:`enable_source`.
+    """
+    from app.data_sources import hydrate_enabled_state, persist_enabled_state, registry
+    hydrate_enabled_state()
+    source = registry.get(name)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"Source '{name}' not found")
+    source.enabled = False
+    persist_enabled_state(name, False)
+    return {"status": "disabled", "name": name}
 
 
 # ── Query all enabled sources ────────────────────────────────────────────────
@@ -91,8 +108,9 @@ class DataSourceQueryRequest(BaseModel):
 @handle_errors(fallback={"results": [], "count": 0})
 async def query_data_sources(body: DataSourceQueryRequest):
     """Query all enabled external data sources in parallel."""
-    from app.data_sources import registry
+    from app.data_sources import hydrate_enabled_state, registry
 
+    hydrate_enabled_state()
     results = await registry.query_all(
         body.query, domain=body.domain, timeout=body.timeout,
     )

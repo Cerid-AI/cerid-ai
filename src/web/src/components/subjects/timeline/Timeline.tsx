@@ -1051,7 +1051,11 @@ export function Timeline({ onEntityPick }: TimelineProps) {
     )
   }
 
-  if (!data || data.bucket_dates.length === 0) {
+  // bucket_dates are DATE-generated (31 entries even for an empty corpus),
+  // so emptiness must key on the data totals — with bucket-only checking the
+  // empty state was unreachable and an all-zero corpus rendered a dead
+  // canvas (found 2026-07-10).
+  if (!data || data.bucket_dates.length === 0 || data.totals.mentions === 0) {
     return (
       <div className="flex h-full w-full items-center justify-center p-12" data-testid="timeline-empty">
         <EmptyState

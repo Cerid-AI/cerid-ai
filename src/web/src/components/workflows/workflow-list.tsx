@@ -184,11 +184,38 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
       </div>
 
       {workflows.length === 0 ? (
-        <EmptyState
-          icon={GitBranch}
-          title="No workflows yet"
-          description="Create a workflow to visually compose agent pipelines"
-        />
+        <div className="p-3 space-y-3 max-w-xl mx-auto w-full">
+          <EmptyState
+            icon={GitBranch}
+            title="No workflows yet"
+            description="A workflow chains Cerid's agents into a repeatable pipeline — retrieval, verification, curation — that runs against your knowledge base on demand."
+          />
+          <ol className="space-y-2 rounded-lg border bg-muted/30 p-3" aria-label="How to build a workflow">
+            {[
+              { step: "Create", detail: "Start from a template or a blank canvas." },
+              { step: "Compose", detail: "Add agent, parser, tool, and condition nodes, then connect them with edges to set the execution order." },
+              { step: "Run", detail: "Save, execute the pipeline, and review each node's result." },
+            ].map((item, i) => (
+              <li key={item.step} className="flex items-start gap-2.5 text-xs">
+                <span
+                  aria-hidden="true"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-teal-500/40 bg-teal-500/10 text-label-xs font-semibold text-teal-600 dark:text-teal-300"
+                >
+                  {i + 1}
+                </span>
+                <span className="pt-0.5">
+                  <span className="font-medium text-foreground">{item.step}</span>
+                  <span className="text-muted-foreground"> — {item.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+          <div className="flex justify-center">
+            <Button size="sm" onClick={onCreate}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Create your first workflow
+            </Button>
+          </div>
+        </div>
       ) : (
         <ScrollArea className="flex-1">
           <div className="p-3 space-y-2">

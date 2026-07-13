@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select"
 import { MODELS } from "@/lib/types"
 import type { ModelCapabilities, ModelOption } from "@/lib/types"
+import { fetchConfiguredProviders } from "@/lib/api/settings"
 import { formatCost } from "@/lib/utils"
 import { estimateTurnCost } from "@/lib/model-router"
 
@@ -13,9 +15,11 @@ interface ModelSelectProps {
   onChange: (model: string) => void
   /**
    * Lowercased provider IDs that the user has configured an API key for
-   * (e.g. ["anthropic", "openai"]). Models whose provider isn't on this
-   * list render disabled with a "Not configured" hint so the user can't
-   * pick something that will error on send.
+   * (registry names from GET /setup/status, e.g. ["openrouter", "openai"]).
+   * Models whose ROUTING provider (the first segment of the model id,
+   * e.g. "openrouter" in "openrouter/google/gemini-2.5-flash") isn't on
+   * this list render disabled with a "Not configured" hint so the user
+   * can't pick something that will error on send.
    *
    * When undefined we treat all providers as configured (back-compat: the
    * dropdown looks identical to its pre-Phase-7 behaviour).
@@ -55,6 +59,13 @@ function groupByProvider(models: ModelOption[]): Array<[string, ModelOption[]]> 
   })
 }
 
+/** Routing provider = first segment of the catalog id ("openrouter" in
+ *  "openrouter/google/gemini-2.5-flash"). This — not the display brand —
+ *  is what GET /setup/status lists in configured_providers. */
+function routingProvider(id: string): string {
+  return id.split("/")[0].toLowerCase()
+}
+
 export function ModelSelect({ value, onChange, configuredProviders }: ModelSelectProps) {
   const selectedModel = MODELS.find((m) => m.id === value)
 
@@ -64,31 +75,68 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
     return new Set(configuredProviders.map((p) => p.toLowerCase()))
   }, [configuredProviders])
 
+  // Live advertised model lists per provider (best-effort decoration): a
+  // model whose routing provider IS configured but whose id is absent from
+  // that provider's advertised list gets an "Unavailable" hint instead of
+  // the misleading "Not configured". The helper is non-throwing, so a
+  // failed fetch just means no hints render.
+  const { data: providerCatalog } = useQuery({
+    queryKey: ["providers-configured"],
+    queryFn: () => fetchConfiguredProviders(),
+    staleTime: 300_000,
+  })
+  const advertisedByProvider = useMemo(() => {
+    if (!providerCatalog?.providers?.length) return null
+    const map = new Map<string, Set<string>>()
+    for (const p of providerCatalog.providers) {
+      map.set(p.name.toLowerCase(), new Set(p.models ?? []))
+    }
+    return map
+  }, [providerCatalog])
+
   const grouped = useMemo(() => groupByProvider(MODELS), [])
 
-  const isProviderConfigured = (provider: string) =>
-    configuredSet === null || configuredSet.has(provider.toLowerCase())
+  // A model is usable when its ROUTING provider is configured (the P0-B
+  // fix: catalog ids all route via "openrouter/...", while m.provider is a
+  // display brand like "Google"/"Meta" that never appears in
+  // configured_providers — brand-only matching permanently disabled those
+  // rows). The brand fallback keeps direct-key setups (e.g. "anthropic")
+  // enabled too.
+  const isModelConfigured = (m: ModelOption): boolean =>
+    configuredSet === null ||
+    configuredSet.has(routingProvider(m.id)) ||
+    configuredSet.has(m.provider.toLowerCase())
+
+  // true/false when the provider's advertised list is known; null = unknown
+  // (no catalog data for that provider) — render no hint in that case.
+  const isModelAdvertised = (m: ModelOption): boolean | null => {
+    const advertised = advertisedByProvider?.get(routingProvider(m.id))
+    if (!advertised) return null
+    return advertised.has(m.id)
+  }
 
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="w-48">
         <span className="truncate">{selectedModel?.label ?? "Select model"}</span>
       </SelectTrigger>
-      <SelectContent position="popper" className="min-w-[20rem]">
+      <SelectContent position="popper" className="min-w-[20rem]"> {/* drift-allowed: pinned popper min-width so model rows and their availability hints align */}
         {grouped.map(([provider, models], groupIdx) => {
-          const configured = isProviderConfigured(provider)
+          const groupConfigured = models.some(isModelConfigured)
           return (
             <SelectGroup key={provider}>
               {groupIdx > 0 && <SelectSeparator />}
               <SelectLabel className="flex items-center justify-between">
                 <span>{provider}</span>
-                {!configured && (
+                {!groupConfigured && (
                   <span className="text-label-xxs font-normal text-muted-foreground/80">Not configured</span>
                 )}
               </SelectLabel>
               {models.map((m) => {
                 const cost = estimateTurnCost(m, 2000, 500)
                 const top = m.capabilities ? topCapability(m.capabilities) : null
+                const configured = isModelConfigured(m)
+                const unavailable = configured && isModelAdvertised(m) === false
                 return (
                   <SelectItem key={m.id} value={m.id} disabled={!configured}>
                     <span className="truncate">{m.label}</span>
@@ -100,6 +148,11 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
                     <span className="ml-1.5 shrink-0 text-label-xs text-muted-foreground">
                       ~{formatCost(cost)}
                     </span>
+                    {unavailable && (
+                      <span className="ml-1.5 shrink-0 rounded bg-muted px-1 py-0.5 text-label-xs text-muted-foreground/80">
+                        Unavailable
+                      </span>
+                    )}
                   </SelectItem>
                 )
               })}

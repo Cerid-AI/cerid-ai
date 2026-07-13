@@ -442,3 +442,157 @@ class TestExternalReferenceModel:
         )
         # Model accepts any string; truncation is the orchestrator's responsibility
         assert len(ref.snippet) == 250
+
+
+# ---------------------------------------------------------------------------
+# is_plausible_wikipedia_title (2026-07-12 junk-title filter)
+# ---------------------------------------------------------------------------
+
+
+class TestIsPlausibleWikipediaTitle:
+    def _filter(self, name: str) -> bool:
+        from app.services.external_apis.wiki_enrichment import (
+            is_plausible_wikipedia_title,
+        )
+        return is_plausible_wikipedia_title(name)
+
+    # -- rejects -----------------------------------------------------------
+
+    def test_rejects_full_url(self):
+        assert self._filter("https://docs.python.org/3/library/asyncio") is False
+
+    def test_rejects_scheme_anywhere(self):
+        assert self._filter("see ftp://host/file") is False
+
+    def test_rejects_bare_domain(self):
+        assert self._filter("example.com") is False
+
+    def test_rejects_www_prefix(self):
+        assert self._filter("www.wikipedia.org") is False
+
+    def test_rejects_domain_with_path(self):
+        assert self._filter("docs.python.org/3") is False
+
+    def test_rejects_quarter(self):
+        assert self._filter("Q3 2024") is False
+
+    def test_rejects_quarter_year_first(self):
+        assert self._filter("2024 Q3") is False
+
+    def test_rejects_bare_year(self):
+        assert self._filter("2024") is False
+
+    def test_rejects_iso_date(self):
+        assert self._filter("2024-07-12") is False
+
+    def test_rejects_slashed_date(self):
+        assert self._filter("7/12/2024") is False
+
+    def test_rejects_month_year(self):
+        assert self._filter("March 2024") is False
+
+    def test_rejects_day_month_year(self):
+        assert self._filter("15 March 2024") is False
+
+    def test_rejects_cfr_citation(self):
+        assert self._filter("5 CFR 1320.3(h)3") is False
+
+    def test_rejects_usc_citation(self):
+        assert self._filter("42 U.S.C. 1983") is False
+
+    def test_rejects_section_symbol(self):
+        assert self._filter("Section § 230 immunity") is False
+
+    def test_rejects_sentence_like_string(self):
+        assert self._filter(
+            "the quarterly report shows revenue increased across all segments"
+        ) is False
+
+    def test_rejects_empty_and_whitespace(self):
+        assert self._filter("") is False
+        assert self._filter("   ") is False
+
+    # -- keeps -------------------------------------------------------------
+
+    def test_keeps_plain_name(self):
+        assert self._filter("Marie Curie") is True
+
+    def test_keeps_disambiguated_title(self):
+        assert self._filter("Python (programming language)") is True
+
+    def test_keeps_dotted_software_name(self):
+        # Dotted but not a bare domain — "js" is not a rejected TLD.
+        assert self._filter("Node.js") is True
+
+    def test_keeps_multiword_concept_within_limit(self):
+        assert self._filter("General Data Protection Regulation") is True
+
+    def test_keeps_title_containing_a_year(self):
+        assert self._filter("2024 Summer Olympics") is True
+
+
+class TestEnrichSkipsImplausibleTitles:
+    async def test_wikipedia_not_called_for_junk_title(self):
+        registry = _make_registry({"wikipedia"})
+
+        with (
+            patch("app.services.external_apis.wiki_enrichment.WikipediaAdapter") as MockWiki,
+            patch("app.services.external_apis.wiki_enrichment.WikidataAdapter"),
+        ):
+            instance = MockWiki.return_value
+            instance.lookup = AsyncMock()
+
+            refs = await enrich(
+                "https://example.com/report?q=3",
+                "unknown",
+                registry=registry,
+            )
+
+        instance.lookup.assert_not_awaited()
+        assert refs == []
+        # The junk gate fires before the registry probe — no wasted work.
+        registry.is_enabled.assert_not_called()
+
+    async def test_wikipedia_still_called_for_plausible_title(self):
+        wiki_result = {
+            "title": "Marie Curie",
+            "extract": "Physicist and chemist.",
+            "content_url": "https://en.wikipedia.org/wiki/Marie_Curie",
+            "thumbnail_url": None,
+            "last_updated": "2026-01-01T00:00:00Z",
+        }
+        registry = _make_registry({"wikipedia"})
+
+        with (
+            patch("app.services.external_apis.wiki_enrichment.WikipediaAdapter") as MockWiki,
+            patch("app.services.external_apis.wiki_enrichment.WikidataAdapter"),
+        ):
+            instance = MockWiki.return_value
+            instance.lookup = AsyncMock(return_value=wiki_result)
+
+            refs = await enrich("Marie Curie", "person", registry=registry)
+
+        instance.lookup.assert_awaited_once()
+        assert len(refs) == 1
+        assert refs[0].title == "Marie Curie"
+
+    async def test_junk_gate_does_not_block_non_wikipedia_adapters(self):
+        """The gate is wikipedia-specific — github lookups for owner/repo
+        style names (which look URL-ish to a title filter) must proceed."""
+        github_result = {
+            "full_name": "Cerid-AI/cerid-ai",
+            "description": "AI knowledge companion",
+            "url": "https://github.com/Cerid-AI/cerid-ai",
+        }
+        registry = _make_registry({"github"})
+
+        with patch("app.services.external_apis.wiki_enrichment.GitHubAdapter") as MockGH:
+            instance = MockGH.return_value
+            instance.lookup = AsyncMock(return_value=github_result)
+
+            refs = await enrich(
+                "Cerid-AI/cerid-ai", "repository", registry=registry,
+            )
+
+        instance.lookup.assert_awaited_once()
+        assert len(refs) == 1

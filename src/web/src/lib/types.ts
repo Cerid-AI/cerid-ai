@@ -1124,6 +1124,8 @@ export interface SetupStatus {
   configured_providers: string[]
   provider_status?: Record<string, { configured: boolean; key_env_var: string; key_present: boolean }>
   services?: Record<string, string>
+  /** Server-side first-run flag; optional so older backends still parse. */
+  onboarding_complete?: boolean
 }
 
 export interface KeyValidation {

@@ -47,6 +47,11 @@ export interface KindSpecificFieldsProps {
    * and folder path is rendered as static text (path is immutable post-create).
    */
   editMode?: boolean
+  /**
+   * Folder kind only: container-side roots a watched-folder path must live
+   * under (from /sources/kinds allowed_roots). Drives the add-mode helper copy.
+   */
+  allowedRoots?: string[]
 }
 
 export function KindSpecificFields({
@@ -55,6 +60,7 @@ export function KindSpecificFields({
   config,
   onConfig,
   editMode = false,
+  allowedRoots = [],
 }: KindSpecificFieldsProps) {
   // In edit mode, provider is always read-only even if providers list is present
   if (providers.length > 0 && !editMode) {
@@ -93,20 +99,81 @@ export function KindSpecificFields({
       ? (config.exclude_patterns as string[]).join(", ")
       : String(config.exclude_patterns ?? "")
 
+    const importMode = config.import_mode === "once" ? "once" : "watch"
+
     return (
       <div className="space-y-3">
-        {/* Path — read-only always (immutable) */}
-        <div>
-          <span className="text-xs font-medium text-foreground">Path</span>
-          <div className="mt-1 rounded-md border border-border/50 bg-muted/30 px-3 py-1.5 text-sm text-muted-foreground">
-            {rawPath || <em className="opacity-60">not set</em>}
-          </div>
-          {editMode && (
+        {/* Path — editable at creation, immutable afterwards */}
+        {editMode ? (
+          <div>
+            <span className="text-xs font-medium text-foreground">Path</span>
+            <div className="mt-1 rounded-md border border-border/50 bg-muted/30 px-3 py-1.5 text-sm text-muted-foreground">
+              {rawPath || <em className="opacity-60">not set</em>}
+            </div>
             <p className="mt-0.5 text-label-xs text-muted-foreground">
               Path cannot be changed after creation.
             </p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div>
+            <label className="text-xs font-medium text-foreground" htmlFor="folder-path">
+              Folder path
+            </label>
+            <input
+              id="folder-path"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder={allowedRoots[0] ? `${allowedRoots[0]}/notes` : "/archive/notes"}
+              value={rawPath}
+              onChange={(e) => onConfig({ ...config, path: e.target.value })}
+            />
+            <p className="mt-0.5 text-label-xs text-muted-foreground">
+              This path is inside the Cerid container, not your desktop
+              filesystem — mount the directory into the container first.
+              {allowedRoots.length > 0 && (
+                <> Allowed roots: {allowedRoots.join(", ")}.</>
+              )}
+            </p>
+          </div>
+        )}
+
+        {/* Import mode — creation-time choice */}
+        {!editMode && (
+          <fieldset>
+            <legend className="text-xs font-medium text-foreground">Import mode</legend>
+            <div className="mt-1 space-y-1.5">
+              <div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-foreground">
+                  <input
+                    type="radio"
+                    name="folder-import-mode"
+                    aria-describedby="import-mode-watch-hint"
+                    checked={importMode === "watch"}
+                    onChange={() => onConfig({ ...config, import_mode: "watch" })}
+                  />
+                  Watch folder (continuous)
+                </label>
+                <p id="import-mode-watch-hint" className="ml-5 text-label-xs text-muted-foreground">
+                  Cerid re-scans this folder on a schedule and ingests new files as they appear.
+                </p>
+              </div>
+              <div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-foreground">
+                  <input
+                    type="radio"
+                    name="folder-import-mode"
+                    aria-describedby="import-mode-once-hint"
+                    checked={importMode === "once"}
+                    onChange={() => onConfig({ ...config, import_mode: "once" })}
+                  />
+                  One-time import
+                </label>
+                <p id="import-mode-once-hint" className="ml-5 text-label-xs text-muted-foreground">
+                  Cerid ingests the current contents once, then stops watching the folder.
+                </p>
+              </div>
+            </div>
+          </fieldset>
+        )}
 
         {/* Label */}
         <div>

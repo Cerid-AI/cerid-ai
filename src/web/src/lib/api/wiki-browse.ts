@@ -94,6 +94,10 @@ function normalizeIndexEntry(raw: Record<string, unknown>): WikiIndexEntry {
     last_updated_at: raw.last_updated_at != null ? String(raw.last_updated_at) : null,
     activity_score: Number(raw.activity_score ?? raw.recent_activity_score ?? 0),
     has_summary: Boolean(raw.has_summary),
+    completeness:
+      raw.completeness === "stub" || raw.completeness === "start" || raw.completeness === "full"
+        ? raw.completeness
+        : undefined,
   }
 }
 

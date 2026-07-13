@@ -60,6 +60,9 @@ beforeEach(() => {
       sibling_circuit_open: null,
       auth_kind: "oauth",
       instruction_doc: "",
+      imports_desc: "Email messages matching your queries.",
+      sync_semantics: "On-demand lookup while connected — no bulk import.",
+      lands_in: "Chat answers with citations.",
     },
   ])
   mockFetchEmailStatus.mockResolvedValue({ last_poll: null, messages_ingested: 0, errors: [] })
@@ -76,6 +79,14 @@ describe("SourcesConnectors", () => {
     expect(await screen.findByText("Notes")).toBeInTheDocument()
     // Gmail connector row: displayName rendered as the row title.
     expect(screen.getAllByText("Gmail").length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("connector rows show their sync-semantics explainer as the sub-label (P0-C.4)", async () => {
+    render(<SourcesConnectors />, { wrapper: wrap() })
+    await screen.findByText("Notes")
+    expect(
+      screen.getByText("On-demand lookup while connected — no bulk import."),
+    ).toBeInTheDocument()
   })
 
   it("does not render external-API or plugin sections", async () => {
@@ -288,5 +299,24 @@ describe("SourcesConnectors — four-state matrix", () => {
     expect(screen.queryByTestId("sources-loading")).not.toBeInTheDocument()
     expect(screen.queryByText(/Connect your first source/i)).not.toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("empty: an oauth gallery tile opens ConnectorDetail for that connector (P0-C.4)", async () => {
+    mockSources.mockResolvedValue([])
+    mockFetchEmailStatus.mockResolvedValue({
+      configured: false, last_poll: null, messages_ingested: 0, errors: [],
+    })
+    mockListSourceKinds.mockResolvedValue([
+      { kind: "gmail", family: "mail", tier: "pro", availability: "oauth" },
+    ])
+    render(<SourcesConnectors />, { wrapper: wrap() })
+
+    expect(await screen.findByText(/Connect your first source/i)).toBeInTheDocument()
+    const tile = screen.getByRole("button", { name: /connect gmail/i })
+    fireEvent.click(tile)
+
+    // ConnectorDetail dialog opens with the status + explainer sections.
+    expect(await screen.findByText("Status")).toBeInTheDocument()
+    expect(screen.getByText("How this connector works")).toBeInTheDocument()
   })
 })

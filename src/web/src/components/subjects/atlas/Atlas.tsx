@@ -722,6 +722,32 @@ export function Atlas({
   const lodTierRef = useRef<LodTier>("mid")
   // In-flight ego-migration morph (A5) — cancelled on refocus/unmount.
   const morphRef = useRef<MorphHandle | null>(null)
+  // Camera pointer interaction is frozen for the morph duration (the
+  // drag-mid-morph race: panning against in-flight position tweens reads as
+  // de-linked edges). Programmatic Camera.animate stays unaffected. The
+  // restore callback is idempotent and re-armed per morph.
+  const restoreCameraRef = useRef<(() => void) | null>(null)
+  const suppressCameraDuringMorph = useCallback(() => {
+    restoreCameraRef.current?.()
+    const s = sigmaRef.current
+    if (!s) return
+    const prev = {
+      zooming: s.getSetting("enableCameraZooming"),
+      panning: s.getSetting("enableCameraPanning"),
+      rotation: s.getSetting("enableCameraRotation"),
+    }
+    s.setSetting("enableCameraZooming", false)
+    s.setSetting("enableCameraPanning", false)
+    s.setSetting("enableCameraRotation", false)
+    restoreCameraRef.current = () => {
+      restoreCameraRef.current = null
+      const cur = sigmaRef.current
+      if (!cur) return
+      cur.setSetting("enableCameraZooming", prev.zooming)
+      cur.setSetting("enableCameraPanning", prev.panning)
+      cur.setSetting("enableCameraRotation", prev.rotation)
+    }
+  }, [])
   const spotlight = useMemo(
     () =>
       createFocusSpotlight({
@@ -902,7 +928,7 @@ export function Atlas({
           }
         },
       })
-        .then(() => {
+        .then(async () => {
           if (cancelled || !sigmaRef.current) return
           const liveGraph = sigmaRef.current.getGraph()
           const plan = planMigrationTargets(liveGraph, next)
@@ -927,14 +953,30 @@ export function Atlas({
               spawnProgress: 0,
             })
           }
-          syncEdges(liveGraph, next)
-          void applyParallelEdgeCurvature(liveGraph)
+          // Exit nodes shrink AND fade with their edges still attached: seed
+          // the tween at 1 (the attr is absent on never-entered nodes, and
+          // the morph's missing-attr fallback would start them transparent)
+          // and defer their incident-edge drops to onDone — stripping edges
+          // up-front leaves exit nodes visibly de-linked for the whole morph.
+          for (const id of plan.exit) {
+            liveGraph.setNodeAttribute(id, "spawnProgress", 1)
+          }
+          syncEdges(liveGraph, next, new Set(plan.exit))
+          // Curvature must land BEFORE the morph: the lazy import resolves
+          // async and mutates edge attrs in place (no graphology events), so
+          // without the await + explicit refresh the parallel fanning paints
+          // a frame late under the morph's skipIndexation refreshes.
+          await applyParallelEdgeCurvature(liveGraph)
+          if (cancelled || !sigmaRef.current) return
+          sigmaRef.current.refresh()
+          suppressCameraDuringMorph()
           morphRef.current?.cancel()
           morphRef.current = morphPositions(liveGraph, plan.targets, {
             durationMs: 600,
             reducedMotion,
             onFrame: () => sigmaRef.current?.refresh({ skipIndexation: true }),
             onDone: () => {
+              restoreCameraRef.current?.()
               const g = sigmaRef.current?.getGraph()
               if (g) {
                 for (const id of plan.exit) {
@@ -961,13 +1003,16 @@ export function Atlas({
         cancelled = true
         abortRef.current?.abort()
         morphRef.current?.cancel()
+        restoreCameraRef.current?.()
       }
     }
 
     // ------------------- CONSTRUCT path (first data arrival) -------------------
     const graph = next
-    // Parallel edge fanning is async (lazy dynamic import to avoid WebGL in tests)
-    void applyParallelEdgeCurvature(graph)
+    // Parallel edge fanning is async (lazy dynamic import to avoid WebGL in
+    // tests) and mutates edge attrs in place (no graphology events) — refresh
+    // once it lands so the curvature doesn't paint a frame late.
+    void applyParallelEdgeCurvature(graph).then(() => sigmaRef.current?.refresh())
 
     if (graph.order === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
@@ -1118,6 +1163,7 @@ export function Atlas({
   useEffect(
     () => () => {
       morphRef.current?.cancel()
+      restoreCameraRef.current = null
       sigmaRef.current?.kill()
       sigmaRef.current = null
     },
@@ -1190,6 +1236,8 @@ export function Atlas({
         graph: {
           source: (e: string) => sigmaRef.current?.getGraph().source(e) ?? "",
           target: (e: string) => sigmaRef.current?.getGraph().target(e) ?? "",
+          getNodeAttribute: (n: string, attr: string) =>
+            sigmaRef.current?.getGraph().getNodeAttribute(n, attr as keyof AtlasNodeAttributes),
         },
         getLodTier: () => lodTierRef.current,
       }),

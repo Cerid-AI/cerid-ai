@@ -323,6 +323,35 @@ export async function fetchProviderCredits(): Promise<import("../types").Provide
 }
 
 // ---------------------------------------------------------------------------
+// Configured providers (GET /providers/configured)
+// Each entry carries the provider's registry name ("openrouter", "openai",
+// "anthropic", "xai", "ollama") plus the model ids it advertises. The chat
+// model dropdown uses this to distinguish "provider not configured" from
+// "model not advertised by the configured provider".
+// ---------------------------------------------------------------------------
+
+export interface ConfiguredProviderInfo {
+  name: string
+  display_name: string
+  requires_api_key: boolean
+  key_set: boolean
+  key_preview: string | null
+  models: string[]
+}
+
+export interface ConfiguredProvidersResponse {
+  providers: ConfiguredProviderInfo[]
+  total: number
+}
+
+/** Non-throwing — availability hints are best-effort decoration. */
+export async function fetchConfiguredProviders(): Promise<ConfiguredProvidersResponse> {
+  const res = await fetch(`${MCP_BASE}/providers/configured`, { headers: mcpHeaders() })
+  if (!res.ok) return { providers: [], total: 0 }
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
 // Ollama / Internal LLM
 
 export async function fetchOllamaStatus(): Promise<import("../types").OllamaStatus> {
@@ -347,6 +376,14 @@ export async function fetchOllamaRecommendations(): Promise<import("../types").O
   return res.json()
 }
 
+/** Error thrown by pullOllamaModel when the backend reports pull is
+ *  structurally unsupported (e.g. Quenchforge answers not_implemented).
+ *  `hint` carries the backend's remediation guidance when present. */
+export interface ModelPullError extends Error {
+  code?: "model_pull_unsupported"
+  hint?: string
+}
+
 export async function pullOllamaModel(model: string): Promise<Response> {
   const res = await fetch(`${MCP_BASE}/ollama/pull`, {
     method: "POST",
@@ -361,7 +398,11 @@ export async function pullOllamaModel(model: string): Promise<Response> {
     let message = "Model pull is not supported by this backend."
     const match = text.match(/"error"\s*:\s*"((?:[^"\\]|\\.)*)"/)
     if (match?.[1]) message = match[1].replace(/\\"/g, '"')
-    throw new Error(message)
+    const err: ModelPullError = new Error(message)
+    err.code = "model_pull_unsupported"
+    const hintMatch = text.match(/"hint"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+    if (hintMatch?.[1]) err.hint = hintMatch[1].replace(/\\"/g, '"')
+    throw err
   }
   return res
 }
@@ -466,18 +507,32 @@ export async function fetchInternalProvider(): Promise<{ provider: string; model
 // Data Sources
 // ---------------------------------------------------------------------------
 
-export async function fetchDataSources(): Promise<{ sources: Array<{ name: string; description: string; enabled: boolean; configured: boolean; requires_api_key: boolean; api_key_env_var: string; domains: string[] }>; total: number }> {
+/** One entry from GET /data-sources — a chat-tool lookup source (registry in
+    app/data_sources), distinct from the /external-apis enrichment adapters. */
+export interface DataSourceSummary {
+  name: string
+  description: string
+  enabled: boolean
+  configured: boolean
+  requires_api_key: boolean
+  api_key_env_var: string
+  domains: string[]
+}
+
+export async function fetchDataSources(): Promise<{ sources: DataSourceSummary[]; total: number }> {
   const res = await fetch(`${MCP_BASE}/data-sources`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error("Failed to fetch data sources")
   return res.json()
 }
 
 export async function enableDataSource(name: string): Promise<void> {
-  await fetch(`${MCP_BASE}/data-sources/${name}/enable`, { method: "POST", headers: mcpHeaders() })
+  const res = await fetch(`${MCP_BASE}/data-sources/${encodeURIComponent(name)}/enable`, { method: "POST", headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Failed to enable ${name}`))
 }
 
 export async function disableDataSource(name: string): Promise<void> {
-  await fetch(`${MCP_BASE}/data-sources/${name}/disable`, { method: "POST", headers: mcpHeaders() })
+  const res = await fetch(`${MCP_BASE}/data-sources/${encodeURIComponent(name)}/disable`, { method: "POST", headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Failed to disable ${name}`))
 }
 
 // ---------------------------------------------------------------------------

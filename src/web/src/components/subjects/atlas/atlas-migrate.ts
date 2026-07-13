@@ -103,7 +103,10 @@ export interface MigrationPlan {
 /**
  * Build the morph plan AFTER layout has assigned final positions to `next`:
  * common nodes tween x/y/size, enters grow (size 0→final, spawnProgress
- * 0→1), exits shrink in place and are dropped on settle.
+ * 0→1), exits shrink AND fade in place (spawnProgress 1→0 — the reducers
+ * alpha-fade nodes and incident edges together) and are dropped on settle.
+ * Callers must seed spawnProgress=1 on exit nodes before morphing, or the
+ * tween's missing-attr fallback starts them already-transparent.
  */
 export function planMigrationTargets(live: GraphLike, next: GraphLike): MigrationPlan {
   const enter: string[] = []
@@ -124,7 +127,7 @@ export function planMigrationTargets(live: GraphLike, next: GraphLike): Migratio
   for (const id of live.nodes()) {
     if (!next.hasNode(id)) {
       exit.push(id)
-      targets.set(id, { size: EXIT_SIZE })
+      targets.set(id, { size: EXIT_SIZE, spawnProgress: 0 })
     }
   }
   return { enter, exit, targets }
@@ -150,10 +153,20 @@ export function syncCommonNodeAttrs(live: GraphLike, next: GraphLike, common: st
  * Diff edges by their deterministic `src::tgt::type` keys: drop live-only
  * edges, add next-only edges (endpoints must already exist in live —
  * Atlas adds entering nodes first).
+ *
+ * Edges incident to a node in `deferIncidentTo` (the morph plan's exit set)
+ * are NOT dropped here: exit nodes stay visible for the whole morph, and
+ * stripping their edges up-front reads as de-linked connections mid-morph.
+ * They fall automatically when Atlas drops the exit nodes on settle
+ * (graphology dropNode removes incident edges).
  */
-export function syncEdges(live: GraphLike, next: GraphLike): void {
+export function syncEdges(live: GraphLike, next: GraphLike, deferIncidentTo?: ReadonlySet<string>): void {
   for (const key of live.edges()) {
-    if (!next.hasEdge(key)) live.dropEdge(key)
+    if (next.hasEdge(key)) continue
+    if (deferIncidentTo && (deferIncidentTo.has(live.source(key)) || deferIncidentTo.has(live.target(key)))) {
+      continue
+    }
+    live.dropEdge(key)
   }
   for (const key of next.edges()) {
     if (live.hasEdge(key)) continue

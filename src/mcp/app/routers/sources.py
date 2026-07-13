@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.db.neo4j import sources as srcdb
@@ -71,8 +71,14 @@ class SourceKindMeta(BaseModel):
     kind: str
     family: str
     tier: str  # "core" | "pro"
-    availability: str = "coming_soon"  # "available" | "oauth" | "coming_soon"
+    # "available" | "oauth" | "coming_soon" | "requires_desktop"
+    availability: str = "coming_soon"
     providers: list[str] = []  # webhook-backed kinds: the recipe providers to pick
+    # True for kinds backed by a desktop helper/daemon (apple_mail,
+    # apple_reminders, clipboard) regardless of whether it is currently present.
+    requires_desktop: bool = False
+    # folder kind only: container-side roots a watched folder must live under.
+    allowed_roots: list[str] = []
 
 
 def _is_webhook_backed(kind: str) -> bool:
@@ -96,14 +102,50 @@ def _kind_providers(kind: str) -> list[str]:
     return providers_for_kind(kind)
 
 
+def _kind_requires_desktop(kind: str) -> bool:
+    """True for kinds whose ingestion path runs through a desktop helper or
+    host daemon (apple_mail → ceridmail, apple_reminders → ceridreminders,
+    clipboard → host clipboard daemon). Derived from the connector's
+    ``requires_desktop`` attribute so new helper-backed kinds are covered
+    automatically."""
+    import core.ingest.sources.connectors as _conns  # noqa: F401 — registers connectors
+    from core.ingest.sources.registry import get_connector
+
+    connector = get_connector(kind)  # type: ignore[arg-type]
+    return bool(connector is not None and getattr(connector, "requires_desktop", False))
+
+
+def _desktop_helper_available(kind: str) -> bool | None:
+    """Probe whether the desktop helper/daemon behind a kind is present.
+
+    Returns ``None`` for kinds that don't need one, ``True``/``False``
+    otherwise. Clipboard is probed via its Redis heartbeat (the daemon runs
+    host-side); the Apple connectors expose a ``desktop_available()`` probe
+    (``shutil.which`` on the helper binary).
+    """
+    if not _kind_requires_desktop(kind):
+        return None
+    if kind == "clipboard":
+        return _check_clipboard_daemon().ok
+
+    from core.ingest.sources.registry import get_connector
+
+    connector = get_connector(kind)  # type: ignore[arg-type]
+    probe = getattr(connector, "desktop_available", None)
+    return bool(probe()) if callable(probe) else True
+
+
 def _kind_availability(kind: str, oauth_kinds: set[str]) -> str:
     """Capability flag for a source kind, so the wizard can gate kinds that
     have no working ingestion path (rather than letting POST /sources 501).
 
-    - ``available``   — a SourceConnector is registered, a webhook-backed kind,
-                        or the ``folder`` kind (bridge-backed via watched-folders).
-    - ``oauth``       — connectable via the /connectors OAuth flow (Gmail, etc.).
-    - ``coming_soon`` — declared in SOURCE_KINDS but not yet implemented.
+    - ``available``        — a SourceConnector is registered, a webhook-backed
+                             kind, or the ``folder`` kind (bridge-backed via
+                             watched-folders).
+    - ``requires_desktop`` — a connector is registered but its desktop
+                             helper/daemon is absent, so connect() would 422.
+    - ``oauth``            — connectable via the /connectors OAuth flow.
+    - ``coming_soon``      — declared in SOURCE_KINDS but not yet implemented.
     """
     # folder is bridge-backed (watched-folders store); no connector registered.
     if kind == "folder":
@@ -112,7 +154,11 @@ def _kind_availability(kind: str, oauth_kinds: set[str]) -> str:
     import core.ingest.sources.connectors as _conns  # noqa: F401 — registers connectors
     from core.ingest.sources.registry import get_connector
 
-    if _is_webhook_backed(kind) or get_connector(kind) is not None:  # type: ignore[arg-type]
+    if _is_webhook_backed(kind):
+        return "available"
+    if get_connector(kind) is not None:  # type: ignore[arg-type]
+        if _desktop_helper_available(kind) is False:
+            return "requires_desktop"
         return "available"
     if kind in oauth_kinds:
         return "oauth"
@@ -207,8 +253,10 @@ async def list_source_kinds():
     Drives the F1 gallery and the F2 radial menu's family grouping.
     """
     from app.routers.connectors import oauth_connector_kinds
+    from app.routers.watched_folders import _ALLOWED_ROOTS
 
     oauth_kinds = oauth_connector_kinds()
+    folder_roots = [str(r) for r in _ALLOWED_ROOTS]
     return [
         SourceKindMeta(
             kind=k,
@@ -216,6 +264,8 @@ async def list_source_kinds():
             tier=KIND_TIER[k],
             availability=_kind_availability(k, oauth_kinds),
             providers=_kind_providers(k),
+            requires_desktop=_kind_requires_desktop(k),
+            allowed_roots=folder_roots if k == "folder" else [],
         )
         for k in SOURCE_KINDS
     ]
@@ -264,7 +314,12 @@ async def create_source(body: CreateSourceRequest):
     if kind == "folder":
         try:
             proj = await create_folder_source(get_redis(), body.display_name, body.config)
-        except HTTPException:
+        except HTTPException as exc:
+            # The watched-folders handler raises 400 for a missing directory or
+            # a path outside the allowed roots — surface those as 422 (invalid
+            # config), matching every other kind's config-validation failures.
+            if exc.status_code == status.HTTP_400_BAD_REQUEST:
+                raise HTTPException(status_code=422, detail=exc.detail) from exc
             raise
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

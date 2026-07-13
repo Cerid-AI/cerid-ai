@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ArtifactCard } from "@/components/kb/artifact-card"
 import type { KBQueryResult } from "@/lib/types"
@@ -137,5 +137,78 @@ describe("ArtifactCard", () => {
     )
     // No quality_score → no QualityBadge rendered
     expect(screen.queryByText(/^Q\d+$/)).not.toBeInTheDocument()
+  })
+})
+
+describe("ArtifactCard — compact mode (Library grid)", () => {
+  it("opens the artifact preview when the card body is clicked", async () => {
+    const user = userEvent.setup()
+    const onPreview = vi.fn()
+    const onSelect = vi.fn()
+    render(
+      <ArtifactCard
+        result={makeResult()}
+        isSelected={false}
+        onSelect={onSelect}
+        onInject={vi.fn()}
+        onPreview={onPreview}
+        compact
+      />,
+    )
+    await user.click(screen.getByText("test-document.py"))
+    expect(onPreview).toHaveBeenCalledWith("art-1")
+    // Compact click routes to the preview, not the (no-op) expand+select path
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("opens the artifact preview via keyboard on the card", async () => {
+    const onPreview = vi.fn()
+    render(
+      <ArtifactCard
+        result={makeResult()}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onInject={vi.fn()}
+        onPreview={onPreview}
+        compact
+      />,
+    )
+    const card = screen.getByLabelText("test-document.py - coding")
+    fireEvent.keyDown(card, { key: "Enter" })
+    expect(onPreview).toHaveBeenCalledWith("art-1")
+  })
+
+  it("falls back to selection when no onPreview is wired", async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <ArtifactCard
+        result={makeResult()}
+        isSelected={false}
+        onSelect={onSelect}
+        onInject={vi.fn()}
+        compact
+      />,
+    )
+    await user.click(screen.getByText("test-document.py"))
+    expect(onSelect).toHaveBeenCalled()
+  })
+
+  it("still expands in place (not preview) in non-compact mode", async () => {
+    const user = userEvent.setup()
+    const onPreview = vi.fn()
+    const onSelect = vi.fn()
+    render(
+      <ArtifactCard
+        result={makeResult()}
+        isSelected={false}
+        onSelect={onSelect}
+        onInject={vi.fn()}
+        onPreview={onPreview}
+      />,
+    )
+    await user.click(screen.getByText("test-document.py"))
+    expect(onSelect).toHaveBeenCalled()
+    expect(onPreview).not.toHaveBeenCalled()
   })
 })

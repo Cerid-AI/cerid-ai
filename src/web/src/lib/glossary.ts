@@ -192,6 +192,24 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     short:
       "The weekly artifact that derives lane labels from community summaries is unavailable. Labels fall back to hub-entity names until the next weekly refresh runs.",
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Knowledge providers (Settings → Extensions)
+  // ──────────────────────────────────────────────────────────────────────
+  "provider-scope-enrichment": {
+    label: "Enrichment provider",
+    short:
+      "Toggles whether this provider is consulted when enriching wiki entities and verifying answers. It is not a chat tool.",
+    detail:
+      "Enrichment providers are read-only public APIs the background pipeline searches while building wiki entries and checking claims. Disabling one stops it from contributing enrichment context; chat lookups are unaffected.",
+  },
+  "provider-scope-chat-tool": {
+    label: "Chat lookup tool",
+    short:
+      "Toggles whether chat can query this source as a live lookup tool when answering. It does not affect wiki enrichment.",
+    detail:
+      "Chat tools are queried in parallel when a conversation needs external facts; results appear in answers with citations. Disabling one removes it from chat lookups; enrichment providers are unaffected.",
+  },
 }
 
 export type GlossaryKey = keyof typeof GLOSSARY

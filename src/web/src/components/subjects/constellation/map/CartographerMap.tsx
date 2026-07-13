@@ -23,6 +23,7 @@ import { createNodeBorderProgram } from "@sigma/node-border"
 import { NodeCircleProgram, createNodeCompoundProgram } from "sigma/rendering"
 import type { NodeProgramType } from "sigma/rendering"
 import { Loader2, X, Link2, Users, ShieldCheck, Maximize2 } from "lucide-react"
+import { PaneError } from "@/components/ui/pane-error"
 import type { GraphMapResponse, CommunityHull, MapLayout } from "@/lib/api/graph-map"
 import type { MapConfig } from "./map-config"
 import { LABEL_DENSITY_VALUES } from "./map-config"
@@ -303,6 +304,8 @@ export interface CartographerMapProps {
   isLoading: boolean
   isError: boolean
   errorMessage?: string
+  /** Retry the graph-map fetch from the first-load error card. */
+  onRetry?: () => void
   newEntityIds?: Set<string>
   /**
    * Unified click contract (Cycle 4): pin/inspect only — never mode-switch.
@@ -353,6 +356,7 @@ export function CartographerMap({
   isLoading,
   isError,
   errorMessage,
+  onRetry,
   newEntityIds,
   onInspect,
   onFocusEntity: _onFocusEntity, // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -1574,11 +1578,12 @@ export function CartographerMap({
 
   if (isError) {
     return (
-      <div className="flex h-full items-center justify-center p-6">
-        <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {errorMessage ?? "Failed to load knowledge map."}
-        </div>
-      </div>
+      <PaneError
+        fullPage
+        title="Failed to load the knowledge map"
+        description={errorMessage}
+        onRetry={onRetry}
+      />
     )
   }
 

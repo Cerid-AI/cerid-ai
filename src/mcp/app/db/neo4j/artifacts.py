@@ -267,10 +267,11 @@ def list_artifacts(
     client_source: str | None = None,
     since: str | None = None,
     min_quality: float | None = None,
+    search: str | None = None,
     offset: int = 0,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """List artifacts, optionally filtered by domain, sub_category, tag, client_source, date, and quality."""
+    """List artifacts, optionally filtered by domain, sub_category, tag, client_source, date, quality, and a filename/summary substring."""
     base_query = "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
     conditions = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -297,6 +298,17 @@ def list_artifacts(
     if min_quality is not None:
         conditions.append("a.quality_score >= $min_quality")
         params["min_quality"] = min_quality
+    if search:
+        # Case-insensitive substring over filename + summary. Added
+        # 2026-07-10: callers were already passing ?search= and FastAPI
+        # silently dropped the unknown param — a filtered-delete loop
+        # walked UNFILTERED pages as a result (the artifact-purge
+        # incident). The param is now real.
+        conditions.append(
+            "(toLower(a.filename) CONTAINS toLower($search) "
+            "OR toLower(coalesce(a.summary, '')) CONTAINS toLower($search))"
+        )
+        params["search"] = search
 
     if conditions:
         base_query += "WHERE " + " AND ".join(conditions) + " "

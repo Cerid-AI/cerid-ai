@@ -145,6 +145,114 @@ AVAILABLE_AGENTS = [
 
 
 # ---------------------------------------------------------------------------
+# Node-type catalog (additive metadata for the workflow builder UI)
+# ---------------------------------------------------------------------------
+
+class NodeTypeInfo(BaseModel):
+    type: str
+    label: str
+    description: str
+    inputs: str
+    outputs: str
+    config_schema_summary: str | None = None
+
+
+class AgentInfo(BaseModel):
+    name: str
+    description: str
+    inputs: str
+    outputs: str
+
+
+class NodeTypeCatalogResponse(BaseModel):
+    node_types: list[NodeTypeInfo]
+    agents: list[AgentInfo]
+
+
+# Descriptions are grounded in the actual execution semantics of
+# execute_workflow / _execute_agent_node above — keep them in sync when
+# execution behavior changes.
+NODE_TYPE_CATALOG: dict[str, dict[str, str | None]] = {
+    "agent": {
+        "label": "Agent",
+        "description": "Runs one of Cerid's built-in agents as a pipeline step. The node's name selects which agent executes.",
+        "inputs": "The workflow input merged with every upstream node's output (query, results, confidence, ...).",
+        "outputs": "The agent's result fields, passed downstream to connected nodes.",
+        "config_schema_summary": None,
+    },
+    "parser": {
+        "label": "Parser",
+        "description": "Marks a parsing step in the pipeline. Currently passes upstream data through unchanged.",
+        "inputs": "Upstream node outputs merged with the workflow input.",
+        "outputs": "The same data, unchanged.",
+        "config_schema_summary": None,
+    },
+    "tool": {
+        "label": "Tool",
+        "description": "Marks an external tool step in the pipeline. Currently passes upstream data through unchanged.",
+        "inputs": "Upstream node outputs merged with the workflow input.",
+        "outputs": "The same data, unchanged.",
+        "config_schema_summary": None,
+    },
+    "condition": {
+        "label": "Condition",
+        "description": "Evaluates a comparison expression against the data flowing in. When the expression is false, downstream nodes are skipped.",
+        "inputs": "Upstream node outputs merged with the workflow input.",
+        "outputs": "A passed flag plus the unchanged upstream data.",
+        "config_schema_summary": "expression — a comparison of one field against a value, e.g. confidence > 0.5 (operators: == != > < >= <=).",
+    },
+}
+
+AGENT_CATALOG: dict[str, dict[str, str]] = {
+    "query": {
+        "description": "Retrieves the most relevant knowledge-base entries for the input query.",
+        "inputs": "query (text), top_k (optional, default 5)",
+        "outputs": "results (matching entries), query",
+    },
+    "curator": {
+        "description": "Curates knowledge related to the query — deduplication, consistency, and quality checks.",
+        "inputs": "query (text)",
+        "outputs": "curation result",
+    },
+    "triage": {
+        "description": "Classifies an incoming file and routes it to the right ingestion path.",
+        "inputs": "file_path",
+        "outputs": "triage classification",
+    },
+    "rectify": {
+        "description": "Repairs inconsistencies between the vector store and the knowledge graph.",
+        "inputs": "none (operates on stored knowledge)",
+        "outputs": "rectification report",
+    },
+    "audit": {
+        "description": "Audits recent system activity and knowledge changes for anomalies.",
+        "inputs": "none (operates on stored state)",
+        "outputs": "audit report",
+    },
+    "maintenance": {
+        "description": "Runs system health checks across the graph, vector, and cache stores.",
+        "inputs": "none (operates on live services)",
+        "outputs": "health summary",
+    },
+    "hallucination": {
+        "description": "Checks response text against stored knowledge for unsupported claims.",
+        "inputs": "query (treated as the text to verify), conversation_id (optional)",
+        "outputs": "verification result",
+    },
+    "memory": {
+        "description": "Extracts durable memories from the text into episodic storage.",
+        "inputs": "query (treated as the text to mine), conversation_id (optional)",
+        "outputs": "results (extracted memories)",
+    },
+    "self_rag": {
+        "description": "Re-evaluates and improves a response with retrieval-augmented self-critique.",
+        "inputs": "query (text) plus upstream retrieval results",
+        "outputs": "enhanced response",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Workflow templates
 # ---------------------------------------------------------------------------
 
@@ -482,6 +590,28 @@ async def list_templates():
             "edges": edges,
         })
     return templates
+
+
+@router.get("/node-types", response_model=NodeTypeCatalogResponse)
+async def list_node_types():
+    """Describe the node types and agents available to the workflow builder."""
+    return NodeTypeCatalogResponse(
+        node_types=[
+            NodeTypeInfo(
+                type=node_type,
+                label=str(info["label"]),
+                description=str(info["description"]),
+                inputs=str(info["inputs"]),
+                outputs=str(info["outputs"]),
+                config_schema_summary=info["config_schema_summary"],
+            )
+            for node_type, info in NODE_TYPE_CATALOG.items()
+        ],
+        agents=[
+            AgentInfo(name=name, **AGENT_CATALOG[name])
+            for name in AVAILABLE_AGENTS
+        ],
+    )
 
 
 @router.post("", response_model=Workflow, status_code=201)

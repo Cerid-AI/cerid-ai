@@ -96,7 +96,12 @@ export interface AtlasEdgeReducerDeps {
   typeChips: Set<string>
   tokens: AtlasReducerTokens
   spotlight: SpotlightReader
-  graph: { source(edge: string): string; target(edge: string): string }
+  graph: {
+    source(edge: string): string
+    target(edge: string): string
+    /** Endpoint attr read for the A5 spawn/exit edge fade (spawnProgress). */
+    getNodeAttribute(node: string, attr: string): unknown
+  }
   /** Zoom-LOD tier (A2): thin edges fade then hide as the camera pulls back. */
   getLodTier?: () => LodTier
 }
@@ -105,31 +110,44 @@ export function buildAtlasEdgeReducer(
   deps: AtlasEdgeReducerDeps,
 ): (edge: string, attrs: AtlasEdgeAttributes) => AtlasEdgeAttributes {
   const { lensEdgeReducer, tokens, spotlight, graph, getLodTier } = deps
+  const spawnOf = (node: string): number => {
+    const v = graph.getNodeAttribute(node, "spawnProgress")
+    return typeof v === "number" ? v : 1
+  }
   return (edge, attrs) => {
-    const reduced: AtlasEdgeAttributes = lensEdgeReducer ? lensEdgeReducer(edge, attrs) : { ...attrs }
+    let reduced: AtlasEdgeAttributes = lensEdgeReducer ? lensEdgeReducer(edge, attrs) : { ...attrs }
+    // Fade contributions multiply (migration tween × spotlight/LOD) into one
+    // hue-preserving alpha application at the end — mirrors the node reducer.
+    let alphaMul = 1
+
+    // A5 migration: an edge tracks its weaker endpoint's spawn/exit tween
+    // (enter 0→1, exit 1→0) so exiting nodes keep visibly-attached edges
+    // and entering nodes never show pre-wired full-strength edges mid-morph.
+    const growth = Math.min(spawnOf(graph.source(edge)), spawnOf(graph.target(edge)))
+    if (growth < 1) alphaMul *= Math.max(0, growth)
 
     const focusNeighbors = spotlight.neighbors()
     if (focusNeighbors) {
       // Neighborhood edges stay at full strength (and ignore the LOD floor);
       // outside edges fade with the same eased progress as nodes.
-      if (focusNeighbors.has(graph.source(edge)) && focusNeighbors.has(graph.target(edge))) {
-        return reduced
+      if (!(focusNeighbors.has(graph.source(edge)) && focusNeighbors.has(graph.target(edge)))) {
+        alphaMul *= focusNodeAlpha(1, spotlight.progress()) * EDGE_FADE_SCALE
       }
-      const p = spotlight.progress()
-      return {
-        ...reduced,
-        color: hexWithAlpha(reduced.color || tokens.edge, focusNodeAlpha(1, p) * EDGE_FADE_SCALE),
+    } else {
+      // No focus: zoom-LOD fade — thin edges lose alpha across the fade band
+      // and drop out entirely below the tier floor, so pulled-back views read
+      // as structure instead of hairball.
+      const tier = getLodTier?.() ?? "detail"
+      if (tier !== "detail") {
+        const lodAlpha = lodEdgeAlpha(tier, reduced.size)
+        if (lodAlpha <= 0) return { ...reduced, hidden: true }
+        alphaMul *= lodAlpha
       }
     }
 
-    // No focus: zoom-LOD fade — thin edges lose alpha across the fade band
-    // and drop out entirely below the tier floor, so pulled-back views read
-    // as structure instead of hairball.
-    const tier = getLodTier?.() ?? "detail"
-    if (tier === "detail") return reduced
-    const lodAlpha = lodEdgeAlpha(tier, reduced.size)
-    if (lodAlpha <= 0) return { ...reduced, hidden: true }
-    if (lodAlpha >= 1) return reduced
-    return { ...reduced, color: hexWithAlpha(reduced.color || tokens.edge, lodAlpha) }
+    if (alphaMul < 1) {
+      reduced = { ...reduced, color: hexWithAlpha(reduced.color || tokens.edge, alphaMul) }
+    }
+    return reduced
   }
 }

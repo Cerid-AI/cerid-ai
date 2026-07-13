@@ -11,12 +11,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 // ---------------------------------------------------------------------------
 
 const mockFetchRegistry = vi.fn()
-const mockInstallKnowledgePack = vi.fn()
+const mockStartPackInstall = vi.fn()
 const mockQueryKB = vi.fn()
 
 vi.mock("@/lib/api/knowledge-packs", () => ({
   fetchKnowledgePackRegistry: (...args: unknown[]) => mockFetchRegistry(...args),
-  installKnowledgePack: (...args: unknown[]) => mockInstallKnowledgePack(...args),
+}))
+
+// The wizard surfaces install through the async contract helper
+// (202 job / already_installed / legacy sync 200) in lib/api/setup.
+vi.mock("@/lib/api/setup", () => ({
+  startPackInstall: (...args: unknown[]) => mockStartPackInstall(...args),
 }))
 
 vi.mock("@/lib/api/kb", () => ({
@@ -103,13 +108,8 @@ const MOCK_REGISTRY_RESPONSE = {
   },
 }
 
-const MOCK_INSTALL_RESPONSE = {
-  pack_id: "python-stdlib-docs",
-  version: "1.0.0",
-  installed_at: "2026-05-10T12:00:00Z",
-  domain: "coding",
-  artifact_count: 208,
-}
+// Legacy synchronous backend: startPackInstall resolves "installed" straight away.
+const MOCK_INSTALL_START = { status: "installed", jobId: null }
 
 // ---------------------------------------------------------------------------
 // Helper: wrap with a fresh QueryClient per test
@@ -140,7 +140,7 @@ beforeEach(() => {
   vi.restoreAllMocks()
   onComplete.mockClear()
   mockFetchRegistry.mockResolvedValue(MOCK_REGISTRY_RESPONSE)
-  mockInstallKnowledgePack.mockResolvedValue(MOCK_INSTALL_RESPONSE)
+  mockStartPackInstall.mockResolvedValue(MOCK_INSTALL_START)
   mockQueryKB.mockResolvedValue({
     results: [{ content: "Python pathlib lets you work with filesystem paths." }],
     total_results: 1,
@@ -173,7 +173,7 @@ describe("SamplePackTab", () => {
     })
   })
 
-  it("calls installKnowledgePack when Install is clicked", async () => {
+  it("calls startPackInstall when Install is clicked", async () => {
     renderWithQuery(<SamplePackTab onComplete={onComplete} />)
     await waitFor(() => screen.getByText("Python Standard Library Documentation"))
 
@@ -181,7 +181,7 @@ describe("SamplePackTab", () => {
       name: /Install Python Standard Library Documentation/i,
     })
     fireEvent.click(installBtn)
-    await waitFor(() => expect(mockInstallKnowledgePack).toHaveBeenCalledWith("python-stdlib-docs"))
+    await waitFor(() => expect(mockStartPackInstall).toHaveBeenCalledWith("python-stdlib-docs"))
   })
 
   it("transitions to demo queries panel after successful install", async () => {
@@ -198,8 +198,22 @@ describe("SamplePackTab", () => {
     })
   })
 
+  it("treats an already_installed response as success", async () => {
+    mockStartPackInstall.mockResolvedValue({ status: "already_installed", jobId: null })
+    renderWithQuery(<SamplePackTab onComplete={onComplete} />)
+    await waitFor(() => screen.getByText("Python Standard Library Documentation"))
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Install Python Standard Library Documentation/i }),
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/installed successfully/i)).toBeInTheDocument()
+    })
+  })
+
   it("renders an Alert on install error", async () => {
-    mockInstallKnowledgePack.mockRejectedValue(new Error("Network error"))
+    mockStartPackInstall.mockRejectedValue(new Error("Network error"))
     renderWithQuery(<SamplePackTab onComplete={onComplete} />)
     await waitFor(() => screen.getByText("Python Standard Library Documentation"))
 
@@ -211,6 +225,61 @@ describe("SamplePackTab", () => {
       expect(screen.getByRole("alert")).toBeInTheDocument()
       expect(screen.getByText(/Network error/i)).toBeInTheDocument()
     })
+  })
+
+  // ---- Card states from registry install flags (beta triage P0-A #3) ----
+
+  it("renders a disabled 'Installed ✓' card for a pack the registry reports installed", async () => {
+    const [irs, cfpb] = MOCK_REGISTRY_RESPONSE.packs_by_domain.finance
+    const registry = {
+      ...MOCK_REGISTRY_RESPONSE,
+      packs_by_domain: {
+        ...MOCK_REGISTRY_RESPONSE.packs_by_domain,
+        finance: [{ ...irs, installed: true, installing: false }, cfpb],
+      },
+    }
+    mockFetchRegistry.mockResolvedValue(registry)
+
+    renderWithQuery(<SamplePackTab onComplete={onComplete} />)
+    await waitFor(() => screen.getByText("IRS Publications (Curated)"))
+
+    const installedBtn = screen.getByRole("button", {
+      name: /IRS Publications \(Curated\) already installed/i,
+    })
+    expect(installedBtn).toBeDisabled()
+    expect(installedBtn).toHaveTextContent("Installed ✓")
+    // No Install affordance remains for that pack
+    expect(
+      screen.queryByRole("button", { name: /Install IRS Publications \(Curated\)/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows an installing state for a pack the registry reports installing", async () => {
+    const [python] = MOCK_REGISTRY_RESPONSE.packs_by_domain.coding
+    const registry = {
+      ...MOCK_REGISTRY_RESPONSE,
+      packs_by_domain: {
+        ...MOCK_REGISTRY_RESPONSE.packs_by_domain,
+        coding: [{ ...python, installed: false, installing: true }],
+      },
+    }
+    mockFetchRegistry.mockResolvedValue(registry)
+
+    renderWithQuery(<SamplePackTab onComplete={onComplete} />)
+    await waitFor(() => screen.getByText("Python Standard Library Documentation"))
+
+    const busyBtn = screen.getByRole("button", {
+      name: /Install Python Standard Library Documentation/i,
+    })
+    expect(busyBtn).toBeDisabled()
+    expect(busyBtn).toHaveTextContent(/Installing/i)
+  })
+
+  it("treats registry entries without install flags as not installed (older backend)", async () => {
+    renderWithQuery(<SamplePackTab onComplete={onComplete} />)
+    await waitFor(() => screen.getByText("Python Standard Library Documentation"))
+    // All four featured packs stay installable
+    expect(screen.getAllByRole("button", { name: /^Install/i }).length).toBe(4)
   })
 
   it("renders an Alert on catalog fetch error", async () => {

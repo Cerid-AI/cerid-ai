@@ -70,7 +70,9 @@ describe("WikiPane — landing view at root", () => {
   it("renders the WikiLanding when no entity is selected", async () => {
     render(wrap(<WikiPane />))
     await waitFor(() => {
-      expect(screen.getByText("Browse by domain")).toBeInTheDocument()
+      // Fresh-install mocks (everything empty) collapse the dashboard to
+      // the single landing EmptyState.
+      expect(screen.getByText("No wiki articles yet")).toBeInTheDocument()
     })
   })
 
@@ -144,7 +146,7 @@ describe("WikiPane — no trailing Separator", () => {
 describe("WikiPane — axe-clean", () => {
   it("is axe-clean at the landing root state", async () => {
     const { container } = render(wrap(<WikiPane />))
-    await waitFor(() => screen.getByText("Browse by domain"))
+    await waitFor(() => screen.getByText("No wiki articles yet"))
     expect(await axe(container)).toHaveNoViolations()
   })
 })

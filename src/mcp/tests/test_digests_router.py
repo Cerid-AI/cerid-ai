@@ -4,7 +4,7 @@
 """Tests for /digests REST surface — Phase K Day 2."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -154,24 +154,51 @@ class TestByDate:
 
 
 class TestRunNow:
-    def test_triggers_digest_pass(self, client):
-        from core.agents.daily_digest import DigestResult
+    """run-now queues a DigestRunJob (202) instead of running the digest
+    inline — the synchronous version timed out clients (2026-07-12)."""
 
-        fake = DigestResult(
-            digest_id="did-test",
-            generated_at="2026-05-22T07:00:00Z",
-            window_hours=24,
-            artifact_count=5,
-        )
+    def test_queues_job(self, client):
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch(
-                "core.agents.daily_digest.generate_daily_digest",
-                new_callable=AsyncMock, return_value=fake,
+                "app.processor.jobs.digest_run.active_digest_run_jobs",
+                return_value=[],
+            ),
+            patch(
+                "app.processor.jobs.digest_run.enqueue_digest_run_job",
+                return_value="job-123",
             ),
         ):
             resp = client.post("/digests/run-now")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["digest_id"] == "did-test"
-        assert body["artifact_count"] == 5
+        assert resp.status_code == 202
+        assert resp.json() == {"job_id": "job-123", "status": "queued"}
+
+    def test_collapses_duplicate_enqueue(self, client):
+        def _must_not_enqueue():
+            raise AssertionError("must not double-enqueue while a digest job is active")
+
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch(
+                "app.processor.jobs.digest_run.active_digest_run_jobs",
+                return_value=["job-active"],
+            ),
+            patch(
+                "app.processor.jobs.digest_run.enqueue_digest_run_job",
+                side_effect=_must_not_enqueue,
+            ),
+        ):
+            resp = client.post("/digests/run-now")
+        assert resp.status_code == 202
+        assert resp.json() == {"job_id": "job-active", "status": "queued"}
+
+    def test_enqueue_failure_returns_500(self, client):
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch(
+                "app.processor.jobs.digest_run.active_digest_run_jobs",
+                side_effect=RuntimeError("redis down"),
+            ),
+        ):
+            resp = client.post("/digests/run-now")
+        assert resp.status_code == 500

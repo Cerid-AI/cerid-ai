@@ -50,17 +50,17 @@ vi.mock("@/lib/api/knowledge-packs", () => ({
       ],
     },
   }),
-  installKnowledgePack: vi.fn().mockResolvedValue({
-    pack_id: "python-stdlib-docs",
-    version: "1.0.0",
-    installed_at: "2026-06-24T12:00:00Z",
-    domain: "coding",
-    artifact_count: 208,
-  }),
+}))
+
+// Wizard surfaces install through the async contract helper in lib/api/setup;
+// resolving "installed" simulates a legacy synchronous backend (no polling).
+vi.mock("@/lib/api/setup", () => ({
+  startPackInstall: vi.fn().mockResolvedValue({ status: "installed", jobId: null }),
 }))
 
 import { BuildKnowledgeStep } from "@/components/setup/build-knowledge-step"
-import { installKnowledgePack } from "@/lib/api/knowledge-packs"
+import { fetchKnowledgePackRegistry } from "@/lib/api/knowledge-packs"
+import { startPackInstall } from "@/lib/api/setup"
 
 function makeClient() {
   return new QueryClient({
@@ -130,7 +130,7 @@ describe("BuildKnowledgeStep", () => {
     expect(plannedBtn).toBeDisabled()
   })
 
-  it("calls installKnowledgePack with the pack id when Install is clicked", async () => {
+  it("calls startPackInstall with the pack id when Install is clicked", async () => {
     const user = userEvent.setup()
     renderStep()
 
@@ -142,7 +142,7 @@ describe("BuildKnowledgeStep", () => {
     await user.click(installBtn)
 
     await waitFor(() => {
-      expect(installKnowledgePack).toHaveBeenCalledWith("python-stdlib-docs")
+      expect(startPackInstall).toHaveBeenCalledWith("python-stdlib-docs")
     })
   })
 
@@ -167,6 +167,81 @@ describe("BuildKnowledgeStep", () => {
         }),
       )
     })
+  })
+
+  // ---- Card states from registry install flags (beta triage P0-A #3) ----
+
+  it("renders an Installed badge instead of an Install button when the registry reports installed", async () => {
+    vi.mocked(fetchKnowledgePackRegistry).mockResolvedValueOnce({
+      schema_version: 1,
+      packs_by_domain: {
+        coding: [
+          {
+            id: "python-stdlib-docs",
+            name: "Python Standard Library Documentation",
+            version: "1.0.0",
+            description: "Authoritative Python stdlib reference.",
+            domain: "coding",
+            sub_category: "python",
+            tags: ["python"],
+            license: "PSF-2.0",
+            size_bytes: 12_345_678,
+            artifact_count: 208,
+            download_url: "https://example.com/pystd.tar.gz",
+            sha256: "abc123",
+            provenance: { status: "built" },
+            installed: true,
+            installing: false,
+          } as never,
+        ],
+      },
+    })
+    renderStep()
+
+    await waitFor(() => {
+      expect(screen.getByText("Python Standard Library Documentation")).toBeInTheDocument()
+    })
+    expect(screen.getAllByText(/Installed|Done/).length).toBeGreaterThanOrEqual(1)
+    expect(
+      screen.queryByRole("button", { name: /Install Python Standard Library Documentation/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("disables the Install button and shows Installing while the registry reports installing", async () => {
+    vi.mocked(fetchKnowledgePackRegistry).mockResolvedValueOnce({
+      schema_version: 1,
+      packs_by_domain: {
+        coding: [
+          {
+            id: "python-stdlib-docs",
+            name: "Python Standard Library Documentation",
+            version: "1.0.0",
+            description: "Authoritative Python stdlib reference.",
+            domain: "coding",
+            sub_category: "python",
+            tags: ["python"],
+            license: "PSF-2.0",
+            size_bytes: 12_345_678,
+            artifact_count: 208,
+            download_url: "https://example.com/pystd.tar.gz",
+            sha256: "abc123",
+            provenance: { status: "built" },
+            installed: false,
+            installing: true,
+          } as never,
+        ],
+      },
+    })
+    renderStep()
+
+    await waitFor(() => {
+      expect(screen.getByText("Python Standard Library Documentation")).toBeInTheDocument()
+    })
+    const busyBtn = screen.getByRole("button", {
+      name: /Install Python Standard Library Documentation/i,
+    })
+    expect(busyBtn).toBeDisabled()
+    expect(busyBtn).toHaveTextContent(/Installing/i)
   })
 
   it("is axe-clean", async () => {

@@ -3,7 +3,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { WorkflowNode, WorkflowEdge, WorkflowRunStatus } from "@/lib/types"
+import type { WorkflowNodeCatalog } from "@/lib/api/workflows"
 import { cn } from "@/lib/utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { FALLBACK_NODE_CATALOG, describeNode } from "./node-catalog"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -62,6 +70,8 @@ interface WorkflowCanvasProps {
   nodeStatuses?: Record<string, WorkflowRunStatus>
   onNodeClick?: (nodeId: string) => void
   onNodeMove?: (nodeId: string, x: number, y: number) => void
+  /** Node-type / agent metadata for hover tooltips. Falls back to the static catalog. */
+  catalog?: WorkflowNodeCatalog
   className?: string
 }
 
@@ -76,6 +86,7 @@ export default function WorkflowCanvas({
   nodeStatuses = {},
   onNodeClick,
   onNodeMove,
+  catalog = FALLBACK_NODE_CATALOG,
   className,
 }: WorkflowCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -175,11 +186,14 @@ export default function WorkflowCanvas({
   }, [])
 
   return (
-    <div ref={containerRef} className={cn("w-full h-full", className)} style={{ minWidth: CANVAS_MIN_WIDTH }}>
+    <TooltipProvider delayDuration={200}>
+    <div ref={containerRef} className={cn("w-full h-full", className)} style={{ minWidth: CANVAS_MIN_WIDTH }}> {/* drift-allowed: canvas geometry — SVG-pinned minimum width */}
     <svg
       ref={svgRef}
       viewBox={`0 0 ${maxX} ${maxY}`}
-      className="w-full h-full min-h-[400px] bg-zinc-950/50 rounded-lg border border-zinc-800"
+      role="group"
+      aria-label="Workflow canvas"
+      className="w-full h-full min-h-[400px] bg-zinc-950/50 rounded-lg border border-zinc-800" // drift-allowed: canvas geometry — SVG-pinned minimum height
       style={isNarrow ? { transform: `scale(${NARROW_SCALE})`, transformOrigin: "top left" } : undefined}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -234,77 +248,110 @@ export default function WorkflowCanvas({
         const colors = NODE_COLORS[node.type] ?? NODE_COLORS.agent
         const isSelected = node.id === selectedNodeId
         const status = nodeStatuses[node.id]
+        const desc = describeNode(node, catalog)
 
         return (
-          <g
-            key={node.id}
-            transform={`translate(${node.position.x}, ${node.position.y})`}
-            className="cursor-pointer"
-            onMouseDown={(e) => handleMouseDown(e, node.id)}
-            onTouchStart={(e) => handleTouchStart(e, node.id)}
-            onClick={() => onNodeClick?.(node.id)}
-          >
-            {/* Node body */}
-            <rect
-              width={NODE_W}
-              height={NODE_H}
-              rx={12}
-              ry={12}
-              className={cn(colors.bg, colors.border, isSelected ? "stroke-[2.5]" : "stroke-[1.5]")}
-              strokeDasharray={node.type === "condition" ? "4 2" : undefined}
-            />
+          <Tooltip key={node.id}>
+            <TooltipTrigger asChild>
+              <g
+                transform={`translate(${node.position.x}, ${node.position.y})`}
+                className="cursor-pointer focus-visible:outline-2 focus-visible:outline-ring/70"
+                role="button"
+                tabIndex={0}
+                aria-label={`${node.name} (${desc.typeLabel} node)`}
+                data-node-id={node.id}
+                onMouseDown={(e) => handleMouseDown(e, node.id)}
+                onTouchStart={(e) => handleTouchStart(e, node.id)}
+                onClick={() => onNodeClick?.(node.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    onNodeClick?.(node.id)
+                  }
+                }}
+              >
+                {/* Node body */}
+                <rect
+                  width={NODE_W}
+                  height={NODE_H}
+                  rx={12}
+                  ry={12}
+                  className={cn(colors.bg, colors.border)}
+                  strokeWidth={isSelected ? 2.5 : 1.5}
+                  strokeDasharray={node.type === "condition" ? "4 2" : undefined}
+                />
 
-            {/* Type icon circle */}
-            <circle
-              cx={20}
-              cy={NODE_H / 2}
-              r={12}
-              className={cn(colors.border, "fill-none stroke-[1.5]")}
-            />
-            <text
-              x={20}
-              y={NODE_H / 2 + 4}
-              textAnchor="middle"
-              className={cn("text-label-sm font-bold", colors.text)}
-            >
-              {TYPE_ICONS[node.type] ?? "?"}
-            </text>
+                {/* Type icon circle */}
+                <circle
+                  cx={20}
+                  cy={NODE_H / 2}
+                  r={12}
+                  className={cn(colors.border, "fill-none")}
+                  strokeWidth={1.5}
+                />
+                <text
+                  x={20}
+                  y={NODE_H / 2 + 4}
+                  textAnchor="middle"
+                  className={cn("text-label-sm font-bold", colors.text)}
+                >
+                  {TYPE_ICONS[node.type] ?? "?"}
+                </text>
 
-            {/* Node name */}
-            <text
-              x={40}
-              y={NODE_H / 2 + 4}
-              className="fill-zinc-200 text-[12px] font-medium"
-            >
-              {node.name.length > 14 ? `${node.name.slice(0, 12)}...` : node.name}
-            </text>
+                {/* Node name */}
+                <text
+                  x={40}
+                  y={NODE_H / 2 - 3}
+                  className="fill-zinc-200 text-xs font-medium"
+                >
+                  {node.name.length > 14 ? `${node.name.slice(0, 12)}...` : node.name}
+                </text>
 
-            {/* Status indicator */}
-            {status && (
-              <circle
-                cx={NODE_W - 12}
-                cy={12}
-                r={5}
-                className={STATUS_COLORS[status] ?? STATUS_COLORS.pending}
-              />
-            )}
+                {/* Type label — keeps the canvas self-describing */}
+                <text
+                  x={40}
+                  y={NODE_H / 2 + 12}
+                  className={cn("text-label-xxs uppercase tracking-wide", colors.text)}
+                >
+                  {desc.typeLabel}
+                </text>
 
-            {/* Selection highlight */}
-            {isSelected && (
-              <rect
-                width={NODE_W + 4}
-                height={NODE_H + 4}
-                x={-2}
-                y={-2}
-                rx={14}
-                ry={14}
-                className="fill-none stroke-teal-400/50 stroke-[1]"
-              />
-            )}
-          </g>
+                {/* Status indicator */}
+                {status && (
+                  <circle
+                    cx={NODE_W - 12}
+                    cy={12}
+                    r={5}
+                    className={STATUS_COLORS[status] ?? STATUS_COLORS.pending}
+                  />
+                )}
+
+                {/* Selection highlight */}
+                {isSelected && (
+                  <rect
+                    width={NODE_W + 4}
+                    height={NODE_H + 4}
+                    x={-2}
+                    y={-2}
+                    rx={14}
+                    ry={14}
+                    className="fill-none stroke-teal-400/50"
+                    strokeWidth={1}
+                  />
+                )}
+              </g>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+              <p className="font-medium">
+                {node.name} · {desc.typeLabel}
+              </p>
+              <p className="mt-1 text-muted-foreground dark:text-muted-foreground/90">{desc.purpose}</p>
+            </TooltipContent>
+          </Tooltip>
         )
       })}
     </svg>
     </div>
+    </TooltipProvider>
   )
 }

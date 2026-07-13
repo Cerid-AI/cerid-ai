@@ -91,6 +91,10 @@ class SetupStatus(BaseModel):
     optional_keys: list[str]
     services: dict[str, str]
     configured_providers: list[str] = Field(default_factory=list)
+    # Server-side first-run flag — the GUI previously gated the wizard on
+    # localStorage alone, so every fresh browser re-entered it on a
+    # configured instance (beta triage 2026-07-12 P0-B4).
+    onboarding_complete: bool = False
 
 
 class KeyValidationRequest(BaseModel):
@@ -116,6 +120,11 @@ class ConfigureRequest(BaseModel):
     watch_folder: bool | None = None
     ollama_enabled: bool | None = None
     ollama_model: str | None = None
+    # Explicit consent to overwrite an already-configured instance. Without
+    # it, /setup/configure on a configured install responds 409 (beta triage
+    # 2026-07-12 P0-B4: a re-run wizard silently rewrote ARCHIVE_PATH /
+    # CERID_LIGHTWEIGHT / WATCH_FOLDER / OLLAMA_* on a live install).
+    force: bool = False
 
 
 class ConfigureResponse(BaseModel):
@@ -136,6 +145,18 @@ def _is_configured() -> bool:
 
 def _missing_keys() -> list[str]:
     return [k for k in _REQUIRED_KEYS if not os.environ.get(k, "").strip()]
+
+
+def _onboarding_complete() -> bool:
+    """Whether first-run onboarding was completed on this instance.
+
+    Persisted in the .env file (same writer as the rest of the setup
+    state, honouring ``CERID_ENV_FILE``) and mirrored into the process
+    environment so it takes effect without a restart.
+    """
+    return os.environ.get("CERID_ONBOARDING_COMPLETE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 
 async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
@@ -279,6 +300,7 @@ async def setup_status() -> SetupStatus:
         optional_keys=_OPTIONAL_KEYS,
         services=services,
         configured_providers=provider_names,
+        onboarding_complete=_onboarding_complete(),
     )
 
 
@@ -423,6 +445,20 @@ def _accept_key(value: str | None) -> bool:
 async def configure(req: ConfigureRequest) -> ConfigureResponse:
     """Apply configuration by writing API keys to the .env file."""
 
+    # Already-configured guard: the API keys have a placeholder-sentinel
+    # guard, but ARCHIVE_PATH / CERID_LIGHTWEIGHT / WATCH_FOLDER / OLLAMA_*
+    # used to be written unconditionally whenever non-None — a re-run wizard
+    # silently rewrote live env config (beta triage 2026-07-12 P0-B4).
+    # Reconfiguring a configured instance now requires explicit force=true.
+    if _is_configured() and not req.force:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cerid is already configured — pass force=true to "
+                "reconfigure and overwrite the existing settings."
+            ),
+        )
+
     try:
         updates: dict[str, str] = {}
 
@@ -524,6 +560,31 @@ async def _post_configure_warmup() -> None:
     except Exception as exc:
         log_swallowed_error("app.routers.setup.post_configure_self_test", exc)
     _logger.info("Post-configure warmup complete")
+
+
+class OnboardingCompleteResponse(BaseModel):
+    onboarding_complete: bool
+
+
+@router.post("/onboarding-complete", response_model=OnboardingCompleteResponse)
+async def mark_onboarding_complete() -> dict:
+    """Persist the server-side first-run-onboarding flag.
+
+    Called by the GUI when the setup wizard finishes or the user chooses
+    "Skip setup". Stored in the .env file so it survives restarts and is
+    shared by every browser — localStorage remains a client-side cache only
+    (beta triage 2026-07-12 P0-B4).
+    """
+    try:
+        _update_env_file({"CERID_ONBOARDING_COMPLETE": "true"})
+    except OSError as exc:
+        _logger.exception("Failed to persist onboarding-complete flag")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not persist onboarding flag: {exc}",
+        ) from exc
+    os.environ["CERID_ONBOARDING_COMPLETE"] = "true"
+    return {"onboarding_complete": True}
 
 
 # ---------------------------------------------------------------------------

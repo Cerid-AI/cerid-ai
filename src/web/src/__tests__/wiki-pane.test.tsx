@@ -155,7 +155,7 @@ describe("WikiPane — empty detail state", () => {
     mockUseWikiEntities.mockReturnValue({ data: [makeEntitySummary()], isLoading: false, isError: false })
     render(<WikiPane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(screen.getByText(/Recent changes/i)).toBeTruthy()
+      expect(screen.getByText(/Recently updated/i)).toBeTruthy()
     })
   })
 })

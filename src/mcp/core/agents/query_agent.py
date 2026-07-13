@@ -1938,6 +1938,10 @@ async def agent_query_full(
 
     if isinstance(result, dict):
         result["low_confidence"] = kb_low_conf
+        # Canonical-boundary clamp: confidence is a 0-1 contract for every
+        # surface (SDK model enforces le=1 and 500s otherwise); boosted
+        # relevances on small corpora can push the impl's average past 1.
+        result["confidence"] = min(1.0, max(0.0, float(result.get("confidence", 0.0) or 0.0)))
 
     # Self-RAG only fires when a generated answer is supplied to validate.
     result = await maybe_self_rag(
@@ -2697,10 +2701,14 @@ async def _agent_query_impl(
             with span("retrieval.assembly", "token_budget_pack", budget=ctx_budget, n_results=len(results)):
                 context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
 
-    # Step 7: Calculate confidence (average relevance of included sources)
+    # Step 7: Calculate confidence (average relevance of included sources).
+    # Clamp to [0, 1]: relevance values pass through quality boost and
+    # small-corpus BM25 blends that can exceed 1, and confidence is a
+    # 0-1 contract everywhere downstream (the SDK response model 500'd
+    # on confidence=4.79 from a ~350-doc corpus, 2026-07-10).
     confidence = 0.0
     if sources:
-        confidence = sum(s["relevance"] for s in sources) / len(sources)
+        confidence = min(1.0, max(0.0, sum(s["relevance"] for s in sources) / len(sources)))
 
     # Step 8: Log query (optional)
     if redis_client:

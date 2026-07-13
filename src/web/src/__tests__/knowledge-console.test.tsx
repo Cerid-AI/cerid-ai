@@ -5,6 +5,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { axe } from "jest-axe"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+
+const mockGoTo = vi.fn()
+vi.mock("@/contexts/navigation-context", async (orig) => ({
+  ...(await orig<typeof import("@/contexts/navigation-context")>()),
+  useNavigation: () => ({
+    activePane: "chat",
+    goTo: mockGoTo,
+    composeChat: vi.fn(),
+    consumeChatSeed: () => null,
+    navVersion: 0,
+  }),
+}))
+
 import { KnowledgeConsole } from "@/components/kb/knowledge-console"
 
 // KnowledgeConsole uses useQuery (DataSourceIndicator + IngestionProgress).
@@ -112,5 +125,47 @@ describe("KnowledgeConsole CH7 controls", () => {
   it("is axe-clean", async () => {
     const { container } = render(<KnowledgeConsole {...baseProps()} />, { wrapper })
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe("KnowledgeConsole — data-source indicator (P0-C.4)", () => {
+  function stubDataSourcesFetch() {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/data-sources")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            sources: [
+              { name: "wikipedia", description: "", enabled: true, configured: true, requires_api_key: false, api_key_env_var: "", domains: [] },
+            ],
+            total: 1,
+          }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      // Keep IngestionProgress inert (it expects total_files/files).
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ total_files: 0, files: [] }), text: () => Promise.resolve("{}") })
+    }))
+  }
+
+  it("lists sources read-only — no inline enable/disable switches", async () => {
+    stubDataSourcesFetch()
+    render(<KnowledgeConsole {...baseProps({ hasQueried: true })} />, { wrapper })
+    // External section is collapsed by default — expand it.
+    fireEvent.click(await screen.findByText("External"))
+    expect(await screen.findByText("wikipedia")).toBeInTheDocument()
+    // The source row carries no switch; toggles live in Settings → Extensions.
+    const row = screen.getByText("wikipedia").closest("div")!.parentElement!
+    expect(row.querySelector("[role='switch']")).toBeNull()
+  })
+
+  it("Manage link routes to Settings → Extensions (unified Knowledge Providers)", async () => {
+    stubDataSourcesFetch()
+    render(<KnowledgeConsole {...baseProps({ hasQueried: true })} />, { wrapper })
+    fireEvent.click(await screen.findByText("External"))
+    const manage = await screen.findByRole("button", { name: /manage knowledge providers in settings/i })
+    fireEvent.click(manage)
+    expect(mockGoTo).toHaveBeenCalledWith("settings", expect.objectContaining({ category: "extensions" }))
   })
 })

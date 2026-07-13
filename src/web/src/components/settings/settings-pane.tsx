@@ -7,8 +7,10 @@
  * Left sidebar: pinned search, 8 intent categories, separator, Diagnostics
  * console entry (preserves the `?diagnostics_tab=` contract). Right detail:
  * ONE scroll container per category page (Diagnostics is the lone documented
- * full-height exception). The U-1 Simple | Advanced header toggle is
- * consumed ONLY by `AdvancedDisclosure` default state.
+ * full-height exception). The Overview landing page is search-first: it
+ * mounts a second, elevated search input bound to the same query state that
+ * stays mounted while results render beneath it. The U-1 Simple | Advanced
+ * header toggle is consumed ONLY by `AdvancedDisclosure` default state.
  *
  * Deep links: `?category=`, `?setting=` (reveal + force-open + scroll),
  * `?settings_q=` (search), `?diagnostics_tab=`. Old `cerid-settings-tab`
@@ -155,6 +157,7 @@ export default function SettingsPane() {
   const [reveal, setReveal] = useState<RevealTarget | null>(null)
   const nonceRef = useRef(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const overviewSearchRef = useRef<HTMLInputElement>(null)
 
   const { data: credits } = useQuery<ProviderCredits>({
     queryKey: ["provider-credits"],
@@ -245,13 +248,15 @@ export default function SettingsPane() {
   }, [searchInput])
 
   // "/" focuses search (ignored while typing in an input/textarea/editable).
+  // Prefers the elevated Overview search when it is mounted (search-first
+  // landing surface); falls back to the pinned sidebar input elsewhere.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return
       e.preventDefault()
-      searchInputRef.current?.focus()
+      ;(overviewSearchRef.current ?? searchInputRef.current)?.focus()
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
@@ -450,7 +455,51 @@ export default function SettingsPane() {
           >
             <SettingsRevealProvider target={reveal}>
              <ModifiedSettingsProvider value={modifiedValue}>
-              {searching ? (
+              {selected === "overview" ? (
+                /* Search-first landing surface: the elevated input keeps its
+                   position (and focus) while the block below it swaps between
+                   the explore map and live search results. */
+                <div className="min-h-0 flex-1 overflow-y-auto p-4" data-density-scope="settings">
+                  <DetailHeading
+                    title="Overview"
+                    description="Find any setting, see what you've changed, and learn what lives where"
+                    onBack={() => setMobileDetail(false)}
+                  />
+                  <div className="mb-3">
+                    <SettingsSearchInput
+                      value={searchInput}
+                      onChange={setSearchInput}
+                      inputRef={overviewSearchRef}
+                      placeholder="Search all settings…"
+                      ariaLabel="Search all settings"
+                      className="h-9"
+                    />
+                  </div>
+                  {searching ? (
+                    <SettingsSearchResults
+                      query={query}
+                      matches={matches}
+                      onSelect={revealSetting}
+                      onClear={() => {
+                        setSearchInput("")
+                        setQuery("")
+                        writeUrlParam("settings_q", null)
+                      }}
+                    />
+                  ) : (
+                    <PaneErrorBoundary label="Overview" queryClient={queryClient}>
+                      <SettingsOverview
+                        settings={settings}
+                        patch={patch}
+                        tier={tier}
+                        credits={credits}
+                        onRevealSetting={revealSetting}
+                        onSelectCategory={selectCategory}
+                      />
+                    </PaneErrorBoundary>
+                  )}
+                </div>
+              ) : searching ? (
                 <div className="min-h-0 flex-1 overflow-y-auto p-4">
                   <SettingsSearchResults
                     query={query}
@@ -462,23 +511,6 @@ export default function SettingsPane() {
                       writeUrlParam("settings_q", null)
                     }}
                   />
-                </div>
-              ) : selected === "overview" ? (
-                <div className="min-h-0 flex-1 overflow-y-auto p-4" data-density-scope="settings">
-                  <DetailHeading
-                    title="Overview"
-                    description="A snapshot of your configuration"
-                    onBack={() => setMobileDetail(false)}
-                  />
-                  <PaneErrorBoundary label="Overview" queryClient={queryClient}>
-                    <SettingsOverview
-                      settings={settings}
-                      patch={patch}
-                      tier={tier}
-                      onRevealSetting={revealSetting}
-                      onSelectCategory={selectCategory}
-                    />
-                  </PaneErrorBoundary>
                 </div>
               ) : selected === "analytics" ? (
                 <div className="min-h-0 flex-1 overflow-y-auto p-4">
