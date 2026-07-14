@@ -166,6 +166,12 @@ jobs:
         run: |
           pip install pip-audit==2.10.0
           pip install -r src/mcp/requirements.txt
+          # The audit venv's BOOTSTRAP setuptools (runner-preinstalled) trips
+          # PYSEC-2026-3447 (MANIFEST.in exclusion bypass when BUILDING sdists
+          # on mac filesystems — never reachable at runtime). Upgrade it past
+          # the fix instead of growing the ignore list; same runner-tooling
+          # class as the pip CVEs below.
+          pip install --upgrade 'setuptools>=83.0.0'
           # Ignore 3 CVEs requiring major version migration (langchain-core 0.3→1.2, langgraph-checkpoint 2→4)
           # CVE-2026-26013: SSRF in ChatOpenAI image token counting — we use Bifrost proxy, not ChatOpenAI
           # CVE-2025-64439: RCE in JsonPlusSerializer — we control all LangGraph inputs, no untrusted data
