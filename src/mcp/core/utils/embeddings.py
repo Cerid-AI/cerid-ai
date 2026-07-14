@@ -586,6 +586,30 @@ def get_embedder() -> Any | None:
     return get_embedding_function()
 
 
+def embedding_stamp(domain: str) -> dict[str, str]:
+    """Return the ``{embedding_model, embedding_model_version}`` stamp for
+    a chunk about to be written to ``domain``.
+
+    Single source of truth for chunk-metadata version stamping (Phase 4.4)
+    — every chunk-write path (ingest, re-embed) merges this into its
+    per-chunk metadata so a future embedding-model swap can identify which
+    chunks were computed under which model without inferring it from
+    vector geometry. ``embedding_model`` is the process-wide active model
+    (``config.EMBEDDING_MODEL``); ``embedding_model_version`` resolves
+    through the per-domain override so a staged migration
+    (``EMBEDDING_MODEL_VERSIONS_PER_DOMAIN``) stamps only the domain being
+    migrated.
+
+    Chunks written before this stamp existed simply lack these two keys —
+    that is treated as "unversioned legacy data" everywhere it's read, not
+    filtered out or specially privileged. Absence is expected, not an error.
+    """
+    return {
+        "embedding_model": config.EMBEDDING_MODEL,
+        "embedding_model_version": config.embedding_version_for_domain(domain),
+    }
+
+
 def get_embedding_dim() -> int:
     """Return the output dimensionality of the configured embedder.
 

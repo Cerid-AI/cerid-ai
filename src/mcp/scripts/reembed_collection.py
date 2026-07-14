@@ -9,6 +9,15 @@ batches, writes to a versioned target collection
 (``<domain>__<target_version>``), and is resumable: chunks already
 present in the target are skipped on re-run.
 
+Phase 4.4: for the narrower case of "the active ``EMBEDDING_MODEL`` /
+``EMBEDDING_MODEL_VERSIONS_PER_DOMAIN`` already changed, catch up chunks
+still stamped with the old version" — no dual-collection stage, no
+operator shell session — use the managed processor job instead:
+``POST /admin/kb/reembed`` (``app/processor/jobs/reembed_chunks.py``).
+This script remains the documented path for a full A/B migration (stage
+a new model in a separate collection, validate against the eval
+harness, atomic-swap) — see ``docs/EMBEDDING_MIGRATIONS.md``.
+
 Usage (run inside Docker MCP container):
 
     python -m scripts.reembed_collection \\

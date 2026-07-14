@@ -25,6 +25,8 @@ __all__ = [
     "merge_memory", "get_memory_graph",
     # wikilinks (RAG Cycle C2.1)
     "write_wikilink_edge", "resolve_pending_artifacts",
+    # entity (Phase 4.3 — re-ingest hygiene)
+    "remove_mentions_for_artifact",
 ]
 
 from app.db.neo4j.artifacts import (  # noqa: F401,E402
@@ -42,6 +44,7 @@ from app.db.neo4j.artifacts import (  # noqa: F401,E402
     update_artifact,
     update_artifact_summary,
 )
+from app.db.neo4j.entity import remove_mentions_for_artifact  # noqa: F401,E402
 from app.db.neo4j.memory import (  # noqa: F401,E402
     archive_memory,
     create_memory_node,

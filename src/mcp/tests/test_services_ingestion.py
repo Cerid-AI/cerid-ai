@@ -302,6 +302,47 @@ class TestIngestChromaDB:
         assert coll_name.startswith("domain_")
         assert "finance" in coll_name
 
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_chunks_stamped_with_embedding_version(self, mock_chroma, mock_neo4j, mock_redis):
+        """Phase 4.4 — every chunk written at ingest carries embedding_model
+        + embedding_model_version metadata, sourced from the active config
+        (not a caller-supplied override)."""
+        import config as cfg
+
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+
+            # A caller-supplied embedding_model_version must NOT survive —
+            # it describes what actually computed the vector, not a claim
+            # a caller can make (same trust boundary as tenant_id).
+            ingest_content(
+                "stamp test " * 20,
+                domain="coding",
+                metadata={"embedding_model_version": "attacker-supplied"},
+            )
+
+        collection.upsert.assert_called_once()
+        metadatas = collection.upsert.call_args.kwargs["metadatas"]
+        assert metadatas, "expected at least one chunk metadata dict"
+        for meta in metadatas:
+            assert meta["embedding_model"] == cfg.EMBEDDING_MODEL
+            assert meta["embedding_model_version"] == cfg.embedding_version_for_domain("coding")
+            assert meta["embedding_model_version"] != "attacker-supplied"
+
 
 # ---------------------------------------------------------------------------
 # Tests: ingest_content — Redis logging
@@ -718,3 +759,146 @@ class TestForceReindex:
         assert metas[0]["element_type"] == "CSVRow"
         # list metadata is JSON-coerced for ChromaDB.
         assert metas[0]["column_headers"] == json.dumps(["a", "b"])
+
+
+# ---------------------------------------------------------------------------
+# Tests: _reingest_artifact — Phase 4.3 re-ingest hygiene
+# ---------------------------------------------------------------------------
+
+class TestReingestEntityReExtraction:
+    """On content change, _reingest_artifact must clear the artifact's
+    stale MENTIONS edges and re-enqueue entity extraction through the same
+    mechanism first-ingest uses. Unchanged content (the force_reindex
+    path) must touch neither — those MENTIONS are still accurate."""
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_changed_content_clears_mentions_and_reextracts(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        driver = MagicMock()
+        mock_neo4j.return_value = driver
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        from app.services.ingestion import _reingest_artifact
+
+        prev = {"id": "aid", "content_hash": "old-hash", "chunk_ids": "[]"}
+        with (
+            patch("app.services.ingestion.graph") as mock_graph,
+            patch(
+                "app.services.ingestion._enqueue_entity_extraction_if_enabled",
+            ) as mock_enqueue,
+        ):
+            mock_graph.update_artifact.return_value = None
+            result = _reingest_artifact(
+                prev, "brand new content", "coding",
+                {"filename": "note.txt"}, "new-hash",
+            )
+
+        assert result["status"] == "updated"
+        mock_graph.remove_mentions_for_artifact.assert_called_once_with(driver, "aid")
+        mock_enqueue.assert_called_once_with(artifact_id="aid")
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_identical_content_skips_mentions_and_reextraction(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        """force_reindex re-embeds UNCHANGED content (same hash reaches
+        _reingest_artifact) — nothing about the entities changed."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        from app.services.ingestion import _reingest_artifact
+
+        prev = {"id": "aid", "content_hash": "same-hash", "chunk_ids": "[]"}
+        with (
+            patch("app.services.ingestion.graph") as mock_graph,
+            patch(
+                "app.services.ingestion._enqueue_entity_extraction_if_enabled",
+            ) as mock_enqueue,
+        ):
+            mock_graph.update_artifact.return_value = None
+            result = _reingest_artifact(
+                prev, "unchanged content", "coding",
+                {"filename": "note.txt"}, "same-hash",
+            )
+
+        assert result["status"] == "updated"
+        mock_graph.remove_mentions_for_artifact.assert_not_called()
+        mock_enqueue.assert_not_called()
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_failed_graph_update_skips_mentions_clear_and_reextraction(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        """Atomicity: if the Neo4j content_hash update itself fails, the
+        artifact node still reflects the OLD content — clearing MENTIONS
+        ahead of a graph write that never landed would leave the artifact
+        with neither old nor new MENTIONS. Both new hooks must be gated on
+        update_artifact succeeding first."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        from app.services.ingestion import _reingest_artifact
+
+        prev = {"id": "aid", "content_hash": "old-hash", "chunk_ids": "[]"}
+        with (
+            patch("app.services.ingestion.graph") as mock_graph,
+            patch(
+                "app.services.ingestion._enqueue_entity_extraction_if_enabled",
+            ) as mock_enqueue,
+        ):
+            mock_graph.update_artifact.side_effect = RuntimeError("neo4j write failed")
+            result = _reingest_artifact(
+                prev, "brand new content", "coding",
+                {"filename": "note.txt"}, "new-hash",
+            )
+
+        # Existing swallow-and-continue contract: Chroma/BM25 already
+        # succeeded, so re-ingest still reports "updated" even though the
+        # graph write failed — but neither new hook may fire.
+        assert result["status"] == "updated"
+        mock_graph.remove_mentions_for_artifact.assert_not_called()
+        mock_enqueue.assert_not_called()
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_mentions_clear_failure_does_not_block_reextraction_enqueue(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        """remove_mentions_for_artifact is a non-blocking observability
+        boundary like every other post-commit hook in this module — a
+        raise there must not stop the re-extraction enqueue and must not
+        fail the re-ingest."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        from app.services.ingestion import _reingest_artifact
+
+        prev = {"id": "aid", "content_hash": "old-hash", "chunk_ids": "[]"}
+        with (
+            patch("app.services.ingestion.graph") as mock_graph,
+            patch(
+                "app.services.ingestion._enqueue_entity_extraction_if_enabled",
+            ) as mock_enqueue,
+        ):
+            mock_graph.update_artifact.return_value = None
+            mock_graph.remove_mentions_for_artifact.side_effect = RuntimeError("neo4j down")
+            result = _reingest_artifact(
+                prev, "brand new content", "coding",
+                {"filename": "note.txt"}, "new-hash",
+            )
+
+        assert result["status"] == "updated"
+        mock_enqueue.assert_called_once_with(artifact_id="aid")

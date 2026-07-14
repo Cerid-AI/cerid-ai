@@ -166,6 +166,34 @@ class ReindexCorpusResponse(BaseModel):
     message: str
 
 
+class ReembedRequest(BaseModel):
+    domain: str | None = Field(
+        None, description="Restrict to one domain (None = every domain)"
+    )
+    force: bool = Field(
+        False,
+        description="Re-embed every chunk regardless of its current version stamp",
+    )
+
+
+class ReembedResponse(BaseModel):
+    status: str
+    job_id: str | None
+    domain: str | None
+    message: str
+
+
+class DomainVersionDistribution(BaseModel):
+    total: int
+    versions: dict[str, int]
+    current_version: str
+    mixed: bool
+
+
+class EmbeddingVersionsResponse(BaseModel):
+    domains: dict[str, DomainVersionDistribution]
+
+
 class CollectionRepairRequest(BaseModel):
     collection_name: str = Field(..., description="Chroma collection name to repair")
     dry_run: bool = Field(
@@ -394,6 +422,143 @@ async def reindex_corpus(req: ReindexCorpusRequest | None = None):
             + (f" More remain — resume at offset={next_offset}." if next_offset else "")
         ),
     )
+
+
+@router.post("/admin/kb/reembed", response_model=ReembedResponse)
+async def reembed_corpus(req: ReembedRequest | None = None):
+    """Enqueue the managed re-embed job (Phase 4.4).
+
+    Promotes ``scripts/reembed_collection.py``'s manual dual-collection
+    logic into a resumable background job: re-embeds, in place, every
+    chunk in the target domain(s) whose ``embedding_model_version`` stamp
+    does not match the domain's currently active version (or every
+    chunk when ``force=true``). Chunk text is never touched, so BM25 /
+    sparse indexes need no rebuild; the semantic cache is invalidated by
+    the job on completion (vectors changed under the same text).
+
+    Unlike ``/admin/kb/reindex`` (synchronous, one page per call), this
+    returns immediately with a ``job_id`` — progress and per-job-type
+    latency are visible via ``GET /processor/status`` /
+    ``GET /processor/recent``. ``enqueue_if_absent`` collapses a
+    duplicate call against the same domain+force while one is already
+    pending or running.
+    """
+    domain = req.domain if req else None
+    force = req.force if req else False
+
+    if domain is not None and domain not in config.DOMAINS:
+        raise HTTPException(status_code=404, detail=f"Unknown domain: {domain}")
+
+    from app.db.redis.processor_queue import RedisJobQueue
+    from app.processor.jobs.reembed_chunks import ReembedChunksJob
+
+    try:
+        queue = RedisJobQueue(get_redis())
+        job = ReembedChunksJob(domain=domain, force=force)
+        record = job.new_record(payload={"domain": domain, "force": force})
+        job_id = await queue.enqueue_if_absent(record)
+    except Exception as e:
+        logger.error("Failed to enqueue reembed job: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue reembed job: {e}")
+
+    if job_id is None:
+        return ReembedResponse(
+            status="already_running",
+            job_id=None,
+            domain=domain,
+            message="A matching re-embed job is already pending or running.",
+        )
+
+    scope = f"domain={domain}" if domain else "all domains"
+    return ReembedResponse(
+        status="enqueued",
+        job_id=job_id,
+        domain=domain,
+        message=(
+            f"Enqueued re-embed job {job_id} for {scope}"
+            f"{' (force=true)' if force else ''}."
+        ),
+    )
+
+
+def _domain_version_distribution(chroma_client: Any, domain: str) -> dict[str, Any]:
+    """Cheap per-domain ``embedding_model_version`` histogram.
+
+    Pages through the domain's collection reading ONLY ``metadatas``
+    (no document text, no vectors) — keeps a multi-million-chunk KB from
+    turning this into a heavy scan. Chunks with no
+    ``embedding_model_version`` field (pre-Phase-4.4 legacy ingest) are
+    bucketed under ``"unstamped"``.
+    """
+    coll_name = config.collection_name(domain)
+    try:
+        collection = chroma_client.get_collection(name=coll_name)
+    except Exception as exc:  # noqa: BLE001 — domain has no collection yet
+        log_swallowed_error(
+            "app.routers.kb_admin.domain_version_distribution.get_collection", exc,
+            context={"domain": domain},
+        )
+        return {"total": 0, "versions": {}}
+
+    versions: dict[str, int] = {}
+    total = 0
+    offset = 0
+    page = 1000
+    while True:
+        try:
+            batch = collection.get(limit=page, offset=offset, include=["metadatas"])
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.routers.kb_admin.domain_version_distribution.get_batch", exc,
+                context={"domain": domain, "offset": offset},
+            )
+            break
+        metadatas = batch.get("metadatas") or []
+        if not metadatas:
+            break
+        for meta in metadatas:
+            version = (meta or {}).get("embedding_model_version") or "unstamped"
+            versions[version] = versions.get(version, 0) + 1
+        total += len(metadatas)
+        if len(metadatas) < page:
+            break
+        offset += page
+    return {"total": total, "versions": versions}
+
+
+@router.get("/admin/kb/embedding-versions", response_model=EmbeddingVersionsResponse)
+async def embedding_versions(domain: str | None = None):
+    """Per-domain ``embedding_model_version`` distribution.
+
+    Detects a mixed-version corpus — multiple stamped versions, or a mix
+    of stamped + unstamped legacy chunks — so an operator knows when
+    ``POST /admin/kb/reembed`` (or the manual
+    ``scripts/reembed_collection.py`` dual-collection path) has work to
+    do. ``total - versions[current_version]`` is the count of chunks the
+    re-embed job would touch on a non-force run for that domain.
+    """
+    import asyncio
+
+    if domain is not None and domain not in config.DOMAINS:
+        raise HTTPException(status_code=404, detail=f"Unknown domain: {domain}")
+
+    chroma = get_chroma()
+    target_domains = [domain] if domain else list(config.DOMAINS)
+
+    out: dict[str, DomainVersionDistribution] = {}
+    for d in target_domains:
+        dist = await asyncio.to_thread(_domain_version_distribution, chroma, d)
+        current = config.embedding_version_for_domain(d)
+        dist_versions: dict[str, int] = dist["versions"]
+        total = dist["total"]
+        mixed = total > 0 and (len(dist_versions) > 1 or dist_versions.get(current, 0) != total)
+        out[d] = DomainVersionDistribution(
+            total=total,
+            versions=dist_versions,
+            current_version=current,
+            mixed=mixed,
+        )
+    return EmbeddingVersionsResponse(domains=out)
 
 
 @router.post("/admin/kb/rebuild-index", response_model=RebuildIndexResponse)

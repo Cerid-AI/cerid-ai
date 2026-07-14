@@ -133,3 +133,44 @@ def list_entities_for_artifact(driver, artifact_id: str) -> list[dict]:
             artifact_id=artifact_id,
         )
         return [dict(r) for r in rows]
+
+
+def remove_mentions_for_artifact(driver, artifact_id: str) -> int:
+    """Delete this artifact's ``MENTIONS`` edges ahead of re-extraction.
+
+    Phase 4.3 (re-ingest hygiene). On content change, the artifact's
+    existing MENTIONS edges were derived from the OLD content — the
+    ``chunk_ids`` they carry may no longer exist once the re-ingest
+    replaces the artifact's chunks — so they are stale and must not
+    survive the re-ingest. This deletes ONLY the ``(:Artifact)-[:MENTIONS]
+    ->(:Entity)`` edges owned by ``artifact_id``; it does not touch any
+    other edge type (``RELATES_TO``, ``WIKILINKS_TO``, ``TAGGED_WITH``,
+    ``BELONGS_TO``, ``HAS_ATTACHMENT``, ...) and never deletes the
+    ``Entity`` node itself — those are the human-curated / cross-artifact
+    graph relationships the re-ingest contract preserves.
+
+    An ``Entity`` that loses its last MENTIONS edge here becomes an
+    orphan (0 inbound MENTIONS). It is left in place: the existing
+    nightly ``DeriveDomainsJob`` (``app/processor/jobs/derive_domains.py``)
+    already detects entities with no MENTIONS path and clears their
+    derived fields (``primary_domain`` etc.) rather than deleting the
+    node, and a future artifact that mentions the same ``canonical_id``
+    re-attaches to it via ``upsert_entities_for_artifact``'s MERGE.
+
+    Returns the number of MENTIONS edges removed (for logging/tests).
+    """
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (a:Artifact {id: $artifact_id})-[m:MENTIONS]->(:Entity)
+            DELETE m
+            RETURN count(m) AS removed
+            """,
+            artifact_id=artifact_id,
+        )
+        row = result.single()
+        removed = int(row["removed"]) if row else 0
+    logger.debug(
+        "mentions_removed artifact=%s removed=%d", artifact_id, removed,
+    )
+    return removed

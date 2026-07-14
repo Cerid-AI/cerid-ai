@@ -525,3 +525,49 @@ class TestL2DistanceToRelevance:
                 f"Not monotonic: rel({distances[i]})={relevances[i]} < "
                 f"rel({distances[i+1]})={relevances[i+1]}"
             )
+
+
+# ---------------------------------------------------------------------------
+# embedding_stamp unit tests (Phase 4.4)
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddingStamp:
+    """embedding_stamp() is the single source of truth for chunk-metadata
+    version stamping — used by both the ingest chunk-write path and the
+    managed re-embed job."""
+
+    def test_returns_model_and_version_keys(self):
+        from core.utils.embeddings import embedding_stamp
+
+        stamp = embedding_stamp("code")
+        assert set(stamp.keys()) == {"embedding_model", "embedding_model_version"}
+
+    def test_model_sourced_from_config(self):
+        import config as cfg
+        from core.utils.embeddings import embedding_stamp
+
+        stamp = embedding_stamp("code")
+        assert stamp["embedding_model"] == cfg.EMBEDDING_MODEL
+
+    def test_version_falls_back_to_global_when_no_override(self):
+        import config as cfg
+        from core.utils.embeddings import embedding_stamp
+
+        stamp = embedding_stamp("nonexistent_domain")
+        assert stamp["embedding_model_version"] == cfg.EMBEDDING_MODEL_VERSION
+
+    def test_version_honors_per_domain_override(self, monkeypatch):
+        from config import settings as _settings
+        from core.utils.embeddings import embedding_stamp
+
+        monkeypatch.setitem(
+            _settings.EMBEDDING_MODEL_VERSIONS_PER_DOMAIN,
+            "code",
+            "arctic-embed-l-v2.0",
+        )
+        stamp = embedding_stamp("code")
+        assert stamp["embedding_model_version"] == "arctic-embed-l-v2.0"
+        # An untouched domain still gets the global version.
+        other = embedding_stamp("finance")
+        assert other["embedding_model_version"] == _settings.EMBEDDING_MODEL_VERSION

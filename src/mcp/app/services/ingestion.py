@@ -53,6 +53,7 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
 from core.context.identity import get_tenant_id
 from core.utils import cache
+from core.utils.embeddings import embedding_stamp
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 from utils.chunker import (
@@ -300,9 +301,10 @@ def _enqueue_entity_extraction_if_enabled(artifact_id: str) -> None:
     """Enqueue an EntityExtractionJob post-commit when the flag is on.
 
     Phase K1.1.  Called from ``ingest_content`` after Neo4j commit and
-    Chroma flip succeed.  Non-blocking — the job runs at LOW priority
-    in the processor queue.  When the job completes it emits an
-    ``entities_added`` event which the wiki-refresh subscriber consumes
+    Chroma flip succeed, and from ``_reingest_artifact`` (Phase 4.3) after
+    a content-changing re-ingest lands.  Non-blocking — the job runs at
+    LOW priority in the processor queue.  When the job completes it emits
+    an ``entities_added`` event which the wiki-refresh subscriber consumes
     (Phase K1.2/K1.3).
 
     Defaults to ON for new ingests; operators can disable via
@@ -315,7 +317,7 @@ def _enqueue_entity_extraction_if_enabled(artifact_id: str) -> None:
         return
 
     try:
-        from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+        from app.db.redis.processor_queue import enqueue_job_if_absent  # noqa: PLC0415
         from app.processor.jobs.entity_extraction import EntityExtractionJob  # noqa: PLC0415
     except ImportError as e:
         logger.debug("entity_extraction.enqueue: import failed (non-fatal): %s", e)
@@ -327,7 +329,11 @@ def _enqueue_entity_extraction_if_enabled(artifact_id: str) -> None:
             "tenant_id": "default",
         }
         job = EntityExtractionJob(**payload)
-        enqueue_job(job, payload=payload)
+        # enqueue_if_absent (not enqueue_job): re-ingest can re-fire this
+        # hook for the same artifact_id before an earlier job drains (e.g.
+        # a bulk reindex loop) — collapse onto the existing pending/running
+        # job instead of stacking duplicates behind it.
+        enqueue_job_if_absent(job, payload=payload)
         logger.debug("entity_extraction.enqueued artifact_id=%s", artifact_id)
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
@@ -438,11 +444,24 @@ def _reingest_artifact(
     are used verbatim — matching the fresh-ingest chunk shape so a forced
     re-index never silently downgrades a layout-aware artifact to token chunks.
     When absent, the token chunker runs with optional contextual enrichment.
+
+    Phase 4.3 (re-ingest hygiene): "preserves relationships" covers the
+    human-curated / cross-artifact graph (RELATES_TO, WIKILINKS_TO,
+    TAGGED_WITH, BELONGS_TO, ...) — this function never touches those.
+    It does NOT cover an artifact's own ``MENTIONS`` edges, which are
+    content-derived provenance: when ``content_hash`` differs from
+    ``prev["content_hash"]`` the content actually changed, so the old
+    MENTIONS edges point at entities extracted from text that no longer
+    exists. Those are cleared and entity extraction is re-enqueued for
+    the new content (see the ``content_changed`` block below). A
+    ``force_reindex`` call re-embeds UNCHANGED content (same hash) and
+    intentionally skips this — nothing to re-extract.
     """
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
     artifact_id = prev["id"]
+    content_changed = prev.get("content_hash") != content_hash
 
     # Delete old chunks from ChromaDB
     old_chunk_ids = json.loads(prev.get("chunk_ids", "[]") or "[]")
@@ -557,6 +576,10 @@ def _reingest_artifact(
     # Caller-supplied metadata cannot override tenant_id — that would let
     # an upload escape its own tenant scope at retrieval time.
     base_meta["tenant_id"] = get_tenant_id()
+    # Phase 4.4 — re-ingested chunks get the same non-spoofable embedding
+    # stamp as fresh ingests (ingest_content); without it a re-index would
+    # strip the version provenance the re-embed job keys on.
+    base_meta.update(embedding_stamp(domain))
 
     chunk_ids = [r["id"] for r in chunk_records]
     chunk_documents = [r["text"] for r in chunk_records]
@@ -656,6 +679,28 @@ def _reingest_artifact(
     except Exception as e:
         log_swallowed_error('app.services.ingestion', e)
         logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
+    else:
+        # Phase 4.3 — re-ingest hygiene. Only runs once the artifact's
+        # content_hash/chunk_ids have actually landed in Neo4j (the
+        # `else` only fires on success) — a failed update_artifact leaves
+        # the artifact's OLD MENTIONS untouched rather than clearing them
+        # ahead of a graph write that never happened, so there is no
+        # window where the artifact ends up with neither old nor new
+        # MENTIONS. force_reindex re-embeds unchanged content
+        # (content_changed=False) and deliberately skips this — those
+        # MENTIONS are still accurate for the (identical) new content.
+        if content_changed:
+            try:
+                graph.remove_mentions_for_artifact(get_neo4j(), artifact_id)
+            except Exception as e:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "app.services.ingestion.reingest_mentions_clear", e,
+                    context={"artifact_id": artifact_id},
+                )
+            # Re-run extraction through the same mechanism first-ingest
+            # uses (enqueue_if_absent semantics inside the helper collapse
+            # a re-ingest loop's repeated calls onto one pending job).
+            _enqueue_entity_extraction_if_enabled(artifact_id=artifact_id)
 
     logger.info(f"Re-ingested artifact {artifact_id[:8]} ({base_meta.get('filename', '?')})")
 
@@ -939,6 +984,12 @@ def ingest_content(
     # Caller-supplied metadata cannot override tenant_id — that would let
     # an upload escape its own tenant scope at retrieval time.
     base_meta["tenant_id"] = get_tenant_id()
+
+    # Phase 4.4 — stamp every chunk with the embedding model that will
+    # actually compute its vector. Caller-supplied metadata cannot
+    # override this either, for the same reason as tenant_id: it
+    # describes what happened, not what a caller believes happened.
+    base_meta.update(embedding_stamp(domain))
 
     # Propagate client_source for provenance tracking
     if metadata and metadata.get("client_source"):

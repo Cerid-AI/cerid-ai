@@ -992,6 +992,12 @@ def embedding_version_for_domain(domain: str) -> str:
     """
     return EMBEDDING_MODEL_VERSIONS_PER_DOMAIN.get(domain, EMBEDDING_MODEL_VERSION)
 
+# Managed re-embed job (Phase 4.4 — ReembedChunksJob, the processor-job
+# promotion of scripts/reembed_collection.py's in-place re-embed logic).
+# Mirrors the BACKFILL_ENRICHMENT_BATCH / _PACE_S knob pair.
+REEMBED_JOB_BATCH_SIZE = int(os.getenv("REEMBED_JOB_BATCH_SIZE", "200"))
+REEMBED_JOB_PACE_S = float(os.getenv("REEMBED_JOB_PACE_S", "0.0"))
+
 # Smart routing: when enabled, "auto" model selection in chat uses the smart
 # router to pick the best model based on query complexity and availability.
 SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "true"

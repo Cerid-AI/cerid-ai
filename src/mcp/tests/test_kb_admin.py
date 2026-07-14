@@ -485,3 +485,138 @@ class TestReindexCorpus:
         data = res.json()
         assert data["errors"] == 1
         assert data["reindexed"] == 1  # a2 still succeeded
+
+
+class TestReembedEndpoint:
+    """POST /admin/kb/reembed — enqueues the managed re-embed job (Phase 4.4).
+
+    ``RedisJobQueue`` is imported locally inside the endpoint (mirrors the
+    semantic-cache invalidation hook's local-import pattern elsewhere in
+    this router), so it's patched at its home module
+    ``app.db.redis.processor_queue``, not at ``app.routers.kb_admin``.
+    """
+
+    def _mock_queue(self, job_id):
+        mock_cls = MagicMock()
+        mock_cls.return_value.enqueue_if_absent = AsyncMock(return_value=job_id)
+        return mock_cls
+
+    def test_enqueues_job_for_domain(self, client: TestClient):
+        mock_cls = self._mock_queue("job-123")
+        with patch("app.db.redis.processor_queue.RedisJobQueue", mock_cls):
+            res = client.post("/admin/kb/reembed", json={"domain": "coding"})
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "enqueued"
+        assert data["job_id"] == "job-123"
+        assert data["domain"] == "coding"
+        mock_cls.return_value.enqueue_if_absent.assert_called_once()
+
+    def test_bodyless_post_defaults_to_all_domains(self, client: TestClient):
+        mock_cls = self._mock_queue("job-456")
+        with patch("app.db.redis.processor_queue.RedisJobQueue", mock_cls):
+            res = client.post("/admin/kb/reembed")
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["domain"] is None
+        assert "all domains" in data["message"]
+
+    def test_duplicate_call_collapses_to_already_running(self, client: TestClient):
+        """enqueue_if_absent returning None means a matching job is already
+        pending/running — the endpoint must not report a fake job_id."""
+        mock_cls = self._mock_queue(None)
+        with patch("app.db.redis.processor_queue.RedisJobQueue", mock_cls):
+            res = client.post("/admin/kb/reembed", json={"domain": "coding"})
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "already_running"
+        assert data["job_id"] is None
+
+    def test_unknown_domain_404s(self, client: TestClient):
+        res = client.post("/admin/kb/reembed", json={"domain": "not-a-real-domain"})
+        assert res.status_code == 404
+
+    def test_force_flag_reflected_in_message(self, client: TestClient):
+        mock_cls = self._mock_queue("job-force")
+        with patch("app.db.redis.processor_queue.RedisJobQueue", mock_cls):
+            res = client.post(
+                "/admin/kb/reembed", json={"domain": "coding", "force": True},
+            )
+
+        assert res.status_code == 200
+        assert "force=true" in res.json()["message"]
+
+    def test_enqueue_failure_returns_500(self, client: TestClient):
+        mock_cls = MagicMock()
+        mock_cls.return_value.enqueue_if_absent = AsyncMock(
+            side_effect=RuntimeError("redis unavailable")
+        )
+        with patch("app.db.redis.processor_queue.RedisJobQueue", mock_cls):
+            res = client.post("/admin/kb/reembed", json={"domain": "coding"})
+
+        assert res.status_code == 500
+
+
+class TestEmbeddingVersionsEndpoint:
+    """GET /admin/kb/embedding-versions — per-domain version distribution.
+
+    ``_domain_version_distribution`` does its own paginated Chroma scan;
+    these tests patch it directly rather than building a fake multi-page
+    Chroma collection, matching how ``TestKBAggregationHelpers`` mocks the
+    Neo4j aggregation helper in ``kb_stats``.
+    """
+
+    def test_mixed_corpus_detected(self, client: TestClient):
+        with patch(
+            "app.routers.kb_admin._domain_version_distribution",
+            return_value={"total": 3, "versions": {"v1": 2, "v2": 1}},
+        ):
+            res = client.get("/admin/kb/embedding-versions", params={"domain": "coding"})
+
+        assert res.status_code == 200
+        dist = res.json()["domains"]["coding"]
+        assert dist["total"] == 3
+        assert dist["versions"] == {"v1": 2, "v2": 1}
+        assert dist["mixed"] is True
+
+    def test_single_version_not_mixed(self, client: TestClient):
+        import config as cfg
+
+        current = cfg.embedding_version_for_domain("coding")
+        with patch(
+            "app.routers.kb_admin._domain_version_distribution",
+            return_value={"total": 5, "versions": {current: 5}},
+        ):
+            res = client.get("/admin/kb/embedding-versions", params={"domain": "coding"})
+
+        assert res.json()["domains"]["coding"]["mixed"] is False
+
+    def test_empty_collection_not_mixed(self, client: TestClient):
+        with patch(
+            "app.routers.kb_admin._domain_version_distribution",
+            return_value={"total": 0, "versions": {}},
+        ):
+            res = client.get("/admin/kb/embedding-versions", params={"domain": "coding"})
+
+        dist = res.json()["domains"]["coding"]
+        assert dist["total"] == 0
+        assert dist["mixed"] is False
+
+    def test_all_domains_when_domain_omitted(self, client: TestClient):
+        import config as cfg
+
+        with patch(
+            "app.routers.kb_admin._domain_version_distribution",
+            return_value={"total": 0, "versions": {}},
+        ):
+            res = client.get("/admin/kb/embedding-versions")
+
+        assert res.status_code == 200
+        assert set(res.json()["domains"].keys()) == set(cfg.DOMAINS)
+
+    def test_unknown_domain_404s(self, client: TestClient):
+        res = client.get("/admin/kb/embedding-versions", params={"domain": "not-a-real-domain"})
+        assert res.status_code == 404
