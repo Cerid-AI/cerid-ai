@@ -168,3 +168,38 @@ def test_original_metadata_preserved() -> None:
         assert c["metadata"]["page_num"] == 5
         assert c["metadata"]["source_path"] == "/tmp/file.txt"
         assert c["metadata"]["element_type"] == "NarrativeText"
+
+
+# ---------------------------------------------------------------------------
+# Ingest-side dispatch contract — the registry routes NarrativeText to the
+# sentence-window strategy when it is registered, and chunk_elements emits the
+# window_text breadcrumb the (retrieval-owned) read-side substitution consumes.
+# Locking this guarantees the ingest half is ready before the read half lands.
+# ---------------------------------------------------------------------------
+
+
+def test_registry_dispatch_emits_window_text() -> None:
+    from core.ingest.chunkers import _STRATEGIES, chunk_elements, register
+
+    prev = _STRATEGIES.get("NarrativeText")
+    try:
+        register("NarrativeText", narrative_sentence_window_strategy)
+        elements = [
+            {
+                "text": "Alpha one. Beta two. Gamma three.",
+                "element_type": "NarrativeText",
+                "metadata": {"source_path": "/x"},
+            },
+        ]
+        chunks = chunk_elements(elements)
+        # One chunk per sentence, each carrying the window_text breadcrumb.
+        assert len(chunks) == 3
+        assert all("window_text" in c["metadata"] for c in chunks)
+        assert all(c["metadata"]["element_type"] == "NarrativeText" for c in chunks)
+    finally:
+        # Restore the default registration so other tests (e.g. the token
+        # fallback contract in test_parser_protocol) are unaffected.
+        if prev is None:
+            _STRATEGIES.pop("NarrativeText", None)
+        else:
+            _STRATEGIES["NarrativeText"] = prev

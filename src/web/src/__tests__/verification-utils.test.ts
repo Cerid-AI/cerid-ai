@@ -2,7 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest"
-import { getClaimDisplayStatus, matchClaimsToText } from "@/lib/verification-utils"
+import { getClaimDisplayStatus, isTimeoutMethod, matchClaimsToText } from "@/lib/verification-utils"
+
+describe("isTimeoutMethod", () => {
+  it("flags timeout-related verification methods", () => {
+    expect(isTimeoutMethod("timeout")).toBe(true)
+    expect(isTimeoutMethod("kb_only_timeout")).toBe(true)
+  })
+
+  it("does not flag regular, failed, or missing methods", () => {
+    expect(isTimeoutMethod("kb")).toBe(false)
+    expect(isTimeoutMethod("kb_nli")).toBe(false)
+    expect(isTimeoutMethod("cross_model")).toBe(false)
+    expect(isTimeoutMethod("web_search_failed")).toBe(false)
+    expect(isTimeoutMethod(undefined)).toBe(false)
+  })
+})
 
 describe("getClaimDisplayStatus", () => {
   it("returns verified for verified status", () => {

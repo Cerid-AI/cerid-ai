@@ -8,6 +8,10 @@ Per-entity Redis debounce (``cerid:wiki:debounce:{slug}``, TTL via
 write amplification. ``enqueue_refresh(slug, force=True)`` bypasses
 the debounce for contradiction-triggered refreshes. Fail-open when
 Redis is unavailable — under-refreshing is worse than over-refreshing.
+
+Queue-level duplicate collapse (``enqueue_job_if_absent``) additionally
+skips slugs whose refresh is already pending or running — the debounce
+TTL alone cannot cover a queue backlog longer than 300s.
 """
 from __future__ import annotations
 
@@ -180,9 +184,14 @@ def _human_edit_protected_slugs(driver: Any, slugs: list[str]) -> set[str]:
 def enqueue_refresh(slug: str, *, force: bool = False) -> bool:
     """Enqueue a WikiRefreshJob for ``slug`` after debounce check.
 
-    Returns True if the job was enqueued, False if debounced out.
+    Returns True if the job was enqueued, False if debounced out or an
+    equivalent refresh for the same slug is already pending/running.
     ``force=True`` bypasses the debounce check (for contradiction-
-    triggered refreshes in Phase K2.3).
+    triggered refreshes in Phase K2.3) but NOT the queue-level duplicate
+    collapse: a pending refresh for the slug will read the latest state
+    (contradiction included) when it runs, so stacking a second copy is
+    pure queue growth. The nightly stale sweep re-enqueues any slug a
+    running-job collapse skipped.
     """
     if not slug:
         return False
@@ -192,12 +201,15 @@ def enqueue_refresh(slug: str, *, force: bool = False) -> bool:
         return False
 
     try:
-        from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+        from app.db.redis.processor_queue import enqueue_job_if_absent  # noqa: PLC0415
         from app.processor.jobs.wiki_refresh import WikiRefreshJob  # noqa: PLC0415
 
         payload = {"entity_slug": slug}
         job = WikiRefreshJob(**payload)
-        enqueue_job(job, payload=payload)
+        job_id = enqueue_job_if_absent(job, payload=payload)
+        if job_id is None:
+            logger.debug("wiki_refresh.collapsed slug=%s (already pending/running)", slug)
+            return False
         logger.info("wiki_refresh.enqueued slug=%s force=%s", slug, force)
         return True
     except Exception as exc:  # noqa: BLE001 — observability boundary

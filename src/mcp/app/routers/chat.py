@@ -16,7 +16,9 @@ import asyncio
 import json
 import logging
 import os
+import time
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any
 
@@ -86,6 +88,126 @@ UPSTREAM_ERROR_MESSAGES: dict[int, str] = {
     402: "OpenRouter credits exhausted. Add credits at https://openrouter.ai/settings/credits",
     403: "Access denied by upstream provider. The selected model may require additional permissions.",
 }
+
+# ---------------------------------------------------------------------------
+# Route-decision + per-model latency telemetry (Phase 0.4a)
+# ---------------------------------------------------------------------------
+#
+# Chat route decisions (explicit model vs smart-routed "auto" vs a
+# cross-family fallback retry) were previously invisible — only
+# llm_cost_usd was recorded. These are best-effort daily counters +
+# capped per-model latency samples so an integrator can reconcile
+# core.routing.smart_router.TIER_P95_MS against observed wall-clock
+# latency instead of the hand-maintained constants drifting silently.
+
+_CHAT_METRICS_TTL_S = 35 * 24 * 60 * 60  # ~35 days
+_ROUTE_SOURCES = ("explicit", "auto", "fallback")
+_MODEL_LATENCY_KEY_PREFIX = "cerid:metrics:chat:model_latency:"
+_MODEL_LATENCY_MODELS_KEY = "cerid:metrics:chat:model_latency:models"
+_MODEL_LATENCY_MAX_ENTRIES = 100
+# A p95 index needs at least two samples to differ from the max.
+_MIN_SAMPLES_FOR_P95 = 2
+
+
+def _chat_route_key(day: str, source: str) -> str:
+    return f"cerid:metrics:chat:route:{day}:{source}"
+
+
+def _model_latency_key(model: str) -> str:
+    return f"{_MODEL_LATENCY_KEY_PREFIX}{model}"
+
+
+def _record_chat_route_decision(route_source: str) -> None:
+    """Best-effort daily counter for chat route-decision telemetry.
+
+    ``route_source`` is one of "explicit" (client sent a concrete model),
+    "auto" (smart-routed), or "fallback" (cross-family retry fired).
+    """
+    try:
+        from app.deps import get_redis
+        redis_client = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        key = _chat_route_key(day, route_source)
+        pipe = redis_client.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, _CHAT_METRICS_TTL_S)
+        pipe.execute()
+    except Exception as exc:  # noqa: BLE001 — telemetry must never break chat
+        log_swallowed_error("app.routers.chat.record_route_decision", exc)
+
+
+def _record_chat_model_latency(model: str, duration_s: float) -> None:
+    """Best-effort rolling per-model latency sample (capped list).
+
+    Lets an integrator reconcile ``TIER_P95_MS`` in
+    ``core.routing.smart_router`` against observed wall-clock latency.
+    """
+    try:
+        from app.deps import get_redis
+        redis_client = get_redis()
+        key = _model_latency_key(model)
+        pipe = redis_client.pipeline()
+        pipe.lpush(key, repr(duration_s))
+        pipe.ltrim(key, 0, _MODEL_LATENCY_MAX_ENTRIES - 1)
+        pipe.expire(key, _CHAT_METRICS_TTL_S)
+        pipe.sadd(_MODEL_LATENCY_MODELS_KEY, model)
+        pipe.execute()
+    except Exception as exc:  # noqa: BLE001 — telemetry must never break chat
+        log_swallowed_error("app.routers.chat.record_model_latency", exc)
+
+
+def get_chat_route_counts_today(redis_client: Any) -> dict[str, int]:
+    """Today's chat route-decision counts, keyed by source.
+
+    Read by ``app.processor.router`` to surface on ``/processor/status``.
+    """
+    counts: dict[str, int] = dict.fromkeys(_ROUTE_SOURCES, 0)
+    try:
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        for source in _ROUTE_SOURCES:
+            raw = redis_client.get(_chat_route_key(day, source))
+            if raw is not None:
+                counts[source] = int(raw)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.chat.get_route_counts", exc)
+    return counts
+
+
+def get_chat_model_latency_stats(redis_client: Any) -> dict[str, dict[str, float | int]]:
+    """Per-model ``{count, p50_s, p95_s}`` from the rolling latency samples.
+
+    Read by ``app.processor.router`` to surface on ``/processor/status``.
+    """
+    stats: dict[str, dict[str, float | int]] = {}
+    try:
+        raw_models = redis_client.smembers(_MODEL_LATENCY_MODELS_KEY)
+        for raw_model in raw_models:
+            model = raw_model.decode() if isinstance(raw_model, bytes) else str(raw_model)
+            raw_durations = redis_client.lrange(_model_latency_key(model), 0, -1)
+            durations: list[float] = []
+            for raw in raw_durations:
+                try:
+                    durations.append(float(raw))
+                except (TypeError, ValueError) as exc:  # silent-catch-allowed: malformed duration-row float — skip, keep the rest
+                    log_swallowed_error("app.routers.chat.get_model_latency_stats", exc)
+                    continue
+            if not durations:
+                continue
+            durations.sort()
+            n = len(durations)
+            stats[model] = {
+                "count": n,
+                "p50_s": round(durations[n // 2], 3),
+                "p95_s": round(
+                    durations[int(n * 0.95)]
+                    if n >= _MIN_SAMPLES_FOR_P95
+                    else durations[-1],
+                    3,
+                ),
+            }
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("app.routers.chat.get_model_latency_stats", exc)
+    return stats
 
 
 def _model_family(model_id: str) -> str:
@@ -157,6 +279,8 @@ async def _success_gen(
     request: Request,
     upstream: httpx.Response,
     bare_model: str,
+    *,
+    start_monotonic: float | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Cancellation-safe streaming generator for an in-flight OpenRouter response.
 
@@ -164,9 +288,16 @@ async def _success_gen(
     us out of the loop; on ``CancelledError``/``GeneratorExit`` the ``finally``
     block closes ``upstream`` so the upstream TCP socket is released instead of
     being left spinning until OpenRouter finishes.
+
+    ``start_monotonic`` — when supplied by ``_attempt_stream`` — is the
+    wall-clock start of the upstream call, used to record observed
+    per-model latency for TIER_P95_MS reconciliation (Phase 0.4a).
+    Defaults to "now" for callers (mainly tests) that construct this
+    generator directly without going through ``_attempt_stream``.
     """
     actual_model_emitted = False
     usage_data: dict | None = None
+    gen_start_monotonic = start_monotonic if start_monotonic is not None else time.monotonic()
     try:
         async for chunk in upstream.aiter_bytes():
             # Client went away — stop pulling from upstream.
@@ -261,6 +392,9 @@ async def _success_gen(
                     )
             except Exception as exc:  # noqa: BLE001 — metrics are best-effort
                 log_swallowed_error("app.routers.chat.success_gen.llm_cost_record", exc)
+        # Record observed wall-clock latency for TIER_P95_MS reconciliation
+        # (Phase 0.4a) — best-effort, never raises (see _record_chat_model_latency).
+        _record_chat_model_latency(bare_model, time.monotonic() - gen_start_monotonic)
 
 
 async def _attempt_stream(
@@ -305,6 +439,7 @@ async def _attempt_stream(
             json=payload_dict,
             headers=headers,
         )
+        start_monotonic = time.monotonic()
         response = await client.send(req_obj, stream=True)
 
         status = response.status_code
@@ -334,7 +469,9 @@ async def _attempt_stream(
             return _error_gen()
 
         # Success — return a cancellation-safe streaming generator.
-        return _success_gen(request, response, bare_model)  # type: ignore[arg-type]
+        return _success_gen(  # type: ignore[arg-type]
+            request, response, bare_model, start_monotonic=start_monotonic
+        )
 
     except (httpx.ConnectError, httpx.ReadTimeout) as exc:
         logger.error("OpenRouter connection/timeout error for model=%s: %s", bare_model, exc)
@@ -354,10 +491,12 @@ async def _proxy_stream(
     the OpenRouter upstream so we don't leak sockets/tokens.
     """
     try:
+        route_source = "explicit"
         # Smart routing: when model is "auto" or smart routing is enabled with no model
         if req.model == "auto" or (
             getattr(config, "SMART_ROUTING_ENABLED", False) and not req.model
         ):
+            route_source = "auto"
             try:
                 from utils.smart_router import TaskType, route
 
@@ -407,6 +546,7 @@ async def _proxy_stream(
             original_status = result
             fallback = _pick_fallback(bare_model)
             if fallback:
+                route_source = "fallback"
                 logger.info(
                     "Retrying with fallback model=%s after %d on model=%s",
                     fallback, original_status, bare_model,
@@ -423,6 +563,9 @@ async def _proxy_stream(
                 result = await _attempt_stream(
                     request, req, fallback, request_id, api_key
                 )
+
+        # Route decision is now final — record telemetry (Phase 0.4a).
+        _record_chat_route_decision(route_source)
 
         # Final evaluation
         if isinstance(result, int):

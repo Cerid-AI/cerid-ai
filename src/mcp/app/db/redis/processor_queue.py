@@ -152,6 +152,91 @@ def enqueue_job(
     return record.id
 
 
+def find_active_job_id(
+    redis_client: Any,
+    job_type: str,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> str | None:
+    """Return the id of a pending-or-running job matching ``job_type``.
+
+    When ``payload`` is given, the stored payload must also be equal
+    (compared as parsed dicts, so JSON key order is irrelevant); when
+    ``None``, any payload of the type matches. Walks the queue's own key
+    layout (pending priority lists + running set) — the same convention
+    the knowledge-pack install and digest-run collapse paths use — so no
+    parallel bookkeeping can drift from the queue.
+
+    Fail-open: any Redis error during the scan returns ``None`` ("no
+    duplicate found") so a broken dedupe check can never block real work —
+    the worst case is one stacked duplicate, the pre-collapse behaviour.
+    """
+    def _s(v: Any) -> str:
+        return v.decode() if isinstance(v, bytes) else str(v)
+
+    try:
+        job_ids: list[str] = []
+        for priority in priority_order():
+            job_ids.extend(
+                _s(j) for j in redis_client.lrange(_queue_key(priority), 0, -1)
+            )
+        job_ids.extend(_s(j) for j in redis_client.smembers(_RUNNING_KEY))
+
+        for job_id in job_ids:
+            stored_type, stored_payload_raw = redis_client.hmget(
+                _job_key(job_id), ["job_type", "payload"]
+            )
+            if stored_type is None or _s(stored_type) != job_type:
+                continue
+            if payload is None:
+                return job_id
+            try:
+                stored_payload = (
+                    json.loads(_s(stored_payload_raw)) if stored_payload_raw else {}
+                )
+            except (TypeError, ValueError) as exc:
+                log_swallowed_error(
+                    "processor.redis_queue.find_active", exc, context={"job_id": job_id}
+                )
+                continue
+            if stored_payload == payload:
+                return job_id
+    except Exception as exc:  # noqa: BLE001 — fail-open, see docstring
+        log_swallowed_error(
+            "processor.redis_queue.find_active", exc, context={"job_type": job_type}
+        )
+    return None
+
+
+def enqueue_job_if_absent(
+    job: Any,
+    *,
+    payload: dict[str, Any] | None = None,
+    redis_client: Any | None = None,
+) -> str | None:
+    """Enqueue like :func:`enqueue_job` unless an equivalent job is already
+    pending or running.
+
+    Equivalence = same ``job_type`` AND equal payload (the payload the
+    worker re-instantiates from). Duplicate collapse for recurring enqueue
+    sites (schedulers, ingest-event subscribers): a pending duplicate would
+    scan the same state as the original, so stacking it only grows the
+    queue — observed live 2026-07-13 when the 60 s ``ingest_recovery`` cron
+    accumulated 1,459 pending copies behind slow LOW-priority jobs.
+    User-triggered one-shot enqueues keep using :func:`enqueue_job`.
+
+    Returns the new ``record.id``, or ``None`` when collapsed onto an
+    existing pending/running job.
+    """
+    if redis_client is None:
+        from app.deps import get_redis  # noqa: PLC0415
+        redis_client = get_redis()
+    existing = find_active_job_id(redis_client, job.job_type, payload=payload or {})
+    if existing is not None:
+        return None
+    return enqueue_job(job, payload=payload, redis_client=redis_client)
+
+
 # ---------------------------------------------------------------------------
 # RedisJobQueue
 # ---------------------------------------------------------------------------
@@ -215,6 +300,30 @@ class RedisJobQueue:
         )
         return job_record.id
 
+    async def enqueue_if_absent(self, job_record: JobRecord) -> str | None:
+        """Enqueue unless an equivalent job (same ``job_type`` + equal
+        payload) is already pending or running.
+
+        Duplicate collapse for periodic enqueues — a pending duplicate
+        scans the same state as the original, so it is pure queue growth;
+        the cadence tick that fires after the active job settles
+        re-enqueues, so skipping never loses work. Follows the pack-install
+        collapse convention: presence in a pending priority list OR the
+        running set counts as active (``recover_orphaned_running`` keeps
+        the running set free of dead-worker ghosts).
+
+        Returns the enqueued ``record.id``, or ``None`` when collapsed.
+        """
+        existing = await self._run(
+            find_active_job_id,
+            self._r,
+            job_record.job_type,
+            payload=job_record.payload,
+        )
+        if existing is not None:
+            return None
+        return await self.enqueue(job_record)
+
     async def dequeue(self, priorities: list[Priority]) -> JobRecord | None:
         """Pop the next ready job in priority order.
 
@@ -270,6 +379,34 @@ class RedisJobQueue:
         await self._run(self._r.srem, _RUNNING_KEY, job_id)
         score = record.completed_at.timestamp()
         await self._run(self._r.zadd, _RECENT_KEY, {job_id: score})
+
+    async def recover_orphaned_running(self) -> list[str]:
+        """Requeue jobs stranded in the running set by a dead worker.
+
+        A single worker process serves this queue, so any job still marked
+        running when a worker STARTS was orphaned by a crash/restart — it
+        will never complete and, worse, sits in the running set forever,
+        where duplicate-enqueue collapse (pack installs, digest runs) reads
+        it as "already in flight" and refuses new work. Observed live
+        2026-07-13: 46 ghosts accumulated across container restarts blocked
+        a pack install indefinitely. Called from ProcessorWorker.start().
+        """
+        recovered: list[str] = []
+        job_ids = await self._run(self._r.smembers, _RUNNING_KEY)
+        for raw_id in job_ids or []:
+            job_id = raw_id.decode() if isinstance(raw_id, bytes) else str(raw_id)
+            record = await self._load_record(job_id)
+            if record is None:
+                await self._run(self._r.srem, _RUNNING_KEY, job_id)
+                continue
+            if record.state == JobState.RUNNING:
+                record.state = JobState.PENDING
+                record.started_at = None
+                await self._save_record(record)
+                await self._run(self._r.lpush, _queue_key(record.priority), job_id)
+                recovered.append(job_id)
+            await self._run(self._r.srem, _RUNNING_KEY, job_id)
+        return recovered
 
     async def pause(self) -> None:
         """Set the paused flag; subsequent dequeue() calls return None."""

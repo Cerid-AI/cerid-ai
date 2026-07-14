@@ -423,9 +423,22 @@ def _check_duplicate(content_hash: str, domain: str) -> dict | None:
 
 
 def _reingest_artifact(
-    prev: dict, content: str, domain: str, metadata: dict | None, content_hash: str
+    prev: dict,
+    content: str,
+    domain: str,
+    metadata: dict | None,
+    content_hash: str,
+    *,
+    pre_chunked: list[dict[str, Any]] | None = None,
 ) -> dict:
-    """Update an existing artifact with new content. Preserves relationships."""
+    """Update an existing artifact with new content. Preserves relationships.
+
+    ``pre_chunked`` (Phase 2.6 re-index): when the caller has already produced
+    layout-aware element chunks (CSV/markdown/code/PDF/sentence-window), they
+    are used verbatim — matching the fresh-ingest chunk shape so a forced
+    re-index never silently downgrades a layout-aware artifact to token chunks.
+    When absent, the token chunker runs with optional contextual enrichment.
+    """
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
@@ -459,26 +472,39 @@ def _reingest_artifact(
                 "app.services.ingestion.sparse_remove_reingest", e,
             )
 
-    # Create new chunks with contextual header
+    # Create new chunks. Two paths mirror ingest_content: layout-aware
+    # pre_chunked input (element chunkers) preserves structural granularity +
+    # metadata; otherwise the token chunker with optional contextual enrichment.
     filename = metadata.get("filename", "") if metadata else ""
     sub_cat = metadata.get("sub_category", "") if metadata else ""
-    ctx_header = make_context_header(filename=filename, domain=domain, sub_category=sub_cat)
-    chunks = chunk_text(
-        content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
-        context_header=ctx_header,
-    )
+    ctx_header = ""
+    pre_chunk_metadatas: list[dict[str, Any]] = []
+    _edge_marker_types = {"WikilinkEdge", "EmailThreadEdge"}
+    if pre_chunked:
+        text_pre_chunked = [
+            c for c in pre_chunked
+            if c.get("metadata", {}).get("element_type") not in _edge_marker_types
+        ]
+        chunks = [c["text"] for c in text_pre_chunked]
+        pre_chunk_metadatas = [dict(c.get("metadata", {})) for c in text_pre_chunked]
+    else:
+        ctx_header = make_context_header(filename=filename, domain=domain, sub_category=sub_cat)
+        chunks = chunk_text(
+            content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+            context_header=ctx_header,
+        )
 
-    # Contextual enrichment — LLM-generated situational summaries per chunk
-    if config.ENABLE_CONTEXTUAL_CHUNKS:
-        try:
-            from core.utils.contextual import contextualize_chunks
-            chunks = contextualize_chunks(chunks, content, metadata)
-        except Exception as e:
-            log_swallowed_error('app.services.ingestion', e)
-            logger.warning("Contextual enrichment skipped (re-ingest): %s", e)
+        # Contextual enrichment — LLM-generated situational summaries per chunk
+        if config.ENABLE_CONTEXTUAL_CHUNKS:
+            try:
+                from core.utils.contextual import contextualize_chunks
+                chunks = contextualize_chunks(chunks, content, metadata)
+            except Exception as e:  # noqa: BLE001 — observability boundary
+                log_swallowed_error("app.services.ingestion.contextual_reingest", e)
 
-    # RAG C2.6 — parent-child dispatch (re-ingest path mirrors ingest_content).
-    pc_active = parent_child_enabled()
+    # RAG C2.6 — parent-child dispatch (token path only; pre_chunked is already
+    # leaf-granular, matching ingest_content's `not pre_chunked` guard).
+    pc_active = parent_child_enabled() and not pre_chunked
     chunk_records: list[dict[str, Any]] = []
     if pc_active:
         try:
@@ -534,15 +560,32 @@ def _reingest_artifact(
 
     chunk_ids = [r["id"] for r in chunk_records]
     chunk_documents = [r["text"] for r in chunk_records]
-    chunk_metadatas = [
-        {
-            **base_meta,
-            "chunk_index": i,
-            "chunk_level": rec["level"],
-            "parent_chunk_id": rec["parent_id"],
-        }
-        for i, rec in enumerate(chunk_records)
-    ]
+    if pre_chunk_metadatas:
+        # Per-chunk structural metadata (column_headers, heading_path,
+        # window_text, file:start_line:end_line) merges over base_meta —
+        # mirrors ingest_content's pre_chunked write. tenant_id is re-asserted
+        # last so a parser metadata entry can't escape its tenant scope;
+        # list/dict values are JSON-coerced for ChromaDB.
+        chunk_metadatas = []
+        for i, extras in enumerate(pre_chunk_metadatas):
+            merged: dict[str, Any] = {**base_meta}
+            for k, v in extras.items():
+                merged[k] = _coerce_chroma_meta(v)
+            merged["chunk_index"] = i
+            merged["tenant_id"] = base_meta["tenant_id"]
+            merged["chunk_level"] = "child"
+            merged["parent_chunk_id"] = ""
+            chunk_metadatas.append(merged)
+    else:
+        chunk_metadatas = [
+            {
+                **base_meta,
+                "chunk_index": i,
+                "chunk_level": rec["level"],
+                "parent_chunk_id": rec["parent_id"],
+            }
+            for i, rec in enumerate(chunk_records)
+        ]
     # Encrypt the Chroma-bound metadata copy (currently just "summary") —
     # base_meta below stays plaintext for the Neo4j update further down.
     chunk_metadatas = [_encrypt_chroma_metadata(m) for m in chunk_metadatas]
@@ -615,6 +658,19 @@ def _reingest_artifact(
         logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
 
     logger.info(f"Re-ingested artifact {artifact_id[:8]} ({base_meta.get('filename', '?')})")
+
+    # Phase 2.2 — the re-embedded chunks above make any cached /agent/query
+    # result computed against the old text stale for up to SEMANTIC_CACHE_TTL.
+    try:
+        from core.retrieval.semantic_cache import (
+            invalidate_cache_non_blocking as _sem_cache_invalidate,
+        )
+        _sem_cache_invalidate(get_redis(), trigger="ingestion.reingest_artifact")
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.semantic_cache_invalidate_reingest", e,
+        )
+
     return {
         "status": "updated",
         "artifact_id": artifact_id,
@@ -634,8 +690,17 @@ def ingest_content(
     skip_quality: bool = False,
     pre_chunked: list[dict[str, Any]] | None = None,
     enrich: bool = True,
+    force_reindex: bool = False,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
+
+    ``force_reindex`` (Phase 2.6): re-embed + re-index an artifact whose content
+    is UNCHANGED so newly-enabled retrieval features (contextual chunking,
+    sentence-window) apply retroactively. It bypasses the content-hash dedup
+    short-circuit and routes to ``_reingest_artifact`` (which deletes the old
+    Chroma/BM25/sparse rows, rewrites all three from the same content-addressed
+    chunk ids, and invalidates the semantic cache) — so it is idempotent:
+    re-running is safe. Relationships/entities are preserved (not re-extracted).
 
     When ``skip_quality`` is True the weighted 4-dimension quality score is
     skipped (neutral 0.5 stored) — used by wizard / bulk paths that don't
@@ -677,7 +742,10 @@ def ingest_content(
     # with the one-artifact-per-content model the DB already enforces.
     artifact_id = content_hash
 
-    existing = _check_duplicate(content_hash, domain)
+    # force_reindex deliberately re-embeds unchanged content, so the exact-hash
+    # dedup short-circuit is skipped; the filename re-ingest branch below routes
+    # to _reingest_artifact (which owns idempotent old-chunk cleanup).
+    existing = None if force_reindex else _check_duplicate(content_hash, domain)
     if existing:
         fname = (metadata or {}).get("filename", "?")
         logger.info(
@@ -716,8 +784,11 @@ def ingest_content(
     if fname != "text_input":
         try:
             prev = graph.find_artifact_by_filename(get_neo4j(), fname, domain)
-            if prev and prev["content_hash"] != content_hash:
-                return _reingest_artifact(prev, content, domain, metadata, content_hash)
+            if prev and (force_reindex or prev["content_hash"] != content_hash):
+                return _reingest_artifact(
+                    prev, content, domain, metadata, content_hash,
+                    pre_chunked=pre_chunked,
+                )
         except Exception as e:
             log_swallowed_error('app.services.ingestion', e)
             logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
@@ -1360,6 +1431,19 @@ def ingest_content(
             "similarity": near_dup["similarity"],
         }
 
+    # Phase 2.2 — a new artifact makes any cached /agent/query result stale
+    # for up to SEMANTIC_CACHE_TTL. ingest_file/ingest_batch/attachments all
+    # funnel through this success path, so one hook covers every ingest route.
+    try:
+        from core.retrieval.semantic_cache import (
+            invalidate_cache_non_blocking as _sem_cache_invalidate,
+        )
+        _sem_cache_invalidate(get_redis(), trigger="ingestion.ingest_content")
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.semantic_cache_invalidate", e,
+        )
+
     return result
 
 
@@ -1624,8 +1708,13 @@ async def ingest_file(
     skip_metadata: bool = False,
     skip_quality: bool = False,
     extra_metadata: dict[str, Any] | None = None,
+    force_reindex: bool = False,
 ) -> dict:
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store.
+
+    ``force_reindex`` (Phase 2.6): re-parse + re-embed a file-backed artifact
+    whose content is unchanged so newly-enabled retrieval features apply
+    retroactively. Threaded straight into ``ingest_content``; idempotent.
 
     ``skip_metadata`` swaps the NLP-heavy ``extract_metadata()`` (spaCy NER
     + tiktoken) for the fast ``extract_metadata_minimal()`` fallback used
@@ -1737,6 +1826,7 @@ async def ingest_file(
         text, domain, meta,
         skip_quality=skip_quality,
         pre_chunked=pre_chunked,
+        force_reindex=force_reindex,
     )
     result["filename"] = filename
     result["categorize_mode"] = mode

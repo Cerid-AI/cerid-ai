@@ -9,12 +9,18 @@ about, and candidates whose recorded date falls in/near that range are
 ADDITIVELY boosted — never filtered out, so a wrong/uncertain window can't drop
 recall (the research's "soft constraint, not hard filter").
 
-Two pieces:
+Three pieces:
 - ``temporal_proximity`` — deterministic, unit-tested: 1.0 inside the window,
   exponential decay (by ``half_life_days``) outside.
 - ``extract_query_window`` — one LLM call (stage ``longmemeval/temporal_parse``)
   returning the ISO window, or ``(None, None)`` when the question isn't
   time-scoped. Any failure degrades to no boost.
+- ``apply_proximity_boost`` — anchors each candidate to its EVENT date (the
+  date the content is actually about) when the candidate carries one,
+  falling back to the existing ingest/observed-date basis otherwise (see
+  ``_resolve_candidate_date``). A July LongMemEval paired A/B measured a
+  statistical wash on the basis-only boost; the event-time basis is what
+  makes it worth re-testing (Phase 2 item 2.7).
 """
 from __future__ import annotations
 
@@ -108,6 +114,23 @@ async def extract_query_window(
     return start, end
 
 
+def _resolve_candidate_date(
+    candidate: dict[str, Any], event_date_key: str, date_key: str,
+) -> str:
+    """Prefer the EVENT date the content describes; fall back to ``date_key``.
+
+    ``date_key`` (default ``"date"``) is typically an ingest/observed-date
+    basis (e.g. session or recording date) — a proxy for "when it was
+    recorded", not "when it happened". ``event_date_key`` (default
+    ``"event_date"``), when present on the candidate, is the absolute date
+    the content is actually ABOUT and is the correct anchor for a proximity
+    boost. Candidates that carry no extracted event date degrade gracefully
+    to the existing basis — this is a pure generalization, not a behavior
+    change for callers that never populate ``event_date_key``.
+    """
+    return str(candidate.get(event_date_key) or candidate.get(date_key) or "")
+
+
 def apply_proximity_boost(
     candidates: list[dict[str, Any]],
     start_iso: str | None,
@@ -116,9 +139,13 @@ def apply_proximity_boost(
     half_life_days: float,
     *,
     date_key: str = "date",
+    event_date_key: str = "event_date",
     score_key: str = "score",
 ) -> int:
     """Additively lift each candidate's ``score`` by ``weight · proximity(date)``.
+
+    The date anchoring each candidate is resolved by ``_resolve_candidate_date``
+    — event time when available, else the existing basis (see there).
 
     Mutates ``candidates`` in place. Safe by construction: it only ever ADDS to
     scores (never removes a candidate), so an inaccurate window cannot reduce
@@ -131,7 +158,7 @@ def apply_proximity_boost(
         return 0
     lifted = 0
     for c in candidates:
-        cd = parse_iso_date(str(c.get(date_key) or ""))
+        cd = parse_iso_date(_resolve_candidate_date(c, event_date_key, date_key))
         prox = temporal_proximity(cd, start, end, half_life_days)
         if prox > 0.0:
             c[score_key] = float(c.get(score_key, 0.0)) + weight * prox

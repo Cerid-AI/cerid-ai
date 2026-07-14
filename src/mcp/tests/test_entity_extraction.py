@@ -18,6 +18,7 @@ from core.agents.entity_extraction import (
     Entity,
     canonical_id,
     extract_entities_from_text,
+    is_junk_entity_name,
 )
 
 # ---------------------------------------------------------------------------
@@ -99,18 +100,19 @@ class TestExtractEntities:
         assert result[0].confidence == 0.9
 
     async def test_confidence_clamped_to_unit_interval(self):
+        # Two-char names: single characters are rejected by the junk-name gate.
         caller = _llm_caller_returning({
             "entities": [
-                {"name": "X", "type": "ORG", "confidence": 1.5},
-                {"name": "Y", "type": "ORG", "confidence": -0.3},
+                {"name": "Xx", "type": "ORG", "confidence": 1.5},
+                {"name": "Yy", "type": "ORG", "confidence": -0.3},
             ]
         })
         # min_confidence=0.0 disables the floor so we can test clamping in isolation.
         result = await extract_entities_from_text("test", llm_caller=caller, min_confidence=0.0)
         # Both pass canonicalisation with non-empty slugs.
         confidences = {e.canonical_id: e.confidence for e in result}
-        assert confidences["org:x"] == 1.0
-        assert confidences["org:y"] == 0.0
+        assert confidences["org:xx"] == 1.0
+        assert confidences["org:yy"] == 0.0
 
     async def test_blank_input_returns_empty(self):
         caller = _llm_caller_returning({"entities": []})
@@ -183,3 +185,74 @@ class TestExtractEntities:
         })
         result_high = await extract_entities_from_text("test", llm_caller=caller_high)
         assert len(result_high) == 1, "entity at or above default floor must survive"
+
+
+# ---------------------------------------------------------------------------
+# is_junk_entity_name — junk-name gate (2026-07-13)
+# ---------------------------------------------------------------------------
+
+
+class TestJunkNameGate:
+    """Structural shapes that cannot be entities are rejected at extraction."""
+
+    # -- rejects -------------------------------------------------------------
+
+    @pytest.mark.parametrize("name", [
+        "library/email.charset.html",
+        "docs/guide/index.htm",
+        "notes/readme.md",
+        "spec/rfc.txt",
+        "handbook/chapter1.rst",
+        "reports/q3.pdf",
+    ])
+    def test_rejects_doc_file_paths(self, name):
+        assert is_junk_entity_name(name) is True
+
+    @pytest.mark.parametrize("name", [
+        "version-3-6",
+        "3.6",
+        "v3.6.1",
+        "1.5.0",
+        "version 3.6",
+    ])
+    def test_rejects_pure_version_strings(self, name):
+        assert is_junk_entity_name(name) is True
+
+    @pytest.mark.parametrize("name", ["", "   ", "x", "Q", "§"])
+    def test_rejects_empty_and_single_characters(self, name):
+        assert is_junk_entity_name(name) is True
+
+    # -- admits --------------------------------------------------------------
+
+    @pytest.mark.parametrize("name", [
+        "NASA",
+        "IBM",
+        "gpt-4",
+        "scikit-learn",
+        "Node.js",
+        "BTC/USD",       # slash but no doc extension
+        "2024",          # bare number, no separator — may be a DATE entity
+        "V8",            # bare v+digits, no separator — product name
+        "V-22 Osprey",   # version-ish prefix but not a pure version token
+        "index.html",    # doc extension but no slash — could be a topic
+        "Elon Musk",
+    ])
+    def test_admits_valid_entities(self, name):
+        assert is_junk_entity_name(name) is False
+
+    # -- end-to-end through the extraction pipeline ---------------------------
+
+    @pytest.mark.asyncio
+    async def test_extraction_drops_junk_keeps_valid(self):
+        caller = _llm_caller_returning({
+            "entities": [
+                {"name": "library/email.charset.html", "type": "OTHER", "confidence": 0.9},
+                {"name": "version-3-6", "type": "DATE", "confidence": 0.9},
+                {"name": "v3.6.1", "type": "OTHER", "confidence": 0.9},
+                {"name": "x", "type": "ORG", "confidence": 0.9},
+                {"name": "NASA", "type": "ORG", "confidence": 0.9},
+                {"name": "gpt-4", "type": "ASSET", "confidence": 0.9},
+            ]
+        })
+        result = await extract_entities_from_text("test", llm_caller=caller)
+        assert [e.name for e in result] == ["NASA", "gpt-4"]

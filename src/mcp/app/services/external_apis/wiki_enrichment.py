@@ -40,6 +40,7 @@ from app.services.external_apis.packages import PackagesAdapter
 from app.services.external_apis.wikidata import WikidataAdapter
 from app.services.external_apis.wikipedia import WikipediaAdapter
 from app.services.wiki_pages import ExternalReference
+from core.agents.entity_extraction import ends_with_doc_extension, is_junk_entity_name
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.external_apis.wiki_enrichment")
@@ -168,6 +169,74 @@ def is_plausible_wikipedia_title(candidate: str) -> bool:
         return False
     if len(name.split()) > _MAX_TITLE_WORDS:
         return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Per-route junk gate (2026-07-13 beta triage)
+# ---------------------------------------------------------------------------
+# The wikipedia shape gate above only protected the wikipedia slug; github /
+# packages / other routes accepted junk verbatim ("library/email.charset.html"
+# was split into owner="library", repo="email.charset.html" and 404'd GitHub).
+# _passes_adapter_gate composes the checks: shared name-junk gate for EVERY
+# route (core.agents.entity_extraction.is_junk_entity_name), plus per-route
+# structural checks. The wikipedia route additionally skips two unknown-typed
+# shapes that live logs proved always 404: shouty constant names ("ALIASES",
+# "CHARSETS") and codec aliases ("euc-jp", "iso-2022-jp", "utf-8"). Those two
+# only fire for entity_type "unknown", so entities with a genuine inferred
+# type are never blocked by them.
+
+_MAX_PLAUSIBLE_ACRONYM_LEN = 6  # NASA(4)/IBM(3)/UNESCO(6) pass; ALIASES(7)/CHARSETS(8) fail
+
+_CODEC_ALIAS_FAMILIES = frozenset((
+    "ascii", "big5", "cp", "euc", "gb", "gb2312", "gb18030", "gbk", "hz",
+    "iso", "johab", "koi8", "latin", "mac", "ptcp154", "shift", "tis",
+    "utf", "windows",
+))
+
+
+def _is_shouty_single_token(name: str) -> bool:
+    """ALL-CAPS pure-alpha token too long to be a plausible acronym.
+
+    Pure-alpha keeps hyphen/digit names like "COVID-19" or "UTF-8" out of
+    this check — they are judged by the codec gate or admitted.
+    """
+    if not name.isalpha() or not name.isupper():
+        return False
+    return len(name) > _MAX_PLAUSIBLE_ACRONYM_LEN
+
+
+def _is_codec_alias_shaped(name: str) -> bool:
+    """Lowercase hyphenated token from a known codec family.
+
+    Matches "euc-jp", "iso-2022-jp", "utf-8". Does NOT match "gpt-4" or
+    "scikit-learn" — their first hyphen segment is not a codec family.
+    """
+    if " " in name or "-" not in name or name != name.lower():
+        return False
+    return name.split("-", 1)[0] in _CODEC_ALIAS_FAMILIES
+
+
+def _passes_adapter_gate(slug: str, entity_name: str, entity_type: EntityType) -> bool:
+    """Structural pre-flight for one adapter route.
+
+    Returns False when the candidate cannot productively hit this adapter —
+    the route is then skipped before any registry probe or HTTP call.
+    """
+    name = entity_name.strip()
+    if is_junk_entity_name(name):
+        return False
+    if slug == "github" and "/" in name:
+        owner, _, repo = name.partition("/")
+        if ends_with_doc_extension(owner) or ends_with_doc_extension(repo):
+            return False
+    if slug == "wikipedia":
+        if not is_plausible_wikipedia_title(name):
+            return False
+        if entity_type == "unknown" and (
+            _is_shouty_single_token(name) or _is_codec_alias_shaped(name)
+        ):
+            return False
     return True
 
 
@@ -473,12 +542,16 @@ async def enrich(
     refs: list[ExternalReference] = []
 
 
+    skipped_routes = 0
     for slug in slugs_to_consult:
-        # Junk gate BEFORE any registry probe or HTTP call — URLs, dates,
-        # regulation cites and sentence-like strings can never be titles.
-        if slug == "wikipedia" and not is_plausible_wikipedia_title(entity_name):
+        # Junk gate BEFORE any registry probe or HTTP call — applies to
+        # every route (doc paths, version tokens, single chars), with
+        # per-route shape checks on top (wikipedia titles, github repos).
+        if not _passes_adapter_gate(slug, entity_name, entity_type):
+            skipped_routes += 1
             logger.debug(
-                "wiki_enrichment.skip_implausible_title entity=%r", entity_name,
+                "wiki_enrichment.skip_junk_candidate slug=%s entity=%r entity_type=%s",
+                slug, entity_name, entity_type,
             )
             continue
 
@@ -525,4 +598,9 @@ async def enrich(
                 slug, entity_name, ref.title,
             )
 
+    if skipped_routes:
+        logger.debug(
+            "wiki_enrichment.junk_routes_skipped entity=%r skipped=%d of=%d",
+            entity_name, skipped_routes, len(slugs_to_consult),
+        )
     return refs

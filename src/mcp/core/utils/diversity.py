@@ -3,9 +3,17 @@
 
 """Maximal Marginal Relevance (MMR) diversity reordering.
 
-Reduces redundancy in retrieval results by penalizing documents
-too similar to already-selected documents. Uses Jaccard similarity
-on stemmed term sets — no additional model required.
+Reduces redundancy in retrieval results by penalizing documents too
+similar to already-selected documents. Prefers cosine similarity over
+each result's pre-computed embedding (upstream retrieval attaches it under
+the ``"embedding"`` key) when BOTH documents in a comparison carry one;
+falls back to Jaccard similarity on stemmed term sets otherwise. This
+module never computes a new embedding — it is a pure re-ranker over
+whatever similarity signal retrieval already put in the result dict, so a
+paraphrase pair with low token overlap but high semantic similarity (which
+Jaccard is blind to) is still recognized as redundant when embeddings are
+present, while callers that never attach embeddings get the original
+Jaccard-only behavior unchanged.
 
 Canonical location as of Sprint D. Previously at ``src/mcp/utils/diversity.py``;
 a thin bridge stays there until Sprint E retires the utils/ bridge dir.
@@ -13,6 +21,8 @@ a thin bridge stays there until Sprint E retires the utils/ bridge dir.
 from __future__ import annotations
 
 import logging
+import math
+from collections.abc import Sequence
 from typing import Any
 
 from config.features import MMR_LAMBDA
@@ -20,6 +30,13 @@ from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
 
 logger = logging.getLogger("ai-companion.diversity")
+
+# MMR's diversity penalty assumes a similarity scale of [0, 1], matching
+# Jaccard's natural range. Raw cosine similarity can go negative for
+# anti-correlated embeddings; an anti-correlated pair is not "more diverse
+# than orthogonal", so it is floored here rather than allowed to invert the
+# penalty term.
+_MMR_MIN_EMBEDDING_SIMILARITY = 0.0
 
 
 def _extract_terms(text: str) -> frozenset[str]:
@@ -60,6 +77,23 @@ def jaccard_similarity(terms_a: frozenset[str], terms_b: frozenset[str]) -> floa
     return intersection / union if union > 0 else 0.0
 
 
+def cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
+    """Cosine similarity between two dense vectors, floored at 0 (see module docstring).
+
+    Empty, mismatched-length, or zero-norm input yields 0 — neutral rather
+    than an error, since the caller (``mmr_reorder``) treats "no similarity
+    signal" as "fall back to Jaccard", not as a crash.
+    """
+    if not vec_a or not vec_b or len(vec_a) != len(vec_b):
+        return 0.0
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(a * a for a in vec_a))
+    norm_b = math.sqrt(sum(b * b for b in vec_b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return max(_MMR_MIN_EMBEDDING_SIMILARITY, dot / (norm_a * norm_b))
+
+
 def mmr_reorder(
     results: list[dict[str, Any]],
     query: str,
@@ -72,6 +106,13 @@ def mmr_reorder(
 
     ``lambda_param=1`` reduces to pure relevance ranking; ``=0`` is
     pure diversity. Default comes from ``config.features.MMR_LAMBDA``.
+
+    The ``d_selected`` similarity term uses cosine similarity over each
+    result's ``"embedding"`` field when BOTH documents in a pairwise
+    comparison carry one (no embedding is computed here — see module
+    docstring); it falls back to Jaccard on stemmed term sets per-pair
+    otherwise, so partial embedding coverage degrades gracefully instead
+    of an all-or-nothing switch.
     """
     if len(results) <= 1:
         return results
@@ -80,9 +121,16 @@ def mmr_reorder(
     n = top_n or len(results)
 
     doc_terms = [_extract_terms(r.get("content", "")) for r in results]
+    doc_embeddings: list[Sequence[float] | None] = [r.get("embedding") for r in results]
 
     # Use calibrated relevance scores directly — already boosted/reranked upstream
     query_sims = [r.get("relevance", 0.0) for r in results]
+
+    def _pair_similarity(idx: int, sel_idx: int) -> float:
+        emb_a, emb_b = doc_embeddings[idx], doc_embeddings[sel_idx]
+        if emb_a and emb_b:
+            return cosine_similarity(emb_a, emb_b)
+        return jaccard_similarity(doc_terms[idx], doc_terms[sel_idx])
 
     selected_indices: list[int] = []
     remaining = set(range(len(results)))
@@ -97,7 +145,7 @@ def mmr_reorder(
             # Max similarity to already selected docs
             max_sim_to_selected = 0.0
             for sel_idx in selected_indices:
-                sim = jaccard_similarity(doc_terms[idx], doc_terms[sel_idx])
+                sim = _pair_similarity(idx, sel_idx)
                 if sim > max_sim_to_selected:
                     max_sim_to_selected = sim
 

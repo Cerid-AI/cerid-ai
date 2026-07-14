@@ -38,6 +38,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ai-companion.briefs.scheduler")
 
 
+async def _enqueue_collapsed(queue: object, record: object) -> bool:
+    """Enqueue with duplicate collapse; return True when collapsed.
+
+    Recurring cron enqueues must not stack a second copy of a job that is
+    still pending or running (same job_type + payload). Falls back to a
+    plain ``enqueue`` for queue implementations without collapse support.
+    """
+    enqueue_if_absent = getattr(queue, "enqueue_if_absent", None)
+    if enqueue_if_absent is not None:
+        return await enqueue_if_absent(record) is None
+    await queue.enqueue(record)  # type: ignore[attr-defined]
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Cron job callables
 # ---------------------------------------------------------------------------
@@ -64,7 +78,12 @@ async def _daily_brief_job(queue: object) -> None:
 
     job = BriefGenerationJob(target_date=target_date, **vault_kwargs)
     record = job.new_record(payload={"target_date": target_date, **vault_kwargs})
-    await queue.enqueue(record)  # type: ignore[attr-defined]
+    if await _enqueue_collapsed(queue, record):
+        logger.info(
+            "brief_generation enqueue skipped: equivalent job pending/running target_date=%s",
+            target_date,
+        )
+        return
     logger.info(
         "brief_generation enqueued target_date=%s job_id=%s write_to_vault=%s",
         target_date, record.id, vault_kwargs["write_to_vault"],
@@ -94,7 +113,12 @@ async def _weekly_synthesis_job(queue: object) -> None:
 
     job = WeeklySynthesisJob(week_ending=week_ending, **vault_kwargs)
     record = job.new_record(payload={"week_ending": week_ending, **vault_kwargs})
-    await queue.enqueue(record)  # type: ignore[attr-defined]
+    if await _enqueue_collapsed(queue, record):
+        logger.info(
+            "weekly_synthesis enqueue skipped: equivalent job pending/running week_ending=%s",
+            week_ending,
+        )
+        return
     logger.info(
         "weekly_synthesis enqueued week_ending=%s job_id=%s write_to_vault=%s",
         week_ending, record.id, vault_kwargs["write_to_vault"],

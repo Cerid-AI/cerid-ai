@@ -108,6 +108,24 @@ class GraphStore(ABC):
                 results[node.id] = node
         return results
 
+    async def get_quality_and_summaries(
+        self, artifact_ids: list[str]
+    ) -> tuple[dict[str, float], dict[str, str]]:
+        """Batch-fetch quality_score and summary for a candidate set.
+
+        Returns ``({artifact_id: quality_score}, {artifact_id: summary})``.
+        IDs with no stored summary are simply absent from the summaries
+        dict; callers apply their own neutral default for missing scores.
+
+        Default implementation derives both from :meth:`get_artifacts_batch`
+        (N-query fan-out); concrete stores should override with a single
+        round-trip query.
+        """
+        nodes = await self.get_artifacts_batch(artifact_ids)
+        scores = {aid: n.quality_score for aid, n in nodes.items()}
+        summaries = {aid: n.summary for aid, n in nodes.items() if n.summary}
+        return scores, summaries
+
     async def find_related_with_metadata(
         self,
         artifact_ids: list[str],

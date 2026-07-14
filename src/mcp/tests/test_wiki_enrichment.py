@@ -596,3 +596,121 @@ class TestEnrichSkipsImplausibleTitles:
 
         instance.lookup.assert_awaited_once()
         assert len(refs) == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-route junk gate (2026-07-13) — every adapter route, not just wikipedia
+# ---------------------------------------------------------------------------
+
+
+class TestAdapterGateRejections:
+    async def test_github_not_called_for_doc_path_repo(self):
+        """'library/email.charset.html' must not be treated as owner/repo."""
+        registry = _make_registry({"github"})
+
+        with patch("app.services.external_apis.wiki_enrichment.GitHubAdapter") as MockGH:
+            MockGH.return_value.lookup = AsyncMock()
+
+            refs = await enrich(
+                "library/email.charset.html", "repository", registry=registry,
+            )
+
+        MockGH.return_value.lookup.assert_not_awaited()
+        assert refs == []
+        # Gate fires before the registry probe — no wasted work.
+        registry.is_enabled.assert_not_called()
+
+    async def test_github_not_called_when_owner_segment_is_doc_file(self):
+        """Segment-level check: owner ending in a doc extension is rejected
+        even when the whole name does not end in one."""
+        registry = _make_registry({"github"})
+
+        with patch("app.services.external_apis.wiki_enrichment.GitHubAdapter") as MockGH:
+            MockGH.return_value.lookup = AsyncMock()
+
+            refs = await enrich("guide.html/repo", "repository", registry=registry)
+
+        MockGH.return_value.lookup.assert_not_awaited()
+        assert refs == []
+
+    async def test_generic_gate_applies_to_non_wikipedia_routes(self):
+        """A pure version token is skipped on every route (wikidata too)."""
+        registry = _all_enabled_registry()
+
+        with (
+            patch("app.services.external_apis.wiki_enrichment.WikipediaAdapter") as MockWiki,
+            patch("app.services.external_apis.wiki_enrichment.WikidataAdapter") as MockWikidata,
+        ):
+            MockWiki.return_value.lookup = AsyncMock()
+            MockWikidata.return_value.lookup = AsyncMock()
+
+            refs = await enrich("v3.6.1", "concept", registry=registry)
+
+        MockWiki.return_value.lookup.assert_not_awaited()
+        MockWikidata.return_value.lookup.assert_not_awaited()
+        assert refs == []
+
+    @pytest.mark.parametrize("name", ["ALIASES", "CHARSETS"])
+    async def test_wikipedia_skips_shouty_unknown_tokens(self, name):
+        registry = _make_registry({"wikipedia"})
+
+        with patch("app.services.external_apis.wiki_enrichment.WikipediaAdapter") as MockWiki:
+            MockWiki.return_value.lookup = AsyncMock()
+
+            refs = await enrich(name, "unknown", registry=registry)
+
+        MockWiki.return_value.lookup.assert_not_awaited()
+        assert refs == []
+
+    @pytest.mark.parametrize("name", ["euc-jp", "iso-2022-jp", "utf-8"])
+    async def test_wikipedia_skips_codec_alias_unknown_tokens(self, name):
+        registry = _make_registry({"wikipedia"})
+
+        with patch("app.services.external_apis.wiki_enrichment.WikipediaAdapter") as MockWiki:
+            MockWiki.return_value.lookup = AsyncMock()
+
+            refs = await enrich(name, "unknown", registry=registry)
+
+        MockWiki.return_value.lookup.assert_not_awaited()
+        assert refs == []
+
+
+class TestAdapterGateAdmissions:
+    @staticmethod
+    def _wiki_result(title: str) -> dict:
+        return {
+            "title": title,
+            "extract": f"About {title}.",
+            "content_url": f"https://en.wikipedia.org/wiki/{title}",
+            "thumbnail_url": None,
+            "last_updated": "2026-01-01T00:00:00Z",
+        }
+
+    @pytest.mark.parametrize("name", ["NASA", "IBM", "gpt-4", "scikit-learn", "Node.js"])
+    async def test_wikipedia_called_for_valid_unknown_entities(self, name):
+        """Short acronyms and hyphen/dot software names must still enrich."""
+        registry = _make_registry({"wikipedia"})
+
+        with patch("app.services.external_apis.wiki_enrichment.WikipediaAdapter") as MockWiki:
+            MockWiki.return_value.lookup = AsyncMock(return_value=self._wiki_result(name))
+
+            refs = await enrich(name, "unknown", registry=registry)
+
+        MockWiki.return_value.lookup.assert_awaited_once()
+        assert len(refs) == 1
+        assert refs[0].title == name
+
+    async def test_shouty_gate_only_applies_to_unknown_type(self):
+        """An ALL-CAPS name with a genuine inferred type is never blocked."""
+        registry = _make_registry({"wikipedia"})
+
+        with (
+            patch("app.services.external_apis.wiki_enrichment.WikipediaAdapter") as MockWiki,
+            patch("app.services.external_apis.wiki_enrichment.WikidataAdapter"),
+        ):
+            MockWiki.return_value.lookup = AsyncMock(return_value=self._wiki_result("UNIVERSE"))
+
+            refs = await enrich("UNIVERSE", "concept", registry=registry)
+
+        MockWiki.return_value.lookup.assert_awaited_once()
+        assert len(refs) == 1

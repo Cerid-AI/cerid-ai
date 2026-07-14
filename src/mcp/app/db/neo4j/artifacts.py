@@ -746,6 +746,23 @@ def save_verification_report(
         "Saved verification report %s for conversation %s (%d artifacts, %d urls, methods=%s)",
         report_id[:8], conversation_id[:8], len(artifact_ids), len(source_urls), sorted(methods),
     )
+
+    # Phase 0.4a telemetry: best-effort daily counters for the
+    # timeout-rate / uncertain-rate visibility gap (verification cites a
+    # 26% uncertain rate with no regression guard). Must never break the
+    # save that already happened above.
+    try:
+        from app.observability.verification_metrics import record_verification_report
+        timeout_count = sum(1 for c in canonical if c.verification_method == "timeout")
+        record_verification_report(
+            claims_total=total,
+            uncertain_count=uncertain,
+            timeout_count=timeout_count,
+        )
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("app.db.neo4j.artifacts.save_verification_report.telemetry", exc)
+
     return report_id
 
 

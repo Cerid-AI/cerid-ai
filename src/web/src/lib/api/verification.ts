@@ -127,7 +127,9 @@ export async function verifySingleClaim(
               source_domain: event.source_domain || undefined,
               source_snippet: event.source_snippet || undefined,
               source_urls: event.source_urls || [],
-              reason: event.reason || undefined,
+              // Timeout verdicts nest the reason under verdict — same
+              // fallback as the streaming hook's claim_verified handler.
+              reason: event.reason || event.verdict?.reason || undefined,
               verification_method: (event.verification_method || undefined) as HallucinationClaim["verification_method"],
               verification_model: event.verification_model || undefined,
               verification_answer: event.verification_answer || undefined,

@@ -39,6 +39,18 @@ logger = logging.getLogger("ai-companion.semantic_cache")
 
 _CACHE_PREFIX = "semcache:"
 
+#: Redis sorted set (entry_id -> stored-at timestamp) used for FIFO
+#: size-bound eviction (Phase 2.2). Shares the ``semcache:`` prefix so
+#: ``invalidate_cache``'s SCAN clears it for free alongside every entry.
+_AGE_INDEX_KEY = _CACHE_PREFIX + "age_index"
+
+#: Watermark of the last full invalidation, consulted by the stale-hit
+#: check in ``cache_lookup``. Deliberately OUTSIDE the ``semcache:``
+#: prefix so it survives ``invalidate_cache``'s SCAN+DELETE sweep instead
+#: of being wiped by the very event it needs to remember.
+_LAST_INVALIDATED_KEY = "semcache_meta:last_invalidated_at"
+_LAST_INVALIDATED_TTL_SECONDS = 7 * 24 * 60 * 60  # outlives any single entry's TTL
+
 
 def _entry_key(entry_id: str) -> str:
     return _CACHE_PREFIX + "entry:" + entry_id
@@ -125,12 +137,68 @@ def _record_cache_hit(redis_client: Any, hit: bool) -> None:
         log_swallowed_error("core.retrieval.semantic_cache.hit_metric", exc)
 
 
+def _record_cache_invalidation(redis_client: Any, count: int, trigger: str) -> None:
+    """Record an invalidation event (entries dropped + trigger source) so
+    operators can see which mutation paths drive cache churn (Phase 2.2 —
+    ``invalidate_cache`` previously had no production caller at all).
+
+    Best-effort: never raises into ``invalidate_cache``'s return path.
+    """
+    try:
+        from utils.metrics import MetricsCollector
+        MetricsCollector(redis_client).record_metric(
+            "cache_invalidation_count", float(count), tags={"trigger": trigger},
+        )
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.invalidation_metric", exc)
+
+
+def _check_stale_hit(redis_client: Any, payload: dict[str, Any], entry_id: str) -> None:
+    """Flag a hit served from an entry that predates the last known
+    invalidation — evidence the invalidation SCAN missed it or the backend
+    ``delete(where={})`` failed, rather than the corpus being confirmed
+    fresh. One extra Redis GET on the hit path only; never raises.
+    """
+    try:
+        watermark_raw = redis_client.get(_LAST_INVALIDATED_KEY)
+        if not watermark_raw:
+            return  # no invalidation has run yet — nothing to compare against
+        last_invalidated_at = float(watermark_raw)
+        stored_at = float(payload.get("stored_at", 0.0))
+        if stored_at < last_invalidated_at:
+            logger.warning(
+                "Semantic cache stale hit: id=%s stored_at=%.0f last_invalidated_at=%.0f",
+                entry_id[:12], stored_at, last_invalidated_at,
+            )
+            from utils.metrics import MetricsCollector
+            MetricsCollector(redis_client).record_metric("cache_stale_hit_count", 1.0)
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.stale_hit_check", exc)
+
+
+def _scope_token(domains: list[str] | None) -> str:
+    """Canonical token for the domain filter a result was computed under."""
+    return ",".join(sorted(domains)) if domains else "__all__"
+
+
+# ANN candidates examined per lookup — the nearest embedding may belong to a
+# different domain scope, so we scan a few neighbors for a same-scope hit.
+_LOOKUP_CANDIDATES = 3
+
+
 def cache_lookup(
     query_embedding: np.ndarray,
     redis_client: Any,
     threshold: float | None = None,
+    domains: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Check if a semantically similar query exists in the cache.
+
+    ``domains`` must match the scope the entry was stored under — the same
+    query text against different domain filters returns different results
+    (live-caught 2026-07-13: a cross-domain query was served another
+    domain's cached result at sim=1.0). Legacy scope-less entries never
+    match and age out via TTL.
 
     Returns the cached result dict, or None on miss / disabled / error.
     """
@@ -139,6 +207,7 @@ def cache_lookup(
         return None
 
     thresh = threshold if threshold is not None else SEMANTIC_CACHE_THRESHOLD
+    scope = _scope_token(domains)
 
     try:
         if backend.count() == 0:
@@ -148,40 +217,48 @@ def cache_lookup(
         emb = np.asarray(query_embedding, dtype=np.float32).reshape(-1).tolist()
         result = backend.query(
             query_embeddings=[emb],
-            n_results=1,
+            n_results=_LOOKUP_CANDIDATES,
             include=["distances"],
         )
 
         ids = (result.get("ids") or [[]])[0]
         distances = (result.get("distances") or [[]])[0]
-        if not ids or not distances:
-            _record_cache_hit(redis_client, hit=False)
-            return None
 
-        entry_id = str(ids[0])
-        # cosine space: distance == 1 - cos_sim
-        similarity = 1.0 - float(distances[0])
-        if similarity < thresh:
-            _record_cache_hit(redis_client, hit=False)
-            return None
+        for entry_id_raw, distance in zip(ids, distances):
+            entry_id = str(entry_id_raw)
+            # cosine space: distance == 1 - cos_sim
+            similarity = 1.0 - float(distance)
+            if similarity < thresh:
+                break  # candidates are distance-ordered; the rest are worse
 
-        result_raw = redis_client.get(_entry_key(entry_id))
-        if not result_raw:
-            # Payload expired (Redis TTL) but the index still has the
-            # embedding — lazy-evict the orphan so the index doesn't grow
-            # unbounded as TTLs cycle.
-            try:
-                backend.delete(ids=[entry_id])
-            except Exception as exc:
-                log_swallowed_error("core.retrieval.semantic_cache.orphan_evict", exc)
-            _record_cache_hit(redis_client, hit=False)
-            return None
+            result_raw = redis_client.get(_entry_key(entry_id))
+            if not result_raw:
+                # Payload expired (Redis TTL) but the index still has the
+                # embedding — lazy-evict the orphan so the index doesn't
+                # grow unbounded as TTLs cycle.
+                try:
+                    backend.delete(ids=[entry_id])
+                except Exception as exc:
+                    log_swallowed_error("core.retrieval.semantic_cache.orphan_evict", exc)
+                continue
 
-        logger.info(
-            "Semantic cache hit (sim=%.4f, id=%s)", similarity, entry_id[:12]
-        )
-        _record_cache_hit(redis_client, hit=True)
-        return json.loads(result_raw)
+            payload = json.loads(result_raw)
+            if not (isinstance(payload, dict) and "result" in payload):
+                continue  # legacy scope-less entry — never serve, let TTL evict
+            if payload.get("domain_scope") != scope:
+                continue
+
+            _check_stale_hit(redis_client, payload, entry_id)
+
+            logger.info(
+                "Semantic cache hit (sim=%.4f, id=%s, scope=%s)",
+                similarity, entry_id[:12], scope,
+            )
+            _record_cache_hit(redis_client, hit=True)
+            return payload["result"]
+
+        _record_cache_hit(redis_client, hit=False)
+        return None
 
     except Exception:
         logger.exception("semantic_cache.lookup_failed")
@@ -196,39 +273,99 @@ def cache_store(
     redis_client: Any,
     ttl: int | None = None,
     max_entries: int | None = None,
+    domains: list[str] | None = None,
 ) -> None:
     """Store a query result in the semantic cache.
 
     Result payload goes to Redis (with TTL); embedding goes to the chroma
     collection backend (no native TTL — orphans evicted lazily on lookup).
+    The entry is keyed and scope-tagged by ``domains`` so lookups never
+    cross domain filters.
     """
     backend = _get_backend()
     if backend is None:
         return
 
+    # Empty and degraded results are never cached: an empty is cheap to
+    # recompute and usually a load artifact (budget expiry, rerank errors);
+    # serving it at sim>=threshold poisons every similar query for the TTL
+    # (live-caught 2026-07-13 by the retrieval harness).
+    if result.get("budget_exceeded") or not result.get("sources"):
+        logger.debug("Semantic cache skip: empty/degraded result not stored")
+        return
+
     cache_ttl = ttl if ttl is not None else SEMANTIC_CACHE_TTL
+    scope = _scope_token(domains)
 
     try:
-        entry_id = hashlib.sha256(query.encode()).hexdigest()[:16]
+        entry_id = hashlib.sha256(f"{scope}|{query}".encode()).hexdigest()[:16]
+        now = time.time()
 
         redis_client.setex(
             _entry_key(entry_id),
             cache_ttl,
-            json.dumps(result, default=str),
+            json.dumps(
+                {"domain_scope": scope, "result": result, "stored_at": now},
+                default=str,
+            ),
         )
 
         emb = np.asarray(query_embedding, dtype=np.float32).reshape(-1).tolist()
         backend.upsert(
             ids=[entry_id],
             embeddings=[emb],
-            metadatas=[{"created_at": time.time()}],
+            metadatas=[{"created_at": now, "domain_scope": scope}],
         )
 
-        logger.debug("Semantic cache stored: %s (ttl=%ds)", entry_id[:12], cache_ttl)
+        logger.debug(
+            "Semantic cache stored: %s (ttl=%ds, scope=%s)",
+            entry_id[:12], cache_ttl, scope,
+        )
 
     except Exception as e:
         log_swallowed_error('core.retrieval.semantic_cache', e)
         logger.warning("Semantic cache store failed: %s", e)
+        return
+
+    # Size bound (Phase 2.2) — FIFO eviction once the age index passes
+    # ``max_entries`` / ``SEMANTIC_CACHE_MAX_ENTRIES``. Own try/except: a
+    # bookkeeping failure here must not make this call report the entry as
+    # unstored when the redis/chroma writes above already succeeded.
+    bound = max_entries if max_entries is not None else SEMANTIC_CACHE_MAX_ENTRIES
+    try:
+        redis_client.zadd(_AGE_INDEX_KEY, {entry_id: now})
+        _evict_oldest_if_over_bound(redis_client, backend, bound)
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.age_index", exc)
+
+
+def _evict_oldest_if_over_bound(redis_client: Any, backend: _CacheBackend, bound: int) -> None:
+    """FIFO-evict the oldest entries once the age index passes ``bound``.
+
+    Phase 2.2 enforcement point — ``max_entries`` / ``SEMANTIC_CACHE_MAX_ENTRIES``
+    was accepted by ``cache_store`` but never consulted before this (the
+    prior ``_capacity_warning_threshold`` was advisory-only, no eviction).
+    The age index is a Redis sorted set scored oldest-first, so eviction
+    never needs to enumerate the chroma backend.
+    """
+    overflow = int(redis_client.zcard(_AGE_INDEX_KEY)) - bound
+    if overflow <= 0:
+        return
+    oldest = redis_client.zrange(_AGE_INDEX_KEY, 0, overflow - 1)
+    if not oldest:
+        return
+    stale_ids = [eid.decode() if isinstance(eid, bytes) else eid for eid in oldest]
+
+    redis_client.delete(*(_entry_key(eid) for eid in stale_ids))
+    redis_client.zrem(_AGE_INDEX_KEY, *stale_ids)
+    try:
+        backend.delete(ids=stale_ids)
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.evict_backend", exc)
+
+    logger.info(
+        "Semantic cache evicted %d oldest entries (bound=%d)", len(stale_ids), bound,
+    )
 
 
 def flush_cache(redis_client: Any) -> None:
@@ -242,8 +379,16 @@ def flush_cache(redis_client: Any) -> None:
     return None
 
 
-def invalidate_cache(redis_client: Any) -> int:
-    """Clear all semantic cache entries (Redis payloads + index)."""
+def invalidate_cache(redis_client: Any, trigger: str = "unspecified") -> int:
+    """Clear all semantic cache entries (Redis payloads + index).
+
+    ``trigger`` names the caller (e.g. ``"ingestion.ingest_content"``,
+    ``"kb_admin.clear_domain"``) and is recorded on the
+    ``cache_invalidation_count`` metric so operators can see which mutation
+    paths drive cache churn (Phase 2.2 — this function previously had no
+    production caller at all, leaving up to a full TTL of stale results
+    served after any corpus mutation).
+    """
     try:
         count = 0
         cursor = 0
@@ -265,8 +410,21 @@ def invalidate_cache(redis_client: Any) -> int:
             except Exception as exc:
                 log_swallowed_error("core.retrieval.semantic_cache.backend_clear", exc)
 
+        # Watermark for cache_lookup's stale-hit check — deliberately
+        # outside the semcache: prefix so the SCAN above never sweeps it.
+        try:
+            redis_client.setex(
+                _LAST_INVALIDATED_KEY, _LAST_INVALIDATED_TTL_SECONDS, str(time.time()),
+            )
+        except Exception as exc:
+            log_swallowed_error("core.retrieval.semantic_cache.watermark_write", exc)
+
+        _record_cache_invalidation(redis_client, count, trigger)
+
         if count:
-            logger.info("Semantic cache invalidated: %d keys", count)
+            logger.info(
+                "Semantic cache invalidated: %d keys (trigger=%s)", count, trigger,
+            )
         return count
     except Exception as e:
         log_swallowed_error('core.retrieval.semantic_cache', e)
@@ -274,15 +432,18 @@ def invalidate_cache(redis_client: Any) -> int:
         return 0
 
 
-# ---------------------------------------------------------------------------
-# Capacity hint (advisory; no eviction yet)
-# ---------------------------------------------------------------------------
+def invalidate_cache_non_blocking(redis_client: Any, trigger: str = "unspecified") -> None:
+    """Fire-and-forget wrapper around :func:`invalidate_cache`.
 
-def _capacity_warning_threshold() -> int:
-    """The HNSW backend grew unbounded too — soft limit only.
-
-    Once chromadb 1.x lands and we have a stable `where` operator set,
-    revisit eviction (FIFO by ``created_at``). Until then this is a no-op
-    consulted by ad-hoc diagnostics.
+    The ingest mutation chokepoints (``app/services/ingestion.py``) are
+    synchronous functions invoked as often from a thread-pool worker
+    (``asyncio.to_thread``, the ``/ingest`` REST path) as from the
+    event-loop thread, so ``utils/query_cache``'s async
+    ``create_task``-on-a-running-loop idiom doesn't apply uniformly here —
+    a thread-pool worker has no running event loop to schedule onto. A
+    daemon thread keeps ``invalidate_cache``'s Redis SCAN + chroma
+    ``delete(where={})`` off the ingest path regardless of calling context.
     """
-    return int(SEMANTIC_CACHE_MAX_ENTRIES)
+    threading.Thread(
+        target=invalidate_cache, args=(redis_client, trigger), daemon=True,
+    ).start()

@@ -10,6 +10,8 @@ Provides real-time observability data for the React dashboard:
 - ``GET /observability/health-score`` — composite health score (0-100)
 - ``GET /observability/cost`` — LLM cost breakdown by model
 - ``GET /observability/quality`` — retrieval quality metrics
+- ``GET /observability/verification-rates`` — timeout/uncertain claim rates
+  (today + trailing 7d), Phase 0.4a
 """
 
 from __future__ import annotations
@@ -54,6 +56,12 @@ class GetCostPerQueryResponse(BaseModel):
     cost_per_query_usd: Any
     total_cost_usd: Any
     total_queries: Any
+    timestamp: Any
+
+
+class GetVerificationRatesResponse(BaseModel):
+    today: dict
+    last_7d: dict
     timestamp: Any
 
 
@@ -411,6 +419,25 @@ def get_claim_accuracy(
         },
         "note": "Per-type breakdown pending — currently shows overall average for each type",
         "sample_count": verif.get("count", 0),
+        "timestamp": _iso_now(),
+    }
+
+
+@router.get("/verification-rates", response_model=GetVerificationRatesResponse)
+def get_verification_rates_endpoint():
+    """Return today's and trailing-7-day verification timeout/uncertain rates.
+
+    Phase 0.4a: the verification pipeline had no timeout-rate or
+    uncertain-rate telemetry despite ``core.agents.hallucination.verification``
+    citing a 26% uncertain rate with no regression guard. Fed by
+    ``app.observability.verification_metrics.record_verification_report``,
+    called from ``save_verification_report`` after every persisted report.
+    """
+    from app.observability.verification_metrics import get_verification_rates
+    rates = get_verification_rates()
+    return {
+        "today": rates["today"],
+        "last_7d": rates["last_7d"],
         "timestamp": _iso_now(),
     }
 

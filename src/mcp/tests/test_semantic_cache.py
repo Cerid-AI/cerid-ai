@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+import json
 import threading
+import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import fakeredis
 import numpy as np
 import pytest
 
@@ -17,6 +20,7 @@ from core.retrieval.semantic_cache import (
     cache_store,
     flush_cache,
     invalidate_cache,
+    invalidate_cache_non_blocking,
     set_cache_backend,
 )
 
@@ -151,7 +155,7 @@ class TestCacheLookup:
     def test_hit_above_threshold(self, _reset_backend):
         redis = _mock_redis()
         emb = _random_embedding(seed=10)
-        payload = {"context": "cached context", "sources": []}
+        payload = {"context": "cached context", "sources": [{"filename": "c.md"}]}
 
         cache_store("test query", emb, payload, redis, ttl=300)
         result = cache_lookup(emb, redis, threshold=0.9)
@@ -159,12 +163,38 @@ class TestCacheLookup:
         assert result is not None
         assert result["context"] == "cached context"
 
+    def test_empty_and_degraded_results_never_stored(self, _reset_backend):
+        """Live-caught 2026-07-13: a budget-degraded empty was cached and
+        re-served at sim=1.0, poisoning every similar query for the TTL."""
+        redis = _mock_redis()
+        emb = _random_embedding(seed=11)
+        cache_store("empty q", emb, {"context": "", "sources": []}, redis, ttl=300)
+        cache_store(
+            "degraded q", emb,
+            {"sources": [{"filename": "x.md"}], "budget_exceeded": True},
+            redis, ttl=300,
+        )
+        assert _reset_backend.count() == 0
+        redis.setex.assert_not_called()
+
+    def test_domain_scope_mismatch_is_a_miss(self, _reset_backend):
+        """Same query text under a different domain filter must not hit."""
+        redis = _mock_redis()
+        emb = _random_embedding(seed=12)
+        payload = {"context": "coding result", "sources": [{"filename": "c.md"}]}
+        cache_store("scoped q", emb, payload, redis, ttl=300, domains=["coding"])
+
+        assert cache_lookup(emb, redis, threshold=0.9, domains=["notes"]) is None
+        assert cache_lookup(emb, redis, threshold=0.9) is None  # all-domains scope
+        hit = cache_lookup(emb, redis, threshold=0.9, domains=["coding"])
+        assert hit is not None and hit["context"] == "coding result"
+
     def test_miss_below_threshold(self):
         redis = _mock_redis()
         emb1 = _random_embedding(seed=10)
         emb2 = _random_embedding(seed=99)
 
-        cache_store("query one", emb1, {"answer": "yes"}, redis, ttl=300)
+        cache_store("query one", emb1, {"answer": "yes", "sources": [{"filename": "y.md"}]}, redis, ttl=300)
         assert cache_lookup(emb2, redis, threshold=0.99) is None
 
     def test_orphan_evicted_when_payload_expired(self, _reset_backend):
@@ -172,7 +202,7 @@ class TestCacheLookup:
         redis = _mock_redis()
         emb = _random_embedding(seed=7)
 
-        cache_store("ephemeral", emb, {"answer": "yes"}, redis, ttl=300)
+        cache_store("ephemeral", emb, {"answer": "yes", "sources": [{"filename": "y.md"}]}, redis, ttl=300)
         assert _reset_backend.count() == 1
 
         # Simulate Redis payload expiry: GET returns None for any entry
@@ -192,7 +222,7 @@ class TestCacheStore:
     def test_stores_payload_and_index(self, _reset_backend):
         redis = _mock_redis()
         emb = _random_embedding(seed=5)
-        cache_store("test query", emb, {"context": "result"}, redis, ttl=60)
+        cache_store("test query", emb, {"context": "result", "sources": [{"filename": "a.md"}]}, redis, ttl=60)
 
         redis.setex.assert_called_once()
         assert _reset_backend.count() == 1
@@ -203,8 +233,8 @@ class TestCacheStore:
         emb2 = emb1 + np.random.RandomState(2).randn(768).astype(np.float32) * 0.01
         emb2 = (emb2 / np.linalg.norm(emb2)).astype(np.float32)
 
-        cache_store("query alpha", emb1, {"answer": "alpha"}, redis, ttl=300)
-        cache_store("query beta", emb2, {"answer": "beta"}, redis, ttl=300)
+        cache_store("query alpha", emb1, {"answer": "alpha", "sources": [{"filename": "alpha.md"}]}, redis, ttl=300)
+        cache_store("query beta", emb2, {"answer": "beta", "sources": [{"filename": "beta.md"}]}, redis, ttl=300)
 
         found = cache_lookup(emb1, redis, threshold=0.9)
         assert found is not None
@@ -214,8 +244,8 @@ class TestCacheStore:
         """Storing the same query twice upserts (no duplicate index entries)."""
         redis = _mock_redis()
         emb = _random_embedding(seed=3)
-        cache_store("dup query", emb, {"v": 1}, redis, ttl=300)
-        cache_store("dup query", emb, {"v": 2}, redis, ttl=300)
+        cache_store("dup query", emb, {"v": 1, "sources": [{"filename": "v.md"}]}, redis, ttl=300)
+        cache_store("dup query", emb, {"v": 2, "sources": [{"filename": "v.md"}]}, redis, ttl=300)
         assert _reset_backend.count() == 1
 
 
@@ -228,7 +258,7 @@ class TestInvalidateCache:
         redis = _mock_redis()
         emb = _random_embedding(seed=5)
 
-        cache_store("test query", emb, {"answer": "yes"}, redis, ttl=300)
+        cache_store("test query", emb, {"answer": "yes", "sources": [{"filename": "y.md"}]}, redis, ttl=300)
         count = invalidate_cache(redis)
 
         assert count >= 1
@@ -313,3 +343,242 @@ class TestSentryCapture:
 
         assert result is None
         mock_capture.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: invalidate_cache_non_blocking (Phase 2.2 fire-and-forget wrapper)
+# ---------------------------------------------------------------------------
+
+class TestInvalidateCacheNonBlocking:
+    """The ingest hook sites (app/services/ingestion.py) are synchronous
+    functions with no reliable running event loop, so this wrapper uses a
+    daemon thread rather than the asyncio create_task idiom the flat query
+    cache uses."""
+
+    def test_spawns_daemon_thread_targeting_invalidate_cache(self):
+        redis = _mock_redis()
+        with patch("core.retrieval.semantic_cache.threading.Thread") as mock_thread_cls:
+            mock_thread = MagicMock()
+            mock_thread_cls.return_value = mock_thread
+
+            invalidate_cache_non_blocking(redis, trigger="test-trigger")
+
+            mock_thread_cls.assert_called_once()
+            _, kwargs = mock_thread_cls.call_args
+            assert kwargs["target"] is invalidate_cache
+            assert kwargs["args"] == (redis, "test-trigger")
+            assert kwargs["daemon"] is True
+            mock_thread.start.assert_called_once()
+
+    def test_actually_invalidates_when_run(self, _reset_backend):
+        """End-to-end: let a real thread run, joined deterministically."""
+        redis = _mock_redis()
+        emb = _random_embedding(seed=20)
+        cache_store(
+            "bg query", emb, {"answer": "yes", "sources": [{"filename": "y.md"}]},
+            redis, ttl=300,
+        )
+        assert _reset_backend.count() == 1
+
+        created_threads: list[threading.Thread] = []
+        real_thread_cls = threading.Thread
+
+        def _capture_thread(*args, **kwargs):
+            t = real_thread_cls(*args, **kwargs)
+            created_threads.append(t)
+            return t
+
+        with patch(
+            "core.retrieval.semantic_cache.threading.Thread", side_effect=_capture_thread,
+        ):
+            invalidate_cache_non_blocking(redis)
+
+        assert len(created_threads) == 1
+        created_threads[0].join(timeout=5)
+        assert _reset_backend.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: invalidation metric (entries dropped + trigger source)
+# ---------------------------------------------------------------------------
+
+class TestInvalidationMetric:
+    def test_records_count_and_trigger(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        emb = _random_embedding(seed=21)
+        cache_store(
+            "metric query", emb, {"answer": "y", "sources": [{"filename": "y.md"}]},
+            redis, ttl=300,
+        )
+
+        count = invalidate_cache(redis, trigger="kb_admin.clear_domain")
+
+        assert count >= 1
+        raw = redis.zrange("cerid:metrics:cache_invalidation_count", 0, -1)
+        assert len(raw) == 1
+        payload = json.loads(raw[0])
+        assert payload["v"] == float(count)
+        assert payload["t"]["trigger"] == "kb_admin.clear_domain"
+
+    def test_default_trigger_is_unspecified(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        invalidate_cache(redis)
+
+        raw = redis.zrange("cerid:metrics:cache_invalidation_count", 0, -1)
+        payload = json.loads(raw[0])
+        assert payload["t"]["trigger"] == "unspecified"
+
+
+# ---------------------------------------------------------------------------
+# Tests: stale-hit detection
+# ---------------------------------------------------------------------------
+
+class TestStaleHitDetection:
+    _WATERMARK_KEY = "semcache_meta:last_invalidated_at"
+
+    def test_watermark_written_on_invalidation(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        assert redis.get(self._WATERMARK_KEY) is None
+
+        invalidate_cache(redis)
+
+        watermark = redis.get(self._WATERMARK_KEY)
+        assert watermark is not None
+        assert float(watermark) > 0
+
+    def test_watermark_key_survives_its_own_invalidation_scan(self, _reset_backend):
+        """The watermark must NOT be swept by invalidate_cache's own
+        semcache:* SCAN, or it could never accumulate history."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        invalidate_cache(redis)
+        first = redis.get(self._WATERMARK_KEY)
+
+        invalidate_cache(redis)
+        second = redis.get(self._WATERMARK_KEY)
+
+        assert first is not None and second is not None
+        assert float(second) >= float(first)
+
+    def test_hit_surviving_invalidation_is_flagged_stale(self, _reset_backend):
+        """Simulate the race invalidate_cache guards against: an entry
+        whose stored_at predates the watermark but still answers a lookup
+        (e.g. it was written after invalidate_cache's SCAN paged past it,
+        or the backend's delete(where={}) silently failed)."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        emb = _random_embedding(seed=22)
+
+        # A watermark from "the future" relative to the entry below proves
+        # the entry predates the last known invalidation.
+        redis.setex(self._WATERMARK_KEY, 3600, str(time.time() + 10))
+
+        stale_payload = {
+            "domain_scope": "__all__",
+            "result": {"answer": "stale", "sources": [{"filename": "s.md"}]},
+            "stored_at": time.time(),
+        }
+        entry_id = "deadbeefcafefeed"
+        redis.setex(f"semcache:entry:{entry_id}", 300, json.dumps(stale_payload))
+        _reset_backend.upsert(
+            ids=[entry_id],
+            embeddings=[emb.tolist()],
+            metadatas=[{"created_at": time.time(), "domain_scope": "__all__"}],
+        )
+
+        result = cache_lookup(emb, redis, threshold=0.5)
+
+        assert result is not None  # staleness is observability-only, still served
+        raw = redis.zrange("cerid:metrics:cache_stale_hit_count", 0, -1)
+        assert len(raw) == 1
+
+    def test_fresh_hit_after_invalidation_is_not_flagged_stale(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        invalidate_cache(redis)  # sets the watermark
+
+        emb = _random_embedding(seed=23)
+        cache_store(
+            "fresh query", emb, {"answer": "fresh", "sources": [{"filename": "f.md"}]},
+            redis, ttl=300,
+        )
+
+        result = cache_lookup(emb, redis, threshold=0.9)
+
+        assert result is not None
+        raw = redis.zrange("cerid:metrics:cache_stale_hit_count", 0, -1)
+        assert raw == []
+
+    def test_no_watermark_yet_skips_check(self, _reset_backend):
+        """Before any invalidation has ever run, there's nothing to compare
+        against — must not misflag every hit as stale."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        emb = _random_embedding(seed=24)
+        cache_store(
+            "no watermark query", emb, {"answer": "y", "sources": [{"filename": "y.md"}]},
+            redis, ttl=300,
+        )
+
+        result = cache_lookup(emb, redis, threshold=0.9)
+
+        assert result is not None
+        raw = redis.zrange("cerid:metrics:cache_stale_hit_count", 0, -1)
+        assert raw == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: size-bound enforcement (Phase 2.2 — max_entries was a dead knob)
+# ---------------------------------------------------------------------------
+
+class TestSizeBoundEviction:
+    def test_fifo_eviction_when_over_bound(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+
+        for i in range(3):
+            emb = _random_embedding(seed=100 + i)
+            cache_store(
+                f"bound query {i}", emb,
+                {"answer": str(i), "sources": [{"filename": f"{i}.md"}]},
+                redis, ttl=300, max_entries=2,
+            )
+
+        assert _reset_backend.count() == 2, "oldest entry should have been evicted"
+        assert redis.zcard("semcache:age_index") == 2
+
+    def test_evicted_entry_no_longer_served(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        emb0 = _random_embedding(seed=200)
+        emb1 = _random_embedding(seed=201)
+        emb2 = _random_embedding(seed=202)
+
+        cache_store(
+            "q0", emb0, {"answer": "0", "sources": [{"filename": "0.md"}]},
+            redis, ttl=300, max_entries=2,
+        )
+        cache_store(
+            "q1", emb1, {"answer": "1", "sources": [{"filename": "1.md"}]},
+            redis, ttl=300, max_entries=2,
+        )
+        cache_store(
+            "q2", emb2, {"answer": "2", "sources": [{"filename": "2.md"}]},
+            redis, ttl=300, max_entries=2,
+        )
+
+        # q0 was evicted — even a self-similarity=1.0 lookup must miss.
+        assert cache_lookup(emb0, redis, threshold=0.99) is None
+        # q2 (most recent) is still present.
+        assert cache_lookup(emb2, redis, threshold=0.99) is not None
+
+    def test_default_bound_uses_semantic_cache_max_entries_setting(self, _reset_backend):
+        """``max_entries=None`` must fall through to the
+        ``SEMANTIC_CACHE_MAX_ENTRIES`` setting rather than being silently
+        unenforced (the pre-Phase-2.2 dead-knob behavior)."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        with patch("core.retrieval.semantic_cache.SEMANTIC_CACHE_MAX_ENTRIES", 1):
+            emb0 = _random_embedding(seed=300)
+            emb1 = _random_embedding(seed=301)
+            cache_store(
+                "q0", emb0, {"answer": "0", "sources": [{"filename": "0.md"}]}, redis, ttl=300,
+            )
+            cache_store(
+                "q1", emb1, {"answer": "1", "sources": [{"filename": "1.md"}]}, redis, ttl=300,
+            )
+
+        assert _reset_backend.count() == 1

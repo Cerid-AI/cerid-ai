@@ -180,6 +180,37 @@ async def test_worker_drains_single_job():
 
 
 # ---------------------------------------------------------------------------
+# record_completion receives job_type + duration_s (Phase 0.4a)
+# ---------------------------------------------------------------------------
+
+
+async def test_record_completion_receives_job_type_and_duration():
+    """The worker passes job_type and a positive duration_s to record_completion.
+
+    Regression for the head-of-line-blocking visibility gap: record_completion
+    used to persist only {job_id: epoch}, so a slow job type (e.g.
+    wiki_refresh at 40-110s) was invisible.
+    """
+    record = _make_record(job_type="stub_job")
+    queue = _mock_queue(record)
+    redis_mock = MagicMock()
+    worker = _make_worker(queue, redis_client=redis_mock)
+
+    with patch(
+        "app.processor.metrics.record_completion", new_callable=AsyncMock
+    ) as mock_record:
+        await worker.start()
+        await asyncio.sleep(0.05)
+        await worker.stop()
+
+    mock_record.assert_awaited_once()
+    _call_args, call_kwargs = mock_record.call_args
+    assert call_kwargs["job_type"] == "stub_job"
+    assert isinstance(call_kwargs["duration_s"], float)
+    assert call_kwargs["duration_s"] >= 0.0
+
+
+# ---------------------------------------------------------------------------
 # Priority order: dequeue called with HIGH → MEDIUM → LOW
 # ---------------------------------------------------------------------------
 

@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { axe } from "jest-axe"
 import { VerificationStatusBar } from "@/components/audit/verification-status-bar"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
 
@@ -194,6 +195,94 @@ describe("VerificationStatusBar", () => {
       <VerificationStatusBar report={report} loading={false} featureEnabled={true} />,
     )
     expect(screen.getByText("1 refuted")).toBeInTheDocument()
+  })
+
+  // --- Degraded phase (BUG 2: partial results must render, not hide) ---
+
+  it("degraded phase renders the partial report with a 'partial' marker and settled counts, axe-clean", async () => {
+    const report = makeReport({
+      claims: [
+        makeClaim({ claim: "Settled claim", status: "verified", similarity: 0.95 }),
+        makeClaim({ claim: "Stalled claim", status: "uncertain", similarity: 0 }),
+      ],
+      summary: { total: 2, verified: 1, unverified: 0, uncertain: 1 },
+    })
+    const { container } = render(
+      <VerificationStatusBar
+        report={report}
+        loading={false}
+        featureEnabled={true}
+        streamPhase="degraded"
+      />,
+    )
+    expect(screen.getByText("partial")).toBeInTheDocument()
+    expect(screen.getByText("1 verified")).toBeInTheDocument()
+    expect(screen.getByText("1 uncertain")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("degraded phase with no settled claims renders nothing (the banner owns the messaging)", () => {
+    const { container } = render(
+      <VerificationStatusBar
+        report={null}
+        loading={false}
+        featureEnabled={true}
+        streamPhase="degraded"
+      />,
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("does not show the 'partial' marker for a completed report", () => {
+    render(
+      <VerificationStatusBar report={makeReport()} loading={false} featureEnabled={true} streamPhase="done" />,
+    )
+    expect(screen.queryByText("partial")).not.toBeInTheDocument()
+  })
+
+  // --- Timeout labeling (BUG 3: timed-out ≠ genuinely inconclusive) ---
+
+  const timeoutReport = () =>
+    makeReport({
+      claims: [
+        makeClaim({ claim: "Timed out claim", status: "uncertain", similarity: 0, verification_method: "timeout" }),
+        makeClaim({ claim: "Inconclusive claim", status: "uncertain", similarity: 0.4 }),
+      ],
+      summary: { total: 2, verified: 0, unverified: 0, uncertain: 2 },
+    })
+
+  it("splits the uncertain tooltip into timed out vs inconclusive when timeouts are present", async () => {
+    const user = userEvent.setup()
+    render(
+      <VerificationStatusBar report={timeoutReport()} loading={false} featureEnabled={true} />,
+    )
+    await user.hover(screen.getByText("2 uncertain"))
+    const tips = await screen.findAllByText(/1 timed out — evidence incomplete \/ 1 checked but inconclusive/)
+    expect(tips.length).toBeGreaterThan(0)
+  })
+
+  it("keeps the generic inconclusive tooltip when no timeouts are present", async () => {
+    const user = userEvent.setup()
+    const report = makeReport({
+      claims: [makeClaim({ claim: "Inconclusive claim", status: "uncertain", similarity: 0.4 })],
+      summary: { total: 1, verified: 0, unverified: 0, uncertain: 1 },
+    })
+    render(<VerificationStatusBar report={report} loading={false} featureEnabled={true} />)
+    await user.hover(screen.getByText("1 uncertain"))
+    const tips = await screen.findAllByText(/Checked but inconclusive — insufficient evidence/)
+    expect(tips.length).toBeGreaterThan(0)
+  })
+
+  it("marks timed-out claims with a 'timed out' chip in the expanded claim list", async () => {
+    const user = userEvent.setup()
+    render(
+      <VerificationStatusBar report={timeoutReport()} loading={false} featureEnabled={true} />,
+    )
+    await user.click(screen.getByLabelText("Toggle verified claims"))
+    // Only the timed-out claim carries the chip — the inconclusive one doesn't.
+    expect(screen.getAllByText("timed out")).toHaveLength(1)
+    expect(screen.getByText("Timed out claim")).toBeInTheDocument()
+    expect(screen.getByText("Inconclusive claim")).toBeInTheDocument()
   })
 
   it("responsive layout: core metrics in min-w-0 group; session metrics in shrink-0 group; all data present", () => {

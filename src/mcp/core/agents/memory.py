@@ -721,18 +721,20 @@ def calculate_memory_score(
     if stability_days is None:
         stability_days = half_life_days if half_life_days is not None else config.MEMORY_HALF_LIFE_DAYS
     # Guard against zero / negative stability for types that need it
-    if memory_type not in ("empirical", "temporal") and stability_days <= 0:
+    # (empirical now decays via power-law too, so it needs the guard).
+    if memory_type != "temporal" and stability_days <= 0:
         stability_days = 30.0
 
     age = max(0.0, age_days)
 
     # --- Decay ---
-    if memory_type == "empirical":
-        decay = 1.0
-    elif memory_type == "temporal":
+    if memory_type == "temporal":
         decay = 1.0 if age_days <= 0.0 else 0.1
     elif memory_type in config.MEMORY_POWER_LAW_TYPES:
-        # Power-law: (1 + t / (9 * S))^(-0.5)
+        # Power-law: (1 + t / (9 * S))^(-0.5). Empirical memories decay this
+        # way too (stability from MEMORY_TYPE_STABILITY, finite since the
+        # 2026-07-13 trust-integrity fix) — the old decay=1.0 hardcode made
+        # verification-promoted facts immortal in recall scoring.
         decay = (1.0 + age / (9.0 * stability_days)) ** (-0.5)
     else:
         # Exponential (project_context, conversational, unknown)

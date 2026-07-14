@@ -3,7 +3,9 @@
 
 """Tests for MMR diversity reordering module."""
 
-from core.utils.diversity import _extract_terms, jaccard_similarity, mmr_reorder
+import pytest
+
+from core.utils.diversity import _extract_terms, cosine_similarity, jaccard_similarity, mmr_reorder
 
 
 class TestExtractTerms:
@@ -114,3 +116,81 @@ class TestMmrReorder:
         reordered = mmr_reorder(results, "alpha")
         assert all("artifact_id" in r for r in reordered)
         assert all("domain" in r for r in reordered)
+
+
+class TestCosineSimilarity:
+    """Tests for cosine_similarity()."""
+
+    def test_identical_vectors(self):
+        assert cosine_similarity([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
+
+    def test_orthogonal_vectors(self):
+        assert cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+
+    def test_opposite_vectors_floored_at_zero(self):
+        # Raw cosine would be -1.0; MMR's penalty term assumes [0, 1], so a
+        # negative similarity is floored rather than inverting the penalty.
+        assert cosine_similarity([1.0, 0.0], [-1.0, 0.0]) == 0.0
+
+    def test_empty_or_mismatched_inputs(self):
+        assert cosine_similarity([], [1.0]) == 0.0
+        assert cosine_similarity([1.0], []) == 0.0
+        assert cosine_similarity([1.0, 0.0], [1.0]) == 0.0
+
+    def test_zero_norm_vector(self):
+        assert cosine_similarity([0.0, 0.0], [1.0, 0.0]) == 0.0
+
+
+class TestMmrReorderEmbeddings:
+    """Embedding-based MMR kernel: cosine over `"embedding"` when present,
+    Jaccard fallback otherwise (Phase 2 item 2.7).
+
+    Shared fixture: A is the top-relevance pick. B is a paraphrase of A —
+    near-zero token overlap after stemming (so Jaccard sees no redundancy)
+    but embedded at the *same* vector as A (so cosine sees full redundancy).
+    C is a genuinely different topic, embedded orthogonally to A.
+    """
+
+    _RESULTS_NO_EMBEDDING = [
+        {"content": "revenue climbed sharply overall quarter", "relevance": 0.95},
+        {"content": "topline figures jumped considerably lately", "relevance": 0.90},
+        {"content": "office relocated building downtown location", "relevance": 0.80},
+    ]
+
+    def _with_embeddings(self):
+        results = [dict(r) for r in self._RESULTS_NO_EMBEDDING]
+        results[0]["embedding"] = [1.0, 0.0]  # A
+        results[1]["embedding"] = [1.0, 0.0]  # B — paraphrase of A, same embedding
+        results[2]["embedding"] = [0.0, 1.0]  # C — orthogonal to A
+        return results
+
+    def test_jaccard_fallback_misses_the_paraphrase_duplicate(self):
+        # No "embedding" key anywhere → pure Jaccard kernel (unchanged
+        # pre-rework behavior). Jaccard(A, B) == Jaccard(A, C) == 0, so it
+        # cannot tell the near-duplicate paraphrase B apart from the
+        # genuinely distinct C — ranking falls back to pure relevance and
+        # picks the redundant B over the diversifying C.
+        reordered = mmr_reorder(self._RESULTS_NO_EMBEDDING, "revenue", lambda_param=0.5, top_n=2)
+        contents = [r["content"] for r in reordered]
+        assert contents[0].startswith("revenue")
+        assert contents[1].startswith("topline")  # B (the redundant paraphrase) wins
+
+    def test_embeddings_diversify_the_paraphrase_duplicate(self):
+        # Same content/relevance, now with embeddings attached. Cosine
+        # correctly identifies B as near-duplicate of A (same vector) and
+        # penalizes it below C (orthogonal to A), which Jaccard could not see.
+        reordered = mmr_reorder(self._with_embeddings(), "revenue", lambda_param=0.5, top_n=2)
+        contents = [r["content"] for r in reordered]
+        assert contents[0].startswith("revenue")
+        assert contents[1].startswith("office")  # C (genuinely diverse) wins
+
+    def test_partial_embedding_coverage_falls_back_per_pair(self):
+        # Only A and C carry an embedding; B does not. The (A, B) comparison
+        # must fall back to Jaccard (not crash, not treat B as redundant),
+        # while (A, C) still uses cosine.
+        results = self._with_embeddings()
+        del results[1]["embedding"]  # B loses its embedding
+        reordered = mmr_reorder(results, "revenue", lambda_param=0.5, top_n=2)
+        contents = [r["content"] for r in reordered]
+        assert contents[0].startswith("revenue")
+        assert contents[1].startswith("topline")  # B: no embedding → Jaccard(A,B)=0 → wins on relevance

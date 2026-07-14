@@ -36,9 +36,14 @@ def test_invariants_flag_empty_collections():
     the 10-empty-collection problem from the audit."""
     from app.startup.invariants import run_invariants
 
+    # NOTE: the custom-collection exemplar must be a name that can NEVER become
+    # a built-in domain. "domain_trading" was used here originally, but trading
+    # IS a built-in domain in internal builds once the internal bootstrap has
+    # extended the taxonomy — which made this test order-dependent on whether
+    # an earlier test in the session refreshed config.DOMAINS.
     chroma = _mk_chroma([
         {"name": "domain_general", "count": 50},
-        {"name": "domain_trading", "count": 0},
+        {"name": "domain_clientzz", "count": 0},
         {"name": "domain_finance", "count": 0},
     ])
     redis = MagicMock()
@@ -52,9 +57,9 @@ def test_invariants_flag_empty_collections():
     # A custom/client collection (not a built-in domain) must NOT pollute the
     # built-in empty signal even when empty (a freshly-created client domain is
     # normal); it's surfaced separately so operators see client activity. (P5)
-    assert "domain_trading" not in snap["collections_empty"]
+    assert "domain_clientzz" not in snap["collections_empty"]
     assert "custom_collections" in snap
-    assert "domain_trading" in snap["custom_collections"]
+    assert "domain_clientzz" in snap["custom_collections"]
     assert "domain_finance" not in snap["custom_collections"]
     assert "domain_general" not in snap["custom_collections"]
 

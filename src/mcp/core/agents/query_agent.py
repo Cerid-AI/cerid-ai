@@ -34,6 +34,11 @@ from core.utils.text import WORD_RE as _WORD_RE
 
 logger = logging.getLogger("ai-companion.query_agent")
 
+# Relaxed junk floor when the caller scoped retrieval to a specific file via
+# metadata_filter — generic questions against one document must still return
+# its chunks even at modest similarity.
+_METADATA_SCOPED_MIN_RELEVANCE = 0.05
+
 
 # ---------------------------------------------------------------------------
 # Step timer for latency tracing
@@ -691,13 +696,19 @@ async def multi_domain_query(
                                     )
                                 else:
                                     rel = config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid]
-                                formatted.append(_format_chroma_result(
+                                _bm25_entry = _format_chroma_result(
                                     content=fetched["documents"][j],
                                     relevance=rel,
                                     chunk_id=cid,
                                     domain=domain,
                                     metadata=meta,
-                                ))
+                                )
+                                # Keyword-arm-only candidate: its weighted_sum
+                                # relevance is capped at HYBRID_KEYWORD_WEIGHT
+                                # (below the absolute junk floor), so the floor
+                                # exempts these and lets the reranker judge them.
+                                _bm25_entry["bm25_only"] = True
+                                formatted.append(_bm25_entry)
                                 seen_ids.add(cid)
                         except Exception as e:  # noqa: BLE001 — observability boundary
                             log_swallowed_error(
@@ -1577,84 +1588,6 @@ def apply_context_alignment_boost(
     return results
 
 
-# ---------------------------------------------------------------------------
-# Quality boost
-# ---------------------------------------------------------------------------
-
-async def apply_quality_boost(
-    results: list[dict[str, Any]],
-    neo4j_driver: Any | None = None,
-    graph_store: GraphStore | None = None,
-) -> list[dict[str, Any]]:
-    """Apply quality score multiplier to relevance scores.
-
-    Formula: adjusted = relevance * (QUALITY_BOOST_BASE + QUALITY_BOOST_FACTOR * quality_score)
-    Default:  adjusted = relevance * (0.8 + 0.2 * quality_score)
-
-    This means quality=1.0 → 1.0x (no change), quality=0.0 → 0.8x (20% penalty).
-    Accepts *graph_store* (preferred) or *neo4j_driver* (legacy, ignored in core/).
-    """
-    if (graph_store is None and neo4j_driver is None) or not results:
-        return results
-
-    artifact_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
-    if not artifact_ids:
-        return results
-
-    if graph_store is None:
-        logger.debug("graph_store not provided; skipping quality boost")
-        return results
-
-    try:
-        nodes = await graph_store.get_artifacts_batch(artifact_ids)
-        scores = {aid: n.quality_score for aid, n in nodes.items()}
-    except Exception as e:
-        log_swallowed_error('core.agents.query_agent', e)
-        logger.warning(f"Quality score lookup failed (skipping boost): {e}")
-        return results
-
-    for r in results:
-        quality = scores.get(r.get("artifact_id", ""), 0.5)
-        multiplier = config.QUALITY_BOOST_BASE + config.QUALITY_BOOST_FACTOR * quality
-        r["relevance"] = round(r["relevance"] * multiplier, 4)
-        r["quality_score"] = quality
-
-    return results
-
-
-async def _enrich_summaries(
-    results: list[dict[str, Any]],
-    neo4j_driver: Any | None = None,
-    graph_store: GraphStore | None = None,
-) -> list[dict[str, Any]]:
-    """Attach artifact-level summaries from the knowledge graph to query results."""
-    if (graph_store is None and neo4j_driver is None) or not results:
-        return results
-
-    artifact_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
-    if not artifact_ids:
-        return results
-
-    if graph_store is None:
-        logger.debug("graph_store not provided; skipping summary enrichment")
-        return results
-
-    try:
-        nodes = await graph_store.get_artifacts_batch(artifact_ids)
-        summaries = {aid: n.summary for aid, n in nodes.items() if n.summary}
-    except Exception as e:
-        log_swallowed_error('core.agents.query_agent', e)
-        logger.warning(f"Summary lookup failed (skipping): {e}")
-        return results
-
-    for r in results:
-        s = summaries.get(r.get("artifact_id", ""))
-        if s:
-            r["summary"] = s
-
-    return results
-
-
 async def _nli_gate_scores(pairs: list[tuple[str, str]]) -> list[dict[str, Any]]:
     """Run the NLI gate's batch inference OFF the event loop.
 
@@ -1668,15 +1601,28 @@ async def _nli_gate_scores(pairs: list[tuple[str, str]]) -> list[dict[str, Any]]
     return await asyncio.to_thread(_nli_mod.batch_nli_score, pairs)
 
 
+# ---------------------------------------------------------------------------
+# Quality boost
+# ---------------------------------------------------------------------------
+
 async def _apply_quality_and_summaries(
     results: list[dict[str, Any]],
     neo4j_driver: Any | None = None,
     graph_store: GraphStore | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply quality boost and summary enrichment via the graph store.
+    """Apply quality score multiplier to relevance + attach artifact summaries.
 
-    Replaces the previous sequential ``apply_quality_boost`` +
-    ``_enrich_summaries`` pattern, halving round-trips.
+    Formula: adjusted = relevance * (QUALITY_BOOST_BASE + QUALITY_BOOST_FACTOR * quality_score)
+    Default:  adjusted = relevance * (0.8 + 0.4 * quality_score)
+
+    This means quality=1.0 → 1.2x (boost), quality=0.5 → 1.0x (neutral),
+    quality=0.0 → 0.8x (penalty). Artifacts with no stored score (never
+    curated) default to the neutral 0.5.
+
+    Fetches real per-artifact scores via ``graph_store.get_quality_and_summaries``
+    — a genuine single Cypher round-trip for the whole candidate set (see
+    ``Neo4jGraphStore.get_quality_and_summaries``), not the
+    ``get_artifacts_batch`` N-query fan-out this used to route through.
     Accepts *graph_store* (preferred) or *neo4j_driver* (legacy, ignored in core/).
     """
     if (graph_store is None and neo4j_driver is None) or not results:
@@ -1691,9 +1637,7 @@ async def _apply_quality_and_summaries(
         return results
 
     try:
-        nodes = await graph_store.get_artifacts_batch(artifact_ids)
-        scores = {aid: n.quality_score for aid, n in nodes.items()}
-        summaries = {aid: n.summary for aid, n in nodes.items() if n.summary}
+        scores, summaries = await graph_store.get_quality_and_summaries(artifact_ids)
     except Exception as e:
         log_swallowed_error('core.agents.query_agent', e)
         logger.warning(f"Quality/summary lookup failed (skipping): {e}")
@@ -2230,6 +2174,51 @@ def _domains_no_results(requested: list[str], results: list[dict[str, Any]]) -> 
     return [d for d in requested if d not in hit]
 
 
+# Kept only as the "discount" policy's scale factor — see
+# config.features.RAG_CONVERSATIONS_POLICY for why "exclude" is now the
+# default instead.
+_CHAT_TRANSCRIPT_DISCOUNT = 0.35
+
+
+def _apply_conversations_rag_policy(
+    results: list[dict[str, Any]], policy: str,
+) -> list[dict[str, Any]]:
+    """Apply RAG_CONVERSATIONS_POLICY to conversations-domain RAG evidence (Phase 1.4).
+
+    Scope is deliberately narrow: only raw chat-transcript *artifacts*
+    (``domain == "conversations"`` with a filename minted by
+    ``app/processor/jobs/feedback_ingest.py``, always prefixed ``"chat_"``)
+    are policy-gated here. Those are assistant-authored and can be
+    hallucinated, so letting them resurface as future RAG evidence risks
+    the retrieval-side sibling of the chat-verification circularity bug.
+
+    Recalled episodic memories — whether merged in via
+    ``_recall_memory_surface`` (``source_type == "memory"``) or retrieved
+    directly as "memory_*"-filenamed artifacts — are user-confirmed and are
+    never dropped or discounted here, regardless of policy: the identifying
+    check below only matches the "chat_" filename prefix, which memory
+    artifacts never carry.
+
+    - "exclude"  — drop transcript results entirely (default).
+    - "discount" — keep them, relevance scaled by ``_CHAT_TRANSCRIPT_DISCOUNT``.
+    - "include"  — keep them at full relevance (no penalty).
+    """
+    kept: list[dict[str, Any]] = []
+    for r in results:
+        _fn = r.get("filename", "")
+        if r.get("domain") == "conversations" and _fn.startswith("chat_"):
+            if policy == "exclude":
+                continue
+            r["source_authority"] = "chat_transcript"
+            if policy == "discount":
+                r["relevance"] = round(r["relevance"] * _CHAT_TRANSCRIPT_DISCOUNT, 4)
+            # "include": no penalty — falls through and is kept as-is.
+        elif r.get("domain") == "conversations" and _fn.startswith("memory_"):
+            r["source_authority"] = "user_memory"
+        kept.append(r)
+    return kept
+
+
 async def _agent_query_impl(
     query: str,
     domains: list[str] | None = None,
@@ -2262,9 +2251,13 @@ async def _agent_query_impl(
         ENABLE_QUERY_DECOMPOSITION,
         ENABLE_SEMANTIC_CACHE,
         ENABLE_SURFACE_BIASED_RETRIEVAL,
+        RAG_CONVERSATIONS_POLICY,
     )
 
-    # Semantic cache early-return — check before any retrieval work
+    # Semantic cache early-return — check before any retrieval work.
+    # Scope is captured from the INCOMING domain filter (the consumer-visible
+    # contract) before follow-up prioritization / adaptive gating mutate it.
+    _cache_domains = list(domains) if domains else None
     _query_embedding: np.ndarray | None = None
     with timer.step("semantic_cache_lookup"):
         if ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache:
@@ -2277,7 +2270,9 @@ async def _agent_query_impl(
                     _query_embedding = await asyncio.to_thread(
                         lambda: np.asarray(ef([query])[0])
                     )
-                    cached = cache_lookup(_query_embedding, redis_client)
+                    cached = cache_lookup(
+                        _query_embedding, redis_client, domains=_cache_domains,
+                    )
                     if cached is not None:
                         cached["semantic_cache_hit"] = True
                         return cached
@@ -2453,21 +2448,11 @@ async def _agent_query_impl(
 
     results = deduplicate_results(results)
 
-    # ── Source authority: demote raw chat transcripts ────────────────────
-    # Raw conversations (filename starts with "chat_") are prior LLM
-    # responses — NOT authoritative sources.  Using them as evidence
-    # creates circular self-verification.  Extracted memories
-    # (filename starts with "memory_") are user-confirmed and keep
-    # full relevance.
-    _CHAT_TRANSCRIPT_DISCOUNT = 0.35
-    for r in results:
-        if r.get("domain") == "conversations":
-            _fn = r.get("filename", "")
-            if _fn.startswith("chat_"):
-                r["relevance"] = round(r["relevance"] * _CHAT_TRANSCRIPT_DISCOUNT, 4)
-                r["source_authority"] = "chat_transcript"
-            elif _fn.startswith("memory_"):
-                r["source_authority"] = "user_memory"
+    # ── Source authority: conversations-domain RAG policy (Phase 1.4) ────
+    # See config.features.RAG_CONVERSATIONS_POLICY for the full loop this
+    # flag governs, and _apply_conversations_rag_policy's docstring for the
+    # exact scope (memory-surface results are never touched here).
+    results = _apply_conversations_rag_policy(results, RAG_CONVERSATIONS_POLICY)
 
     with timer.step("graph_expansion"):
         graph_count_before = len(results)
@@ -2590,7 +2575,37 @@ async def _agent_query_impl(
     if exclude_packs and results:
         results = [r for r in results if not r.get("pack_id")]
 
-    # Step 5: Reranking (includes both direct and graph-sourced results)
+    # Step 4.95: Scale-aware junk floor — BEFORE rerank, on the retrieval
+    # scale QUALITY_MIN_RELEVANCE_THRESHOLD was calibrated for. It used to
+    # run post-rerank (old Step 5.7), where it operated on the reranker's
+    # replaced scores: cross-encoder sigmoids are ORDINAL (bge-reranker-v2-m3
+    # puts a correct top answer near sigmoid(-4)≈0.02), so the absolute
+    # floor emptied the envelope for every indirect-evidence query
+    # (live-proven 2026-07-14). Scale rules:
+    # - weighted_sum: fused vector+keyword relevance — the calibrated scale.
+    #   BM25-only candidates are exempt: their relevance is capped at
+    #   HYBRID_KEYWORD_WEIGHT (< the floor), so an unexempted floor would
+    #   structurally kill the entire keyword-rescue path.
+    # - rrf/tri_rrf: rank-native reciprocal scores (max ≈ 1/k) — absolute
+    #   floors are meaningless; each arm is already top-k truncated.
+    # - metadata_filter: caller scoped to a file — relaxed floor, as before.
+    _fusion_mode = getattr(config, "HYBRID_FUSION_MODE", "weighted_sum")
+    if _fusion_mode == "weighted_sum":
+        _min_rel = (
+            _METADATA_SCOPED_MIN_RELEVANCE if metadata_filter
+            else config.QUALITY_MIN_RELEVANCE_THRESHOLD
+        )
+        results = [
+            r for r in results
+            if r.get("bm25_only") or r["relevance"] >= _min_rel
+        ]
+
+    # Step 5: Reranking (includes both direct and graph-sourced results).
+    # Rerank legs REPLACE ``relevance`` with the cross-encoder's sigmoid —
+    # keep the retrieval-scale score alongside for observability and any
+    # scale-sensitive downstream consumer.
+    for _r in results:
+        _r.setdefault("retrieval_relevance", _r.get("relevance", 0.0))
     with timer.step("reranking"):
         results = await rerank_results(
             results=results,
@@ -2626,7 +2641,8 @@ async def _agent_query_impl(
                 log_swallowed_error('core.agents.query_agent', e)
                 logger.warning("Late interaction scoring failed: %s", e)
 
-    # Step 5.5: Quality boost + summary enrichment — single Neo4j round-trip
+    # Step 5.5: Quality boost + summary enrichment — real per-artifact scores
+    # via one UNWIND Cypher round-trip (Neo4jGraphStore.get_quality_and_summaries).
     with timer.step("quality_boost"):
         results = await _apply_quality_and_summaries(results, neo4j_driver, graph_store=graph_store)
         results = sorted(results, key=lambda x: x["relevance"], reverse=True)
@@ -2669,11 +2685,9 @@ async def _agent_query_impl(
                 "core.agents.query_agent.nli_gate", nli_exc,
             )
 
-    # Step 5.7: Filter low-relevance results below minimum threshold
-    # When metadata_filter is set, the caller explicitly scoped to a file —
-    # use a relaxed threshold so generic questions still return results.
-    _min_rel = 0.05 if metadata_filter else config.QUALITY_MIN_RELEVANCE_THRESHOLD
-    results = [r for r in results if r["relevance"] >= _min_rel]
+    # (The former Step 5.7 absolute floor moved to Step 4.95, pre-rerank —
+    # post-rerank relevance is the cross-encoder's ordinal sigmoid, where an
+    # absolute threshold has no calibrated meaning.)
 
     # Step 6: Assemble context
     with timer.step("context_assembly"):
@@ -2762,7 +2776,10 @@ async def _agent_query_impl(
     if ENABLE_SEMANTIC_CACHE and redis_client and _query_embedding is not None:
         try:
             from core.retrieval.semantic_cache import cache_store
-            cache_store(query, _query_embedding, result_dict, redis_client)
+            cache_store(
+                query, _query_embedding, result_dict, redis_client,
+                domains=_cache_domains,
+            )
         except Exception as e:  # noqa: BLE001 — observability boundary
             log_swallowed_error(
                 "core.agents.query_agent.semantic_cache_store", e,

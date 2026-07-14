@@ -89,3 +89,36 @@ def test_apply_boost_noop_on_empty_window() -> None:
     cands = [{"content": "a", "date": "2023-03-15", "score": 0.5}]
     assert apply_proximity_boost(cands, None, None, weight=1.0, half_life_days=30) == 0
     assert cands[0]["score"] == 0.5  # never removed or changed
+
+
+# --- event-time vs ingest-time basis (Phase 2 item 2.7) ---
+
+
+def test_apply_boost_falls_back_to_date_when_no_event_date() -> None:
+    # No event_date on the candidate → falls back to the existing "date" basis,
+    # unchanged from pre-rework behavior.
+    cands = [{"content": "a", "date": "2023-03-15", "score": 0.5}]
+    lifted = apply_proximity_boost(cands, "2023-03-01", "2023-03-31", weight=1.0, half_life_days=30)
+    assert cands[0]["score"] == pytest.approx(1.5)
+    assert lifted == 1
+
+
+def test_apply_boost_prefers_event_date_when_both_present() -> None:
+    # event_date is inside the window; date (ingest/session-adjacent) is not.
+    # The boost must anchor to event_date — the date the content is ABOUT —
+    # not the ingest-adjacent "date" basis.
+    cands = [{"content": "a", "date": "2020-01-01", "event_date": "2023-03-15", "score": 0.5}]
+    lifted = apply_proximity_boost(cands, "2023-03-01", "2023-03-31", weight=1.0, half_life_days=30)
+    assert cands[0]["score"] == pytest.approx(1.5)  # event_date is in-window → full +1.0 lift
+    assert lifted == 1
+
+
+def test_apply_boost_event_date_overrides_in_window_ingest_date() -> None:
+    # Reverse-direction case: "date" is IN the window but event_date is FAR
+    # outside it. If the implementation regressed to reading "date" this
+    # would score 1.5 (full lift); the correct event-time basis leaves it
+    # near-untouched.
+    cands = [{"content": "a", "date": "2023-03-15", "event_date": "2010-01-01", "score": 0.5}]
+    lifted = apply_proximity_boost(cands, "2023-03-01", "2023-03-31", weight=1.0, half_life_days=30)
+    assert cands[0]["score"] == pytest.approx(0.5, abs=0.01)
+    assert lifted == 1  # a vanishingly small but nonzero lift still counts

@@ -499,10 +499,17 @@ class TestVerifiedMemoryPromotion:
 class TestTieredAuthorityBoost:
     """Memory authority boost should vary by source and confidence."""
 
-    def test_verified_fact_gets_highest_boost(self):
+    def test_verification_promoted_memory_demoted_from_tier1(self):
+        # Verification-promoted memories are excluded from Tier 1: boosting a
+        # prior verdict's own promoted memory re-arms the self-reinforcement
+        # loop that _query_memories closes on the evidence side.
         from core.agents.hallucination.patterns import memory_authority_boost
-        result = memory_authority_boost({"memory_source_type": "verification", "relevance": 0.9})
-        assert result == 0.25
+        result = memory_authority_boost({
+            "memory_type": "empirical",
+            "memory_source_type": "verification",
+            "relevance": 0.9,
+        })
+        assert result == 0.15
 
     def test_empirical_memory_gets_highest_boost(self):
         from core.agents.hallucination.patterns import memory_authority_boost

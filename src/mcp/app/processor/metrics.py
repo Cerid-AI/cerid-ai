@@ -32,8 +32,21 @@ _COMPLETED_KEY = "cerid:proc:completed:by_ts"
 _COST_KEY = "cerid:proc:cost:by_ts"
 _THROTTLED_KEY = "cerid:proc:throttled:by_ts"
 
+# Per-job-type rolling duration lists (Phase 0.4a) — a capped LPUSH/LTRIM
+# list per job_type, plus a SET tracking which job_types have data so the
+# reader never needs a Redis KEYS/SCAN. Surfaces the head-of-line-blocking
+# signal that was previously invisible (e.g. wiki_refresh p95 in the
+# 40-110s range) — record_completion only stored {job_id: epoch} before.
+_DURATION_KEY_PREFIX = "cerid:proc:duration:by_type:"
+_DURATION_TYPES_KEY = "cerid:proc:duration:job_types"
+_DURATION_MAX_ENTRIES = 200
+
 _24H_S: float = 86_400.0
 _7D_S: float = 604_800.0
+
+
+def _duration_key(job_type: str) -> str:
+    return f"{_DURATION_KEY_PREFIX}{job_type}"
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +59,8 @@ def _sync_record_completion(
     job_id: str,
     completed_at: float,
     actual_cost_usd: Decimal,
+    job_type: str | None,
+    duration_s: float | None,
 ) -> None:
     """Synchronous inner — runs in a thread via asyncio.to_thread."""
     # Completed-set: member=job_id, score=epoch
@@ -54,6 +69,12 @@ def _sync_record_completion(
     cost_member = f"{job_id}:{actual_cost_usd!s}"
     redis_client.zadd(_COST_KEY, {cost_member: completed_at})
 
+    if job_type and duration_s is not None:
+        key = _duration_key(job_type)
+        redis_client.lpush(key, repr(duration_s))
+        redis_client.ltrim(key, 0, _DURATION_MAX_ENTRIES - 1)
+        redis_client.sadd(_DURATION_TYPES_KEY, job_type)
+
 
 async def record_completion(
     redis_client: Any,
@@ -61,6 +82,8 @@ async def record_completion(
     *,
     completed_at: float,
     actual_cost_usd: Decimal,
+    job_type: str | None = None,
+    duration_s: float | None = None,
 ) -> None:
     """Record a job completion in both the completed and cost sorted sets.
 
@@ -74,6 +97,13 @@ async def record_completion(
         Epoch-seconds timestamp of completion (float).
     actual_cost_usd
         Actual cost in USD as a ``Decimal``.
+    job_type
+        Optional job-type label (e.g. ``"wiki_refresh"``). When supplied
+        together with ``duration_s``, the duration is appended to a capped
+        rolling list per job_type so ``processor_job_type_stats`` can
+        surface p50/p95 latency by job type (Phase 0.4a).
+    duration_s
+        Optional wall-clock execution time in seconds for this job.
     """
     try:
         await asyncio.to_thread(
@@ -82,6 +112,8 @@ async def record_completion(
             job_id,
             completed_at,
             actual_cost_usd,
+            job_type,
+            duration_s,
         )
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error("processor.metrics.record_completion", exc)
@@ -197,3 +229,56 @@ async def processor_throttled_ticks(
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error("processor.metrics.throttled_ticks", exc)
         return 0
+
+
+# ---------------------------------------------------------------------------
+# Per-job-type latency (Phase 0.4a)
+# ---------------------------------------------------------------------------
+
+
+def _percentile(sorted_values: list[float], pct: float) -> float:
+    """Nearest-rank percentile over an already-sorted ascending list."""
+    if not sorted_values:
+        return 0.0
+    idx = min(len(sorted_values) - 1, int(round(pct * (len(sorted_values) - 1))))
+    return sorted_values[idx]
+
+
+def _sync_job_type_stats(redis_client: Any) -> dict[str, dict[str, float | int]]:
+    raw_types = redis_client.smembers(_DURATION_TYPES_KEY)
+    stats: dict[str, dict[str, float | int]] = {}
+    for raw_jt in raw_types:
+        job_type = raw_jt.decode() if isinstance(raw_jt, bytes) else str(raw_jt)
+        raw_durations = redis_client.lrange(_duration_key(job_type), 0, -1)
+        durations: list[float] = []
+        for raw in raw_durations:
+            try:
+                durations.append(float(raw))
+            except (TypeError, ValueError) as exc:  # silent-catch-allowed: malformed duration-row float — skip, keep the rest
+                log_swallowed_error('app.processor.metrics', exc)
+                continue
+        if not durations:
+            continue
+        durations.sort()
+        stats[job_type] = {
+            "count": len(durations),
+            "p50_s": round(_percentile(durations, 0.50), 3),
+            "p95_s": round(_percentile(durations, 0.95), 3),
+        }
+    return stats
+
+
+async def processor_job_type_stats(
+    redis_client: Any,
+) -> dict[str, dict[str, float | int]]:
+    """Return per-job-type ``{count, p50_s, p95_s}`` from the rolling duration lists.
+
+    Surfaces the head-of-line-blocking signal Phase 0.4a targets — a
+    wiki_refresh job with a p95 in the 40-110s range was previously
+    invisible because ``record_completion`` only stored ``{job_id: epoch}``.
+    """
+    try:
+        return await asyncio.to_thread(_sync_job_type_stats, redis_client)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("processor.metrics.job_type_stats", exc)
+        return {}

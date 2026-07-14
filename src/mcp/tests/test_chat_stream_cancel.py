@@ -12,6 +12,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _patch_chat_redis(monkeypatch):
+    """``_success_gen``'s finally-block records per-model latency (Phase
+    0.4a) via a local ``from app.deps import get_redis`` import. Route it
+    to a MagicMock so these direct-generator tests never touch a real
+    Redis (see the matching fixture in test_router_chat.py)."""
+    monkeypatch.setattr("app.deps.get_redis", lambda: MagicMock(), raising=False)
+
+
 @pytest.mark.asyncio
 async def test_generator_aborts_on_disconnect():
     """If Request.is_disconnected returns True mid-stream, the generator

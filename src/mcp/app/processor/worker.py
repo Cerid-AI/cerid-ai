@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -146,6 +147,21 @@ class ProcessorWorker:
         if self._tasks:
             return
         self._stop_flag = False
+        # A worker start means no prior worker survives: requeue anything a
+        # dead worker stranded in the running set (otherwise those ghosts
+        # block duplicate-enqueue collapse forever). Best-effort — a broken
+        # queue must not stop the worker from starting.
+        recover = getattr(self._queue, "recover_orphaned_running", None)
+        if recover is not None:
+            try:
+                recovered = await recover()
+                if recovered:
+                    logger.info(
+                        "processor.recovered %d orphaned running job(s): %s",
+                        len(recovered), ", ".join(recovered[:5]),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log_swallowed_error("app.processor.worker", exc)
         for i in range(self._concurrency):
             task = asyncio.create_task(
                 self._worker_loop(i), name=f"processor-worker-{i}"
@@ -313,6 +329,7 @@ class ProcessorWorker:
 
             chosen_model = (decision.model if decision is not None else None) or default_local
 
+        job_start_monotonic = time.monotonic()
         try:
             if (
                 record.requires_llm
@@ -331,6 +348,7 @@ class ProcessorWorker:
             )
             await self._handle_failure(record, str(exc))
             return
+        job_duration_s = time.monotonic() - job_start_monotonic
 
         # Fill in the job_id (contract: jobs leave it "" per Phase 3a spec)
         result = JobResult(
@@ -390,6 +408,8 @@ class ProcessorWorker:
                     job_id,
                     completed_at=datetime.now(tz=timezone.utc).timestamp(),
                     actual_cost_usd=actual_cost,
+                    job_type=record.job_type,
+                    duration_s=job_duration_s,
                 )
             except Exception as exc:  # noqa: BLE001
                 log_swallowed_error("processor.execute.record_completion", exc)

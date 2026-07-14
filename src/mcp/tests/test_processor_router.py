@@ -46,9 +46,9 @@ def mock_queue() -> MagicMock:
     q.list_recent = AsyncMock(return_value=[_make_job_record("job-a"), _make_job_record("job-b")])
     q.pause = AsyncMock()
     q.resume = AsyncMock()
-    # Expose underlying redis attribute so the router can probe the paused flag
-    q._r = MagicMock()
-    q._r.get = MagicMock(return_value="0")
+    # RedisJobQueue's own async paused-check (router.py calls this instead
+    # of reaching into the private ``_r`` redis client directly).
+    q._is_paused = AsyncMock(return_value=False)
     return q
 
 
@@ -95,6 +95,120 @@ def test_processor_status_shape(client):
     assert body["jobs_completed_24h"] == 7
     assert abs(body["cost_usd_7d"] - 0.42) < 1e-6
     assert body["throttled_ticks_1h"] == 2
+
+
+def test_processor_status_reflects_paused_true(client, mock_queue):
+    """GET /processor/status surfaces paused=True via queue._is_paused()."""
+    mock_queue._is_paused = AsyncMock(return_value=True)
+    with (
+        patch("app.processor.router.get_redis") as mock_get_redis,
+        patch("app.processor.router.processor_jobs_completed_24h", new_callable=AsyncMock) as mock_jobs,
+        patch("app.processor.router.processor_cost_usd_7d", new_callable=AsyncMock) as mock_cost,
+        patch("app.processor.router.processor_throttled_ticks", new_callable=AsyncMock) as mock_throttled,
+    ):
+        mock_get_redis.return_value = MagicMock()
+        mock_jobs.return_value = 0
+        mock_cost.return_value = Decimal("0")
+        mock_throttled.return_value = 0
+
+        resp = client.get("/processor/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["paused"] is True
+
+
+def test_processor_status_paused_probe_degrades_to_false_on_error(client, mock_queue):
+    """A broken _is_paused() must not 500 the status endpoint."""
+    mock_queue._is_paused = AsyncMock(side_effect=RuntimeError("queue unreachable"))
+    with (
+        patch("app.processor.router.get_redis") as mock_get_redis,
+        patch("app.processor.router.processor_jobs_completed_24h", new_callable=AsyncMock) as mock_jobs,
+        patch("app.processor.router.processor_cost_usd_7d", new_callable=AsyncMock) as mock_cost,
+        patch("app.processor.router.processor_throttled_ticks", new_callable=AsyncMock) as mock_throttled,
+    ):
+        mock_get_redis.return_value = MagicMock()
+        mock_jobs.return_value = 0
+        mock_cost.return_value = Decimal("0")
+        mock_throttled.return_value = 0
+
+        resp = client.get("/processor/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["paused"] is False
+
+
+def test_processor_status_includes_job_type_latency(client):
+    """GET /processor/status surfaces per-job-type p50/p95 latency (Phase 0.4a)."""
+    with (
+        patch("app.processor.router.get_redis") as mock_get_redis,
+        patch("app.processor.router.processor_jobs_completed_24h", new_callable=AsyncMock) as mock_jobs,
+        patch("app.processor.router.processor_cost_usd_7d", new_callable=AsyncMock) as mock_cost,
+        patch("app.processor.router.processor_throttled_ticks", new_callable=AsyncMock) as mock_throttled,
+        patch("app.processor.router.processor_job_type_stats", new_callable=AsyncMock) as mock_jt,
+    ):
+        mock_get_redis.return_value = MagicMock()
+        mock_jobs.return_value = 0
+        mock_cost.return_value = Decimal("0")
+        mock_throttled.return_value = 0
+        mock_jt.return_value = {"wiki_refresh": {"count": 5, "p50_s": 42.0, "p95_s": 98.5}}
+
+        resp = client.get("/processor/status")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_type_latency"] == {
+        "wiki_refresh": {"count": 5, "p50_s": 42.0, "p95_s": 98.5}
+    }
+
+
+def test_processor_status_job_type_latency_degrades_to_empty_on_error(client):
+    """A broken job-type-stats reader must not 500 the status endpoint."""
+    with (
+        patch("app.processor.router.get_redis") as mock_get_redis,
+        patch("app.processor.router.processor_jobs_completed_24h", new_callable=AsyncMock) as mock_jobs,
+        patch("app.processor.router.processor_cost_usd_7d", new_callable=AsyncMock) as mock_cost,
+        patch("app.processor.router.processor_throttled_ticks", new_callable=AsyncMock) as mock_throttled,
+        patch("app.processor.router.processor_job_type_stats", new_callable=AsyncMock) as mock_jt,
+    ):
+        mock_get_redis.return_value = MagicMock()
+        mock_jobs.return_value = 0
+        mock_cost.return_value = Decimal("0")
+        mock_throttled.return_value = 0
+        mock_jt.side_effect = RuntimeError("redis down")
+
+        resp = client.get("/processor/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["job_type_latency"] == {}
+
+
+def test_processor_status_includes_chat_telemetry(client):
+    """GET /processor/status surfaces chat route counts + per-model latency (Phase 0.4a)."""
+    with (
+        patch("app.processor.router.get_redis") as mock_get_redis,
+        patch("app.processor.router.processor_jobs_completed_24h", new_callable=AsyncMock) as mock_jobs,
+        patch("app.processor.router.processor_cost_usd_7d", new_callable=AsyncMock) as mock_cost,
+        patch("app.processor.router.processor_throttled_ticks", new_callable=AsyncMock) as mock_throttled,
+        patch("app.processor.router.get_chat_route_counts_today") as mock_routes,
+        patch("app.processor.router.get_chat_model_latency_stats") as mock_latency,
+    ):
+        mock_get_redis.return_value = MagicMock()
+        mock_jobs.return_value = 0
+        mock_cost.return_value = Decimal("0")
+        mock_throttled.return_value = 0
+        mock_routes.return_value = {"explicit": 3, "auto": 7, "fallback": 1}
+        mock_latency.return_value = {
+            "anthropic/claude-sonnet-4.6": {"count": 10, "p50_s": 4.2, "p95_s": 11.0}
+        }
+
+        resp = client.get("/processor/status")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["chat_route_counts_today"] == {"explicit": 3, "auto": 7, "fallback": 1}
+    assert body["chat_model_latency"] == {
+        "anthropic/claude-sonnet-4.6": {"count": 10, "p50_s": 4.2, "p95_s": 11.0}
+    }
 
 
 def test_processor_status_includes_mode_and_spend(client):

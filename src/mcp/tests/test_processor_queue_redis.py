@@ -11,12 +11,18 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import fakeredis
 import pytest
 
-from app.db.redis.processor_queue import RedisJobQueue
-from core.processor.job import JobRecord, JobResult, JobState
+from app.db.redis.processor_queue import (
+    RedisJobQueue,
+    enqueue_job_if_absent,
+    find_active_job_id,
+)
+from core.processor.cost import CostEstimate
+from core.processor.job import BaseJob, JobRecord, JobResult, JobState, ProgressCallback
 from core.processor.priority import Priority, priority_order
 
 # ---------------------------------------------------------------------------
@@ -367,3 +373,185 @@ async def test_list_recent_respects_limit(queue):
 
 async def test_list_recent_returns_empty_when_no_jobs(queue):
     assert await queue.list_recent(10) == []
+
+
+# ---------------------------------------------------------------------------
+# Orphan recovery — jobs stranded in the running set by a dead worker
+# ---------------------------------------------------------------------------
+
+async def test_recover_orphaned_running_requeues_job(queue):
+    record = _make_record()
+    await queue.enqueue(record)
+    dequeued = await queue.dequeue([record.priority])
+    await queue.mark_running(dequeued.id)
+
+    recovered = await queue.recover_orphaned_running()
+
+    assert recovered == [record.id]
+    again = await queue.dequeue([record.priority])
+    assert again is not None and again.id == record.id
+    # Running set is clean — duplicate-enqueue collapse no longer sees a ghost.
+    assert await queue.recover_orphaned_running() == []
+
+
+async def test_recover_orphaned_running_drops_recordless_ids(redis_client, queue):
+    redis_client.sadd("cerid:proc:running", "ghost-without-record")
+    assert await queue.recover_orphaned_running() == []
+    assert redis_client.smembers("cerid:proc:running") == set()
+
+
+async def test_recover_orphaned_running_skips_settled_jobs(queue, redis_client):
+    record = _make_record()
+    await queue.enqueue(record)
+    dequeued = await queue.dequeue([record.priority])
+    await queue.mark_running(dequeued.id)
+    # Simulate a completed job whose SREM was lost (partial write).
+    await queue.mark_completed(dequeued.id, JobResult(job_id=dequeued.id, actual_tokens_in=0, actual_tokens_out=0))
+    redis_client.sadd("cerid:proc:running", dequeued.id)
+
+    assert await queue.recover_orphaned_running() == []
+    assert redis_client.smembers("cerid:proc:running") == set()
+
+
+# ---------------------------------------------------------------------------
+# enqueue_if_absent — duplicate collapse for periodic enqueues
+#
+# Semantics: equivalence = same job_type AND equal payload. A match in a
+# pending priority list OR the running set collapses the enqueue (pack-install
+# convention) — periodic jobs are re-enqueued by their next cadence tick after
+# the active one settles, so a collapse never loses work.
+# ---------------------------------------------------------------------------
+
+
+async def test_enqueue_if_absent_enqueues_when_no_duplicate(queue):
+    record = _make_record(job_type="ingest_recovery")
+
+    assert await queue.enqueue_if_absent(record) == record.id
+
+    sizes = await queue.size_by_priority()
+    assert sizes[Priority.LOW] == 1
+
+
+async def test_enqueue_if_absent_skips_pending_duplicate(queue):
+    first = _make_record(job_type="ingest_recovery")
+    assert await queue.enqueue_if_absent(first) == first.id
+
+    # Same job_type + same payload (_make_record uses a fixed payload).
+    duplicate = _make_record(job_type="ingest_recovery")
+    assert await queue.enqueue_if_absent(duplicate) is None
+
+    sizes = await queue.size_by_priority()
+    assert sizes[Priority.LOW] == 1
+
+
+async def test_enqueue_if_absent_different_payload_same_type_enqueues_both(queue):
+    first = _make_record(job_type="wiki_refresh")
+    first.payload = {"entity_slug": "ada-lovelace"}
+    second = _make_record(job_type="wiki_refresh")
+    second.payload = {"entity_slug": "alan-turing"}
+
+    assert await queue.enqueue_if_absent(first) == first.id
+    assert await queue.enqueue_if_absent(second) == second.id
+
+    sizes = await queue.size_by_priority()
+    assert sizes[Priority.LOW] == 2
+
+
+async def test_enqueue_if_absent_skips_running_duplicate(queue):
+    record = _make_record(job_type="ingest_recovery")
+    await queue.enqueue(record)
+    dequeued = await queue.dequeue(priority_order())
+    assert dequeued is not None
+    await queue.mark_running(dequeued.id)
+
+    # Running (not pending) still counts as active — the next cadence
+    # tick re-enqueues once the in-flight run settles.
+    duplicate = _make_record(job_type="ingest_recovery")
+    assert await queue.enqueue_if_absent(duplicate) is None
+
+    sizes = await queue.size_by_priority()
+    assert sizes[Priority.LOW] == 0
+
+
+async def test_enqueue_if_absent_reenqueues_after_completion(queue):
+    record = _make_record(job_type="ingest_recovery")
+    await queue.enqueue(record)
+    dequeued = await queue.dequeue(priority_order())
+    assert dequeued is not None
+    await queue.mark_running(dequeued.id)
+    result = JobResult(job_id=dequeued.id, actual_tokens_in=0, actual_tokens_out=0)
+    await queue.mark_completed(dequeued.id, result)
+
+    # Settled jobs leave both the pending lists and the running set, so
+    # the next periodic tick enqueues normally.
+    fresh = _make_record(job_type="ingest_recovery")
+    assert await queue.enqueue_if_absent(fresh) == fresh.id
+
+
+async def test_enqueue_if_absent_ignores_other_job_types(queue):
+    other = _make_record(job_type="wiki_refresh")
+    await queue.enqueue(other)
+
+    record = _make_record(job_type="ingest_recovery")
+    assert await queue.enqueue_if_absent(record) == record.id
+
+
+# ---------------------------------------------------------------------------
+# enqueue_job_if_absent — sync bridge (wiki_refresh subscriber path)
+# ---------------------------------------------------------------------------
+
+
+class _StubPeriodicJob(BaseJob):
+    """Minimal zero-cost BaseJob for exercising the sync enqueue bridge."""
+
+    job_type = "stub_periodic"
+
+    @property
+    def priority(self) -> Priority:
+        return Priority.LOW
+
+    def estimate_cost(self) -> CostEstimate:
+        return CostEstimate(
+            estimated_tokens_in=0,
+            estimated_tokens_out=0,
+            model="none",
+            estimated_usd=Decimal("0.00"),
+            confidence="high",
+        )
+
+    async def run(self, progress_cb: ProgressCallback) -> JobResult:
+        return JobResult(job_id="", actual_tokens_in=0, actual_tokens_out=0)
+
+
+def test_enqueue_job_if_absent_collapses_pending_duplicate(redis_client):
+    first = enqueue_job_if_absent(
+        _StubPeriodicJob(), payload={"entity_slug": "ada-lovelace"}, redis_client=redis_client
+    )
+    assert first is not None
+
+    duplicate = enqueue_job_if_absent(
+        _StubPeriodicJob(), payload={"entity_slug": "ada-lovelace"}, redis_client=redis_client
+    )
+    assert duplicate is None
+
+    other = enqueue_job_if_absent(
+        _StubPeriodicJob(), payload={"entity_slug": "alan-turing"}, redis_client=redis_client
+    )
+    assert other is not None
+    assert redis_client.llen("cerid:proc:queue:low") == 2
+
+
+def test_enqueue_job_if_absent_empty_payload_is_type_level(redis_client):
+    """Payload-less periodic jobs ({} payload) collapse at the type level."""
+    first = enqueue_job_if_absent(_StubPeriodicJob(), redis_client=redis_client)
+    assert first is not None
+
+    duplicate = enqueue_job_if_absent(_StubPeriodicJob(), redis_client=redis_client)
+    assert duplicate is None
+    assert redis_client.llen("cerid:proc:queue:low") == 1
+
+
+def test_find_active_job_id_fails_open_on_broken_client():
+    """A broken Redis client must read as 'no duplicate' — the dedupe check
+    can never be allowed to block real work."""
+    assert find_active_job_id(None, "ingest_recovery", payload={}) is None

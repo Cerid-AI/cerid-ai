@@ -63,16 +63,6 @@ src/web/src/components/chat/model-select.tsx:77
 
 src/web/src/components/kb/tag-filter.tsx:128
 
-# --- Section: Verification-status-bar indent ---------------------------------
-# `ml-[18px]` aligns sub-content under the chevron icon column.
-# Line numbers bumped after Phase 4 (V-P0.1 nested-button → div+role=button
-# refactor expanded the summary row).  Bumped again after Phase 9 (M-A.6
-# current-step pulse) — +18/+19 lines for ClaimStatusIcon's `isCurrent`
-# prop and the IIFE wrapping the streaming claims list. The other two
-# summary-row entries migrated to inline annotations (Task 3.5b).
-
-src/web/src/components/audit/verification-status-bar.tsx:184
-
 # --- Section: Truncated tag / metadata widths --------------------------------
 
 src/web/src/components/chat/web-search-indicator.tsx:55

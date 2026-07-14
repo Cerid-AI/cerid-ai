@@ -12,7 +12,7 @@ I20 invariants:
      queryable, stored results.
   b) Ebbinghaus decay schedule: a ``conversational``-type memory aged past
      its decay window has a lower adjusted score than the same memory at
-     age zero, and an ``empirical``-type memory is immune to decay.
+     age zero, and an ``empirical``-type memory decays slowly (power-law).
   c) NLI guard: two contradictory memories fed through conflict resolution
      result in the lower-confidence one being rejected (coexist or
      supersede, not merged into semantic drift), and a ContradictionFinding
@@ -194,8 +194,13 @@ async def test_i20a_round_trip_store_and_query():
 # ---------------------------------------------------------------------------
 
 
+# Empirical memories must retain at least this fraction after one year —
+# slow decay, no longer immortal (2026-07-13 trust-integrity fix).
+_EMPIRICAL_ONE_YEAR_RETENTION_FLOOR = 0.85
+
+
 def test_i20b_ebbinghaus_decay_schedule():
-    """Decay scoring: older memories score lower; empirical type is immune.
+    """Decay scoring: older memories score lower; empirical decays slowest.
 
     The ``calculate_memory_score`` function in ``core.agents.memory`` is the
     canonical implementation of the Ebbinghaus-inspired decay model.
@@ -203,7 +208,7 @@ def test_i20b_ebbinghaus_decay_schedule():
     Assertions:
     - A ``conversational`` memory aged past its stability window (3 days)
       has a materially lower score than the same memory at age 0.
-    - An ``empirical`` memory has identical score regardless of age (no decay).
+    - An ``empirical`` memory decays slowly: >= 85% strength after a year.
     - A ``conversational`` memory aged 2× its stability window is below 50%
       of its fresh score (exponential decay contract).
     """
@@ -243,7 +248,7 @@ def test_i20b_ebbinghaus_decay_schedule():
         f"of fresh {fresh_score:.4f}"
     )
 
-    # --- empirical: no decay regardless of age ---
+    # --- empirical: slow power-law decay (contract updated 2026-07-13) ---
     empirical_fresh = calculate_memory_score(
         base_score=base_score,
         access_count=0,
@@ -253,12 +258,21 @@ def test_i20b_ebbinghaus_decay_schedule():
     empirical_old = calculate_memory_score(
         base_score=base_score,
         access_count=0,
-        age_days=365.0,  # 1 year old — should not decay
+        age_days=365.0,  # 1 year old — decays slowly (power-law)
         memory_type="empirical",
     )
 
-    assert empirical_old == empirical_fresh, (
-        f"empirical memory should not decay: "
+    # Contract updated 2026-07-13 (trust-integrity fix): empirical memories
+    # decay via power-law with finite stability — the old no-decay contract
+    # made verification-promoted facts immortal (self-reinforcement loop).
+    # Invariant: strictly decaying, but slower than any other memory type —
+    # still >= 85% of fresh strength after a full year.
+    assert empirical_old < empirical_fresh, (
+        f"empirical memory must decay (finite stability): "
+        f"fresh={empirical_fresh:.4f} vs 1yr={empirical_old:.4f}"
+    )
+    assert empirical_old >= empirical_fresh * _EMPIRICAL_ONE_YEAR_RETENTION_FLOOR, (
+        f"empirical decay too fast — expected slow power-law: "
         f"fresh={empirical_fresh:.4f} vs 1yr={empirical_old:.4f}"
     )
 

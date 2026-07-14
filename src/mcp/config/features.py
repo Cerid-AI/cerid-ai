@@ -276,6 +276,20 @@ ENABLE_ENCRYPTION = os.getenv("ENABLE_ENCRYPTION", "false").lower() == "true"
 ENABLE_AUTO_INJECT = os.getenv("ENABLE_AUTO_INJECT", "true").lower() == "true"
 ENABLE_SELF_RAG = os.getenv("ENABLE_SELF_RAG", "true").lower() == "true"
 ENABLE_CONTEXTUAL_CHUNKS = os.getenv("ENABLE_CONTEXTUAL_CHUNKS", "false").lower() == "true"
+# Contextual-chunk cost/latency guards (Phase 2.6). Contextualization fires one
+# internal-LLM call per batch of CONTEXTUAL_CHUNK_BATCH_SIZE chunks at ingest.
+# These bound the worst case so a pack install of hundreds of chunks cannot hang
+# ingestion for hours. Model + provider routing flow through the internal-LLM
+# stage registry (stage="contextual_chunks"); no vendor model name is hardcoded.
+CONTEXTUAL_CHUNK_BATCH_SIZE = int(os.getenv("CONTEXTUAL_CHUNK_BATCH_SIZE", "5"))
+# Per-call wall-clock budget in seconds. A slow/hung call past this is abandoned
+# and the affected chunks are ingested WITHOUT a context prefix (never a failed
+# ingest). Wired via asyncio.wait_for in core.utils.contextual.
+CONTEXTUAL_CHUNK_LLM_TIMEOUT = float(os.getenv("CONTEXTUAL_CHUNK_LLM_TIMEOUT", "30"))
+# Hard cap on chunks contextualized per artifact — worst-case call count is
+# ceil(cap / batch_size). Chunks past the cap are ingested un-prefixed. Set
+# <= 0 to disable the cap (unbounded — not recommended for large packs).
+CONTEXTUAL_CHUNKS_MAX_PER_ARTIFACT = int(os.getenv("CONTEXTUAL_CHUNKS_MAX_PER_ARTIFACT", "200"))
 # Surface-biased retrieval (GA P0.5 A1b/A2/C2) — the surface route
 # (core/retrieval/surface_router) biases retrieval: `relational` queries consult
 # the graph surface (bypass the high-confidence early-exit), `personal_context`
@@ -399,6 +413,38 @@ ENABLE_CONTEXT_COMPRESSION = os.getenv("ENABLE_CONTEXT_COMPRESSION", "true").low
 ENABLE_CONTRADICTION_LEDGER = os.getenv("ENABLE_CONTRADICTION_LEDGER", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
+# Conversations-domain RAG policy — the "Learning" toggle's downstream effect
+# ---------------------------------------------------------------------------
+# The full loop, so the next reader doesn't have to reconstruct it:
+#   1. A chat turn (user + assistant messages) is captured by
+#      ``app/processor/jobs/feedback_ingest.py`` and ingested as a
+#      "chat_*"-filenamed artifact in the ``conversations`` domain. This is
+#      what the GUI's "Learning" toggle controls the ingestion of.
+#   2. Three surfaces consume that domain differently:
+#      - Memory extraction (``core/agents/memory.py``): ALWAYS consumes it —
+#        episodic memories are distilled from transcripts regardless of this
+#        flag. Extracted memories are filed as "memory_*" artifacts and are
+#        treated as user-confirmed, not assistant-authored.
+#      - RAG evidence (``core/agents/query_agent.py`` multi-domain
+#        retrieval): governed by THIS policy. Assistant-authored transcript
+#        text can be hallucinated, so letting it resurface as evidence for a
+#        later answer risks a self-reinforcing loop — the retrieval-side
+#        sibling of the chat-verification circularity closed 2026-07-13.
+#      - Claim verification (``core/agents/hallucination/*``): NEVER
+#        consumes it — every ``lightweight_kb_query`` call site already
+#        excludes the ``conversations`` domain outright; this policy does
+#        not change that path.
+# Allowed values:
+#   "exclude"  — (default) drop conversations-domain chat-transcript
+#                results from RAG evidence entirely.
+#   "discount" — keep the pre-2026-07-13 behavior: scale transcript
+#                relevance by the named discount factor.
+#   "include"  — no penalty; transcripts compete as full-relevance evidence.
+# Invalid values fall back to "exclude" with a startup warning (below).
+RAG_CONVERSATIONS_POLICY = os.getenv("RAG_CONVERSATIONS_POLICY", "exclude").strip().lower()
+_VALID_RAG_CONVERSATIONS_POLICIES = frozenset(("exclude", "discount", "include"))
+
+# ---------------------------------------------------------------------------
 # Unified toggle registry — single source of truth for all boolean toggles.
 # Module-level ENABLE_* vars above remain for backward compatibility.
 # Use ``set_toggle()`` (utils/features.py) for runtime mutations.
@@ -439,6 +485,13 @@ if COST_SENSITIVITY not in ("low", "medium", "high"):
         "Invalid COST_SENSITIVITY=%r, defaulting to 'medium'", COST_SENSITIVITY
     )
     COST_SENSITIVITY = "medium"
+
+if RAG_CONVERSATIONS_POLICY not in _VALID_RAG_CONVERSATIONS_POLICIES:
+    _config_logger.warning(
+        "Invalid RAG_CONVERSATIONS_POLICY=%r, defaulting to 'exclude'",
+        RAG_CONVERSATIONS_POLICY,
+    )
+    RAG_CONVERSATIONS_POLICY = "exclude"
 
 
 def log_feature_toggles() -> None:

@@ -242,6 +242,13 @@ export const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string>
   error: "bg-muted text-muted-foreground",
 }
 
+/** True when the verification method indicates a timeout verdict — the
+ * evidence gathering was cut short, not genuinely inconclusive. Timed-out
+ * claims keep the gray "uncertain" band; only the labeling differs. */
+export function isTimeoutMethod(method?: string): boolean {
+  return method === "timeout" || method === "kb_only_timeout"
+}
+
 /** Verification method → human-readable label. */
 export function verificationMethodLabel(method?: string): string | null {
   if (!method) return null

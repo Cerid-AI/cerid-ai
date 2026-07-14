@@ -5,7 +5,9 @@
 
 Endpoints
 ---------
-GET  /processor/status    — queue sizes, pause flag, 24h/7d metrics, mode/cap
+GET  /processor/status    — queue sizes, pause flag, 24h/7d metrics, mode/cap,
+                             per-job-type latency, chat route-decision counts
+                             and per-model chat latency (Phase 0.4a telemetry)
 GET  /processor/recent    — recently completed/failed jobs
 POST /processor/pause     — halt new dequeues
 POST /processor/resume    — lift the pause
@@ -27,9 +29,11 @@ from app.deps import get_redis
 from app.processor.metrics import (
     processor_cost_usd_7d,
     processor_cost_usd_month,
+    processor_job_type_stats,
     processor_jobs_completed_24h,
     processor_throttled_ticks,
 )
+from app.routers.chat import get_chat_model_latency_stats, get_chat_route_counts_today
 from core.processor.mode import resolve_processor_mode
 from core.utils.swallowed import log_swallowed_error
 
@@ -64,14 +68,14 @@ async def processor_status(request: Request) -> dict[str, Any]:
             log_swallowed_error("processor.router.size_by_priority", exc)
 
         try:
-            # Peek at the paused flag — use internal knowledge of the protocol.
-            # The queue doesn't expose is_paused() publicly, so we probe via
-            # a dequeue-no-op: if paused the queue returns None even with items.
-            # Instead, check the Redis key directly via the queue's internal
-            # helper if possible, else call a no-arg pause check.
-            _r = queue._r  # type: ignore[attr-defined]
-            raw = _r.get("cerid:proc:paused")
-            paused = raw == "1"
+            # RedisJobQueue._is_paused() already wraps the Redis GET in its
+            # own asyncio.to_thread helper — reuse it instead of reaching
+            # into ``queue._r`` directly (was a raw sync call on the queue's
+            # internal client, bypassing its async wrapper). Still a
+            # leading-underscore method — making it public requires editing
+            # app/db/redis/processor_queue.py, which is outside this file's
+            # ownership for this change; noted for the integrator.
+            paused = await queue._is_paused()  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("processor.router.paused_probe", exc)
 
@@ -112,6 +116,30 @@ async def processor_status(request: Request) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("processor.router.monthly_spend", exc)
 
+    # Phase 0.4a telemetry: per-job-type processor latency + chat
+    # route-decision counters + per-model chat latency, so the
+    # 40-110s wiki_refresh head-of-line blocker (and TIER_P95_MS drift)
+    # are visible from a single endpoint instead of only {job_id: epoch}.
+    job_type_latency: dict[str, dict[str, float | int]] = {}
+    chat_route_counts_today: dict[str, int] = {}
+    chat_model_latency: dict[str, dict[str, float | int]] = {}
+
+    if redis_client is not None:
+        try:
+            job_type_latency = await processor_job_type_stats(redis_client)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("processor.router.job_type_stats", exc)
+
+        try:
+            chat_route_counts_today = get_chat_route_counts_today(redis_client)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("processor.router.chat_route_counts", exc)
+
+        try:
+            chat_model_latency = get_chat_model_latency_stats(redis_client)
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("processor.router.chat_model_latency", exc)
+
     return {
         "queue_sizes": queue_sizes,
         "paused": paused,
@@ -121,6 +149,9 @@ async def processor_status(request: Request) -> dict[str, Any]:
         "mode": resolve_processor_mode(config.settings.PROCESSOR_MODE),
         "monthly_spend_usd": monthly_spend_usd,
         "cap_usd": float(config.settings.PROCESSOR_MONTHLY_CAP_USD),
+        "job_type_latency": job_type_latency,
+        "chat_route_counts_today": chat_route_counts_today,
+        "chat_model_latency": chat_model_latency,
     }
 
 

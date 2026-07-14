@@ -35,6 +35,7 @@ import os
 from decimal import Decimal
 from typing import Any
 
+from core.agents.entity_extraction import is_junk_entity_name
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
@@ -164,6 +165,18 @@ class WikiRefreshJob(BaseJob):
         entity_name = entity_raw.get("name", self._entity_slug)
         entity_type = entity_raw.get("entity_type", "OTHER")
         source_artifacts = entity_raw.get("source_artifacts", [])
+
+        # Junk-name gate — the single choke point covering every producer
+        # (ingest hook, nightly stale sweep, manual enqueue). Fires before
+        # the LLM summary, so a re-enqueued junk entity costs one Neo4j
+        # read instead of 40-110s of LLM + external-API time.
+        if is_junk_entity_name(str(entity_name)):
+            logger.info(
+                "wiki_refresh.skip_junk_entity slug=%s name=%r",
+                self._entity_slug,
+                entity_name,
+            )
+            return {"skipped": "junk_entity_name"}
 
         if not source_artifacts:
             return {"skipped": "no_source_artifacts"}

@@ -561,11 +561,13 @@ class TestContextAssembly:
 class TestCalculateMemoryScoreIntegration:
     """Verify decay curves used by recall_memories."""
 
-    def test_empirical_no_decay(self):
-        """Empirical memories should have decay = 1.0 regardless of age."""
+    def test_empirical_slow_decay(self):
+        """Empirical memories decay on a slow power law (finite stability):
+        strictly decaying, but retaining >=85% of fresh salience at one year."""
         score_new = calculate_memory_score(0.8, access_count=0, age_days=0, memory_type="empirical")
         score_old = calculate_memory_score(0.8, access_count=0, age_days=365, memory_type="empirical")
-        assert score_new == score_old, "Empirical should not decay"
+        assert score_old < score_new, "Empirical must decay (finite stability)"
+        assert score_old >= 0.85 * score_new, "Empirical decay must stay slow (>=85% at 1yr)"
 
     def test_conversational_fast_decay(self):
         """Conversational memories with 3-day half-life should decay rapidly."""

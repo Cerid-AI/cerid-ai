@@ -28,6 +28,13 @@ class QueryEndpointResponse(BaseModel):
     sources: Any
     confidence: Any
     timestamp: Any
+    # Budget-degradation passthrough (2026-07-13): agent_query returns an
+    # empty degraded envelope when the wall-clock budget expires; without
+    # these fields a degraded-empty response is byte-identical to a true
+    # zero-hit, so consumers (chat auto-inject, SDK, eval harnesses) could
+    # not retry or discount it.
+    budget_exceeded: bool = False
+    degraded_reason: Any = None
 
 
 
@@ -42,6 +49,25 @@ class QueryRequest(BaseModel):
     exclude_packs: bool = Field(
         False,
         description="Drop knowledge-pack chunks from retrieval (personal-first KB search).",
+    )
+    budget_seconds: float | None = Field(
+        None, ge=1, le=120,
+        description=(
+            "Per-request retrieval wall-clock budget override (seconds). "
+            "None = the server's interactive default (AGENT_QUERY_BUDGET_"
+            "SECONDS, 20s). Mirrors /agent/query — offline/batch callers "
+            "(eval harnesses, SDK batch jobs) prefer completeness over "
+            "latency; without this, ambient host load degrades responses "
+            "to empty envelopes that harnesses mis-score as misses."
+        ),
+    )
+    skip_cache: bool = Field(
+        False,
+        description=(
+            "Bypass the semantic/query caches. Mirrors /agent/query — "
+            "required for A/B measurement (a cached arm silently measures "
+            "the other arm's results) and fresh-data flows."
+        ),
     )
 
 
@@ -69,6 +95,8 @@ async def query_endpoint(req: QueryRequest):
         domains=[req.domain],
         top_k=req.top_k,
         exclude_packs=req.exclude_packs,
+        budget_seconds=req.budget_seconds,
+        skip_cache=req.skip_cache,
         external_augmentation=False,
         chroma_client=get_chroma(),
         redis_client=get_redis(),
@@ -80,4 +108,6 @@ async def query_endpoint(req: QueryRequest):
         "sources": result.get("sources", []),
         "confidence": result.get("confidence", 0.0),
         "timestamp": utcnow_iso(),
+        "budget_exceeded": bool(result.get("budget_exceeded", False)),
+        "degraded_reason": result.get("degraded_reason"),
     }

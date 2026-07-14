@@ -879,12 +879,13 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         </div>
       )}
 
-      {/* Verification status bar (suppressed while degraded — the banner
-          above owns that state; the bar's fallback rows would contradict it) */}
+      {/* Verification status bar — in the degraded phase it renders whatever
+          claims settled, marked "partial"; the amber banner above carries the
+          timeout messaging and the Retry affordance. */}
       <VerificationStatusBar
         report={halReport}
         loading={halLoading}
-        featureEnabled={hallucinationEnabled && verification.phase !== "degraded"}
+        featureEnabled={hallucinationEnabled}
         streamPhase={verification.phase}
         verifiedCount={verification.verifiedCount}
         totalClaims={verification.totalClaims}

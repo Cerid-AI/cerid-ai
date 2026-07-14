@@ -91,9 +91,15 @@ def claim_hash(claim: str) -> str:
 # the new `verf:claim:v2:…` namespace and will age out via their 30d TTL.
 _CACHE_SCHEMA = "v2"
 
-# Web-search verdicts go stale fast, so cap their TTL regardless of the
-# caller-requested scope. 3 days in seconds.
-_WEB_SEARCH_VERDICT_MAX_TTL_S = 3 * 24 * 60 * 60
+# Time-sensitive verdicts go stale fast, so cap their TTL regardless of the
+# caller-requested scope. 3 days in seconds. Applies to (a) web-search-method
+# verdicts, checked here from the ``verdict`` payload's
+# ``verification_method`` (legacy signal, kept as-is), and (b) any verdict
+# whose caller passes an explicit ``ttl`` at or below this cap because the
+# *claim* was classified time_sensitive by
+# ``core.agents.hallucination.freshness`` — regardless of which method
+# produced the verdict (Phase 3.4, 2026-07-13 quality-maximization program).
+TIME_SENSITIVE_VERDICT_TTL_S = 3 * 24 * 60 * 60
 
 
 def claim_cache_key(
@@ -189,8 +195,12 @@ async def cache_verdict(
     code paths while letting updated call sites scope keys per model/tier.
 
     The TTL shortening for web-search verdicts still uses the verdict
-    payload's ``verification_method`` so time-sensitive data is always
-    capped regardless of what the caller keys on.
+    payload's ``verification_method`` so that specific case is always capped
+    regardless of what the caller keys on. Callers that classify the *claim*
+    itself as time_sensitive (``core.agents.hallucination.freshness`` —
+    Phase 3.4) pass an explicit ``ttl=TIME_SENSITIVE_VERDICT_TTL_S`` instead,
+    so the cap applies regardless of which verification method produced the
+    verdict, not just the web-search one.
 
     When ``response_context`` is provided it is also stored alongside the
     verdict so that future cache hits can include the topic context
@@ -202,8 +212,8 @@ async def cache_verdict(
     # Shorten TTL when the *verdict* is a web-search result — time-sensitive
     # data goes stale even if the reader asked us to scope the key differently.
     verdict_method = verdict.get("verification_method", "") or ""
-    if verdict_method in ("web_search",) and ttl > _WEB_SEARCH_VERDICT_MAX_TTL_S:
-        ttl = _WEB_SEARCH_VERDICT_MAX_TTL_S
+    if verdict_method in ("web_search",) and ttl > TIME_SENSITIVE_VERDICT_TTL_S:
+        ttl = TIME_SENSITIVE_VERDICT_TTL_S
     # Key components default to empty string so unupdated callers stay in a
     # self-consistent namespace with unupdated readers.
     key_model = model if model is not None else ""

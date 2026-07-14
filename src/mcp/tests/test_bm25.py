@@ -207,8 +207,8 @@ class TestBM25SentryCapture:
         with patch("sentry_sdk.capture_exception") as mock_capture:
             idx = _BM25Index("broken_domain", data_dir=str(tmp_path))
 
-        # Index gracefully degrades to empty
-        assert idx._retriever is None
+        # Index gracefully degrades to empty (no published retriever)
+        assert idx._snapshot[0] is None
         mock_capture.assert_called_once()
 
     def test_persist_failed_captured(self, tmp_path):
@@ -323,27 +323,37 @@ class TestBM25TenantIsolation:
         empty = idx2.search("alpha", top_k=10, tenant_id="bob")
         assert empty == []
 
-    def test_module_shim_emits_deprecation_when_tenant_omitted(self, tmp_path):
-        """search_bm25 without tenant_id raises DeprecationWarning."""
+    def test_module_shim_no_longer_deprecates_tenant_omission(self, tmp_path):
+        """search_bm25 without tenant_id must NOT emit a DeprecationWarning.
+
+        The Workstream E Phase 0.5 shim that nagged on every hot-path query
+        is retired; the no-tenant call is a supported mode (the caller
+        applies chunk_matches_tenant on the BM25-only fallback path). Search
+        still returns hits.
+        """
         import warnings
 
         from core.retrieval.bm25 import BM25Index as _BM25Index
         from core.retrieval.bm25 import _indexes, search_bm25
 
-        # Pre-populate the module cache so search_bm25 hits our test data
+        # Pre-populate the module cache so search_bm25 hits our test data.
+        # Need 3+ docs so BM25 IDF is non-zero.
         idx = _BM25Index("test_dep", data_dir=str(tmp_path))
-        idx.add_documents(["c1"], ["alpha beta gamma"])
+        idx.add_documents(
+            ["c1", "c2", "c3"],
+            ["alpha beta gamma", "alpha delta", "alpha epsilon"],
+        )
         _indexes["test_dep"] = idx
 
         try:
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                search_bm25("test_dep", "alpha")
-                deprecation = [
+                results = search_bm25("test_dep", "alpha")
+                deprecations = [
                     w for w in caught if issubclass(w.category, DeprecationWarning)
                 ]
-                assert len(deprecation) == 1
-                assert "tenant_id" in str(deprecation[0].message)
+                assert deprecations == [], "deprecation shim was not retired"
+                assert results, "search_bm25 should return hits without tenant_id"
         finally:
             _indexes.pop("test_dep", None)
 
@@ -390,3 +400,140 @@ class TestBM25Durability:
         mock_log.assert_called_once()
         args, _ = mock_log.call_args
         assert args[0] == "core.retrieval.bm25.fsync"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.3: deferred (debounced) rebuild off the ingest path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not is_available(), reason="bm25s not installed")
+class TestBM25DeferredRebuild:
+    """The whole-corpus rebuild no longer runs inline on every ingest add."""
+
+    def test_add_does_not_retokenize_corpus(self, tmp_path, monkeypatch):
+        """Adding docs one-by-one must not re-tokenize the whole corpus.
+
+        Regression guard for the multi-minute indexing lag: the old
+        ``add_documents`` called ``_rebuild()`` on every call, re-tokenizing
+        the entire (growing) corpus — 20 single-doc adds meant 20 whole-corpus
+        tokenizations. RED against that implementation (corpus count == 20);
+        GREEN here (0 during adds, exactly 1 deferred rebuild at first query).
+        """
+        import core.retrieval.bm25 as bm25_mod
+
+        idx = BM25Index("test_no_retok", data_dir=str(tmp_path))
+        calls = {"corpus": 0}
+        real_tokenize = bm25_mod.bm25s.tokenize
+
+        def spy(text, *args, **kwargs):
+            # Corpus tokenization passes a list of texts; a query passes a str.
+            if isinstance(text, (list, tuple)):
+                calls["corpus"] += 1
+            return real_tokenize(text, *args, **kwargs)
+
+        monkeypatch.setattr(bm25_mod.bm25s, "tokenize", spy)
+
+        for i in range(20):
+            assert idx.add_documents([f"c{i}"], [f"word{i} shared alpha"]) == 1
+
+        assert calls["corpus"] == 0, (
+            f"add path re-tokenized the whole corpus {calls['corpus']}x "
+            "(old inline-rebuild behavior); expected 0 with deferred rebuild"
+        )
+
+        # First search performs exactly one deferred full rebuild.
+        hits = idx.search("shared", top_k=25)
+        assert calls["corpus"] == 1
+        assert len(hits) == 20
+
+    def test_added_docs_searchable_on_first_query(self, tmp_path):
+        """Fresh-index adds are visible at the first query (retriever is None
+        so the debounce cooldown is bypassed)."""
+        idx = BM25Index("test_vis_fresh", data_dir=str(tmp_path))
+        idx.add_documents(
+            ["c1", "c2", "c3"],
+            ["alpha beta", "alpha gamma", "alpha delta"],
+        )
+        result_ids = {cid for cid, _ in idx.search("alpha", top_k=10)}
+        assert result_ids == {"c1", "c2", "c3"}
+
+    def test_added_docs_visible_within_debounce_window(self, tmp_path, monkeypatch):
+        """A doc added after the retriever exists becomes searchable at the
+        next query once the cooldown elapses (documents the
+        BM25_REBUILD_DEBOUNCE_SECONDS bound; forced to 0 for determinism)."""
+        monkeypatch.setattr(
+            "core.retrieval.bm25.BM25_REBUILD_DEBOUNCE_SECONDS", 0.0
+        )
+        idx = BM25Index("test_vis_window", data_dir=str(tmp_path))
+        idx.add_documents(
+            ["c1", "c2", "c3"],
+            ["alpha beta", "alpha gamma", "alpha delta"],
+        )
+        assert idx.search("alpha")  # builds the retriever
+
+        idx.add_documents(["c4"], ["alpha zeta shared"])
+        result_ids = {cid for cid, _ in idx.search("zeta", top_k=10)}
+        assert "c4" in result_ids
+
+    def test_removed_doc_does_not_resurface_within_window(self, tmp_path):
+        """A removal takes effect immediately even before the next rebuild:
+        the tombstoned id is filtered out of results."""
+        idx = BM25Index("test_rm_window", data_dir=str(tmp_path))
+        idx.add_documents(
+            ["c1", "c2", "c3"],
+            ["alpha beta", "gamma delta", "epsilon zeta"],
+        )
+        # Build the retriever (snapshot now holds c2).
+        assert any(cid == "c2" for cid, _ in idx.search("gamma", top_k=5))
+
+        # Remove within the debounce window — no rebuild, but must not resurface.
+        assert idx.remove_documents(["c2"]) == 1
+        results = idx.search("gamma", top_k=5)
+        assert all(cid != "c2" for cid, _ in results)
+        assert idx.size == 2
+
+    def test_reingest_within_window_never_serves_stale_text(self, tmp_path, monkeypatch):
+        """Remove-then-readd under the same id never serves the pre-edit text,
+        even inside the debounce window (the stale snapshot entry is filtered;
+        the fresh text appears after the next rebuild)."""
+        idx = BM25Index("test_reingest_window", data_dir=str(tmp_path))
+        idx.add_documents(
+            ["c1", "c2", "c3"],
+            ["zzz old", "filler one", "filler two"],
+        )
+        assert any(cid == "c1" for cid, _ in idx.search("zzz", top_k=5))
+
+        # Re-ingest c1 with new text inside the window (no rebuild yet).
+        idx.remove_documents(["c1"])
+        assert idx.add_documents(["c1"], ["yyy new"]) == 1
+        # The stale "zzz old" entry must not surface.
+        assert all(cid != "c1" for cid, _ in idx.search("zzz", top_k=5))
+
+        # After the cooldown (forced to 0) the fresh text is live.
+        monkeypatch.setattr(
+            "core.retrieval.bm25.BM25_REBUILD_DEBOUNCE_SECONDS", 0.0
+        )
+        assert any(cid == "c1" for cid, _ in idx.search("yyy", top_k=5))
+
+    def test_rebuild_all_forces_clean_reload(self, tmp_path, monkeypatch):
+        """rebuild_all() still performs a clean full rebuild from disk and the
+        reloaded index is immediately queryable (not left dirty)."""
+        import config
+        import core.retrieval.bm25 as bm25_mod
+
+        monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(config, "DOMAINS", ["coding"])
+        bm25_mod._indexes.clear()
+        try:
+            idx = bm25_mod.get_index("coding")
+            idx.add_documents(
+                ["c1", "c2", "c3"],
+                ["alpha beta", "alpha gamma", "alpha delta"],
+            )
+            assert bm25_mod.rebuild_all() == 1
+            idx2 = bm25_mod.get_index("coding")
+            assert idx2._dirty is False
+            assert len(idx2.search("alpha", top_k=10)) == 3
+        finally:
+            bm25_mod._indexes.clear()

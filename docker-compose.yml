@@ -359,6 +359,59 @@ services:
       retries: 3
       start_period: 30s
 
+  # ──────────────────────────────────────────────
+  # Optional: SearXNG (self-hosted metasearch for verification evidence)
+  # ──────────────────────────────────────────────
+  # Independent, privacy-first search evidence for hallucination
+  # verification (Quality Program Phase 3.3) — supplements the OpenRouter
+  # `:online`-annotation URLs so evidence isn't sourced from one vendor.
+  # Activated via: docker compose --profile searxng up -d
+  # After it's healthy, set SEARXNG_URL=http://cerid-searxng:8080 in .env
+  # and restart mcp-server (utils/web_search.py reads it once at process
+  # start — see the "env-capture-allowed" note on SEARXNG_URL there).
+  # Not started by `docker compose up -d` alone — same opt-in pattern as
+  # the `ollama` service above.
+
+  searxng:
+    container_name: cerid-searxng
+    image: searxng/searxng:latest
+    profiles: ["searxng"]
+    ports:
+      - "127.0.0.1:${CERID_PORT_SEARXNG:-8080}:8080"
+    volumes:
+      # Read-write: SearXNG's entrypoint generates uwsgi.ini alongside our
+      # settings.yml on first boot (CHOWN/SETUID/SETGID below scope exactly
+      # what that init step needs, nothing more).
+      - ./stacks/infrastructure/searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:${CERID_PORT_SEARXNG:-8080}/
+      # Required when the profile is enabled: generate into .env with
+      #   openssl rand -hex 32
+      # (empty default keeps `docker compose config` valid for everyone
+      # not running the profile; SearXNG refuses to start without it).
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
 networks:
   llm-network:
     external: true   # Created by start-cerid.sh before compose runs.

@@ -40,6 +40,10 @@ def client(tmp_path, monkeypatch):
     with (
         patch("app.routers.kb_admin.get_chroma", return_value=chroma),
         patch("app.routers.kb_admin.get_neo4j", return_value=neo4j),
+        # The semantic-cache invalidation hooks call get_redis(); mock both
+        # namespaces so the test never touches a live Redis.
+        patch("app.routers.kb_admin.get_redis", return_value=MagicMock()),
+        patch("app.services.ingestion.get_redis", return_value=MagicMock()),
         patch("app.routers.kb_admin.list_artifacts", return_value=[
             {"id": "a1", "filename": "note.txt", "domain": "general"},
         ]),

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,9 +20,10 @@ from app.db.neo4j.artifacts import (
     list_artifacts,
     list_duplicate_artifacts,
 )
-from app.deps import get_chroma, get_neo4j
+from app.deps import get_chroma, get_neo4j, get_redis
 from config.features import CERID_MULTI_USER
 from core.retrieval.bm25 import rebuild_all as rebuild_bm25_all
+from core.retrieval.semantic_cache import invalidate_cache as invalidate_semantic_cache
 from core.utils.swallowed import log_swallowed_error
 from utils.encryption import decrypt_field
 from utils.query_cache import invalidate_cache_non_blocking
@@ -59,6 +61,19 @@ def _require_admin(request: Request) -> None:
 
 
 router = APIRouter(tags=["kb-admin"], dependencies=[Depends(_require_admin)])
+
+
+def _invalidate_semantic_cache_safe(trigger: str) -> None:
+    """Best-effort semantic-cache invalidation alongside the existing
+    flat query-cache invalidation (Phase 2.2). Admin mutation endpoints
+    already call synchronous store operations directly (no ``to_thread``),
+    so this mirrors that style rather than the ingest path's daemon-thread
+    wrapper. Never raises into the admin endpoint.
+    """
+    try:
+        invalidate_semantic_cache(get_redis(), trigger=trigger)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.kb_admin.semantic_cache_invalidate", e)
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +145,25 @@ class ReingestResponse(BaseModel):
     domain: str
     chunks: int
     timestamp: str
+
+
+class ReindexCorpusRequest(BaseModel):
+    domain: str | None = Field(
+        None, description="Restrict to one domain (None = whole corpus)"
+    )
+    offset: int = Field(0, ge=0, description="Pagination cursor for resumable batches")
+    limit: int = Field(
+        25, ge=1, le=200, description="Artifacts to process this call (bounds request time)"
+    )
+
+
+class ReindexCorpusResponse(BaseModel):
+    requested: int
+    reindexed: int
+    skipped: int
+    errors: int
+    next_offset: int | None
+    message: str
 
 
 class CollectionRepairRequest(BaseModel):
@@ -242,6 +276,7 @@ async def reingest_artifact(artifact_id: str):
         )
 
         await invalidate_cache_non_blocking()
+        _invalidate_semantic_cache_safe("kb_admin.reingest_artifact")
 
         return ReingestResponse(
             status=result.get("status", "success"),
@@ -261,12 +296,113 @@ async def reingest_artifact(artifact_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to reingest: {e}")
 
 
+def _resolve_archive_source(filename: str, domain: str) -> Path | None:
+    """Locate an artifact's source file under the archive root, or None.
+
+    Mirrors the lookup in ``reingest_artifact``: archive root first, then the
+    per-domain subdirectory.
+    """
+    if not filename:
+        return None
+    archive_root = Path(config.ARCHIVE_PATH).resolve()
+    candidate = archive_root / filename
+    if candidate.exists():
+        return candidate
+    candidate = archive_root / domain / filename
+    if candidate.exists():
+        return candidate
+    return None
+
+
+@router.post("/admin/kb/reindex", response_model=ReindexCorpusResponse)
+async def reindex_corpus(req: ReindexCorpusRequest | None = None):
+    """Re-embed + re-index existing artifacts so newly-enabled retrieval
+    features (contextual chunking, sentence-window) apply retroactively.
+
+    Idempotent + resumable: each artifact is force-reingested from its source
+    file via ``ingest_file(force_reindex=True)`` — which deletes the stale
+    Chroma/BM25/sparse rows, rewrites all three from the same content-addressed
+    chunk ids, and invalidates the semantic cache — so re-running any page is
+    safe. Drive to completion by looping ``offset`` until ``next_offset`` is
+    null. Artifacts with no resolvable source file are skipped (their only copy
+    is the chunk text, which cannot be cleanly re-chunked).
+
+    NOTE: this does NOT flip any feature flag. Enable the flag first
+    (``ENABLE_CONTEXTUAL_CHUNKS`` / ``ENABLE_SENTENCE_WINDOW``), then run this.
+    """
+    from app.services.ingestion import ingest_file
+
+    # Mirror the other admin mutators: tolerate a bodyless POST by falling back
+    # to the model defaults rather than constructing the model with no args.
+    domain_filter = req.domain if req else None
+    offset = req.offset if req else 0
+    limit = req.limit if req else 25
+    try:
+        neo4j = get_neo4j()
+        artifacts = list_artifacts(
+            neo4j, domain=domain_filter, offset=offset, limit=limit,
+        )
+    except Exception as e:
+        logger.error("Reindex: failed to list artifacts: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to list artifacts: {e}")
+
+    reindexed = 0
+    skipped = 0
+    errors = 0
+    for a in artifacts:
+        filename = a.get("filename", "")
+        domain = a.get("domain", "") or config.DEFAULT_DOMAIN
+        source = _resolve_archive_source(filename, domain)
+        if source is None:
+            skipped += 1
+            continue
+        try:
+            result = await ingest_file(
+                file_path=str(source),
+                domain=domain,
+                sub_category=a.get("sub_category", "") or "",
+                force_reindex=True,
+            )
+            if result.get("status") in ("success", "updated"):
+                reindexed += 1
+            else:
+                skipped += 1
+        except Exception as e:  # noqa: BLE001 — per-artifact failure must not abort the batch
+            errors += 1
+            log_swallowed_error(
+                "app.routers.kb_admin.reindex_corpus", e,
+                # "filename" is a reserved LogRecord attribute — use a
+                # non-colliding key (see _ingest_single_attachment).
+                context={"artifact_id": a.get("id", ""), "source_filename": filename},
+            )
+
+    # Per-artifact re-ingest already invalidates the semantic cache; invalidate
+    # the flat query cache once for the batch to match the other admin mutators.
+    await invalidate_cache_non_blocking()
+    _invalidate_semantic_cache_safe("kb_admin.reindex_corpus")
+
+    next_offset = offset + limit if len(artifacts) == limit else None
+    return ReindexCorpusResponse(
+        requested=len(artifacts),
+        reindexed=reindexed,
+        skipped=skipped,
+        errors=errors,
+        next_offset=next_offset,
+        message=(
+            f"Re-indexed {reindexed}/{len(artifacts)} artifact(s) "
+            f"(skipped {skipped}, errors {errors})."
+            + (f" More remain — resume at offset={next_offset}." if next_offset else "")
+        ),
+    )
+
+
 @router.post("/admin/kb/rebuild-index", response_model=RebuildIndexResponse)
 async def rebuild_indexes():
     """Rebuild BM25 indexes for all domains from disk."""
     try:
         rebuilt = rebuild_bm25_all()
         await invalidate_cache_non_blocking()
+        _invalidate_semantic_cache_safe("kb_admin.rebuild_indexes")
         return RebuildIndexResponse(
             domains_rebuilt=rebuilt,
             message=f"Rebuilt BM25 indexes for {rebuilt} domains",
@@ -290,6 +426,7 @@ async def rescore_artifacts(req: RescoreRequest | None = None):
             max_artifacts=max_artifacts,
         )
         await invalidate_cache_non_blocking()
+        _invalidate_semantic_cache_safe("kb_admin.rescore_artifacts")
         return RescoreResponse(
             artifacts_scored=result["artifacts_scored"],
             avg_quality_score=result["avg_quality_score"],
@@ -324,6 +461,7 @@ async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
             force_synopses=force,
         )
         await invalidate_cache_non_blocking()
+        _invalidate_semantic_cache_safe("kb_admin.regenerate_summaries")
         return {
             "synopses_generated": result["synopses_generated"],
             "artifacts_scored": result["artifacts_scored"],
@@ -373,6 +511,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
             logger.warning("Failed to delete collection %s: %s", coll_name, e)
 
         await invalidate_cache_non_blocking()
+        _invalidate_semantic_cache_safe("kb_admin.clear_domain")
 
         return {
             "domain": domain,
@@ -413,6 +552,7 @@ async def delete_single_artifact(artifact_id: str):
                 logger.warning("Failed to clean ChromaDB chunks: %s", e)
 
         await invalidate_cache_non_blocking()
+        _invalidate_semantic_cache_safe("kb_admin.delete_single_artifact")
 
         return DeleteArtifactResponse(
             deleted=True,
@@ -625,6 +765,7 @@ async def repair_collection(req: CollectionRepairRequest):
         )
 
     await invalidate_cache_non_blocking()
+    _invalidate_semantic_cache_safe("kb_admin.repair_collection")
 
     return CollectionRepairResponse(
         status="repaired",

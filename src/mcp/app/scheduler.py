@@ -62,6 +62,34 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
         logger.warning(f"Failed to log scheduled job {job_name}: {e}")
 
 
+async def _enqueue_periodic(queue: Any, job: Any, job_name: str, start: float) -> str | None:
+    """Enqueue a recurring job with duplicate collapse.
+
+    Uses the queue's ``enqueue_if_absent`` when available: a job of the
+    same type + payload that is still pending or running is not stacked
+    again — the cadence tick that fires after it settles re-enqueues.
+    Without collapse, any cadence faster than the queue's drain rate grows
+    the queue forever (live-proven by the 60 s ``ingest_recovery`` cron:
+    1,459 pending duplicates). Falls back to plain ``enqueue`` for queue
+    implementations without collapse support.
+
+    Returns the enqueued job id, or ``None`` when collapsed.
+    """
+    record = job.new_record()
+    enqueue_if_absent = getattr(queue, "enqueue_if_absent", None)
+    if enqueue_if_absent is not None:
+        job_id = await enqueue_if_absent(record)
+    else:
+        job_id = await queue.enqueue(record)
+    if job_id is None:
+        _log_execution(job_name, "skipped", time.time() - start, "duplicate pending/running")
+        logger.debug("%s enqueue skipped: equivalent job already pending or running", job_name)
+    else:
+        _log_execution(job_name, "enqueued", time.time() - start)
+        logger.debug("%s enqueued via processor job_id=%s", job_name, job_id)
+    return job_id
+
+
 async def _run_daily_digest() -> None:
     """Phase K Day 1 — daily LLM-synthesized activity digest.
 
@@ -560,12 +588,7 @@ async def _run_ingest_recovery() -> None:
         if queue is not None:
             # Lazy import to avoid circular imports at module load time.
             from app.processor.jobs.ingest_recovery import IngestRecoveryJob
-            job = IngestRecoveryJob()
-            record = job.new_record()
-            await queue.enqueue(record)
-            logger.debug("ingest_recovery enqueued via processor job_id=%s", record.id)
-            duration = time.time() - start
-            _log_execution("ingest_recovery", "enqueued", duration)
+            await _enqueue_periodic(queue, IngestRecoveryJob(), "ingest_recovery", start)
         else:
             # Fallback: run the recovery service directly.
             from app.services.ingest_recovery import recover_orphan, scan_orphans
@@ -788,14 +811,7 @@ async def _run_config_recommender() -> None:
 
         if queue is not None:
             from app.processor.jobs.config_recommender import ConfigRecommenderJob
-            job = ConfigRecommenderJob()
-            record = job.new_record()
-            await queue.enqueue(record)
-            logger.debug(
-                "config_recommender enqueued via processor job_id=%s", record.id,
-            )
-            duration = time.time() - start
-            _log_execution("config_recommender", "enqueued", duration)
+            await _enqueue_periodic(queue, ConfigRecommenderJob(), "config_recommender", start)
         else:
             from app.deps import get_neo4j, get_redis
             from app.processor.jobs.config_recommender import run_recommender_sync
@@ -1025,9 +1041,7 @@ async def _run_compute_entity_embeddings() -> None:
 
         job = ComputeEntityEmbeddingsJob()
         if queue is not None:
-            record = job.new_record()
-            await queue.enqueue(record)
-            _log_execution("compute_entity_embeddings", "enqueued", time.time() - start)
+            await _enqueue_periodic(queue, job, "compute_entity_embeddings", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1108,9 +1122,7 @@ async def _run_compute_umap_3d() -> None:
 
         job = ComputeUmap3DJob()
         if queue is not None:
-            record = job.new_record()
-            await queue.enqueue(record)
-            _log_execution("compute_umap_3d", "enqueued", time.time() - start)
+            await _enqueue_periodic(queue, job, "compute_umap_3d", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1142,9 +1154,7 @@ async def _run_compute_trust_state() -> None:
 
         job = ComputeTrustStateJob()
         if queue is not None:
-            record = job.new_record()
-            await queue.enqueue(record)
-            _log_execution("compute_trust_state", "enqueued", time.time() - start)
+            await _enqueue_periodic(queue, job, "compute_trust_state", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1184,9 +1194,7 @@ async def _run_derive_domains() -> None:
 
         job = DeriveDomainsJob()
         if queue is not None:
-            record = job.new_record()
-            await queue.enqueue(record)
-            _log_execution("derive_domains", "enqueued", time.time() - start)
+            await _enqueue_periodic(queue, job, "derive_domains", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1229,8 +1237,7 @@ async def _run_backfill_enrichment() -> None:
 
         job = BackfillEnrichmentJob()
         if queue is not None:
-            await queue.enqueue(job.new_record())
-            _log_execution("backfill_enrichment", "enqueued", time.time() - start)
+            await _enqueue_periodic(queue, job, "backfill_enrichment", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None

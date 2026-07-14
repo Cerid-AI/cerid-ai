@@ -357,13 +357,24 @@ RERANK_CROSS_ENCODER_MODEL = os.getenv(
 #   onnx/model_quint8_avx2.onnx (23 MB, int8, requires AVX2)
 RERANK_ONNX_FILENAME = os.getenv("RERANK_ONNX_FILENAME", "onnx/model.onnx")
 RERANK_MODEL_CACHE_DIR = os.getenv("RERANK_MODEL_CACHE_DIR", "")
-# Max (query, chunk) pair length the cross-encoder tokenizer keeps before
-# truncating. Must NOT exceed the model's positional limit: ms-marco-MiniLM
-# caps at 512 (the default — safe for the shipped fallback model), while
-# bge-reranker-v2-m3 reads up to 1024 without clipping a full 512-token parent
-# chunk. Bump this to 1024 ONLY alongside RERANK_CROSS_ENCODER_MODEL=bge-…;
-# raising it past a model's limit makes ONNX inference fail on out-of-range
-# position ids.
+# Max (query, chunk) pair length the IN-PROCESS ONNX cross-encoder tokenizer
+# (core.retrieval.reranker) keeps before truncating. Must NOT exceed the
+# configured model's positional limit: ms-marco-MiniLM (the default) caps at
+# 512, so a parent chunk this large + the query overflows the budget and
+# silently drops the chunk's tail from scoring (logged at debug level — see
+# reranker._score_pairs). Raising this past a model's real limit makes ONNX
+# inference fail on out-of-range position ids, not truncate further.
+#
+# This setting has NO effect on the RERANK_PROVIDER=quenchforge HTTP path
+# (utils.quenchforge_client.quenchforge_rerank) — that wire call carries no
+# max_length parameter; truncation there is handled server-side against the
+# GGUF model's native context window. QUENCHFORGE_RERANK_MODEL already
+# defaults to bge-reranker-v2-m3, which reads a full 512-token parent chunk +
+# query without clipping when RERANK_PROVIDER=quenchforge is opted in — that
+# is the production route to bge-reranker-v2-m3, not this setting. BAAI's
+# upstream repo ships no ONNX export (model.safetensors only, verified via
+# the HF hub file listing), so pointing RERANK_CROSS_ENCODER_MODEL at it for
+# this in-process path fails at model-download time.
 RERANK_MAX_LENGTH = int(os.getenv("RERANK_MAX_LENGTH", "512"))
 
 # ---------------------------------------------------------------------------
@@ -743,9 +754,16 @@ MEMORY_MIN_RECALL_BY_TYPE: dict[str, float] = {
 #   - power-law types ((1 + t/(9S))^-0.5):     half-life = 27·S days (solve
 #     (1+t/(9S))^-0.5 = 0.5 → t = 27S). So "decision" S=90 ≈ a 2430-day
 #     half-life, not 90. Tune power-law S with the 27× factor in mind.
-# "empirical" uses float("inf") — permanent facts never decay.
+# "empirical" is a large-but-FINITE stability: verification-promoted facts must
+# eventually decay so a single verdict can't self-reinforce forever. As a
+# power-law type its effective half-life is 27×S (see note above), so 180 days
+# still yields a multi-year half-life for genuine durable facts — finite, not
+# permanent. (float("inf") previously made these immortal.)
+EMPIRICAL_MEMORY_STABILITY_DAYS = float(
+    os.getenv("EMPIRICAL_MEMORY_STABILITY_DAYS", "180")
+)
 MEMORY_TYPE_STABILITY: dict[str, float] = {
-    "empirical": float("inf"),       # "Python has a GIL" — no decay
+    "empirical": EMPIRICAL_MEMORY_STABILITY_DAYS,  # durable facts — slow finite decay
     "decision": 90.0,                # "Chose Postgres over Mongo" — slow power-law
     "preference": 60.0,              # "User prefers Rust" — moderate power-law
     "project_context": 14.0,         # "Working on feature X" — fast exponential

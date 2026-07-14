@@ -41,8 +41,11 @@ def memory_authority_boost(memory_result: dict) -> float:
     source = memory_result.get("memory_source_type", "")  # set by verified_memory promotion
     raw_rel = memory_result.get("_raw_relevance", memory_result.get("relevance", 0.5))
 
-    # Tier 1: Verified facts promoted from the verification pipeline
-    if source == "verification" or memory_type == "empirical":
+    # Tier 1: user-confirmed empirical facts. Verification-promoted memories are
+    # demoted out of Tier 1 (they now fall through to the standard tiers below):
+    # boosting a prior verdict's own promoted memory re-arms the self-
+    # reinforcement loop that _query_memories already closes on the evidence side.
+    if memory_type == "empirical" and source != "verification":
         return 0.25
 
     # Tier 2: High-confidence user-stated or decision memories

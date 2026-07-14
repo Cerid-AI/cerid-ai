@@ -12,8 +12,11 @@ caller can surface the degraded state.
 
 from __future__ import annotations
 
+import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 
@@ -91,3 +94,77 @@ def test_tokenizer_truncation_uses_configured_max_length(max_length):
         reranker._load_model()
 
     fake_tokenizer.enable_truncation.assert_called_once_with(max_length=max_length)
+
+
+def _fake_encoding(ids: list[int], overflowing: bool) -> SimpleNamespace:
+    """Mimic a ``tokenizers.Encoding``. Verified against the real
+    ``tokenizers`` library: ``enable_truncation`` always populates
+    ``.overflowing`` with the dropped tail when a pair is truncated (even
+    with the default ``stride=0``), so a non-empty list is an exact,
+    zero-extra-cost truncation signal.
+    """
+    return SimpleNamespace(
+        ids=ids,
+        attention_mask=[1] * len(ids),
+        type_ids=[0] * len(ids),
+        overflowing=[SimpleNamespace()] if overflowing else [],
+    )
+
+
+def _fake_session() -> MagicMock:
+    session = MagicMock()
+    session.get_inputs.return_value = [
+        SimpleNamespace(name="input_ids"),
+        SimpleNamespace(name="attention_mask"),
+        SimpleNamespace(name="token_type_ids"),
+    ]
+    session.run.return_value = [np.array([[0.1, 0.9], [0.2, 0.8]])]
+    return session
+
+
+def test_score_pairs_logs_debug_when_pair_truncated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A (query, chunk) pair that overflows RERANK_MAX_LENGTH is truncated
+    silently by the tokenizer — _score_pairs must at least log a debug
+    signal so the parent-chunk data loss isn't invisible."""
+    from core.retrieval import reranker
+
+    # Real (padded) batches always have equal-length ids across the batch —
+    # only ``.overflowing`` distinguishes the truncated pair.
+    fake_tokenizer = MagicMock()
+    fake_tokenizer.encode_batch.return_value = [
+        _fake_encoding([1, 2, 3], overflowing=True),
+        _fake_encoding([1, 2, 0], overflowing=False),
+    ]
+
+    with patch.object(reranker, "_session", _fake_session()), patch.object(
+        reranker, "_tokenizer", fake_tokenizer,
+    ), caplog.at_level(logging.DEBUG, logger="ai-companion.reranker"):
+        reranker._score_pairs("query", ["long doc", "short doc"])
+
+    assert any(
+        "truncat" in record.message.lower() for record in caplog.records
+    ), "Truncation must be logged at debug level, not silently dropped"
+
+
+def test_score_pairs_no_log_when_no_truncation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Happy path: no pair overflowed the budget — no truncation log."""
+    from core.retrieval import reranker
+
+    fake_tokenizer = MagicMock()
+    fake_tokenizer.encode_batch.return_value = [
+        _fake_encoding([1, 2], overflowing=False),
+        _fake_encoding([1, 2], overflowing=False),
+    ]
+
+    with patch.object(reranker, "_session", _fake_session()), patch.object(
+        reranker, "_tokenizer", fake_tokenizer,
+    ), caplog.at_level(logging.DEBUG, logger="ai-companion.reranker"):
+        reranker._score_pairs("query", ["doc1", "doc2"])
+
+    assert not any(
+        "truncat" in record.message.lower() for record in caplog.records
+    )

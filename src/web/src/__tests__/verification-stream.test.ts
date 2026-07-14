@@ -444,6 +444,95 @@ describe("useVerificationStream", () => {
     expect(verdicts).not.toContain("pending")
   })
 
+  // --- Post-summary retry sweep (round 2) + verdict.* fallbacks ---
+  //
+  // The backend re-emits `claim_verified` events for claims resolved by its
+  // round-2 retry sweep AFTER the first `summary`, then sends a final
+  // `summary_update` with refreshed totals before `persisted`. The hook must
+  // apply those in place with phase staying "done". Timeout verdicts nest
+  // status/confidence/reason under `verdict` — the reason fallback was the
+  // missing piece (BUG 1).
+
+  describe("post-summary retry sweep", () => {
+    const ROUND1: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 2 },
+      { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+      { type: "claim_extracted", claim: "Claim B", index: 1, claim_type: "factual" },
+      { type: "claim_verified", index: 0, claim: "Claim A", claim_type: "factual", status: "verified", confidence: 0.95, verification_method: "cross_model" },
+      { type: "claim_verified", index: 1, claim: "Claim B", claim_type: "factual", verdict: { status: "uncertain", confidence: 0.2, reason: "KB-only verdict (verification timeout)" }, verification_method: "kb_only_timeout" },
+      { type: "summary", verified: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55, extraction_method: "llm" },
+    ]
+
+    it("falls back to verdict.reason for timeout verdicts", async () => {
+      mockStreamFn.mockReturnValue(makeSSEStream(ROUND1))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-verdict-reason", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      const timedOut = result.current.claims.find((c) => c.index === 1)!
+      expect(timedOut.status).toBe("uncertain")
+      expect(timedOut.reason).toBe("KB-only verdict (verification timeout)")
+      expect(timedOut.similarity).toBe(0.2)
+      // The reason must also flow into the derived report for the status bar.
+      expect(result.current.report?.claims[1].reason).toBe("KB-only verdict (verification timeout)")
+    })
+
+    it("applies claim_verified after the summary and summary_update refreshes counts while phase stays done", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1,
+        // Round-2 sweep resolves the timed-out claim, then refreshes totals.
+        { type: "claim_verified", index: 1, claim: "Claim B", claim_type: "factual", status: "verified", confidence: 0.9, verification_method: "web_search" },
+        { type: "summary_update", verified: 2, unverified: 0, uncertain: 0, total: 2, overall_confidence: 0.92 },
+        { type: "persisted" },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-round2", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.summary?.uncertain).toBe(0)
+      })
+
+      expect(result.current.phase).toBe("done")
+      const swept = result.current.claims.find((c) => c.index === 1)!
+      expect(swept.status).toBe("verified")
+      expect(swept.verification_method).toBe("web_search")
+      expect(result.current.summary?.verified).toBe(2)
+      expect(result.current.summary?.overallConfidence).toBe(0.92)
+      // The derived report rebuilds with the refreshed counts + verdicts.
+      expect(result.current.report?.summary.verified).toBe(2)
+      expect(result.current.report?.summary.uncertain).toBe(0)
+      expect(result.current.report?.claims[1].status).toBe("verified")
+    })
+
+    it("ignores post-summary claim_verified events for unknown indices", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1,
+        { type: "claim_verified", index: 99, claim: "Ghost claim", status: "verified", confidence: 0.9 },
+        { type: "summary_update", verified: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55 },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-ghost", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      expect(result.current.claims).toHaveLength(2)
+      expect(result.current.claims.map((c) => c.claim)).not.toContain("Ghost claim")
+    })
+  })
+
   // --- SSE keepalive comment handling ---
 
   it("ignores SSE keepalive comments interleaved with data events", async () => {
@@ -591,6 +680,38 @@ describe("useVerificationStream", () => {
       expect(result.current.claims).toHaveLength(1)
       expect(result.current.claims[0].status).toBe("uncertain")
       expect(typeof result.current.claims[0].reason).toBe("string")
+      // Degraded phase must expose a partial report so the status bar +
+      // per-message badge can render what settled instead of hiding it.
+      const partial = result.current.report
+      expect(partial).not.toBeNull()
+      expect(partial!.skipped).toBe(false)
+      expect(partial!.summary.total).toBe(1)
+      expect(partial!.summary.uncertain).toBe(1)
+      expect(partial!.summary.verified).toBe(0)
+    })
+
+    it("keeps phase 'done' when the stream idles out after the summary (post-summary sweep guard)", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-post-summary", true, 1),
+      )
+
+      await flush()
+      for (const ev of HAPPY_EVENTS) {
+        stream.enqueue(`data: ${JSON.stringify(ev)}\n\n`)
+      }
+      await flush()
+      expect(result.current.phase).toBe("done")
+
+      // Backend holds the stream open for the round-2 sweep, then goes silent.
+      await flush(VERIFICATION_IDLE_TIMEOUT_MS + 1_000)
+
+      expect(stream.abort).toHaveBeenCalled()
+      // The complete round-1 report must not be demoted to "degraded".
+      expect(result.current.phase).toBe("done")
+      expect(result.current.report?.summary.verified).toBe(1)
     })
 
     it("caps even a keepalive-active stream at the absolute ceiling with the degraded state", async () => {

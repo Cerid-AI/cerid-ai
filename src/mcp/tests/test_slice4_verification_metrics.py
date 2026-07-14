@@ -248,7 +248,10 @@ class TestCacheHitRateRecording:
         backend.count.return_value = 5
         backend.query.return_value = {"ids": [["e1"]], "distances": [[0.01]]}
         redis_client = MagicMock()
-        redis_client.get.return_value = _json.dumps({"answer": "cached"})
+        # Scope-tagged wrapper payload (legacy scope-less entries never match).
+        redis_client.get.return_value = _json.dumps(
+            {"domain_scope": "__all__", "result": {"answer": "cached", "sources": [{"id": "s1"}]}}
+        )
 
         with (
             patch.object(sc, "_get_backend", return_value=backend),
@@ -258,7 +261,7 @@ class TestCacheHitRateRecording:
             import numpy as np
             out = sc.cache_lookup(np.zeros(8, dtype=np.float32), redis_client)
 
-        assert out == {"answer": "cached"}
+        assert out == {"answer": "cached", "sources": [{"id": "s1"}]}
         assert ("cache_hit_rate", 1.0) in recorded
 
     def test_records_miss_on_below_threshold(self):

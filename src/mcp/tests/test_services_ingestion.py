@@ -9,6 +9,7 @@ duplicate detection flow, and response shapes.
 """
 
 import hashlib
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -489,3 +490,231 @@ class TestCompensatingTransaction:
             ingest_content("fail test", domain="coding")
 
         mock_cache.log_event.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: semantic-cache invalidation hooks (Phase 2.2)
+# ---------------------------------------------------------------------------
+
+class TestSemanticCacheInvalidationHook:
+    """Corpus mutations must invalidate the semantic query cache — before
+    this, ``invalidate_cache`` had no production caller at all, leaving up
+    to SEMANTIC_CACHE_TTL of stale ``/agent/query`` results after every
+    ingest/re-ingest. The hook call is a local import inside
+    ``app.services.ingestion``, so it's mocked at its home module
+    (``core.retrieval.semantic_cache``), not at the ingestion module.
+    """
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_fresh_ingest_success_invalidates_semantic_cache(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem_invalidate,
+    ):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+
+            result = ingest_content("fresh content for cache invalidation", domain="coding")
+
+        assert result["status"] == "success"
+        mock_sem_invalidate.assert_called_once()
+        _, kwargs = mock_sem_invalidate.call_args
+        assert kwargs.get("trigger") == "ingestion.ingest_content"
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_duplicate_ingest_does_not_invalidate_semantic_cache(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem_invalidate,
+    ):
+        """No corpus mutation happened — invalidating would just be churn."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        record = {"id": "existing-id", "filename": "existing.txt", "domain": "coding"}
+        session.run.return_value.single.return_value = record
+
+        result = ingest_content(
+            "duplicate content", domain="coding", metadata={"filename": "new.txt"},
+        )
+
+        assert result["status"] == "duplicate"
+        mock_sem_invalidate.assert_not_called()
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_reingest_invalidates_semantic_cache(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem_invalidate,
+    ):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None  # _check_duplicate: no match
+
+        prev = {"id": "old-artifact-id", "content_hash": "old-hash", "chunk_ids": "[]"}
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = prev
+            mock_graph.update_artifact.return_value = None
+
+            result = ingest_content(
+                "new content that differs from the old hash",
+                domain="coding",
+                metadata={"filename": "existing.txt"},
+            )
+
+        assert result["status"] == "updated"
+        assert result["artifact_id"] == "old-artifact-id"
+        mock_sem_invalidate.assert_called_once()
+        _, kwargs = mock_sem_invalidate.call_args
+        assert kwargs.get("trigger") == "ingestion.reingest_artifact"
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_invalidation_hook_failure_does_not_break_ingest(
+        self, mock_chroma, mock_neo4j, mock_redis,
+    ):
+        """The hook call is a best-effort observability boundary — a
+        raising cache invalidation must not fail the ingest itself."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph, patch(
+            "core.retrieval.semantic_cache.invalidate_cache_non_blocking",
+            side_effect=RuntimeError("cache backend unreachable"),
+        ):
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+
+            result = ingest_content("resilience check", domain="coding")
+
+        assert result["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# Tests: force_reindex — retroactive feature application (Phase 2.6)
+# ---------------------------------------------------------------------------
+
+class TestForceReindex:
+    """force_reindex re-embeds UNCHANGED content so newly-enabled retrieval
+    features apply retroactively. It must bypass the exact-hash dedup and route
+    to the relationship-preserving _reingest_artifact path."""
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_force_reindex_reingests_unchanged_content(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        # _check_duplicate WOULD find this artifact (exact-hash hit).
+        session.run.return_value.single.return_value = {
+            "id": "aid", "filename": "existing.txt", "domain": "coding",
+        }
+
+        content = "unchanged content"
+        chash = _content_hash(content)
+        prev = {"id": "aid", "content_hash": chash, "chunk_ids": "[]"}
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = prev
+            mock_graph.update_artifact.return_value = None
+
+            # Control (red for reindex): without the flag, the exact-hash dedup
+            # short-circuits and nothing is re-embedded.
+            dup = ingest_content(
+                content, domain="coding", metadata={"filename": "existing.txt"},
+            )
+            assert dup["status"] == "duplicate"
+
+            # force_reindex bypasses dedup and re-embeds via _reingest_artifact.
+            result = ingest_content(
+                content, domain="coding", metadata={"filename": "existing.txt"},
+                force_reindex=True,
+            )
+
+        assert result["status"] == "updated"
+        assert result["artifact_id"] == "aid"
+        # Re-index invalidated the semantic cache (via the _reingest path).
+        assert mock_sem.called
+
+    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_reingest_preserves_pre_chunked_layout(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        """_reingest_artifact with pre_chunked keeps element granularity +
+        structural metadata — a re-index must not downgrade a layout-aware
+        artifact to token chunks."""
+        from app.services.ingestion import _reingest_artifact
+
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        mock_neo4j.return_value = MagicMock()
+
+        prev = {"id": "aid", "content_hash": "h", "chunk_ids": "[]"}
+        pre_chunked = [
+            {"text": "row one", "metadata": {"element_type": "CSVRow", "column_headers": ["a", "b"]}},
+            {"text": "row two", "metadata": {"element_type": "CSVRow", "column_headers": ["a", "b"]}},
+        ]
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.update_artifact.return_value = None
+            result = _reingest_artifact(
+                prev, "row one\nrow two", "coding", {"filename": "data.csv"}, "h",
+                pre_chunked=pre_chunked,
+            )
+
+        assert result["status"] == "updated"
+        upsert_kwargs = collection.upsert.call_args.kwargs
+        # Exactly the two layout chunks (verbatim), not token-chunked.
+        assert upsert_kwargs["documents"] == ["row one", "row two"]
+        metas = upsert_kwargs["metadatas"]
+        assert len(metas) == 2
+        assert metas[0]["element_type"] == "CSVRow"
+        # list metadata is JSON-coerced for ChromaDB.
+        assert metas[0]["column_headers"] == json.dumps(["a", "b"])

@@ -16,6 +16,17 @@ from app.db.neo4j.artifacts import get_verification_report, save_verification_re
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
+@pytest.fixture(autouse=True)
+def _patch_verification_redis(monkeypatch):
+    """``save_verification_report`` calls
+    ``app.observability.verification_metrics.record_verification_report``
+    (Phase 0.4a), which does a local ``from app.deps import get_redis``.
+    Route it to a MagicMock so this module's real-Neo4j-mocked-but-not-
+    Redis-mocked tests never touch a real Redis."""
+    monkeypatch.setattr("app.deps.get_redis", lambda: MagicMock(), raising=False)
+
+
 @pytest.fixture
 def mock_neo4j():
     driver = MagicMock()
@@ -325,3 +336,57 @@ def test_save_report_handles_no_sources_gracefully():
     save_verification_report(driver, "conv-3", claims, 0.5, 0, 0, 1, 1)
     cyphers = [c[0][0] for c in session.run.call_args_list]
     assert sum("MERGE (r:VerificationReport" in c for c in cyphers) == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 0.4a: verification telemetry hook
+# ---------------------------------------------------------------------------
+
+
+class TestVerificationTelemetryHook:
+    """save_verification_report must record best-effort Redis counters."""
+
+    def test_records_claims_total_and_uncertain_and_timeout(self, monkeypatch):
+        import fakeredis
+
+        from app.observability.verification_metrics import get_verification_rates
+
+        fake = fakeredis.FakeRedis(decode_responses=True)
+        monkeypatch.setattr("app.deps.get_redis", lambda: fake, raising=False)
+
+        driver, _session = _mk_driver()
+        claims = [
+            {"claim": "a", "status": "verified", "sources": [{"artifact_id": "a1"}]},
+            {"claim": "b", "status": "uncertain", "sources": [{"artifact_id": "a2"}]},
+            {
+                "claim": "c",
+                "status": "error",
+                "verification_method": "timeout",
+                "sources": [{"artifact_id": "a3"}],
+            },
+        ]
+        save_verification_report(
+            driver, "conv-telemetry", claims, 0.5,
+            verified=1, unverified=0, uncertain=1, total=3,
+        )
+
+        rates = get_verification_rates()
+        assert rates["today"]["claims_total"] == 3
+        assert rates["today"]["uncertain_count"] == 1
+        assert rates["today"]["timeout_count"] == 1
+        assert rates["today"]["reports_total"] == 1
+
+    def test_telemetry_failure_does_not_break_save(self, monkeypatch):
+        """A broken Redis must not prevent the report from being saved."""
+
+        def _broken():
+            raise ConnectionError("redis down")
+
+        monkeypatch.setattr("app.deps.get_redis", _broken, raising=False)
+
+        driver, _session = _mk_driver()
+        claims = [{"claim": "a", "status": "verified"}]
+        report_id = save_verification_report(
+            driver, "conv-broken-redis", claims, 0.9, verified=1, total=1,
+        )
+        assert report_id  # save still succeeded despite the broken Redis

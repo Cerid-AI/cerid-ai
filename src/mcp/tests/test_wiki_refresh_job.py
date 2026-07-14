@@ -254,3 +254,57 @@ class TestWikiRefreshJobEnrichment:
         assert result.metadata.get("external_refs_count", 0) == 0
 
 
+
+
+# ---------------------------------------------------------------------------
+# _run_pipeline — junk-entity gate (2026-07-13)
+# ---------------------------------------------------------------------------
+
+
+class TestJunkEntityGate:
+    """Junk-named entities are skipped at the pipeline choke point, before
+    the LLM summary — this covers every producer (ingest hook, nightly
+    stale sweep, manual enqueue) without touching the producers."""
+
+    @pytest.mark.asyncio
+    async def test_pipeline_skips_junk_named_entity_before_llm(self):
+        from unittest.mock import MagicMock
+
+        job = _make_job(slug="other:library-email-charset-html")
+        junk_entity = {
+            "name": "library/email.charset.html",
+            "entity_type": "OTHER",
+            "source_artifacts": [{"artifact_id": "a1"}],
+        }
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.deps.get_chroma", return_value=MagicMock()),
+            patch("app.db.neo4j.wiki.get_entity", return_value=junk_entity),
+            patch(
+                "core.utils.internal_llm.call_internal_llm", new=AsyncMock()
+            ) as mock_llm,
+        ):
+            stats = await job._run_pipeline(_noop_progress)
+
+        assert stats == {"skipped": "junk_entity_name"}
+        mock_llm.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_pipeline_proceeds_for_valid_entity_name(self):
+        from unittest.mock import MagicMock
+
+        job = _make_job(slug="org:nasa")
+        valid_entity = {
+            "name": "NASA",
+            "entity_type": "ORG",
+            "source_artifacts": [],  # forces the next skip branch
+        }
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.deps.get_chroma", return_value=MagicMock()),
+            patch("app.db.neo4j.wiki.get_entity", return_value=valid_entity),
+        ):
+            stats = await job._run_pipeline(_noop_progress)
+
+        # Passes the junk gate and reaches the no-artifacts skip instead.
+        assert stats == {"skipped": "no_source_artifacts"}

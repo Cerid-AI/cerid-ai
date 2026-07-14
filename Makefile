@@ -1,6 +1,8 @@
 .PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
-       test test-all test-eval ci-local drift-check prepush smoke slo help
+       test test-all test-eval eval-live-retrieval eval-chat-faithfulness \
+       eval-verdict bench-nli-aggrefact \
+       ci-local drift-check prepush smoke slo help
 
 # -- Python deps --
 lock-python:
@@ -48,6 +50,27 @@ test-all:
 
 test-eval:
 	cd src/mcp && python -m pytest tests/eval/ -v --tb=short
+
+# -- Live eval harnesses (Quality-Maximization Phase 0.1 / 0.3) --
+# Score LIVE retrieval + chat faithfulness against a running stack
+# (MCP_BASE default http://localhost:8888). Need CERID_API_KEY in env or .env;
+# the chat harness also needs OPENROUTER_API_KEY (env or .env). Both self-seed a
+# deterministic eval-fixture corpus and tear it down after. Report-only unless
+# RETRIEVAL_EVAL_MIN_RECALL5 / CHAT_FAITHFULNESS_MIN are set.
+eval-live-retrieval: ## Live-retrieval golden-query eval (requires running stack)
+	@echo "[eval-live-retrieval] requires stack (scripts/start-cerid.sh) + CERID_API_KEY"
+	cd src/mcp && ../../.venv/bin/python -m tests.eval.live_retrieval_eval
+
+eval-chat-faithfulness: ## Chat-path faithfulness eval (requires running stack; use --max-items for cost)
+	@echo "[eval-chat-faithfulness] requires stack + CERID_API_KEY + OPENROUTER_API_KEY"
+	cd src/mcp && ../../.venv/bin/python -m tests.eval.chat_faithfulness_eval
+
+eval-verdict: ## Claim-verdict accuracy eval vs labeled cases (requires running stack)
+	@echo "[eval-verdict] requires stack + CERID_API_KEY (report-only unless VERDICT_EVAL_MIN_ACCURACY set)"
+	cd src/mcp && ../../.venv/bin/python -m tests.eval.verification_verdict_eval
+
+bench-nli-aggrefact: ## Benchmark the local NLI gate on LLM-AggreFact (needs HF access)
+	PYTHONPATH=src/mcp .venv/bin/python scripts/bench_nli_aggrefact.py
 
 # -- Combined --
 check-all: deps-check lint-frontend typecheck-frontend test-frontend
@@ -168,6 +191,8 @@ help:
 	@echo "  test               Run unit + integration tests (skip eval)"
 	@echo "  test-all           Run ALL tests including eval"
 	@echo "  test-eval          Run evaluation harness only (Monte Carlo, RAGAS)"
+	@echo "  eval-live-retrieval    Live-retrieval golden-query eval (running stack)"
+	@echo "  eval-chat-faithfulness Chat-path faithfulness eval (running stack)"
 	@echo "  check-all          Run deps-check + lint + typecheck + test"
 	@echo "  smoke              Run smoke/load harness (requires running stack)"
 	@echo "  slo                Run latency SLO benchmarks (requires running stack)"

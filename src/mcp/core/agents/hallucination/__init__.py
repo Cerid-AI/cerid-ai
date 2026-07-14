@@ -80,7 +80,6 @@ from core.agents.hallucination.verification import (  # noqa: F401
     _invert_evasion_verdict,
     _invert_ignorance_verdict,
     _kb_source_fields,
-    _llm_call_with_retry,
     _parse_verification_verdict,
     _query_memories,
     _verify_claim_externally,

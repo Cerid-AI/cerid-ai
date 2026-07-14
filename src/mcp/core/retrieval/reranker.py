@@ -61,9 +61,14 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
             providers=resolve_providers(config.ONNX_EXECUTION_PROVIDERS),
         )
         _tokenizer = Tokenizer.from_file(tok_path)
-        # Coupled to the model: 512 for ms-marco-MiniLM (default), 1024 for
-        # bge-reranker-v2-m3. A 512-token parent chunk + query overflows a
-        # 512 budget and silently loses the chunk's tail; bge reads it whole.
+        # RERANK_MAX_LENGTH governs ONLY this in-process ONNX tokenizer — it
+        # has no effect on the RERANK_PROVIDER=quenchforge HTTP path (see the
+        # RERANK_MAX_LENGTH comment in settings.py for the full explanation).
+        # Coupled to the configured model's positional limit: ms-marco-MiniLM
+        # (the default) caps at 512, so a parent chunk larger than the budget
+        # silently loses its tail (see the truncation-detection log in
+        # _score_pairs). Raising this past a model's real limit makes ONNX
+        # inference fail on out-of-range position ids, not truncate further.
         _tokenizer.enable_truncation(max_length=config.RERANK_MAX_LENGTH)
         _tokenizer.enable_padding()
 
@@ -87,6 +92,20 @@ def _score_pairs(query: str, documents: list[str]) -> list[float]:
     session, tokenizer = _load_model()
 
     encodings = tokenizer.encode_batch([(query, doc) for doc in documents])
+
+    # ``enable_truncation`` (in _load_model) always populates ``.overflowing``
+    # with the dropped tail when a pair exceeds RERANK_MAX_LENGTH — reading it
+    # here costs nothing extra (the tokenizer already computed it) and turns
+    # what would otherwise be silent parent-chunk data loss into at least a
+    # debug-level signal.
+    truncated_count = sum(1 for e in encodings if e.overflowing)
+    if truncated_count:
+        logger.debug(
+            "Reranker: %d/%d (query, chunk) pair(s) exceeded "
+            "RERANK_MAX_LENGTH=%d tokens — chunk tail truncated before "
+            "cross-encoder scoring",
+            truncated_count, len(encodings), config.RERANK_MAX_LENGTH,
+        )
 
     input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
     attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)

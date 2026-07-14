@@ -303,3 +303,29 @@ async def test_web_search_returns_structured_results():
     assert "score" in first
     assert first["title"] == "Test Result 1"
     assert first["url"] == "https://example.com/1"
+
+
+# ---------------------------------------------------------------------------
+# has_real_search_provider — excludes the always-on OpenRouter fallback
+# ---------------------------------------------------------------------------
+
+
+def test_has_real_search_provider_true_for_tavily():
+    with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
+         patch("utils.web_search.SEARXNG_URL", ""):
+        from utils.web_search import has_real_search_provider
+        assert has_real_search_provider() is True
+
+
+def test_has_real_search_provider_true_for_searxng():
+    with patch.dict("os.environ", {"TAVILY_API_KEY": ""}), \
+         patch("utils.web_search.SEARXNG_URL", "http://localhost:8080"):
+        from utils.web_search import has_real_search_provider
+        assert has_real_search_provider() is True
+
+
+def test_has_real_search_provider_false_when_unconfigured():
+    with patch.dict("os.environ", {"TAVILY_API_KEY": ""}), \
+         patch("utils.web_search.SEARXNG_URL", ""):
+        from utils.web_search import has_real_search_provider
+        assert has_real_search_provider() is False

@@ -317,33 +317,6 @@ class TestStreamingTimeouts:
         assert summary["total"] == 3
 
     @pytest.mark.asyncio
-    async def test_streaming_flag_limits_retries(self):
-        """In streaming mode, _llm_call_with_retry should use fewer attempts."""
-        from core.agents.hallucination.verification import _llm_call_with_retry
-
-        call_count = 0
-
-        class FakeClient:
-            async def post(self, url, json=None):
-                nonlocal call_count
-                call_count += 1
-
-                class FakeResp:
-                    status_code = 429
-                    headers = {}
-
-                    def raise_for_status(self):
-                        raise Exception("Rate limited after exhausting retries")
-
-                return FakeResp()
-
-        # With max_attempts=1, should only try once then raise
-        with pytest.raises(Exception, match="Rate limited"):
-            await _llm_call_with_retry(FakeClient(), "http://fake", {}, max_attempts=1)
-
-        assert call_count == 1  # Only 1 attempt, no retries
-
-    @pytest.mark.asyncio
     async def test_streaming_mode_same_as_non_streaming_for_web_escalation(self):
         """After removing the streaming exclusion from staleness escalation,
         both streaming and non-streaming modes should behave identically

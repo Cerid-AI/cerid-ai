@@ -16,19 +16,28 @@ from app.agents.memory import calculate_memory_score
 
 
 class TestEmpiricalMemory:
-    """Empirical facts should never decay."""
+    """Empirical facts decay slowly via power-law (finite stability since the
+    2026-07-13 trust-integrity fix; previously hardcoded immortal)."""
 
     def test_no_decay_at_zero_age(self):
         score = calculate_memory_score(1.0, 0, 0.0, memory_type="empirical")
         assert score == pytest.approx(1.0)
 
-    def test_no_decay_at_one_year(self):
-        score = calculate_memory_score(1.0, 0, 365.0, memory_type="empirical")
-        assert score == pytest.approx(1.0)
+    def test_slow_decay_at_one_year(self):
+        score = calculate_memory_score(
+            1.0, 0, 365.0, memory_type="empirical", stability_days=180.0,
+        )
+        # (1 + 365/(9*180))^-0.5 ≈ 0.903 — strong but no longer immortal
+        assert score == pytest.approx(0.903, abs=0.01)
+        assert score < 1.0
 
     def test_source_authority_applied(self):
-        score = calculate_memory_score(1.0, 0, 100.0, memory_type="empirical", source_authority=0.5)
-        assert score == pytest.approx(0.5)
+        score = calculate_memory_score(
+            1.0, 0, 100.0, memory_type="empirical",
+            source_authority=0.5, stability_days=180.0,
+        )
+        # decay(100d, S=180) ≈ 0.970 → 0.970 * 0.5 ≈ 0.485
+        assert score == pytest.approx(0.485, abs=0.01)
 
     def test_access_count_ignored(self):
         """Access count should not change empirical scores."""

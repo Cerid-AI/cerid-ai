@@ -18,8 +18,16 @@ reused verbatim from :mod:`core.agents.hallucination`.
 """
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
+
+# Wall-clock budget (seconds) for verifying every claim in one brief, threaded
+# to :func:`verify_claims` as a monotonic deadline shared across the batch.
+# Briefs are a background/offline path with no user waiting on an SSE stream, so
+# the bound is generous relative to the per-turn chat budget — but it MUST exist
+# so a stalled cross-model/web verification can't hang brief generation forever.
+BRIEF_VERIFY_DEADLINE_S = 60.0
 
 # Conservative status -> band mapping. Anything not explicitly "verified"
 # or "uncertain" collapses to "unverified" so the UI never over-claims
@@ -55,6 +63,7 @@ async def verify_brief_claims(
     isolates it to an ``error`` verdict, which maps to ``"unverified"``.
     """
     from core.agents.hallucination import extract_claims, verify_claims
+    from core.agents.hallucination.patterns import _has_staleness_indicators
 
     body = "\n\n".join(
         text.strip() for text in sections.values() if text and text.strip()
@@ -66,11 +75,17 @@ async def verify_brief_claims(
     if not claims or method in ("ignorance", "evasion", "none"):
         return []
 
+    # Propagate the two integrity signals the facade forwards to verify_claim:
+    # a stale-cutoff admission anywhere in the brief routes its factual claims to
+    # a live web check instead of a KB echo, and the shared deadline bounds total
+    # external work so brief generation can't hang on a slow verifier.
     verdicts = await verify_claims(
         claims,
         chroma_client,
         neo4j_driver=neo4j_driver,
         redis_client=redis_client,
+        stale_context=_has_staleness_indicators(body),
+        deadline=time.monotonic() + BRIEF_VERIFY_DEADLINE_S,
     )
 
     results: list[dict[str, Any]] = []

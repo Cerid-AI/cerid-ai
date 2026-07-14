@@ -14,13 +14,15 @@ from __future__ import annotations
 import json
 import logging
 import os
-import warnings
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import sentry_sdk
 
 import config
+from config.constants import BM25_REBUILD_DEBOUNCE_SECONDS
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.bm25")
@@ -70,9 +72,32 @@ class BM25Index:
         # carries its tenant_id so search(tenant_id=...) can post-filter at
         # the index layer instead of relying on the caller-side post-filter.
         self._doc_tenant: dict[str, str] = {}
-        self._retriever: Any | None = None
+
+        # Serializes corpus mutations (add/remove) against the rebuild so a
+        # lazy rebuild triggered on a search thread never observes a
+        # half-mutated corpus. The retrieve itself runs lock-free off the
+        # atomically-published ``_snapshot``.
+        self._lock = threading.Lock()
+        self._reset_index_state()
 
         self._load()
+
+    def _reset_index_state(self) -> None:
+        """Reset the retriever + rebuild bookkeeping to the empty state."""
+        # ``_snapshot`` is the (retriever, indexed_ids) pair the last rebuild
+        # published, assigned as one tuple so a lock-free search never pairs a
+        # retriever with the wrong id list. Search maps retriever result
+        # indices through ``indexed_ids`` — NOT the live ``_doc_ids``, which
+        # may have drifted ahead of the retriever between debounced rebuilds.
+        self._snapshot: tuple[Any | None, tuple[str, ...]] = (None, ())
+        # Set by add/remove; a query rebuilds when dirty and the debounce
+        # cooldown has elapsed (or no retriever exists yet).
+        self._dirty: bool = False
+        # ids removed since the last rebuild — their entries still occupy a
+        # slot in the current retriever snapshot and must be filtered out of
+        # results until the next rebuild drops them for real.
+        self._stale_ids: set[str] = set()
+        self._last_rebuild: float = 0.0
 
     def add_documents(
         self,
@@ -86,27 +111,35 @@ class BM25Index:
         :meth:`search` can scope results at the index layer. Defaults to
         ``config.DEFAULT_TENANT_ID`` for backward compatibility with callers
         that don't yet pass tenant.
+
+        The (whole-corpus) BM25 rebuild is deferred off this ingest path:
+        new docs are persisted durably and the index is marked dirty; the
+        next eligible :meth:`search` rebuilds. New chunks become searchable
+        within ``BM25_REBUILD_DEBOUNCE_SECONDS`` (see :meth:`_maybe_rebuild`).
         """
         if not _bm25s_available:
             return 0
 
         tenant = tenant_id if tenant_id is not None else config.DEFAULT_TENANT_ID
 
-        new_entries: list[dict] = []
-        for chunk_id, text in zip(chunk_ids, texts):
-            if chunk_id in self._doc_id_set:
-                continue
-            if not text or not text.strip():
-                continue
-            self._texts.append(text)
-            self._doc_ids.append(chunk_id)
-            self._doc_id_set.add(chunk_id)
-            self._doc_tenant[chunk_id] = tenant
-            new_entries.append({"id": chunk_id, "text": text, "tenant_id": tenant})
+        with self._lock:
+            new_entries: list[dict] = []
+            for chunk_id, text in zip(chunk_ids, texts):
+                if chunk_id in self._doc_id_set:
+                    continue
+                if not text or not text.strip():
+                    continue
+                self._texts.append(text)
+                self._doc_ids.append(chunk_id)
+                self._doc_id_set.add(chunk_id)
+                self._doc_tenant[chunk_id] = tenant
+                new_entries.append(
+                    {"id": chunk_id, "text": text, "tenant_id": tenant}
+                )
 
-        if new_entries:
-            self._rebuild()
-            self._append_to_disk(new_entries)
+            if new_entries:
+                self._dirty = True
+                self._append_to_disk(new_entries)
 
         return len(new_entries)
 
@@ -118,27 +151,34 @@ class BM25Index:
         ``add_documents`` dedup-skips them and the keyword index would
         otherwise keep serving the PRE-edit text while ChromaDB holds the
         new text. Removing first lets the caller re-add the fresh text.
+
+        The rebuild is deferred (as with :meth:`add_documents`): the removed
+        ids are tombstoned in ``_stale_ids`` so :meth:`search` filters their
+        still-indexed entries out immediately, and the next eligible search
+        drops them from the retriever for real.
         """
-        remove_set = {c for c in chunk_ids if c in self._doc_id_set}
-        if not remove_set:
-            return 0
+        with self._lock:
+            remove_set = {c for c in chunk_ids if c in self._doc_id_set}
+            if not remove_set:
+                return 0
 
-        kept_texts: list[str] = []
-        kept_ids: list[str] = []
-        for cid, text in zip(self._doc_ids, self._texts):
-            if cid in remove_set:
-                continue
-            kept_texts.append(text)
-            kept_ids.append(cid)
+            kept_texts: list[str] = []
+            kept_ids: list[str] = []
+            for cid, text in zip(self._doc_ids, self._texts):
+                if cid in remove_set:
+                    continue
+                kept_texts.append(text)
+                kept_ids.append(cid)
 
-        self._texts = kept_texts
-        self._doc_ids = kept_ids
-        self._doc_id_set = set(kept_ids)
-        for cid in remove_set:
-            self._doc_tenant.pop(cid, None)
+            self._texts = kept_texts
+            self._doc_ids = kept_ids
+            self._doc_id_set = set(kept_ids)
+            for cid in remove_set:
+                self._doc_tenant.pop(cid, None)
 
-        self._rebuild()
-        self._rewrite_disk()
+            self._stale_ids.update(remove_set)
+            self._dirty = True
+            self._rewrite_disk()
         return len(remove_set)
 
     def search(
@@ -153,10 +193,18 @@ class BM25Index:
 
         When ``tenant_id`` is provided (Workstream E Phase 0), results are
         filtered at the index layer to match. When ``None``, all tenants
-        are returned and the caller is expected to apply
-        :func:`core.context.identity.chunk_matches_tenant` (deprecated path).
+        are returned and the caller applies its own tenant post-filter
+        (:func:`core.context.identity.chunk_matches_tenant` on the
+        BM25-only fallback path in ``query_agent``).
         """
-        if not _bm25s_available or self._retriever is None or not self._texts:
+        if not _bm25s_available:
+            return []
+
+        # Rebuild the retriever from the live corpus if ingest has moved it
+        # ahead of the last snapshot (deferred off the ingest path).
+        self._maybe_rebuild()
+        retriever, indexed_ids = self._snapshot
+        if retriever is None or not indexed_ids:
             return []
 
         query_tokens = bm25s.tokenize(
@@ -168,12 +216,14 @@ class BM25Index:
         if len(query_tokens[0]) == 0:
             return []
 
-        # Over-fetch slightly when tenant filtering is on so we still return
-        # ~top_k matches after the post-filter trims cross-tenant hits.
-        fetch_k = min(top_k * 4 if tenant_id is not None else top_k, len(self._texts))
-        results, scores = self._retriever.retrieve(query_tokens, k=fetch_k)
+        # Over-fetch when a post-filter is active — tenant scoping, or
+        # tombstoned removals still present in the snapshot — so we still
+        # return ~top_k after trimming.
+        overfetch = tenant_id is not None or bool(self._stale_ids)
+        fetch_k = min(top_k * 4 if overfetch else top_k, len(indexed_ids))
+        results, scores = retriever.retrieve(query_tokens, k=fetch_k)
 
-        # results shape: (1, k) - indices into corpus
+        # results shape: (1, k) - indices into the snapshot corpus
         # scores shape: (1, k) - BM25 scores (descending)
         if scores.shape[1] == 0:
             return []
@@ -188,7 +238,11 @@ class BM25Index:
             if score <= 0:
                 break
             idx = int(results[0, i])
-            chunk_id = self._doc_ids[idx]
+            chunk_id = indexed_ids[idx]
+            # Removed-since-rebuild ids still occupy a slot in the snapshot;
+            # honor the removal immediately by skipping them.
+            if chunk_id in self._stale_ids:
+                continue
             if tenant_id is not None:
                 doc_tenant = self._doc_tenant.get(chunk_id, config.DEFAULT_TENANT_ID)
                 if doc_tenant != tenant_id:
@@ -203,9 +257,47 @@ class BM25Index:
     def size(self) -> int:
         return len(self._doc_ids)
 
-    def _rebuild(self) -> None:
+    def _maybe_rebuild(self) -> None:
+        """Rebuild the retriever from the live corpus if it has drifted.
+
+        Called on the read (search) path. Rebuilds when the corpus is dirty
+        AND either no retriever exists yet or the debounce cooldown
+        (:data:`BM25_REBUILD_DEBOUNCE_SECONDS`) has elapsed since the last
+        rebuild. This coalesces a burst of ingest ``add_documents`` calls
+        into at most one rebuild per cooldown window instead of one
+        whole-corpus rebuild per document. The double-checked ``_dirty``
+        flag keeps the steady-state (clean) search path lock-free.
+        """
+        if not self._dirty:
+            return
+        retriever = self._snapshot[0]
+        if retriever is not None and (
+            time.monotonic() - self._last_rebuild
+        ) < BM25_REBUILD_DEBOUNCE_SECONDS:
+            return
+        with self._lock:
+            if not self._dirty:
+                return
+            retriever = self._snapshot[0]
+            if retriever is not None and (
+                time.monotonic() - self._last_rebuild
+            ) < BM25_REBUILD_DEBOUNCE_SECONDS:
+                return
+            self._rebuild_locked()
+
+    def _rebuild_locked(self) -> None:
+        """Tokenize the whole live corpus and publish a fresh retriever.
+
+        Caller must hold ``self._lock`` (or run single-threaded, as during
+        construction / :meth:`_load`). ``_snapshot`` is published as one
+        atomic assignment so a concurrent lock-free search never sees a
+        retriever paired with the wrong id list.
+        """
         if not self._texts or not _bm25s_available:
-            self._retriever = None
+            self._snapshot = (None, ())
+            self._stale_ids.clear()
+            self._dirty = False
+            self._last_rebuild = time.monotonic()
             return
 
         corpus_tokens = bm25s.tokenize(
@@ -213,7 +305,12 @@ class BM25Index:
         )
         retriever = bm25s.BM25()
         retriever.index(corpus_tokens)
-        self._retriever = retriever
+        # Snapshot the id ordering the retriever was built against; search
+        # maps retriever result indices through this, not the live _doc_ids.
+        self._snapshot = (retriever, tuple(self._doc_ids))
+        self._stale_ids.clear()
+        self._dirty = False
+        self._last_rebuild = time.monotonic()
 
     def _load(self) -> None:
         if not self._corpus_file.exists():
@@ -249,7 +346,7 @@ class BM25Index:
                         "tenant_id", config.DEFAULT_TENANT_ID,
                     )
 
-            self._rebuild()
+            self._rebuild_locked()
             if self._doc_ids:
                 logger.info(
                     f"BM25 index loaded for {self.domain}: {len(self._doc_ids)} docs"
@@ -266,7 +363,7 @@ class BM25Index:
             self._doc_ids = []
             self._doc_id_set = set()
             self._doc_tenant = {}
-            self._retriever = None
+            self._reset_index_state()
 
     def _append_to_disk(self, entries: list[dict]) -> None:
         try:
@@ -364,20 +461,13 @@ def search_bm25(
 ) -> list[tuple[str, float]]:
     """Search a domain's BM25 index. Returns (chunk_id, score) tuples.
 
-    ``tenant_id`` (Workstream E Phase 0) scopes results at the index
-    layer. Calling without ``tenant_id`` emits a :class:`DeprecationWarning`
-    — the index-layer filter is the canonical path; callers should migrate
-    off the post-filter at ``query_agent.py`` (chunk_matches_tenant).
+    ``tenant_id`` scopes results at the index layer. When omitted, all
+    tenants are returned and the caller applies its own tenant post-filter
+    (:func:`core.context.identity.chunk_matches_tenant` on the BM25-only
+    fallback path in ``query_agent``). Both call styles are supported —
+    the Workstream E Phase 0.5 deprecation shim that nagged on every
+    hot-path query has been retired.
     """
-    if tenant_id is None:
-        warnings.warn(
-            "search_bm25 called without tenant_id; tenant scoping will be "
-            "enforced at the caller layer via chunk_matches_tenant. "
-            "Pass tenant_id to scope at the BM25 index instead. This "
-            "deprecation will be removed after Workstream E Phase 0.5.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
     idx = get_index(domain)
     return idx.search(query, top_k, tenant_id=tenant_id)
 
@@ -388,12 +478,13 @@ def rebuild_all() -> int:
     for domain in config.DOMAINS:
         if domain in _indexes:
             idx = _indexes[domain]
-            idx._texts.clear()
-            idx._doc_ids.clear()
-            idx._doc_id_set.clear()
-            idx._doc_tenant.clear()
-            idx._retriever = None
-            idx._load()
+            with idx._lock:
+                idx._texts.clear()
+                idx._doc_ids.clear()
+                idx._doc_id_set.clear()
+                idx._doc_tenant.clear()
+                idx._reset_index_state()
+                idx._load()
         else:
             _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
         rebuilt += 1

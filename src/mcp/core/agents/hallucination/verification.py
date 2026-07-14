@@ -13,15 +13,27 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import datetime
-from http import HTTPStatus
 from typing import Any
-
-import httpx
 
 import config
 from core.agents.hallucination.enums import VerificationStatus
+from core.agents.hallucination.escalation import (
+    EscalationTier,
+    GroundingSignals,
+    get_escalation_policy,
+)
 from core.agents.hallucination.extraction import _reclassify_recency
+from core.agents.hallucination.freshness import (
+    ClaimFreshness,
+    classify_claim_freshness,
+    weight_evidence_by_recency,
+)
+from core.agents.hallucination.grounding_verifier import (
+    NLI_PREMISE_CHAR_LIMIT,
+    get_grounding_verifier,
+)
 from core.agents.hallucination.patterns import (
     MEMORY_TYPES,
     PERCENT_RE,
@@ -37,7 +49,11 @@ from core.agents.hallucination.patterns import (
 )
 from core.context.identity import with_tenant_scope
 from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
-from core.utils.claim_cache import cache_verdict, get_cached_verdict
+from core.utils.claim_cache import (
+    TIME_SENSITIVE_VERDICT_TTL_S,
+    cache_verdict,
+    get_cached_verdict,
+)
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
 from core.utils.swallowed import log_swallowed_error
@@ -56,6 +72,37 @@ class CreditExhaustedError(NonTransientError):
         super().__init__(f"{provider} credits exhausted (HTTP 402)")
 
 logger = logging.getLogger("ai-companion.hallucination")
+
+# Deadline geometry for per-claim verification. The streaming caller wraps
+# each claim in wait_for(claim_timeout); every LLM/fetch budget inside the
+# claim must fit what remains of that window or the outer timeout is
+# guaranteed to fire mid-call (the pre-2026-07-13 failure mode: inner web
+# calls were granted BIFROST_TIMEOUT*2=40s under a 25s outer cap).
+_DEADLINE_SAFETY_MARGIN_S = 1.0
+# Below this remaining budget an external call cannot plausibly finish —
+# return a retryable timeout verdict instead of starting a doomed call.
+_MIN_EXTERNAL_CALL_BUDGET_S = 3.0
+
+# ``memory_source_type`` stamped by verified_memory.promote_verified_facts on
+# memories it writes to the conversations collection. Such memories are
+# INADMISSIBLE as verification evidence: a prior verdict must not become the
+# evidence that confirms the next similar claim (self-reinforcing loop).
+_VERIFICATION_MEMORY_SOURCE = "verification"
+
+# Minimum cross-model verdict confidence for a "supported" verdict to promote a
+# claim to "verified" (vs. graded "uncertain"). Phase 3.5 calibration HELD this
+# at 0.5: the labeled harness's mid confidence band (0.35-0.64) is degenerate
+# (n=5) and an exhaustive (lo, hi) threshold sweep found no move that improves
+# accuracy — so the bare literal is *named*, not changed. Module constant per
+# file convention (no env knob: calibration says there is nothing to tune yet).
+_SUPPORTED_MIN_CONFIDENCE = 0.5
+
+
+def _remaining_budget(deadline: float | None) -> float | None:
+    """Seconds left before *deadline* (monotonic), or None when unbounded."""
+    if deadline is None:
+        return None
+    return deadline - time.monotonic()
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +313,6 @@ async def _verify_against_cited_url(
     from html.parser import HTMLParser
 
     from core.ingest.sources.safe_fetch import guarded_get
-    from core.utils.nli import nli_score
 
     # SSRF guard: the cited URL comes from LLM output (attacker-influenceable
     # via prompt injection / poisoned KB), so route it through the shared
@@ -310,7 +356,10 @@ async def _verify_against_cited_url(
     # 512 tokens (~2k chars). 4000 chars is an upper bound; the tokenizer
     # truncates from there.
     premise = text[:4000]
-    nli_result = nli_score(premise=premise, hypothesis=claim_text)
+    # Route through the pluggable grounding verifier (Phase 3.1) — the second
+    # NLI site. Async/batched: the sync variant runs ONNX inference on the event
+    # loop and stalls every concurrent claim verification in the stream.
+    nli_result = await get_grounding_verifier().score(premise, claim_text)
 
     entail = float(nli_result.get("entailment", 0.0))
     contra = float(nli_result.get("contradiction", 0.0))
@@ -737,7 +786,12 @@ async def _query_memories(
     """Query the conversations collection for matching user-confirmed memories.
 
     Filters to memory_type artifacts to avoid matching feedback-ingested
-    LLM responses (which would cause circular self-verification).
+    LLM responses (which would cause circular self-verification), and further
+    excludes verification-promoted memories (``memory_source_type ==
+    "verification"``) so a prior verdict can never be re-served as the evidence
+    that confirms the next similar claim. ``$ne`` still matches rows that omit
+    the key (genuine user memories carry no ``memory_source_type``), so honest
+    empirical/decision/preference facts remain admissible.
     """
     try:
         collection = chroma_client.get_collection(
@@ -746,7 +800,12 @@ async def _query_memories(
         results = collection.query(
             query_texts=[claim],
             n_results=top_k,
-            where=with_tenant_scope({"memory_type": {"$in": MEMORY_TYPES}}),
+            where=with_tenant_scope({
+                "$and": [
+                    {"memory_type": {"$in": MEMORY_TYPES}},
+                    {"memory_source_type": {"$ne": _VERIFICATION_MEMORY_SOURCE}},
+                ]
+            }),
             include=["documents", "metadatas", "distances"],
         )
 
@@ -865,7 +924,7 @@ def _parse_verification_verdict(raw: str) -> dict[str, Any]:
         confidence = max(0.0, min(1.0, confidence))
         reasoning = str(parsed.get("reasoning", ""))
 
-        if verdict == "supported" and confidence >= 0.5:
+        if verdict == "supported" and confidence >= _SUPPORTED_MIN_CONFIDENCE:
             status = "verified"
         elif verdict == "refuted":
             status = "unverified"
@@ -919,51 +978,73 @@ def _parse_verification_verdict(raw: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# LLM call with retry
+# Independent search evidence (Phase 3.3, 2026-07-13 quality program)
 # ---------------------------------------------------------------------------
+# External evidence URLs previously came almost exclusively from OpenRouter
+# ``:online``-annotation citations (single-vendor sourcing). This adds URLs
+# from the SearXNG/Tavily chain in ``utils/web_search.py`` as independent
+# evidence for the same claim, so a claim's evidence set isn't sourced from
+# one vendor's search index.
+_WEB_SEARCH_EVIDENCE_TOP_N = 3
 
-async def _llm_call_with_retry(
-    client: httpx.AsyncClient,
-    url: str,
-    payload: dict,
-    max_attempts: int | None = None,
-    timeout: float | None = None,
-) -> httpx.Response:
-    """POST to an LLM endpoint with exponential backoff on 429 responses."""
-    if max_attempts is None:
-        max_attempts = config.EXTERNAL_VERIFY_RETRY_ATTEMPTS
-    base_delay = config.EXTERNAL_VERIFY_RETRY_BASE_DELAY
 
-    post_kwargs: dict = {"json": payload}
-    if timeout is not None:
-        post_kwargs["timeout"] = timeout
+async def _independent_search_evidence_urls(
+    claim: str, deadline: float | None
+) -> list[str]:
+    """Fetch up to :data:`_WEB_SEARCH_EVIDENCE_TOP_N` URLs from the configured
+    ``utils.web_search`` provider chain (SearXNG/Tavily) for *claim*.
 
-    for attempt in range(max_attempts):
-        resp = await client.post(url, **post_kwargs)
-        # 402 = payment required / credits exhausted — not transient, don't retry
-        if resp.status_code == HTTPStatus.PAYMENT_REQUIRED:
-            raise CreditExhaustedError("openrouter")
-        if resp.status_code != HTTPStatus.TOO_MANY_REQUESTS:
-            resp.raise_for_status()
-            return resp
-        # 429 — wait with exponential backoff, respect Retry-After if present
-        retry_after = resp.headers.get("retry-after")
-        if retry_after:
-            try:
-                delay = float(retry_after)
-            except ValueError:
-                delay = base_delay * (2 ** attempt)
-        else:
-            delay = base_delay * (2 ** attempt)
-        logger.info(
-            "429 rate-limited (attempt %d/%d), retrying in %.1fs",
-            attempt + 1, max_attempts, delay,
+    Skips gracefully (returns ``[]``, never raises into the caller) when:
+    - no real provider (Tavily/SearXNG) is configured — the always-on
+      OpenRouter ``:online`` fallback is deliberately excluded here since it
+      would add a second synthesized-answer LLM call on top of the verdict
+      call already in flight for this claim;
+    - too little of the caller's per-claim deadline budget remains to
+      plausibly complete a search, mirroring the external-call budget gate
+      above.
+    """
+    from utils.web_search import has_real_search_provider
+
+    if not has_real_search_provider():
+        return []
+
+    _budget = _remaining_budget(deadline)
+    if _budget is not None and _budget < _MIN_EXTERNAL_CALL_BUDGET_S:
+        return []
+
+    try:
+        from utils.web_search import search_and_verify
+
+        search_result = await search_and_verify(
+            claim, max_results=_WEB_SEARCH_EVIDENCE_TOP_N,
         )
-        await asyncio.sleep(delay)
+        return [
+            r["url"] for r in search_result.get("results", []) if r.get("url")
+        ]
+    except Exception as exc:  # noqa: BLE001 — evidence gathering is best-effort
+        log_swallowed_error(f"{__name__}.independent_search_evidence", exc)
+        return []
 
-    # Exhausted retries — raise the last 429 so the caller handles it
-    resp.raise_for_status()
-    return resp  # unreachable, but keeps mypy happy
+
+def _extract_citation_urls(message: dict[str, Any]) -> list[str]:
+    """De-duplicate OpenRouter ``url_citation`` annotation URLs from an LLM
+    message, preserving first-seen order.
+
+    ``:online``-suffixed models attach web sources as ``url_citation``
+    annotations. Both the single-claim (:func:`_verify_claim_externally`) and
+    batch (:func:`verify_claims_batch_external`) external verifiers extract them
+    identically; this is the shared core so the annotation shape is parsed in
+    exactly one place.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+    for annotation in message.get("annotations", []) or []:
+        if annotation.get("type") == "url_citation":
+            url_str = annotation.get("url_citation", {}).get("url", "")
+            if url_str and url_str not in seen:
+                seen.add(url_str)
+                urls.append(url_str)
+    return urls
 
 
 # ---------------------------------------------------------------------------
@@ -976,13 +1057,20 @@ async def _verify_claim_externally(
     force_web_search: bool = False,
     streaming: bool = False,
     expert_mode: bool = False,
-    fast_mode: bool = False,
     claim_context: str | None = None,
     response_context: str | None = None,
     kb_snippet: str | None = None,
     conversation_context: list[dict[str, str]] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
+
+    ``deadline`` is a ``time.monotonic()`` timestamp by which the caller's
+    per-claim budget expires. The LLM call timeout is clamped to fit it, and
+    when too little budget remains to plausibly complete a call the function
+    returns a retryable ``timeout`` verdict instead of starting one — this is
+    what keeps sequential fallback chains (cross-model → forced web →
+    authoritative) from overrunning the caller's ``wait_for``.
 
     Strategy: send the claim directly to a model from a *different family*
     than the generator and ask for a structured JSON verdict.  Cross-model
@@ -1011,11 +1099,6 @@ async def _verify_claim_externally(
     for all claim types, overriding pool-based selection.  For claims
     requiring web search, the ``:online`` suffix is appended.
 
-    When ``fast_mode`` is True, the function uses the fastest available
-    model (GPT-4o-mini) with 1 retry, skipping the multi-model fallback
-    chain and staleness escalation.  Used for recency claims that don't
-    specifically need current web data.
-
     Pipeline:
     1. Check feature flag (early return if disabled)
     2. Detect ignorance-admission claims (always → web search)
@@ -1036,6 +1119,20 @@ async def _verify_claim_externally(
             "confidence": 0.3,
             "reason": "External verification disabled",
             "verification_method": "none",
+            "source_urls": [],
+        }
+
+    # Deadline gate: with almost no budget left, an external call can only
+    # end in the caller's wait_for firing mid-flight. Return a retryable
+    # timeout verdict (never cached — see _is_transport_failure_verdict;
+    # picked up by the streaming retry sweep) instead of starting one.
+    _budget = _remaining_budget(deadline)
+    if _budget is not None and _budget < _MIN_EXTERNAL_CALL_BUDGET_S:
+        return {
+            "status": "uncertain",
+            "confidence": 0.3,
+            "reason": "Per-claim budget exhausted before external verification",
+            "verification_method": "timeout",
             "source_urls": [],
         }
 
@@ -1139,12 +1236,6 @@ async def _verify_claim_externally(
             except Exception as exc:  # noqa: BLE001 — evidence gathering is best-effort
                 log_swallowed_error(__name__, exc)
 
-    # Fast mode: use cheapest/fastest model, 1 retry, skip staleness escalation
-    if fast_mode and not expert_mode:
-        verify_model = config.VERIFICATION_MODEL  # GPT-4o-mini
-        verification_method = "cross_model_fast"
-        logger.debug("Fast mode: using %s for claim verification", verify_model)
-
     sem = _get_ext_verify_semaphore()
 
     async with sem:
@@ -1230,9 +1321,14 @@ async def _verify_claim_externally(
                         # v0.93.10: async-batched NLI for coalescing with
                         # the concurrent verify_claim() calls in the same
                         # asyncio.gather(). See line ~1804 for the full
-                        # rationale.
-                        from core.utils.nli import nli_score_async as _ext_nli_fn
-                        _ext_nli = await _ext_nli_fn(kb_snippet[:512], claim)
+                        # rationale. Phase 3.1: routed through the grounding
+                        # verifier + widened to NLI_PREMISE_CHAR_LIMIT (the old
+                        # [:512]-char slice starved expert-mode's 1200-char
+                        # snippet of ~half its evidence before the tokenizer's
+                        # 512-*token* budget even applied).
+                        _ext_nli = await get_grounding_verifier().score(
+                            kb_snippet[:NLI_PREMISE_CHAR_LIMIT], claim
+                        )
                         _ext_nli_label = _ext_nli["label"]
                         _ext_nli_conf = (
                             f"entailment={_ext_nli['entailment']:.2f}, "
@@ -1270,8 +1366,17 @@ async def _verify_claim_externally(
                 {"role": "user", "content": user_prompt},
             ]
 
-            # Increase timeout for web-search calls — they take longer
+            # Increase timeout for web-search calls — they take longer.
+            # Clamp to the caller's remaining per-claim budget: an inner
+            # timeout larger than the outer wait_for guarantees the claim
+            # dies as "timeout" while the call is still in flight.
             timeout = config.BIFROST_TIMEOUT * 2 if is_current_event else config.BIFROST_TIMEOUT
+            _budget = _remaining_budget(deadline)
+            if _budget is not None:
+                timeout = max(
+                    min(timeout, _budget - _DEADLINE_SAFETY_MARGIN_S),
+                    _MIN_EXTERNAL_CALL_BUDGET_S,
+                )
 
             from core.utils.llm_client import call_llm_raw
             data = await call_llm_raw(
@@ -1287,13 +1392,16 @@ async def _verify_claim_externally(
 
             # Extract source URLs from OpenRouter URL citation annotations
             # (present when using :online suffix models like Grok)
-            annotations = raw_message.get("annotations", [])
-            source_urls: list[str] = []
-            seen_urls: set = set()
-            for a in annotations:
-                if a.get("type") == "url_citation":
-                    url_str = a.get("url_citation", {}).get("url", "")
-                    if url_str and url_str not in seen_urls:
+            source_urls: list[str] = _extract_citation_urls(raw_message)
+
+            # Independent evidence (Phase 3.3): merge SearXNG/Tavily results
+            # for this claim so evidence isn't sourced from OpenRouter alone.
+            # Only for the web-search verification path — cross-model claims
+            # don't carry a web-search premise for these URLs to support.
+            if is_current_event:
+                seen_urls: set[str] = set(source_urls)
+                for url_str in await _independent_search_evidence_urls(claim, deadline):
+                    if url_str not in seen_urls:
                         source_urls.append(url_str)
                         seen_urls.add(url_str)
 
@@ -1344,7 +1452,6 @@ async def _verify_claim_externally(
                 not force_web_search
                 and not is_ignorance
                 and not is_current_event
-                and not fast_mode
                 and _is_current_event_claim(claim)  # re-check with broader lens
                 and verdict["status"] in ("verified", "uncertain")
                 and _has_staleness_indicators(raw_answer)
@@ -1358,6 +1465,7 @@ async def _verify_claim_externally(
                     claim, generating_model, force_web_search=True,
                     response_context=response_context,
                     claim_context=claim_context,
+                    deadline=deadline,
                 )
 
             return {
@@ -1444,6 +1552,71 @@ def _kb_source_fields(top_result: dict[str, Any] | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# External verdict envelope assembly
+# ---------------------------------------------------------------------------
+# ``_verify_claim_externally`` reports its verdict score under ``confidence``
+# (the LLM's verdict confidence). Every downstream consumer of a ``verify_claim``
+# verdict — the ``claim_verified`` SSE event (which reads ``result["similarity"]``
+# for its ``confidence`` field), the Redis report aggregate, and the fact cache
+# (``cache_verdict`` stores ``verdict["similarity"]``) — expects the score under
+# ``similarity``. These two helpers are the single place that maps
+# ``confidence → similarity`` so no external-return path can leak a verdict
+# missing ``similarity`` (the pre-2026-07-14 defect where terminal verified/
+# unverified verdicts on the escalation paths arrived over the SSE stream with
+# confidence=0.0 — calibration cases V-94, TS-03).
+
+
+def _external_verdict(
+    claim: str,
+    ext_result: dict[str, Any],
+    **extra: Any,
+) -> dict[str, Any]:
+    """Whitelisted verdict envelope from an external verification result.
+
+    Used by the KB-fallback escalation paths (no KB evidence, low similarity,
+    KB-unverified, KB-uncertain), which surface only the scalar verdict + its
+    sources. ``extra`` folds in per-path annotations (e.g. ``circular_source``).
+    """
+    verdict: dict[str, Any] = {
+        "claim": claim,
+        "status": ext_result["status"],
+        "similarity": ext_result["confidence"],
+        "reason": ext_result["reason"],
+        "verification_method": ext_result.get("verification_method", "none"),
+        "verification_model": ext_result.get("verification_model"),
+        "source_urls": ext_result.get("source_urls", []),
+    }
+    if ext_result.get("credit_exhausted"):
+        verdict["credit_exhausted"] = True
+    verdict.update(extra)
+    return verdict
+
+
+def _escalated_external_verdict(
+    claim: str,
+    ext_result: dict[str, Any],
+    **extra: Any,
+) -> dict[str, Any]:
+    """Verdict envelope that preserves the FULL external payload.
+
+    Unlike :func:`_external_verdict`, the NLI-entailment / NLI-contradiction /
+    semantic-alignment escalation paths keep every field the external verifier
+    produced (``verification_answer`` plus, in expert mode, the authoritative
+    evidence bundle: ``authoritative_sources`` / ``claim_domain`` /
+    ``cross_validation`` / ``evidence_summary``) so the audit UI can show *why*
+    the escalation resolved the way it did. It still normalizes the score into
+    the ``similarity`` envelope field. ``extra`` folds in the per-path
+    escalation markers (``kb_nli_escalated`` etc.).
+    """
+    return {
+        **ext_result,
+        "claim": claim,
+        "similarity": ext_result["confidence"],
+        **extra,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Batch external verification (same-model claim grouping)
 # ---------------------------------------------------------------------------
 
@@ -1516,16 +1689,9 @@ async def verify_claims_batch_external(
         )
         raw_answer = data["choices"][0]["message"].get("content", "").strip()
 
-        # Extract source URLs from annotations (web search models)
-        annotations = data["choices"][0]["message"].get("annotations", [])
-        source_urls: list[str] = []
-        seen_urls: set = set()
-        for a in annotations:
-            if a.get("type") == "url_citation":
-                url_str = a.get("url_citation", {}).get("url", "")
-                if url_str and url_str not in seen_urls:
-                    source_urls.append(url_str)
-                    seen_urls.add(url_str)
+        # Extract source URLs from annotations (web search models) — shared
+        # dedup core with the single-claim external verifier.
+        source_urls: list[str] = _extract_citation_urls(data["choices"][0]["message"])
 
         # Parse the JSON array response
         from core.utils.llm_parsing import parse_llm_json
@@ -1588,6 +1754,10 @@ async def verify_claims(
     expert_mode: bool = False,
     response_context: str | None = None,
     conversation_context: list[dict[str, str]] | None = None,
+    source_artifact_ids: list[str] | None = None,
+    claim_context: str | None = None,
+    deadline: float | None = None,
+    stale_context: bool = False,
 ) -> list[dict[str, Any]]:
     """Verify a batch of already-extracted claims concurrently.
 
@@ -1602,9 +1772,23 @@ async def verify_claims(
     orchestrator (:func:`~core.agents.hallucination.streaming.verify_response_streaming`)
     keeps its own per-claim timeout/SSE machinery, but new callers that just
     need "verify these N claims" use this.
+
+    ``deadline``, ``stale_context``, ``source_artifact_ids``, and
+    ``claim_context`` are threaded verbatim to every :func:`verify_claim` so
+    batch callers (e.g. briefs generation) get the same deadline-bounding,
+    stale-cutoff freshness routing, and anti-circularity the streaming path
+    enforces — the facade must not be a bypass around those integrity gates.
+    ``source_urls`` are extracted per-claim from inline citations (mirroring
+    the streaming orchestrator) so a fabricated citation is NLI-entailed against
+    the cited page before any KB / cross-model fallback runs.
     """
     if not claims:
         return []
+
+    # Lazy import: streaming.py imports this module at load time, so the URL
+    # extractor can only be pulled in at call time (both modules are fully
+    # initialised by then). Mirrors the streaming per-claim call site.
+    from core.agents.hallucination.streaming import _extract_source_urls_from_claim
 
     async def _one(claim: str) -> dict[str, Any]:
         try:
@@ -1617,8 +1801,13 @@ async def verify_claims(
                 model=model,
                 streaming=streaming,
                 expert_mode=expert_mode,
+                source_artifact_ids=source_artifact_ids,
                 response_context=response_context,
+                claim_context=claim_context,
                 conversation_context=conversation_context,
+                source_urls=_extract_source_urls_from_claim(claim),
+                deadline=deadline,
+                stale_context=stale_context,
             )
         except Exception as exc:  # noqa: BLE001 — one bad claim must not sink the batch
             log_swallowed_error(f"{__name__}.verify_claims", exc)
@@ -1631,6 +1820,231 @@ async def verify_claims(
             }
 
     return await asyncio.gather(*[_one(c) for c in claims])
+
+
+# ---------------------------------------------------------------------------
+# verify_claim pipeline stages
+# ---------------------------------------------------------------------------
+# verify_claim is a staged pipeline: (1) cited-URL grounding →
+# (2) KB/memory evidence gathering → (3) entailment + escalation → (4) verdict
+# assembly. Stages 1-2 are cohesive enough to live as their own functions so
+# the orchestrator reads as a sequence of named steps; stage 3's many
+# escalation branches stay inline (each is a distinct terminal-verdict decision)
+# and share the stage-4 verdict-assembly helpers (`_external_verdict` /
+# `_escalated_external_verdict`) defined above.
+
+
+async def _verify_via_cited_urls(
+    claim: str,
+    source_urls: list[str] | None,
+    deadline: float | None,
+) -> dict[str, Any] | None:
+    """Cited-URL grounding stage (Task 12 / audit V-3).
+
+    NLI-entail the claim against each LLM-cited page body *before* any KB lookup
+    or cross-model web search — otherwise a fabricated citation ("According to
+    https://wikipedia.org/foo, the sky is green") can get "confirmed" against an
+    unrelated web-search result because the verifier re-searches from claim text
+    and ignores the cited source.
+
+    Bounded to at most 3 URLs per claim to cap latency, and deadline-gated (each
+    check costs a fetch + NLI; three exceed the tightest per-claim budget). The
+    first URL returning a definitive verdict (verified/unverified) wins; a URL
+    that errors or returns "uncertain" falls through to the next. Returns the
+    terminal verdict dict (``claim`` stamped) or ``None`` to fall through to the
+    KB + external path.
+    """
+    for url in (source_urls or [])[:3]:
+        _budget = _remaining_budget(deadline)
+        if _budget is not None and _budget < _MIN_EXTERNAL_CALL_BUDGET_S * 2:
+            break
+        try:
+            cited_verdict = await _verify_against_cited_url(claim, url)
+        except Exception as exc:
+            log_swallowed_error(f"{__name__}.cited_url_verify", exc)
+            logger.debug("cited URL verification failed for %s: %s", url, exc)
+            continue
+        if cited_verdict.get("status") in ("verified", "unverified"):
+            cited_verdict["claim"] = claim
+            return cited_verdict
+        # status == "uncertain" → try the next cited URL, then fall through to
+        # KB / external if all URLs are inconclusive.
+    return None
+
+
+async def _gather_kb_evidence(
+    claim: str,
+    chroma_client: Any,
+    *,
+    response_context: str | None,
+    source_artifact_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Evidence-gathering stage: assemble the KB + user-memory candidate set.
+
+    Lightweight (vector + BM25) KB retrieval merged with the user-confirmed
+    memory query, memory-authority boosted, min-relevance filtered, anti-circular
+    penalized against ``source_artifact_ids``, relevance-sorted, and term-overlap
+    sanity filtered. Returns the candidate evidence list (before recency
+    weighting); the caller owns the no-evidence → external fallback decision and
+    the freshness re-rank so those stay visible in the orchestrator.
+    """
+    from core.agents.query_agent import lightweight_kb_query
+
+    # Exclude 'conversations' domain from general KB query to avoid
+    # self-verification against feedback-ingested LLM responses.
+    verification_domains = [d for d in config.DOMAINS if d != "conversations"]
+    # Build an enriched query: the bare claim text is often too terse
+    # for vector search (e.g. "it uses 768 dimensions" without context).
+    # Prepending the response_context topic gives the embedding model
+    # enough signal to retrieve relevant KB chunks.
+    enriched_query = claim
+    if response_context:
+        # Use the topic summary (first line) — not the full multi-claim
+        # enrichment which adds noise to the embedding.
+        topic = response_context.split("\n")[0].strip()
+        if topic and len(topic) > 10:
+            enriched_query = f"{topic}: {claim}"
+    # Use lightweight retrieval (vector + BM25 hybrid only) — skips graph
+    # expansion, cross-encoder, quality boost, MMR, and context assembly
+    # for significantly faster per-claim verification.
+    kb_results = await lightweight_kb_query(
+        query=enriched_query,
+        domains=verification_domains,
+        top_k=5,
+        chroma_client=chroma_client,
+    )
+
+    # Also query user-confirmed memories (filtered by memory_type)
+    memory_results = await _query_memories(claim, chroma_client, top_k=2)
+
+    # Merge KB results with memory results
+    all_results = list(kb_results)
+    for mr in memory_results:
+        # Preserve raw relevance for escalation decisions
+        raw_rel = mr["relevance"]
+        mr["_raw_relevance"] = raw_rel
+        # Memories get an authority boost (user-confirmed content)
+        mr["relevance"] = min(1.0, round(raw_rel + memory_authority_boost(mr), 4))
+        all_results.append(mr)
+
+    # Filter out results below verification relevance threshold
+    all_results = [
+        r for r in all_results
+        if r.get("relevance", 0) >= config.VERIFICATION_MIN_RELEVANCE
+    ]
+
+    # --- Anti-circularity: penalise KB results that were injected into
+    # the LLM prompt.  These cannot independently verify a claim because
+    # the response was *derived* from them — matching is expected.
+    # Penalty is 0.15 (not 0.30): the old 0.30 was too aggressive — it
+    # pushed genuine supporting docs from 0.65 to 0.35, right at the
+    # discard threshold, causing false "uncertain" verdicts when the KB
+    # actually contained the answer.
+    _CIRCULAR_PENALTY = 0.15
+    if source_artifact_ids:
+        _src_set = set(source_artifact_ids)
+        for r in all_results:
+            aid = r.get("artifact_id", "")
+            if aid and aid in _src_set:
+                original_rel = r.get("relevance", 0.0)
+                r["_circular"] = True
+                r["relevance"] = max(0.0, round(original_rel - _CIRCULAR_PENALTY, 4))
+                logger.info(
+                    "Anti-circular penalty: artifact=%s relevance %.3f → %.3f",
+                    aid[:8], original_rel, r["relevance"],
+                )
+
+    # Sort by relevance descending
+    all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
+
+    # --- Heuristic sanity filter: drop KB results with low term overlap ---
+    # Vector similarity can return false matches (e.g., a cabin project doc
+    # matching a claim about light wavelengths). Free check — regex only.
+    claim_lower = claim.lower()
+    claim_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", claim_lower))
+    if claim_terms:
+        filtered: list[dict[str, Any]] = []
+        for r in all_results:
+            src_text = r.get("content", "")[:300].lower()
+            src_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", src_text))
+            overlap = len(claim_terms & src_terms) / len(claim_terms)
+            if overlap >= 0.25:
+                filtered.append(r)
+            else:
+                logger.debug(
+                    "KB result filtered (%.0f%% term overlap): '%s…' vs claim '%s…'",
+                    overlap * 100, src_text[:40], claim[:40],
+                )
+        all_results = filtered
+
+    return all_results
+
+
+async def _score_kb_grounding(
+    claim: str,
+    top_results: list[dict[str, Any]],
+    top_result: dict[str, Any],
+    raw_similarity: float,
+    neo4j_driver: Any,
+) -> tuple[float, dict[str, Any], dict[str, Any]]:
+    """Grounding-signal stage — the three signals the verdict branches consume.
+
+    Returns ``(similarity, details, nli)``:
+    - ``similarity``: multi-result calibrated confidence, with the optional
+      graph-corroboration boost applied when the top artifact has ≥2 verified
+      graph neighbours;
+    - ``details``: transparency / analytics metadata;
+    - ``nli``: entailment/contradiction score of the claim against the top KB
+      snippet (neutral fallback if scoring is unavailable).
+
+    Pure with respect to control flow — every terminal-verdict decision made
+    from these signals stays in the orchestrator.
+    """
+    # Apply multi-result confidence calibration
+    similarity = _compute_adjusted_confidence(claim, top_results, raw_similarity)
+    details = _build_verification_details(claim, top_results)
+
+    # --- Graph-guided verification: connected verified artifacts boost confidence ---
+    # If the source artifact has graph relationships to other verified artifacts,
+    # this corroboration increases trust (knowledge graph structure as evidence).
+    _graph_boost = getattr(config, "GRAPH_VERIFICATION_BOOST", 0.05)
+    if _graph_boost > 0 and neo4j_driver and top_result.get("artifact_id"):
+        try:
+            with neo4j_driver.session() as _gs:
+                _graph_count = _gs.run(
+                    "MATCH (a:Artifact {id: $aid})-[:RELATES_TO|DEPENDS_ON|REFERENCES]-(b:Artifact) "
+                    "WHERE EXISTS { MATCH (b)<-[:RELATES_TO]-(m:Memory)-[:VERIFIED_BY]->(r:VerificationReport) } "
+                    "RETURN count(b) AS verified_neighbors",
+                    aid=top_result["artifact_id"],
+                ).single()
+                if _graph_count and _graph_count["verified_neighbors"] >= 2:
+                    similarity = min(1.0, similarity + _graph_boost)
+                    details["graph_verified_neighbors"] = _graph_count["verified_neighbors"]
+        except Exception as exc:  # noqa: BLE001 — graph boost is non-blocking
+            log_swallowed_error(__name__, exc)
+
+    # --- NLI entailment check on top KB result ---
+    # v0.93.10: switched to nli_score_async so N concurrent
+    # verify_claim() tasks dispatched via asyncio.gather rendezvous
+    # in a single batched inference (`_NliBatcher` coalesces calls
+    # within an NLI_COALESCE_MS window).  Pre-v0.93.10 these calls
+    # serialised on the ONNX-session lock — N concurrent claims took
+    # N × per-call time.  Now they take ~1 × per-batch time.
+    # Phase 3.1: the single grounding choke point routes through the pluggable
+    # verifier tier, and the premise widens from the old [:512]-char slice to
+    # NLI_PREMISE_CHAR_LIMIT. The 512-char cut was a second, ~4× tighter ceiling
+    # stacked on the tokenizer's own 512-*token* truncation — the model never saw
+    # the ~2k chars (≈512 tokens) it was built to read.
+    try:
+        nli = await get_grounding_verifier().score(
+            top_result.get("content", "")[:NLI_PREMISE_CHAR_LIMIT], claim
+        )
+    except Exception as exc:
+        log_swallowed_error('core.agents.hallucination.verification', exc)
+        logger.debug("NLI scoring failed for claim %r — falling back to similarity", claim[:60])
+        nli = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "label": "neutral"}
+
+    return similarity, details, nli
 
 
 async def verify_claim(
@@ -1647,8 +2061,20 @@ async def verify_claim(
     claim_context: str | None = None,
     conversation_context: list[dict[str, str]] | None = None,
     source_urls: list[str] | None = None,
+    deadline: float | None = None,
+    stale_context: bool = False,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
+
+    ``deadline`` (a ``time.monotonic()`` timestamp) bounds every external
+    call and cited-URL fetch inside this claim so the total work fits the
+    caller's per-claim ``wait_for`` window instead of overrunning it.
+
+    ``stale_context`` marks a claim extracted from a response that admitted
+    a stale knowledge cutoff ("as of my knowledge cutoff…"). The framing is
+    stripped from individual claims at extraction time, so the caller must
+    propagate it — such claims are treated as temporal: external fallbacks
+    force web search and KB entailment triggers the freshness gates.
 
     When ``claim_context`` is provided, the surrounding text from the original
     response is included in the verification prompt so the verifier understands
@@ -1680,12 +2106,25 @@ async def verify_claim(
     When ``expert_mode`` is True, all external verification calls use the
     expert-tier model (Grok 4) instead of the default model pool.
     """
-    from core.agents.query_agent import lightweight_kb_query
-
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
     unverified_threshold = config.HALLUCINATION_UNVERIFIED_THRESHOLD
     ext_kb_threshold = config.EXTERNAL_VERIFY_KB_THRESHOLD
+
+    # Phase 3.2 — trust-or-escalate policy seam. Built with the thresholds this
+    # call resolved so every escalation decision reads from one named, testable
+    # place instead of duplicated inline predicates + bare literals. The default
+    # policy reproduces this function's pre-3.2 decisions exactly.
+    policy = get_escalation_policy(verified_threshold=threshold)
+    # Claim currency is grounding-independent (claim text + stale flag) — decide
+    # once and reuse across Fallback 1 and every positive-grounding branch.
+    _is_temporal = policy.is_temporal(claim, stale_context=stale_context)
+
+    # Phase 3.4 — freshness classification (pure, no LLM call). Reused below
+    # to (a) prefer newer KB evidence when the claim is time-sensitive, and
+    # (b) cap the verdict-cache TTL regardless of which verification method
+    # ultimately answers the claim.
+    claim_freshness = classify_claim_freshness(claim)
 
     # --- Fact-level cache: skip re-verification for previously seen claims ---
     # Key on (claim, model, method, response_context) so we don't return a
@@ -1720,6 +2159,7 @@ async def verify_claim(
         "response_context": response_context,
         "claim_context": claim_context,
         "conversation_context": conversation_context if expert_mode else None,
+        "deadline": deadline,
     }
 
     async def _cache_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -1736,6 +2176,17 @@ async def verify_claim(
         if status in ("verified", "unverified", "uncertain") and not _is_transport_failure_verdict(result):
             # Key on the same (model, tier, response_context) the reader uses
             # above — otherwise cache writes never match cache reads.
+            #
+            # Phase 3.4 — time-sensitive claims get the short cache cap
+            # regardless of *which* verification method produced this
+            # verdict (kb / kb_nli / cross_model / web_search). Previously
+            # only web_search-method verdicts were capped (still enforced
+            # independently inside cache_verdict); this closes the gap for
+            # a time-sensitive claim that happened to resolve via KB or
+            # cross-model verification.
+            _cache_ttl_kwargs: dict[str, int] = {}
+            if claim_freshness == ClaimFreshness.TIME_SENSITIVE:
+                _cache_ttl_kwargs["ttl"] = TIME_SENSITIVE_VERDICT_TTL_S
             await cache_verdict(
                 redis_client,
                 claim,
@@ -1743,143 +2194,56 @@ async def verify_claim(
                 response_context=response_context,
                 model=model or "",
                 method=_cache_tier,
+                **_cache_ttl_kwargs,
             )
         return result
 
     try:
-        # --- Task 12 / audit V-3: if the LLM cited URLs for this claim,
-        # verify against those URLs *first* (NLI against the cited page body)
-        # before any KB lookup or cross-model web search. Otherwise a
-        # fabricated citation ("According to https://wikipedia.org/foo, the
-        # sky is green") can get "confirmed" against an unrelated web-search
-        # result, because the verifier was re-searching from claim text and
-        # ignoring the cited source entirely.
-        #
-        # Bounded to at most 3 URLs per claim to cap latency. The first URL
-        # that returns a definitive verdict (verified / unverified) wins.
-        # Any URL that errors (timeout, non-2xx, NLI failure) or returns
-        # "uncertain" falls through to the next URL, then ultimately to the
-        # existing KB + external verification path.
-        for url in (source_urls or [])[:3]:
-            try:
-                cited_verdict = await _verify_against_cited_url(claim, url)
-            except Exception as exc:
-                log_swallowed_error(f"{__name__}.cited_url_verify", exc)
-                logger.debug(
-                    "cited URL verification failed for %s: %s", url, exc,
-                )
-                continue
-            if cited_verdict.get("status") in ("verified", "unverified"):
-                cited_verdict["claim"] = claim
-                return await _cache_result(cited_verdict)
-            # status == "uncertain" → try the next cited URL, then fall
-            # through to KB / external if all URLs are inconclusive.
+        # Phase 3.5 — type-aware routing. Evasion and ignorance claims assert
+        # something about the model's *stance* ("I don't have information about
+        # X"; a hedge), not a fact the KB can confirm. Grading their literal text
+        # against KB similarity rubber-stamps a hedge whose surface content
+        # happens to be grounded — the calibration study's evasion=0.375 /
+        # ignorance=0.727 misgrades (4/14 verified at ~1.0). Route them straight
+        # to the type-aware external verifier, which inverts the verdict on
+        # whether the underlying facts actually exist (see _invert_evasion_verdict
+        # / _invert_ignorance_verdict), bypassing the KB-grounding path entirely.
+        if policy.type_route(claim) is EscalationTier.WEB:
+            ext_result = await _verify_claim_externally(
+                claim, model, force_web_search=True, **_ext_common,
+            )
+            return await _cache_result(_external_verdict(claim, ext_result))
 
-        # Exclude 'conversations' domain from general KB query to avoid
-        # self-verification against feedback-ingested LLM responses.
-        verification_domains = [d for d in config.DOMAINS if d != "conversations"]
-        # Build an enriched query: the bare claim text is often too terse
-        # for vector search (e.g. "it uses 768 dimensions" without context).
-        # Prepending the response_context topic gives the embedding model
-        # enough signal to retrieve relevant KB chunks.
-        enriched_query = claim
-        if response_context:
-            # Use the topic summary (first line) — not the full multi-claim
-            # enrichment which adds noise to the embedding.
-            topic = response_context.split("\n")[0].strip()
-            if topic and len(topic) > 10:
-                enriched_query = f"{topic}: {claim}"
-        # Use lightweight retrieval (vector + BM25 hybrid only) — skips graph
-        # expansion, cross-encoder, quality boost, MMR, and context assembly
-        # for significantly faster per-claim verification.
-        kb_results = await lightweight_kb_query(
-            query=enriched_query,
-            domains=verification_domains,
-            top_k=5,
-            chroma_client=chroma_client,
+        # Stage 1 — cited-URL grounding: NLI-entail the claim against any
+        # LLM-cited page bodies before any KB / cross-model fallback.
+        cited_verdict = await _verify_via_cited_urls(claim, source_urls, deadline)
+        if cited_verdict is not None:
+            return await _cache_result(cited_verdict)
+
+        # Stage 2 — evidence gathering: KB + user-memory candidate set,
+        # boosted / filtered / anti-circular-penalized / term-overlap sanitized.
+        all_results = await _gather_kb_evidence(
+            claim,
+            chroma_client,
+            response_context=response_context,
+            source_artifact_ids=source_artifact_ids,
         )
-
-        # Also query user-confirmed memories (filtered by memory_type)
-        memory_results = await _query_memories(claim, chroma_client, top_k=2)
-
-        # Merge KB results with memory results
-        all_results = list(kb_results)
-        for mr in memory_results:
-            # Preserve raw relevance for escalation decisions
-            raw_rel = mr["relevance"]
-            mr["_raw_relevance"] = raw_rel
-            # Memories get an authority boost (user-confirmed content)
-            mr["relevance"] = min(1.0, round(raw_rel + memory_authority_boost(mr), 4))
-            all_results.append(mr)
-
-        # Filter out results below verification relevance threshold
-        all_results = [
-            r for r in all_results
-            if r.get("relevance", 0) >= config.VERIFICATION_MIN_RELEVANCE
-        ]
-
-        # --- Anti-circularity: penalise KB results that were injected into
-        # the LLM prompt.  These cannot independently verify a claim because
-        # the response was *derived* from them — matching is expected.
-        # Penalty is 0.15 (not 0.30): the old 0.30 was too aggressive — it
-        # pushed genuine supporting docs from 0.65 to 0.35, right at the
-        # discard threshold, causing false "uncertain" verdicts when the KB
-        # actually contained the answer.
-        _CIRCULAR_PENALTY = 0.15
-        if source_artifact_ids:
-            _src_set = set(source_artifact_ids)
-            for r in all_results:
-                aid = r.get("artifact_id", "")
-                if aid and aid in _src_set:
-                    original_rel = r.get("relevance", 0.0)
-                    r["_circular"] = True
-                    r["relevance"] = max(0.0, round(original_rel - _CIRCULAR_PENALTY, 4))
-                    logger.info(
-                        "Anti-circular penalty: artifact=%s relevance %.3f → %.3f",
-                        aid[:8], original_rel, r["relevance"],
-                    )
-
-        # Sort by relevance descending
-        all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
-
-        # --- Heuristic sanity filter: drop KB results with low term overlap ---
-        # Vector similarity can return false matches (e.g., a cabin project doc
-        # matching a claim about light wavelengths). Free check — regex only.
-        claim_lower = claim.lower()
-        claim_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", claim_lower))
-        if claim_terms:
-            filtered: list[dict[str, Any]] = []
-            for r in all_results:
-                src_text = r.get("content", "")[:300].lower()
-                src_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", src_text))
-                overlap = len(claim_terms & src_terms) / len(claim_terms)
-                if overlap >= 0.25:
-                    filtered.append(r)
-                else:
-                    logger.debug(
-                        "KB result filtered (%.0f%% term overlap): '%s…' vs claim '%s…'",
-                        overlap * 100, src_text[:40], claim[:40],
-                    )
-            all_results = filtered
 
         # --- Fallback 1: No KB results at all → try external verification ---
         # Only force web search for claims that genuinely need current data.
         # Historical/established facts (pre-2024) can be verified via cross-model.
         if not all_results:
-            needs_web = _is_current_event_claim(claim) or _is_recency_claim(claim)
             ext_result = await _verify_claim_externally(
-                claim, model, force_web_search=needs_web, **_ext_common,
+                claim, model, force_web_search=_is_temporal, **_ext_common,
             )
-            return await _cache_result({
-                "claim": claim,
-                "status": ext_result["status"],
-                "similarity": ext_result["confidence"],
-                "reason": ext_result["reason"],
-                "verification_method": ext_result.get("verification_method", "none"),
-                "verification_model": ext_result.get("verification_model"),
-                "source_urls": ext_result.get("source_urls", []),
-                **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
-            })
+            return await _cache_result(_external_verdict(claim, ext_result))
+
+        # Phase 3.4 — for time-sensitive claims, prefer newer evidence among
+        # near-equally-relevant KB results before picking the top match. A
+        # bounded re-rank (see freshness.weight_evidence_by_recency), not a
+        # rewrite of selection: dated/timeless claims and non-time-sensitive
+        # cases fall through unchanged.
+        all_results = weight_evidence_by_recency(all_results, claim_freshness)
 
         top_results = all_results[:3]
         top_result = top_results[0]
@@ -1912,17 +2276,9 @@ async def verify_claim(
                 claim, model,
                 **_ext_common, kb_snippet=_top_snippet,
             )
-            return await _cache_result({
-                "claim": claim,
-                "status": ext_result["status"],
-                "similarity": ext_result["confidence"],
-                "reason": ext_result["reason"],
-                "verification_method": ext_result.get("verification_method", "none"),
-                "verification_model": ext_result.get("verification_model"),
-                "source_urls": ext_result.get("source_urls", []),
-                "circular_source": True,
-                **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
-            })
+            return await _cache_result(
+                _external_verdict(claim, ext_result, circular_source=True)
+            )
 
         # --- Fallback 2: Very low KB similarity → try external verification ---
         if escalation_similarity < ext_kb_threshold:
@@ -1932,63 +2288,28 @@ async def verify_claim(
             )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
-                return await _cache_result({
-                    "claim": claim,
-                    "status": ext_result["status"],
-                    "similarity": ext_result["confidence"],
-                    "reason": ext_result["reason"],
-                    "verification_method": ext_result.get("verification_method", "none"),
-                    "verification_model": ext_result.get("verification_model"),
-                    "source_urls": ext_result.get("source_urls", []),
-                    **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
-                })
+                return await _cache_result(_external_verdict(claim, ext_result))
 
-        # Apply multi-result confidence calibration
-        similarity = _compute_adjusted_confidence(claim, top_results, raw_similarity)
-        details = _build_verification_details(claim, top_results)
-
-        # --- Graph-guided verification: connected verified artifacts boost confidence ---
-        # If the source artifact has graph relationships to other verified artifacts,
-        # this corroboration increases trust (knowledge graph structure as evidence).
-        _graph_boost = getattr(config, "GRAPH_VERIFICATION_BOOST", 0.05)
-        if _graph_boost > 0 and neo4j_driver and top_result.get("artifact_id"):
-            try:
-                with neo4j_driver.session() as _gs:
-                    _graph_count = _gs.run(
-                        "MATCH (a:Artifact {id: $aid})-[:RELATES_TO|DEPENDS_ON|REFERENCES]-(b:Artifact) "
-                        "WHERE EXISTS { MATCH (b)<-[:RELATES_TO]-(m:Memory)-[:VERIFIED_BY]->(r:VerificationReport) } "
-                        "RETURN count(b) AS verified_neighbors",
-                        aid=top_result["artifact_id"],
-                    ).single()
-                    if _graph_count and _graph_count["verified_neighbors"] >= 2:
-                        similarity = min(1.0, similarity + _graph_boost)
-                        details["graph_verified_neighbors"] = _graph_count["verified_neighbors"]
-            except Exception as exc:  # noqa: BLE001 — graph boost is non-blocking
-                log_swallowed_error(__name__, exc)
-
-        # --- NLI entailment check on top KB result ---
-        # v0.93.10: switched to nli_score_async so N concurrent
-        # verify_claim() tasks dispatched via asyncio.gather rendezvous
-        # in a single batched inference (`_NliBatcher` coalesces calls
-        # within an NLI_COALESCE_MS window).  Pre-v0.93.10 these calls
-        # serialised on the ONNX-session lock — N concurrent claims took
-        # N × per-call time.  Now they take ~1 × per-batch time.
-        try:
-            from core.utils.nli import nli_score_async
-            _nli = await nli_score_async(top_result.get("content", "")[:512], claim)
-        except Exception as exc:
-            log_swallowed_error('core.agents.hallucination.verification', exc)
-            logger.debug("NLI scoring failed for claim %r — falling back to similarity", claim[:60])
-            _nli = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "label": "neutral"}
+        # Stage 3 — grounding signals: calibrated similarity (+ graph boost),
+        # transparency details, and the NLI entailment/contradiction score that
+        # the verdict branches below decide on.
+        similarity, details, _nli = await _score_kb_grounding(
+            claim, top_results, top_result, raw_similarity, neo4j_driver,
+        )
+        # Grounding signals the escalation policy decides on (Phase 3.2).
+        _signals = GroundingSignals(
+            similarity=similarity,
+            raw_similarity=raw_similarity,
+            entailment=_nli["entailment"],
+            contradiction=_nli["contradiction"],
+        )
 
         if _nli["entailment"] >= config.NLI_ENTAILMENT_THRESHOLD:
             # For recency/current-event claims, even strong NLI entailment needs
-            # web search validation — KB evidence may be semantically correct but stale.
-            _is_temporal = (
-                _is_recency_claim(claim)
-                or _is_current_event_claim(claim)
-            )
-            if _is_temporal:
+            # web search validation — KB evidence may be semantically correct but
+            # stale. The policy resolves strong-entailment grounding to WEB (only)
+            # when the claim is time-sensitive, else TRUST_KB.
+            if policy.classify(_signals, is_temporal=_is_temporal) is EscalationTier.WEB:
                 logger.debug(
                     "NLI entailed but temporal claim — verifying freshness via web search: %r",
                     claim[:60],
@@ -1998,7 +2319,9 @@ async def verify_claim(
                     **_ext_common, kb_snippet=_top_snippet,
                 )
                 if ext_result and ext_result.get("status") in ("verified", "unverified"):
-                    return await _cache_result(ext_result)
+                    return await _cache_result(
+                        _escalated_external_verdict(claim, ext_result)
+                    )
                 # If web search inconclusive, fall to the staleness gate below
                 # (Phase 4.2) before rubber-stamping NLI-entailed stale data.
 
@@ -2040,12 +2363,9 @@ async def verify_claim(
             #       different context scores high similarity but ~0 entailment)
             # High contradiction + near-zero entailment is the signature of
             # "different topic, same keywords" — NOT a real contradiction.
-            # Escalate instead of hard-failing.
-            _kb_authoritative = (
-                raw_similarity >= threshold
-                and _nli["entailment"] >= 0.15
-            )
-            if not _kb_authoritative:
+            # Escalate instead of hard-failing. The policy encodes the two-signal
+            # KB-authority gate (topical strength AND semantic alignment).
+            if not policy.kb_contradiction_authoritative(_signals):
                 logger.debug(
                     "NLI contradiction on weak KB evidence (sim=%.2f < %.2f) — escalating externally: %r",
                     raw_similarity, threshold, claim[:60],
@@ -2054,12 +2374,15 @@ async def verify_claim(
                     claim, model, **_ext_common, kb_snippet=_top_snippet,
                 )
                 if ext_result and ext_result.get("status") in ("verified", "unverified", "uncertain"):
-                    return await _cache_result({
-                        **ext_result,
-                        # Preserve the NLI signal for observability / debugging
-                        "kb_nli_contradiction": round(_nli["contradiction"], 3),
-                        "kb_nli_escalated": True,
-                    })
+                    return await _cache_result(
+                        _escalated_external_verdict(
+                            claim,
+                            ext_result,
+                            # Preserve the NLI signal for observability / debugging
+                            kb_nli_contradiction=round(_nli["contradiction"], 3),
+                            kb_nli_escalated=True,
+                        )
+                    )
                 # If external verification failed/errored, fall through to the
                 # original terminal-contradiction verdict below as a safety net.
 
@@ -2102,13 +2425,11 @@ async def verify_claim(
             })
 
         if similarity >= threshold:
-            # NLI neutral — fall back to similarity-based checks.
-            # BUT: recency/current-event claims MUST escalate to web search even
-            # when KB similarity is high — stale data can match with high similarity.
-            _is_temporal = (
-                _is_recency_claim(claim)
-                or _is_current_event_claim(claim)
-            )
+            # NLI neutral/weak — the policy resolves this positive-grounding case
+            # to WEB (time-sensitive) then CROSS_MODEL (similarity high but
+            # entailment below the alignment floor) in sequence, else TRUST_KB.
+            # Recency/current-event claims MUST escalate to web search even when
+            # KB similarity is high — stale data can match with high similarity.
             if _is_temporal:
                 # Force web search for temporal claims despite high KB similarity
                 logger.debug(
@@ -2120,7 +2441,9 @@ async def verify_claim(
                     **_ext_common, kb_snippet=_top_snippet,
                 )
                 if ext_result and ext_result.get("status") in ("verified", "unverified"):
-                    return await _cache_result(ext_result)
+                    return await _cache_result(
+                        _escalated_external_verdict(claim, ext_result)
+                    )
                 # If web search was inconclusive, fall through to KB verdict below
 
             # Semantic-alignment gate: high similarity + fully-neutral NLI is
@@ -2131,7 +2454,7 @@ async def verify_claim(
             # a minimum entailment floor to trust the kb-only verdict. If NLI
             # is entirely indifferent, escalate externally rather than rubber-
             # stamping on keyword overlap alone.
-            if _nli["entailment"] < 0.15:
+            if not policy.semantic_alignment_ok(_signals):
                 logger.debug(
                     "High KB similarity (%.2f) but NLI entailment too weak "
                     "(%.2f) — escalating externally: %r",
@@ -2141,12 +2464,15 @@ async def verify_claim(
                     claim, model, **_ext_common, kb_snippet=_top_snippet,
                 )
                 if ext_result and ext_result.get("status") in ("verified", "unverified", "uncertain"):
-                    return await _cache_result({
-                        **ext_result,
-                        "kb_semantic_gate_escalated": True,
-                        "kb_similarity": round(similarity, 3),
-                        "kb_nli_entailment": round(_nli["entailment"], 3),
-                    })
+                    return await _cache_result(
+                        _escalated_external_verdict(
+                            claim,
+                            ext_result,
+                            kb_semantic_gate_escalated=True,
+                            kb_similarity=round(similarity, 3),
+                            kb_nli_entailment=round(_nli["entailment"], 3),
+                        )
+                    )
                 # External inconclusive — fall through to the kb verdict below
                 # as a safety net so we still return something.
 
@@ -2181,16 +2507,7 @@ async def verify_claim(
                 **_ext_common, kb_snippet=_top_snippet,
             )
             if ext_result.get("status") in ("verified", "unverified"):
-                return await _cache_result({
-                    "claim": claim,
-                    "status": ext_result["status"],
-                    "similarity": ext_result["confidence"],
-                    "reason": ext_result["reason"],
-                    "verification_method": ext_result.get("verification_method", "none"),
-                    "verification_model": ext_result.get("verification_model"),
-                    "source_urls": ext_result.get("source_urls", []),
-                    **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
-                })
+                return await _cache_result(_external_verdict(claim, ext_result))
             return await _cache_result({
                 "claim": claim,
                 "status": "unverified",
@@ -2208,16 +2525,7 @@ async def verify_claim(
                 **_ext_common, kb_snippet=_top_snippet,
             )
             if ext_result.get("status") in ("verified", "unverified"):
-                return await _cache_result({
-                    "claim": claim,
-                    "status": ext_result["status"],
-                    "similarity": ext_result["confidence"],
-                    "reason": ext_result["reason"],
-                    "verification_method": ext_result.get("verification_method", "none"),
-                    "verification_model": ext_result.get("verification_model"),
-                    "source_urls": ext_result.get("source_urls", []),
-                    **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
-                })
+                return await _cache_result(_external_verdict(claim, ext_result))
             # External also uncertain — try web search as final escalation.
             # Previously skipped in streaming mode, but 26% uncertain rate was
             # too high. Web search resolves many "cannot independently verify"
@@ -2228,18 +2536,7 @@ async def verify_claim(
                     **_ext_common, kb_snippet=_top_snippet,
                 )
                 if web_result.get("status") in ("verified", "unverified"):
-                    return await _cache_result({
-                        "claim": claim,
-                        "status": web_result["status"],
-                        "similarity": web_result["confidence"],
-                        "reason": web_result["reason"],
-                        "verification_method": web_result.get(
-                            "verification_method", "web_search",
-                        ),
-                        "verification_model": web_result.get("verification_model"),
-                        "source_urls": web_result.get("source_urls", []),
-                        **({"credit_exhausted": True} if web_result.get("credit_exhausted") else {}),
-                    })
+                    return await _cache_result(_external_verdict(claim, web_result))
             # --- Fallback 5: Escalate to authoritative verification ---
             # Before giving up, try authoritative external sources if available.
             # This catches claims that cross-model LLMs can't verify from

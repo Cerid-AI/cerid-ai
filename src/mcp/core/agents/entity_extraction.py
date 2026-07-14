@@ -79,6 +79,89 @@ def canonical_id(name: str, entity_type: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Name-quality gate
+# ---------------------------------------------------------------------------
+# Live triage (2026-07-13) showed the wiki-refresh queue churning on junk
+# "entities" the LLM lifts verbatim from ingested documentation: relative
+# doc paths ("library/email.charset.html"), bare version strings
+# ("version-3-6", "v3.6.1"), and single characters. Every admitted name
+# eventually costs a 40-110s wiki_refresh job plus external-API 404s, so
+# extraction is the cheapest place to stop them. The gate is structural
+# and deliberately conservative — when unsure, admit.
+
+_MIN_ENTITY_NAME_CHARS = 2  # single characters carry no entity signal
+
+# Documentation-flavoured file extensions; a slash-containing name ending
+# in one of these is a doc path, not an entity ("BTC/USD" stays).
+DOC_FILE_EXTENSIONS: tuple[str, ...] = (
+    ".html", ".htm", ".txt", ".md", ".rst", ".pdf",
+)
+
+# Version-token shape: optional prefix, then digits joined by separators.
+_VERSION_PREFIXES: tuple[str, ...] = ("version", "ver", "v")  # longest first
+_VERSION_SEPARATORS = frozenset(".-_ ")
+
+
+def ends_with_doc_extension(segment: str) -> bool:
+    """True when ``segment`` ends in a doc-ish file extension (case-insensitive)."""
+    lowered = segment.strip().lower()
+    return any(lowered.endswith(ext) for ext in DOC_FILE_EXTENSIONS)
+
+
+def _is_doc_path_like(name: str) -> bool:
+    """True for path-shaped names: contain a ``/`` AND end in a doc extension."""
+    return "/" in name and ends_with_doc_extension(name)
+
+
+def _is_version_token(name: str) -> bool:
+    """True when the WHOLE name is a version string.
+
+    Shape: optional "v"/"ver"/"version" prefix, then digits joined by
+    ``.`` / ``-`` / ``_`` / space, with at least one separator between digit
+    groups ("3.6", "v3.6.1", "version-3-6"). A bare number with no separator
+    ("2024", "V8") is admitted — it may be a year or a product name. Plain
+    string walk; no regex (DUO138).
+    """
+    lowered = name.lower()
+    rest = lowered
+    for prefix in _VERSION_PREFIXES:
+        if lowered.startswith(prefix):
+            rest = lowered[len(prefix):]
+            break
+    if rest[:1] in _VERSION_SEPARATORS:
+        rest = rest[1:]
+    if not rest or not rest[0].isdigit():
+        return False
+    has_separator = False
+    for ch in rest:
+        if ch.isdigit():
+            continue
+        if ch in _VERSION_SEPARATORS:
+            has_separator = True
+            continue
+        return False
+    return has_separator
+
+
+def is_junk_entity_name(name: str) -> bool:
+    """Structural junk gate for entity names.
+
+    Shared choke-point primitive: applied at extraction time
+    (:func:`_normalise_entities`), at wiki-refresh time
+    (``app.processor.jobs.wiki_refresh``), and per adapter route
+    (``app.services.external_apis.wiki_enrichment``). Rejects only shapes
+    that cannot be real entities: empty / single characters, doc-file
+    paths, and pure version tokens.
+    """
+    stripped = name.strip()
+    if len(stripped) < _MIN_ENTITY_NAME_CHARS:
+        return True
+    if _is_doc_path_like(stripped):
+        return True
+    return _is_version_token(stripped)
+
+
+# ---------------------------------------------------------------------------
 # Prompt + extraction
 # ---------------------------------------------------------------------------
 
@@ -191,6 +274,9 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
             continue
         name = (raw.get("name") or "").strip()
         if not name:
+            continue
+        if is_junk_entity_name(name):
+            logger.debug("entity_extraction.rejected_junk_name name=%r", name)
             continue
         ent_type = str(raw.get("type") or "").strip().upper()
         if ent_type not in _VALID_TYPES:

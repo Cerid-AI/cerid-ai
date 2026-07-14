@@ -21,6 +21,7 @@ from app.processor.metrics import (
     _sync_jobs_completed_24h,
     _sync_throttled_ticks,
     processor_cost_usd_7d,
+    processor_job_type_stats,
     processor_jobs_completed_24h,
     processor_throttled_ticks,
     record_completion,
@@ -173,6 +174,101 @@ async def test_cost_usd_7d_empty(redis_client):
     """No completions returns Decimal('0')."""
     total = await processor_cost_usd_7d(redis_client)
     assert total == Decimal("0")
+
+
+# ---------------------------------------------------------------------------
+# Per-job-type latency (Phase 0.4a)
+# ---------------------------------------------------------------------------
+
+
+async def test_job_type_stats_empty_when_no_data(redis_client):
+    """No durations recorded yet — empty dict, not an error."""
+    stats = await processor_job_type_stats(redis_client)
+    assert stats == {}
+
+
+async def test_job_type_stats_single_job_type(redis_client):
+    """A single duration sample produces count=1 and p50==p95==that value."""
+    await record_completion(
+        redis_client,
+        "job-1",
+        completed_at=time.time(),
+        actual_cost_usd=Decimal("0.01"),
+        job_type="wiki_refresh",
+        duration_s=45.5,
+    )
+    stats = await processor_job_type_stats(redis_client)
+    assert stats["wiki_refresh"]["count"] == 1
+    assert stats["wiki_refresh"]["p50_s"] == 45.5
+    assert stats["wiki_refresh"]["p95_s"] == 45.5
+
+
+async def test_job_type_stats_computes_percentiles_across_samples(redis_client):
+    """p95 sits near the top of the distribution, p50 near the middle."""
+    durations = [float(i) for i in range(1, 101)]  # 1..100
+    for i, d in enumerate(durations):
+        await record_completion(
+            redis_client,
+            f"job-{i}",
+            completed_at=time.time(),
+            actual_cost_usd=Decimal("0.00"),
+            job_type="entity_extraction",
+            duration_s=d,
+        )
+    stats = await processor_job_type_stats(redis_client)
+    entry = stats["entity_extraction"]
+    assert entry["count"] == 100
+    assert 45 <= entry["p50_s"] <= 55
+    assert 90 <= entry["p95_s"] <= 100
+
+
+async def test_job_type_stats_separates_job_types(redis_client):
+    """Two job types keep independent rolling lists."""
+    await record_completion(
+        redis_client, "a", completed_at=time.time(), actual_cost_usd=Decimal("0"),
+        job_type="wiki_refresh", duration_s=90.0,
+    )
+    await record_completion(
+        redis_client, "b", completed_at=time.time(), actual_cost_usd=Decimal("0"),
+        job_type="entity_extraction", duration_s=2.0,
+    )
+    stats = await processor_job_type_stats(redis_client)
+    assert set(stats.keys()) == {"wiki_refresh", "entity_extraction"}
+    assert stats["wiki_refresh"]["p50_s"] == 90.0
+    assert stats["entity_extraction"]["p50_s"] == 2.0
+
+
+async def test_job_type_stats_list_is_capped(redis_client):
+    """The rolling duration list is capped at 200 entries per job_type."""
+    from app.processor.metrics import _DURATION_MAX_ENTRIES, _duration_key
+
+    for i in range(_DURATION_MAX_ENTRIES + 25):
+        await record_completion(
+            redis_client, f"job-{i}", completed_at=time.time(), actual_cost_usd=Decimal("0"),
+            job_type="wiki_refresh", duration_s=float(i),
+        )
+    length = redis_client.llen(_duration_key("wiki_refresh"))
+    assert length == _DURATION_MAX_ENTRIES
+
+
+async def test_record_completion_without_job_type_skips_duration_list(redis_client):
+    """Backward compatibility: omitting job_type/duration_s records no duration."""
+    await record_completion(
+        redis_client,
+        "job-legacy",
+        completed_at=time.time(),
+        actual_cost_usd=Decimal("0.01"),
+    )
+    stats = await processor_job_type_stats(redis_client)
+    assert stats == {}
+
+
+async def test_job_type_stats_defensive_on_error():
+    """Returns {} cleanly when Redis raises."""
+    mock = MagicMock()
+    mock.smembers.side_effect = ConnectionError("Redis unreachable")
+    stats = await processor_job_type_stats(mock)
+    assert stats == {}
 
 
 # ---------------------------------------------------------------------------

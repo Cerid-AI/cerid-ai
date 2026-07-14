@@ -32,6 +32,7 @@ from core.agents.hallucination.extraction import (
 )
 from core.agents.hallucination.patterns import (
     _get_claim_verify_semaphore,
+    _has_staleness_indicators,
     _is_current_event_claim,
     _is_ignorance_admission,
     _is_recency_claim,
@@ -636,14 +637,25 @@ async def verify_response_streaming(
             "claim_type": _claim_type(claim),
         }
 
+    # Response-level staleness: "as of my knowledge cutoff…" framing gets
+    # stripped from individual claims at extraction time, so a stale-cutoff
+    # admission must be detected on the full response and propagated — every
+    # factual claim in such a response needs a live web check, not a KB echo.
+    response_is_stale = _has_staleness_indicators(response_text)
+
     # --- Pre-fetch KB context for all claims in one batch ---
     # Reduces per-claim KB query overhead by sharing a single warm retrieval.
     batch_kb_context: list[dict[str, Any]] = []
     try:
         from core.agents.query_agent import lightweight_kb_query
         batch_query = " ".join(c for c in claims[:10])
+        # Anti-circularity: mirror the per-claim path — never retrieve from
+        # the conversations domain, or a response verifies against its own
+        # (or a prior turn's) transcript once it gets ingested.
+        batch_domains = [d for d in config.DOMAINS if d != "conversations"]
         batch_kb_context = await lightweight_kb_query(
-            batch_query, chroma_client=chroma_client, top_k=15,
+            batch_query, domains=batch_domains, chroma_client=chroma_client,
+            top_k=15,
         )
     except Exception as kb_exc:
         # Batch pre-fetch is an optimization; per-claim queries still run.
@@ -684,12 +696,54 @@ async def verify_response_streaming(
     # when the batch pre-fetch already found strong evidence.
     high_confidence_kb_claims: dict[int, dict[str, Any]] = {}
     if batch_kb_context:
+        excluded_artifact_ids = set(source_artifact_ids or [])
         for idx, claim_text in enumerate(claims):
+            # Time-sensitive claim types must run the full verify_claim
+            # pipeline (staleness gates + forced web checks) — a KB snapshot
+            # match can't confirm them. A response that admits a stale
+            # knowledge cutoff taints every claim it made the same way.
+            if response_is_stale or _claim_type(claim_text) != "factual":
+                continue
             claim_lower = claim_text.lower()
             for kb_result in batch_kb_context:
+                # Anti-circularity (defense in depth alongside the domain
+                # exclusion above): never pre-resolve against the artifacts
+                # the response itself was generated from, prior transcripts,
+                # or episodic memories.
+                if (
+                    kb_result.get("artifact_id") in excluded_artifact_ids
+                    or kb_result.get("domain") == "conversations"
+                    or kb_result.get("memory_source")
+                ):
+                    continue
                 relevance = kb_result.get("relevance", 0.0)
-                content = (kb_result.get("content", "") or "").lower()
+                raw_content = kb_result.get("content", "") or ""
+                content = raw_content.lower()
                 if relevance > 0.85 and claim_lower[:60] in content:
+                    # Relevance + substring is exactly the "shared keywords,
+                    # different topic" false positive the slow path's semantic-
+                    # alignment gate refuses. Require NLI entailment before
+                    # stamping verified so the fast path can't over-claim on
+                    # lexical overlap alone. NLI runs ONLY here, on the few
+                    # candidates that already passed the cheap checks.
+                    try:
+                        from core.utils.nli import nli_score_async
+                        entailment = (
+                            await nli_score_async(raw_content[:512], claim_text)
+                        )["entailment"]
+                    except Exception as nli_exc:
+                        log_swallowed_error(
+                            "core.agents.hallucination.streaming.kb_batch_nli",
+                            nli_exc,
+                            redis_client=redis_client,
+                        )
+                        # NLI unavailable — do NOT pre-resolve; the full
+                        # verify_claim pipeline handles this claim.
+                        break
+                    if entailment < config.NLI_ENTAILMENT_THRESHOLD:
+                        # Lexical match without entailment — try the next
+                        # candidate, else fall through to full verification.
+                        continue
                     high_confidence_kb_claims[idx] = {
                         "claim": claim_text,
                         "status": "verified",
@@ -697,7 +751,7 @@ async def verify_response_streaming(
                         "source_artifact_id": kb_result.get("artifact_id", ""),
                         "source_filename": kb_result.get("filename", ""),
                         "source_domain": kb_result.get("domain", ""),
-                        "source_snippet": (kb_result.get("content", "") or "")[:200],
+                        "source_snippet": raw_content[:200],
                         "verification_method": "kb_batch",
                         "memory_source": bool(kb_result.get("memory_source")),
                     }
@@ -716,7 +770,17 @@ async def verify_response_streaming(
     current_event_claims: list[tuple[int, str]] = []
     for idx, claim_text in enumerate(claims):
         ct = _claim_type(claim_text)
-        if ct in ("recency",) or _is_current_event_claim(claim_text):
+        # Stale-cutoff responses route their factual claims through the same
+        # batched web check as recency claims — one :online call for all of
+        # them instead of N individual calls that blow the per-claim budget.
+        # (ignorance/evasion/citation claims stay on the individual path:
+        # their verdicts need direction-specific inversion the batch prompt
+        # doesn't perform.)
+        if (
+            ct == "recency"
+            or _is_current_event_claim(claim_text)
+            or (response_is_stale and ct == "factual")
+        ):
             # Check cache first — don't re-batch already-cached claims
             from core.utils.claim_cache import get_cached_verdict
             cached = await get_cached_verdict(
@@ -823,14 +887,15 @@ async def verify_response_streaming(
 
         await _wait_for_memory(config.VERIFY_MEMORY_FLOOR_MB, f"claim-{idx}")
         sem = _get_claim_verify_semaphore()
-        # Adaptive timeout based on verification strategy:
-        #   - Expert mode (Grok 4 + web search): longest (30s)
+        # Adaptive timeout based on verification strategy (config defaults):
+        #   - Expert mode (web-search reasoning model): longest (30s)
         #   - Web search claims (temporal, current-event, citation): medium (25s)
-        #   - Cross-model (general factual): fastest (12s)
+        #   - Cross-model (general factual): fastest (18s)
         ct = _claim_type(claim_text)
         needs_web = (
             ct in ("recency", "evasion", "citation", "ignorance")
             or _is_current_event_claim(claim_text)
+            or response_is_stale
         )
         per_claim_timeout = _per_claim_base_timeout(expert_mode, needs_web)
         # Cap per-claim timeout to remaining global budget (leave 2s buffer for summary)
@@ -838,6 +903,8 @@ async def verify_response_streaming(
         claim_timeout = min(per_claim_timeout, max(remaining - 2.0, 3.0))
         try:
             async with sem:
+                # Deadline is measured from NOW (post-semaphore) — queueing
+                # behind other claims must not consume this claim's budget.
                 result = await asyncio.wait_for(
                     verify_claim(
                         claim_text, chroma_client, neo4j_driver, redis_client,
@@ -848,6 +915,8 @@ async def verify_response_streaming(
                         claim_context=_extract_claim_context(claim_text),
                         conversation_context=conversation_history,
                         source_urls=_extract_source_urls_from_claim(claim_text),
+                        deadline=time.monotonic() + claim_timeout,
+                        stale_context=response_is_stale,
                     ),
                     timeout=claim_timeout,
                 )
@@ -864,6 +933,53 @@ async def verify_response_streaming(
                 "verification_method": "timeout",
             }
         return idx, result
+
+    def _claim_verified_event(i: int, result: dict[str, Any]) -> dict[str, Any]:
+        """Build the claim_verified SSE event for a settled claim result.
+
+        Shared by the main verification loop and the round-2 retry sweep so
+        sweep-resolved verdicts reach the frontend in the exact same shape
+        (pre-2026-07-13 the sweep only updated the persisted report and the
+        UI kept showing the stale timeout verdicts).
+        """
+        return {
+            "type": "claim_verified",
+            "index": i,
+            "claim": claims[i],
+            "claim_type": _claim_type(claims[i]),
+            "status": result.get("status", "error"),
+            "confidence": result.get("similarity", 0.0),
+            "source": result.get("source_filename", ""),
+            "source_artifact_id": result.get("source_artifact_id", ""),
+            "source_domain": result.get("source_domain", ""),
+            "source_snippet": result.get("source_snippet", ""),
+            "reason": result.get("reason", ""),
+            "verification_method": result.get("verification_method", "kb"),
+            "verification_model": result.get("verification_model"),
+            "source_urls": result.get("source_urls", []),
+            "verification_answer": result.get("verification_answer", ""),
+            # Expert-mode authoritative evidence — surfaces per-source NLI
+            # scores, domain classification, and KB-vs-external cross
+            # validation so the UI can show *why* a verdict was reached.
+            # Fields are omitted entirely when not in expert/authoritative path.
+            **(
+                {"authoritative_sources": result["authoritative_sources"]}
+                if result.get("authoritative_sources") else {}
+            ),
+            **(
+                {"claim_domain": result["claim_domain"]}
+                if result.get("claim_domain") else {}
+            ),
+            **(
+                {"cross_validation": result["cross_validation"]}
+                if result.get("cross_validation") else {}
+            ),
+            **(
+                {"evidence_summary": result["evidence_summary"]}
+                if result.get("evidence_summary") else {}
+            ),
+            **({"circular_source": True} if result.get("circular_source") else {}),
+        }
 
     tasks = [_verify_indexed(i, claim) for i, claim in enumerate(claims)]
 
@@ -1024,44 +1140,7 @@ async def verify_response_streaming(
 
             collected_results[i] = result
 
-            yield {
-                "type": "claim_verified",
-                "index": i,
-                "claim": claims[i],
-                "claim_type": _claim_type(claims[i]),
-                "status": status,
-                "confidence": confidence,
-                "source": result.get("source_filename", ""),
-                "source_artifact_id": result.get("source_artifact_id", ""),
-                "source_domain": result.get("source_domain", ""),
-                "source_snippet": result.get("source_snippet", ""),
-                "reason": result.get("reason", ""),
-                "verification_method": result.get("verification_method", "kb"),
-                "verification_model": result.get("verification_model"),
-                "source_urls": result.get("source_urls", []),
-                "verification_answer": result.get("verification_answer", ""),
-                # Expert-mode authoritative evidence — surfaces per-source NLI
-                # scores, domain classification, and KB-vs-external cross
-                # validation so the UI can show *why* a verdict was reached.
-                # Fields are omitted entirely when not in expert/authoritative path.
-                **(
-                    {"authoritative_sources": result["authoritative_sources"]}
-                    if result.get("authoritative_sources") else {}
-                ),
-                **(
-                    {"claim_domain": result["claim_domain"]}
-                    if result.get("claim_domain") else {}
-                ),
-                **(
-                    {"cross_validation": result["cross_validation"]}
-                    if result.get("cross_validation") else {}
-                ),
-                **(
-                    {"evidence_summary": result["evidence_summary"]}
-                    if result.get("evidence_summary") else {}
-                ),
-                **({"circular_source": True} if result.get("circular_source") else {}),
-            }
+            yield _claim_verified_event(i, result)
 
             # Emit credit_error event once when first 402 is detected
             if result.get("credit_exhausted") and not credit_error_emitted:
@@ -1173,6 +1252,7 @@ async def verify_response_streaming(
     if retry_indices and not stream_interrupted:
         retry_budget = min(15.0, config.STREAMING_TOTAL_TIMEOUT * 0.15)
         retry_sem = asyncio.Semaphore(3)
+        sweep_resolved: list[int] = []
 
         async def _retry_claim(idx: int) -> None:
             claim_text = claims[idx]
@@ -1186,11 +1266,14 @@ async def verify_response_streaming(
                             response_context=response_context,
                             claim_context=_extract_claim_context(claim_text),
                             source_urls=_extract_source_urls_from_claim(claim_text),
+                            deadline=time.monotonic() + retry_budget,
+                            stale_context=response_is_stale,
                         ),
                         timeout=retry_budget,
                     )
                     if result.get("status") in ("verified", "unverified"):
                         collected_results[idx] = result
+                        sweep_resolved.append(idx)
                         old_status = "timeout/error"
                         logger.info(
                             "Sweep retry resolved claim %d: %s → %s ('%s...')",
@@ -1215,6 +1298,33 @@ async def verify_response_streaming(
             1 for r in collected_results
             if r and r.get("status") not in ("verified", "unverified", "skipped", "error", None)
         )
+
+        # Push the corrected verdicts to the frontend. The summary above was
+        # emitted pre-sweep; without these events the UI keeps showing the
+        # stale timeout verdicts while the persisted report has the resolved
+        # ones (the two disagreed until 2026-07-13).
+        for idx in sweep_resolved:
+            resolved_result = collected_results[idx]
+            if resolved_result is not None:
+                yield _claim_verified_event(idx, resolved_result)
+        if sweep_resolved:
+            assessed = verified_count + unverified_count
+            yield {
+                "type": "summary_update",
+                "verified": verified_count,
+                "unverified": unverified_count,
+                "uncertain": uncertain_count,
+                "total": len(claims),
+                "assessed": assessed,
+                "overall_confidence": round(
+                    sum(
+                        (r or {}).get("similarity", 0.0)
+                        for r in collected_results
+                        if r and r.get("status") in ("verified", "unverified")
+                    ) / assessed,
+                    3,
+                ) if assessed else 0.0,
+            }
 
     # --- Promote verified facts to empirical memories (fire-and-forget) ---
     _create_mem_fn = create_memory_fn

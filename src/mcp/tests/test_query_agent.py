@@ -18,11 +18,11 @@ if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
     del sys.modules["core.agents.query_agent"]
 
 from core.agents.query_agent import (  # noqa: E402  # noqa: E402
+    _apply_quality_and_summaries,
     _enrich_query,
     _get_adjacent_domains,
     agent_query,
     apply_metadata_boost,
-    apply_quality_boost,
     assemble_context,
     deduplicate_results,
     multi_domain_query,
@@ -892,31 +892,30 @@ class TestApplyMetadataBoost:
 
 
 # ---------------------------------------------------------------------------
-# Tests: apply_quality_boost (Phase 14B)
+# Tests: _apply_quality_and_summaries (Phase 14B; rewired Phase 2.1 —
+# real per-artifact scores via GraphStore.get_quality_and_summaries instead
+# of the get_artifacts_batch fan-out that always defaulted to 0.5)
 # ---------------------------------------------------------------------------
 
 class TestApplyQualityBoost:
     @staticmethod
-    def _mock_graph_store(scores_map=None, raise_exc=None):
-        """Create a mock GraphStore with get_artifacts_batch returning ArtifactNodes."""
+    def _mock_graph_store(scores_map=None, summaries_map=None, raise_exc=None):
+        """Create a mock GraphStore with get_quality_and_summaries returning
+        the ``(scores, summaries)`` tuple the real batch fetch returns."""
         gs = MagicMock()
         if raise_exc:
-            gs.get_artifacts_batch = AsyncMock(side_effect=raise_exc)
+            gs.get_quality_and_summaries = AsyncMock(side_effect=raise_exc)
         else:
-            scores_map = scores_map or {}
-            nodes = {}
-            for aid, score in scores_map.items():
-                node = MagicMock()
-                node.quality_score = score
-                nodes[aid] = node
-            gs.get_artifacts_batch = AsyncMock(return_value=nodes)
+            gs.get_quality_and_summaries = AsyncMock(
+                return_value=(scores_map or {}, summaries_map or {})
+            )
         return gs
 
     @pytest.mark.asyncio
     async def test_no_driver(self):
         """Returns results unchanged when neither driver nor graph_store is provided."""
         results = [_make_result(relevance=0.8)]
-        boosted = await apply_quality_boost(results, neo4j_driver=None)
+        boosted = await _apply_quality_and_summaries(results, neo4j_driver=None)
         assert boosted[0]["relevance"] == 0.8
         assert "quality_score" not in boosted[0]
 
@@ -924,14 +923,14 @@ class TestApplyQualityBoost:
     async def test_empty_results(self):
         """Returns empty list for empty input."""
         gs = self._mock_graph_store()
-        assert await apply_quality_boost([], graph_store=gs) == []
+        assert await _apply_quality_and_summaries([], graph_store=gs) == []
 
     @pytest.mark.asyncio
     async def test_basic_multiplier_quality_1(self):
         """quality=1.0 → multiplier = 0.8 + 0.4*1.0 = 1.2 (20% boost)."""
         gs = self._mock_graph_store({"art-1": 1.0})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = await apply_quality_boost(results, graph_store=gs)
+        boosted = await _apply_quality_and_summaries(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 1.2, 4)
 
     @pytest.mark.asyncio
@@ -939,7 +938,7 @@ class TestApplyQualityBoost:
         """quality=0.0 → multiplier = 0.8 + 0.4*0.0 = 0.8 (20% penalty)."""
         gs = self._mock_graph_store({"art-1": 0.0})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = await apply_quality_boost(results, graph_store=gs)
+        boosted = await _apply_quality_and_summaries(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 0.8, 4)
 
     @pytest.mark.asyncio
@@ -947,15 +946,16 @@ class TestApplyQualityBoost:
         """quality=0.5 → multiplier = 0.8 + 0.4*0.5 = 1.0 (neutral)."""
         gs = self._mock_graph_store({"art-1": 0.5})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = await apply_quality_boost(results, graph_store=gs)
+        boosted = await _apply_quality_and_summaries(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
 
     @pytest.mark.asyncio
     async def test_unscored_default(self):
-        """Artifacts not in scores dict get 0.5 default."""
+        """Artifacts not in the returned scores dict (never curated) get the
+        neutral 0.5 default — the fallback stays, only the wiring changes."""
         gs = self._mock_graph_store({})  # No scores returned
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = await apply_quality_boost(results, graph_store=gs)
+        boosted = await _apply_quality_and_summaries(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
         assert boosted[0]["quality_score"] == 0.5
 
@@ -964,14 +964,49 @@ class TestApplyQualityBoost:
         """quality_score field is added to result dict."""
         gs = self._mock_graph_store({"art-1": 0.75})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = await apply_quality_boost(results, graph_store=gs)
+        boosted = await _apply_quality_and_summaries(results, graph_store=gs)
         assert boosted[0]["quality_score"] == 0.75
 
     @pytest.mark.asyncio
     async def test_lookup_failure(self):
-        """If get_artifacts_batch raises, returns results unchanged."""
+        """If get_quality_and_summaries raises, returns results unchanged."""
         gs = self._mock_graph_store(raise_exc=Exception("Neo4j connection failed"))
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = await apply_quality_boost(results, graph_store=gs)
+        boosted = await _apply_quality_and_summaries(results, graph_store=gs)
         assert boosted[0]["relevance"] == 0.8
         assert "quality_score" not in boosted[0]
+
+    @pytest.mark.asyncio
+    async def test_batch_fetch_called_once_not_per_artifact(self):
+        """The quality lookup must be ONE batched call for the whole candidate
+        set, never a per-artifact fan-out (Phase 2.1: the GraphStore default
+        get_artifacts_batch used to fan out one get_artifact call per unique
+        artifact_id; the live path must route through the real single
+        round-trip get_quality_and_summaries instead)."""
+        gs = self._mock_graph_store({"art-1": 0.9, "art-2": 0.2})
+        results = [
+            _make_result(relevance=0.5, artifact_id="art-1"),
+            _make_result(relevance=0.5, artifact_id="art-2"),
+            _make_result(relevance=0.5, artifact_id="art-1"),  # dup id, same artifact
+        ]
+        await _apply_quality_and_summaries(results, graph_store=gs)
+        gs.get_quality_and_summaries.assert_awaited_once()
+        called_ids = gs.get_quality_and_summaries.call_args.args[0]
+        assert set(called_ids) == {"art-1", "art-2"}
+
+    @pytest.mark.asyncio
+    async def test_equal_relevance_reorders_by_quality_score(self):
+        """Two candidates with EQUAL relevance but different stored
+        quality_score must reorder after the boost. A uniform multiplier
+        (every artifact defaulting to the same 0.5) can never do this — this
+        is the exact regression the no-op wiring produced."""
+        gs = self._mock_graph_store({"art-lo": 0.1, "art-hi": 0.95})
+        results = [
+            _make_result(relevance=0.8, artifact_id="art-lo"),
+            _make_result(relevance=0.8, artifact_id="art-hi"),
+        ]
+        boosted = await _apply_quality_and_summaries(results, graph_store=gs)
+        boosted.sort(key=lambda r: r["relevance"], reverse=True)
+        assert boosted[0]["artifact_id"] == "art-hi"
+        assert boosted[1]["artifact_id"] == "art-lo"
+        assert boosted[0]["relevance"] > boosted[1]["relevance"]

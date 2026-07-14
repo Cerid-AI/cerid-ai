@@ -401,6 +401,8 @@ class TestMetricNames:
             "llm_cost_usd",
             "retrieval_ndcg",
             "cache_hit_rate",
+            "cache_invalidation_count",
+            "cache_stale_hit_count",
             "verification_accuracy",
             "queries_per_minute",
             "ragas_faithfulness",
@@ -482,3 +484,52 @@ class TestRestartsEndpoint:
         assert increment_restart_counter() == 7
         fake_redis.incr.assert_called_once_with("cerid:mcp:restart_count")
         fake_redis.set.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# GET /observability/verification-rates (Phase 0.4a)
+# ---------------------------------------------------------------------------
+
+
+class TestVerificationRatesEndpoint:
+    def test_returns_zeroed_shape_when_no_data(self, monkeypatch):
+        import fakeredis
+
+        from app.routers.observability import get_verification_rates_endpoint
+
+        fake = fakeredis.FakeRedis(decode_responses=True)
+        monkeypatch.setattr("app.deps.get_redis", lambda: fake, raising=False)
+
+        result = get_verification_rates_endpoint()
+        assert result["today"]["claims_total"] == 0
+        assert result["today"]["timeout_rate"] is None
+        assert result["last_7d"]["claims_total"] == 0
+        assert "timestamp" in result
+
+    def test_reflects_recorded_counters(self, monkeypatch):
+        import fakeredis
+
+        from app.observability.verification_metrics import record_verification_report
+        from app.routers.observability import get_verification_rates_endpoint
+
+        fake = fakeredis.FakeRedis(decode_responses=True)
+        monkeypatch.setattr("app.deps.get_redis", lambda: fake, raising=False)
+
+        record_verification_report(claims_total=20, uncertain_count=5, timeout_count=2)
+
+        result = get_verification_rates_endpoint()
+        assert result["today"]["claims_total"] == 20
+        assert result["today"]["uncertain_rate"] == pytest.approx(0.25)
+        assert result["today"]["timeout_rate"] == pytest.approx(0.1)
+
+    def test_degrades_gracefully_when_redis_unavailable(self, monkeypatch):
+        from app.routers.observability import get_verification_rates_endpoint
+
+        def _broken():
+            raise RuntimeError("redis down")
+
+        monkeypatch.setattr("app.deps.get_redis", _broken, raising=False)
+
+        result = get_verification_rates_endpoint()
+        assert result["today"]["claims_total"] == 0
+        assert result["today"]["timeout_rate"] is None

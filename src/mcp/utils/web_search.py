@@ -3,13 +3,15 @@
 
 """Web search provider abstraction — Tavily, SearXNG, or OpenRouter :online fallback.
 
-Provides a unified interface for explicit web searches. Current callers: the
-``pkb_web_search`` MCP tool (``app/tools.py``) and the a2a ``web-search`` skill
-(``app/routers/a2a.py``). NOT reached from the RAG/retrieval path today — the
-hallucination pipeline does its own ``:online`` model-suffix web search inline
-(``core/agents/hallucination/verification.py``), not via this module. Wiring
-these providers into the retrieval path as first-class external sources is
-tracked as Phase 2b follow-on 4b.
+Provides a unified interface for explicit web searches. Callers: the
+``pkb_web_search`` MCP tool (``app/tools.py``), the a2a ``web-search`` skill
+(``app/routers/a2a.py``), the RAG external-source path
+(``app/data_sources/web_search_source.py``, Phase 2b slice 4b), and — as of
+Phase 3.3 of the 2026-07-13 quality program — the hallucination verification
+pipeline's independent evidence sourcing (``core/agents/hallucination/
+verification.py::_independent_search_evidence_urls``), which supplements the
+``:online`` model-suffix annotation URLs with this module's providers instead
+of relying on OpenRouter as the sole evidence vendor.
 
 Priority: Tavily (structured API) > SearXNG (self-hosted) > OpenRouter online
 (LLM with implicit web search, always available as fallback).
@@ -309,6 +311,19 @@ def get_search_provider() -> WebSearchProvider:
         return SearxngProvider()
     _logger.info("Using OpenRouter online model as web search fallback")
     return OpenRouterSearchProvider()
+
+
+def has_real_search_provider() -> bool:
+    """True when a structured provider (Tavily or SearXNG) is configured.
+
+    Excludes the always-on OpenRouter ``:online`` fallback. Callers that want
+    to gate an *additional* search off of "is there a real provider" — rather
+    than "is any provider available at all" (:func:`get_search_provider` is
+    never empty-handed) — check this first, since routing through the
+    OpenRouter fallback would add a second synthesized-answer LLM call rather
+    than a cheap structured search.
+    """
+    return bool(_tavily_api_key() or SEARXNG_URL)
 
 
 # ---------------------------------------------------------------------------

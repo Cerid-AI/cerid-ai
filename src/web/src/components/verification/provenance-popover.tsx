@@ -17,6 +17,7 @@ import type { ClaimVerificationFE } from "@/components/verification/types"
 import { useClaimFeedback } from "@/hooks/use-claim-feedback"
 import { UX_COPY } from "@/lib/ux-copy"
 import { cn } from "@/lib/utils"
+import { isTimeoutMethod } from "@/lib/verification-utils"
 
 interface ProvenancePopoverProps {
   claim: ClaimVerificationFE
@@ -87,6 +88,12 @@ export function ProvenancePopover({
             {claim.verification_method}
           </span>
         </p>
+      )}
+
+      {/* Timeout verdicts are uncertain because evidence gathering was cut
+          short — say so instead of implying a genuinely inconclusive check. */}
+      {isTimeoutMethod(claim.verification_method) && (
+        <p className="text-muted-foreground">Timed out — evidence incomplete</p>
       )}
 
       {/* Source artifact */}

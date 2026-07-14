@@ -87,6 +87,92 @@ jobs:
           name: ragas-baselines
           path: src/mcp/tests/eval/baselines/ragas.json
 
+  quality-evals:
+    name: nightly / quality-evals
+    # Phase-0 quality-program harnesses (2026-07-13): live-retrieval
+    # recall/nDCG (self-seeding fixture corpus — immune to the
+    # degenerate-corpus trap), chat-path faithfulness, and claim-verdict
+    # accuracy. REPORT-ONLY until baselines are ratified: floors arm via
+    # RETRIEVAL_EVAL_MIN_RECALL5 / CHAT_FAITHFULNESS_MIN /
+    # VERDICT_EVAL_MIN_ACCURACY repo variables. Boots the isolated -ci
+    # stack (ci.yml preservation pattern) so the dev stack on :8888 is
+    # never touched. Costs OpenRouter credits (verdict + faithfulness
+    # judge) — nightly/dispatch only; schedule/dispatch cannot come from
+    # forks, so the rule-8 fork guard is structurally satisfied.
+    runs-on: ${{ vars.LIVESTACK_RUNNER && fromJSON(vars.LIVESTACK_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 50
+    env:
+      COMPOSE_PROJECT_NAME: cerid-ci
+      CERID_PORT_MCP: "18888"
+      CERID_PORT_NEO4J: "17474"
+      CERID_PORT_NEO4J_BOLT: "17687"
+      CERID_PORT_CHROMA: "18001"
+      CERID_PORT_REDIS: "16379"
+      CERID_PORT_GUI: "13000"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Seed .env from .env.example
+        env:
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          cp .env.example .env
+          echo "NEO4J_PASSWORD=qualityevalCI" >> .env
+          echo "REDIS_PASSWORD=qualityevalCI" >> .env
+          echo "OPENROUTER_API_KEY=$OPENROUTER_KEY" >> .env
+          mkdir -p /tmp/cerid-sync/user
+          chmod -R 777 /tmp/cerid-sync
+          echo "CERID_SYNC_DIR_HOST=/tmp/cerid-sync" >> .env
+      - name: Boot Cerid stack
+        run: |
+          docker network create llm-network 2>/dev/null || true
+          docker tag cerid-ai-internal-mcp-server:latest cerid-ci-mcp-server:latest 2>/dev/null || true
+          docker tag cerid-ai-internal-cerid-web:latest cerid-ci-cerid-web:latest 2>/dev/null || true
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait --wait-timeout 300
+          for i in {1..90}; do
+            if curl -sf http://localhost:18888/health/ping > /dev/null 2>&1; then
+              echo "stack reachable after $i attempts"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Stack did not reach /health/ping within 180s"
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail 200
+          exit 1
+      - name: Run quality-eval harnesses (containerized)
+        # Same containerized pattern as ragas-eval above: the harnesses
+        # import the MCP runtime config chain and onnxruntime ships no
+        # mac-intel wheels, so host pip can't install it on the Mac Pro.
+        # host-gateway alias keeps MCP_BASE working on both runner types.
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          RETRIEVAL_EVAL_MIN_RECALL5: ${{ vars.RETRIEVAL_EVAL_MIN_RECALL5 }}
+          CHAT_FAITHFULNESS_MIN: ${{ vars.CHAT_FAITHFULNESS_MIN }}
+          VERDICT_EVAL_MIN_ACCURACY: ${{ vars.VERDICT_EVAL_MIN_ACCURACY }}
+        run: |
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            -e OPENROUTER_API_KEY \
+            -e RETRIEVAL_EVAL_MIN_RECALL5 -e CHAT_FAITHFULNESS_MIN \
+            -e VERDICT_EVAL_MIN_ACCURACY \
+            -e MCP_BASE=http://host.docker.internal:18888 \
+            -e PYTHONPATH=/eval-src \
+            -v "$GITHUB_WORKSPACE/src/mcp:/eval-src" \
+            -w /eval-src \
+            --entrypoint bash \
+            cerid-ci-mcp-server:latest \
+            -c "pip install -q -r requirements-eval.txt pytest pytest-asyncio && \
+                python -m tests.eval.live_retrieval_eval && \
+                python -m tests.eval.verification_verdict_eval --limit 25 && \
+                python -m tests.eval.chat_faithfulness_eval --max-items 8"
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: quality-eval-results
+          path: src/mcp/tests/eval/out/*.json
+      - name: Tear down stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
+
   slo:
     # Nightly latency-drift twin of ci.yml's merge-time benchmark-slo gate —
     # one shared definition (rule: no drifting copies).

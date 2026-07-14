@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import time
 from http import HTTPStatus
@@ -295,8 +296,17 @@ async def quenchforge_rerank(
     Quenchforge's /v1/rerank follows the Cohere/Voyage convention —
     response carries ``{"results": [{"index": i, "relevance_score": s}, ...]}``
     in arbitrary order.  We sort by index and emit the scores aligned
-    with the original document order so the caller's existing
-    sigmoid-clipped score contract stays intact.
+    with the original document order.
+
+    ``relevance_score`` is the cross-encoder's RAW LOGIT (llama.cpp does not
+    apply an activation): bge-reranker-v2-m3 emits roughly [-11, +11], and a
+    merely-adjacent document scores around -5. The local-ONNX and sidecar
+    legs both return sigmoid probabilities, and every consumer (relevance
+    blending, the QUALITY_MIN_RELEVANCE_THRESHOLD floor) assumes [0, 1] — so
+    the logits are sigmoid-mapped here to honor that contract. Live-proven
+    2026-07-14: raw logits made /query return EMPTY for any query without a
+    strongly-positive match (negative relevance floored every candidate),
+    while single strong matches survived alone.
     """
     # Per-workload breaker — isolated from chat/embed (see quenchforge_embed).
     breaker = get_breaker("quenchforge-rerank")
@@ -322,9 +332,14 @@ async def quenchforge_rerank(
 
     results = data.get("results") or []
     # Build an index → score map; missing indices get 0.0 so the output
-    # always matches the input length.
+    # always matches the input length. Raw logits → sigmoid (see docstring);
+    # missing entries stay 0.0 (post-sigmoid floor), not sigmoid(0)=0.5,
+    # so an absent document never outranks a scored-irrelevant one.
     by_idx = {int(r.get("index", -1)): float(r.get("relevance_score", 0.0)) for r in results}
-    scores = [by_idx.get(i, 0.0) for i in range(len(documents))]
+    scores = [
+        1.0 / (1.0 + math.exp(-by_idx[i])) if i in by_idx else 0.0
+        for i in range(len(documents))
+    ]
 
     try:
         from utils.inference_config import get_inference_config

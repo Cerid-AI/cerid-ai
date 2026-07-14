@@ -23,9 +23,14 @@ These tests verify:
 
 from __future__ import annotations
 
+import math
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
 
 
 def _async_mock_response(json_data: dict, status: int = 200) -> AsyncMock:
@@ -163,22 +168,23 @@ async def test_rerank_defaults_model_when_env_unset(monkeypatch):
         with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
             scores = await quenchforge_client.quenchforge_rerank("q", ["d0"])
 
-    assert scores == [0.4]
+    assert scores == [pytest.approx(_sigmoid(0.4))]
     assert fake_client.post.call_args.kwargs["json"]["model"] == "bge-reranker-v2-m3"
 
 
 async def test_rerank_aligns_scores_to_input_order(monkeypatch):
     """Quenchforge's /v1/rerank may return results sorted by score; we
     must un-sort by ``index`` so the caller's score array maps 1:1 to
-    the input documents."""
+    the input documents. Scores are RAW LOGITS and must come back
+    sigmoid-mapped into [0, 1]."""
     monkeypatch.setenv("QUENCHFORGE_RERANK_MODEL", "test-rerank")
     from utils import quenchforge_client
 
     fake_response = _async_mock_response({
         "results": [
-            {"index": 1, "relevance_score": 0.9},  # best
-            {"index": 0, "relevance_score": 0.3},
-            {"index": 2, "relevance_score": 0.5},
+            {"index": 1, "relevance_score": 4.1},   # best (strong positive logit)
+            {"index": 0, "relevance_score": -5.2},  # typical adjacent-doc logit
+            {"index": 2, "relevance_score": -1.2},
         ],
     })
     fake_client = MagicMock()
@@ -191,7 +197,42 @@ async def test_rerank_aligns_scores_to_input_order(monkeypatch):
     with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
         with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
             scores = await quenchforge_client.quenchforge_rerank("q", ["d0", "d1", "d2"])
-    assert scores == [0.3, 0.9, 0.5]
+    assert scores == [
+        pytest.approx(_sigmoid(-5.2)),
+        pytest.approx(_sigmoid(4.1)),
+        pytest.approx(_sigmoid(-1.2)),
+    ]
+    # Order-preserving map: relative ranking must survive the activation.
+    assert scores[1] > scores[2] > scores[0]
+
+
+async def test_rerank_sigmoid_maps_raw_logits_into_unit_interval(monkeypatch):
+    """Regression (live 2026-07-14): llama.cpp's /v1/rerank emits raw
+    bge-reranker logits (roughly [-11, +11]); passing them through as
+    relevance made every negative-logit candidate floor to zero downstream,
+    so /query returned EMPTY for any query lacking a strongly-positive
+    match. The client owns the sigmoid so all three rerank legs
+    (quenchforge / sidecar / local ONNX) honor the same [0, 1] contract."""
+    monkeypatch.setenv("QUENCHFORGE_RERANK_MODEL", "test-rerank")
+    from utils import quenchforge_client
+
+    fake_response = _async_mock_response({
+        "results": [
+            {"index": 0, "relevance_score": -10.6},
+            {"index": 1, "relevance_score": 11.0},
+        ],
+    })
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(return_value=fake_response)
+    fake_breaker = MagicMock()
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            scores = await quenchforge_client.quenchforge_rerank("q", ["d0", "d1"])
+    assert 0.0 < scores[0] < 0.5 < scores[1] < 1.0
 
 
 async def test_rerank_handles_missing_indices(monkeypatch):
@@ -214,7 +255,10 @@ async def test_rerank_handles_missing_indices(monkeypatch):
     with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
         with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
             scores = await quenchforge_client.quenchforge_rerank("q", ["d0", "d1", "d2"])
-    assert scores == [0.7, 0.0, 0.0]
+    # Scored docs are sigmoid-mapped; MISSING docs stay 0.0 (post-sigmoid
+    # floor), never sigmoid(0)=0.5 — an absent doc must not outrank a
+    # scored-irrelevant one.
+    assert scores == [pytest.approx(_sigmoid(0.7)), 0.0, 0.0]
 
 
 # ---------------------------------------------------------------------------

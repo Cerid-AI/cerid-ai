@@ -50,11 +50,16 @@ from core.agents.memory import calculate_memory_score, recall_memories  # noqa: 
 class TestCalculateMemoryScore:
     """Verify decay/reinforcement curves for each memory_type."""
 
-    def test_empirical_no_decay(self):
-        """Empirical facts should have decay=1.0 regardless of age."""
-        score = calculate_memory_score(0.7, 0, 365, memory_type="empirical")
-        # decay=1.0, reinforcement=1.0 (empirical skips reinforcement)
-        assert score == pytest.approx(0.7, abs=0.01)
+    def test_empirical_slow_power_law_decay(self):
+        """Empirical facts decay slowly via power-law (finite stability since
+        the 2026-07-13 trust-integrity fix — the old decay=1.0 hardcode made
+        verification-promoted facts immortal)."""
+        score = calculate_memory_score(
+            0.7, 0, 365, memory_type="empirical", stability_days=180.0,
+        )
+        # (1 + 365/(9*180))^-0.5 ≈ 0.903; reinforcement=1.0 (empirical skips it)
+        assert score == pytest.approx(0.7 * 0.903, abs=0.01)
+        assert score > 0.6  # slow decay: still strong after a year
 
     def test_conversational_rapid_decay(self):
         """Conversational memories have 3-day half-life exponential decay."""

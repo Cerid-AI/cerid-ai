@@ -242,6 +242,11 @@ export function useVerificationStream(
       if (cancelled) return
       cancelled = true
       abort()
+      // Once the summary landed the round-1 verdict is complete — the stream
+      // only stays open for the backend's post-summary retry sweep. Close it
+      // but keep phase "done": degrading here would hide a full report
+      // behind the partial-results banner.
+      if (receivedSummary) return
       finalizePendingClaims("verification stalled — partial result, retry to re-verify")
       setPhase("degraded")
       logEntry(`${reason} — showing partial results, use Retry to re-verify`, "error")
@@ -328,7 +333,9 @@ export function useVerificationStream(
                   break
 
                 case "claim_verified": {
-                  setPhase("verifying")
+                  // Round-2 retry-sweep verdicts arrive AFTER the summary;
+                  // apply them in place without regressing "done" → "verifying".
+                  if (!receivedSummary) setPhase("verifying")
                   const claimNum = (event.index ?? 0) + 1
                   const conf = event.confidence != null ? ` (${event.verification_method ?? "KB"} match ${(event.confidence as number).toFixed(2)})` : ""
                   if (event.status === "verified") {
@@ -352,7 +359,9 @@ export function useVerificationStream(
                             source_domain: event.source_domain,
                             source_snippet: event.source_snippet,
                             source_urls: event.source_urls || [],
-                            reason: event.reason,
+                            // Total-deadline timeout events nest the reason under
+                            // verdict (e.g. "KB-only verdict (verification timeout)").
+                            reason: event.reason ?? event.verdict?.reason,
                             verification_method: event.verification_method,
                             verification_model: event.verification_model,
                             verification_answer: event.verification_answer || undefined,
@@ -391,6 +400,25 @@ export function useVerificationStream(
                   setSessionEstCost(sessionRef.current.estCost)
                   setPhase("done")
                   logEntry(`Complete — ${event.verified ?? 0}/${event.total ?? 0} claims verified`, "success")
+                  break
+
+                case "summary_update":
+                  // Final totals after the backend's round-2 retry sweep
+                  // (emitted after "summary", before "persisted"). Phase stays
+                  // "done"; the derived report picks up the refreshed counts.
+                  setSummary((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          verified: event.verified ?? prev.verified,
+                          unverified: event.unverified ?? prev.unverified,
+                          uncertain: event.uncertain ?? prev.uncertain,
+                          total: event.total ?? prev.total,
+                          overallConfidence: event.overall_confidence ?? prev.overallConfidence,
+                        }
+                      : prev,
+                  )
+                  logEntry(`Retry sweep — ${event.verified ?? 0}/${event.total ?? 0} claims verified`, "success")
                   break
 
                 case "consistency_check":
@@ -465,14 +493,44 @@ export function useVerificationStream(
   const verifiedCount = claims.filter((c) => c.status && c.status !== "pending").length
   const totalClaims = claims.length
 
-  // Build a HallucinationReport-compatible object for status bar
+  // Build a HallucinationReport-compatible object for the status bar.
+  // "done": authoritative counts from the summary event.
+  // "degraded": the stream idled out mid-run — derive counts from whatever
+  // claims settled (pending ones were finalized to "uncertain") so the
+  // promised partial results actually render instead of staying hidden.
+  const doneCounts = phase === "done" && summary
+    ? {
+        total: summary.total,
+        verified: summary.verified,
+        unverified: summary.unverified,
+        uncertain: summary.uncertain,
+        skipped: summary.skipped,
+      }
+    : null
+  const degradedCounts = phase === "degraded" && claims.length > 0
+    ? (() => {
+        const verified = claims.filter((c) => c.status === "verified").length
+        const unverified = claims.filter((c) => c.status === "unverified").length
+        const skipped = claims.filter((c) => c.status === "skipped").length
+        return {
+          total: claims.length,
+          verified,
+          unverified,
+          skipped,
+          // Everything else (uncertain / finalized-pending / error) rolls up
+          // as uncertain so the counts always sum to the total.
+          uncertain: claims.length - verified - unverified - skipped,
+        }
+      })()
+    : null
+  const reportSummary = doneCounts ?? degradedCounts
   const report: HallucinationReport | null =
-    phase === "done" && summary
+    reportSummary
       ? {
           conversation_id: conversationId ?? "",
           timestamp: new Date().toISOString(),
-          skipped: summary.total === 0,
-          extraction_method: summary.extractionMethod,
+          skipped: reportSummary.total === 0,
+          extraction_method: summary?.extractionMethod ?? extractionMethod ?? undefined,
           claims: claims.map((c) => ({
             claim: c.claim,
             claim_type: c.claim_type,
@@ -490,13 +548,7 @@ export function useVerificationStream(
             consistency_issue: c.consistency_issue,
             circular_source: c.circular_source,
           })),
-          summary: {
-            total: summary.total,
-            verified: summary.verified,
-            unverified: summary.unverified,
-            uncertain: summary.uncertain,
-            skipped: summary.skipped,
-          },
+          summary: reportSummary,
         }
       : null
 

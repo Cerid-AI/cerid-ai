@@ -217,6 +217,7 @@ export function useVerificationOrchestrator({
       setClaimUpdates(new Map())
       setExpertVerifiedClaims(new Set())
       savedForKey.current = ""
+      savedSignature.current = ""
       if (activeId && lastAssistantMsgId) {
         reportCache.delete(cacheKey(activeId, lastAssistantMsgId))
         // Defer context update to avoid re-render during effect
@@ -227,8 +228,13 @@ export function useVerificationOrchestrator({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude clearVerified: context callback, triggers state update
   }, [isStreaming, activeId, lastAssistantMsgId])
 
-  // Guard: only save once per verification completion (prevents infinite re-render loop)
+  // Guard: save once per verification completion AND once per report content
+  // (prevents infinite re-render loops). The content signature matters because
+  // the backend's post-summary retry sweep revises claim verdicts + counts
+  // while phase stays "done" — the revised report must replace the
+  // cached/persisted copy instead of being swallowed by the key guard.
   const savedForKey = useRef<string>("")
+  const savedSignature = useRef<string>("")
 
   // Cache completed verification report — uses refs to avoid triggering re-renders
   const markVerifiedRef = useRef(markVerified)
@@ -241,9 +247,13 @@ export function useVerificationOrchestrator({
   useEffect(() => {
     if (verification.phase !== "done" || !verification.report || !activeId || !lastAssistantMsgId) return
     const key = cacheKey(activeId, lastAssistantMsgId)
-    if (savedForKey.current === key) return
+    const { summary: s, claims: cs } = verification.report
+    const signature = `${s.verified}/${s.unverified}/${s.uncertain}/${s.total}:${cs.map((c) => `${c.status}|${c.verification_method ?? ""}`).join(",")}`
+    if (savedForKey.current === key && savedSignature.current === signature) return
     // eslint-disable-next-line react-hooks/immutability -- established mutation pattern; lint cannot prove safety but pattern is unit-tested
     savedForKey.current = key
+    // eslint-disable-next-line react-hooks/immutability -- established mutation pattern; lint cannot prove safety but pattern is unit-tested
+    savedSignature.current = signature
 
     // Cache in module-level map (instant, no re-render)
     if (reportCache.size >= MAX_REPORT_CACHE) {

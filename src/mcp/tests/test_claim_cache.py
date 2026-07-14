@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from core.utils.claim_cache import (
+    TIME_SENSITIVE_VERDICT_TTL_S,
     cache_verdict,
     claim_hash,
     get_cached_verdict,
@@ -195,6 +196,32 @@ class TestCacheVerdict:
         for prefix in ("[EVASION]", "[CITATION]", "[IGNORANCE]"):
             await cache_verdict(redis, f"{prefix} some text", {"status": "verified"})
         redis.set.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_web_search_verdict_capped_regardless_of_requested_ttl(self):
+        """A web_search-method verdict never gets more than the 3-day cap,
+        even if the caller asked for the (longer) default TTL."""
+        redis = MagicMock()
+        verdict = {"status": "verified", "verification_method": "web_search"}
+
+        await cache_verdict(redis, "test", verdict)  # default ttl = 30 days
+
+        ttl = redis.set.call_args[0][2]
+        assert ttl == TIME_SENSITIVE_VERDICT_TTL_S
+
+    @pytest.mark.asyncio
+    async def test_non_web_search_verdict_keeps_caller_ttl(self):
+        """Only the web_search-method special case is capped inside
+        cache_verdict itself; a kb-method verdict keeps whatever TTL the
+        caller passed (Phase 3.4 claim-level capping is the caller's job —
+        see verification.verify_claim)."""
+        redis = MagicMock()
+        verdict = {"status": "verified", "verification_method": "kb"}
+
+        await cache_verdict(redis, "test", verdict)  # default ttl = 30 days
+
+        ttl = redis.set.call_args[0][2]
+        assert ttl == 2_592_000
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -375,12 +376,19 @@ async def _persist(result: DigestResult, mcp_base_url: str) -> str | None:
             "inbox_urgent_count": str(result.inbox_urgent_count),
         },
     }
+    # Self-call over HTTP crosses the API-key gate like any other client;
+    # without the key the persist 401s on every auth-enforcing deployment
+    # and /digests/latest stays empty forever (found live 2026-07-13).
+    headers = {"X-Client-ID": "daily_digest"}
+    api_key = os.getenv("CERID_API_KEY", "")
+    if api_key:
+        headers["X-API-Key"] = api_key
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"{mcp_base_url}/ingest/structured",
                 json=payload,
-                headers={"X-Client-ID": "daily_digest"},
+                headers=headers,
             )
         if resp.status_code != HTTPStatus.OK:
             logger.warning("daily_digest persist returned %d", resp.status_code)
@@ -511,5 +519,4 @@ async def generate_daily_digest(
 
 
 def _resolve_mcp_url() -> str:
-    import os
     return os.getenv("CERID_MCP_INTERNAL_URL", "http://localhost:8888")

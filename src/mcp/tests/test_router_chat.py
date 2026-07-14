@@ -8,8 +8,21 @@ import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _patch_chat_redis(monkeypatch):
+    """Route ``app.deps.get_redis`` to a MagicMock for every test in this
+    module. Phase 0.4a added best-effort route-decision + per-model
+    latency telemetry to the hot /chat/stream path (local ``from app.deps
+    import get_redis`` inside the writer helpers); without this, the
+    first unmocked call in the suite would pay app.deps._retry's
+    exponential-backoff cost against an unreachable Redis host.
+    """
+    monkeypatch.setattr("app.deps.get_redis", lambda: MagicMock(), raising=False)
 
 
 def _make_app():
@@ -278,3 +291,66 @@ class TestChatRequestValidation:
                 call_kwargs = mock_client.build_request.call_args
                 payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
                 assert payload["max_tokens"] == 100
+
+
+class TestChatTelemetry:
+    """Phase 0.4a: route-decision counters + per-model latency (fakeredis)."""
+
+    @staticmethod
+    def _mock_ok_response():
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.aclose = AsyncMock()
+        mock_response.aread = AsyncMock(return_value=b"")
+
+        async def fake_aiter():
+            yield b"data: [DONE]\n\n"
+
+        mock_response.aiter_bytes = fake_aiter
+        return mock_response
+
+    def test_explicit_route_increments_counter(self, monkeypatch):
+        import fakeredis
+
+        fake = fakeredis.FakeRedis(decode_responses=True)
+        monkeypatch.setattr("app.deps.get_redis", lambda: fake, raising=False)
+
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
+            app = _make_app()
+            client = TestClient(app)
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
+                _setup_mock_client(mock_client_cls, self._mock_ok_response())
+                resp = client.post("/chat/stream", json={
+                    "model": "openrouter/openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hello"}],
+                })
+                assert resp.status_code == 200
+
+        from app.routers.chat import get_chat_route_counts_today
+
+        counts = get_chat_route_counts_today(fake)
+        assert counts == {"explicit": 1, "auto": 0, "fallback": 0}
+
+    def test_model_latency_recorded_on_success(self, monkeypatch):
+        import fakeredis
+
+        fake = fakeredis.FakeRedis(decode_responses=True)
+        monkeypatch.setattr("app.deps.get_redis", lambda: fake, raising=False)
+
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
+            app = _make_app()
+            client = TestClient(app)
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
+                _setup_mock_client(mock_client_cls, self._mock_ok_response())
+                resp = client.post("/chat/stream", json={
+                    "model": "openrouter/anthropic/claude-sonnet-4.6",
+                    "messages": [{"role": "user", "content": "hello"}],
+                })
+                assert resp.status_code == 200
+
+        from app.routers.chat import get_chat_model_latency_stats
+
+        stats = get_chat_model_latency_stats(fake)
+        assert "anthropic/claude-sonnet-4.6" in stats
+        assert stats["anthropic/claude-sonnet-4.6"]["count"] == 1
+        assert stats["anthropic/claude-sonnet-4.6"]["p50_s"] >= 0.0

@@ -19,38 +19,43 @@
 
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import type { ChatMessage } from "@/lib/types"
+import type { ChatMessage, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 
 // Mock useVerificationStream so we can observe the triggerKey it receives
+// and (for the re-save tests) control the phase/report it returns.
 const mockStreamHook: Mock = vi.fn()
+const defaultStreamReturn = () => ({
+  claims: [],
+  phase: "idle",
+  summary: null,
+  loading: false,
+  verifiedCount: 0,
+  totalClaims: 0,
+  extractionMethod: null,
+  report: null,
+  sessionClaimsChecked: 0,
+  sessionEstCost: 0,
+  creditError: null,
+  activityLog: [],
+})
+let mockStreamReturn: Record<string, unknown> = defaultStreamReturn()
 vi.mock("@/hooks/use-verification-stream", () => ({
   useVerificationStream: (...args: unknown[]) => {
     mockStreamHook(...args)
-    return {
-      claims: [],
-      phase: "idle",
-      summary: null,
-      loading: false,
-      verifiedCount: 0,
-      totalClaims: 0,
-      extractionMethod: null,
-      report: null,
-      sessionClaimsChecked: 0,
-      sessionEstCost: 0,
-      creditError: null,
-      activityLog: [],
-    }
+    return mockStreamReturn
   },
 }))
 
 // Mock conversations + KB injection contexts — orchestrator reads callbacks
-// off them but we don't exercise state persistence here.
+// off them; save/mark are shared spies so the persistence tests can assert.
+const mockSaveVerification: Mock = vi.fn()
+const mockMarkVerified: Mock = vi.fn()
 vi.mock("@/contexts/conversations-context", () => ({
   useConversationsContext: () => ({
-    markVerified: vi.fn(),
+    markVerified: mockMarkVerified,
     clearVerified: vi.fn(),
-    saveVerification: vi.fn(),
+    saveVerification: mockSaveVerification,
     getVerification: vi.fn(() => null),
     getAllVerificationReports: vi.fn(() => ({})),
   }),
@@ -87,6 +92,7 @@ function lastTriggerKey(): number {
 describe("useVerificationOrchestrator — length gate (Bug #11)", () => {
   beforeEach(() => {
     mockStreamHook.mockClear()
+    mockStreamReturn = defaultStreamReturn()
   })
 
   it("fires verification for a short-but-verifiable response (31 chars) once streaming completes", async () => {
@@ -197,6 +203,7 @@ function makeMultiTurnMessages(): ChatMessage[] {
 describe("useVerificationOrchestrator — per-message scoping", () => {
   beforeEach(() => {
     mockStreamHook.mockClear()
+    mockStreamReturn = defaultStreamReturn()
   })
 
   it("defaults selectedVerificationMsgId to the latest assistant message", () => {
@@ -262,5 +269,76 @@ describe("useVerificationOrchestrator — per-message scoping", () => {
     // verification state when a new user message is sent."
     rerender({ isStreaming: true })
     expect(result.current.selectedVerificationMsgId).toBe("a2")
+  })
+})
+
+/**
+ * Post-summary retry sweep persistence — the backend re-emits claim_verified
+ * events and a final summary_update AFTER the first summary, revising the
+ * report while phase stays "done". The orchestrator's save guard used to be
+ * key-only, so the revised report never replaced the cached/persisted copy.
+ */
+describe("useVerificationOrchestrator — post-summary report refresh", () => {
+  beforeEach(() => {
+    mockStreamHook.mockClear()
+    mockSaveVerification.mockClear()
+    mockMarkVerified.mockClear()
+    mockStreamReturn = defaultStreamReturn()
+  })
+
+  it("re-persists the report when the retry sweep revises counts, and only then", async () => {
+    const messages = makeMessages("The capital of France is Paris.")
+    const round1: HallucinationReport = {
+      conversation_id: "conv-resave",
+      timestamp: "2026-07-13T00:00:00Z",
+      skipped: false,
+      claims: [
+        { claim: "A", status: "verified", similarity: 0.9 },
+        { claim: "B", status: "uncertain", similarity: 0, verification_method: "timeout" },
+      ],
+      summary: { total: 2, verified: 1, unverified: 0, uncertain: 1 },
+    }
+    mockStreamReturn = { ...defaultStreamReturn(), phase: "done", report: round1 }
+
+    const { rerender } = renderHook(
+      ({ tick }: { tick: number }) => {
+        void tick // rerender knob only
+        return useVerificationOrchestrator({
+          activeMessages: messages,
+          activeId: "conv-resave",
+          isStreaming: false,
+          hallucinationEnabled: true,
+          currentModel,
+        })
+      },
+      { initialProps: { tick: 0 } },
+    )
+
+    await waitFor(() => {
+      expect(mockSaveVerification).toHaveBeenCalledTimes(1)
+    })
+    expect(mockSaveVerification).toHaveBeenLastCalledWith("conv-resave", "a1", round1)
+
+    // Same report content — must NOT save again.
+    rerender({ tick: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(mockSaveVerification).toHaveBeenCalledTimes(1)
+
+    // Round-2 sweep resolves the timed-out claim and refreshes counts.
+    const round2: HallucinationReport = {
+      ...round1,
+      claims: [
+        { claim: "A", status: "verified", similarity: 0.9 },
+        { claim: "B", status: "verified", similarity: 0.85, verification_method: "web_search" },
+      ],
+      summary: { total: 2, verified: 2, unverified: 0, uncertain: 0 },
+    }
+    mockStreamReturn = { ...defaultStreamReturn(), phase: "done", report: round2 }
+    rerender({ tick: 2 })
+
+    await waitFor(() => {
+      expect(mockSaveVerification).toHaveBeenCalledTimes(2)
+    })
+    expect(mockSaveVerification).toHaveBeenLastCalledWith("conv-resave", "a1", round2)
   })
 })

@@ -33,6 +33,11 @@ METRIC_NAMES = frozenset({
     "llm_cost_usd",
     "retrieval_ndcg",
     "cache_hit_rate",
+    # Semantic-cache lifecycle (written by core.retrieval.semantic_cache):
+    # entries dropped per invalidation, and hits served from entries that
+    # predate the last known invalidation (missed-eviction evidence).
+    "cache_invalidation_count",
+    "cache_stale_hit_count",
     "verification_accuracy",
     "queries_per_minute",
     "ragas_faithfulness",

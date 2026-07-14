@@ -99,6 +99,13 @@ PDF_DEFAULT_MEMORY_LIMIT_MB = 1024
 DEDUP_BATCH_SIZE = 100
 CHROMA_MAX_BATCH_SIZE = 5000  # max chunks per ChromaDB add() call for large ingestions
 BM25_MAX_LOADED_DOMAINS = 8   # LRU eviction threshold for in-memory BM25 indexes
+# Debounce window for the deferred BM25 rebuild. add_documents/remove_documents
+# no longer re-tokenize the whole domain corpus inline; they mark the index
+# dirty and the next eligible search rebuilds. A committed chunk is therefore
+# searchable within at most this many seconds of being ingested (exposed at the
+# first query after the cooldown). Coalesces an ingest burst into ~one rebuild
+# per window instead of one whole-corpus rebuild per document.
+BM25_REBUILD_DEBOUNCE_SECONDS = 2.0
 
 __all__ = [
     "MAX_ARTIFACT_LIST",

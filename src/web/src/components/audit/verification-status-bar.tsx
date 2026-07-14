@@ -10,7 +10,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ProgressBar } from "@/components/ui/progress-bar"
 import type { HallucinationReport, StreamingClaim } from "@/lib/types"
 import type { VerificationPhase } from "@/hooks/use-verification-stream"
-import { getClaimDisplayStatus, stripMarkdown, type ClaimDisplayStatus } from "@/lib/verification-utils"
+import { getClaimDisplayStatus, isTimeoutMethod, stripMarkdown, type ClaimDisplayStatus } from "@/lib/verification-utils"
 import { cn, getAccuracyTier } from "@/lib/utils"
 
 interface VerificationStatusBarProps {
@@ -165,6 +165,9 @@ export function VerificationStatusBar({
                       {c.verification_method === "kb" && (
                         <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-label-xs text-cyan-700 dark:text-cyan-400">kb</span>
                       )}
+                      {isTimeoutMethod(c.verification_method) && (
+                        <span className="shrink-0 rounded bg-amber-500/15 px-1 text-label-xs text-amber-700 dark:text-amber-400" title="Timed out — evidence incomplete">timed out</span>
+                      )}
                       {(c.source_urls?.length ?? 0) > 0 && (
                         <a
                           href={c.source_urls![0]}
@@ -181,7 +184,7 @@ export function VerificationStatusBar({
                       )}
                     </div>
                     {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
-                      <div className="ml-[18px] rounded bg-green-500/10 px-2 py-1">
+                      <div className="ml-[18px] rounded bg-green-500/10 px-2 py-1"> {/* drift-allowed: ml-[18px] aligns sub-content under the chevron icon column */}
                         <span className="text-label-xs font-medium text-green-700 dark:text-green-400">Found answer: </span>
                         <span className="text-label-xs leading-tight text-green-800 dark:text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                       </div>
@@ -261,6 +264,12 @@ export function VerificationStatusBar({
     )
   }
 
+  // Degraded with nothing settled — the chat pane's amber banner owns the
+  // messaging; rendering "Verification ready" here would contradict it.
+  if (streamPhase === "degraded" && (!report || !report.summary || report.summary.total === 0)) {
+    return null
+  }
+
   // No report yet or skipped
   if (!report || report.skipped || !report.summary || report.summary.total === 0) {
     return (
@@ -286,6 +295,13 @@ export function VerificationStatusBar({
 
   const { verified, unverified, uncertain, total } = report.summary
   const skippedCount = report.summary?.skipped ?? 0
+
+  // Split uncertain into timed-out (evidence gathering cut short) and
+  // genuinely inconclusive so the labeling stays truthful.
+  const timedOutCount = report.claims.filter(
+    (c) => c.status === "uncertain" && isTimeoutMethod(c.verification_method),
+  ).length
+  const inconclusiveCount = Math.max(uncertain - timedOutCount, 0)
 
   // Split unverified into refuted (cross-model/web-search) and soft unverified (KB only)
   const refutedCount = report.claims.filter(
@@ -331,12 +347,11 @@ export function VerificationStatusBar({
         </div>
       )}
       {/* Summary row — clickable to expand claims.
-          V-P0.1: the outer container is a <div role="button"> rather than a
-          real <button>, because tooltip triggers (which are <button>s) live
-          inside it. Nested <button>s are invalid HTML and trip the React 19
-          dev runtime warning. Enter/Space activate the row; the dedicated
-          expand <button> at the end has its own onClick (stopPropagation
-          would be overkill — both routes toggle the same state).
+          V-P0.1 (revised): the row click is a pointer-only convenience; the
+          dedicated expand <button> at the end is the keyboard/AT control
+          (aria-expanded + label). The row deliberately carries no
+          role/tabIndex — a role="button" wrapper around a focusable
+          descendant trips axe nested-interactive.
           CH2: the row uses two flex children — a min-w-0 core group that
           can shrink, and a shrink-0 trailing group for session metrics +
           expand toggle — so no child forces horizontal overflow. */}
@@ -347,22 +362,18 @@ export function VerificationStatusBar({
           hasClaims ? "cursor-pointer" : "cursor-default",
         )}
         onClick={() => hasClaims && setExpanded(!expanded)}
-        onKeyDown={(e) => {
-          if (!hasClaims) return
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault()
-            setExpanded(!expanded)
-          }
-        }}
-        role={hasClaims ? "button" : undefined}
-        tabIndex={hasClaims ? 0 : undefined}
-        aria-expanded={hasClaims ? expanded : undefined}
-        aria-label={hasClaims ? "Verification summary" : undefined}
-        aria-disabled={!hasClaims}
       >
         {/* Core metrics group — shrinks to fit; text children truncate rather than overflow */}
         <div data-metrics="core" className="flex min-w-0 items-center gap-3">
           <ShieldIcon className={cn("h-3 w-3 shrink-0", shieldColor)} />
+
+          {/* Degraded stream — the counts below reflect only the claims that
+              settled before the timeout. Amber matches the degraded banner. */}
+          {streamPhase === "degraded" && (
+            <Tooltip><TooltipTrigger asChild>
+              <span className="shrink-0 rounded bg-amber-500/10 px-1 text-label-xs font-medium text-amber-700 dark:text-amber-400">partial</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Verification timed out mid-run — counts cover only the claims that settled</p></TooltipContent></Tooltip>
+          )}
 
           {/* Claim count — show assessed vs total when some are uncertain */}
           <span className="shrink-0 text-muted-foreground">
@@ -392,7 +403,11 @@ export function VerificationStatusBar({
           {uncertain > 0 && (
             <Tooltip><TooltipTrigger asChild>
               <span className="shrink-0 text-muted-foreground">{uncertain} uncertain</span>
-            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Checked but inconclusive — insufficient evidence to confirm or deny</p></TooltipContent></Tooltip>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">
+              {timedOutCount > 0
+                ? `${timedOutCount} timed out — evidence incomplete${inconclusiveCount > 0 ? ` / ${inconclusiveCount} checked but inconclusive` : ""}`
+                : "Checked but inconclusive — insufficient evidence to confirm or deny"}
+            </p></TooltipContent></Tooltip>
           )}
 
           <div className="h-3 w-px shrink-0 bg-border" />
@@ -403,6 +418,7 @@ export function VerificationStatusBar({
             <span className="text-muted-foreground">Accuracy:</span>
             <ProgressBar
               pct={accuracyPct}
+              label="Accuracy"
               fillClassName={accuracyTier.barColor}
               className="w-12"
             />
@@ -489,6 +505,9 @@ export function VerificationStatusBar({
                     )}
                     {c.verification_method === "kb" && (
                       <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-label-xs text-cyan-700 dark:text-cyan-400">kb</span>
+                    )}
+                    {isTimeoutMethod(c.verification_method) && (
+                      <span className="shrink-0 rounded bg-amber-500/15 px-1 text-label-xs text-amber-700 dark:text-amber-400" title="Timed out — evidence incomplete">timed out</span>
                     )}
                     {(c.source_urls?.length ?? 0) > 0 && c.source_urls!.slice(0, 2).map((url, ui) => {
                       let domain: string
