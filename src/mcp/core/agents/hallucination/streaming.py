@@ -21,6 +21,7 @@ from typing import Any
 import config
 from core.agents.hallucination.extraction import (
     _detect_evasion,
+    _evasion_supersedes_primary,
     _extract_citation_claims,
     _extract_claims_heuristic,
     _extract_claims_llm,
@@ -551,8 +552,14 @@ async def verify_response_streaming(
     ignorance_claims = _extract_ignorance_claims(response_text)
     evasion_claims = _detect_evasion(response_text, user_query) if user_query else []
     citation_claims = _extract_citation_claims(response_text)
-    heuristic_raw = _extract_claims_heuristic(response_text)
-    heuristic_claims = _resolve_pronouns_heuristic(heuristic_raw, response_text, user_query)
+    if _evasion_supersedes_primary(response_text, evasion_claims):
+        # Whole-response evasion: heuristic output would only restate the
+        # hedge — see extraction._evasion_supersedes_primary. The nonempty
+        # special set below also short-circuits Stage 2's LLM extraction.
+        heuristic_claims: list[str] = []
+    else:
+        heuristic_raw = _extract_claims_heuristic(response_text)
+        heuristic_claims = _resolve_pronouns_heuristic(heuristic_raw, response_text, user_query)
     initial_claims = _merge_special_claims(
         heuristic_claims, ignorance_claims, evasion_claims, citation_claims, max_claims,
     )

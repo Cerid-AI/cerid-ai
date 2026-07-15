@@ -983,6 +983,17 @@ async def recall_memories(
     # side keeps the two stores in lockstep (close_superseded_memory_intervals
     # mirror-closes the Chroma valid_to whenever it closes a :Fact), so the
     # Chroma metadata already surfaced here is authoritative for admission.
+    #
+    # PRECEDENCE (plan F2 — validity gates ADMISSIBILITY, boosts order the
+    # SURVIVORS): this admission filter (and Step 3.5's supersession filter) run
+    # BEFORE the Step 4 ordering below — they REMOVE candidates from
+    # scored_memories, so nothing downstream can resurrect a closed interval. The
+    # only ranking signal here (adjusted_score, computed in the Step 2a scoring
+    # loop) is applied purely by the Step 4 `sort` over whatever survives
+    # admission; no proximity/recency boost is added after this point, so a boost
+    # can never re-admit a filtered candidate. The event-time proximity boost
+    # (core/retrieval/temporal_filter.apply_proximity_boost) is additive-only and
+    # lives on the retrieval-ranking path, never here — it reorders, never admits.
     from config.features import ENABLE_FACT_INVALIDATION_FILTER
 
     if ENABLE_FACT_INVALIDATION_FILTER and scored_memories:

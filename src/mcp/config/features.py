@@ -344,6 +344,21 @@ ENABLE_FACT_INVALIDATION_FILTER = (
 # together with the Phase D/F reader). The C3 Chroma valid-interval metadata is
 # stamped unconditionally (cheap, additive) — only the graph WRITES gate here.
 ENABLE_FACT_WRITES = os.getenv("ENABLE_FACT_WRITES", "false").lower() == "true"
+# Symbolic :Fact counting at query time (bi-temporal memory plan Phase F): gates
+# the graph-backed count(DISTINCT :Fact) seam in
+# ``app/mcp_tools/retrieval.py::pkb_answer_with_citations``. When ON and the
+# answer mode is AGGREGATION, a deterministic, conservative subject resolution
+# is attempted BEFORE the text/LLM count operator — the symbolic count answers
+# only when the question resolves to exactly one :Fact subject with current
+# facts, otherwise it falls through silently. Default OFF (dark until ready):
+# the :Fact writer (ENABLE_FACT_WRITES) is only now beginning to accumulate
+# production facts, so the graph is empty-to-sparse; the seam ships dark and is
+# flipped once the readers are validated against a populated graph (mirrors
+# ENABLE_FACT_INVALIDATION_FILTER / ENABLE_FACT_WRITES dark-until-ready
+# discipline). Flag OFF is byte-identical to the pre-Phase-F text-only count.
+ENABLE_FACT_SYMBOLIC_COUNT = (
+    os.getenv("ENABLE_FACT_SYMBOLIC_COUNT", "false").lower() == "true"
+)
 # Once-per-session summarization (bi-temporal memory plan Phase E gate): the
 # master switch for the whole session-summary path — the scheduler scan
 # (_run_session_summaries), the SessionSummaryJob's LLM call + ingest, and the

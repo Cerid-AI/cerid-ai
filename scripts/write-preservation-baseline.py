@@ -18,7 +18,7 @@ JSON shape::
       "skipped": int,
       "total": int,
       "last_run_at": "<ISO-8601 UTC>",
-      "git_sha": "<short>",
+      "git_sha": "g<short>",
       "source": "ci" | "local"
     }
 
@@ -55,13 +55,19 @@ _OUTPUT = _REPO_ROOT / "src" / "mcp" / "tests" / "eval" / "baselines" / "preserv
 
 
 def _git_sha_short() -> str:
-    """Capture the current HEAD's short SHA for traceability."""
+    """Capture the current HEAD's short SHA for traceability.
+
+    Prefixed ``g`` (the git-describe convention) so the stored value is
+    never a fully-hex token — a bare 9-char short sha with all-distinct
+    characters crosses detect-secrets' hex-entropy threshold and fails
+    the security gate as a false positive (sha lottery: some shas pass,
+    some don't)."""
     try:
         out = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=_REPO_ROOT, stderr=subprocess.DEVNULL,
         )
-        return out.decode().strip()
+        return "g" + out.decode().strip()
     except Exception:
         return "unknown"
 

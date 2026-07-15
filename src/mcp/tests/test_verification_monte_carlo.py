@@ -518,13 +518,21 @@ class TestMonteCarloVerdictInversion:
                 f"Recency mapping: {verdict['status']} → expected {expected}, got {result['status']}"
             )
 
-    def test_inversion_preserves_confidence(self):
-        """Verdict inversion should preserve the confidence value."""
-        for verdict, _ in self.IGNORANCE_VERDICTS + self.EVASION_VERDICTS:
-            inv_ign = _invert_ignorance_verdict(verdict)
-            inv_eva = _invert_evasion_verdict(verdict)
-            assert inv_ign["confidence"] == verdict["confidence"]
-            assert inv_eva["confidence"] == verdict["confidence"]
+    def test_inversion_confidence_bands(self):
+        """Ignorance inversion preserves confidence; evasion inversion (Phase
+        3.6) clamps a 'supported' (verified) result into the unverified band so
+        a hedge never surfaces at ~1.0, keeps a contested result in the uncertain
+        mid-band, and does not lower a justified-caution verdict."""
+        for verdict, _ in self.IGNORANCE_VERDICTS:
+            assert _invert_ignorance_verdict(verdict)["confidence"] == verdict["confidence"]
+        for verdict, expected in self.EVASION_VERDICTS:
+            inv = _invert_evasion_verdict(verdict)
+            if expected == "unverified":
+                assert inv["confidence"] <= 0.35
+            elif expected == "uncertain":
+                assert 0.36 <= inv["confidence"] <= 0.64
+            else:  # verified — model's caution was justified
+                assert inv["confidence"] >= verdict["confidence"]
 
 
 class TestMonteCarloConfidenceCalibration:

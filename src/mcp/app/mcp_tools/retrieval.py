@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 import config
@@ -748,6 +749,140 @@ async def pkb_hypothetical_doc(
     }
 
 
+# ================================================= symbolic :Fact count seam (Phase F)
+#
+# Bi-temporal memory plan Phase F: an opt-in symbolic answer for AGGREGATION-mode
+# ("how many …") questions. Instead of asking the reader LLM to count items in
+# the retrieved text (miscount-prone), count the DISTINCT :Fact nodes the graph
+# holds for the question's subject (the uid MERGE identity makes that a symbolic
+# count — see app/db/neo4j/fact_queries.py). Dark behind ENABLE_FACT_SYMBOLIC_
+# COUNT; conservative by construction — it answers ONLY when the question
+# resolves to exactly one :Fact subject with current facts, otherwise it falls
+# through to the existing text operator SILENTLY.
+
+# Slug tokenizer mirroring core.agents.entity_extraction.canonical_id's slug step
+# (non-alphanumeric runs are the separators). Kept local so this seam carries no
+# import-time dependency on the derivation layer.
+_SLUG_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# Interrogative / counting / function words dropped before building subject-slug
+# candidates, so they can never form a spurious subject slug ("how", "many",
+# "the" …). Deliberately small: dropping a real subject word only costs a missed
+# symbolic answer (safe — text path still runs); keeping a non-subject word only
+# adds a candidate slug that the graph lookup won't match. Erring toward MORE
+# candidates is the conservative direction — more candidates means a likelier
+# multi-match, and multi-match falls through to the text path.
+_COUNT_STOPWORDS: frozenset[str] = frozenset({
+    "how", "many", "much", "often", "number", "total", "count", "list",
+    "of", "the", "a", "an", "and", "or", "to", "in", "on", "at", "for",
+    "did", "do", "does", "was", "were", "is", "are", "have", "has", "had",
+    "i", "you", "we", "my", "me", "your", "our", "times", "time",
+})
+
+# Entity-type prefixes for canonical ids ({type}:{slug}). Mirrors
+# core.agents.entity_extraction.EntityType; test_fact_symbolic_count pins these
+# against get_args(EntityType) so the tuple cannot drift silently.
+_ENTITY_TYPE_PREFIXES: tuple[str, ...] = (
+    "person", "org", "asset", "event", "date", "loc", "other",
+)
+
+
+def _candidate_slugs(question: str) -> list[str]:
+    """Deterministic canonical-id slug candidates from a question's content words.
+
+    Content words are the question's alphanumeric tokens minus
+    :data:`_COUNT_STOPWORDS`; candidates are each unigram and each adjacent
+    bigram, slugified exactly as ``canonical_id`` would. Order-preserving and
+    de-duplicated. Pure and LLM-free — the same question always yields the same
+    candidates.
+    """
+    tokens = [t for t in _SLUG_TOKEN_RE.findall(question.lower()) if t not in _COUNT_STOPWORDS]
+    slugs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(slug: str) -> None:
+        if slug and slug not in seen:
+            seen.add(slug)
+            slugs.append(slug)
+
+    for i, tok in enumerate(tokens):
+        _add(tok)
+        if i + 1 < len(tokens):
+            _add(f"{tok}-{tokens[i + 1]}")
+    return slugs
+
+
+def _resolve_count_subject(driver, question: str) -> str | None:
+    """Resolve a question to EXACTLY ONE :Fact subject canonical id, or None.
+
+    Builds candidate canonical ids by prefixing every entity type onto every
+    slug candidate, then asks the graph which of those have current facts
+    (``subjects_with_current_facts`` — an indexed ``subject_id IN`` probe). The
+    resolution gate is deliberately strict: exactly one matching subject wins;
+    zero (no graph support) or many (ambiguous) both return None so the caller
+    falls through to the text path. Conservative and deterministic.
+    """
+    slugs = _candidate_slugs(question)
+    if not slugs:
+        return None
+    from app.db.neo4j.fact_queries import subjects_with_current_facts
+
+    candidate_ids = [f"{prefix}:{slug}" for prefix in _ENTITY_TYPE_PREFIXES for slug in slugs]
+    matched = subjects_with_current_facts(driver, candidate_ids)
+    if len(matched) == 1:
+        return next(iter(matched))
+    return None
+
+
+def _symbolic_count_answer(driver, question: str) -> str | None:
+    """A symbolic ``count(DISTINCT :Fact)`` answer, or None to defer to text.
+
+    Returns the bare ``"<n>"`` (same shape as ``compute_count_answer``) only when
+    the question resolves to one subject that holds current facts; otherwise None.
+    Best-effort: a missing driver, an unresolved/ambiguous subject, a zero count,
+    or any store error all return None so the text operator runs unchanged.
+    """
+    if driver is None:
+        return None
+    try:
+        subject = _resolve_count_subject(driver, question)
+        if subject is None:
+            return None
+        from app.db.neo4j.fact_queries import count_facts
+
+        # predicate=None: count all current facts for the subject (EVENT
+        # occurrences are distinct nodes by event_date via fact_key).
+        n = count_facts(driver, subject, None)
+        if n <= 0:
+            return None
+        return str(n)
+    except Exception as exc:  # noqa: BLE001 — best-effort; text path is the fallback
+        from core.utils.swallowed import log_swallowed_error
+
+        log_swallowed_error("app.mcp_tools.retrieval.symbolic_count", exc)
+        return None
+
+
+async def _aggregation_answer(driver, question: str, context: str) -> str | None:
+    """AGGREGATION-mode answer: symbolic :Fact count first (dark), then text.
+
+    With ENABLE_FACT_SYMBOLIC_COUNT OFF (default) this is byte-identical to
+    calling ``compute_count_answer(question, context)`` directly — the symbolic
+    path is never entered. With the flag ON, the symbolic count is tried first
+    and only its genuine graph-backed answer short-circuits the text operator;
+    every fall-through case runs the text operator exactly as before.
+    """
+    from config.features import ENABLE_FACT_SYMBOLIC_COUNT
+
+    if ENABLE_FACT_SYMBOLIC_COUNT:
+        symbolic = _symbolic_count_answer(driver, question)
+        if symbolic is not None:
+            return symbolic
+    from core.agents.analytical_ops import compute_count_answer
+
+    return await compute_count_answer(question, context)
+
+
 # ============================================================ pkb_answer_with_citations
 
 
@@ -910,10 +1045,7 @@ async def pkb_answer_with_citations(
     # prompt instead of the extractive one, so the reader DERIVES the answer
     # from evidence that is present but not literal instead of abstaining.
     # Fact-lookup questions keep the concise extractive behaviour unchanged.
-    from core.agents.analytical_ops import (
-        compute_count_answer,
-        compute_temporal_answer,
-    )
+    from core.agents.analytical_ops import compute_temporal_answer
     from core.agents.answer_synthesis import (
         AnswerMode,
         build_answer_messages,
@@ -935,7 +1067,10 @@ async def pkb_answer_with_citations(
             question, context, reference_date=utcnow_iso()[:10],
         )
     elif _mode is AnswerMode.AGGREGATION:
-        answer = await compute_count_answer(question, context)
+        # Symbolic :Fact count (dark behind ENABLE_FACT_SYMBOLIC_COUNT) is tried
+        # before the text operator; flag OFF is byte-identical to the direct
+        # compute_count_answer call this replaces. See _aggregation_answer.
+        answer = await _aggregation_answer(get_neo4j(), question, context)
 
     if answer is None:
         _messages = build_answer_messages(question, context, _mode)

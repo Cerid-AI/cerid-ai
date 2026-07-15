@@ -238,14 +238,14 @@ IGNORANCE_ADMISSION_PATTERNS = [
 # Patterns that indicate the model is deflecting/hedging instead of answering
 EVASION_PATTERNS = [
     re.compile(
-        r"(?:it'?s|this is) (?:important|crucial|worth|essential) to "
+        r"(?:it'?s|it is|this is) (?:important|crucial|worth|essential) to "
         r"(?:note|consider|remember|understand|recognize|acknowledge)",
         re.I,
     ),
     re.compile(
-        r"(?:I |it'?s )(?:not (?:appropriate|possible|accurate|helpful)|"
-        r"difficult|challenging) to (?:provide|give|make|single out|pinpoint|"
-        r"attribute|assign)",
+        r"(?:I |it'?s |it is )(?:not (?:appropriate|possible|accurate|helpful)|"
+        r"difficult|challenging|hard) to (?:provide|give|make|single out|"
+        r"pinpoint|attribute|assign|determine)",
         re.I,
     ),
     re.compile(
@@ -283,6 +283,57 @@ EVASION_PATTERNS = [
         r"causation",
         re.I,
     ),
+    # Modal-possibility hedging: asserts mere possibility instead of committing
+    # to an answer ("it might be possible that…", "it may well be the case").
+    re.compile(
+        r"\bit (?:might|may|could) (?:well )?be (?:possible|the case)\b",
+        re.I,
+    ),
+    # Deflection to a plurality of viewpoints ("consider multiple perspectives",
+    # "weigh differing viewpoints") — content-free breadth in place of an answer.
+    re.compile(
+        r"\b(?:consider|considering|weigh|weighing|explore|examine|acknowledge|"
+        r"respect|from) (?:multiple|various|several|different|many|all|both|"
+        r"other|differing|competing) "
+        r"(?:perspectives|viewpoints|angles|sides|considerations|dimensions|"
+        r"opinions|views)\b",
+        re.I,
+    ),
+    # "multiple variables play a role" — the "factors" pattern above, generalized
+    # to the other nouns models reach for when deflecting.
+    re.compile(
+        r"\b(?:multiple|various|several|many|numerous|different) "
+        r"(?:variables|elements|considerations|forces|dynamics) "
+        r"(?:play|come into play|are (?:at )?(?:play|involved)|matter|"
+        r"contribute|influence|affect|shape)\b",
+        re.I,
+    ),
+    # "depends on many/various factors" — dependency deflection.
+    re.compile(
+        r"\bdepends? (?:on|upon) (?:many|multiple|various|numerous|several|"
+        r"a (?:range|number|variety|host|lot) of|individual|the specific)\b",
+        re.I,
+    ),
+    # Context deflection ("without more context", "need additional information").
+    re.compile(
+        r"\b(?:without|need|needs|require(?:s)?|provide|give) "
+        r"(?:more|additional|further|the specific) "
+        r"(?:context|information|specifics|details|clarification)\b",
+        re.I,
+    ),
+    # Deflection to unresolved expert disagreement ("scholars continue to debate",
+    # "experts disagree", "remains contested").
+    re.compile(
+        r"\b(?:scholars|experts|researchers|historians|economists|academics|"
+        r"analysts) (?:continue to |still |often |generally )?"
+        r"(?:debate|disagree|dispute|differ|are divided)",
+        re.I,
+    ),
+    re.compile(
+        r"\bremains? (?:a matter of |the subject of |an? (?:open |ongoing )?)?"
+        r"(?:debated?|contested|disputed|(?:open|ongoing) (?:debate|question))",
+        re.I,
+    ),
 ]
 
 # Patterns that indicate the user asked a specific quantitative/factual question
@@ -294,6 +345,22 @@ SPECIFIC_QUESTION_PATTERNS = [
     re.compile(r"\b(?:rank|top|most|least|highest|lowest|leading|largest|smallest)\b", re.I),
     re.compile(r"\b(?:per capita|per 100k?|per thousand|per million)\b", re.I),
     re.compile(r"\b(?:breakdown|distribution|statistics|stats|data|figures)\b", re.I),
+]
+
+# Patterns that indicate the user asked an *answer-seeking* question — an
+# interrogative that expects a specific determination (a cause, a yes/no, a
+# value), as opposed to an open-ended request ("tell me about X") that
+# legitimately warrants a broad, discursive answer. Broader than
+# ``SPECIFIC_QUESTION_PATTERNS`` (which is quantitative-only); it gates the
+# whole-response evasion path so a discursive prompt is never scored as evasion.
+ANSWER_SEEKING_QUESTION_PATTERNS = [
+    re.compile(r"^\s*(?:what|which|who|whom|whose|when|where|why|how)\b", re.I),
+    re.compile(
+        r"^\s*(?:is|are|was|were|do|does|did|can|could|should|would|will|"
+        r"has|have|had|may|might)\b",
+        re.I,
+    ),
+    re.compile(r"\?\s*$"),
 ]
 
 # Pattern for detecting concrete data in a response (numbers, percentages, etc.)

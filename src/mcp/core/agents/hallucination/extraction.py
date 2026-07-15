@@ -22,6 +22,7 @@ import httpx
 
 import config
 from core.agents.hallucination.patterns import (
+    ANSWER_SEEKING_QUESTION_PATTERNS,
     CITATION_PATTERNS,
     CONCRETE_DATA_RE,
     EVASION_PATTERNS,
@@ -337,31 +338,84 @@ def _extract_ignorance_claims(response_text: str) -> list[str]:
 # Evasion detection — model hedges instead of answering specific questions
 # ---------------------------------------------------------------------------
 
+# A mid-sentence capitalized token — a proxy for a named entity / proper noun
+# that gives a response a concrete, checkable subject. Anchored to a preceding
+# word-ending char + space so it never fires on a sentence-initial capital.
+_MID_SENTENCE_PROPER_NOUN_RE = re.compile(r"(?<=[a-z0-9,;:'\")\-] )[A-Z][A-Za-z]")
+_ANY_DIGIT_RE = re.compile(r"\d")
+
+# Whole-response evasion needs a denser hedge signature than the
+# specific-question path (which is anchored by the quantitative question); this
+# is the density floor that, combined with the no-checkable-fragment guard,
+# separates a wholly-evasive answer from a factual one carrying a stray hedge.
+_WHOLE_RESPONSE_EVASION_MIN_HITS = 3
+
+# Word-boundary truncation cap for the hedged-response quote inside a
+# synthesized [EVASION] claim — long enough to carry the labeled fragment,
+# short enough to keep the claim a single verifier input.
+_EVASION_HEDGE_SNIPPET_MAX_CHARS = 160
+
+
+def _has_checkable_fragment(text: str) -> bool:
+    """True when *text* carries concrete, checkable content: a number or a
+    mid-sentence named entity.
+
+    The guard that keeps whole-response evasion detection from swallowing a
+    factual claim that merely contains a hedge word — a real factual answer
+    almost always names a specific value or entity ("approximately 100°C",
+    "the Roman Senate"), whereas pure hedging ("various factors contribute")
+    names nothing checkable.
+    """
+    return bool(_ANY_DIGIT_RE.search(text) or _MID_SENTENCE_PROPER_NOUN_RE.search(text))
+
+
 def _detect_evasion(response_text: str, user_query: str | None) -> list[str]:
-    """Detect when a model evades answering a specific factual question.
+    """Detect when a model evades answering a question the user actually posed.
 
     Returns synthesized claims for verification when evasion is detected.
-    These claims reframe the user's original question so Grok can answer it.
+    These claims reframe the user's original question so the external verifier
+    can answer it.
+
+    Two routes fire:
+
+    * **Specific-question route** (pre-3.6): a quantitative/specific question
+      met with >= 2 hedging signals and no substantive data.
+    * **Whole-response route** (3.6): any *answer-seeking* question met with a
+      response that is entirely hedge/vagueness markers (>= 3 signals) and
+      carries no checkable fragment (no number, no named entity). This catches
+      qualitative evasion — "What caused the 2008 crisis?" answered with "it
+      might be possible that various factors contribute…" — that the
+      quantitative-only gate missed. The no-checkable-fragment guard keeps a
+      factual claim with an incidental hedge word out of the evasion bucket.
     """
     if not user_query:
         return []
 
-    # Check if user asked a specific/quantitative question
-    is_specific_question = any(p.search(user_query) for p in SPECIFIC_QUESTION_PATTERNS)
-    if not is_specific_question:
-        return []
-
-    # Count evasion signals in the response
+    # Count evasion signals in the response — shared by both routes.
     text = response_text[:5000]
     evasion_hits = sum(1 for p in EVASION_PATTERNS if p.search(text))
-
     if evasion_hits < 2:
-        return []  # Need at least 2 hedging signals
+        return []  # Need at least 2 hedging signals for any evasion verdict
 
-    # Check if the response lacks concrete data despite a specific question
     has_concrete_data = bool(CONCRETE_DATA_RE.search(text))
-    if has_concrete_data and evasion_hits < 4:
-        return []  # Has some data + fewer hedges = not full evasion
+
+    # Route 1 — specific quantitative question evaded (unchanged pre-3.6 logic:
+    # >= 2 hedges, and a response with *some* data needs >= 4 to still count).
+    is_specific_question = any(p.search(user_query) for p in SPECIFIC_QUESTION_PATTERNS)
+    specific_route = is_specific_question and not (has_concrete_data and evasion_hits < 4)
+
+    # Route 2 — whole-response evasiveness on an answer-seeking question.
+    is_answer_seeking = any(
+        p.search(user_query) for p in ANSWER_SEEKING_QUESTION_PATTERNS
+    )
+    whole_response_route = (
+        is_answer_seeking
+        and evasion_hits >= _WHOLE_RESPONSE_EVASION_MIN_HITS
+        and not _has_checkable_fragment(text)
+    )
+
+    if not (specific_route or whole_response_route):
+        return []
 
     # Evasion confirmed — synthesize a verification claim from the user's query
     # Truncate query to a reasonable length for the claim
@@ -369,10 +423,21 @@ def _detect_evasion(response_text: str, user_query: str | None) -> list[str]:
     if len(query_text) > 200:
         query_text = query_text[:200].rsplit(" ", 1)[0] + "..."
 
+    # Quote the hedged response in the claim: the claim is *about* the
+    # response's hedging, so the verdict must attach to that text — downstream
+    # consumers (audit UI, the verdict harness's fragment matcher) locate the
+    # graded claim by the response's own words, not by the user's question.
+    hedge_snippet = response_text.strip()
+    if len(hedge_snippet) > _EVASION_HEDGE_SNIPPET_MAX_CHARS:
+        hedge_snippet = (
+            hedge_snippet[:_EVASION_HEDGE_SNIPPET_MAX_CHARS].rsplit(" ", 1)[0] + "..."
+        )
+
     claim = (
         f"[EVASION] The user asked: \"{query_text}\" — "
         f"The model deflected with {evasion_hits} hedging patterns "
-        f"instead of providing concrete data"
+        f"instead of providing concrete data. "
+        f"Hedged response: \"{hedge_snippet}\""
     )
     logger.info("Evasion detected (%d signals): %s", evasion_hits, query_text[:80])
     return [claim]
@@ -558,6 +623,21 @@ async def _extract_claims_llm(
 # ---------------------------------------------------------------------------
 
 
+def _evasion_supersedes_primary(response_text: str, evasion_claims: list[str]) -> bool:
+    """True when a synthesized evasion claim should replace primary extraction.
+
+    The whole-response evasion signature: an ``[EVASION]`` claim fired AND the
+    response carries no checkable fragment (no number, no named entity). Any
+    LLM/heuristic claim extracted from such a response is by definition a
+    restatement of the hedge — grading it sends unverifiable vagueness down the
+    KB/cross-model path (where "X is a complex topic that depends on many
+    factors" verifies supported at high confidence as a truism), shadowing the
+    type-aware evasion verdict. The specific-question route's partial-evasion
+    case (response carries some data) keeps normal merge semantics.
+    """
+    return bool(evasion_claims) and not _has_checkable_fragment(response_text[:5000])
+
+
 def _merge_special_claims(
     primary: list[str],
     ignorance: list[str],
@@ -565,15 +645,33 @@ def _merge_special_claims(
     citation: list[str],
     max_claims: int,
 ) -> list[str]:
-    """Merge special claim types into a primary claim list, deduplicating."""
-    merged = list(primary)
-    merged_set = {c.lower() for c in primary}
+    """Merge special claim types into a primary claim list, deduplicating.
+
+    Special claims survive the ``max_claims`` cap: the primary list is trimmed
+    to the remaining budget instead. A response whose primary extraction fills
+    the cap must not push its ignorance/evasion/citation claims out of the
+    verification set — those claims carry the response's *stance*, which is
+    exactly what the type-aware verification paths grade.
+    """
+    specials: list[str] = []
+    special_set: set[str] = set()
     for extra in (ignorance, evasion, citation):
         for c in extra:
-            if c.lower() not in merged_set:
-                merged.append(c)
-                merged_set.add(c.lower())
-    return merged[:max_claims]
+            key = c.lower()
+            if key not in special_set:
+                specials.append(c)
+                special_set.add(key)
+    budget = max(0, max_claims - len(specials))
+    merged: list[str] = []
+    merged_set: set[str] = set()
+    for c in primary:
+        if len(merged) >= budget:
+            break
+        key = c.lower()
+        if key not in merged_set and key not in special_set:
+            merged.append(c)
+            merged_set.add(key)
+    return (merged + specials)[:max_claims]
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +735,12 @@ async def extract_claims(
                 len(dropped), source, dropped[0][:80],
             )
         return kept
+
+    # Whole-response evasion supersedes primary extraction — running the
+    # LLM/heuristic extractors on a response with no checkable fragment only
+    # produces hedge restatements (see _evasion_supersedes_primary).
+    if _evasion_supersedes_primary(response_text, evasion_claims):
+        return _merge_special([]), "evasion"
 
     # Try LLM extraction first
     llm_claims = await _extract_claims_llm(response_text, max_claims, user_query=user_query)

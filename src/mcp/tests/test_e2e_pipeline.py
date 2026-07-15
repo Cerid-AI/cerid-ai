@@ -472,6 +472,7 @@ class TestVerificationPipeline:
              patch("utils.agent_events.emit_agent_event"):
             mc.HALLUCINATION_THRESHOLD = 0.6
             mc.HALLUCINATION_MIN_RESPONSE_LENGTH = 50
+            mc.HALLUCINATION_MAX_CLAIMS = 10
             mc.VERIFICATION_CURRENT_EVENT_MODEL = "openai/gpt-4o-mini"
             mc.VERIFICATION_EXPERT_MODEL = "xai/grok-4"
 

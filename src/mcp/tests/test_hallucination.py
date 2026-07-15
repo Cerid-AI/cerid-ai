@@ -1843,6 +1843,105 @@ class TestEvasionDetection:
         if claims:
             assert len(claims[0]) < 500  # Reasonable length
 
+    # --- Whole-response evasion route (Phase 3.6): qualitative answer-seeking
+    # questions met with content-free hedging. Regression for verdict-harness
+    # residue V-10/V-11/EV-01/EV-05/EV-06, none of which is a *quantitative*
+    # question and so all slipped past the specific-question route. ---
+
+    def test_whole_response_evasion_qualitative_question(self):
+        """Modal-possibility + multi-perspective hedging to a 'what caused'
+        question is tagged [EVASION] (residue V-10)."""
+        response = (
+            "It might be possible that various factors contribute to this "
+            "outcome, and it is important to consider multiple perspectives "
+            "before drawing conclusions."
+        )
+        claims = _detect_evasion(response, "What caused the 2008 financial crisis?")
+        assert len(claims) == 1
+        assert claims[0].startswith("[EVASION]")
+        assert "2008" in claims[0]
+
+    def test_whole_response_evasion_deflection_language(self):
+        """'complex topic' + 'depends on many factors' + 'no simple answer' +
+        'multiple variables' deflection to a yes/no question → [EVASION]
+        (residue V-11)."""
+        response = (
+            "This is a complex topic that depends on many factors. There is "
+            "no simple answer to this question, and multiple variables play a "
+            "role."
+        )
+        claims = _detect_evasion(response, "Is nuclear energy safe?")
+        assert len(claims) == 1
+        assert claims[0].startswith("[EVASION]")
+
+    def test_whole_response_evasion_context_deflection(self):
+        """'without more context' context-deflection → [EVASION] (residue EV-01)."""
+        response = (
+            "Many factors play a role in determining an answer like that, so "
+            "it's difficult to provide a single definitive number without more "
+            "context."
+        )
+        claims = _detect_evasion(response, "What is the boiling point of water at sea level?")
+        assert len(claims) == 1
+        assert claims[0].startswith("[EVASION]")
+
+    def test_whole_response_evasion_contested_debate(self):
+        """'scholars continue to debate' contested-debate deflection → [EVASION]
+        (residue EV-05)."""
+        response = (
+            "It's important to note that various factors contribute to complex "
+            "historical outcomes like this, and scholars continue to debate the "
+            "relative weight of each."
+        )
+        claims = _detect_evasion(response, "What caused the fall of the Roman Empire?")
+        assert len(claims) == 1
+        assert claims[0].startswith("[EVASION]")
+
+    def test_whole_response_evasion_depends_on_hard_to_give(self):
+        """'depends on many ... factors' + 'hard to give one universal answer'
+        → [EVASION] (residue EV-06)."""
+        response = (
+            "This is a nuanced topic that depends on many individual and "
+            "organizational factors, so it's hard to give one universal answer."
+        )
+        claims = _detect_evasion(response, "Is remote work better than in-office work?")
+        assert len(claims) == 1
+        assert claims[0].startswith("[EVASION]")
+
+    # --- Anti-false-positive guards: the whole-response route must not swallow
+    # factual claims that merely carry a hedge word (the checkable-fragment
+    # guard) or discursive open-ended requests (the answer-seeking gate). ---
+
+    def test_hedged_factual_answer_with_number_not_evasion(self):
+        """Same hedge density as V-10, but the answer names a concrete number →
+        NOT evasion (the number is a checkable fragment)."""
+        response = (
+            "This is a complex and nuanced topic, and it is important to "
+            "consider multiple perspectives, but water boils at approximately "
+            "100 degrees Celsius at sea level."
+        )
+        assert _detect_evasion(response, "What is the boiling point of water at sea level?") == []
+
+    def test_hedged_factual_answer_with_named_entity_not_evasion(self):
+        """Hedge density above threshold, but the answer names a concrete entity
+        → NOT evasion (the mid-sentence proper noun is a checkable fragment)."""
+        response = (
+            "This is a complex topic and it is important to consider multiple "
+            "perspectives, but the fall was driven in large part by the "
+            "Visigoths sacking Rome in 410 CE."
+        )
+        assert _detect_evasion(response, "What caused the fall of the Roman Empire?") == []
+
+    def test_open_ended_request_not_evasion_even_when_hedged(self):
+        """A discursive 'tell me about' request (not answer-seeking) met with
+        heavy hedging must not trigger the whole-response route."""
+        response = (
+            "This is a complex and nuanced topic. It is important to consider "
+            "multiple perspectives, and it might be possible that various "
+            "factors contribute to different views."
+        )
+        assert _detect_evasion(response, "Tell me about the economy") == []
+
 
 class TestEvasionVerdictInversion:
     """Test verdict inversion for evasion claims."""
@@ -1870,7 +1969,7 @@ class TestEvasionVerdictInversion:
         assert inverted["confidence"] >= 0.7
 
     def test_uncertain_unchanged(self):
-        """Uncertain verdicts should not be inverted."""
+        """Uncertain verdicts stay uncertain (status is not flipped)."""
         original = {
             "status": "uncertain",
             "confidence": 0.3,
@@ -1878,6 +1977,51 @@ class TestEvasionVerdictInversion:
         }
         inverted = _invert_evasion_verdict(original)
         assert inverted["status"] == "uncertain"
+
+    def test_contested_question_stays_uncertain_with_mid_confidence(self):
+        """Phase 3.6: an insufficient_info verdict (question is genuinely
+        contested / has no single objective answer) yields a genuine uncertain
+        outcome — clamped mid-band, with a defensible-hedge reason — instead of
+        being inverted to a high-confidence unverified."""
+        original = {
+            "status": "uncertain",
+            "confidence": 0.5,
+            "reason": "Claim not independently verifiable: multi-causal debate",
+        }
+        inverted = _invert_evasion_verdict(original)
+        assert inverted["status"] == "uncertain"
+        assert 0.36 <= inverted["confidence"] <= 0.64
+        assert "defensible" in inverted["reason"].lower()
+
+    def test_verified_inversion_confidence_clamped_to_unverified_band(self):
+        """Phase 3.6: a high-confidence 'supported' (a concrete answer exists)
+        inverts to unverified with confidence clamped into the unverified band
+        (<= 0.35) — a hedge never surfaces as unverified@~1.0."""
+        original = {
+            "status": "verified",
+            "confidence": 0.97,
+            "reason": "Cross-model verification confirmed: water boils at 100C",
+        }
+        inverted = _invert_evasion_verdict(original)
+        assert inverted["status"] == "unverified"
+        assert inverted["confidence"] <= 0.35
+
+    @pytest.mark.parametrize(
+        "verifier_json,expected_status",
+        [
+            # kind 1 — concrete answer exists → evasion unjustified → unverified
+            ('{"verdict": "supported", "confidence": 0.95, "reasoning": "100C"}', "unverified"),
+            # kind 2 — genuinely contested → defensible hedge → uncertain
+            ('{"verdict": "insufficient_info", "confidence": 0.5, "reasoning": "debate"}', "uncertain"),
+            # kind 3 — unknowable / nonexistent → caution justified → verified
+            ('{"verdict": "refuted", "confidence": 0.8, "reasoning": "unknowable"}', "verified"),
+        ],
+    )
+    def test_evasion_verifier_verdict_to_final_status(self, verifier_json, expected_status):
+        """End-to-end contract: verifier answerability class → final evasion
+        status, through the parser + inversion the live path uses."""
+        parsed = _parse_verification_verdict(verifier_json)
+        assert _invert_evasion_verdict(parsed)["status"] == expected_status
 
 
 class TestEvasionClaimExtraction:
@@ -1906,12 +2050,15 @@ class TestEvasionClaimExtraction:
     @pytest.mark.asyncio
     @patch("core.agents.hallucination.extraction._extract_claims_llm")
     async def test_evasion_merged_with_llm_claims(self, mock_llm):
-        """Evasion claims merge with LLM-extracted claims."""
-        mock_llm.return_value = ["Some factual claim about demographics"]
+        """Partial evasion (specific-question route, response carries data)
+        keeps merge semantics: LLM claims and the [EVASION] claim coexist."""
+        mock_llm.return_value = ["Roughly 45% of recorded incidents involve a single group"]
         response = (
-            "Some factual claim about demographics. But this is a complex "
-            "topic. It's important to consider many factors. There is no "
-            "simple answer." + " " * 200
+            "Roughly 45% of recorded incidents involve a single group. But "
+            "this is a complex topic. It's important to consider many "
+            "factors, and it might be possible that other variables play a "
+            "role. It depends on many social factors. There is no simple "
+            "answer." + " " * 200
         )
         query = "What is the murder rate breakdown by demographic?"
         claims, method = await extract_claims(response, user_query=query)
@@ -1919,6 +2066,147 @@ class TestEvasionClaimExtraction:
         # Should include both LLM claim and evasion claim
         assert len(claims) >= 2
         assert any("[EVASION]" in c for c in claims)
+        assert any("45%" in c for c in claims)
+
+
+class TestWholeResponseEvasionSuppression:
+    """Composition-level tests for the whole-response evasion route (Phase 3.6
+    integration fix): when the response has no checkable fragment, the
+    synthesized [EVASION] claim SUPPRESSES LLM/heuristic pseudo-claims instead
+    of merging beside them — a hedge restatement like 'X is a complex topic
+    that depends on many factors' otherwise verifies supported@~1.0 via the
+    cross-model path and shadows the type-aware evasion verdict (full-100
+    HTTP run, 2026-07-14: V-11/EV-06 verified@1.0 via cross_model_complex)."""
+
+    # (response_text, user_query, dataset text_fragment) — the four
+    # whole-response residue shapes from verification_cases_v2.jsonl.
+    RESIDUE_SHAPES = [
+        (
+            "It might be possible that various factors contribute to this "
+            "outcome, and it is important to consider multiple perspectives "
+            "before drawing conclusions.",
+            "What caused the 2008 financial crisis?",
+            "various factors contribute",
+        ),
+        (
+            "This is a complex topic that depends on many factors. There is "
+            "no simple answer to this question, and multiple variables play "
+            "a role.",
+            "Is nuclear energy safe?",
+            "complex topic",
+        ),
+        (
+            "It's important to note that various factors contribute to "
+            "complex historical outcomes like this, and scholars continue "
+            "to debate the relative weight of each.",
+            "What caused the fall of the Roman Empire?",
+            "various factors contribute",
+        ),
+        (
+            "This is a nuanced topic that depends on many individual and "
+            "organizational factors, so it's hard to give one universal "
+            "answer.",
+            "Is remote work better than in-office work?",
+            "hard to give one universal answer",
+        ),
+    ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("response,query,fragment", RESIDUE_SHAPES)
+    @patch("core.agents.hallucination.extraction._extract_claims_llm", new_callable=AsyncMock)
+    async def test_pseudo_claims_suppressed_and_fragment_matches_evasion(
+        self, mock_llm, response, query, fragment
+    ):
+        """extract_claims end-to-end: the [EVASION] claim is the ONLY claim,
+        the LLM extractor is never even called, and the response fragment
+        (what the verdict harness matches on) lands inside the [EVASION]
+        claim via the quoted hedge snippet."""
+        # Realistic pseudo-claims the LLM extractor produces for hedged text —
+        # must never reach the output.
+        mock_llm.return_value = [
+            f"{query.rstrip('?')} is a complex topic that depends on many factors",
+            "There is no simple answer to this question",
+        ]
+        claims, method = await extract_claims(response, user_query=query)
+        assert method == "evasion"
+        assert len(claims) == 1
+        assert claims[0].startswith("[EVASION]")
+        # Suppression happens before primary extraction — no wasted LLM call.
+        assert mock_llm.await_count == 0
+        # The harness's fragment matcher (substring, case-insensitive) must
+        # resolve to the [EVASION] claim.
+        assert fragment.lower() in claims[0].lower()
+
+    @pytest.mark.asyncio
+    async def test_heuristic_pseudo_claims_suppressed_in_streaming_composition(self):
+        """The streaming stage-1 composition (heuristic-first, the live
+        /agent/verify-stream path) must not emit heuristic hedge restatements
+        beside the [EVASION] claim. V-11 shape: the heuristic extractor
+        naturally produces 'Is nuclear energy safe is a complex topic that
+        depends on many factors' — the exact claim that graded verified@1.0
+        over HTTP."""
+        from core.agents.hallucination.extraction import (
+            _detect_evasion,
+            _evasion_supersedes_primary,
+            _extract_citation_claims,
+            _extract_claims_heuristic,
+            _extract_ignorance_claims,
+            _merge_special_claims,
+            _resolve_pronouns_heuristic,
+        )
+        response = (
+            "This is a complex topic that depends on many factors. There is "
+            "no simple answer to this question, and multiple variables play "
+            "a role."
+        )
+        query = "Is nuclear energy safe?"
+        ignorance = _extract_ignorance_claims(response)
+        evasion = _detect_evasion(response, query)
+        citation = _extract_citation_claims(response)
+        assert evasion and _evasion_supersedes_primary(response, evasion)
+        # Mirror streaming.verify_response_streaming stage 1 post-fix.
+        heuristic: list[str] = []
+        if not _evasion_supersedes_primary(response, evasion):
+            heuristic = _resolve_pronouns_heuristic(
+                _extract_claims_heuristic(response), response, query
+            )
+        merged = _merge_special_claims(heuristic, ignorance, evasion, citation, 10)
+        assert merged == evasion  # nothing but the [EVASION] claim
+
+    @pytest.mark.asyncio
+    @patch("core.agents.hallucination.extraction._extract_claims_llm", new_callable=AsyncMock)
+    async def test_ignorance_shape_gets_no_evasion_and_survives_merge(self, mock_llm):
+        """An ignorance-shaped response must not trip the evasion detector,
+        and its ignorance claim must survive merging even when the LLM
+        extractor returns pseudo-claims."""
+        mock_llm.return_value = [
+            "The municipality passed several policy changes",
+            "Policy records are maintained by the city clerk",
+        ]
+        response = (
+            "I don't have any information about recent policy changes in "
+            "that municipality, as my training data does not include local "
+            "government records from that period." + " " * 120
+        )
+        query = "What policy changes did the municipality pass last year?"
+        claims, method = await extract_claims(response, user_query=query)
+        assert not any(c.startswith("[EVASION]") for c in claims)
+        assert any(c.lower().startswith("i don't have") for c in claims)
+
+    def test_merge_cap_never_evicts_special_claims(self):
+        """A primary list that fills max_claims must not push special claims
+        out — the primary is trimmed to the remaining budget instead."""
+        from core.agents.hallucination.extraction import _merge_special_claims
+
+        primary = [f"Fact number {i} about the topic" for i in range(12)]
+        ignorance = ["I don't have information about the launch date"]
+        evasion = ['[EVASION] The user asked: "When?" — deflected']
+        merged = _merge_special_claims(primary, ignorance, evasion, [], 10)
+        assert len(merged) == 10
+        assert ignorance[0] in merged
+        assert evasion[0] in merged
+        # Primary trimmed to the remaining budget (10 - 2 specials = 8).
+        assert sum(1 for c in merged if c.startswith("Fact number")) == 8
 
 
 class TestEmpiricalSourcePrompts:
@@ -1944,10 +2232,21 @@ class TestEmpiricalSourcePrompts:
         assert ".gov" in _SYSTEM_EVASION_VERIFICATION
         assert "concrete" in _SYSTEM_EVASION_VERIFICATION.lower()
 
-    def test_evasion_prompt_instructs_concrete_answers(self):
-        """Evasion prompt should instruct the verifier to provide concrete data."""
+    def test_evasion_prompt_classifies_answerability(self):
+        """Evasion prompt should ask the verifier to classify the question's
+        answerability — concrete answer (supported) vs genuinely contested
+        (insufficient_info) vs nonexistent (refuted) — rather than always
+        forcing a concrete answer (Phase 3.6)."""
         from core.agents.hallucination.verification import _SYSTEM_EVASION_VERIFICATION
-        assert "Do NOT hedge" in _SYSTEM_EVASION_VERIFICATION
+        prompt = _SYSTEM_EVASION_VERIFICATION
+        # Still routes single-answer evasions to a real, concrete answer.
+        assert "concrete" in prompt.lower()
+        assert "single decisive" in prompt.lower()
+        # And offers a genuine contested/no-single-answer outcome so a hedge
+        # about a multi-causal or subjective question is not forced to supported.
+        assert "insufficient_info" in prompt
+        assert "combination" in prompt.lower()
+        assert "no single decisive answer" in prompt.lower()
 
 
 class TestRecencyClaimDetection:

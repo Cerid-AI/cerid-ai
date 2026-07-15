@@ -193,29 +193,41 @@ _SYSTEM_IGNORANCE_VERIFICATION = (
 
 _SYSTEM_EVASION_VERIFICATION = (
     "You are a factual claim verifier with access to real-time web search. "
-    "A different AI model was asked a specific factual question but evaded "
-    "answering with concrete data — instead giving hedging language, "
-    "deflections, or generic disclaimers about complexity.\n\n"
-    "Your job is to find and provide the actual factual answer using "
-    "authoritative empirical sources. Search for the specific data the user "
-    "requested. Do NOT hedge or deflect — provide concrete numbers, "
-    "statistics, and facts with source citations."
+    "A different AI model was asked a question but evaded answering — instead "
+    "giving hedging language, deflections, or generic disclaimers about "
+    "complexity.\n\n"
+    "Your job is to judge whether that evasion was JUSTIFIED. First classify "
+    "the question into exactly one of three kinds:\n"
+    "1. It has a SINGLE decisive answer that settles it — one specific number, "
+    "date, name, measurement, or universally-agreed fact (e.g. the boiling "
+    "point of water). Find it and report it; the evasion was unjustified.\n"
+    "2. Its honest answer is a COMBINATION of many contributing factors, a "
+    "matter of ongoing debate, a subjective or value judgment, or 'it depends' "
+    "— there is no single decisive answer, even if you can name some "
+    "contributing factors or examples. The model's caution is defensible.\n"
+    "3. The specific information genuinely does not exist or is impossible to "
+    "determine (e.g. an unknowable future outcome).\n"
+    "Naming a few contributing factors does NOT make a question kind 1: if no "
+    "single fact settles it, it is kind 2. Do NOT force a concrete answer onto "
+    "a question of kind 2 or 3."
     f"{_EMPIRICAL_SOURCE_GUIDANCE}\n\n"
     "Respond with ONLY a JSON object — no other text:\n"
     '{"verdict": "supported"|"refuted"|"insufficient_info", '
     '"confidence": 0.0-1.0, '
-    '"reasoning": "Concrete answer with source citations"}\n\n'
+    '"reasoning": "Your classification and, for kind 1, the concrete answer '
+    'with source citations"}\n\n'
     "Rules:\n"
-    "- \"supported\": The data exists and you found concrete answers — "
-    "the model's evasion was unjustified\n"
-    "- \"refuted\": The specific data genuinely does not exist or is "
-    "legitimately impossible to determine\n"
-    "- \"insufficient_info\": Cannot find authoritative sources for this "
-    "specific question\n"
+    "- \"supported\": kind 1 — a single decisive, checkable answer exists that "
+    "the model evaded. Give the actual answer with sources.\n"
+    "- \"insufficient_info\": kind 2 — the answer is a combination of factors, "
+    "an ongoing debate, or a subjective judgment with no single decisive "
+    "answer, so the model's hedge is defensible.\n"
+    "- \"refuted\": kind 3 — the specific data genuinely does not exist or is "
+    "legitimately impossible to determine.\n"
     "- Include specific numbers, percentages, or data points in your "
-    "reasoning when available\n"
-    "- confidence: 0.0 = no data found, 1.0 = authoritative data with "
-    "clear answer"
+    "reasoning when the answer is concrete (kind 1).\n"
+    "- confidence: how certain you are of the CLASSIFICATION "
+    "(0.0 = unsure, 1.0 = certain)"
 )
 
 _SYSTEM_RECENCY_VERIFICATION = (
@@ -457,20 +469,31 @@ def _invert_ignorance_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
 
 
 def _invert_evasion_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
-    """Invert a verification verdict for an evasion claim.
+    """Map an external verifier's answerability judgment onto an evasion verdict.
 
-    When a model evades answering and Grok finds the actual data
-    (verdict = "verified"/supported), the model's evasion was unjustified
-    → mark as "unverified" (refuted in the UI).
+    The evasion verifier classifies the *question the model evaded* (see
+    ``_SYSTEM_EVASION_VERIFICATION``) into one of three kinds, which arrive here
+    already funneled through ``_parse_verification_verdict``:
 
-    If Grok confirms the data genuinely doesn't exist ("unverified"/refuted),
-    the model's caution was justified → mark as "verified".
+    * "verified" (verifier said *supported* — a concrete, checkable answer
+      exists) → the evasion was unjustified → **unverified**. Confidence is
+      clamped into the unverified band (<= 0.35, the same clamp the direct
+      ``refuted`` path uses) so a hedge never surfaces as unverified@~1.0.
+    * "uncertain" (verifier said *insufficient_info* — the question is genuinely
+      contested / subjective / multi-causal with no single objective answer) →
+      the model's hedge is defensible → **uncertain**, at a clamped mid-band
+      confidence. This is the outcome the type-aware path previously lacked: a
+      hedge about a genuinely open question is graded uncertain, not inverted to
+      a high-confidence unverified.
+    * "unverified" (verifier said *refuted* — the specific data genuinely does
+      not exist / is unknowable) → the model's caution was justified →
+      **verified**.
     """
     status = verdict["status"]
     reasoning = verdict.get("reason", "")
 
     if status == "verified":
-        # Data exists — model's evasion was unjustified
+        # A concrete answer exists — model's evasion was unjustified.
         clean_reason = reasoning
         for prefix in (
             "Cross-model verification confirmed: ",
@@ -482,13 +505,39 @@ def _invert_evasion_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
         return {
             **verdict,
             "status": "unverified",
+            # Align with the direct refuted→unverified clamp (parser: <= 0.35);
+            # the inbound score is the verifier's confidence the answer EXISTS,
+            # not a confidence the claim is supported, so it must not ride
+            # through onto the unverified verdict.
+            "confidence": round(min(verdict.get("confidence", 0.35), 0.35), 3),
             "reason": (
                 f"Model evaded answering — data is available: {clean_reason}"
             ).rstrip(": "),
         }
 
+    if status == "uncertain":
+        # Genuinely contested / no single objective answer — hedge is defensible.
+        clean_reason = reasoning
+        for prefix in (
+            "Claim not independently verifiable: ",
+            "Claim not independently verifiable",
+        ):
+            if clean_reason.startswith(prefix):
+                clean_reason = clean_reason[len(prefix):]
+                break
+        return {
+            **verdict,
+            "status": "uncertain",
+            # Mid band, matching the parser's uncertain clamp (0.36–0.64).
+            "confidence": round(max(0.36, min(0.64, verdict.get("confidence", 0.5))), 3),
+            "reason": (
+                "Model's hedge is defensible — the question has no single "
+                f"objective answer: {clean_reason}"
+            ).rstrip(": "),
+        }
+
     if status == "unverified":
-        # Data genuinely unavailable — evasion was justified
+        # Data genuinely unavailable / unknowable — evasion was justified.
         clean_reason = reasoning
         for prefix in (
             "Cross-model verification found factual errors: ",
@@ -507,7 +556,7 @@ def _invert_evasion_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
             ).rstrip(": "),
         }
 
-    # uncertain / error — keep as-is
+    # error / unrecognized — keep as-is
     return verdict
 
 
