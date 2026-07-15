@@ -448,6 +448,7 @@ def _invariants_snapshot() -> dict:
             # Lightweight mode — skip the orphan check, NLI still matters.
             snap: dict[str, Any] = {
                 "verification_report_orphans": 0,
+                "fact_orphans": 0,
                 "collections_empty": [],
                 "custom_collections": [],
                 "errors": [],

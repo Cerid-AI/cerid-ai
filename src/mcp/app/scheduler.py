@@ -1284,6 +1284,79 @@ async def _run_memory_consolidation_sweep() -> None:
         logger.error("memory_consolidation_sweep scheduled job failed: %s", e)
 
 
+async def _run_session_summaries() -> None:
+    """Phase E (bi-temporal memory plan) — once-per-session summarization scan.
+
+    Finds conversations idle >= SESSION_SUMMARY_IDLE_MIN (default 30) minutes
+    with no session-summary artifact yet, and enqueues a SessionSummaryJob per
+    conversation (bounded by SESSION_SUMMARY_SCAN_LIMIT, default 20;
+    ``enqueue_session_summary_job`` collapses duplicates via enqueue_if_absent).
+
+    DARK behind ENABLE_SESSION_SUMMARIZATION (default OFF): with the flag off
+    the scan returns immediately, so the registered cron is a no-op. Idle proxy:
+    the :Conversation node carries no last-activity timestamp, so the newest
+    non-summary EXTRACTED_FROM artifact's ``ingested_at`` stands in for it.
+    """
+    import os
+
+    start = time.time()
+    from config.features import ENABLE_SESSION_SUMMARIZATION
+
+    if not ENABLE_SESSION_SUMMARIZATION:
+        return  # dark by default — no-op until the Phase E gate flips
+
+    try:
+        from app.processor.jobs.session_summary import enqueue_session_summary_job
+
+        driver = get_neo4j()
+        if driver is None:
+            _log_execution("session_summaries", "skipped", time.time() - start, "neo4j unavailable")
+            return
+
+        idle_min = int(os.environ.get("SESSION_SUMMARY_IDLE_MIN", "30"))
+        cap = int(os.environ.get("SESSION_SUMMARY_SCAN_LIMIT", "20"))
+        cutoff = (
+            datetime.now(tz=timezone.utc) - timedelta(minutes=idle_min)
+        ).isoformat()
+
+        def _scan() -> list[str]:
+            with driver.session() as session:
+                rows = session.run(
+                    """
+                    MATCH (a:Artifact)-[:EXTRACTED_FROM]->(c:Conversation)
+                    WHERE coalesce(a.memory_scope, '') <> 'session_summary'
+                    WITH c, max(a.ingested_at) AS last_activity
+                    WHERE last_activity < $cutoff
+                    OPTIONAL MATCH (s:Artifact)-[:EXTRACTED_FROM]->(c)
+                      WHERE s.memory_scope = 'session_summary'
+                    WITH c, last_activity, s
+                    WHERE s IS NULL
+                    RETURN c.id AS cid
+                    ORDER BY last_activity ASC
+                    LIMIT $cap
+                    """,
+                    cutoff=cutoff,
+                    cap=cap,
+                )
+                return [r["cid"] for r in rows if r["cid"]]
+
+        cids = await asyncio.to_thread(_scan)
+        enqueued = 0
+        for cid in cids:
+            if enqueue_session_summary_job(cid) is not None:
+                enqueued += 1
+
+        duration = time.time() - start
+        detail = f"idle_conversations={len(cids)} enqueued={enqueued} limit={cap}"
+        _log_execution("session_summaries", "success", duration, detail)
+        if enqueued:
+            logger.info("session_summaries: %s in %.1fs", detail, duration)
+    except Exception as e:  # noqa: BLE001 — scheduler error surface
+        duration = time.time() - start
+        _log_execution("session_summaries", "error", duration, str(e))
+        logger.error("session_summaries scheduled job failed: %s", e)
+
+
 async def _run_webhook_drain() -> None:
     """Consume cerid:webhook_inbox:* and route entries into the KB.
 
@@ -1775,6 +1848,23 @@ def start_scheduler() -> AsyncIOScheduler:
             ),
             id="memory_consolidation_sweep",
             name="Memory archival sweep (safe consolidation)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Phase E (bi-temporal memory plan) — once-per-session summarization scan.
+    # Enqueues a SessionSummaryJob per idle conversation lacking a summary. The
+    # scan body no-ops unless ENABLE_SESSION_SUMMARIZATION is on (dark by
+    # default), so registration is safe. Empty SCHEDULE_SESSION_SUMMARIES
+    # disables the cron entirely.
+    if getattr(config, "SCHEDULE_SESSION_SUMMARIES", "*/15 * * * *"):
+        _scheduler.add_job(
+            _run_session_summaries,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_SESSION_SUMMARIES", "*/15 * * * *"),
+            ),
+            id="session_summaries",
+            name="Session summarization scan (idle conversations)",
             replace_existing=True,
             max_instances=1,
         )

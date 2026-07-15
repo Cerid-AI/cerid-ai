@@ -22,6 +22,7 @@ import httpx
 
 import config
 from config.settings import MEMORY_TYPE_MIGRATION
+from core.agents.fact_derivation import OPEN_INTERVAL, resolve_valid_from
 from core.context.identity import with_tenant_scope
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
@@ -351,21 +352,41 @@ async def extract_and_store_memories(
                     )
 
             convo_prefix = conversation_id[:8] if conversation_id else "unknown"
+            now_iso = utcnow_iso()
             timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
             filename = f"memory_{mem['memory_type']}_{convo_prefix}_{timestamp}_{idx}"
 
+            # Bi-temporal contract (mirrors tests/eval/longmemeval/bitemporal.py
+            # so the Chroma memory store and the Neo4j :Fact store resolve
+            # identical validity intervals — the two must never diverge):
+            #   created_at — system/transaction time (this ingestion instant).
+            #   valid_from — world/valid-time start: event_date when known, else
+            #                the observation date; "" when neither is known.
+            #   valid_to   — OPEN_INTERVAL ("") = still true; Phase D closes it.
+            # decay_anchor pins the Ebbinghaus age-anchor to ingestion time: it
+            # holds the value valid_from used to carry, so moving valid_from onto
+            # event_date (which can be far in the past) does NOT shift
+            # calculate_memory_score's age — recall reads decay_anchor before
+            # valid_from (see recall_memories). This keeps the i20b slow-decay
+            # contract byte-identical while giving the store its valid-time.
             metadata = {
                 "filename": filename,
                 "conversation_id": conversation_id,
                 "model": model,
                 "memory_type": mem["memory_type"],
                 "summary": mem["summary"],
-                "valid_from": utcnow_iso(),
+                "created_at": now_iso,
+                "valid_from": resolve_valid_from(
+                    event_date=mem.get("event_date"),
+                    observation_date=observation_date,
+                ),
+                "valid_to": OPEN_INTERVAL,
+                "decay_anchor": now_iso,
                 "access_count": "0",
             }
-            # event_date = the absolute date the fact is ABOUT (vs valid_from =
-            # ingestion time). Enables time-filtered/-windowed retrieval and
-            # deterministic date arithmetic downstream. Only set when known.
+            # event_date = the absolute date the fact is ABOUT. Enables
+            # time-filtered/-windowed retrieval and deterministic date arithmetic
+            # downstream. Only set when known.
             if mem.get("event_date"):
                 metadata["event_date"] = mem["event_date"]
 
@@ -392,6 +413,39 @@ async def extract_and_store_memories(
                     await asyncio.to_thread(
                         mark_superseded, neo4j_driver, supersede_target, new_artifact_id
                     )
+
+                    # Phase D — close the superseded memory's bi-temporal fact
+                    # intervals in BOTH stores so the :Fact layer never diverges
+                    # from the memory layer (plan R4/R7). chroma_client is
+                    # already DI-threaded into this function (like neo4j_driver);
+                    # resolve the conversations collection the same way recall /
+                    # conflict-detection do — no app import (core↛app). Wholly
+                    # best-effort: closure must never break the store path.
+                    try:
+                        from core.agents.fact_invalidation import (
+                            close_superseded_memory_intervals,
+                        )
+
+                        fact_collection = None
+                        if chroma_client is not None:
+                            fact_collection = await asyncio.to_thread(
+                                chroma_client.get_or_create_collection,
+                                name=config.collection_name("conversations"),
+                            )
+                        await close_superseded_memory_intervals(
+                            neo4j_driver,
+                            fact_collection,
+                            old_artifact_id=supersede_target,
+                            new_artifact_id=new_artifact_id,
+                            new_valid_from=metadata["valid_from"],
+                            new_content=effective_content,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — closure must not break the store path
+                        log_swallowed_error(
+                            "core.agents.memory.fact_invalidation",
+                            exc,
+                            redis_client=redis_client,
+                        )
 
                 if redis_client:
                     try:
@@ -881,6 +935,11 @@ async def recall_memories(
                 "access_count": access_count,
                 "memory_type": metadata.get("memory_type", "fact"),
                 "summary": metadata.get("summary", ""),
+                # Bi-temporal valid-time end: "" (OPEN_INTERVAL) = still true;
+                # a non-empty value marks a closed interval (Phase D). Captured
+                # here so the read-side admission filter below can drop closed
+                # intervals without a second Chroma round-trip.
+                "valid_to": metadata.get("valid_to", OPEN_INTERVAL),
             })
 
     # Step 3.5: Supersession-at-read — drop candidates explicitly marked
@@ -914,6 +973,24 @@ async def recall_memories(
             scored_memories = [
                 m for m in scored_memories if m["memory_id"] not in superseded_ids
             ]
+
+    # Step 3.6: Interval admission (bi-temporal :Fact layer, plan D3) — drop
+    # candidates whose validity interval is CLOSED (non-empty valid_to). DARK by
+    # default (ENABLE_FACT_INVALIDATION_FILTER, default off): with the flag off,
+    # this block is skipped entirely and recall is byte-identical to before.
+    # Missing / empty valid_to = open = admitted (back-compat with pre-Phase-C
+    # memories that were never stamped). No extra Neo4j round-trip: the write
+    # side keeps the two stores in lockstep (close_superseded_memory_intervals
+    # mirror-closes the Chroma valid_to whenever it closes a :Fact), so the
+    # Chroma metadata already surfaced here is authoritative for admission.
+    from config.features import ENABLE_FACT_INVALIDATION_FILTER
+
+    if ENABLE_FACT_INVALIDATION_FILTER and scored_memories:
+        scored_memories = [
+            m
+            for m in scored_memories
+            if not str(m.get("valid_to", OPEN_INTERVAL)).strip()
+        ]
 
     # Step 4: Sort by adjusted score descending
     scored_memories.sort(key=lambda m: m["adjusted_score"], reverse=True)

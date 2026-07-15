@@ -41,6 +41,10 @@ logger = logging.getLogger("ai-companion.semantic_edges")
 
 # Chunked matrix-multiply batch size — matches compute_umap_3d.py pattern.
 _CHUNK = 512
+# Chunked UNWIND write batch size. A full-graph run can emit ~250k SIMILAR_TO
+# edges (k=5); writing them in a single UNWIND transaction risks OOM, so the
+# MERGE is paginated at this size.
+_WRITE_CHUNK = 10000
 
 
 def build_similarity_edges(
@@ -210,25 +214,25 @@ def build_similarity_edges(
                 })
 
     # ------------------------------------------------------------------
-    # 6. MERGE SIMILAR_TO edges.
-    # TODO: chunk the UNWIND write at >10k entities (~250k edges at k=5)
+    # 6. MERGE SIMILAR_TO edges — chunked at _WRITE_CHUNK so a full-graph run
+    #    (~250k edges at k=5) never rides in a single UNWIND transaction.
     # ------------------------------------------------------------------
     edges_created = 0
     if edge_rows:
+        merge_cypher = """
+            UNWIND $rows AS row
+            MATCH (a:Entity {canonical_id: row.from_id})
+            MATCH (b:Entity {canonical_id: row.to_id})
+            MERGE (a)-[r:SIMILAR_TO]->(b)
+            SET r.score = row.score
+        """
         try:
             with driver.session(**session_kw) as session:
-                result = session.run(
-                    """
-                    UNWIND $rows AS row
-                    MATCH (a:Entity {canonical_id: row.from_id})
-                    MATCH (b:Entity {canonical_id: row.to_id})
-                    MERGE (a)-[r:SIMILAR_TO]->(b)
-                    SET r.score = row.score
-                    """,
-                    rows=edge_rows,
-                )
-                summary = result.consume()
-                edges_created = summary.counters.relationships_created
+                for start in range(0, len(edge_rows), _WRITE_CHUNK):
+                    batch = edge_rows[start : start + _WRITE_CHUNK]
+                    result = session.run(merge_cypher, rows=batch)
+                    summary = result.consume()
+                    edges_created += summary.counters.relationships_created
         except Exception as exc:
             log_swallowed_error("app.db.neo4j.semantic_edges.merge", exc)
             raise

@@ -323,6 +323,37 @@ QUERY_DECOMPOSITION_MAX_SUBQUERIES = int(os.getenv("QUERY_DECOMPOSITION_MAX_SUBQ
 ENABLE_MEMORY_SUPERSESSION_FILTER = (
     os.getenv("ENABLE_MEMORY_SUPERSESSION_FILTER", "true").lower() == "true"
 )
+# Invalidation-at-read for the bi-temporal :Fact layer (m0004/m0006 schema):
+# drop :Fact nodes whose `invalid_at` is set (CODE-closed, mirrors the
+# ENABLE_MEMORY_SUPERSESSION_FILTER read-time drop above) from query results.
+# Default OFF — no writer exists yet (bi-temporal memory plan Phase C), so
+# every :Fact node today is schema scaffolding with nothing to filter; this
+# flag exists so Phase D/E/F reader code can gate on it in advance (matches
+# the m0004 docstring's forward reference to "a future
+# ENABLE_FACT_INVALIDATION_FILTER"). Flip default only when the writer and
+# reader land together, mirroring how ENABLE_MEMORY_SUPERSESSION_FILTER
+# shipped default-ON as a correctness fix once its write path existed.
+ENABLE_FACT_INVALIDATION_FILTER = (
+    os.getenv("ENABLE_FACT_INVALIDATION_FILTER", "false").lower() == "true"
+)
+# Bi-temporal :Fact writer (bi-temporal memory plan Phase C): gates the
+# derive-facts + write-:Fact-nodes path in the entity-extraction job. Default
+# OFF — the writer creates graph nodes and amplifies writes, so it ships dark
+# and is flipped only once the write path is validated at scale (mirrors
+# ENABLE_FACT_INVALIDATION_FILTER's dark-until-ready discipline; the two flip
+# together with the Phase D/F reader). The C3 Chroma valid-interval metadata is
+# stamped unconditionally (cheap, additive) — only the graph WRITES gate here.
+ENABLE_FACT_WRITES = os.getenv("ENABLE_FACT_WRITES", "false").lower() == "true"
+# Once-per-session summarization (bi-temporal memory plan Phase E gate): the
+# master switch for the whole session-summary path — the scheduler scan
+# (_run_session_summaries), the SessionSummaryJob's LLM call + ingest, and the
+# EXTRACTED_FROM/memory_scope marking. Default OFF; ships dark and flips only
+# once the multi-session recall gate is validated (mirrors ENABLE_FACT_WRITES's
+# dark-until-ready discipline). The layer is additive + background-only — it
+# never touches the live-chat /sdk SLO or MEMORY_LLM_BUDGET_S whether on or off.
+ENABLE_SESSION_SUMMARIZATION = (
+    os.getenv("ENABLE_SESSION_SUMMARIZATION", "false").lower() == "true"
+)
 # LLM-based decomposition for *implicit* multi-hop analytical questions (e.g.
 # "how many days between X and Y") that carry no conjunction trigger, so the
 # heuristic gate skips them. Adds one LLM call on the analytical-query hot path,

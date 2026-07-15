@@ -42,6 +42,11 @@ _EST_TOKENS_OUT = 512
 _MODEL = "ollama/local"
 _MAX_CHARS = 8_000
 
+# Domain whose memory artifacts get bi-temporal :Fact derivation (Phase C). Chat
+# transcripts live in the same domain but carry no ``memory_type`` — the fact
+# step keys on a valid memory_type to restrict itself to extracted memories.
+_CONVERSATIONS_DOMAIN = "conversations"
+
 
 class EntityExtractionJob(BaseJob):
     """Extract and persist named entities for a single artifact.
@@ -120,6 +125,7 @@ class EntityExtractionJob(BaseJob):
                 "tenant_id": self._tenant_id,
                 "entities_upserted": stats.get("entities_upserted", 0),
                 "edges_upserted": stats.get("edges_upserted", 0),
+                "facts_written": stats.get("facts_written", 0),
                 "skipped": stats.get("skipped"),
             },
         )
@@ -148,7 +154,7 @@ class EntityExtractionJob(BaseJob):
             )
             return {"skipped": "artifact_not_found"}
 
-        chunk_ids, docs = await asyncio.to_thread(
+        chunk_ids, docs, metadatas = await asyncio.to_thread(
             self._fetch_chunks, chroma_client, collection_name(domain), self._artifact_id
         )
         await progress_cb(0.3)
@@ -208,6 +214,21 @@ class EntityExtractionJob(BaseJob):
                 context={"artifact_id": self._artifact_id},
             )
 
+        # Phase C — derive + write bi-temporal :Fact nodes for
+        # conversation-derived memories. Reuses THIS job's already-resolved
+        # entities (no extra LLM call). Gated + best-effort inside the helper.
+        fact_stats = _derive_and_write_facts(
+            driver,
+            artifact_id=self._artifact_id,
+            tenant_id=self._tenant_id,
+            domain=domain,
+            content=blob,
+            chunk_metadatas=metadatas,
+            entities=entities,
+        )
+        if fact_stats:
+            stats["facts_written"] = fact_stats.get("facts_written", 0)
+
         return stats
 
     @staticmethod
@@ -225,14 +246,97 @@ class EntityExtractionJob(BaseJob):
         chroma_client: Any,
         coll_name: str,
         artifact_id: str,
-    ) -> tuple[list[str], list[str]]:
-        """Synchronous ChromaDB query — run in a thread."""
+    ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+        """Synchronous ChromaDB query — run in a thread.
+
+        Returns ``(chunk_ids, documents, metadatas)``. Metadatas carry the
+        memory's bi-temporal fields (memory_type / event_date / valid_from /
+        memory_source_type) that Phase-C fact derivation reads.
+        """
         try:
             coll = chroma_client.get_collection(name=coll_name)
         except Exception:  # noqa: BLE001 — collection-missing is a valid skip path
-            return [], []
+            return [], [], []
         res = coll.get(
             where={"artifact_id": {"$eq": artifact_id}},
-            include=["documents"],
+            include=["documents", "metadatas"],
         )
-        return list(res.get("ids", [])), list(res.get("documents", []) or [])
+        return (
+            list(res.get("ids", [])),
+            list(res.get("documents", []) or []),
+            list(res.get("metadatas", []) or []),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase C — bi-temporal :Fact derivation + write (fires inside this job so
+# facts ride the entity job's single LLM pass; no second LLM call).
+# ---------------------------------------------------------------------------
+
+
+def _first_memory_metadata(metadatas: list[dict[str, Any]]) -> dict[str, Any]:
+    """First non-empty chunk metadata. Memory chunks of one artifact share the
+    bi-temporal fields, so the first is representative; empty dict when none."""
+    for meta in metadatas:
+        if meta:
+            return meta
+    return {}
+
+
+def _derive_and_write_facts(
+    driver: Any,
+    *,
+    artifact_id: str,
+    tenant_id: str,
+    domain: str,
+    content: str,
+    chunk_metadatas: list[dict[str, Any]],
+    entities: list[Any],
+) -> dict[str, int]:
+    """Derive + persist bi-temporal :Fact nodes for a conversation-derived memory.
+
+    Gated by ``ENABLE_FACT_WRITES`` and restricted to ``conversations``-domain
+    memory artifacts (identified by a valid ``memory_type`` — chat transcripts
+    in the same domain carry none). ``observation_date`` is threaded from the
+    memory's already-stamped ``valid_from`` so each :Fact's valid-time start
+    equals the Chroma memory's exactly (the two stores never diverge).
+
+    Best-effort: any failure is logged and swallowed so the successful entity
+    extraction is never lost.
+    """
+    from config.features import ENABLE_FACT_WRITES
+
+    if not ENABLE_FACT_WRITES or domain != _CONVERSATIONS_DOMAIN:
+        return {}
+
+    from config.settings import MEMORY_TYPES
+
+    meta = _first_memory_metadata(chunk_metadatas)
+    memory_type = str(meta.get("memory_type", ""))
+    if memory_type not in MEMORY_TYPES:
+        return {}
+
+    try:
+        from app.db.neo4j.facts import write_facts
+        from core.agents.fact_derivation import derive_facts
+
+        facts = derive_facts(
+            content=content,
+            memory_type=memory_type,
+            event_date=meta.get("event_date"),
+            observation_date=meta.get("valid_from"),
+            entity_ids=[
+                e.canonical_id for e in entities if getattr(e, "canonical_id", None)
+            ],
+            memory_source_type=meta.get("memory_source_type"),
+        )
+        if not facts:
+            return {"facts_written": 0}
+        return write_facts(driver, facts, source_artifact_id=artifact_id)
+    except Exception as exc:  # noqa: BLE001 — fact write is best-effort; never lose the entity extraction
+        log_swallowed_error(
+            "processor.entity_extraction.fact_write",
+            exc,
+            context={"artifact_id": artifact_id, "tenant_id": tenant_id},
+        )
+        return {}

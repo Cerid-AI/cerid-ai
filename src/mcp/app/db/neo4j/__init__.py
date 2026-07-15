@@ -27,6 +27,8 @@ __all__ = [
     "write_wikilink_edge", "resolve_pending_artifacts",
     # entity (Phase 4.3 — re-ingest hygiene)
     "remove_mentions_for_artifact",
+    # facts (bi-temporal :Fact layer — Phase C)
+    "write_facts",
 ]
 
 from app.db.neo4j.artifacts import (  # noqa: F401,E402
@@ -45,6 +47,7 @@ from app.db.neo4j.artifacts import (  # noqa: F401,E402
     update_artifact_summary,
 )
 from app.db.neo4j.entity import remove_mentions_for_artifact  # noqa: F401,E402
+from app.db.neo4j.facts import write_facts  # noqa: F401,E402
 from app.db.neo4j.memory import (  # noqa: F401,E402
     archive_memory,
     create_memory_node,

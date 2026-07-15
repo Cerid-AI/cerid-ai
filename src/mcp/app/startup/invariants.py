@@ -109,6 +109,37 @@ def _probe_neo4j(neo4j: Any) -> dict[str, Any]:
     return {"verification_report_orphans": orphans}
 
 
+# Fact-orphan invariant (bi-temporal :Fact layer, m0004/m0006): every
+# :Fact must have an inbound (:Entity)-[:HAS_FACT]-> edge. Mirrors the
+# m0002/VerificationReport orphan gate above. No writer exists yet
+# (schema-only through m0006), so this reads 0 until the Phase C writer
+# lands — a non-zero count thereafter is a true writer regression, same
+# semantics as verification_report_orphans.
+_FACT_ORPHAN_CYPHER = """
+MATCH (f:Fact)
+WHERE NOT (f)<-[:HAS_FACT]-()
+RETURN count(f) AS orphans
+"""
+
+
+def _probe_fact_orphans(neo4j: Any) -> dict[str, Any]:
+    """Probe: count of :Fact nodes with no inbound :HAS_FACT edge.
+
+    Single cheap COUNT query. Tolerant of the :Fact label not existing
+    yet — MATCH against a label with zero nodes returns zero rows, so
+    an empty graph reports 0, not an error.
+    """
+    with neo4j.session() as session:
+        row = session.run(_FACT_ORPHAN_CYPHER).single()
+    orphans = 0
+    if row is not None:
+        try:
+            orphans = int(row["orphans"])
+        except (KeyError, TypeError):
+            orphans = int(row.get("orphans", 0)) if hasattr(row, "get") else 0
+    return {"fact_orphans": orphans}
+
+
 _startup_logger = logging.getLogger("ai-companion.startup")
 
 
@@ -265,6 +296,10 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
         * ``verification_report_orphans`` — historical data can't be
           backfilled; the migration (m0001) already ran.  New orphans would
           indicate a writer regression but we don't 503 on them here.
+        * ``fact_orphans`` — :Fact nodes with no inbound :HAS_FACT edge.
+          Always 0 until the Phase C writer lands (m0006 is schema-only);
+          a non-zero count thereafter is a writer regression signal, not a
+          hard failure.
 
     Returns a dict that is always JSON-serializable and never raises.
     """
@@ -287,6 +322,15 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
         logger.warning("neo4j invariant probe failed: %s", exc)
         snapshot["errors"].append(f"neo4j: {exc}")
         snapshot["verification_report_orphans"] = -1
+
+    try:
+        snapshot.update(_probe_fact_orphans(neo4j))
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
+        logger.warning("fact orphan invariant probe failed: %s", exc)
+        snapshot["errors"].append(f"fact_orphans: {exc}")
+        snapshot["fact_orphans"] = -1
 
     try:
         snapshot.update(_probe_nli())

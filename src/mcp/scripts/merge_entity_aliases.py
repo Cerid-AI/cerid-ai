@@ -52,6 +52,7 @@ Usage (inside the Docker MCP container):
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
@@ -534,6 +535,264 @@ def run_merge(
 
 
 # ---------------------------------------------------------------------------
+# Phase 4.2 — embedding-resolution flow (pair candidates → adjudicate → merge)
+#
+# This is the "Tier-C for real" path: instead of the incremental A+B+C grouping
+# above, it generates high-similarity PAIRS from precomputed entity embeddings,
+# auto-merges the confident band, sends the borderline band to the LLM
+# adjudicator (bounded per run), and applies confirmed merges through the
+# reversible/chunked ``app.db.neo4j.entity.merge_entities`` machinery.
+#
+# Dry-run by default (mirrors this script's --apply discipline): it prints the
+# would-merge plan and writes nothing unless dry_run=False.
+# ---------------------------------------------------------------------------
+
+
+def _fetch_entities_with_embeddings(driver: Any) -> list[dict[str, Any]]:
+    """Return entities carrying an ``embedding`` property (parsed to list[float])."""
+    with driver.session() as session:
+        rows = session.run(
+            """
+            MATCH (e:Entity)
+            WHERE e.embedding IS NOT NULL AND e.canonical_id IS NOT NULL
+            RETURN e.canonical_id AS canonical_id,
+                   e.name AS name,
+                   e.entity_type AS entity_type,
+                   coalesce(e.mention_count, 0) AS mention_count,
+                   e.primary_domain AS primary_domain,
+                   e.embedding AS embedding
+            """
+        ).data()
+
+    entities: list[dict[str, Any]] = []
+    for row in rows:
+        raw = row.get("embedding")
+        try:
+            emb = json.loads(raw) if raw else None
+        except (json.JSONDecodeError, TypeError):
+            emb = None
+        if not emb:
+            continue
+        entities.append({
+            "canonical_id": row["canonical_id"],
+            "name": row.get("name") or row["canonical_id"],
+            "entity_type": row.get("entity_type") or "",
+            "mention_count": int(row.get("mention_count") or 0),
+            "primary_domain": row.get("primary_domain") or "",
+            "embedding": emb,
+        })
+    return entities
+
+
+def _cluster_pairs(
+    pairs: list[Any],
+    entities: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Union-find connected components of merge pairs → survivor + losers.
+
+    Survivor per component = highest mention_count (tiebreak: longest name).
+    Returns dicts: {survivor_id, loser_ids, entity_type, survivor_name,
+    merge_method, merge_confidence}.
+    """
+    meta = {e["canonical_id"]: e for e in entities}
+
+    parent: dict[str, str] = {}
+
+    def _find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a: str, b: str) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # component_key → aggregated (min similarity, any-adjudicated flag)
+    for pair in pairs:
+        _union(pair.a_id, pair.b_id)
+
+    components: dict[str, list[str]] = {}
+    for pair in pairs:
+        for cid in (pair.a_id, pair.b_id):
+            root = _find(cid)
+            members = components.setdefault(root, [])
+            if cid not in members:
+                members.append(cid)
+
+    # Per-component provenance: adjudicated if any constituent pair was
+    # borderline; confidence = the lowest pairwise similarity in the component.
+    comp_min_sim: dict[str, float] = {}
+    comp_adjudicated: dict[str, bool] = {}
+    from core.agents.entity_resolution import MergePair  # noqa: PLC0415
+
+    for pair in pairs:
+        root = _find(pair.a_id)
+        prior = comp_min_sim.get(root)
+        comp_min_sim[root] = pair.similarity if prior is None else min(prior, pair.similarity)
+        if isinstance(pair, MergePair) and pair.band == "adjudicate":
+            comp_adjudicated[root] = True
+
+    from app.db.neo4j.entity import (  # noqa: PLC0415
+        MERGE_METHOD_EMBEDDING_ADJUDICATED,
+        MERGE_METHOD_EMBEDDING_AUTO,
+    )
+
+    clusters: list[dict[str, Any]] = []
+    for root, members in components.items():
+        def _rank(cid: str) -> tuple[int, int]:
+            info = meta.get(cid, {})
+            return (int(info.get("mention_count") or 0), len(str(info.get("name") or "")))
+
+        survivor = max(members, key=_rank)
+        losers = [m for m in members if m != survivor]
+        if not losers:
+            continue
+        survivor_info = meta.get(survivor, {})
+        clusters.append({
+            "survivor_id": survivor,
+            "loser_ids": losers,
+            "entity_type": survivor_info.get("entity_type") or "",
+            "survivor_name": survivor_info.get("name") or survivor,
+            "merge_method": (
+                MERGE_METHOD_EMBEDDING_ADJUDICATED
+                if comp_adjudicated.get(root)
+                else MERGE_METHOD_EMBEDDING_AUTO
+            ),
+            "merge_confidence": comp_min_sim.get(root),
+        })
+    return clusters
+
+
+async def _resolve_and_plan(
+    entities: list[dict[str, Any]],
+    *,
+    llm_call: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Generate candidate pairs, adjudicate the borderline band, cluster them."""
+    from core.agents.entity_resolution import (
+        adjudicate_merge_pairs,
+        generate_merge_candidates,
+    )
+
+    candidates = generate_merge_candidates(entities)
+    auto_pairs = [p for p in candidates if p.band == "auto"]
+    borderline = [p for p in candidates if p.band == "adjudicate"]
+
+    contexts = {
+        e["canonical_id"]: e.get("primary_domain", "")
+        for e in entities
+        if e.get("primary_domain")
+    }
+    confirmed = await adjudicate_merge_pairs(
+        borderline, contexts=contexts, llm_call=llm_call
+    )
+
+    merge_pairs = auto_pairs + confirmed
+    clusters = _cluster_pairs(merge_pairs, entities)
+    return {
+        "candidates": len(candidates),
+        "auto_pairs": auto_pairs,
+        "borderline_pairs": borderline,
+        "confirmed_pairs": confirmed,
+        "clusters": clusters,
+    }
+
+
+def run_embedding_resolution(
+    driver: Any,
+    *,
+    dry_run: bool = True,
+    llm_call: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Pair-based embedding entity resolution with LLM adjudication.
+
+    Gated on ``settings.ENTITY_RESOLUTION_EMBED`` — a no-op when the flag is
+    off (matching the ingest-time Tier-C gate). Dry-run by default: prints the
+    plan and writes nothing. When ``dry_run=False`` each cluster is collapsed
+    via the reversible ``merge_entities`` machinery.
+    """
+    import config.settings as _settings
+
+    started = time.time()
+    if not _settings.ENTITY_RESOLUTION_EMBED:
+        logger.info("ENTITY_RESOLUTION_EMBED is off — embedding resolution skipped.")
+        return {"skipped": "disabled", "merged_clusters": 0}
+
+    entities = _fetch_entities_with_embeddings(driver)
+    logger.info("embedding-resolution: %d entities with embeddings", len(entities))
+
+    plan = asyncio.run(_resolve_and_plan(entities, llm_call=llm_call))
+    clusters = plan["clusters"]
+
+    logger.info(
+        "embedding-resolution plan: %d candidate pairs (%d auto, %d borderline "
+        "→ %d LLM-confirmed) → %d merge clusters",
+        plan["candidates"],
+        len(plan["auto_pairs"]),
+        len(plan["borderline_pairs"]),
+        len(plan["confirmed_pairs"]),
+        len(clusters),
+    )
+
+    if dry_run:
+        for cluster in clusters:
+            logger.info(
+                "[DRY-RUN] merge survivor=%s losers=%s method=%s confidence=%s",
+                cluster["survivor_id"], cluster["loser_ids"],
+                cluster["merge_method"], cluster["merge_confidence"],
+            )
+        return {
+            "dry_run": True,
+            "candidates": plan["candidates"],
+            "auto_pairs": len(plan["auto_pairs"]),
+            "borderline_pairs": len(plan["borderline_pairs"]),
+            "confirmed_pairs": len(plan["confirmed_pairs"]),
+            "merge_clusters": len(clusters),
+            "merged_clusters": 0,
+            "elapsed_seconds": round(time.time() - started, 2),
+        }
+
+    from app.db.neo4j.entity import merge_entities
+
+    merged = 0
+    for cluster in clusters:
+        try:
+            merge_entities(
+                driver,
+                cluster["survivor_id"],
+                cluster["loser_ids"],
+                survivor_name=cluster["survivor_name"],
+                entity_type=cluster["entity_type"],
+                merge_method=cluster["merge_method"],
+                merge_confidence=cluster["merge_confidence"],
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad cluster must not abort the run
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("scripts.merge_entity_aliases.run_embedding_resolution", exc)
+            logger.error("Cluster survivor=%s failed: %s", cluster["survivor_id"], exc)
+            continue
+        merged += 1
+
+    logger.info(
+        "embedding-resolution done in %.1fs: %d clusters merged",
+        time.time() - started, merged,
+    )
+    return {
+        "dry_run": False,
+        "candidates": plan["candidates"],
+        "auto_pairs": len(plan["auto_pairs"]),
+        "borderline_pairs": len(plan["borderline_pairs"]),
+        "confirmed_pairs": len(plan["confirmed_pairs"]),
+        "merge_clusters": len(clusters),
+        "merged_clusters": merged,
+        "elapsed_seconds": round(time.time() - started, 2),
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -561,6 +820,17 @@ def main() -> int:
         action="store_true",
         help="Clear the checkpoint and re-scan from scratch.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=("structural", "embedding"),
+        default="structural",
+        help=(
+            "structural (default): A+B[+incremental-C] canonical-id grouping. "
+            "embedding: pair-based Tier-C resolution with LLM adjudication over "
+            "precomputed entity embeddings (requires ENTITY_RESOLUTION_EMBED=true "
+            "and a prior compute_entity_embeddings run)."
+        ),
+    )
     args = parser.parse_args()
 
     import config.settings as _settings
@@ -571,6 +841,11 @@ def main() -> int:
     if args.reset and CHECKPOINT_PATH.exists():
         CHECKPOINT_PATH.unlink()
         logger.info("Checkpoint cleared.")
+
+    if args.mode == "embedding":
+        result = run_embedding_resolution(driver, dry_run=not args.apply)
+        logger.info("Result: %s", result)
+        return 0
 
     # Build the embed callable for Tier C when the flag is on.
     # Uses the same get_embedding_function() singleton as compute_entity_embeddings.

@@ -25,10 +25,15 @@ different entity_type values.
 """
 from __future__ import annotations
 
+import json
+import logging
 import re
-from typing import Callable
+from typing import Any, Awaitable, Callable, NamedTuple
 
 import config.settings as _settings
+from core.utils.swallowed import log_swallowed_error
+
+logger = logging.getLogger("ai-companion.entity_resolution")
 
 # ---------------------------------------------------------------------------
 # Slug helper (mirrors entity_extraction.canonical_id's slug step)
@@ -275,3 +280,253 @@ def resolve_canonical(
 
     # Fallback — bare slug (same as today's canonical_id)
     return f"{type_prefix}:{raw_slug}"
+
+
+# ===========================================================================
+# Phase 4.2 — embedding-merge candidate generation + LLM adjudication
+# ===========================================================================
+#
+# The Tier-C resolve_canonical path above is the *ingest-time* nearest-canonical
+# hook. This section is the *sweep-time* resolution engine: given the whole
+# entity set with precomputed embeddings, it emits high-similarity PAIRS and
+# routes them into three bands (see config ENTITY_MERGE_* for the thresholds):
+#
+#   sim >= AUTO_SIM        → auto-merge (structural certainty; no LLM cost)
+#   ADJUDICATE_SIM <= sim
+#                < AUTO_SIM → LLM adjudication (merge/keep), bounded per run
+#   sim <  ADJUDICATE_SIM   → no action (SIMILAR_TO connectivity already links
+#                             them; this is NOT a merge candidate)
+#
+# Cross-type merges are impossible by construction: pairing is scoped inside a
+# single entity_type group.
+
+# Minimum group members before any pairing is worth doing.
+_MIN_PAIR_GROUP = 2
+# Token budget for one adjudication batch — a compact merge/keep verdict list.
+_ADJUDICATION_MAX_TOKENS = 400
+# Truncate the per-entity context snippet so a batch prompt stays compact.
+_CONTEXT_SNIPPET_CHARS = 200
+
+
+class MergePair(NamedTuple):
+    """A candidate pair of entities that resolution may collapse.
+
+    ``band`` is ``"auto"`` (>= AUTO_SIM) or ``"adjudicate"`` (in the borderline
+    band). ``a_id`` sorts lexicographically before ``b_id`` so a pair has one
+    canonical form (no (a,b)/(b,a) duplication).
+    """
+
+    a_id: str
+    b_id: str
+    a_name: str
+    b_name: str
+    entity_type: str
+    similarity: float
+    band: str
+
+
+def _normalize_vec(vec: list[float]) -> list[float]:
+    mag = sum(x * x for x in vec) ** 0.5
+    if mag == 0:
+        return vec
+    return [x / mag for x in vec]
+
+
+def generate_merge_candidates(
+    entities: list[dict[str, Any]],
+    *,
+    auto_threshold: float | None = None,
+    adjudicate_floor: float | None = None,
+) -> list[MergePair]:
+    """Pair entities by embedding cosine, bucketed into auto / adjudicate bands.
+
+    ``entities`` is a list of dicts with ``canonical_id``, ``name``,
+    ``entity_type`` and ``embedding`` (``list[float]``; entities without an
+    embedding are skipped). Pairing is scoped per ``entity_type`` (never
+    cross-type). Pairs below ``adjudicate_floor`` are dropped (SIMILAR_TO
+    connectivity covers them). Returns pairs sorted by similarity descending so
+    a bounded adjudication cap consumes the most-confident borderline pairs
+    first.
+    """
+    import numpy as np  # noqa: PLC0415 — heavy import deferred to call time
+
+    auto = auto_threshold if auto_threshold is not None else _settings.ENTITY_MERGE_AUTO_SIM
+    floor = (
+        adjudicate_floor
+        if adjudicate_floor is not None
+        else _settings.ENTITY_MERGE_ADJUDICATE_SIM
+    )
+
+    by_type: dict[str, list[dict[str, Any]]] = {}
+    for ent in entities:
+        emb = ent.get("embedding")
+        if not emb:
+            continue
+        by_type.setdefault(ent["entity_type"], []).append(ent)
+
+    pairs: list[MergePair] = []
+    for etype, group in by_type.items():
+        if len(group) < _MIN_PAIR_GROUP:
+            continue
+        matrix = np.asarray(
+            [_normalize_vec(list(ent["embedding"])) for ent in group],
+            dtype=np.float32,
+        )
+        sims = matrix @ matrix.T
+        rows, cols = np.triu_indices(len(group), k=1)
+        flat = sims[rows, cols]
+        keep = np.where(flat >= floor)[0]
+        for k in keep:
+            i = int(rows[k])
+            j = int(cols[k])
+            sim = float(flat[k])
+            a, b = group[i], group[j]
+            # Canonical pair order: lexicographically smaller id first.
+            if a["canonical_id"] > b["canonical_id"]:
+                a, b = b, a
+            band = "auto" if sim >= auto else "adjudicate"
+            pairs.append(
+                MergePair(
+                    a_id=a["canonical_id"],
+                    b_id=b["canonical_id"],
+                    a_name=a["name"],
+                    b_name=b["name"],
+                    entity_type=etype,
+                    similarity=sim,
+                    band=band,
+                )
+            )
+
+    pairs.sort(key=lambda p: p.similarity, reverse=True)
+    return pairs
+
+
+def build_entity_merge_adjudication_messages(
+    pairs: list[MergePair],
+    contexts: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    """Compact merge/keep prompt for a batch of borderline pairs.
+
+    The model sees each pair's two surface names plus (optional) short context
+    snippets and returns a JSON verdict list. Deliberately terse: this runs
+    once per borderline pair and cost is bounded per run.
+    """
+    ctx = contexts or {}
+    lines: list[str] = []
+    for idx, pair in enumerate(pairs):
+        a_ctx = ctx.get(pair.a_id, "")
+        b_ctx = ctx.get(pair.b_id, "")
+        a_suffix = f" ({a_ctx[:_CONTEXT_SNIPPET_CHARS]})" if a_ctx else ""
+        b_suffix = f" ({b_ctx[:_CONTEXT_SNIPPET_CHARS]})" if b_ctx else ""
+        lines.append(
+            f'{idx}. type={pair.entity_type}: '
+            f'"{pair.a_name}"{a_suffix} vs "{pair.b_name}"{b_suffix}'
+        )
+    system = (
+        "You de-duplicate a knowledge graph. For each numbered pair decide "
+        "whether the two names refer to the SAME real-world entity. Only answer "
+        '"merge" when you are confident they are the same; otherwise "keep". '
+        'Reply with JSON only: {"results": [{"index": <int>, "decision": '
+        '"merge"|"keep"}]}.'
+    )
+    user = "Pairs:\n" + "\n".join(lines)
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def _parse_adjudication(raw: str, count: int) -> dict[int, str]:
+    """Parse the model's JSON verdict list into {index: decision}.
+
+    Conservative: any index not explicitly returned as ``"merge"`` defaults to
+    ``"keep"`` (a parse failure never triggers a merge).
+    """
+    decisions: dict[int, str] = {}
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        newline = text.find("\n")
+        if newline != -1:
+            text = text[newline + 1 :]
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError) as exc:
+        log_swallowed_error(
+            "core.agents.entity_resolution._parse_adjudication", exc,
+            context={"raw_prefix": raw[:_CONTEXT_SNIPPET_CHARS]},
+        )
+        return decisions
+    results = parsed.get("results") if isinstance(parsed, dict) else None
+    if not isinstance(results, list):
+        return decisions
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        idx = item.get("index")
+        decision = item.get("decision")
+        if isinstance(idx, int) and 0 <= idx < count and decision == "merge":
+            decisions[idx] = "merge"
+    return decisions
+
+
+async def adjudicate_merge_pairs(
+    pairs: list[MergePair],
+    *,
+    contexts: dict[str, str] | None = None,
+    llm_call: Callable[..., Awaitable[str]] | None = None,
+    max_pairs: int | None = None,
+    batch_size: int | None = None,
+) -> list[MergePair]:
+    """Send borderline pairs to the internal LLM; return the confirmed merges.
+
+    Bounded per run: at most ``max_pairs`` (default
+    ``ENTITY_MERGE_ADJUDICATION_MAX_PAIRS``) pairs are adjudicated, in batches
+    of ``batch_size`` (default ``ENTITY_MERGE_ADJUDICATION_BATCH``). A batch
+    that errors or fails to parse yields NO merges (conservative). ``llm_call``
+    defaults to :func:`core.utils.internal_llm.call_internal_llm` and is
+    injectable for tests.
+    """
+    if not pairs:
+        return []
+
+    if llm_call is None:
+        from core.utils.internal_llm import call_internal_llm  # noqa: PLC0415
+        llm_call = call_internal_llm
+
+    cap = (
+        max_pairs
+        if max_pairs is not None
+        else _settings.ENTITY_MERGE_ADJUDICATION_MAX_PAIRS
+    )
+    batch = (
+        batch_size
+        if batch_size is not None
+        else _settings.ENTITY_MERGE_ADJUDICATION_BATCH
+    )
+    batch = max(1, int(batch))
+    bounded = list(pairs)[: max(0, int(cap))]
+
+    confirmed: list[MergePair] = []
+    for start in range(0, len(bounded), batch):
+        window = bounded[start : start + batch]
+        messages = build_entity_merge_adjudication_messages(window, contexts)
+        try:
+            raw = await llm_call(
+                messages,
+                stage="entity_merge_adjudication",
+                temperature=0.0,
+                max_tokens=_ADJUDICATION_MAX_TOKENS,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad batch must not abort the sweep
+            log_swallowed_error(
+                "core.agents.entity_resolution.adjudicate_merge_pairs", exc,
+                context={"batch_start": start},
+            )
+            continue
+        decisions = _parse_adjudication(raw, len(window))
+        for i, pair in enumerate(window):
+            if decisions.get(i) == "merge":
+                confirmed.append(pair)
+    return confirmed

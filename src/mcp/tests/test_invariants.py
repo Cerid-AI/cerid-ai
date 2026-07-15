@@ -137,3 +137,62 @@ def test_invariants_healthy_flag_true_when_all_good():
         assert snap["nli_model_loaded"] is True
     finally:
         nli._MODEL_LOADED = prior
+
+
+# ---------------------------------------------------------------------------
+# Bi-temporal :Fact orphan invariant (m0004/m0006) — B4
+# ---------------------------------------------------------------------------
+
+def _mk_neo4j_fact_orphans(count: int) -> MagicMock:
+    """A driver mock returning `count` for the :Fact-orphan COUNT query,
+    isolated from the verification-report-orphan probe's mock shape."""
+    neo4j = MagicMock()
+    neo4j.session().__enter__().run.return_value.single.return_value = {
+        "orphans": count
+    }
+    return neo4j
+
+
+def test_probe_fact_orphans_zero_when_no_facts() -> None:
+    """No writer exists yet (m0006 is schema-only) — an empty graph (no
+    :Fact nodes at all) must report 0, not an error. The Cypher's own
+    MATCH-on-absent-label semantics guarantee this; the probe adds no
+    special-casing."""
+    from app.startup.invariants import _probe_fact_orphans
+
+    neo4j = _mk_neo4j_fact_orphans(0)
+    result = _probe_fact_orphans(neo4j)
+    assert result == {"fact_orphans": 0}
+
+
+def test_probe_fact_orphans_surfaces_orphan_count() -> None:
+    """A :Fact with no inbound :HAS_FACT edge is a writer-regression
+    signal — the probe must surface the count, mirroring
+    verification_report_orphans."""
+    from app.startup.invariants import _probe_fact_orphans
+
+    neo4j = _mk_neo4j_fact_orphans(3)
+    result = _probe_fact_orphans(neo4j)
+    assert result == {"fact_orphans": 3}
+
+
+def test_invariants_snapshot_includes_fact_orphans() -> None:
+    """run_invariants wires _probe_fact_orphans in beside the
+    verification-orphan probe — fact_orphans must appear in the full
+    snapshot and must NOT flip healthy_invariants (non-critical, same
+    treatment as verification_report_orphans)."""
+    from app.startup.invariants import run_invariants
+    from core.utils import nli
+
+    prior = getattr(nli, "_MODEL_LOADED", False)
+    nli._MODEL_LOADED = True
+    try:
+        chroma = _mk_chroma([{"name": "domain_general", "count": 50}])
+        redis = MagicMock()
+        neo4j = _mk_neo4j(orphans=0)
+
+        snap = run_invariants(chroma, redis, neo4j)
+        assert "fact_orphans" in snap
+        assert snap["healthy_invariants"] is True
+    finally:
+        nli._MODEL_LOADED = prior

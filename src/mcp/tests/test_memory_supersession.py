@@ -95,3 +95,58 @@ async def test_recall_unaffected_without_neo4j() -> None:
     with patch("core.utils.nli.nli_score", return_value=_HIGH_ENTAILMENT):
         results = await recall_memories("q", chroma, None, top_k=10)
     assert {m["memory_id"] for m in results} == {"a", "b"}
+
+
+# ---------------------------------------------------------------------------
+# Interval admission (bi-temporal :Fact layer, plan D3) — dark behind
+# ENABLE_FACT_INVALIDATION_FILTER (default off). A CLOSED interval (non-empty
+# valid_to) is dropped only when the flag is on; open / missing valid_to is
+# always admitted (back-compat with pre-Phase-C memories).
+# ---------------------------------------------------------------------------
+
+
+def _chroma_valid_to(valid_to_by_id: dict[str, str | None]) -> MagicMock:
+    metas = []
+    for aid, vt in valid_to_by_id.items():
+        meta = {
+            "artifact_id": aid,
+            "memory_type": "empirical",
+            "valid_from": "2025-01-01T00:00:00Z",
+            "access_count": "0",
+            "summary": f"summary-{aid}",
+        }
+        if vt is not None:  # None = key absent (pre-Phase-C memory)
+            meta["valid_to"] = vt
+        metas.append(meta)
+    ids = list(valid_to_by_id.keys())
+    collection = MagicMock()
+    collection.query.return_value = {
+        "ids": [ids],
+        "documents": [[f"doc {aid}" for aid in ids]],
+        "distances": [[0.1] * len(ids)],
+        "metadatas": [metas],
+    }
+    client = MagicMock()
+    client.get_or_create_collection.return_value = collection
+    return client
+
+
+@pytest.mark.asyncio
+async def test_recall_admits_closed_interval_when_flag_off() -> None:
+    # Default flag OFF → valid_to is ignored, every candidate admitted
+    # (behaviour byte-identical to pre-Phase-D recall).
+    chroma = _chroma_valid_to({"open": "", "closed": "2026-05-01", "missing": None})
+    with patch("core.utils.nli.nli_score", return_value=_HIGH_ENTAILMENT):
+        results = await recall_memories("q", chroma, None, top_k=10)
+    assert {m["memory_id"] for m in results} == {"open", "closed", "missing"}
+
+
+@pytest.mark.asyncio
+async def test_recall_drops_closed_interval_when_flag_on(monkeypatch) -> None:
+    monkeypatch.setattr("config.features.ENABLE_FACT_INVALIDATION_FILTER", True)
+    chroma = _chroma_valid_to({"open": "", "closed": "2026-05-01", "missing": None})
+    with patch("core.utils.nli.nli_score", return_value=_HIGH_ENTAILMENT):
+        results = await recall_memories("q", chroma, None, top_k=10)
+    got = {m["memory_id"] for m in results}
+    assert "closed" not in got          # closed interval dropped
+    assert got == {"open", "missing"}   # open + missing (back-compat) admitted

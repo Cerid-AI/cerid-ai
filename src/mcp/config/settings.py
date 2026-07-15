@@ -469,6 +469,11 @@ GRAPH_RELATIONSHIP_TYPES = [
     "WIKILINKS_TO",     # Obsidian-style [[wikilink]] in markdown body (C2.1)
     "EMBEDS",           # Obsidian-style ![[embed]] / transclusion (C2.1)
     "HAS_ATTACHMENT",   # parent email → child artifact extracted from attachment (C2.4)
+    "HAS_FACT",         # (:Entity)-[:HAS_FACT]->(:Fact) — bi-temporal fact layer (m0004/m0006)
+    "FACT_OBJECT",      # (:Fact)-[:FACT_OBJECT]->(:Entity) — the fact's object entity, when binary
+    "FACT",             # reserved: provenance edge from a source Artifact/Conversation to
+                         # its extracted :Fact (m0004's earlier relationship-model exploration,
+                         # not yet emitted by any writer — Phase C decides if it's needed)
 ]
 
 # ---------------------------------------------------------------------------
@@ -486,6 +491,38 @@ ENTITY_MIN_CONFIDENCE: float = float(os.getenv("ENTITY_MIN_CONFIDENCE", "0.5"))
 # ENTITY_RESOLUTION_SIM: cosine similarity threshold for Tier-C merge (0.0–1.0).
 ENTITY_RESOLUTION_EMBED: bool = os.getenv("ENTITY_RESOLUTION_EMBED", "false").lower() in ("true", "1", "yes")
 ENTITY_RESOLUTION_SIM: float = float(os.getenv("ENTITY_RESOLUTION_SIM", "0.92"))
+
+# Phase 4.2 — embedding-based entity RESOLUTION (real merges, not just
+# connectivity). The candidate generator buckets high-similarity entity pairs
+# into three bands:
+#   sim >= ENTITY_MERGE_AUTO_SIM          → auto-merge (no LLM cost)
+#   ENTITY_MERGE_ADJUDICATE_SIM <= sim
+#                       < ENTITY_MERGE_AUTO_SIM → LLM adjudication (merge/keep)
+#   sim <  ENTITY_MERGE_ADJUDICATE_SIM     → no action (SIMILAR_TO connectivity
+#                                            already links them; not a merge)
+# The adjudication band is bounded per run so a large graph cannot blow the
+# per-run LLM budget: at most ENTITY_MERGE_ADJUDICATION_MAX_PAIRS pairs are
+# sent, in batches of ENTITY_MERGE_ADJUDICATION_BATCH per call.
+ENTITY_MERGE_AUTO_SIM: float = float(os.getenv("ENTITY_MERGE_AUTO_SIM", "0.94"))
+ENTITY_MERGE_ADJUDICATE_SIM: float = float(os.getenv("ENTITY_MERGE_ADJUDICATE_SIM", "0.86"))
+ENTITY_MERGE_ADJUDICATION_MAX_PAIRS: int = int(os.getenv("ENTITY_MERGE_ADJUDICATION_MAX_PAIRS", "50"))
+ENTITY_MERGE_ADJUDICATION_BATCH: int = int(os.getenv("ENTITY_MERGE_ADJUDICATION_BATCH", "5"))
+# Chunk size for the merge/unmerge edge-repoint UNWINDs. A heavily-connected
+# entity can carry >10k adjacent edges (~250k SIMILAR_TO at k=5 graph-wide);
+# re-pointing them in one UNWIND transaction risks OOM, so every repoint is
+# paginated at this batch size (fixes the >10k UNWIND TODO called out by the
+# Phase-4 audit before ENTITY_RESOLUTION_EMBED can be flipped on).
+ENTITY_MERGE_UNWIND_CHUNK: int = int(os.getenv("ENTITY_MERGE_UNWIND_CHUNK", "5000"))
+
+# Validate the resolution bands are ordered and in range so a misconfigured
+# env cannot invert the auto/adjudicate split (which would auto-merge the
+# band that was meant for human/LLM review).
+assert 0.0 <= ENTITY_MERGE_ADJUDICATE_SIM <= ENTITY_MERGE_AUTO_SIM <= 1.0, (
+    "ENTITY_MERGE thresholds must satisfy "
+    "0 <= ADJUDICATE_SIM <= AUTO_SIM <= 1: "
+    f"adjudicate={ENTITY_MERGE_ADJUDICATE_SIM} auto={ENTITY_MERGE_AUTO_SIM}"
+)
+assert ENTITY_MERGE_UNWIND_CHUNK > 0, "ENTITY_MERGE_UNWIND_CHUNK must be positive"
 
 # Validate relationship type names are safe for Cypher injection
 for _rt in GRAPH_RELATIONSHIP_TYPES:
@@ -813,6 +850,12 @@ SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
 SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
+# Phase E (bi-temporal memory plan) — once-per-session summarization scan
+# cadence. Default every 15 min; empty string disables the cron. The scan is
+# dark behind ENABLE_SESSION_SUMMARIZATION (config/features.py, default OFF), so
+# this cron is a no-op until the flag flips. Idle threshold + per-scan cap are
+# read at scan time via SESSION_SUMMARY_IDLE_MIN / SESSION_SUMMARY_SCAN_LIMIT.
+SCHEDULE_SESSION_SUMMARIES = os.getenv("SCHEDULE_SESSION_SUMMARIES", "*/15 * * * *")
 # Phase S4 of the unified GA program — K-program metrics snapshot.
 # Default midnight UTC. Empty string disables (operator may prefer a
 # host-side cron / launchd plist over the in-process scheduler).
