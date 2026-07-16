@@ -881,6 +881,21 @@ async def lifespan(app: FastAPI):
         log_swallowed_error('app.main', e)
         logger.warning("Startup dim check errored (non-fatal): %s", e)
 
+    # CL-7/AF-012: restore operator-created :Domain nodes into runtime config so a
+    # domain added via POST /taxonomy/domain survives a restart — without this its
+    # live consumers (ingest domain-clamp, clear_domain, reembed) reverted to the
+    # static domain set and orphaned the custom collection.
+    try:
+        # get_neo4j is already module-imported (top of file); a local re-import
+        # here would shadow it and break the earlier lifespan use (F823).
+        from app.startup.domain_rehydration import rehydrate_runtime_domains
+        await asyncio.get_running_loop().run_in_executor(
+            None, rehydrate_runtime_domains, get_neo4j(),
+        )
+    except Exception as e:
+        log_swallowed_error('app.main', e)
+        logger.warning("Domain rehydration errored (non-fatal): %s", e)
+
     # Warm up NLI model — the slow one (~45s on cold start due to model download).
     # Must use run_in_executor: running it directly blocked the event loop for the
     # entire download duration, causing healthcheck timeouts during startup.

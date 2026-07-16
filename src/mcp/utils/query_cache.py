@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -103,3 +104,61 @@ def invalidate_all() -> None:
 async def invalidate_cache_non_blocking() -> None:
     """Async wrapper — runs invalidate_all() in a thread to avoid blocking the event loop."""
     await asyncio.to_thread(invalidate_all)
+
+
+def invalidate_query_caches(trigger: str, redis: Any | None = None) -> None:
+    """Bust BOTH query-result caches in one call — the single invalidation
+    contract every content mutation funnels through (audit CL-14).
+
+    - C1 (this module, ``qcache:*``) is app-bound and always uses the app Redis
+      singleton via :func:`get_redis`.
+    - C2 (``core.retrieval.semantic_cache``, ``semcache:*``) takes a Redis handle;
+      the ``redis`` arg routes only C2 and defaults to :func:`get_redis` when omitted.
+
+    Both underlying invalidators are internally defensive, so a failure of one
+    cache never aborts the other. ``trigger`` names the mutation for the
+    ``cache_invalidation_count`` metric. The graph serving cache (C3,
+    ``cerid:graph:emb3d:*``) is deliberately NOT busted here — it is a nightly
+    viz cache owned by scheduler jobs (CL-6); content-removal busts it separately.
+    """
+    # Lazy import: keep this app-layer util free of a module-load-time core dep.
+    from core.retrieval.semantic_cache import invalidate_cache
+
+    invalidate_all()  # C1 — uses get_redis() internally
+    try:
+        client = redis if redis is not None else get_redis()
+    except (RetrievalError, RuntimeError, OSError) as exc:
+        logger.warning("invalidate_query_caches: redis unavailable for C2 (trigger=%s): %s", trigger, exc)
+        return
+    invalidate_cache(client, trigger)  # C2 — internally defensive
+
+
+async def invalidate_query_caches_non_blocking(trigger: str, redis: Any | None = None) -> None:
+    """Async wrapper — runs :func:`invalidate_query_caches` in a thread so hot
+    ingest paths never block the event loop on the SCAN + chroma clear."""
+    await asyncio.to_thread(invalidate_query_caches, trigger, redis)
+
+
+def _threaded_invalidate(trigger: str, redis: Any | None) -> None:
+    """Daemon-thread target: fully guarded so NO exception escapes the thread
+    (an unhandled thread exception would surface as noise and, worse, a redis
+    blip must never crash a background cache bust)."""
+    try:
+        invalidate_query_caches(trigger, redis)
+    except Exception:  # noqa: BLE001 — fire-and-forget; swallow everything in the thread
+        logger.exception("invalidate_query_caches_threaded.failed")
+        sentry_sdk.capture_exception()
+
+
+def invalidate_query_caches_threaded(trigger: str, redis: Any | None = None) -> None:
+    """Fire-and-forget combined bust for SYNC call sites with no running event
+    loop — the ingest chokepoints run in thread-pool workers, so they cannot
+    await. Runs the full C1+C2 invalidation on a daemon thread (mirroring the
+    semantic cache's own non-blocking idiom) so the caller never blocks on the
+    SCANs. This is the single contract that replaced the prior C2-only hooks."""
+    threading.Thread(
+        target=_threaded_invalidate,
+        args=(trigger, redis),
+        daemon=True,
+        name=f"qcache-invalidate:{trigger[:40]}",
+    ).start()

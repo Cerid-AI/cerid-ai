@@ -234,10 +234,11 @@ SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE = int(os.getenv("SOURCE_POLL_MAX_ARTIFACTS_
 SCHEDULE_EMAIL_POLL = os.getenv("SCHEDULE_EMAIL_POLL", "*/15 * * * *")
 
 # Contextual retrieval per-tenant monthly USD budget (Workstream E
-# Phase 3). When breached, the circuit breaker disables further
-# contextual generation for that tenant for the rest of the calendar
-# month. Configurable; default $50 aligns with the Anthropic-published
-# cost model (~$1.02/M ingested tokens with prompt-cache hits).
+# Phase 3). Advisory only — no enforcement currently reads this value;
+# breaching it does not trip a circuit breaker or disable contextual
+# generation. Configurable; default $50 aligns with the
+# Anthropic-published cost model (~$1.02/M ingested tokens with
+# prompt-cache hits).
 CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH = float(
     os.getenv("CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH", "50.0"),
 )
@@ -694,7 +695,9 @@ CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 5  # max chunks from same artifact in assemble
 # ---------------------------------------------------------------------------
 QUALITY_WEIGHT_SUMMARY = 0.30       # weight for summary quality dimension
 QUALITY_WEIGHT_KEYWORDS = 0.25      # weight for keyword quality dimension
-QUALITY_WEIGHT_FRESHNESS = 0.20     # weight for freshness dimension
+# QUALITY_WEIGHT_FRESHNESS lives in config/constants.py — the v2 scorer
+# (core/utils/quality.py) imports it from there; this module must not
+# shadow it with a divergent value.
 QUALITY_WEIGHT_COMPLETENESS = 0.25  # weight for metadata completeness dimension
 QUALITY_SUMMARY_MIN_CHARS = 50      # below this: linear ramp to 0
 QUALITY_SUMMARY_MAX_CHARS = 500     # above this: gentle penalty
@@ -902,6 +905,9 @@ ROUTING_TIERS_OVERLAY_PATH = os.getenv(
 # Folder Scanning
 # ---------------------------------------------------------------------------
 SCAN_PATHS = os.getenv("SCAN_PATHS", ARCHIVE_PATH)  # colon-separated directories to scan
+# Legacy-path only: honored by _run_folder_scan()'s SCAN_PATHS fallback
+# branch (no watched folders registered). Folders registered via the
+# watched-folders store bypass these two filters entirely.
 SCAN_MIN_QUALITY = float(os.getenv("SCAN_MIN_QUALITY", "0.4"))  # min quality score (0-1)
 SCAN_MAX_FILE_SIZE_MB = int(os.getenv("SCAN_MAX_FILE_SIZE_MB", "50"))
 SCAN_EXCLUDE_PATTERNS = [p for p in os.getenv("SCAN_EXCLUDE_PATTERNS", "").split(",") if p]
@@ -915,7 +921,6 @@ SCHEDULE_INBOX_TRIAGE = os.getenv("SCHEDULE_INBOX_TRIAGE", "*/15 * * * *")
 # Per-user timezone resolution tracked for Phase K.2 (currently
 # everyone gets server-UTC-7am).
 SCHEDULE_DAILY_DIGEST = os.getenv("SCHEDULE_DAILY_DIGEST", "0 7 * * *")
-SCHEDULE_WATCHED_RESCAN = os.getenv("SCHEDULE_WATCHED_RESCAN", "")  # cron expr, e.g. "0 */6 * * *"=every 6h, empty=disabled
 # Phase 5.3 — Track A enrichment backfill. Gated OFF by default: the job
 # calls the classifier per artifact, so the operator opts in once after
 # Slice 5.1/5.2 land (CERID_BACKFILL_ENRICHMENT_ENABLED=true). Nightly until
@@ -924,7 +929,6 @@ SCHEDULE_WATCHED_RESCAN = os.getenv("SCHEDULE_WATCHED_RESCAN", "")  # cron expr,
 SCHEDULE_BACKFILL_ENRICHMENT = os.getenv("SCHEDULE_BACKFILL_ENRICHMENT", "0 3 * * *")  # 3 AM UTC
 BACKFILL_ENRICHMENT_BATCH = int(os.getenv("BACKFILL_ENRICHMENT_BATCH", "100"))
 BACKFILL_ENRICHMENT_PACE_S = float(os.getenv("BACKFILL_ENRICHMENT_PACE_S", "0.5"))
-SCHEDULE_MODEL_CATALOG = os.getenv("SCHEDULE_MODEL_CATALOG", "")  # cron expr, e.g. "0 6 * * *"=daily 6 AM, empty=disabled
 ENABLE_AI_TRIAGE = os.getenv("ENABLE_AI_TRIAGE", "").lower() in ("true", "1", "yes")  # Ollama content triage scoring
 
 # ---------------------------------------------------------------------------
@@ -1016,12 +1020,14 @@ MEMORY_QUEUE_MODE = os.getenv("MEMORY_QUEUE_MODE", "sync").lower()
 EMBEDDING_MODEL_VERSION = os.getenv("EMBEDDING_MODEL_VERSION", EMBEDDING_MODEL)
 
 # Per-domain embedding-model version overrides (Workstream E Phase 5c).
-# Empty by default — the global EMBEDDING_MODEL_VERSION applies. During a
-# dual-collection migration, the operator stages the new version here for
-# the target domain, runs scripts/reembed_collection.py to dual-write,
-# then keeps the override post-cutover so query routing reads from the
-# versioned collection. See docs/EMBEDDING_MIGRATIONS.md for the full
-# playbook.
+# Empty by default — the global EMBEDDING_MODEL_VERSION applies. This is a
+# source-level dict, not an env var — there is no EMBEDDING_MODEL_VERSIONS_
+# PER_DOMAIN environment variable to set. During a dual-collection
+# migration, the operator edits this literal directly for the target
+# domain, runs scripts/reembed_collection.py to dual-write, then keeps the
+# override post-cutover (requires a code change + redeploy) so query
+# routing reads from the versioned collection. See
+# docs/EMBEDDING_MIGRATIONS.md for the full playbook.
 EMBEDDING_MODEL_VERSIONS_PER_DOMAIN: dict[str, str] = {}
 
 

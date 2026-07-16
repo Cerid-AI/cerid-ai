@@ -208,6 +208,11 @@ class DeriveDomainsJob(BaseJob):
         removed = await asyncio.to_thread(self._write_orphan_removes, driver, orphan_ids)
         await progress_cb(1.0)
 
+        # Bust the emb3d serving cache now that the domain writes are committed
+        # (AF-036). This job is the sole owner of the bust for the domain pass —
+        # the scheduler no longer busts at enqueue time.
+        self._bust_serving_cache()
+
         logger.info(
             "derive_domains.done written=%d orphans_cleared=%d",
             written,
@@ -222,6 +227,30 @@ class DeriveDomainsJob(BaseJob):
                 "orphans_cleared": removed,
             },
         )
+
+    def _bust_serving_cache(self) -> None:
+        """Drop the /graph/embeddings/3d Redis cache after writing domain fields.
+
+        Mirrors ``compute_umap_3d._bust_serving_cache``. Lives in the job (not
+        the scheduler trigger) so every execution path — nightly cron, manual
+        run-now — leaves a fresh cache and Constellation picks up the new domain
+        colouring on its next poll. AF-036: this job is now the sole owner of the
+        bust for the domain pass.
+        """
+        try:
+            from app.deps import get_redis  # noqa: PLC0415
+
+            redis = get_redis()
+            if redis is None:
+                return
+            dropped = 0
+            for key in redis.scan_iter(match="cerid:graph:emb3d:*", count=200):
+                redis.delete(key)
+                dropped += 1
+            if dropped:
+                logger.info("derive_domains: busted %d serving-cache key(s)", dropped)
+        except Exception as exc:  # noqa: BLE001 — cache bust is best-effort
+            log_swallowed_error("processor.derive_domains.cache_bust", exc)
 
     # ------------------------------------------------------------------
     # Read

@@ -46,6 +46,9 @@ class JobState(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     PAUSED = "paused"
+    # Terminal state for a job stopped by a cost-cap / budget hold (CL-5/AF-017).
+    # Distinct from COMPLETED so a held job is never mistaken for a success.
+    HELD = "held"
 
 
 # Allowed (from_state → to_state) pairs. Enforced by ``validate_transition``.
@@ -54,6 +57,7 @@ _VALID_TRANSITIONS: frozenset[tuple[JobState, JobState]] = frozenset(
         (JobState.PENDING, JobState.RUNNING),
         (JobState.RUNNING, JobState.COMPLETED),
         (JobState.RUNNING, JobState.FAILED),
+        (JobState.RUNNING, JobState.HELD),
         (JobState.PENDING, JobState.PAUSED),
         (JobState.PAUSED, JobState.PENDING),
     }
@@ -112,6 +116,12 @@ class JobRecord:
     requires_llm: bool = False
     model: str | None = None
     error_message: str | None = None
+    # CL-5: the worker/queue persist a completed job's ``JobResult.metadata`` here
+    # (job-type-specific outcome data — entity counts, skip reasons, held marker)
+    # and the latest progress checkpoint, so ``GET /processor/recent`` can finally
+    # surface both. Declared as real fields (slots=True forbids monkey-setting).
+    metadata: dict[str, Any] = field(default_factory=dict)
+    progress: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict for Redis / JSON persistence."""
@@ -134,6 +144,8 @@ class JobRecord:
             "requires_llm": self.requires_llm,
             "model": self.model,
             "error_message": self.error_message,
+            "metadata": self.metadata,
+            "progress": self.progress,
         }
 
     @classmethod
@@ -164,6 +176,8 @@ class JobRecord:
             requires_llm=data.get("requires_llm", False),
             model=data.get("model"),
             error_message=data.get("error_message"),
+            metadata=data.get("metadata") or {},
+            progress=float(data.get("progress") or 0.0),
         )
 
 

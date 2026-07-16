@@ -144,15 +144,13 @@ class TestClearDomain:
         assert res.status_code == 404
 
     def test_clear_domain_success(self, client: TestClient):
-        mock_artifacts = [
-            {"id": "art-1", "filename": "test.py"},
-            {"id": "art-2", "filename": "test2.py"},
-        ]
-        delete_result = {"deleted": True, "artifact_id": "art-1", "domain": "code", "filename": "test.py", "chunk_ids": ["c1", "c2"]}
-
+        # AF-093: clear_domain now deletes the whole domain in ONE domain-scoped
+        # DETACH DELETE via delete_artifacts_by_domain, not a per-artifact loop.
         with (
-            patch("app.routers.kb_admin.list_artifacts", return_value=mock_artifacts),
-            patch("app.routers.kb_admin.delete_artifact", return_value=delete_result),
+            patch(
+                "app.routers.kb_admin.delete_artifacts_by_domain",
+                return_value={"deleted": 2, "chunks": 4},
+            ) as mock_delete_domain,
             patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
             patch("app.routers.kb_admin.get_chroma"),
             patch("app.routers.kb_admin.get_neo4j"),
@@ -168,7 +166,9 @@ class TestClearDomain:
         assert res.status_code == 200
         data = res.json()
         assert data["artifacts_deleted"] == 2
+        assert data["chunks_removed"] == 4
         assert data["domain"] == "code"
+        mock_delete_domain.assert_called_once()
 
 
 class TestDeleteArtifact:

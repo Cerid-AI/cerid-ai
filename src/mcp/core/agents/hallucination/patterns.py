@@ -231,6 +231,38 @@ IGNORANCE_ADMISSION_PATTERNS = [
     ),
 ]
 
+# First-person capability / recall admissions the noun-anchored
+# ``IGNORANCE_ADMISSION_PATTERNS`` above miss. Those patterns require the model
+# to name a data/knowledge/information noun ("I don't have *information* about
+# X"); these fire on a bare inability ("I cannot access X", "I cannot recall X")
+# where the object is the very thing the model is admitting ignorance about.
+# This is the shape of the verdict-harness ignorance residue V-42 / IG-04 /
+# IG-08, whose labeled fragments ("cannot access real-time data", "cannot access
+# real-time GPS coordinates", "cannot recall who painted the Mona Lisa") the
+# narrow set never surfaced — grading fell through to LLM-extraction luck.
+#
+# Kept a SEPARATE list, not merged into IGNORANCE_ADMISSION_PATTERNS, because
+# the two are used with different guards: extraction surfaces an inability
+# admission only when it asserts no concrete numeric value (so a hedged factual
+# answer — "I can't recall the exact figure, but it's 8.4 million" — keeps its
+# number and stays factual), whereas the noun-anchored set surfaces
+# unconditionally. Verification's ``_is_ignorance_admission`` unions both so a
+# surfaced inability admission still reaches the ignorance verdict path.
+INABILITY_ADMISSION_PATTERNS = [
+    # "I cannot / can't / could not / am unable to access <anything>"
+    re.compile(
+        r"I (?:cannot|can'?t|could not|couldn'?t|am unable to|'m unable to) "
+        r"access\b",
+        re.I,
+    ),
+    # "I cannot / can't / could not / don't recall|remember <X>"
+    re.compile(
+        r"I (?:cannot|can'?t|could not|couldn'?t|do not|don'?t) "
+        r"(?:recall|remember)\b",
+        re.I,
+    ),
+]
+
 # ---------------------------------------------------------------------------
 # Evasion patterns
 # ---------------------------------------------------------------------------
@@ -443,6 +475,18 @@ def _is_recency_claim(claim: str) -> bool:
     return any(p.search(claim) for p in STALE_KNOWLEDGE_PATTERNS)
 
 
+def _is_inability_admission(claim: str) -> bool:
+    """Detect a first-person capability/recall inability admission.
+
+    Broader than the noun-anchored ``IGNORANCE_ADMISSION_PATTERNS`` — matches
+    "I cannot access X" / "I cannot recall X" where the object is the thing the
+    model is admitting it cannot supply. Kept separate so extraction can gate
+    surfacing on the absence of an asserted numeric value; see
+    ``INABILITY_ADMISSION_PATTERNS``.
+    """
+    return any(p.search(claim) for p in INABILITY_ADMISSION_PATTERNS)
+
+
 def _is_ignorance_admission(claim: str) -> bool:
     """Detect whether a claim is an admission of ignorance by the generating model.
 
@@ -451,8 +495,15 @@ def _is_ignorance_admission(claim: str) -> bool:
     assertion.  Such claims need special verification: instead of checking
     whether the model is being honest, we check whether the underlying facts
     actually exist.
+
+    Unions the noun-anchored admissions with the broader first-person inability
+    admissions ("I cannot access/recall X") so a surfaced inability admission
+    routes to the ignorance verdict path in verification.
     """
-    return any(p.search(claim) for p in IGNORANCE_ADMISSION_PATTERNS)
+    return (
+        any(p.search(claim) for p in IGNORANCE_ADMISSION_PATTERNS)
+        or _is_inability_admission(claim)
+    )
 
 
 def _is_complex_claim(claim: str) -> bool:

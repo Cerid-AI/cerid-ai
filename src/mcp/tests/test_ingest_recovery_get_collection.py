@@ -61,20 +61,22 @@ async def test_scan_orphans_calls_get_collection_with_kwargs() -> None:
 
 
 def test_recover_orphan_source_uses_get_collection_kwarg() -> None:
-    """Source-level pin: recover_orphan calls get_collection with name= kwarg.
+    """Source-level pin: the recovery path calls get_collection with name= kwarg.
 
-    Calling recover_orphan end-to-end requires mocking 6+ internal helpers
-    that change shape between releases. The bug class we care about is
-    purely the call signature, so a source-string match catches the
-    regression without coupling to the recovery state machine.
+    The get_collection call lives in ``recover_artifact`` (the artifact-granular
+    recovery entry point; ``recover_orphan`` is a thin shim delegating to it).
+    Calling it end-to-end requires mocking 6+ internal helpers that change shape
+    between releases. The bug class we care about is purely the call signature,
+    so a source-string match catches the regression without coupling to the
+    recovery state machine.
     """
     import inspect
 
     from app.services import ingest_recovery
 
-    src = inspect.getsource(ingest_recovery.recover_orphan)
+    src = inspect.getsource(ingest_recovery.recover_artifact)
     assert "chroma.get_collection, name=" in src or "chroma.get_collection, name =" in src, (
-        "recover_orphan must call chroma.get_collection with name= kwarg "
+        "recover_artifact must call chroma.get_collection with name= kwarg "
         "(positional rejected by _EmbeddingAwareClient proxy at "
         "app/deps.py:90)"
     )

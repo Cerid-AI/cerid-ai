@@ -18,8 +18,9 @@ list[float]) derived from the Chroma chunk embeddings referenced by its
    c. Fallback: if no chunk vectors are retrievable, embed the entity's
       canonical name via the ONNX embedding function.
    d. Skip: if even the name-embed path is unavailable, skip without writing.
-3. Batch-write ``embedding`` (JSON list[float]), ``embedding_model`` (settings
-   name), and ``embedding_computed_at`` (ISO) back to Neo4j via UNWIND.
+3. Batch-write ``embedding`` (JSON list[float]) back to Neo4j via UNWIND.
+   (The ``embedding_model`` / ``embedding_computed_at`` provenance fields were
+   removed as unread — AF-063.)
 
 Runs nightly BEFORE ``compute_umap_3d`` so semantic kNN edges and layout both
 pick up fresh embeddings.
@@ -29,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -51,8 +51,7 @@ _CHUNK_BATCH_SIZE = 200
 class ComputeEntityEmbeddingsJob(BaseJob):
     """Nightly job: compute and store one embedding vector per Entity node.
 
-    Idempotent: each run overwrites existing ``embedding`` / ``embedding_model``
-    / ``embedding_computed_at`` properties.
+    Idempotent: each run overwrites the existing ``embedding`` property.
     """
 
     job_type = "compute_entity_embeddings"
@@ -141,7 +140,6 @@ class ComputeEntityEmbeddingsJob(BaseJob):
             rows_to_write.append({
                 "id": row["id"],
                 "embedding": json.dumps(vec.tolist()),
-                "embedding_model": model_name,
             })
 
         await progress_cb(0.85)
@@ -215,18 +213,18 @@ class ComputeEntityEmbeddingsJob(BaseJob):
         """Batch-write entity embeddings via UNWIND (mirrors _write_coords pattern)."""
         if not rows:
             return
-        now = datetime.now(timezone.utc).isoformat()
+        # AF-063: only the embedding vector is stamped now. The former
+        # embedding_model / embedding_computed_at provenance was write-only
+        # (zero readers anywhere), so both SET clauses were deleted.
         cypher = """
             UNWIND $rows AS row
             MATCH (e:Entity {canonical_id: row.id})
             SET
-                e.embedding = row.embedding,
-                e.embedding_model = row.embedding_model,
-                e.embedding_computed_at = $now
+                e.embedding = row.embedding
         """
         try:
             with driver.session() as session:
-                session.run(cypher, rows=rows, now=now)
+                session.run(cypher, rows=rows)
         except (OSError, RuntimeError, ValueError) as exc:
             log_swallowed_error("compute_entity_embeddings._write_embeddings", exc)
 

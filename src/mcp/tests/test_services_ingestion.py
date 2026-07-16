@@ -224,7 +224,9 @@ class TestConcurrentDuplicate:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None  # First check passes
 
-        with patch("app.services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph, patch(
+            "app.services.content_lifecycle.remove_orphan_chunks"
+        ) as mock_rollback:
             mock_graph.find_artifact_by_filename.return_value = None
             # Simulate a constraint violation on create
             mock_graph.create_artifact.side_effect = Exception(
@@ -236,8 +238,8 @@ class TestConcurrentDuplicate:
 
         assert result["status"] == "duplicate"
         assert result["duplicate_of"] == "(concurrent)"
-        # Verify cleanup was attempted
-        collection.delete.assert_called_once()
+        # Cleanup fans across all stores via the coordinator, not just Chroma.
+        mock_rollback.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -383,23 +385,31 @@ class TestIngestRedisLogging:
 # ---------------------------------------------------------------------------
 
 class TestRollbackChromaDB:
-    """Test the compensating transaction helper."""
+    """Test the compensating transaction helper. Post-CL-2 it fans the rollback
+    across ALL chunk-bearing stores (Chroma + BM25 + SPLADE) via the
+    content-lifecycle coordinator's ``remove_orphan_chunks`` (chunk-only, no
+    Neo4j node), with cache busting skipped (staged pending chunks are never
+    retrievable). It no longer deletes only the Chroma collection directly."""
 
-    def test_deletes_chunk_ids(self):
-        collection = MagicMock()
-        _rollback_chromadb(collection, ["id1", "id2", "id3"])
-        collection.delete.assert_called_once_with(ids=["id1", "id2", "id3"])
+    def test_fans_rollback_across_stores(self):
+        with patch("app.services.content_lifecycle.remove_orphan_chunks") as mock_rollback:
+            _rollback_chromadb(["id1", "id2", "id3"], "coding")
+        mock_rollback.assert_called_once_with(
+            ["id1", "id2", "id3"], "coding", chroma=None, bust_caches=False,
+        )
 
-    def test_handles_delete_failure(self):
-        collection = MagicMock()
-        collection.delete.side_effect = Exception("ChromaDB unavailable")
-        # Should not raise — logs error instead
-        _rollback_chromadb(collection, ["id1"])
+    def test_handles_rollback_failure(self):
+        with patch(
+            "app.services.content_lifecycle.remove_orphan_chunks",
+            side_effect=Exception("stores unavailable"),
+        ):
+            # Should not raise — logs a CRITICAL orphan warning instead.
+            _rollback_chromadb(["id1"], "coding")
 
     def test_empty_chunk_ids(self):
-        collection = MagicMock()
-        _rollback_chromadb(collection, [])
-        collection.delete.assert_called_once_with(ids=[])
+        with patch("app.services.content_lifecycle.remove_orphan_chunks") as mock_rollback:
+            _rollback_chromadb([], "coding")
+        mock_rollback.assert_called_once_with([], "coding", chroma=None, bust_caches=False)
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +507,9 @@ class TestCompensatingTransaction:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("app.services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph, patch(
+            "app.services.content_lifecycle.remove_orphan_chunks"
+        ) as mock_rollback:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.side_effect = Exception(
                 "ConstraintValidationFailed content_hash uniqueness"
@@ -506,7 +518,7 @@ class TestCompensatingTransaction:
             result = ingest_content("concurrent test", domain="coding")
 
         assert result["status"] == "duplicate"
-        collection.delete.assert_called_once()
+        mock_rollback.assert_called_once()
 
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -538,15 +550,16 @@ class TestCompensatingTransaction:
 # ---------------------------------------------------------------------------
 
 class TestSemanticCacheInvalidationHook:
-    """Corpus mutations must invalidate the semantic query cache — before
-    this, ``invalidate_cache`` had no production caller at all, leaving up
-    to SEMANTIC_CACHE_TTL of stale ``/agent/query`` results after every
-    ingest/re-ingest. The hook call is a local import inside
+    """Corpus mutations must invalidate BOTH query-result caches (C1 flat +
+    C2 semantic) through the unified CL-14 contract. Before CL-14 the ingest
+    hook busted only C2, leaving the flat cache C1 stale for every service-layer
+    ingest path (AF-095). The hook call is a local import inside
     ``app.services.ingestion``, so it's mocked at its home module
-    (``core.retrieval.semantic_cache``), not at the ingestion module.
+    (``utils.query_cache.invalidate_query_caches_threaded``), not at the
+    ingestion module.
     """
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -575,7 +588,7 @@ class TestSemanticCacheInvalidationHook:
         _, kwargs = mock_sem_invalidate.call_args
         assert kwargs.get("trigger") == "ingestion.ingest_content"
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -601,7 +614,7 @@ class TestSemanticCacheInvalidationHook:
         assert result["status"] == "duplicate"
         mock_sem_invalidate.assert_not_called()
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -654,7 +667,7 @@ class TestSemanticCacheInvalidationHook:
         session.run.return_value.single.return_value = None
 
         with patch("app.services.ingestion.graph") as mock_graph, patch(
-            "core.retrieval.semantic_cache.invalidate_cache_non_blocking",
+            "utils.query_cache.invalidate_query_caches_threaded",
             side_effect=RuntimeError("cache backend unreachable"),
         ):
             mock_graph.find_artifact_by_filename.return_value = None
@@ -667,6 +680,105 @@ class TestSemanticCacheInvalidationHook:
 
 
 # ---------------------------------------------------------------------------
+# Tests: CL-1 source-node write path
+# ---------------------------------------------------------------------------
+
+class TestSourceLinking:
+    """CL-1 — ingest_content links the artifact to its :Source and bumps that
+    source's counters, but ONLY when metadata carries a source_id that resolves
+    to a real :Source node (existence-checked), so an external-capture id can
+    never create a dangling FROM_SOURCE edge or spurious counter."""
+
+    def _drive(self, filename_meta):
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            return ingest_content("content from a source", domain="coding", metadata=filename_meta)
+
+    @patch("app.db.neo4j.sources.increment_source_counters")
+    @patch("app.db.neo4j.sources.link_artifact")
+    @patch("app.db.neo4j.sources.get_source")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_links_when_source_resolves(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_get_source, mock_link, mock_incr,
+    ):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+        mock_get_source.return_value = {"id": "src-uuid", "quality_floor": 0.0}
+
+        result = self._drive({"source_id": "src-uuid"})
+
+        assert result["status"] == "success"
+        mock_get_source.assert_called()  # existence check ran
+        mock_link.assert_called_once()
+        # link_artifact(driver, artifact_id, source_id) — source_id is the 3rd arg
+        assert mock_link.call_args.args[2] == "src-uuid"
+        mock_incr.assert_called_once()
+        assert mock_incr.call_args.kwargs.get("artifacts") == 1
+
+    @patch("app.db.neo4j.sources.increment_source_counters")
+    @patch("app.db.neo4j.sources.link_artifact")
+    @patch("app.db.neo4j.sources.get_source")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_does_not_link_when_source_missing(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_get_source, mock_link, mock_incr,
+    ):
+        """An external-capture id in source_id that has no :Source node must NOT
+        create a dangling edge — get_source returns None → no link/counter."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+        mock_get_source.return_value = None  # external id, no :Source node
+
+        result = self._drive({"source_id": "external-app-id-123"})
+
+        assert result["status"] == "success"
+        mock_get_source.assert_called()
+        mock_link.assert_not_called()
+        mock_incr.assert_not_called()
+
+    @patch("app.db.neo4j.sources.link_artifact")
+    @patch("app.db.neo4j.sources.get_source")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_no_source_id_skips_lookup_entirely(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_get_source, mock_link,
+    ):
+        """upload/text ingests carry no source_id — no source lookup at all."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        result = self._drive({"filename": "note.txt"})
+
+        assert result["status"] == "success"
+        mock_get_source.assert_not_called()
+        mock_link.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Tests: force_reindex — retroactive feature application (Phase 2.6)
 # ---------------------------------------------------------------------------
 
@@ -675,7 +787,7 @@ class TestForceReindex:
     features apply retroactively. It must bypass the exact-hash dedup and route
     to the relationship-preserving _reingest_artifact path."""
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -721,7 +833,7 @@ class TestForceReindex:
         # Re-index invalidated the semantic cache (via the _reingest path).
         assert mock_sem.called
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -771,7 +883,7 @@ class TestReingestEntityReExtraction:
     mechanism first-ingest uses. Unchanged content (the force_reindex
     path) must touch neither — those MENTIONS are still accurate."""
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -802,7 +914,7 @@ class TestReingestEntityReExtraction:
         mock_graph.remove_mentions_for_artifact.assert_called_once_with(driver, "aid")
         mock_enqueue.assert_called_once_with(artifact_id="aid")
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -833,7 +945,7 @@ class TestReingestEntityReExtraction:
         mock_graph.remove_mentions_for_artifact.assert_not_called()
         mock_enqueue.assert_not_called()
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -844,7 +956,13 @@ class TestReingestEntityReExtraction:
         artifact node still reflects the OLD content — clearing MENTIONS
         ahead of a graph write that never landed would leave the artifact
         with neither old nor new MENTIONS. Both new hooks must be gated on
-        update_artifact succeeding first."""
+        update_artifact succeeding first.
+
+        AF-005 (CL-3): a failed re-ingest Neo4j write now returns ``status
+        "error"`` and leaves the new chunks staged ``pending`` for the recovery
+        job — it must NOT report ``"updated"`` (the old swallow-and-continue
+        behavior left the node pointing at deleted chunk_ids with the new chunks
+        unrecoverable). The mentions-clear + re-extraction stay gated on success."""
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
 
@@ -863,14 +981,13 @@ class TestReingestEntityReExtraction:
                 {"filename": "note.txt"}, "new-hash",
             )
 
-        # Existing swallow-and-continue contract: Chroma/BM25 already
-        # succeeded, so re-ingest still reports "updated" even though the
-        # graph write failed — but neither new hook may fire.
-        assert result["status"] == "updated"
+        # AF-005: failed graph write → error (not a false "updated"); neither
+        # success-gated hook fires.
+        assert result["status"] == "error"
         mock_graph.remove_mentions_for_artifact.assert_not_called()
         mock_enqueue.assert_not_called()
 
-    @patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")

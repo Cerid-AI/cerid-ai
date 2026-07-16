@@ -175,11 +175,16 @@ async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Requ
     Mail, Messages) — each maps a source row to one artifact with rich
     tag metadata that retrieval can filter by source.
 
-    Metadata keys are merged into the artifact's tag set. `source_id`
-    is treated as an idempotency hint — re-ingesting the same source_id
-    is currently a no-op only in the sense that ChromaDB collapses
-    duplicate content_hashes; explicit dedup-by-source_id is tracked
-    for Phase D.2.
+    Metadata keys are merged into the artifact's tag set. `source_id` is an
+    external idempotency hint here — re-ingesting the same source_id is a no-op
+    only in the sense that ChromaDB collapses duplicate content_hashes; explicit
+    dedup-by-source_id is tracked for Phase D.2. Note (CL-1): the ingest service
+    now links an artifact to a :Source node only when `source_id` resolves to a
+    real :Source (existence-checked), so an external id passed here can never
+    create a dangling FROM_SOURCE edge or spurious source counter — it is simply
+    treated as a filterable tag. (Fully reserving source_id for :Source UUIDs and
+    routing external ids through `external_id` is a deferred hygiene follow-up;
+    the existence check already makes the current overloading safe.)
     """
     client_source = request.headers.get("X-Client-ID", "")
     metadata: dict[str, str] = dict(req.metadata)

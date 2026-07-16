@@ -151,6 +151,20 @@ def test_isolated_sentinel_cypher_in_module():
     assert "WHERE e.community_id IS NULL SET e.community_id = 'isolated'" in src
 
 
+def test_partition_reset_cypher_in_module():
+    """AF-034: detect_communities must clear last run's partition markers
+    (leiden_communityIds + community_id) before Leiden re-writes them, so an
+    entity that dropped out of this run's projection can't keep a stale
+    community_id (or resurrect its old Community via the write-back MERGE) — it
+    falls through to the 'isolated' sentinel instead.
+    """
+    import inspect
+
+    import app.db.neo4j.community_detection as mod
+    src = inspect.getsource(mod)
+    assert "REMOVE e.leiden_communityIds, e.community_id" in src
+
+
 def test_isolated_sentinel_stats_recorded():
     """detect_communities must record stats['isolated_assigned'] so callers
     can observe the orphan count without a separate graph query.
@@ -187,17 +201,19 @@ class TestDetectCommunitiesIsolatedSentinel:
         # 1. count entities → 3
         # 2. DELETE CO_MENTIONED
         # 3. MERGE CO_MENTIONED
-        # 4. DELETE IN_COMMUNITY
-        # 5. SELECT leiden_communityIds rows → 2 connected entities
-        # 6-7. MERGE Community + SET e.community_id for each connected entity
-        # 8. DETACH DELETE stale communities
-        # 9. tiny-community prune (min_community_size=1 default → skipped in test)
-        # 10. SET community_id = 'isolated' for NULL entities → 1 affected
+        # 4. AF-034: REMOVE leiden_communityIds, community_id (up-front reset)
+        # 5. DELETE IN_COMMUNITY
+        # 6. SELECT leiden_communityIds rows → 2 connected entities
+        # 7-8. MERGE Community + SET e.community_id for each connected entity
+        # 9. DETACH DELETE stale communities
+        # 10. tiny-community prune (min_community_size=1 default → skipped in test)
+        # 11. SET community_id = 'isolated' for NULL entities → 1 affected
         count_result = MagicMock()
         count_result.single.return_value = {"n": 3}
 
         delete_co = MagicMock()
         merge_co = MagicMock()
+        clear_partition = MagicMock()  # AF-034: up-front leiden/community_id reset
         delete_in_comm = MagicMock()
 
         # leiden_communityIds rows: two connected entities
@@ -223,6 +239,7 @@ class TestDetectCommunitiesIsolatedSentinel:
             count_result,       # MATCH (e:Entity) RETURN count(e)
             delete_co,          # DELETE CO_MENTIONED
             merge_co,           # MERGE CO_MENTIONED
+            clear_partition,    # AF-034: REMOVE leiden_communityIds, community_id
             delete_in_comm,     # DELETE IN_COMMUNITY
             rows_result,        # SELECT leiden_communityIds
             merge_comm_result,  # MERGE Community for ent-a

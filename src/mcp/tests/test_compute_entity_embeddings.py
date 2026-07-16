@@ -5,11 +5,11 @@
 
 Covers:
 - Mean-pool + L2-normalise path (two chunk vectors → correct mean)
-- embedding_model sourced from config.EMBEDDING_MODEL, not a literal
+- model name (JobResult metadata) sourced from config.EMBEDDING_MODEL, not a literal
 - Name-embed fallback (entity with no chunk vectors → embed_fn called)
 - Skip path (no chunk vectors AND embed_fn unavailable → entity skipped)
 - Neo4j-unavailable guard (job returns skipped result)
-- _write_embeddings sends JSON-encoded list with correct model name
+- _write_embeddings sends a JSON-encoded embedding list (AF-063: no model provenance)
 """
 from __future__ import annotations
 
@@ -133,8 +133,10 @@ class TestModelNameFromConfig:
         """The job must read config.EMBEDDING_MODEL at runtime, not a hardcoded literal.
 
         Monkeypatches config.EMBEDDING_MODEL to a distinctive sentinel, runs the
-        job end-to-end against mocked Chroma+Neo4j, and asserts that the value
-        written to Neo4j equals the sentinel — not the default model name.
+        job end-to-end against mocked Chroma+Neo4j, and asserts the model name
+        reported in the JobResult metadata equals the sentinel — not the default
+        model name. (AF-063: the model name is no longer stamped on the Entity
+        node, so it is asserted via the job result, not the Neo4j write.)
         """
         import config as cfg
 
@@ -171,7 +173,6 @@ class TestModelNameFromConfig:
 
             assert result.metadata["model"] == sentinel
             assert len(written_calls) == 1
-            assert written_calls[0][0]["embedding_model"] == sentinel
 
         asyncio.run(_test())
 
@@ -251,8 +252,9 @@ class TestRunMethod:
         asyncio.run(_test())
 
     def test_run_writes_mean_pooled_embedding_and_model_from_settings(self):
-        """End-to-end run: two chunk vectors → written embedding matches mean-pool,
-        embedding_model matches config.EMBEDDING_MODEL."""
+        """End-to-end run: two chunk vectors → written embedding matches mean-pool;
+        JobResult metadata model matches config.EMBEDDING_MODEL (AF-063: model is
+        no longer written to the Entity node)."""
         import config as cfg
 
         job = _make_job()
@@ -292,7 +294,6 @@ class TestRunMethod:
             assert len(rows) == 1
             row = rows[0]
             assert row["id"] == "ent1"
-            assert row["embedding_model"] == cfg.EMBEDDING_MODEL
 
             stored_vec = np.array(json.loads(row["embedding"]), dtype=np.float32)
             np.testing.assert_allclose(stored_vec, expected_norm, atol=1e-5)

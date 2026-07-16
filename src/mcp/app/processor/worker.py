@@ -314,7 +314,9 @@ class ProcessorWorker:
                     "processor.job_held job_id=%s reason=%s", job_id, decision.reason,
                 )
                 try:
-                    await self._queue.mark_completed(
+                    # CL-5/AF-017: record the HELD terminal state, NOT COMPLETED —
+                    # a cost-cap hold must be distinguishable from a real success.
+                    await self._queue.mark_held(
                         job_id,
                         JobResult(
                             job_id=job_id,
@@ -324,7 +326,7 @@ class ProcessorWorker:
                         ),
                     )
                 except Exception as exc:  # noqa: BLE001
-                    log_swallowed_error("processor.execute.mark_completed_held", exc)
+                    log_swallowed_error("processor.execute.mark_held", exc)
                 return
 
             chosen_model = (decision.model if decision is not None else None) or default_local
@@ -470,7 +472,12 @@ class ProcessorWorker:
             return False
 
     def _make_progress_cb(self, record: JobRecord):  # type: ignore[return]
-        """Return an async progress callback that logs progress for the job."""
+        """Return an async progress callback that logs AND persists progress.
+
+        CL-5: persisting the checkpoint onto the job record (via a lightweight
+        single-field HSET) is what lets ``GET /processor/recent`` and dashboards
+        surface a job's progress — previously it was debug-logged and lost.
+        """
         job_id = record.id
 
         async def _cb(progress: float) -> None:
@@ -479,6 +486,7 @@ class ProcessorWorker:
                 job_id,
                 progress * 100,
             )
+            await self._queue.update_progress(job_id, progress)
 
         return _cb
 

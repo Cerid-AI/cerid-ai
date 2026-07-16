@@ -80,6 +80,16 @@ def _mapping_to_record(mapping: dict[str, Any]) -> JobRecord:
     else:
         d["payload"] = {}
 
+    # CL-5: metadata round-trips as a JSON string; progress is float-coerced in
+    # JobRecord.from_dict, so only metadata needs re-parsing here.
+    if d.get("metadata"):
+        try:
+            d["metadata"] = json.loads(d["metadata"])
+        except (TypeError, ValueError):
+            d["metadata"] = {}
+    else:
+        d["metadata"] = {}
+
     # Booleans
     if "requires_llm" in d and d["requires_llm"] is not None:
         d["requires_llm"] = d["requires_llm"].lower() in ("true", "1")
@@ -352,8 +362,20 @@ class RedisJobQueue:
         await self._save_record(record)
         await self._run(self._r.sadd, _RUNNING_KEY, job_id)
 
+    async def update_progress(self, job_id: str, progress: float) -> None:
+        """Persist the latest progress checkpoint (0.0–1.0) onto the job hash.
+
+        Lightweight single-field HSET — avoids a full record load+save on every
+        progress tick. Best-effort: a Redis failure never breaks the running job
+        (CL-5 — progress was previously only debug-logged and never persisted).
+        """
+        try:
+            await self._run(self._r.hset, _job_key(job_id), "progress", str(float(progress)))
+        except Exception as exc:  # noqa: BLE001 — progress persistence is best-effort
+            log_swallowed_error("processor.redis_queue.update_progress", exc, context={"job_id": job_id})
+
     async def mark_completed(self, job_id: str, result: JobResult) -> None:
-        """Transition running → completed; persist token actuals."""
+        """Transition running → completed; persist token actuals + result metadata."""
         record = await self._load_record(job_id)
         if record is None:
             return
@@ -361,9 +383,33 @@ class RedisJobQueue:
         record.completed_at = datetime.now(tz=timezone.utc)
         record.actual_tokens_in = result.actual_tokens_in
         record.actual_tokens_out = result.actual_tokens_out
+        # CL-5: carry the job's outcome data onto the persisted record so
+        # /processor/recent can surface it (was silently dropped — AF-008/076/083).
+        record.metadata = dict(result.metadata or {})
+        record.progress = 1.0
         await self._save_record(record)
         await self._run(self._r.srem, _RUNNING_KEY, job_id)
         # Add to recent sorted set (score = epoch seconds for ordering)
+        score = record.completed_at.timestamp()
+        await self._run(self._r.zadd, _RECENT_KEY, {job_id: score})
+
+    async def mark_held(self, job_id: str, result: JobResult) -> None:
+        """Transition running → HELD; a cost-cap / budget hold stopped the job.
+
+        Distinct terminal state from COMPLETED so a held job is never counted as
+        a success (CL-5/AF-017). Persists the held marker (in ``result.metadata``)
+        and surfaces on /processor/recent like any other terminal outcome.
+        """
+        record = await self._load_record(job_id)
+        if record is None:
+            return
+        record.state = JobState.HELD
+        record.completed_at = datetime.now(tz=timezone.utc)
+        record.actual_tokens_in = result.actual_tokens_in
+        record.actual_tokens_out = result.actual_tokens_out
+        record.metadata = dict(result.metadata or {})
+        await self._save_record(record)
+        await self._run(self._r.srem, _RUNNING_KEY, job_id)
         score = record.completed_at.timestamp()
         await self._run(self._r.zadd, _RECENT_KEY, {job_id: score})
 

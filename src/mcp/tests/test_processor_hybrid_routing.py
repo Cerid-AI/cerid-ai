@@ -255,7 +255,7 @@ async def test_hybrid_big_job_over_cap_hold_never_runs(monkeypatch, _llm_transpo
         ) as mock_record:
             await worker.start()
             for _ in range(20):
-                if queue.mark_completed.await_count:
+                if queue.mark_held.await_count:
                     break
                 await asyncio.sleep(0.02)
             await worker.stop()
@@ -265,9 +265,12 @@ async def test_hybrid_big_job_over_cap_hold_never_runs(monkeypatch, _llm_transpo
     assert len(_LLMStubJob.instances) == 1
     assert _LLMStubJob.instances[0].ran is False
 
-    queue.mark_completed.assert_called_once()
-    completed_job_id, result = queue.mark_completed.call_args[0]
-    assert completed_job_id == record.id
+    # CL-5/AF-017: a cost-cap hold is recorded via mark_held (HELD state), NOT
+    # mark_completed — so it can never be mistaken for a successful run.
+    queue.mark_held.assert_called_once()
+    queue.mark_completed.assert_not_called()
+    held_job_id, result = queue.mark_held.call_args[0]
+    assert held_job_id == record.id
     assert result.metadata == {"held": True, "reason": "hybrid_cap_hold"}
     assert result.actual_tokens_in == 0
     assert result.actual_tokens_out == 0

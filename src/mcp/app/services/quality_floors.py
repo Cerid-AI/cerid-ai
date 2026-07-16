@@ -40,6 +40,12 @@ def get_source_quality_floor(source_id: str | None) -> float:
 
         src = srcdb.get_source(get_neo4j(), source_id)
         if src is None:
+            # Correct-by-design: a source_id resolving to no (:Source) node
+            # carries no per-source floor, so nothing is dropped on its behalf.
+            # This is the expected path for sourceless / external-capture
+            # content. The ingest service existence-checks source linkage before
+            # tagging an artifact, so only real :Source UUIDs ever reach here
+            # with a configured floor.
             return 0.0
         floor = float(src.get("quality_floor", 0.0) or 0.0)
         _CACHE[source_id] = floor
@@ -53,6 +59,10 @@ def should_drop(source_id: str | None, quality_score: float) -> bool:
     """Return True iff the artifact's quality_score falls below the
     source's configured floor. Sources without a configured floor
     always return False.
+
+    A ``source_id`` that is None or resolves to no (:Source) node yields
+    floor 0.0 and thus never drops — correct-by-design for sourceless /
+    external-capture content (see :func:`get_source_quality_floor`).
     """
     floor = get_source_quality_floor(source_id)
     if floor <= 0.0:

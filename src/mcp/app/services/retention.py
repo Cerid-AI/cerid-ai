@@ -4,16 +4,16 @@
 """Per-source retention enforcement — app-layer driver.
 
 Calls into :mod:`core.ingest.retention` for the policy logic, then
-applies the resulting purge plans against Chroma + Neo4j. Triggered
-nightly by the scheduler (``SCHEDULE_RETENTION_ENFORCE``).
+applies the resulting purge plans via the content-lifecycle coordinator
+(:func:`app.services.content_lifecycle.remove_content`), which hard-deletes
+each artifact across Neo4j + Chroma + BM25 + SPLADE and busts the query
+caches. Triggered nightly by the scheduler (``SCHEDULE_RETENTION_ENFORCE``).
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
-import config
 from app.db.neo4j import sources as srcdb
 from app.deps import get_neo4j
 from core.ingest.retention import ArtifactRef, RetentionDecision, plan_for_source
@@ -56,64 +56,18 @@ def apply_retention_plan(driver, decision: RetentionDecision) -> int:
     if not decision.purge:
         return 0
 
+    from app.services.content_lifecycle import remove_content
+
     purged = 0
     for artifact_id in decision.purge:
         try:
-            # Capture the artifact's chunk ids + domain BEFORE deleting the
-            # node — DETACH DELETE removes the only record of which Chroma
-            # vectors belong to it. WITH binds the values so they survive
-            # the delete and come back on the RETURN row.
-            with driver.session() as session:
-                row = session.run(
-                    """
-                    MATCH (a:Artifact {id: $aid})
-                    WITH a, a.chunk_ids AS chunk_ids_json, a.domain AS domain
-                    DETACH DELETE a
-                    RETURN chunk_ids_json, domain
-                    """,
-                    aid=artifact_id,
-                ).single()
-
-            chunk_ids: list[str] = []
-            domain: str | None = None
-            if row is not None:
-                domain = row.get("domain")
-                raw = row.get("chunk_ids_json")
-                if raw:
-                    try:
-                        chunk_ids = json.loads(raw)
-                    except (ValueError, TypeError) as exc:
-                        log_swallowed_error("retention.chunk_ids_parse", exc)
-
-            # Chroma cleanup: chunks are stored under per-chunk ids
-            # (``{artifact_id}_chunk_{i}``), never the bare artifact id, so
-            # we must delete the captured chunk ids. Prefer the artifact's
-            # own domain collection; fall back to every collection when the
-            # domain is missing (chunk ids are globally unique, so safe).
-            if chunk_ids:
-                try:
-                    from app.deps import get_chroma
-
-                    chroma = get_chroma()
-                    if domain:
-                        collections = [
-                            chroma.get_or_create_collection(
-                                name=config.collection_name(domain)
-                            )
-                        ]
-                    else:
-                        collections = chroma.list_collections()
-                    for collection in collections:
-                        try:
-                            collection.delete(ids=chunk_ids)
-                        except Exception as exc:  # noqa: BLE001
-                            # Per-collection failure is fine; Chroma raises
-                            # on missing-id deletes for some backends. Log so
-                            # the failure is visible in /health.swallowed_errors_last_hour.
-                            log_swallowed_error("retention.chroma_per_collection_delete", exc)
-                except Exception as exc:  # noqa: BLE001
-                    log_swallowed_error("retention.chroma_delete", exc)
-            purged += 1
+            # HARD delete through the content-lifecycle coordinator: drops the
+            # Neo4j node (source of chunk_ids) and fans chunk removal across
+            # Chroma + BM25 + SPLADE, then busts the query caches. Per-artifact
+            # try/except keeps a single failure from rolling back the rest.
+            result = remove_content(artifact_id, neo4j=driver)
+            if result.found:
+                purged += 1
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("retention.apply_one", exc, context={"artifact_id": artifact_id})
 
@@ -131,6 +85,11 @@ def enforce_all_retention() -> dict[str, Any]:
     per_source: list[dict[str, Any]] = []
 
     for src in sources:
+        # Retention is opt-in: only sources with an explicit dict policy whose
+        # mode is not "keep_all" are ever enforced. keep_all is the intentional
+        # default set by create_source(), so an operator must deliberately
+        # configure a concrete policy before any artifact is purged. Non-dict /
+        # malformed policies are skipped for the same fail-safe reason.
         policy = src.get("retention_policy") or {}
         if not isinstance(policy, dict):
             continue

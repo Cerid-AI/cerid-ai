@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 import config
 from app.routers.models import DEFAULT_ASSIGNMENTS, _current_assignments
+from app.services.private_mode import strip_injected_context
 from core.utils.swallowed import log_swallowed_error
 
 
@@ -591,6 +592,12 @@ async def _proxy_stream(
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request):
     """Stream chat completion directly via OpenRouter."""
+    # Private Mode L2+ server-side gate: this endpoint forwards the caller's
+    # pre-assembled messages verbatim to the provider, so the web client's
+    # client-side KB-bypass cannot protect a direct API/SDK caller. Strip any
+    # injected KB/memory context here, before smart-routing inspects it or the
+    # payload is forwarded (single strip — _attempt_stream runs twice).
+    req.messages = strip_injected_context(req.messages)
     api_key = _resolve_api_key(request)
 
     if not api_key:

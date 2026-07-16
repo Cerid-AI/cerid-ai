@@ -13,6 +13,7 @@ Covers:
 """
 from __future__ import annotations
 
+import json
 import os
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -142,6 +143,39 @@ class TestTwoPhaseWrite:
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
+    def test_reingest_neo4j_failure_leaves_chunks_pending(self, mock_chroma, mock_neo4j, mock_redis):
+        """AF-005: a failed Neo4j write on the RE-INGEST path leaves the new
+        chunks staged cerid_state=pending (recoverable by IngestRecoveryJob) and
+        returns an error status — it must NOT report 'updated' with the new
+        chunks live-but-unrecoverable (never marked pending), which is the exact
+        permanent-divergence bug this test guards against."""
+        collection = _make_collection_mock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver, session = _make_neo4j_mock()
+        mock_neo4j.return_value = driver
+
+        # Existing artifact with a DIFFERENT content_hash → content changed →
+        # ingest_content routes to the re-ingest path (not fresh, not dedup).
+        prev = {"id": "old-artifact-id", "content_hash": "stale-hash", "chunk_ids": "[]"}
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = prev
+            mock_graph.update_artifact.side_effect = RuntimeError("Neo4j is down")
+
+            result = _call_ingest_content(
+                "brand new re-ingested content that differs", "coding", "existing.txt",
+            )
+
+        assert result["status"] == "error"
+        assert len(collection._stored) > 0
+        for meta in collection._stored.values():
+            assert meta.get("cerid_state") == "pending", (
+                f"Expected pending after failed re-ingest, got {meta.get('cerid_state')!r}"
+            )
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_idempotency_key_written_to_metadata(self, mock_chroma, mock_neo4j, mock_redis):
         """cerid_idempotency_key is present in Chroma chunk metadata."""
         collection = _make_collection_mock()
@@ -195,7 +229,9 @@ class TestTwoPhaseWrite:
         driver, session = _make_neo4j_mock()
         mock_neo4j.return_value = driver
 
-        with patch("app.services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph, patch(
+            "app.services.content_lifecycle.remove_orphan_chunks"
+        ) as mock_rollback:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.side_effect = RuntimeError(
                 "constraint violation on content_hash"
@@ -204,8 +240,9 @@ class TestTwoPhaseWrite:
             result = _call_ingest_content("content", "coding", "dup.txt")
 
         assert result["status"] == "duplicate"
-        # Chroma should be cleaned up
-        assert len(collection._stored) == 0
+        # Rollback now fans across ALL stores through the coordinator (CL-2),
+        # not just a direct Chroma collection.delete.
+        mock_rollback.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +398,63 @@ class TestIngestRecoveryService:
             )
         ]
         assert committed_calls, "Expected collection.update with cerid_state=committed"
+
+    @pytest.mark.asyncio
+    async def test_recover_artifact_rebuilds_with_real_chunk_count(self):
+        """AF-003: a multi-chunk artifact recovers with the REAL chunk_count=N and
+        the full chunk_ids list in ONE create_artifact call — not once-per-chunk
+        with chunk_count=1 (which collapsed multi-chunk artifacts to a single
+        visible chunk). All chunks flip committed together."""
+        from app.services.ingest_recovery import (
+            OrphanRecord,
+            RecoveryAction,
+            recover_artifact,
+        )
+
+        old_ts = (datetime.now(tz=timezone.utc) - timedelta(seconds=120)).isoformat()
+        chunk_ids = ["art1_chunk_0", "art1_chunk_1", "art1_chunk_2"]
+        orphans = [
+            OrphanRecord(
+                chunk_id=cid,
+                artifact_id="art1",
+                domain="coding",
+                collection_name="coll-coding",
+                idempotency_key="abc",
+                pending_at=old_ts,
+                document="doc text",
+                metadata={"filename": "f.txt", "quality_score": "0.5"},
+                retry_count=0,
+            )
+            for cid in chunk_ids
+        ]
+
+        collection = MagicMock()
+        chroma_client = MagicMock()
+        chroma_client.get_collection.return_value = collection
+        driver = MagicMock()
+
+        with (
+            patch("app.services.ingest_recovery.get_chroma", return_value=chroma_client),
+            patch("app.services.ingest_recovery.get_neo4j", return_value=driver),
+            patch("app.services.ingest_recovery.graph") as mock_graph,
+        ):
+            mock_graph.create_artifact.return_value = None
+            action = await recover_artifact(orphans)
+
+        assert action == RecoveryAction.COMMITTED
+        # ONE create_artifact call with the real N + full chunk_ids list.
+        mock_graph.create_artifact.assert_called_once()
+        _, kwargs = mock_graph.create_artifact.call_args
+        assert kwargs["chunk_count"] == 3
+        assert json.loads(kwargs["chunk_ids_json"]) == chunk_ids
+        # Every chunk flipped committed (one update carrying all three ids).
+        committed = [
+            c for c in collection.update.call_args_list
+            if c[1].get("metadatas")
+            and all(m.get("cerid_state") == "committed" for m in c[1]["metadatas"])
+            and c[1].get("ids") == chunk_ids
+        ]
+        assert committed, "Expected all chunk_ids flipped committed in one update"
 
     @pytest.mark.asyncio
     async def test_recover_orphan_decrypts_summary_before_neo4j_write(self):

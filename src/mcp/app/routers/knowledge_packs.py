@@ -16,7 +16,9 @@ Install is a queued processor job (``KnowledgePackInstallJob``). It used
 to run synchronously in-process; three concurrent installs inside a
 memory-capped container OOM'd the server mid-beta (2026-07-12 triage),
 so the endpoint now returns 202 with a ``job_id`` and clients poll the
-registry's ``installing`` flag (or ``/processor/recent``) for completion.
+registry's ``installing`` flag for completion — or ``/processor/recent``,
+which lists the job's terminal state (completed / failed / held) plus
+install details (``artifact_count`` / ``version`` in ``result.metadata``).
 """
 from __future__ import annotations
 

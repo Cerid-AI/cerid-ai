@@ -173,13 +173,21 @@ async def bookmark_import_status():
 
 
 class EmailConfigRequest(BaseModel):
-    """IMAP connection configuration."""
+    """IMAP connection configuration.
+
+    Note: ``poll_interval`` is currently IGNORED. Email poll cadence is driven
+    solely by the global ``SCHEDULE_EMAIL_POLL`` cron in the scheduler, not by
+    any per-source value. The field is retained for API/forward-compatibility
+    only — setting it has no effect on how often the mailbox is polled.
+    """
 
     host: str
     port: int = 993
     user: str
     password: str
     folder: str = "INBOX"
+    # IGNORED — cadence is the global SCHEDULE_EMAIL_POLL cron, not this value.
+    # Retained for forward-compat / API stability only.
     poll_interval: int = 15  # minutes
 
 
@@ -263,7 +271,12 @@ class AddFeedRequest(BaseModel):
 @router.post("/data-sources/rss", response_model=RssAddResponse)
 @handle_errors(breaker_name="rss-feed")
 async def add_rss_feed(body: AddFeedRequest):
-    """Add a new RSS/Atom feed. Validates the URL is reachable and parseable."""
+    """Add a new RSS/Atom feed. Validates the URL is reachable and parseable.
+
+    Deprecated: manages the legacy Redis-backed RSS poller, which does not
+    participate in the :Source economy (no per-source counters, quality floor,
+    or retention). Prefer :Source management (``POST /sources``) as canonical.
+    """
     from app.data_sources.rss_feed import add_feed, validate_feed_url
 
     ok, message = validate_feed_url(body.url)
@@ -299,7 +312,11 @@ async def delete_rss_feed(feed_id: str):
 @router.post("/data-sources/rss/{feed_id}/fetch-now", response_model=RssFetchNowResponse)
 @handle_errors(breaker_name="rss-feed")
 async def fetch_rss_feed_now(feed_id: str):
-    """Immediately poll a single RSS/Atom feed."""
+    """Immediately poll a single RSS/Atom feed.
+
+    Deprecated: operates on the legacy Redis-backed RSS poller (no :Source node
+    / FROM_SOURCE edge). Prefer :Source management as canonical.
+    """
     from app.data_sources.rss_feed import get_feed, poll_feed
 
     feed = get_feed(feed_id)
@@ -355,7 +372,11 @@ async def list_rss_feed_entries(
 @router.post("/data-sources/rss/poll-all", response_model=RssPollAllResponse)
 @handle_errors(breaker_name="rss-feed")
 async def poll_all_rss_feeds():
-    """Poll all enabled RSS/Atom feeds now."""
+    """Poll all enabled RSS/Atom feeds now.
+
+    Deprecated: operates on the legacy Redis-backed RSS poller (no :Source node
+    / FROM_SOURCE edge). Prefer :Source management as canonical.
+    """
     from app.data_sources.rss_feed import poll_all_feeds
 
     results = await poll_all_feeds()

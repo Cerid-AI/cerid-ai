@@ -51,6 +51,12 @@ logger = logging.getLogger("ai-companion.ingest_recovery")
 # How many Neo4j commit attempts before giving up and purging.
 _MAX_RECOVERY_ATTEMPTS = 2
 
+# AF-018: bound the pending-chunk fetch per collection so a large backlog of
+# stale pending rows cannot load unboundedly into memory. Chunks beyond the cap
+# are recovered on a later scan (recovery is idempotent), and the cap being hit
+# is logged (never a silent truncation).
+_SCAN_MAX_CHUNKS_PER_COLLECTION = 5000
+
 
 # ---------------------------------------------------------------------------
 # Public data types
@@ -156,6 +162,7 @@ def _fetch_pending_chunks(
         result = collection.get(
             where={"cerid_state": {"$eq": "pending"}},
             include=["documents", "metadatas"],
+            limit=_SCAN_MAX_CHUNKS_PER_COLLECTION,
         )
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
@@ -166,6 +173,12 @@ def _fetch_pending_chunks(
         return []
 
     ids = result.get("ids") or []
+    if len(ids) >= _SCAN_MAX_CHUNKS_PER_COLLECTION:
+        logger.warning(
+            "ingest_recovery.scan_capped collection=%s at %d pending chunks — "
+            "remaining orphans recover on the next scan",
+            collection_name, _SCAN_MAX_CHUNKS_PER_COLLECTION,
+        )
     docs = result.get("documents") or []
     metas = result.get("metadatas") or []
 
@@ -250,81 +263,89 @@ async def scan_orphans(*, max_age_seconds: float = 60.0) -> list[OrphanRecord]:
     return all_orphans
 
 
-async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
-    """Attempt to roll-forward a single orphaned chunk.
+def group_orphans_by_artifact(
+    orphans: list[OrphanRecord],
+) -> dict[str, list[OrphanRecord]]:
+    """Group orphan chunk records by ``artifact_id`` so recovery rebuilds each
+    artifact's node ONCE with the real ``chunk_count`` (AF-003). Records that
+    share an ``artifact_id`` also share a domain + collection. Orphans with an
+    empty artifact_id each recover as their own singleton group."""
+    groups: dict[str, list[OrphanRecord]] = {}
+    for orphan in orphans:
+        groups.setdefault(orphan.artifact_id, []).append(orphan)
+    return groups
 
-    Strategy
-    --------
-    1. Increment ``cerid_recovery_attempts`` in Chroma metadata.
-    2. Attempt ``graph.create_artifact`` with the artifact metadata
-       reconstructed from the Chroma metadata.
-    3. On Neo4j success → flip ``cerid_state="committed"`` → return
-       ``RecoveryAction.COMMITTED``.
-    4. On Neo4j failure:
-       - If ``retry_count < _MAX_RECOVERY_ATTEMPTS`` (after increment) →
-         return ``RecoveryAction.DEFERRED`` (try again next worker tick).
-       - If retry budget exhausted → add a Sentry breadcrumb, purge the
-         Chroma row → return ``RecoveryAction.PURGED``.
 
-    Parameters
-    ----------
-    orphan
-        An :class:`OrphanRecord` returned by :func:`scan_orphans`.
+async def recover_artifact(orphans: list[OrphanRecord]) -> RecoveryAction:
+    """Roll-forward ALL orphaned pending chunks of ONE artifact in a single
+    Neo4j write (AF-003).
 
-    Returns
-    -------
-    RecoveryAction
-        The outcome of this recovery attempt.
+    Every record must share the same ``artifact_id`` (hence domain +
+    collection). Rebuilding the node with the real ``chunk_count = len(orphans)``
+    and the full ``chunk_ids`` list — rather than once-per-chunk with
+    ``chunk_count=1`` — is why multi-chunk artifacts no longer collapse to a
+    single visible chunk after recovery.
+
+    Strategy mirrors the per-chunk path: bump the recovery-attempt counter on
+    every chunk, attempt one ``graph.create_artifact``, flip every chunk to
+    ``committed`` on success, and on retry-exhaustion dead-letter + purge every
+    chunk. Idempotent — a re-run MERGEs the same node (``ON MATCH SET`` repairs
+    ``chunk_count``/``chunk_ids``).
     """
+    if not orphans:
+        return RecoveryAction.DEFERRED
+
     chroma = get_chroma()
     driver = get_neo4j()
+    lead = orphans[0]
+    chunk_ids = [o.chunk_id for o in orphans]
+    new_attempt_count = max(o.retry_count for o in orphans) + 1
 
-    # --- 1. Increment attempt counter in Chroma metadata -----------------
-    new_attempt_count = orphan.retry_count + 1
     try:
         collection = await asyncio.to_thread(
-            chroma.get_collection, name=orphan.collection_name
+            chroma.get_collection, name=lead.collection_name
         )
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
             "app.services.ingest_recovery.get_collection_for_recover",
             e,
-            context={"chunk_id": orphan.chunk_id},
+            context={"artifact_id": lead.artifact_id},
         )
         return RecoveryAction.DEFERRED
 
+    # --- 1. Bump attempt counter on every chunk --------------------------
     try:
         await asyncio.to_thread(
             collection.update,
-            ids=[orphan.chunk_id],
-            metadatas=[{"cerid_recovery_attempts": new_attempt_count}],
+            ids=chunk_ids,
+            metadatas=[{"cerid_recovery_attempts": new_attempt_count} for _ in chunk_ids],
         )
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
             "app.services.ingest_recovery.update_attempt_count",
             e,
-            context={"chunk_id": orphan.chunk_id},
+            context={"artifact_id": lead.artifact_id},
         )
         # Non-fatal: proceed with recovery attempt anyway.
 
-    # --- 2. Attempt Neo4j commit -----------------------------------------
-    meta = orphan.metadata
+    # --- 2. One Neo4j commit for the whole artifact ----------------------
+    meta = lead.metadata  # artifact-level fields are identical across chunks
     neo4j_ok = False
     try:
         await asyncio.to_thread(
             graph.create_artifact,
             driver,
-            artifact_id=orphan.artifact_id,
+            artifact_id=lead.artifact_id,
             filename=meta.get("filename", "recovered_artifact"),
-            domain=orphan.domain,
+            domain=lead.domain,
             keywords_json=meta.get("keywords_json", "[]"),
             # meta is the raw Chroma chunk metadata — "summary" may carry the
             # enc:v1: Chroma-only ciphertext (see CHROMA_ENCRYPTED_FIELDS).
             # decrypt_field no-ops on plaintext, so this is safe either way,
             # and it keeps Neo4j's summary property queryable cleartext.
-            summary=decrypt_field(meta.get("summary", orphan.document[:200])),
-            chunk_count=1,  # conservative: one chunk visible to recovery
-            chunk_ids_json=f'["{orphan.chunk_id}"]',
+            summary=decrypt_field(meta.get("summary", lead.document[:200])),
+            chunk_count=len(chunk_ids),  # AF-003: the real N, not 1
+            chunk_ids_json=json.dumps(chunk_ids),
             content_hash=meta.get("content_hash", ""),
             sub_category=meta.get("sub_category", getattr(config, "DEFAULT_SUB_CATEGORY", "")),
             tags_json=meta.get("tags_json", "[]"),
@@ -336,63 +357,77 @@ async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
         log_swallowed_error('app.services.ingest_recovery', e)
         err_msg = str(e).lower()
         # A content_hash constraint violation means another path already
-        # committed this artifact — treat as success so we can flip the chunk.
+        # committed this artifact — treat as success so we can flip the chunks.
         if "constraint" in err_msg and "content_hash" in err_msg:
             logger.info(
                 "ingest_recovery.constraint_collision artifact=%s — treating as committed",
-                orphan.artifact_id,
+                lead.artifact_id,
             )
             neo4j_ok = True
         else:
             logger.warning(
-                "ingest_recovery.neo4j_failed chunk=%s attempt=%d/%d: %s",
-                orphan.chunk_id,
+                "ingest_recovery.neo4j_failed artifact=%s chunks=%d attempt=%d/%d: %s",
+                lead.artifact_id,
+                len(chunk_ids),
                 new_attempt_count,
                 _MAX_RECOVERY_ATTEMPTS,
                 e,
             )
 
-    # --- 3. On success: flip chunk to committed ---------------------------
+    # --- 3. On success: flip every chunk to committed --------------------
     if neo4j_ok:
         try:
             await asyncio.to_thread(
                 collection.update,
-                ids=[orphan.chunk_id],
-                metadatas=[{"cerid_state": "committed"}],
+                ids=chunk_ids,
+                metadatas=[{"cerid_state": "committed"} for _ in chunk_ids],
             )
         except Exception as e:  # noqa: BLE001 — observability boundary
             log_swallowed_error(
                 "app.services.ingest_recovery.flip_committed",
                 e,
-                context={"chunk_id": orphan.chunk_id},
+                context={"artifact_id": lead.artifact_id},
             )
-        logger.info("ingest_recovery.committed chunk=%s", orphan.chunk_id)
+        logger.info(
+            "ingest_recovery.committed artifact=%s chunks=%d",
+            lead.artifact_id, len(chunk_ids),
+        )
         return RecoveryAction.COMMITTED
 
     # --- 4. On failure: deferred or purge --------------------------------
     if new_attempt_count < _MAX_RECOVERY_ATTEMPTS:
         return RecoveryAction.DEFERRED
 
-    # Budget exhausted — dead-letter the content, raise a Sentry breadcrumb,
-    # then purge. Dead-lettering BEFORE the delete means the chunk's text +
-    # metadata survive even when Neo4j is permanently down (no silent data loss).
-    await _deadletter_orphan(orphan, new_attempt_count)
-    _escalate_orphan(orphan, new_attempt_count)
+    # Budget exhausted — dead-letter each chunk's content, escalate once per
+    # artifact, then purge. Dead-lettering BEFORE the delete means every chunk's
+    # text + metadata survive even when Neo4j is permanently down (no silent loss).
+    for orphan in orphans:
+        await _deadletter_orphan(orphan, new_attempt_count)
+    _escalate_orphan(lead, new_attempt_count)
     try:
-        await asyncio.to_thread(collection.delete, ids=[orphan.chunk_id])
+        await asyncio.to_thread(collection.delete, ids=chunk_ids)
         logger.warning(
-            "ingest_recovery.purged chunk=%s artifact=%s (exhausted %d retries)",
-            orphan.chunk_id,
-            orphan.artifact_id,
+            "ingest_recovery.purged artifact=%s chunks=%d (exhausted %d retries)",
+            lead.artifact_id,
+            len(chunk_ids),
             new_attempt_count,
         )
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
             "app.services.ingest_recovery.purge",
             e,
-            context={"chunk_id": orphan.chunk_id},
+            context={"artifact_id": lead.artifact_id},
         )
     return RecoveryAction.PURGED
+
+
+async def recover_orphan(orphan: OrphanRecord) -> RecoveryAction:
+    """Compat shim — recover a single orphaned chunk as an artifact group of one.
+
+    Retained for callers/tests that operate per-chunk; the artifact-granular
+    :func:`recover_artifact` is the primary path (the recovery job groups
+    orphans by ``artifact_id`` before calling it, closing AF-003)."""
+    return await recover_artifact([orphan])
 
 
 async def _deadletter_orphan(orphan: OrphanRecord, attempt_count: int) -> None:

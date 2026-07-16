@@ -421,6 +421,37 @@ def _merge_cluster(
 
 
 # ---------------------------------------------------------------------------
+# Serving-cache invalidation (mirrors compute_umap_3d._bust_serving_cache)
+# ---------------------------------------------------------------------------
+
+
+def _bust_emb3d_serving_cache() -> None:
+    """Best-effort drop of the ``cerid:graph:emb3d:*`` serving cache.
+
+    A committed merge changes the served node set, so the Constellation's 3D
+    embedding cache is stale for up to 24 h. Mirror
+    ``compute_umap_3d.ComputeUmap3DJob._bust_serving_cache`` so an operator's
+    merge run leaves a fresh cache. This offline script may run without a live
+    Redis (e.g. against a dump), so the bust degrades gracefully — it logs and
+    returns, never aborting a merge that already committed.
+    """
+    try:
+        from app.deps import get_redis
+
+        redis = get_redis()
+        if redis is None:
+            logger.warning("emb3d cache bust skipped — no Redis available.")
+            return
+        dropped = 0
+        for key in redis.scan_iter(match="cerid:graph:emb3d:*", count=200):
+            redis.delete(key)
+            dropped += 1
+        logger.info("emb3d serving-cache busted: %d key(s)", dropped)
+    except Exception as exc:  # noqa: BLE001 — best-effort; merge already committed
+        logger.warning("emb3d cache bust failed (merge already committed): %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Main entry: run_merge (importable by tests)
 # ---------------------------------------------------------------------------
 
@@ -525,6 +556,8 @@ def run_merge(
         "Merge complete in %.1fs: %d clusters merged, %d singletons untouched",
         time.time() - started, merged_count, singleton_count,
     )
+    if merged_count:
+        _bust_emb3d_serving_cache()
     return {
         "dry_run": False,
         "clusters_found": len(duplicate_clusters),
@@ -780,6 +813,8 @@ def run_embedding_resolution(
         "embedding-resolution done in %.1fs: %d clusters merged",
         time.time() - started, merged,
     )
+    if merged:
+        _bust_emb3d_serving_cache()
     return {
         "dry_run": False,
         "candidates": plan["candidates"],

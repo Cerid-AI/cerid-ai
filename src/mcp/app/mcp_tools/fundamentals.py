@@ -200,75 +200,66 @@ async def pkb_artifact_delete(
 ) -> dict[str, Any]:
     """See decorator for contract.
 
-    Soft-delete: sets ``a.archived = true`` + ``a.archived_at`` on the
-    Neo4j node. Retrieval filters out archived artifacts by default
-    (the canonical retrieval path drops archived artifacts).
-    Chunks stay in ChromaDB so an accidental delete can be reversed by
-    clearing the flag.
+    Soft-delete: routes the ``archived`` write through the content-lifecycle
+    coordinator (:func:`app.services.content_lifecycle.hide_content`), which
+    sets ``a.archived = true`` + ``a.archived_at`` on the Neo4j node and busts
+    the query-result caches. The archived filter is enforced by the
+    content-lifecycle coordinator together with the ``query_agent``
+    post-retrieval join, so archived artifacts are dropped at query time.
+    Chunks stay in ChromaDB, so the hide is reversible by clearing the flag.
 
-    Hard-delete: calls ``graph.delete_artifact`` (DETACH DELETE the
-    node + relationships), then drops the ChromaDB chunks. Irreversible.
+    Hard-delete: routes through
+    :func:`app.services.content_lifecycle.remove_content`, which DETACH-DELETEs
+    the Neo4j node and fans chunk removal across every retrieval store (ChromaDB
+    + BM25 + SPLADE, physically dropping the on-disk postings), then busts
+    caches. Irreversible.
     """
     driver = get_neo4j()
 
     if not hard:
-        # Soft path — set archived flag, leave chunks intact.
-        with driver.session() as session:
-            result = session.run(
-                "MATCH (a:Artifact {id: $id}) "
-                "SET a.archived = true, a.archived_at = datetime() "
-                "RETURN a.filename AS filename, a.domain AS domain, "
-                "a.chunk_count AS chunk_count",
-                id=artifact_id,
+        # Soft path — reversible hide via the coordinator (centralizes the
+        # archived write + cache invalidation); chunks stay intact. Read
+        # metadata first for the response shape (the node persists post-hide).
+        artifact = graph.get_artifact(driver, artifact_id)
+        if artifact is None:
+            raise ResourceNotFoundError(
+                f"Artifact {artifact_id!r} not found"
             )
-            row = result.single()
-            if row is None:
-                raise ResourceNotFoundError(
-                    f"Artifact {artifact_id!r} not found"
-                )
+        from app.services.content_lifecycle import hide_content
+        hide_content(artifact_id, neo4j=driver)
         return {
             "deleted": True,
             "mode": "soft",
             "artifact_id": artifact_id,
-            "domain": row["domain"] or "",
-            "filename": row["filename"] or "",
-            "chunks_affected": int(row["chunk_count"] or 0),
+            "domain": artifact.get("domain") or "",
+            "filename": artifact.get("filename") or "",
+            "chunks_affected": int(artifact.get("chunk_count") or 0),
         }
 
-    # Hard path — full removal.
-    record = await asyncio.to_thread(graph.delete_artifact, driver, artifact_id)
-    if not record.get("deleted"):
+    # Hard path — full removal via the coordinator so BM25 + SPLADE postings are
+    # dropped alongside the Neo4j node + Chroma chunks (previously orphaned).
+    # Read filename first: RemovalResult doesn't carry it and the node is gone
+    # once remove_content returns.
+    from app.services.content_lifecycle import remove_content
+
+    artifact = await asyncio.to_thread(graph.get_artifact, driver, artifact_id)
+    if artifact is None:
         raise ResourceNotFoundError(
             f"Artifact {artifact_id!r} not found"
         )
-
-    # Drop chunks from ChromaDB. Best-effort: if the collection is
-    # missing or the chunks already gone, that's acceptable — the
-    # Neo4j node is already gone.
-    chunk_ids = record.get("chunk_ids") or []
-    chunks_removed = 0
-    if chunk_ids and record.get("domain"):
-        chroma = get_chroma()
-        try:
-            coll = await asyncio.to_thread(
-                chroma.get_collection,
-                name=config.collection_name(record["domain"]),
-            )
-            await asyncio.to_thread(coll.delete, ids=chunk_ids)
-            chunks_removed = len(chunk_ids)
-        except Exception as exc:
-            from core.utils.swallowed import log_swallowed_error
-            log_swallowed_error('app.mcp_tools.fundamentals', exc)
-            # Collection might not exist; tolerate.
-            chunks_removed = 0
+    result = await asyncio.to_thread(remove_content, artifact_id, neo4j=driver)
+    if not result.found:
+        raise ResourceNotFoundError(
+            f"Artifact {artifact_id!r} not found"
+        )
 
     return {
         "deleted": True,
         "mode": "hard",
         "artifact_id": artifact_id,
-        "domain": record.get("domain", ""),
-        "filename": record.get("filename", ""),
-        "chunks_affected": chunks_removed,
+        "domain": result.domain,
+        "filename": artifact.get("filename", ""),
+        "chunks_affected": result.removed.get("chroma", 0),
     }
 
 

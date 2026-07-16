@@ -45,6 +45,10 @@ def create_source(
     """
     source_id = str(uuid.uuid4())
     now = datetime.now(tz=timezone.utc).isoformat()
+    # Retention is opt-in. Absent an explicit operator-supplied policy we default
+    # to keep_all, which enforce_all_retention() deliberately skips — nothing is
+    # ever purged until an operator configures a concrete dict policy
+    # (mode != "keep_all"). This default is intentional, not a missing feature.
     retention = retention_policy or {"mode": "keep_all"}
 
     with driver.session() as session:

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -101,7 +102,7 @@ async def upload_file_endpoint(
         # and concurrent requests (mirrors ingest_file in ingestion.py).
         from app.parsers import parse_file as _parse_file
         from app.services.ingestion import ingest_content
-        from utils.metadata import extract_metadata, extract_metadata_minimal
+        from utils.metadata import ai_categorize, extract_metadata, extract_metadata_minimal
 
         parsed = await asyncio.to_thread(_parse_file, tmp_path)
         text = parsed.get("text", "")
@@ -119,17 +120,62 @@ async def upload_file_endpoint(
                 ),
             )
 
+        # AF-025/AF-026: resolve the categorization mode and, when no domain
+        # was supplied, auto-detect one via the same ai_categorize() call
+        # ingest_file() uses (app/services/ingestion.py) — mirrors that
+        # wiring so `categorize_mode` genuinely selects the AI tier used and
+        # an empty `domain` genuinely triggers auto-detect instead of being
+        # silently coerced to the default. An explicit domain always wins —
+        # there's nothing to categorize once the caller already chose one.
+        mode = categorize_mode or (
+            "manual" if domain and domain in config.DOMAINS else config.CATEGORIZE_MODE
+        )
+        if mode != "manual" and not domain:
+            try:
+                ai_result = await ai_categorize(text, file.filename, mode)
+            except Exception as e:  # noqa: BLE001 — auto-detect is best-effort, never blocks upload
+                logger.warning(f"Upload domain auto-detect failed: {e}")
+                ai_result = {}
+            if ai_result.get("suggested_domain"):
+                domain = ai_result["suggested_domain"]
+        if not domain or domain not in config.DOMAINS:
+            domain = config.DEFAULT_DOMAIN
+
         # Honor skip_metadata: the wizard's fast-path swaps the spaCy + tiktoken
         # pipeline for filename-derived keywords so Try-It-Out doesn't block
         # on NLP cold-start. Enriched metadata can be re-computed later by
         # the curator agent without re-ingesting the file.
         if skip_metadata:
-            metadata = extract_metadata_minimal(text, file.filename, domain or "general")
+            metadata = extract_metadata_minimal(text, file.filename, domain)
         else:
-            metadata = extract_metadata(text, file.filename, domain or "general")
+            metadata = extract_metadata(text, file.filename, domain)
         metadata["file_type"] = parsed.get("file_type", metadata.get("file_type", ""))
         metadata["sub_category"] = sub_category
         metadata["client_source"] = "upload"
+
+        # AF-024: thread the declared `tags` param (comma-separated or JSON
+        # array, per the docstring) into the ingest metadata as `tags_json`
+        # — the same shape routers/ingestion.py and routers/artifacts.py use
+        # — so retrieval can filter on it. Malformed JSON falls back to
+        # comma-splitting the raw string rather than 500ing; tags are
+        # best-effort enrichment, not a request-validation gate.
+        if tags:
+            stripped_tags = tags.strip()
+            parsed_tags: Any = None
+            if stripped_tags.startswith("["):
+                try:
+                    parsed_tags = json.loads(stripped_tags)
+                except (json.JSONDecodeError, TypeError):
+                    parsed_tags = None
+            if isinstance(parsed_tags, list):
+                tags_list = [
+                    t.strip().lower() for t in parsed_tags if isinstance(t, str) and t.strip()
+                ]
+            else:
+                tags_list = [t.strip().lower() for t in tags.split(",") if t.strip()]
+            if tags_list:
+                metadata["tags_json"] = json.dumps(tags_list)
+
         # Add optional parsed fields, filtering out None (ChromaDB rejects None)
         for key in ("page_count", "table_count", "form_field_count"):
             val = parsed.get(key)
@@ -138,11 +184,11 @@ async def upload_file_endpoint(
         result = await asyncio.to_thread(
             ingest_content,
             text,
-            domain or "general",
+            domain,
             metadata,
             skip_quality=skip_quality,
         )
-        result["categorize_mode"] = categorize_mode or "smart"
+        result["categorize_mode"] = mode
         result["metadata"] = metadata
 
         # Override filename in result with the original upload name
@@ -155,7 +201,7 @@ async def upload_file_endpoint(
 
         # Archive mode: copy the file to archive/{domain}/ for Dropbox sync
         if config.STORAGE_MODE == "archive" and tmp_path:
-            _archive_file(tmp_path, file.filename, result.get("domain", domain or "general"))
+            _archive_file(tmp_path, file.filename, result.get("domain", domain))
 
         return result
 

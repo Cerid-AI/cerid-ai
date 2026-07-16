@@ -589,24 +589,26 @@ async def pkb_quarantine(
 
     driver = get_neo4j()
 
-    def _run() -> bool:
-        with driver.session() as session:
-            result = session.run(
-                """
-                MATCH (a:Artifact {id: $id})
-                SET a.archived = true,
-                    a.quarantined_at = $now,
-                    a.purge_after = $purge_after,
-                    a.quarantine_reason = $reason
-                RETURN count(a) AS c
-                """,
-                id=artifact_id, now=now_iso,
-                purge_after=purge_after, reason=reason,
-            )
-            return int(result.single()["c"]) > 0
+    # Route the archived write through the content-lifecycle coordinator, which
+    # centralizes the ``a.archived = true`` write and busts the query-result
+    # caches. Quarantine-specific fields ride along via ``extra_props`` (merged
+    # with ``SET a += $extra``). ``quarantined_at`` was already a Python ISO
+    # string (``now.isoformat()``), never a server-side ``datetime()``, so it is
+    # safe to pass as a plain param and preserves the exact prior value;
+    # ``archived_at`` is additionally set server-side by ``set_archived`` (the
+    # soft-delete convention) — harmless to the scheduler, which reads
+    # ``purge_after`` + ``archived``.
+    extra_props = {
+        "quarantined_at": now_iso,
+        "purge_after": purge_after,
+        "quarantine_reason": reason,
+    }
 
     try:
-        ok = await asyncio.to_thread(_run)
+        from app.services.content_lifecycle import hide_content
+        ok = await asyncio.to_thread(
+            hide_content, artifact_id, neo4j=driver, extra_props=extra_props
+        )
     except Exception as exc:
         raise UpstreamUnavailableError(f"Neo4j unreachable: {exc}") from exc
 

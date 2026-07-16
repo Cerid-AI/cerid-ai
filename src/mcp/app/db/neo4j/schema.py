@@ -82,6 +82,14 @@ def init_schema(driver) -> None:
             "CREATE INDEX artifact_updated_at_idx IF NOT EXISTS "
             "FOR (a:Artifact) ON (a.updated_at)"
         )
+        # AF-091: list_artifacts (ORDER BY + since-filter), discover_relationships
+        # strategy 2 (EVERY ingest), daily_digest, knowledge_stats_snapshot, and
+        # rectify all sort/range-filter on a.ingested_at — each a full label scan
+        # + in-memory sort without this index. O(N log N) per call → indexed.
+        session.run(
+            "CREATE INDEX artifact_ingested_at_idx IF NOT EXISTS "
+            "FOR (a:Artifact) ON (a.ingested_at)"
+        )
 
         # --- Entity layer (Workstream E Phase 4a.2) ---
         # GraphRAG entity nodes that materialise from LLM-extracted mentions

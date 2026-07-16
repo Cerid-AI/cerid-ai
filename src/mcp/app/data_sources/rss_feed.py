@@ -3,6 +3,16 @@
 
 """RSS/Atom feed poller data source connector.
 
+.. deprecated::
+    This is the **legacy** Redis-backed RSS subsystem. It ingests article
+    content directly via ``ingest_content()`` with no (:Source) node and no
+    FROM_SOURCE edge, so it funds none of the :Source economy — no per-source
+    counters, no quality floor, no retention policy. The canonical,
+    :Source-aware RSS connector is ``core/ingest/sources/connectors/rss.py``;
+    manage feeds through :Source management (``POST /sources``) instead. This
+    module and its endpoints are retained for backward compatibility only and
+    should not be extended.
+
 Polls configured RSS/Atom feeds, deduplicates entries via Redis,
 and ingests article content into the KB through ``ingest_content()``.
 
@@ -48,6 +58,30 @@ _SEEN_SET = "cerid:rss:seen"
 
 # Namespaces for Atom feeds
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+
+# One-time deprecation warning guard (see module docstring). Flipped by
+# _warn_deprecated_once() so the warning fires at most once per process.
+_deprecation_warned = False
+
+
+def _warn_deprecated_once() -> None:
+    """Emit the legacy-RSS deprecation warning at most once per process.
+
+    This poller predates the :Source economy: it ingests directly with no
+    (:Source) node or FROM_SOURCE edge, so it funds no per-source counters,
+    quality floor, or retention. Operators should migrate to the :Source-based
+    connector ``core/ingest/sources/connectors/rss.py``.
+    """
+    global _deprecation_warned
+    if _deprecation_warned:
+        return
+    _deprecation_warned = True
+    _logger.warning(
+        "app.data_sources.rss_feed is DEPRECATED: this legacy Redis-backed RSS "
+        "poller does not fund the :Source economy (no per-source counters, "
+        "quality floor, or retention). Use the :Source-based connector "
+        "core/ingest/sources/connectors/rss.py as canonical."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +394,11 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
     """Poll a single RSS/Atom feed and ingest new entries.
 
     Returns a summary dict: ``{feed_id, new_entries, errors}``.
+
+    Deprecated: part of the legacy Redis-backed RSS subsystem (see module
+    docstring). Prefer the :Source-based connector.
     """
+    _warn_deprecated_once()
     from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 
     feed_id = feed_config["id"]
@@ -483,7 +521,12 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
 
 
 async def poll_all_feeds() -> list[dict[str, Any]]:
-    """Poll all enabled feeds and return per-feed summaries."""
+    """Poll all enabled feeds and return per-feed summaries.
+
+    Deprecated: part of the legacy Redis-backed RSS subsystem (see module
+    docstring). Prefer the :Source-based connector.
+    """
+    _warn_deprecated_once()
     feeds = list_feeds()
     results = []
     for feed in feeds:

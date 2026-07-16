@@ -106,8 +106,28 @@ class TestJobRecordSerialisation:
             "estimated_tokens_in", "estimated_tokens_out",
             "actual_tokens_in", "actual_tokens_out",
             "requires_llm", "model", "error_message",
+            "metadata", "progress",
         }
         assert required.issubset(d.keys())
+
+    def test_round_trip_metadata_and_progress(self) -> None:
+        """CL-5/AF-008: a job's outcome metadata + progress checkpoint survive the
+        Redis round-trip. Before the schema fix, JobRecord had neither field, so
+        every job's rich outcome and progress were irrecoverable at the persist
+        seam and /processor/recent could not surface them."""
+        rec = _make_record(
+            metadata={"written": 42, "orphans_cleared": 3, "held": False},
+            progress=0.75,
+        )
+        restored = JobRecord.from_dict(rec.to_dict())
+        assert restored.metadata == {"written": 42, "orphans_cleared": 3, "held": False}
+        assert restored.progress == 0.75
+
+    def test_held_state_serialises(self) -> None:
+        """A HELD (cost-cap) job round-trips as HELD, never COMPLETED (AF-017)."""
+        rec = _make_record(state=JobState.HELD)
+        assert rec.to_dict()["state"] == "held"
+        assert JobRecord.from_dict(rec.to_dict()).state is JobState.HELD
 
     def test_state_serialised_as_string(self) -> None:
         rec = _make_record(state=JobState.RUNNING)

@@ -435,26 +435,21 @@ async def _default_ingest(
 
 
 async def _default_delete(artifact_id: str) -> dict[str, Any]:
-    """Remove an artifact from Neo4j *and* its chunks from chromadb."""
-    import config
-    from app.db.neo4j.artifacts import delete_artifact
-    from app.deps import get_chroma, get_neo4j
+    """Remove an artifact from Neo4j *and* every retrieval store (Chroma + BM25
+    + SPLADE) plus the query caches, via the content-lifecycle coordinator.
+
+    Returns the ``{"deleted": bool, ...}`` shape :func:`uninstall_pack` expects.
+    """
+    from app.deps import get_neo4j
+    from app.services.content_lifecycle import remove_content
 
     neo4j = get_neo4j()
-    chroma = get_chroma()
-    result = await asyncio.to_thread(delete_artifact, neo4j, artifact_id)
-    chunk_ids = result.get("chunk_ids") or []
-    domain = result.get("domain") or ""
-    if chunk_ids and domain:
-        coll_name = config.collection_name(domain)
-        try:
-            collection = await asyncio.to_thread(chroma.get_collection, name=coll_name)
-            await asyncio.to_thread(collection.delete, ids=chunk_ids)
-        except Exception as exc:  # noqa: BLE001 — observability boundary
-            log_swallowed_error(
-                "app.services.knowledge_packs.delete_chunks", exc,
-            )
-    return result
+    result = await asyncio.to_thread(remove_content, artifact_id, neo4j=neo4j)
+    return {
+        "deleted": result.found,
+        "chunk_ids": result.chunk_ids,
+        "domain": result.domain,
+    }
 
 
 def default_state_path() -> Path:

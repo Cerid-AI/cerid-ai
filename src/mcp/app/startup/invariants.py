@@ -140,6 +140,102 @@ def _probe_fact_orphans(neo4j: Any) -> dict[str, Any]:
     return {"fact_orphans": orphans}
 
 
+# Store-divergence invariant (CL-12, audit 2026-07-15): the class of bug where
+# a delete/hide path updates a subset of the {Neo4j, Chroma, BM25, SPLADE}
+# stores, leaving the survivors serving orphaned content. This is a WARN-ONLY
+# sample-based metric — it does NOT flip ``healthy_invariants`` in Phase 0
+# (flip to gating only after a soak). Two axes:
+#   * two_store_residual       — artifacts whose Neo4j chunk_count disagrees
+#                                with the count of their chunks physically in
+#                                Chroma (a delete/ingest that touched one store)
+#   * vector_visible_archived  — archived artifacts whose chunks are still
+#                                physically present (= vector-visible) in Chroma
+#                                (the AF-001 storage-level residue)
+# Sample-bounded so the /health poll stays cheap on large corpora.
+_DIVERGENCE_SAMPLE_LIMIT = 200
+_DIVERGENCE_SAMPLE_CYPHER = """
+MATCH (a:Artifact)
+RETURN a.id AS id,
+       a.chunk_count AS chunk_count,
+       a.chunk_ids AS chunk_ids,
+       a.domain AS domain,
+       coalesce(a.archived, false) AS archived
+LIMIT $limit
+"""
+
+
+def _probe_divergence(chroma: Any, neo4j: Any) -> dict[str, Any]:
+    """Probe: sampled cross-store divergence between Neo4j and Chroma.
+
+    Direct-store sample (no coordinator import): read a bounded set of
+    :Artifact nodes, then for each count how many of its chunk_ids are
+    physically present in its Chroma domain collection. A chunk_count vs
+    present-count mismatch is a two-store divergence; an archived artifact
+    whose chunks are still present is a vector-visible-archived residue.
+
+    Warn-only. Every sub-step is defensive so a partial-store outage degrades
+    the count rather than raising — the caller also wraps this in try/except.
+    """
+    import json as _json
+
+    import config
+
+    with neo4j.session() as session:
+        rows = list(
+            session.run(_DIVERGENCE_SAMPLE_CYPHER, limit=_DIVERGENCE_SAMPLE_LIMIT)
+        )
+
+    coll_cache: dict[str, Any] = {}
+
+    def _present_count(domain: str | None, chunk_ids: list[str]) -> int:
+        """Count how many of an artifact's chunk_ids are COMMITTED-present in
+        Chroma. Restricting to ``cerid_state != pending`` (CL-3) means a
+        stuck-pending artifact — node.chunk_count=N but its chunks never flipped
+        committed after a failed two-store commit — reads as divergence instead
+        of being masked by the pending rows. Chunks with no ``cerid_state`` (pre
+        two-phase legacy) count as present. A brief transient window during a
+        healthy ingest (staged pending → create_artifact → flip committed) can
+        register momentarily; the metric is warn-only + sampled and the recovery
+        job heals real stuck-pending within ~60 s."""
+        if not chunk_ids or not domain:
+            return 0
+        name = config.collection_name(domain)
+        coll = coll_cache.get(name)
+        if coll is None:
+            coll = chroma.get_or_create_collection(name=name)
+            coll_cache[name] = coll
+        got = coll.get(ids=list(chunk_ids), where={"cerid_state": {"$ne": "pending"}})
+        return len((got or {}).get("ids") or [])
+
+    two_store = 0
+    vector_visible_archived = 0
+    for r in rows:
+        raw_ids = r.get("chunk_ids") if hasattr(r, "get") else r["chunk_ids"]
+        try:
+            chunk_ids = (
+                _json.loads(raw_ids) if isinstance(raw_ids, str) else (raw_ids or [])
+            )
+        except (ValueError, TypeError):
+            chunk_ids = []
+        if not isinstance(chunk_ids, list):
+            chunk_ids = []
+        domain = r.get("domain") if hasattr(r, "get") else r["domain"]
+        present = _present_count(domain, chunk_ids)
+
+        chunk_count = r.get("chunk_count") if hasattr(r, "get") else r["chunk_count"]
+        if isinstance(chunk_count, (int, float)) and int(chunk_count) != present:
+            two_store += 1
+
+        archived = r.get("archived") if hasattr(r, "get") else r["archived"]
+        if archived and present > 0:
+            vector_visible_archived += 1
+
+    return {
+        "two_store_residual": two_store,
+        "vector_visible_archived": vector_visible_archived,
+    }
+
+
 _startup_logger = logging.getLogger("ai-companion.startup")
 
 
@@ -331,6 +427,29 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
         logger.warning("fact orphan invariant probe failed: %s", exc)
         snapshot["errors"].append(f"fact_orphans: {exc}")
         snapshot["fact_orphans"] = -1
+
+    # Store-divergence sample (CL-12). WARN-ONLY — deliberately not part of the
+    # healthy_invariants gate in Phase 0 (flip to gating after a soak).
+    try:
+        snapshot.update(_probe_divergence(chroma, neo4j))
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
+        logger.warning("divergence invariant probe failed: %s", exc)
+        snapshot["errors"].append(f"divergence: {exc}")
+        snapshot["two_store_residual"] = -1
+        snapshot["vector_visible_archived"] = -1
+
+    # CL-1 — surface whether the connector ingest sink is wired. A silent wiring
+    # failure (main.py logs-and-continues) previously left connector polling dead
+    # with no observable signal (polled=N, ingested=0). WARN-ONLY.
+    try:
+        from core.ingest.sources.ingest_sink import get_source_ingest_fn
+        snapshot["source_ingest_fn_wired"] = get_source_ingest_fn() is not None
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.startup.invariants', exc)
+        snapshot["source_ingest_fn_wired"] = False
 
     try:
         snapshot.update(_probe_nli())

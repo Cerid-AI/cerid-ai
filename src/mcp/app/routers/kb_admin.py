@@ -16,7 +16,9 @@ import config
 from app.agents.curator import curate
 from app.db.neo4j.artifacts import (
     delete_artifact,
+    delete_artifacts_by_domain,
     domain_artifact_stats,
+    get_artifact,
     list_artifacts,
     list_duplicate_artifacts,
 )
@@ -267,14 +269,9 @@ async def reingest_artifact(artifact_id: str):
 
     try:
         neo4j = get_neo4j()
-        artifact = list_artifacts(neo4j, limit=10000)
-        # Find the specific artifact
-        target = None
-        for a in artifact:
-            if a["id"] == artifact_id:
-                target = a
-                break
-
+        # AF-054: fetch the one artifact by id directly — was a full-domain
+        # list_artifacts(limit=10000) + Python loop for a single-artifact op.
+        target = get_artifact(neo4j, artifact_id)
         if not target:
             raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
 
@@ -437,11 +434,13 @@ async def reembed_corpus(req: ReembedRequest | None = None):
     the job on completion (vectors changed under the same text).
 
     Unlike ``/admin/kb/reindex`` (synchronous, one page per call), this
-    returns immediately with a ``job_id`` — progress and per-job-type
-    latency are visible via ``GET /processor/status`` /
-    ``GET /processor/recent``. ``enqueue_if_absent`` collapses a
-    duplicate call against the same domain+force while one is already
-    pending or running.
+    returns immediately with a ``job_id``. Live queue/worker state is
+    visible via ``GET /processor/status``; the job's ``progress`` and
+    ``metadata`` are surfaced on ``GET /processor/recent`` as a terminal
+    snapshot (live per-job progress is persisted on the record as the job
+    runs, but ``/recent`` lists only terminal jobs). ``enqueue_if_absent``
+    collapses a duplicate call against the same domain+force while one is
+    already pending or running.
     """
     domain = req.domain if req else None
     force = req.force if req else False
@@ -649,22 +648,14 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
     try:
         neo4j = get_neo4j()
         chroma = get_chroma()
-        artifacts = list_artifacts(neo4j, domain=domain, limit=10000)
 
-        deleted_count = 0
-        chunks_removed = 0
-
-        # Delete Neo4j artifacts first — safer ordering avoids split-brain
-        # if the process crashes between the two phases
-        for artifact in artifacts:
-            try:
-                result = delete_artifact(neo4j, artifact["id"])
-                if result.get("deleted"):
-                    deleted_count += 1
-                    chunks_removed += len(result.get("chunk_ids", []))
-            except Exception as e:
-                log_swallowed_error('app.routers.kb_admin', e)
-                logger.warning("Failed to delete artifact %s: %s", artifact["id"][:8], e)
+        # AF-093: delete every artifact in the domain in ONE domain-scoped
+        # DETACH DELETE (no per-artifact loop, no 10k cap → no orphaned tail).
+        # Neo4j first — safer ordering avoids split-brain if the process crashes
+        # between the two phases; the Chroma collection is dropped wholesale next.
+        _del = delete_artifacts_by_domain(neo4j, domain)
+        deleted_count = _del["deleted"]
+        chunks_removed = _del["chunks"]
 
         # Delete ChromaDB collection for the domain
         coll_name = config.collection_name(domain)
@@ -878,6 +869,7 @@ async def repair_collection(req: CollectionRepairRequest):
     rebuilt = 0
 
     # Replay the backup into the fresh collection via the public ingest path.
+    import asyncio
     import json as _json
     from pathlib import Path
 
@@ -913,7 +905,14 @@ async def repair_collection(req: CollectionRepairRequest):
                         # plaintext; ingest_content re-encrypts the Chroma
                         # copy and keeps Neo4j's summary cleartext.
                         replay_meta["summary"] = decrypt_field(str(replay_meta["summary"]))
-                    ingest_content(
+                    # AF-092: ingest_content is fully synchronous (re-chunk +
+                    # re-embed + relationship discovery). Calling it directly here
+                    # blocked the event loop for the ENTIRE replay, stalling health
+                    # probes until the mcp-watchdog force-exited the container
+                    # mid-repair. Offload each record to a worker thread so the
+                    # loop keeps serving.
+                    await asyncio.to_thread(
+                        ingest_content,
                         content=doc,
                         domain=domain,
                         metadata=replay_meta,
@@ -1026,13 +1025,18 @@ async def list_duplicates(min_similarity: float = 0.85):
 @router.post("/admin/kb/duplicates/merge", response_model=MergeDuplicatesResponse)
 async def merge_duplicates(req: MergeDuplicatesRequest):
     """Delete the ``remove_ids`` artifacts, keeping ``keep_id``."""
+    from app.services.content_lifecycle import remove_content
+
     neo4j = get_neo4j()
     merged = 0
     for art_id in req.remove_ids:
         if art_id == req.keep_id:
             continue
         try:
-            delete_artifact(neo4j, art_id)
+            # HARD delete through the coordinator: fans chunk removal across
+            # Chroma + BM25 + SPLADE (was Neo4j-only, discarding chunk_ids) and
+            # busts the query caches.
+            remove_content(art_id, neo4j=neo4j)
             merged += 1
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("app.routers.kb_admin.merge_duplicates", exc)

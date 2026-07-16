@@ -27,13 +27,14 @@ from core.agents.hallucination.patterns import (
     CONCRETE_DATA_RE,
     EVASION_PATTERNS,
     FACTUAL_PATTERNS,
+    IGNORANCE_ADMISSION_PATTERNS,
+    INABILITY_ADMISSION_PATTERNS,
     KNOWN_SOURCES,
     NON_FACTUAL_PATTERNS,
     SENTENCE_RE,
     SPECIFIC_QUESTION_PATTERNS,
     STALE_KNOWLEDGE_PATTERNS,
     STRONG_FACTUAL_PATTERNS,
-    _is_ignorance_admission,
 )
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.internal_llm import call_internal_llm
@@ -307,6 +308,21 @@ def _extract_ignorance_claims(response_text: str) -> list[str]:
 
     This function runs *before* LLM/heuristic extraction and pulls these
     claims directly from the response so they reach downstream verification.
+
+    Two admission shapes are surfaced:
+
+    * **Noun-anchored** (``IGNORANCE_ADMISSION_PATTERNS``): "I don't have
+      *information* about X", "I'm not aware of X" — surfaced unconditionally,
+      as before.
+    * **First-person inability** (``INABILITY_ADMISSION_PATTERNS``): "I cannot
+      access X", "I cannot recall X" — the verdict-harness residue shape whose
+      object is the very thing the model can't supply. Surfaced only when the
+      admission asserts no concrete numeric value: a hedged factual answer
+      ("I can't recall the exact figure, but it's 8.4 million") keeps its number
+      and must stay a factual claim, not be swallowed as pure ignorance. Named
+      entities in the object (Mona Lisa, GPS) are the *subject* of the ignorance,
+      not an asserted answer, so — unlike the evasion whole-response guard — a
+      proper noun does not disqualify the admission; only an asserted number does.
     """
     text = response_text[:5000]
     sentences = SENTENCE_RE.split(text)
@@ -319,18 +335,25 @@ def _extract_ignorance_claims(response_text: str) -> list[str]:
     for sentence in expanded:
         if len(sentence) < 20 or len(sentence) > 300:
             continue
-        if _is_ignorance_admission(sentence):
-            clean = sentence.rstrip(".,;: ")
-            if clean and clean not in seen:
-                claims.append(clean)
-                seen.add(clean)
+        clean = sentence.rstrip(".,;: ")
+        if not clean or clean in seen:
+            continue
+        if any(p.search(sentence) for p in IGNORANCE_ADMISSION_PATTERNS):
+            claims.append(clean)
+            seen.add(clean)
+        # First-person inability admission — guarded on the absence of an
+        # asserted numeric value (see docstring).
+        elif (
+            any(p.search(sentence) for p in INABILITY_ADMISSION_PATTERNS)
+            and not _ANY_DIGIT_RE.search(sentence)
+        ):
+            claims.append(clean)
+            seen.add(clean)
         # Also catch knowledge-cutoff / staleness statements that aren't
         # phrased as ignorance admissions (e.g. "As of my last update...")
         elif any(p.search(sentence) for p in STALE_KNOWLEDGE_PATTERNS):
-            clean = sentence.rstrip(".,;: ")
-            if clean and clean not in seen:
-                claims.append(clean)
-                seen.add(clean)
+            claims.append(clean)
+            seen.add(clean)
     return claims
 
 

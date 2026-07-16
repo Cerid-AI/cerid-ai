@@ -112,6 +112,8 @@ def _mock_queue(record: JobRecord | None = None) -> MagicMock:
     q.dequeue = AsyncMock(side_effect=[record, None, None, None, None])
     q.mark_running = AsyncMock()
     q.mark_completed = AsyncMock()
+    q.mark_held = AsyncMock()
+    q.update_progress = AsyncMock()
     q.mark_failed = AsyncMock()
     q.enqueue = AsyncMock(return_value="new-id")
     q.pause = AsyncMock()

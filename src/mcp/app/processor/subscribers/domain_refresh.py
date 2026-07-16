@@ -58,16 +58,26 @@ def _on_entities_added(payload: dict[str, Any]) -> None:
         return
     if not payload.get("entity_slugs"):
         return
+    # Cheap first-line filter that coalesces ingest bursts into one recompute.
+    # The authoritative dedup is now enqueue_job_if_absent below — it is
+    # running-set-aware and collapses a concurrent duplicate even when a job's
+    # work outlives this debounce's TTL (which the bare enqueue could not).
     if not _try_acquire_debounce():
         logger.debug("domain_refresh.debounced")
         return
 
     try:
-        from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+        from app.db.redis.processor_queue import enqueue_job_if_absent  # noqa: PLC0415
         from app.processor.jobs.derive_domains import DeriveDomainsJob  # noqa: PLC0415
 
         job = DeriveDomainsJob()
-        enqueue_job(job, payload={})
+        job_id = enqueue_job_if_absent(job, payload={})
+        if job_id is None:
+            logger.debug(
+                "domain_refresh.collapsed onto an in-flight job artifact=%s",
+                payload.get("artifact_id"),
+            )
+            return
         logger.info(
             "domain_refresh.enqueued artifact=%s entities=%d",
             payload.get("artifact_id"),

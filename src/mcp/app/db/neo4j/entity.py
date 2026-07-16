@@ -506,6 +506,32 @@ SET rel.merged_at        = $merged_at,
 """
 
 
+def _bust_emb3d_cache() -> None:
+    """Best-effort drop of the ``cerid:graph:emb3d:*`` serving cache (AF-102).
+
+    An offline entity merge changes canonical_id / mention_count / topology that
+    the /graph/embeddings/3d serving cache (86400s TTL) would otherwise serve
+    stale for up to a day. Mirrors ``compute_umap_3d._bust_serving_cache``. The
+    ``get_redis`` import is lazy (``app.deps`` is layer-legal from
+    ``app/db/neo4j``) so this DAL keeps no hard redis dependency; every failure
+    is swallowed — a merge must never fail because the cache couldn't be busted.
+    """
+    try:
+        from app.deps import get_redis  # noqa: PLC0415
+
+        redis = get_redis()
+        if redis is None:
+            return
+        dropped = 0
+        for key in redis.scan_iter(match="cerid:graph:emb3d:*", count=200):
+            redis.delete(key)
+            dropped += 1
+        if dropped:
+            logger.info("entity_merge: busted %d serving-cache key(s)", dropped)
+    except Exception as exc:  # noqa: BLE001 — cache bust is best-effort
+        log_swallowed_error("app.db.neo4j.entity.merge_entities.cache_bust", exc)
+
+
 def merge_entities(
     driver,
     survivor_id: str,
@@ -612,6 +638,14 @@ def merge_entities(
         "entity_merge survivor=%s merged=%d skipped=%d method=%s repoints=%s",
         survivor_id, len(merged), len(skipped), merge_method, repoint_totals,
     )
+
+    # AF-102: a successful merge rewrote canonical_id / mention_count / topology;
+    # drop the emb3d serving cache so /graph/embeddings/3d does not serve the
+    # pre-merge projection for the cache's 86400s TTL. Skip when nothing merged
+    # (idempotent no-op re-run) so we don't bust needlessly.
+    if merged:
+        _bust_emb3d_cache()
+
     return {
         "survivor_id": survivor_id,
         "merged": merged,

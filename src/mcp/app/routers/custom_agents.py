@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.services.strict_agents_policy import enforce_strict_mode
-from deps import get_neo4j
+from deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from models.agents import (
     AgentCreateRequest,
     AgentDefinition,
@@ -201,6 +201,15 @@ async def query_agent(agent_id: str, body: AgentQueryRequest):
         domains=agent.get("domains") or None,
         model=agent.get("model_override") or None,
         top_k=10,
+        # Wire the full store set like every other answer-path caller. Without
+        # neo4j_driver the post-retrieval active-learning join is skipped, so
+        # archived (soft-deleted / quarantined) artifacts would still surface
+        # here — the residual AF-001 hole on the /custom_agents path. This also
+        # restores semantic cache + graph expansion this path was missing.
+        chroma_client=get_chroma(),
+        redis_client=get_redis(),
+        neo4j_driver=get_neo4j(),
+        graph_store=get_graph_store(),
     )
     # Attach agent context so the caller can apply system_prompt/temperature
     result["agent_config"] = {

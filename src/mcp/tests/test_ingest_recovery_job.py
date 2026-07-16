@@ -87,7 +87,7 @@ class TestEstimateCost:
 # ---------------------------------------------------------------------------
 
 class TestRun:
-    """run() calls scan_orphans + recover_orphan and returns JobResult."""
+    """run() calls scan_orphans + recover_artifact and returns JobResult."""
 
     @pytest.mark.asyncio
     async def test_run_no_orphans(self):
@@ -104,7 +104,7 @@ class TestRun:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("app.services.ingest_recovery.recover_orphan", new_callable=AsyncMock),
+            patch("app.services.ingest_recovery.recover_artifact", new_callable=AsyncMock),
         ):
             result = await job.run(_progress)
 
@@ -117,7 +117,7 @@ class TestRun:
 
     @pytest.mark.asyncio
     async def test_run_with_orphans_committed(self):
-        """run() calls recover_orphan for each orphan and counts committed."""
+        """run() groups orphans by artifact and calls recover_artifact per group, counting committed."""
         from app.services.ingest_recovery import OrphanRecord, RecoveryAction
 
         job = IngestRecoveryJob()
@@ -145,7 +145,7 @@ class TestRun:
                 return_value=[orphan],
             ),
             patch(
-                "app.services.ingest_recovery.recover_orphan",
+                "app.services.ingest_recovery.recover_artifact",
                 new_callable=AsyncMock,
                 return_value=RecoveryAction.COMMITTED,
             ),
@@ -153,6 +153,7 @@ class TestRun:
             result = await job.run(_progress)
 
         assert result.metadata["orphans_found"] == 1
+        assert result.metadata["artifacts_found"] == 1
         assert result.metadata["committed"] == 1
         assert result.metadata["purged"] == 0
         assert result.metadata["deferred"] == 0
@@ -176,7 +177,7 @@ class TestRun:
 
     @pytest.mark.asyncio
     async def test_run_individual_orphan_exception_counted_not_propagated(self):
-        """Exceptions from individual recover_orphan calls are counted, not re-raised."""
+        """Exceptions from individual recover_artifact calls are counted, not re-raised."""
         from app.services.ingest_recovery import OrphanRecord
 
         job = IngestRecoveryJob()
@@ -204,7 +205,7 @@ class TestRun:
                 return_value=[orphan],
             ),
             patch(
-                "app.services.ingest_recovery.recover_orphan",
+                "app.services.ingest_recovery.recover_artifact",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("unexpected"),
             ),

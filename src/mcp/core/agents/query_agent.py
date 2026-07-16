@@ -1475,10 +1475,17 @@ def _apply_active_learning_signals(
     results: list[dict[str, Any]],
     neo4j_driver: Any,
 ) -> list[dict[str, Any]]:
-    """Enrich retrieval results with endorsement_weight + flag_reason.
+    """Enrich retrieval results with endorsement_weight + flag_reason, and
+    filter out archived (soft-deleted / quarantined) artifacts.
 
     Reads each result's source artifact (by ``artifact_id``) and:
 
+    * **Drops** the result when the artifact is ``archived`` (soft-deleted or
+      quarantined via the content-lifecycle coordinator). The vector where-clause
+      cannot see this flag (it lives on the Neo4j node, not Chroma chunk
+      metadata), so this post-retrieval join is where the vector arm honors it —
+      closing AF-001, the hole where archived artifacts still surfaced as RAG
+      evidence. Clearing ``archived`` restores the artifact.
     * **Drops** the result when ``flag_reason`` is non-empty (inaccurate /
       outdated / off_topic / duplicate / spam — see ``pkb_flag`` for the
       taxonomy). The flag clears via ``pkb_flag(reason='')`` and the
@@ -1513,7 +1520,8 @@ def _apply_active_learning_signals(
             RETURN
                 a.id AS id,
                 coalesce(a.endorsement_weight, 1.0) AS weight,
-                coalesce(a.flag_reason, '') AS flag
+                coalesce(a.flag_reason, '') AS flag,
+                coalesce(a.archived, false) AS archived
             """,
             ids=artifact_ids,
         )
@@ -1521,12 +1529,23 @@ def _apply_active_learning_signals(
             metadata[r["id"]] = {
                 "weight": float(r["weight"] or 1.0),
                 "flag": str(r["flag"] or ""),
+                "archived": bool(r["archived"]),
             }
 
     filtered: list[dict[str, Any]] = []
     for chunk in results:
         aid = chunk.get("artifact_id")
         meta = metadata.get(aid) if aid else None
+        if meta and meta.get("archived"):
+            # Soft-deleted / quarantined — must NOT surface as RAG evidence on
+            # the vector arm (AF-001). ``archived`` is set by the content-
+            # lifecycle coordinator's hide_content; clearing the flag restores
+            # the artifact. The vector where-clause cannot filter this (the flag
+            # lives on the Neo4j node, not Chroma chunk metadata), so this
+            # post-retrieval join is the enforcement point — same mechanism the
+            # graph/temporal arms already use.
+            chunk["_filtered_reason"] = "archived"
+            continue
         if meta and meta["flag"]:
             # Flagged-out — don't surface this chunk at all. We tag the
             # filter event on the chunk dict before dropping it so a

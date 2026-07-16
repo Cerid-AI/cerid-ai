@@ -71,11 +71,17 @@ class TestDegradedEnvelopeCaching:
 
     @pytest.mark.asyncio
     async def test_healthy_envelope_still_cached(self, client):
-        """The guard must not disable caching for normal results."""
+        """The guard must not disable caching for normal (sourced) results. A
+        genuinely healthy result carries sources; the empty-source case is the
+        transient miss AF-101 now deliberately refuses to cache (see
+        test in this class), so a 'healthy' envelope must have sources."""
         with (
             patch(
                 "core.agents.query_agent.agent_query",
-                new=AsyncMock(return_value=_envelope()),
+                new=AsyncMock(return_value=_envelope(
+                    sources=[{"artifact_id": "a1", "content": "x", "relevance": 0.9}],
+                    total_results=1,
+                )),
             ),
             patch("utils.query_cache.get_cached", return_value=None),
             patch("utils.query_cache.set_cached") as mock_set,

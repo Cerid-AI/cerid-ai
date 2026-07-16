@@ -1196,9 +1196,25 @@ async def _verify_claim_externally(
     # but need different handling (compare data, not just check existence).
     # Also catch date-based claims via _reclassify_recency (e.g. "2024
     # elections are upcoming") that the stale-knowledge pattern misses.
+    #
+    # An explicit stale-knowledge admission (_is_recency_claim) still wins the
+    # recency route even when it also reads as ignorance. But the keyword-based
+    # _reclassify_recency reclassification must NOT hijack a first-person
+    # inability admission that merely mentions a temporal word: "I cannot access
+    # real-time data for *current* stock prices" is an ignorance admission about
+    # live data, not a stale factual claim — "current" would otherwise route it
+    # to the recency path, which has no data point to compare and grades it
+    # uncertain (verdict-harness residue V-42 / IG-04).
+    is_ignorance_admission = _is_ignorance_admission(claim)
     is_recency = (
         not is_evasion and not is_citation
-        and (_is_recency_claim(claim) or _reclassify_recency(claim, "factual") == "recency")
+        and (
+            _is_recency_claim(claim)
+            or (
+                not is_ignorance_admission
+                and _reclassify_recency(claim, "factual") == "recency"
+            )
+        )
     )
 
     # Detect ignorance-admitting claims ("I don't have info about X")
@@ -1206,7 +1222,7 @@ async def _verify_claim_externally(
     # Exclude recency claims — they have separate handling.
     is_ignorance = (
         not is_evasion and not is_citation and not is_recency
-        and _is_ignorance_admission(claim)
+        and is_ignorance_admission
     )
 
     # Determine if the claim needs web-search verification.

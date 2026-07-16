@@ -18,10 +18,18 @@ explicit Source node so:
      identifier per ingestion stream.
 
 This migration creates two unique constraints + an index. It does
-NOT backfill existing artifacts — backfill is a separate one-shot
-script (scripts/backfill_source_nodes.py, Phase 1 follow-up) that
-groups artifacts by (client_source, source_type) and creates a
-Source node per distinct combination.
+NOT backfill existing artifacts — backfill is the separate one-shot
+``scripts/backfill_source_nodes.py`` (CL-1 follow-up). That script is
+dry-run by default (``--apply`` to write) and idempotent: it
+reconstructs each pre-CL-1 artifact's ``source_id`` from its Chroma
+chunk metadata (the id is never stored on the :Artifact node — only
+``client_source`` is), MERGEs the ``(:Artifact)-[:FROM_SOURCE]->(:Source)``
+edge for every id that resolves to a real :Source, then recomputes each
+source's ``total_artifacts`` / ``total_chunks`` in one SET-from-graph pass
+(``SET s.total_artifacts = count(a), s.total_chunks = sum(a.chunk_count)``)
+so re-running never double-counts. Artifacts whose ``source_id`` cannot be
+reconstructed are reported grouped by (client_source, source_type) rather
+than linked — the script never fabricates :Source nodes.
 """
 from __future__ import annotations
 

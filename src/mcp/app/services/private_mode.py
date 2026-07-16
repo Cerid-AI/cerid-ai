@@ -33,10 +33,29 @@ exists solely for the L4 session-wipe confirmation flow.
 """
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from app.deps import get_redis
 from core.utils.swallowed import log_swallowed_error
 
+logger = logging.getLogger("ai-companion.private_mode")
+
 PRIVATE_MODE_KEY = "cerid:private_mode:global"
+
+# Markers the web client stamps onto the single injected ``system`` message
+# (RAG preamble + ``<document>``/``<memory>`` blocks — see
+# src/web/src/lib/rag-prompt.ts + kb-utils.ts). A system message carrying any
+# of these is KB/memory context, never a plain instruction, so at L2+ the
+# generation gate drops it. Privacy-safe by construction: matching is
+# permissive (any marker strips) because a false-negative here leaks the
+# user's KB to the model, which is the exact failure Private Mode L2 forbids.
+_INJECTION_MARKERS = (
+    "<document",
+    "<memory",
+    "[Remembered Context]",
+    "The user has a personal knowledge base.",
+)
 
 
 def get_private_mode_level() -> int:
@@ -58,3 +77,53 @@ def get_private_mode_level() -> int:
 def private_blocks(threshold: int) -> bool:
     """Return True when the current private-mode level is >= ``threshold``."""
     return get_private_mode_level() >= threshold
+
+
+def _role_of(message: Any) -> str | None:
+    """Role of a chat message, whether it is a Pydantic ``_ChatMessage``
+    (attribute access, ``/chat/stream``) or a raw ``dict`` (``/sdk/v1/llm/
+    complete``)."""
+    if isinstance(message, dict):
+        return message.get("role")
+    return getattr(message, "role", None)
+
+
+def _content_of(message: Any) -> str:
+    if isinstance(message, dict):
+        return message.get("content") or ""
+    return getattr(message, "content", None) or ""
+
+
+def strip_injected_context(messages: list[Any]) -> list[Any]:
+    """Enforce the L2+ "bypass KB injection" contract at the generation
+    boundary: drop any ``system`` message carrying KB/memory injection markers.
+
+    This is the server-side backstop the web client cannot provide — the web
+    client assembles the injected ``system`` message itself, so a direct
+    caller (SDK, curl, mobile) that replicates that assembly would otherwise
+    reach the model with the user's KB/memory despite Private Mode being on.
+    The level is read from trusted server state (:data:`PRIVATE_MODE_KEY`),
+    never from the request, so a caller cannot forge its way past this.
+
+    No-op below L2 (returns the input list unchanged). Works structurally on
+    role/content so both message shapes pass through unchanged when nothing
+    matches.
+    """
+    if not private_blocks(2):
+        return messages
+
+    kept: list[Any] = []
+    stripped = 0
+    for message in messages:
+        if _role_of(message) == "system":
+            content = _content_of(message)
+            if any(marker in content for marker in _INJECTION_MARKERS):
+                stripped += 1
+                continue
+        kept.append(message)
+
+    if stripped:
+        # Count only — never the content (L3 forbids logging conversation
+        # content; the count is metadata proving the gate fired).
+        logger.info("private_mode: stripped %d injected system message(s) at L2+", stripped)
+    return kept

@@ -85,13 +85,12 @@ def build_similarity_edges(
         session_kw["database"] = neo4j_database
 
     # ------------------------------------------------------------------
-    # 1. Idempotent purge of previous SIMILAR_TO edges.
-    # ------------------------------------------------------------------
-    with driver.session(**session_kw) as session:
-        session.run("MATCH ()-[r:SIMILAR_TO]-() DELETE r")
-
-    # ------------------------------------------------------------------
-    # 2. Fetch entities that have embeddings.
+    # 1. Fetch entities that have embeddings FIRST — data-readiness gate.
+    #    AF-013: this used to purge ALL SIMILAR_TO edges *before* checking, so
+    #    if the predecessor embedding stage (03:15) hadn't drained by the 03:22
+    #    build, it found zero embeddings, wrote zero edges, and silently left the
+    #    graph with NO similarity structure for a day. Never purge until we know
+    #    there is data to rebuild from.
     # ------------------------------------------------------------------
     with driver.session(**session_kw) as session:
         rows = list(session.run(
@@ -106,8 +105,23 @@ def build_similarity_edges(
 
     if not rows:
         elapsed = round(time.time() - started, 2)
-        logger.info("semantic_edges: no entities with embeddings, elapsed=%.2fs", elapsed)
-        return {"edges_created": 0, "entities_with_embeddings": 0, "elapsed_seconds": elapsed}
+        logger.warning(
+            "semantic_edges: 0 entities with embeddings — REFUSING to purge "
+            "SIMILAR_TO (predecessor embedding stage not ready); existing edges "
+            "preserved; elapsed=%.2fs", elapsed,
+        )
+        return {
+            "skipped": "no_embeddings",
+            "edges_created": 0,
+            "entities_with_embeddings": 0,
+            "elapsed_seconds": elapsed,
+        }
+
+    # ------------------------------------------------------------------
+    # 2. Data exists — NOW purge the previous SIMILAR_TO edges and rebuild.
+    # ------------------------------------------------------------------
+    with driver.session(**session_kw) as session:
+        session.run("MATCH ()-[r:SIMILAR_TO]-() DELETE r")
 
     # ------------------------------------------------------------------
     # 3. Parse embeddings into a float32 matrix.

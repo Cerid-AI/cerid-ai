@@ -127,6 +127,19 @@ def detect_communities(
             stats["skipped"] = "no_co_mention_edges"
             return stats
 
+        # AF-034: reset last run's partition markers before Leiden re-writes
+        # them, so a stale id can't survive. gds.leiden.write only writes
+        # leiden_communityIds for entities in THIS run's projection (those with
+        # ≥1 CO_MENTIONED edge); an entity that dropped out of the projection
+        # keeps last run's leiden_communityIds AND community_id. Left in place,
+        # the write-back loop below would re-derive a stale community_id from
+        # those stale ids and resurrect the entity's old Community via MERGE.
+        # Clearing both here means only this run's projected entities carry a
+        # partition; every dropped/orphan entity falls through to the
+        # 'isolated' sentinel sweep at the end.
+        with driver.session(database=neo4j_database) as session:
+            session.run("MATCH (e:Entity) REMOVE e.leiden_communityIds, e.community_id")
+
         # Run Leiden, write back communityId across all levels.
         result = gds.leiden.write(
             graph,
@@ -249,6 +262,11 @@ def detect_communities(
     stats["edges"] = edges_total
     stats["elapsed_seconds"] = round(time.time() - started, 2)
     logger.info("Leiden complete: %s", stats)
+
+    # AF-035: re-clustering leaves the cerid:graph:emb3d:* serving cache stale.
+    # This module is a pure Neo4j DAL (no redis import by design), so the bust
+    # lives in the caller — scheduler.py::_run_community_refresh busts
+    # cerid:graph:emb3d:* (via _bust_job_caches) after detect_communities returns.
     return stats
 
 

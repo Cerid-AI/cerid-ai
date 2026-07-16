@@ -1561,6 +1561,161 @@ class TestIgnoranceAdmissionDetection:
         )
 
 
+class TestInabilityAdmissionDetection:
+    """Phase 3.6 ignorance lever: first-person inability admissions the
+    noun-anchored IGNORANCE_ADMISSION_PATTERNS miss ("I cannot access/recall X").
+    These are the verdict-harness ignorance residue V-42 / IG-04 / IG-08 whose
+    labeled fragments the narrow set never surfaced."""
+
+    def test_cannot_access_real_time_data_detected(self):
+        """V-42 shape: 'I cannot access real-time data ...'."""
+        from core.agents.hallucination.patterns import _is_inability_admission
+        claim = "I cannot access real-time data for current stock prices or live market conditions"
+        assert _is_inability_admission(claim)
+        assert _is_ignorance_admission(claim)
+
+    def test_cannot_access_gps_detected(self):
+        """IG-04 shape: 'I cannot access real-time GPS coordinates ...'."""
+        assert _is_ignorance_admission(
+            "I cannot access real-time GPS coordinates for your current physical location"
+        )
+
+    def test_cannot_recall_detected(self):
+        """IG-08 shape: 'I cannot recall who painted the Mona Lisa'."""
+        from core.agents.hallucination.patterns import _is_inability_admission
+        claim = "I cannot recall who painted the Mona Lisa"
+        assert _is_inability_admission(claim)
+        assert _is_ignorance_admission(claim)
+
+    def test_cannot_access_external_databases_detected(self):
+        """Monte-carlo IGNORANCE_CLAIMS exemplar — previously luck-dependent."""
+        assert _is_ignorance_admission(
+            "I cannot access external databases to verify this claim"
+        )
+
+    def test_unable_to_access_detected(self):
+        from core.agents.hallucination.patterns import _is_inability_admission
+        assert _is_inability_admission("I am unable to access your account history")
+
+    def test_dont_remember_detected(self):
+        from core.agents.hallucination.patterns import _is_inability_admission
+        assert _is_inability_admission("I don't remember the details of that conversation")
+
+    def test_third_person_access_not_flagged(self):
+        """Non-first-person / capability-provision 'access' usage is NOT an
+        inability admission — the widening must not over-match factual text."""
+        from core.agents.hallucination.patterns import _is_inability_admission
+        assert not _is_inability_admission("Users can access the dashboard after login")
+        assert not _is_ignorance_admission("The API provides access to real-time market data")
+
+    def test_hedged_factual_not_flagged_by_narrow_gap(self):
+        """A hedge word without the inability shape stays factual."""
+        from core.agents.hallucination.patterns import _is_inability_admission
+        assert not _is_inability_admission("I'm not sure, but Paris is the capital of France")
+
+
+class TestIgnoranceInabilityExtraction:
+    """_extract_ignorance_claims surfaces the inability residue shapes under a
+    no-asserted-number guard (Phase 3.6 ignorance lever)."""
+
+    def test_surfaces_cannot_access_real_time_data(self):
+        """V-42: the admission sentence is surfaced even though a later sentence
+        names 'Yahoo Finance' — the guard is scoped to the admission sentence."""
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        claims = _extract_ignorance_claims(
+            "I cannot access real-time data for current stock prices or live "
+            "market conditions. You would need to check a financial service like "
+            "Yahoo Finance or your brokerage for live prices."
+        )
+        assert any("cannot access real-time data" in c.lower() for c in claims)
+
+    def test_surfaces_cannot_access_gps(self):
+        """IG-04."""
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        claims = _extract_ignorance_claims(
+            "I cannot access real-time GPS coordinates for your current physical location."
+        )
+        assert any("cannot access real-time gps coordinates" in c.lower() for c in claims)
+
+    def test_surfaces_cannot_recall_named_entity_subject(self):
+        """IG-08: the named entity (Mona Lisa) is the SUBJECT of the ignorance,
+        not an asserted answer — a proper noun must NOT disqualify the admission.
+        (The evasion _has_checkable_fragment guard would wrongly reject it.)"""
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        claims = _extract_ignorance_claims("I cannot recall who painted the Mona Lisa.")
+        assert any("cannot recall who painted the mona lisa" in c.lower() for c in claims)
+
+    def test_hedged_factual_answer_with_number_not_swallowed(self):
+        """Same inability verb, but an asserted number makes it a factual answer
+        wearing a hedge — it must NOT be surfaced as pure ignorance."""
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        assert _extract_ignorance_claims(
+            "I cannot recall the exact population, but it is roughly 8.4 million people."
+        ) == []
+
+    def test_surfaced_fragment_is_quotable_for_harness(self):
+        """The whole admission sentence is surfaced, so the verdict harness's
+        substring matcher resolves the labeled fragment to the ignorance claim."""
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        claims = _extract_ignorance_claims("I cannot recall who painted the Mona Lisa.")
+        assert claims and "cannot recall who painted the Mona Lisa" in claims[0]
+
+    def test_evasion_exemplar_does_not_trip_ignorance(self):
+        """A whole-response evasion shape (residue V-11) must not surface an
+        ignorance claim — the two levers stay disjoint."""
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        assert _extract_ignorance_claims(
+            "This is a complex topic that depends on many factors. There is no "
+            "simple answer to this question, and multiple variables play a role."
+        ) == []
+
+    def test_narrow_admission_with_year_still_surfaces(self):
+        """The no-number guard applies ONLY to the broad inability branch — a
+        narrow noun-anchored admission carrying a year (V-41) still surfaces
+        unconditionally, as before."""
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        claims = _extract_ignorance_claims(
+            "I'm not aware of any specific policy changes in that municipality after 2024."
+        )
+        assert any("not aware of" in c.lower() for c in claims)
+
+
+class TestIgnoranceExtractionFull100Audit:
+    """Deterministic dataset audit (Phase 3.6 ignorance lever): the widened
+    inability detection must surface every ignorance-type fragment and synthesize
+    ZERO ignorance claims on the other (non-ignorance) cases — the analog of the
+    evasion fix's full-100 no-spurious-synthesis audit."""
+
+    @staticmethod
+    def _load_cases():
+        import json
+        from pathlib import Path
+        path = Path(__file__).parent / "eval" / "datasets" / "verification_cases_v2.jsonl"
+        return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+    def test_no_spurious_ignorance_synthesis_on_non_ignorance_cases(self):
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        offenders = [
+            case["id"]
+            for case in self._load_cases()
+            if case["claim_type"] != "ignorance" and _extract_ignorance_claims(case["response_text"])
+        ]
+        assert offenders == [], f"spurious ignorance synthesis on: {offenders}"
+
+    def test_all_ignorance_type_fragments_surface(self):
+        from core.agents.hallucination.extraction import _extract_ignorance_claims
+        missing: list[tuple[str, str]] = []
+        for case in self._load_cases():
+            if case["claim_type"] != "ignorance":
+                continue
+            claims = _extract_ignorance_claims(case["response_text"])
+            for ec in case.get("expected_claims", []):
+                frag = ec["text_fragment"].lower()
+                if not any(frag in c.lower() for c in claims):
+                    missing.append((case["id"], ec["text_fragment"]))
+        assert missing == [], f"ignorance fragments not surfaced: {missing}"
+
+
 class TestIgnoranceVerdictInversion:
     """Test verdict inversion for ignorance-admitting claims."""
 
@@ -1703,6 +1858,61 @@ class TestIgnoranceClaimVerification:
         assert result["status"] == "unverified"
         assert "factually inadequate" in result["reason"]
         assert result["confidence"] == 0.92
+
+    @pytest.mark.asyncio
+    @patch("core.utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_inability_admission_with_current_routes_to_ignorance(self, mock_llm_raw):
+        """An inability admission that mentions a temporal word ('current') must
+        route to the ignorance path, NOT recency. 'current' trips
+        _reclassify_recency, which would strand the claim on the recency path
+        (no data point to compare → uncertain) — verdict-harness residue
+        V-42 / IG-04. The precedence fix gates keyword-recency behind
+        not-is-ignorance-admission."""
+        mock_llm_raw.return_value = {
+            "choices": [{"message": {
+                "content": json.dumps({
+                    "verdict": "refuted",
+                    "confidence": 0.8,
+                    "reasoning": "Live stock prices are not a stably knowable fact.",
+                }),
+            }}]
+        }
+        result = await _verify_claim_externally(
+            "I cannot access real-time data for current stock prices or live market conditions",
+            generating_model="openrouter/openai/gpt-4o-mini",
+        )
+        system_msg = mock_llm_raw.call_args[0][0][0]["content"]
+        # Ignorance system prompt (checks the UNDERLYING TOPIC), not the recency
+        # prompt (which asks whether the model's data is outdated).
+        assert "UNDERLYING TOPIC" in system_msg
+        assert "outdated training data" not in system_msg
+        # refuted (facts unobtainable) → inverted → verified: the model was
+        # correct to say it cannot access live data.
+        assert result["status"] == "verified"
+
+    @pytest.mark.asyncio
+    @patch("core.utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_inability_recall_inverts_supported_to_unverified(self, mock_llm_raw):
+        """IG-08: 'I cannot recall who painted the Mona Lisa' is a FALSE ignorance
+        admission (authorship is well-documented). The verifier confirms the fact
+        exists (supported) → inverted → unverified (inappropriate ignorance)."""
+        mock_llm_raw.return_value = {
+            "choices": [{"message": {
+                "content": json.dumps({
+                    "verdict": "supported",
+                    "confidence": 0.99,
+                    "reasoning": "Leonardo da Vinci painted the Mona Lisa — extremely well documented.",
+                }),
+            }}]
+        }
+        result = await _verify_claim_externally(
+            "I cannot recall who painted the Mona Lisa",
+            generating_model="openrouter/openai/gpt-4o-mini",
+        )
+        system_msg = mock_llm_raw.call_args[0][0][0]["content"]
+        assert "UNDERLYING TOPIC" in system_msg
+        assert result["status"] == "unverified"
+        assert "factually inadequate" in result["reason"]
 
     @pytest.mark.asyncio
     @patch("core.utils.llm_client.call_llm_raw", new_callable=AsyncMock)

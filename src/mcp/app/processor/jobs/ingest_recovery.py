@@ -119,13 +119,19 @@ class IngestRecoveryJob(BaseJob):
         # race the startup lifecycle.
         from app.services.ingest_recovery import (
             RecoveryAction,
-            recover_orphan,
+            group_orphans_by_artifact,
+            recover_artifact,
             scan_orphans,
         )
 
         orphans = await scan_orphans(max_age_seconds=self._max_age_seconds)
+        # AF-003: recover per ARTIFACT, not per chunk — one create_artifact call
+        # with the real chunk_count=N so multi-chunk artifacts don't collapse to
+        # chunk_count=1. committed/deferred/purged therefore count artifacts.
+        groups = group_orphans_by_artifact(orphans)
         stats: dict = {
             "orphans_found": len(orphans),
+            "artifacts_found": len(groups),
             "committed": 0,
             "deferred": 0,
             "purged": 0,
@@ -134,9 +140,9 @@ class IngestRecoveryJob(BaseJob):
         if not orphans:
             return stats
 
-        for orphan in orphans:
+        for artifact_id, group in groups.items():
             try:
-                action = await recover_orphan(orphan)
+                action = await recover_artifact(group)
                 if action == RecoveryAction.COMMITTED:
                     stats["committed"] += 1
                 elif action == RecoveryAction.DEFERRED:
@@ -145,9 +151,9 @@ class IngestRecoveryJob(BaseJob):
                     stats["purged"] += 1
             except Exception as exc:  # noqa: BLE001 — observability boundary
                 log_swallowed_error(
-                    "processor.ingest_recovery.recover_orphan",
+                    "processor.ingest_recovery.recover_artifact",
                     exc,
-                    context={"chunk_id": orphan.chunk_id},
+                    context={"artifact_id": artifact_id},
                 )
                 stats["errors"] += 1
 

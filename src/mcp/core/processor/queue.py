@@ -56,7 +56,24 @@ class JobQueueProtocol(Protocol):
         ...
 
     async def mark_completed(self, job_id: str, result: JobResult) -> None:
-        """Transition a job to ``completed`` and persist token actuals."""
+        """Transition a job to ``completed`` and persist token actuals + metadata."""
+        ...
+
+    async def mark_held(self, job_id: str, result: JobResult) -> None:
+        """Transition a job to ``held`` — stopped by a cost-cap / budget hold.
+
+        A distinct terminal state from ``completed`` so a held job is never
+        counted as a success (CL-5/AF-017). Persists the held marker in
+        ``result.metadata``.
+        """
+        ...
+
+    async def update_progress(self, job_id: str, progress: float) -> None:
+        """Persist the latest progress checkpoint (0.0–1.0) onto the job record.
+
+        Best-effort and lightweight (single-field write) so it can be called on
+        every progress tick of a long-running job.
+        """
         ...
 
     async def mark_failed(self, job_id: str, error_message: str) -> None:

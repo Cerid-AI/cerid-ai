@@ -399,7 +399,7 @@ class TestConstellationRefreshSubscriber:
 
         with (
             patch("app.deps.get_redis", return_value=mock_redis),
-            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+            patch("app.db.redis.processor_queue.enqueue_job_if_absent", mock_enqueue),
         ):
             constellation_refresh._on_entities_added(self._PAYLOAD)
 
@@ -419,7 +419,7 @@ class TestConstellationRefreshSubscriber:
 
         with (
             patch("app.deps.get_redis", return_value=mock_redis),
-            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+            patch("app.db.redis.processor_queue.enqueue_job_if_absent", mock_enqueue),
         ):
             constellation_refresh._on_entities_added(self._PAYLOAD)
 
@@ -431,7 +431,7 @@ class TestConstellationRefreshSubscriber:
         mock_enqueue = MagicMock()
         with (
             patch("app.deps.get_redis", return_value=None),
-            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+            patch("app.db.redis.processor_queue.enqueue_job_if_absent", mock_enqueue),
         ):
             constellation_refresh._on_entities_added(self._PAYLOAD)
 
@@ -442,7 +442,7 @@ class TestConstellationRefreshSubscriber:
 
         monkeypatch.setenv("CERID_CONSTELLATION_REFRESH_ON_INGEST", "false")
         mock_enqueue = MagicMock()
-        with patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue):
+        with patch("app.db.redis.processor_queue.enqueue_job_if_absent", mock_enqueue):
             constellation_refresh._on_entities_added(self._PAYLOAD)
         mock_enqueue.assert_not_called()
 
@@ -450,6 +450,6 @@ class TestConstellationRefreshSubscriber:
         from app.processor.subscribers import constellation_refresh
 
         mock_enqueue = MagicMock()
-        with patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue):
+        with patch("app.db.redis.processor_queue.enqueue_job_if_absent", mock_enqueue):
             constellation_refresh._on_entities_added({"artifact_id": "a1", "entity_slugs": []})
         mock_enqueue.assert_not_called()

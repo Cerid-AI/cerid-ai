@@ -13,15 +13,19 @@ Every new ingest now follows a two-phase commit protocol:
 
 1. **Stage** — write Chroma chunks with ``cerid_state="pending"`` and
    ``cerid_pending_at=<iso>``.  An ``idempotency_key`` (SHA-256 of
-   ``content + source_uri + tenant``) is stored so a re-run of the same
-   input finds the existing pending rows and skips the duplicate write.
+   ``content + source_uri + tenant``) is stamped on each row purely as a
+   recovery/deadletter correlation tag (AF-062: nothing queries Chroma by it
+   — actual write-idempotency comes from the content-addressed
+   ``artifact_id = content_hash`` plus per-chunk ids ``{artifact_id}_chunk_{i}``
+   and ``collection.upsert`` overwriting the same rows on re-delivery).
 
-2. **Commit Neo4j** — call ``graph.create_artifact``.  On success, flip
-   all staged chunks to ``cerid_state="committed"`` via
-   ``_flip_chunks_committed``.  On failure, leave the Chroma rows in
-   ``pending`` state — the ``IngestRecoveryJob`` in
-   ``app/services/ingest_recovery.py`` scans for rows older than 60 s and
-   either rolls them forward or purges them.
+2. **Commit Neo4j** — call ``graph.create_artifact`` (fresh) or
+   ``graph.update_artifact`` (re-ingest).  On success, flip all staged chunks to
+   ``cerid_state="committed"`` via ``_flip_chunks_committed``.  On failure, leave
+   the Chroma rows in ``pending`` state and report a non-success status — the
+   ``IngestRecoveryJob`` in ``app/services/ingest_recovery.py`` scans for rows
+   older than 60 s and either rolls them forward or purges them.  BOTH the fresh
+   and re-ingest paths follow this protocol (CL-3/AF-005).
 
 Retrieval gate (Phase O.1)
 --------------------------
@@ -250,11 +254,14 @@ def _content_hash(content: str) -> str:
 
 
 def _idempotency_key(content: str, source_uri: str, tenant: str) -> str:
-    """Stable key for the two-phase ingest boundary.
+    """Stable correlation key for the two-phase ingest boundary.
 
-    SHA-256 of (content + source_uri + tenant) so the same upload from
-    the same tenant never produces duplicate pending rows.  Stored as
-    ``cerid_idempotency_key`` in Chroma metadata.
+    SHA-256 of (content + source_uri + tenant), stamped on each chunk as
+    ``cerid_idempotency_key`` in Chroma metadata. It is a recovery/deadletter
+    correlation tag ONLY — no path queries Chroma by this key (AF-062).
+    Write-idempotency instead comes from the content-addressed
+    ``artifact_id = content_hash`` + ``collection.upsert`` overwriting the same
+    per-chunk ids, so re-delivery of identical content is naturally idempotent.
     """
     blob = "\x00".join([content, source_uri, tenant])
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -267,9 +274,9 @@ def _stage_chunks_pending(
 ) -> None:
     """Stamp cerid_state=pending on the chunks just written.
 
-    ChromaDB's ``update`` method mutates metadata in place.  Called
-    immediately after ``collection.add()`` so the rows are invisible to
-    the retrieval gate until Neo4j commits successfully.
+    ChromaDB's ``update`` method mutates metadata in place.  Called immediately
+    after ``collection.upsert()`` so the rows are invisible to the retrieval gate
+    until Neo4j commits successfully.
     """
     pending_at = utcnow_iso()
     metadatas_patch = [
@@ -391,17 +398,28 @@ def _enqueue_hype_jobs_if_enabled(
             )
 
 
-def _rollback_chromadb(collection, chunk_ids: list[str]) -> None:
-    """Compensating transaction: remove ChromaDB chunks when Neo4j write fails."""
+def _rollback_chromadb(chunk_ids: list[str], domain: str = "") -> None:
+    """Compensating transaction: remove staged chunks when the Neo4j write fails.
+
+    Fans across ALL chunk-bearing stores through the content-lifecycle
+    coordinator — Chroma AND the BM25 / SPLADE lexical indexes — so a partial
+    ingest that seeded the lexical indexes before the graph write failed does
+    not leave orphaned keyword/sparse postings (AF-070). Cache busting is
+    skipped: the rolled-back chunks were staged ``pending`` and never
+    retrievable, so no query-result cache references them.
+    """
     try:
-        collection.delete(ids=chunk_ids)
+        from app.services.content_lifecycle import remove_orphan_chunks
+
+        result = remove_orphan_chunks(chunk_ids, domain, chroma=None, bust_caches=False)
         logger.warning(
-            "Rolled back %d ChromaDB chunks after graph failure", len(chunk_ids),
+            "Rolled back %d staged chunks after graph failure (removed=%s)",
+            len(chunk_ids), result.removed,
         )
     except Exception as e:
         log_swallowed_error('app.services.ingestion', e)
         logger.error(
-            "CRITICAL: ChromaDB rollback failed for %d chunks — orphaned data: %s",
+            "CRITICAL: chunk rollback failed for %d chunks — orphaned data: %s",
             len(chunk_ids), e,
         )
 
@@ -621,6 +639,17 @@ def _reingest_artifact(
         metadatas=chunk_metadatas,
     )
 
+    # AF-005 (CL-3): stage the re-ingested chunks 'pending' through the SAME
+    # two-phase helper the fresh path uses, so a failed Neo4j update below leaves
+    # recoverable rows instead of live-but-orphaned chunks. Previously re-ingest
+    # wrote chunks with no cerid_state (immediately visible) and swallowed a
+    # failed update as "updated" — the recovery job (which scans for 'pending')
+    # could never heal the resulting divergence.
+    _reingest_source_uri = base_meta.get("source_uri") or base_meta.get("filename") or ""
+    _reingest_tenant = base_meta.get("tenant_id") or ""
+    _reingest_idem_key = _idempotency_key(content, _reingest_source_uri, _reingest_tenant)
+    _stage_chunks_pending(collection, chunk_ids, _reingest_idem_key)
+
     bm25_ids = [r["id"] for r in chunk_records if r["retrieve_eligible"]]
     bm25_texts = [r["text"] for r in chunk_records if r["retrieve_eligible"]]
     child_chunk_ids = bm25_ids
@@ -679,7 +708,24 @@ def _reingest_artifact(
     except Exception as e:
         log_swallowed_error('app.services.ingestion', e)
         logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
+        # AF-005 (CL-3): the new chunks are staged 'pending' in Chroma/BM25/SPLADE.
+        # Leave them so the IngestRecoveryJob can forward-commit them (grouped by
+        # artifact_id with the real chunk_count). Do NOT flip committed and do NOT
+        # report success — reporting "updated" here previously left the node
+        # pointing at the now-deleted OLD chunk_ids while the NEW chunks were
+        # invisible to recovery (never marked pending) → permanent divergence.
+        return {
+            "status": "error",
+            "artifact_id": artifact_id,
+            "domain": domain,
+            "chunks": 0,
+            "error": str(e),
+            "timestamp": utcnow_iso(),
+        }
     else:
+        # Neo4j committed — promote the staged chunks pending → committed so the
+        # retrieval gate stops hiding them.
+        _flip_chunks_committed(collection, chunk_ids)
         # Phase 4.3 — re-ingest hygiene. Only runs once the artifact's
         # content_hash/chunk_ids have actually landed in Neo4j (the
         # `else` only fires on success) — a failed update_artifact leaves
@@ -704,16 +750,15 @@ def _reingest_artifact(
 
     logger.info(f"Re-ingested artifact {artifact_id[:8]} ({base_meta.get('filename', '?')})")
 
-    # Phase 2.2 — the re-embedded chunks above make any cached /agent/query
-    # result computed against the old text stale for up to SEMANTIC_CACHE_TTL.
+    # Phase 2.2 / CL-14 — the re-embedded chunks above make any cached
+    # /agent/query result computed against the old text stale. Bust BOTH caches
+    # through the unified contract (the flat cache C1 was previously left stale).
     try:
-        from core.retrieval.semantic_cache import (
-            invalidate_cache_non_blocking as _sem_cache_invalidate,
-        )
-        _sem_cache_invalidate(get_redis(), trigger="ingestion.reingest_artifact")
+        from utils.query_cache import invalidate_query_caches_threaded
+        invalidate_query_caches_threaded(trigger="ingestion.reingest_artifact", redis=get_redis())
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
-            "app.services.ingestion.semantic_cache_invalidate_reingest", e,
+            "app.services.ingestion.query_cache_invalidate_reingest", e,
         )
 
     return {
@@ -1233,6 +1278,31 @@ def ingest_content(
         # Non-fatal if this flip fails; IngestRecoveryJob will forward-commit.
         _flip_chunks_committed(collection, chunk_ids)
 
+        # CL-1 — fund the :Source economy. When this artifact came from a
+        # registered :Source (metadata carries its UUID and the node exists),
+        # create the FROM_SOURCE edge and bump the source's counters — the write
+        # path that the per-source quality floor, retention, counters, and
+        # cascade-delete readers were all built against but nothing ever called.
+        # Existence-checked via get_source so an external-capture id (which now
+        # belongs in external_id, not source_id) can never create a dangling
+        # edge or spurious counter. Non-fatal to the ingest.
+        _source_id = base_meta.get("source_id")
+        if _source_id:
+            try:
+                from app.db.neo4j.sources import (
+                    get_source,
+                    increment_source_counters,
+                    link_artifact,
+                )
+                if get_source(driver, _source_id) is not None:
+                    link_artifact(driver, artifact_id, _source_id)
+                    increment_source_counters(
+                        driver, _source_id,
+                        artifacts=1, chunks=len(child_chunk_ids),
+                    )
+            except Exception as e:  # noqa: BLE001 — source linkage is non-fatal
+                log_swallowed_error("app.services.ingestion.source_link", e)
+
         # RAG Cycle C2.2 — frontmatter → Artifact properties.
         # Reserved scalars (status, cssclass, source) + ``cerid:*`` custom
         # keys (rewritten as ``cerid_*`` because Neo4j property names
@@ -1310,7 +1380,7 @@ def ingest_content(
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:
             logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
-            _rollback_chromadb(collection, chunk_ids)
+            _rollback_chromadb(chunk_ids, domain)
             return {
                 "status": "duplicate",
                 "artifact_id": artifact_id,
@@ -1482,17 +1552,19 @@ def ingest_content(
             "similarity": near_dup["similarity"],
         }
 
-    # Phase 2.2 — a new artifact makes any cached /agent/query result stale
-    # for up to SEMANTIC_CACHE_TTL. ingest_file/ingest_batch/attachments all
-    # funnel through this success path, so one hook covers every ingest route.
+    # Phase 2.2 / CL-14 — a new artifact makes any cached /agent/query result
+    # stale. ingest_file/ingest_batch/attachments all funnel through this
+    # success path, so one hook covers every ingest route — including the
+    # service-layer callers (a2a, sdk, automations, migration, session_summary,
+    # queue/tasks, data_sources, vault_write, multimodal) that reach ingest_content
+    # directly and previously left the flat cache C1 stale (AF-095). Bust BOTH
+    # caches through the unified contract.
     try:
-        from core.retrieval.semantic_cache import (
-            invalidate_cache_non_blocking as _sem_cache_invalidate,
-        )
-        _sem_cache_invalidate(get_redis(), trigger="ingestion.ingest_content")
+        from utils.query_cache import invalidate_query_caches_threaded
+        invalidate_query_caches_threaded(trigger="ingestion.ingest_content", redis=get_redis())
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
-            "app.services.ingestion.semantic_cache_invalidate", e,
+            "app.services.ingestion.query_cache_invalidate", e,
         )
 
     return result

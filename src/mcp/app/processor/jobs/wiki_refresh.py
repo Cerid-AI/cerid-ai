@@ -229,12 +229,15 @@ class WikiRefreshJob(BaseJob):
                 stage="wiki_summary",
             )
         except Exception as exc:
-            log_swallowed_error(
-                "processor.wiki_refresh.llm_call",
+            # A genuine LLM fault is fatal: re-raise so the worker records the
+            # job as FAILED. Returning a "skipped" dict would be marked
+            # COMPLETED and evade failure-keyed alerting (AF-038).
+            logger.error(
+                "wiki_refresh.llm_call_failed entity=%s: %s",
+                self._entity_slug,
                 exc,
-                context={"entity_slug": self._entity_slug},
             )
-            return {"skipped": "llm_call_failed"}
+            raise
 
         summary_text = (summary_text or "").strip()
         if not summary_text:

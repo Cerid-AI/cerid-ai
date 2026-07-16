@@ -47,14 +47,17 @@ def _make_driver(
 ) -> MagicMock:
     """Build a mock driver whose session returns preset data.
 
-    The session context manager returns a mock session; session.run is
-    configured to return different values based on call order.
+    The session context manager returns a mock session; session.run dispatches by
+    QUERY CONTENT (not call order) so the mock stays correct regardless of the
+    order build_similarity_edges issues its statements. Queries used:
+      * DELETE SIMILAR_TO edges   (consume only)
+      * MATCH Entity.embedding     (iterable of entity_rows)
+      * MATCH CO_MENTIONED pairs   (iterable of co_mentioned_pairs)
+      * UNWIND MERGE SIMILAR_TO    (consume → relationships_created)
 
-    Call order expected by build_similarity_edges:
-      1. DELETE SIMILAR_TO edges  (consume only)
-      2. MATCH Entity.embedding   (iterable of entity_rows)
-      3. MATCH CO_MENTIONED pairs (iterable of co_mentioned_pairs)
-      4. UNWIND MERGE SIMILAR_TO  (consume → relationships_created)
+    NOTE: the fetch-Entity-embedding query now runs BEFORE the DELETE (AF-013
+    data-readiness gate — never purge before confirming there's data to rebuild),
+    so this content-based dispatch is deliberately order-independent.
     """
     driver = MagicMock()
     session = MagicMock()
@@ -69,25 +72,22 @@ def _make_driver(
     merge_consume = MagicMock()
     merge_consume.counters = merge_counters
 
-    call_results = [
-        "delete",           # DELETE SIMILAR_TO
-        entity_rows,        # entity fetch
-        co_mentioned_pairs, # co_mentioned fetch
-        "merge",            # MERGE SIMILAR_TO
-    ]
-    run_iter = iter(call_results)
-
     def _run_side_effect(*args, **kwargs):
-        tag = next(run_iter, "extra")
+        query = str(args[0]) if args else ""
         mock_result = MagicMock()
-        if tag == "delete":
+        if "DELETE" in query and "SIMILAR_TO" in query:
             mock_result.consume.return_value = MagicMock()
-        elif isinstance(tag, list):
-            rows = tag
-            mock_result.__iter__ = lambda s: iter(rows)
-            mock_result.data.return_value = rows
-        elif tag == "merge":
+        elif "MERGE" in query and "SIMILAR_TO" in query:
             mock_result.consume.return_value = merge_consume
+        elif "CO_MENTIONED" in query:
+            mock_result.__iter__ = lambda s: iter(co_mentioned_pairs)
+            mock_result.data.return_value = co_mentioned_pairs
+        elif "Entity" in query and "embedding" in query:
+            mock_result.__iter__ = lambda s: iter(entity_rows)
+            mock_result.data.return_value = entity_rows
+        else:
+            mock_result.__iter__ = lambda s: iter([])
+            mock_result.data.return_value = []
         return mock_result
 
     # Override: decide edges_created based on whether any rows would be written.

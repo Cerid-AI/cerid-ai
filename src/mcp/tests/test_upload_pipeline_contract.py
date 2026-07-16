@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -66,12 +67,22 @@ def mocks(monkeypatch):
         m_inval = stack.enter_context(
             patch("utils.query_cache.invalidate_cache_non_blocking", new_callable=AsyncMock)
         )
+        # AF-025/AF-026: the handler now calls ai_categorize() for domain
+        # auto-detect whenever no domain is supplied — mock it so the default
+        # (no domain in the request) test path never makes a real LLM call.
+        # Empty dict == "AI found nothing", matching the graceful-failure
+        # return shape ai_categorize() itself uses, so domain falls back to
+        # config.DEFAULT_DOMAIN exactly like the pre-fix hardcoded "general".
+        m_ai_cat = stack.enter_context(
+            patch("utils.metadata.ai_categorize", new_callable=AsyncMock)
+        )
 
         m_parse.return_value = {"text": "extracted body text", "file_type": "txt"}
         m_ingest.return_value = {"status": "ok", "artifact_id": "a1", "chunks": 3, "domain": "general"}
         # Fresh dict per call — the handler mutates the returned metadata dict.
         m_meta.side_effect = lambda *a, **k: {"source_extractor": "full"}
         m_meta_min.side_effect = lambda *a, **k: {"source_extractor": "minimal"}
+        m_ai_cat.return_value = {}
 
         yield SimpleNamespace(
             parse=m_parse,
@@ -80,6 +91,7 @@ def mocks(monkeypatch):
             meta=m_meta,
             meta_min=m_meta_min,
             inval=m_inval,
+            ai_categorize=m_ai_cat,
         )
 
 
@@ -191,6 +203,75 @@ class TestUploadEndpoint:
         assert meta["page_count"] == 3
         assert "table_count" not in meta  # None values are filtered (ChromaDB rejects None)
         assert "form_field_count" not in meta
+
+    # ── AF-024/AF-025/AF-026 — declared params must actually flow through ──
+
+    def test_tags_comma_separated_thread_into_tags_json_metadata(self, mocks):
+        # AF-024: the declared `tags` param was previously read but never
+        # used — it must now land in the ingest metadata as `tags_json`
+        # (the shape routers/ingestion.py + routers/artifacts.py use).
+        resp = client.post("/upload", files={"file": _FILE}, params={"tags": "Alpha, beta , gamma"})
+        assert resp.status_code == 200
+        _, _, metadata_arg = mocks.ingest.call_args.args
+        assert json.loads(metadata_arg["tags_json"]) == ["alpha", "beta", "gamma"]
+
+    def test_tags_json_array_threads_into_tags_json_metadata(self, mocks):
+        resp = client.post("/upload", files={"file": _FILE}, params={"tags": '["One", "Two"]'})
+        assert resp.status_code == 200
+        _, _, metadata_arg = mocks.ingest.call_args.args
+        assert json.loads(metadata_arg["tags_json"]) == ["one", "two"]
+
+    def test_malformed_tags_json_falls_back_to_comma_split_not_500(self, mocks):
+        resp = client.post("/upload", files={"file": _FILE}, params={"tags": "[not valid json"})
+        assert resp.status_code == 200
+        _, _, metadata_arg = mocks.ingest.call_args.args
+        assert json.loads(metadata_arg["tags_json"]) == ["[not valid json"]
+
+    def test_no_tags_omits_tags_json(self, mocks):
+        resp = client.post("/upload", files={"file": _FILE})
+        assert resp.status_code == 200
+        _, _, metadata_arg = mocks.ingest.call_args.args
+        assert "tags_json" not in metadata_arg
+
+    def test_empty_domain_triggers_ai_categorize_auto_detect(self, mocks):
+        # AF-026: an empty `domain` must genuinely trigger auto-detect
+        # (ai_categorize) rather than being silently coerced to the default.
+        mocks.ai_categorize.return_value = {"suggested_domain": "finance"}
+        resp = client.post("/upload", files={"file": _FILE})
+        assert resp.status_code == 200
+        mocks.ai_categorize.assert_called_once()
+        domain_arg = mocks.ingest.call_args.args[1]
+        assert domain_arg == "finance"
+
+    def test_explicit_domain_skips_auto_detect(self, mocks):
+        # An explicit domain always wins — nothing left to auto-detect.
+        resp = client.post("/upload", files={"file": _FILE}, params={"domain": "finance"})
+        assert resp.status_code == 200
+        mocks.ai_categorize.assert_not_called()
+        domain_arg = mocks.ingest.call_args.args[1]
+        assert domain_arg == "finance"
+
+    def test_auto_detect_failure_falls_back_to_default_domain(self, mocks):
+        # ai_categorize's graceful-failure return ({}) must not 500 the
+        # upload — domain falls back to config.DEFAULT_DOMAIN ("general").
+        mocks.ai_categorize.return_value = {}
+        resp = client.post("/upload", files={"file": _FILE})
+        assert resp.status_code == 200
+        domain_arg = mocks.ingest.call_args.args[1]
+        assert domain_arg == "general"
+
+    def test_manual_categorize_mode_skips_auto_detect(self, mocks):
+        # categorize_mode="manual" must skip AI classification entirely,
+        # even with no domain supplied — matches ai_categorize's own
+        # mode=="manual" short-circuit.
+        resp = client.post(
+            "/upload", files={"file": _FILE}, params={"categorize_mode": "manual"}
+        )
+        assert resp.status_code == 200
+        mocks.ai_categorize.assert_not_called()
+        assert resp.json()["categorize_mode"] == "manual"
+        domain_arg = mocks.ingest.call_args.args[1]
+        assert domain_arg == "general"
 
     def test_value_error_maps_to_400(self, mocks):
         mocks.ingest.side_effect = ValueError("path outside archive")

@@ -36,6 +36,9 @@ def _fake_driver(meta_by_id: dict[str, dict]):
                 "id": aid,
                 "weight": meta_by_id.get(aid, {}).get("weight", 1.0),
                 "flag": meta_by_id.get(aid, {}).get("flag", ""),
+                # The real query RETURNs coalesce(a.archived, false) AS archived;
+                # keep this fake row faithful to the join shape (AF-001).
+                "archived": meta_by_id.get(aid, {}).get("archived", False),
             }
             for aid in ids if aid in meta_by_id
         ]
@@ -88,6 +91,25 @@ def test_flagged_artifacts_filtered_out():
     ids = {r["artifact_id"] for r in out}
     assert "a-clean" in ids
     assert "a-flagged" not in ids
+
+
+def test_archived_artifacts_filtered_out():
+    """AF-001: soft-deleted / quarantined (archived) artifacts must NOT surface
+    as RAG evidence on the vector arm. The post-retrieval join drops them exactly
+    as it drops flagged artifacts; clearing the flag restores the artifact."""
+    results = [
+        {"artifact_id": "a-live",     "relevance": 0.7, "text": "x"},
+        {"artifact_id": "a-archived", "relevance": 0.9, "text": "secret"},
+    ]
+    driver = _fake_driver({
+        "a-live":     {"weight": 1.0, "flag": "", "archived": False},
+        "a-archived": {"weight": 1.0, "flag": "", "archived": True},
+    })
+
+    out = _apply_active_learning_signals(results, driver)
+    ids = {r["artifact_id"] for r in out}
+    assert "a-live" in ids
+    assert "a-archived" not in ids
 
 
 def test_results_with_no_artifact_id_passthrough_unchanged():

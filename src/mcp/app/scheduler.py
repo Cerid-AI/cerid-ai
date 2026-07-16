@@ -319,22 +319,23 @@ async def _run_quarantine_purge() -> None:
     ``pkb_artifact_delete(hard=true)`` but auto-triggered by the
     retention window expiring.
 
-    Drops ChromaDB chunks too (collection by collection) so the vector
-    side stays consistent with the Neo4j source-of-truth. Best-effort
-    on each artifact — a single failure doesn't abort the batch.
+    Fans chunk removal across every retrieval store (Chroma + BM25 +
+    SPLADE) and busts the query caches via the content-lifecycle
+    coordinator, so the vector/keyword side stays consistent with the
+    Neo4j source-of-truth. Best-effort on each artifact — a single
+    failure doesn't abort the batch.
     """
     start = time.time()
     purged = 0
     chunk_dropped = 0
     failed = 0
     try:
-        from app.db import neo4j as graph
-        from app.deps import get_chroma, get_neo4j
+        from app.deps import get_neo4j
+        from app.services.content_lifecycle import remove_content
         from core.utils.time import utcnow_iso
 
         now_iso = utcnow_iso()
         driver = get_neo4j()
-        chroma = get_chroma()
 
         # 1. Find candidates whose purge window has elapsed.
         with driver.session() as session:
@@ -351,25 +352,17 @@ async def _run_quarantine_purge() -> None:
             )
             candidates = [dict(r) for r in result]
 
-        # 2. For each, drop chunks + delete the node. graph.delete_artifact
-        # already does the DETACH DELETE; we add the ChromaDB sweep.
+        # 2. For each, hard-delete through the content-lifecycle coordinator:
+        # DETACH DELETEs the node and fans chunk removal across Chroma + BM25
+        # + SPLADE, then busts the query caches.
         for c in candidates:
             artifact_id = c["id"]
             try:
-                record = graph.delete_artifact(driver, artifact_id)
-                if not record.get("deleted"):
+                result = remove_content(artifact_id, neo4j=driver)
+                if not result.found:
                     continue
                 purged += 1
-                chunk_ids = record.get("chunk_ids") or []
-                if chunk_ids and c.get("domain"):
-                    try:
-                        coll = chroma.get_collection(
-                            name=config.collection_name(c["domain"])
-                        )
-                        coll.delete(ids=chunk_ids)
-                        chunk_dropped += len(chunk_ids)
-                    except Exception as exc:  # noqa: BLE001 — collection-gone is a valid post-state during quarantine cleanup
-                        log_swallowed_error(__name__, exc)
+                chunk_dropped += result.chunk_count
             except Exception as e:
                 log_swallowed_error('app.scheduler', e)
                 failed += 1
@@ -1009,6 +1002,11 @@ async def _run_community_refresh() -> None:
         det = await asyncio.to_thread(detect_communities, driver)
         _summary_cap = int(getattr(config, "COMMUNITY_SUMMARY_MAX_PER_RUN", 200)) or None
         summ = await summarize_communities(driver, get_chroma(), max_communities=_summary_cap)
+        # CL-6/AF-035: the weekly re-clustering rewrites Entity.community_id that
+        # the emb3d serving cache embeds — bust it on completion so the graph
+        # renderers don't serve the prior partition for up to 24 h. Previously
+        # only the MANUAL trigger path busted; the scheduled cron never did.
+        _bust_job_caches("community_refresh")
         duration = time.time() - start
         detail = (
             f"edges={det.get('edges', det.get('skipped', '?'))} "
@@ -1207,9 +1205,11 @@ async def _run_derive_domains() -> None:
                 f"written={result.metadata.get('written', 0)} "
                 f"orphans_cleared={result.metadata.get('orphans_cleared', 0)}",
             )
-        # Post-run: bust the emb3d/map serving caches so primary_domain
-        # changes propagate within a pan rather than waiting 24 h.
-        _bust_job_caches("derive_domains")
+        # CL-6/AF-036: the emb3d serving-cache bust now lives INSIDE
+        # DeriveDomainsJob (self-bust ON COMPLETION), so it fires for the queue
+        # path (worker runs the job minutes after this enqueue) as well as the
+        # direct run above — the old enqueue-time _bust_job_caches here busted
+        # BEFORE the job ran, re-warming stale pre-derivation data. Removed.
     except Exception as e:  # noqa: BLE001 — scheduler error surface
         duration = time.time() - start
         _log_execution("derive_domains", "error", duration, str(e))
@@ -1540,9 +1540,11 @@ _JOB_CACHE_PATTERNS: dict[str, list[str]] = {
     "compute_umap_3d": ["cerid:graph:emb3d:*"],
     "community_refresh": ["cerid:graph:emb3d:*"],
     "config_recommender": ["cerid:recommendations*"],
-    # derive_domains writes primary_domain onto entities — the emb3d/map
-    # caches embed those fields, so they must be busted after a run.
-    "derive_domains": ["cerid:graph:emb3d:*"],
+    # CL-6/AF-036: derive_domains was removed here — DeriveDomainsJob now
+    # self-busts cerid:graph:emb3d:* ON COMPLETION (single-owner model), so both
+    # its scheduled (queue→worker) and manual (run-now) paths bust exactly once
+    # after the write lands, instead of the old enqueue-time bust that re-warmed
+    # stale pre-derivation data.
 }
 
 # Manual runs in flight, so a double-click can't stack a second pass over a
@@ -1570,7 +1572,14 @@ def _bust_job_caches(job_id: str) -> int:
 
 
 async def _run_and_invalidate(job_id: str, func: Any, args: Any, kwargs: Any) -> None:
-    """Run a job's callable, then bust its serving caches."""
+    """Run a job's callable, then bust its serving caches.
+
+    CL-5/AF-040: guarantees a ``_log_execution`` outcome on EVERY exit (success
+    or error) so a manually-triggered job's run is always observable — the
+    manual path previously logged nothing of its own and inherited whatever gaps
+    the underlying job body had.
+    """
+    _mt_start = time.time()
     try:
         result = func(*(args or ()), **(kwargs or {}))
         if asyncio.iscoroutine(result):
@@ -1578,8 +1587,10 @@ async def _run_and_invalidate(job_id: str, func: Any, args: Any, kwargs: Any) ->
         dropped = _bust_job_caches(job_id)
         if dropped:
             logger.info("manual trigger %s: busted %d cache key(s)", job_id, dropped)
+        _log_execution(job_id, "success", time.time() - _mt_start, "manual trigger")
     except Exception as exc:  # noqa: BLE001 — surface, don't crash the loop task
         log_swallowed_error("app.scheduler.trigger.run", exc, context={"job": job_id})
+        _log_execution(job_id, "error", time.time() - _mt_start, f"manual trigger: {exc}")
     finally:
         _manual_running.discard(job_id)
 

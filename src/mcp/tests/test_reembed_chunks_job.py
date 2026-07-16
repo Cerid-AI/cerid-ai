@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.processor.jobs.reembed_chunks import ReembedChunksJob
 
@@ -182,7 +182,8 @@ class TestRunMethod:
                 patch("app.deps.get_redis", return_value=MagicMock()),
                 patch.object(job, "_reembed_domain", return_value=(5, 2, 3)) as mock_reembed,
                 patch(
-                    "core.retrieval.semantic_cache.invalidate_cache_non_blocking",
+                    "utils.query_cache.invalidate_query_caches_non_blocking",
+                    new_callable=AsyncMock,
                 ) as mock_invalidate,
             ):
                 result = await job.run(capture_progress)
@@ -214,7 +215,10 @@ class TestRunMethod:
                 patch("app.deps.get_chroma", return_value=MagicMock()),
                 patch("app.deps.get_redis", return_value=MagicMock()),
                 patch.object(job, "_reembed_domain", return_value=(0, 0, 0)) as mock_reembed,
-                patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking"),
+                patch(
+                    "utils.query_cache.invalidate_query_caches_non_blocking",
+                    new_callable=AsyncMock,
+                ),
             ):
                 result = await job.run(_noop)
 
@@ -235,7 +239,8 @@ class TestRunMethod:
                 patch("app.deps.get_redis", return_value=MagicMock()),
                 patch.object(job, "_reembed_domain", return_value=(4, 0, 4)),
                 patch(
-                    "core.retrieval.semantic_cache.invalidate_cache_non_blocking",
+                    "utils.query_cache.invalidate_query_caches_non_blocking",
+                    new_callable=AsyncMock,
                 ) as mock_invalidate,
             ):
                 await job.run(_noop)
@@ -255,7 +260,10 @@ class TestRunMethod:
                 patch("app.deps.get_chroma", return_value=MagicMock()),
                 patch("app.deps.get_redis", return_value=MagicMock()),
                 patch.object(job, "_reembed_domain", return_value=(1, 1, 0)),
-                patch("core.retrieval.semantic_cache.invalidate_cache_non_blocking"),
+                patch(
+                    "utils.query_cache.invalidate_query_caches_non_blocking",
+                    new_callable=AsyncMock,
+                ),
             ):
                 result = await job.run(_noop)
 

@@ -111,17 +111,18 @@ class ReembedChunksJob(BaseJob):
 
         # Re-embedding changes vector geometry for every affected domain, so
         # any cached /agent/query result computed against the old vectors is
-        # stale — same invalidation hook _reingest_artifact fires after a
-        # text-changing re-ingest (Phase 2.2).
+        # stale. Bust BOTH query-result caches through the unified contract —
+        # the flat cache C1 was previously left stale here (AF-105); the C2-only
+        # hook could not see the flat qcache:* entries.
         if total_reembedded:
             try:
-                from core.retrieval.semantic_cache import (
-                    invalidate_cache_non_blocking as _sem_cache_invalidate,
+                from utils.query_cache import invalidate_query_caches_non_blocking
+                await invalidate_query_caches_non_blocking(
+                    trigger="processor.reembed_chunks", redis=get_redis(),
                 )
-                _sem_cache_invalidate(get_redis(), trigger="processor.reembed_chunks")
             except Exception as exc:  # noqa: BLE001 — observability boundary
                 log_swallowed_error(
-                    "app.processor.jobs.reembed_chunks.semantic_cache_invalidate", exc,
+                    "app.processor.jobs.reembed_chunks.query_cache_invalidate", exc,
                 )
 
         logger.info(

@@ -449,10 +449,19 @@ def _invariants_snapshot() -> dict:
             snap: dict[str, Any] = {
                 "verification_report_orphans": 0,
                 "fact_orphans": 0,
+                "two_store_residual": 0,
+                "vector_visible_archived": 0,
                 "collections_empty": [],
                 "custom_collections": [],
                 "errors": [],
             }
+            # Sink-wiring is neo4j-independent — report the real value even here.
+            try:
+                from core.ingest.sources.ingest_sink import get_source_ingest_fn
+                snap["source_ingest_fn_wired"] = get_source_ingest_fn() is not None
+            except Exception as exc:
+                log_swallowed_error('app.routers.health', exc)
+                snap["source_ingest_fn_wired"] = False
             from app.startup.invariants import _probe_chroma, _probe_nli
             try:
                 if chroma is not None:

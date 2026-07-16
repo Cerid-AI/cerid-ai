@@ -282,11 +282,17 @@ async def sdk_memory_extract_job_status(job_id: str) -> SDKMemoryExtractJobStatu
     responses={422: _422, 503: _503},
 )
 async def sdk_llm_complete(req: SDKLLMCompleteRequest) -> SDKLLMCompleteResponse:
+    # Private Mode L2+ server-side gate (same contract as /chat/stream): a
+    # direct SDK caller can pre-assemble KB/memory context into messages;
+    # strip it before generation so the model never sees the KB at L2+.
+    from app.services.private_mode import strip_injected_context
     from core.routing.smart_router import (  # noqa: F401  (EXPERT_MODELS import for cost lookup)
         EXPERT_MODELS,
         BudgetUnsatisfiableError,
     )
     from core.utils.llm_client import route_and_call
+
+    req.messages = strip_injected_context(req.messages)
 
     try:
         content, decision = await route_and_call(

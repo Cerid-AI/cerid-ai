@@ -129,6 +129,41 @@ def recategorize(
             tags_json=tags_json,
         )
 
+    # AF-014: the Chroma chunks moved to the new domain's collection above, but
+    # the BM25 + SPLADE keyword/sparse postings still point at the OLD domain.
+    # Drop the stale old-domain postings, then re-index the retrieve-eligible
+    # (child-level) chunks under the new domain — mirroring ingestion's
+    # ``retrieve_eligible == (chunk_level == "child")`` rule so parent chunks are
+    # not over-indexed. Removal uses the full chunk_id list (a no-op for ids not
+    # present); re-add uses only what Chroma actually returned.
+    try:
+        from core.retrieval import bm25, sparse_index
+
+        bm25.remove_chunks(old_domain, chunk_ids)
+        sparse_index.remove_chunks(old_domain, chunk_ids)
+        readd_ids: list[str] = []
+        readd_texts: list[str] = []
+        for cid, doc, meta in zip(
+            fetched["ids"], fetched["documents"], fetched["metadatas"]
+        ):
+            if (meta or {}).get("chunk_level", "child") == "child":
+                readd_ids.append(cid)
+                readd_texts.append(doc)
+        if readd_ids:
+            bm25.index_chunks(new_domain, readd_ids, readd_texts)
+            sparse_index.index_chunks(new_domain, readd_ids, readd_texts)
+    except Exception as exc:  # noqa: BLE001 — lexical reconcile is best-effort
+        log_swallowed_error("app.routers.artifacts.recategorize_lexical", exc)
+
+    # Bust query-result caches so re-ranked/rewritten results don't keep serving
+    # the artifact under its stale old domain.
+    try:
+        from utils.query_cache import invalidate_query_caches
+
+        invalidate_query_caches(trigger="artifacts.recategorize", redis=get_redis())
+    except Exception as exc:  # noqa: BLE001 — cache bust is best-effort
+        log_swallowed_error("app.routers.artifacts.recategorize_cache", exc)
+
     try:
         cache.log_event(
             get_redis(),
@@ -321,6 +356,15 @@ async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
                 "SET a.quality_score = $score, a.quality_scored_at = $now",
                 aid=artifact_id, score=round(new_score, 4), now=utcnow_iso(),
             )
+
+        # Bust query-result caches so re-ranked (quality-weighted) results aren't
+        # served stale after the score change (AF-064/099).
+        try:
+            from utils.query_cache import invalidate_query_caches
+
+            invalidate_query_caches(trigger="artifacts.feedback", redis=get_redis())
+        except Exception as exc:  # noqa: BLE001 — cache bust is best-effort
+            log_swallowed_error("app.routers.artifacts.feedback_cache", exc)
 
         # Log feedback to Redis for analytics
         try:

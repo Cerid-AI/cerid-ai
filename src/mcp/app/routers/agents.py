@@ -456,8 +456,13 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
 
         # Never cache a budget-degraded envelope: it holds fallback-only
         # results (kb/memory timed out), and a cache hit would keep serving
-        # them after the load transient passes.
-        degraded = isinstance(result, dict) and bool(result.get("budget_exceeded"))
+        # them after the load transient passes. Also never cache an empty-source
+        # result — a transient miss would otherwise poison every matching query
+        # for the full TTL (AF-101; mirrors the semantic cache's guard at
+        # core/retrieval/semantic_cache.py:293).
+        degraded = isinstance(result, dict) and (
+            bool(result.get("budget_exceeded")) or not result.get("sources")
+        )
         if not has_context and not req.skip_cache and not degraded:
             set_cached(req.query, domain_key, req.top_k, result)
         return result

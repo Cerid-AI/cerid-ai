@@ -534,6 +534,67 @@ def delete_artifact(
     }
 
 
+def set_archived(
+    driver,
+    artifact_id: str,
+    *,
+    archived_at: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> bool:
+    """Soft-delete: mark an artifact ``archived`` (reversible — chunks stay in
+    the stores). Centralizes the ``a.archived = true`` write that callers
+    (soft-delete, quarantine) previously inlined, so the content-lifecycle
+    coordinator owns the single archived-write path.
+
+    ``archived_at`` defaults to server-side ``datetime()`` when omitted. ``extra``
+    merges caller-specific properties (e.g. quarantine's ``purge_after`` /
+    ``quarantine_reason``) onto the node in the same write. Returns ``True`` when
+    the artifact existed and was flagged.
+    """
+    with driver.session() as session:
+        record = session.run(
+            "MATCH (a:Artifact {id: $id}) "
+            "SET a.archived = true, "
+            "    a.archived_at = coalesce($archived_at, datetime()) "
+            "SET a += $extra "
+            "RETURN a.id AS id",
+            id=artifact_id,
+            archived_at=archived_at,
+            extra=extra or {},
+        ).single()
+    if record is None:
+        return False
+    logger.info("Archived artifact %s", artifact_id[:8])
+    return True
+
+
+def delete_artifacts_by_domain(driver, domain: str) -> dict[str, Any]:
+    """Delete EVERY :Artifact in a domain in one domain-scoped DETACH DELETE.
+
+    AF-093: clear_domain previously fetched ``list_artifacts(limit=10000)`` and
+    looped ``delete_artifact`` one node at a time (N Neo4j round-trips), and a
+    domain with more than 10k artifacts left the tail as orphaned nodes whose
+    Chroma chunks were already gone (the collection is dropped wholesale). A
+    single domain-scoped delete is O(1) round-trips and has no 10k cliff.
+    Returns ``{deleted, chunks}`` (chunks summed from the ``chunk_count`` property).
+    """
+    with driver.session() as session:
+        row = session.run(
+            "MATCH (a:Artifact {domain: $domain}) "
+            "RETURN count(a) AS deleted, sum(coalesce(a.chunk_count, 0)) AS chunks",
+            domain=domain,
+        ).single()
+        deleted = int(row["deleted"]) if row and row["deleted"] is not None else 0
+        chunks = int(row["chunks"]) if row and row["chunks"] is not None else 0
+        if deleted:
+            session.run(
+                "MATCH (a:Artifact {domain: $domain}) DETACH DELETE a",
+                domain=domain,
+            )
+    logger.info("Deleted %d artifacts (%d chunks) from domain %s", deleted, chunks, domain)
+    return {"deleted": deleted, "chunks": chunks}
+
+
 def get_active_memories(
     driver,
     domain: str = "conversations",

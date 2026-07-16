@@ -160,57 +160,72 @@ async def test_artifact_get_missing_raises_resource_not_found():
 
 
 @pytest.mark.asyncio
-async def test_artifact_delete_soft_sets_archived_flag():
-    fake_session = MagicMock()
-    fake_result = MagicMock()
-    fake_result.single.return_value = {
-        "filename": "f.md",
-        "domain": "coding",
-        "chunk_count": 3,
-    }
-    fake_session.run.return_value = fake_result
+async def test_artifact_delete_soft_routes_through_hide_content():
     fake_driver = MagicMock()
-    fake_driver.session.return_value.__enter__ = MagicMock(return_value=fake_session)
-    fake_driver.session.return_value.__exit__ = MagicMock(return_value=False)
 
-    with patch("app.mcp_tools.fundamentals.get_neo4j", return_value=fake_driver):
+    with (
+        patch("app.mcp_tools.fundamentals.get_neo4j", return_value=fake_driver),
+        patch(
+            "app.mcp_tools.fundamentals.graph.get_artifact",
+            return_value={
+                "id": "art-soft",
+                "filename": "f.md",
+                "domain": "coding",
+                "chunk_count": 3,
+            },
+        ),
+        patch(
+            "app.services.content_lifecycle.hide_content", return_value=True
+        ) as mock_hide,
+    ):
         out = await pkb_artifact_delete(artifact_id="art-soft", hard=False)
 
     assert out["deleted"] is True
     assert out["mode"] == "soft"
     assert out["chunks_affected"] == 3
-    # Verify it actually ran the SET archived = true cypher
-    sent = fake_session.run.call_args.args[0]
-    assert "SET a.archived = true" in sent
+    assert out["filename"] == "f.md"
+    assert out["domain"] == "coding"
+    # Archived write is routed through the content-lifecycle coordinator, not an
+    # inline cypher — it centralizes the flag + the query-cache bust.
+    mock_hide.assert_called_once_with("art-soft", neo4j=fake_driver)
 
 
 @pytest.mark.asyncio
-async def test_artifact_delete_hard_removes_node_and_chunks():
+async def test_artifact_delete_hard_routes_through_remove_content():
+    from app.services.content_lifecycle import RemovalResult
+
     fake_driver = MagicMock()
-    fake_chroma_coll = MagicMock()
-    fake_chroma_coll.delete = MagicMock()
-    fake_chroma = MagicMock()
-    fake_chroma.get_collection = MagicMock(return_value=fake_chroma_coll)
+    result = RemovalResult(
+        found=True,
+        artifact_id="art-hard",
+        domain="coding",
+        chunk_ids=["c1", "c2"],
+        removed={"chroma": 2, "bm25": 2, "sparse": 0},
+    )
 
     with (
         patch("app.mcp_tools.fundamentals.get_neo4j", return_value=fake_driver),
-        patch("app.mcp_tools.fundamentals.get_chroma", return_value=fake_chroma),
         patch(
-            "app.mcp_tools.fundamentals.graph.delete_artifact",
+            "app.mcp_tools.fundamentals.graph.get_artifact",
             return_value={
-                "deleted": True,
-                "artifact_id": "art-hard",
-                "domain": "coding",
+                "id": "art-hard",
                 "filename": "f.md",
-                "chunk_ids": ["c1", "c2"],
+                "domain": "coding",
+                "chunk_count": 2,
             },
         ),
+        patch(
+            "app.services.content_lifecycle.remove_content", return_value=result
+        ) as mock_remove,
     ):
         out = await pkb_artifact_delete(artifact_id="art-hard", hard=True)
 
     assert out["mode"] == "hard"
     assert out["chunks_affected"] == 2
-    fake_chroma_coll.delete.assert_called_once_with(ids=["c1", "c2"])
+    assert out["filename"] == "f.md"
+    # Hard delete fans across every store via the coordinator (BM25/SPLADE no
+    # longer orphaned) instead of the old Chroma-only inline delete.
+    mock_remove.assert_called_once_with("art-hard", neo4j=fake_driver)
 
 
 @pytest.mark.asyncio
