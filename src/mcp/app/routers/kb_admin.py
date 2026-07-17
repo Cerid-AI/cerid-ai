@@ -1079,8 +1079,13 @@ async def _dismissed_duplicate_hashes() -> set[str]:
 
 
 @router.get("/admin/kb/duplicates", response_model=DuplicatesResponse)
-async def list_duplicates(min_similarity: float = 0.85):
-    """Group artifacts by exact ``content_hash``. Sprint 2 will add fuzzy similarity."""
+async def list_duplicates():
+    """Group artifacts by exact ``content_hash``.
+
+    AF-027: the old ``min_similarity`` query param was dead — grouping is
+    exact-hash only, so nothing read it. A future fuzzy-similarity pass would
+    reintroduce a threshold param when it actually consumes one.
+    """
     import asyncio
     from collections import defaultdict
 

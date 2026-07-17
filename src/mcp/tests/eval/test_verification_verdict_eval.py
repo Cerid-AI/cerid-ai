@@ -11,7 +11,18 @@ Phase 3.5 confidence-recording extension: ``ClaimGrade.confidence`` and the
 """
 from __future__ import annotations
 
+import tests.eval.verification_verdict_eval as vve
 from tests.eval.verification_verdict_eval import CaseResult, ClaimGrade, summarize
+
+
+def test_load_dotenv_survives_shallow_container_path(monkeypatch):
+    """Regression: the harness ran ``Path(__file__).resolve().parents[4]`` at
+    import, which raised ``IndexError`` in the CI container's shallow
+    ``/eval-src/tests/eval/`` layout and silently failed the nightly
+    quality-evals for days. ``_load_dotenv`` must walk parents and never index
+    out of range regardless of how shallow the path is."""
+    monkeypatch.setattr(vve, "__file__", "/eval-src/tests/eval/verification_verdict_eval.py")
+    vve._load_dotenv()  # must not raise IndexError on a 3-deep path
 
 
 def _case_result(case_id: str, *grades: ClaimGrade) -> CaseResult:

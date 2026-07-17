@@ -47,7 +47,6 @@ import httpx
 
 from tests.eval._live_eval_common import gate_floor
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
 _SCRIPT_DIR = Path(__file__).parent
 _DEFAULT_CASES = _SCRIPT_DIR / "datasets" / "verification_cases_v2.jsonl"
 _DEFAULT_OUTPUT = _SCRIPT_DIR / "out" / "verification_verdict_results.json"
@@ -79,9 +78,19 @@ def _load_dotenv() -> None:
 
     Only fills env vars not already set — an explicitly exported CERID_API_KEY
     (or one injected by CI) always wins over the file.
+
+    Walks up from this file to find a repo-root ``.env``. The old
+    ``parents[4]`` hard-index assumed a 5-deep repo layout and raised
+    ``IndexError`` on import in the CI container's shallow ``/eval-src/tests/eval/``
+    layout — which has no ``.env`` anyway (CI injects env vars), and was
+    silently failing the nightly quality-evals harness. Iterating ``.parents``
+    can never index out of range.
     """
-    env_path = _REPO_ROOT / ".env"
-    if not env_path.exists():
+    env_path = next(
+        (p / ".env" for p in Path(__file__).resolve().parents if (p / ".env").exists()),
+        None,
+    )
+    if env_path is None:
         return
     for raw in env_path.read_text(encoding="utf-8").splitlines():
         stripped = raw.strip()

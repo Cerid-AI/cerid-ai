@@ -185,7 +185,7 @@ export function DuplicateDetector({ open, onClose }: DuplicateDetectorProps) {
     refetch,
   } = useQuery({
     queryKey: ["kb-duplicates"],
-    queryFn: () => fetchDuplicates(0.85),
+    queryFn: () => fetchDuplicates(),
     enabled: open,
     staleTime: 30_000,
   })

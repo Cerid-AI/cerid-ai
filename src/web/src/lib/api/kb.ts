@@ -645,9 +645,9 @@ export async function fetchIngestionProgress(): Promise<IngestionProgress> {
 // Near-duplicate detection
 // ---------------------------------------------------------------------------
 
-export async function fetchDuplicates(minSimilarity = 0.85): Promise<DuplicatesResponse> {
-  const params = new URLSearchParams({ min_similarity: String(minSimilarity) })
-  const res = await fetch(`${MCP_BASE}/admin/kb/duplicates?${params}`, { headers: mcpHeaders() })
+export async function fetchDuplicates(): Promise<DuplicatesResponse> {
+  // Grouping is exact-hash only; the removed min_similarity param was dead (AF-027).
+  const res = await fetch(`${MCP_BASE}/admin/kb/duplicates`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Duplicates fetch failed: ${res.status}`))
   return res.json()
 }
