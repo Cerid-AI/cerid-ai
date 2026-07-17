@@ -762,14 +762,19 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm connections and models for faster first request
     try:
+        import config
         from app.deps import get_chroma
-        from config.taxonomy import DOMAINS, collection_name
+        from config.taxonomy import collection_name
         chroma = get_chroma()
-        for domain in DOMAINS:
+        # AF-033: live config.DOMAINS (the canonical runtime list rehydration +
+        # POST /taxonomy/domain reassign) rather than the import-time
+        # config.taxonomy.DOMAINS snapshot, so runtime domains pre-warm too.
+        domains = config.DOMAINS
+        for domain in domains:
             chroma.get_or_create_collection(name=collection_name(domain))
         # Also pre-warm conversations collection (used by memory recall)
         chroma.get_or_create_collection(name="domain_conversations")
-        logger.info("ChromaDB + embedding model pre-warmed (%d domain collections)", len(DOMAINS))
+        logger.info("ChromaDB + embedding model pre-warmed (%d domain collections)", len(domains))
     except Exception as e:
         log_swallowed_error("app.main.prewarm_chroma", e)
 

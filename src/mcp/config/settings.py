@@ -853,6 +853,14 @@ SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
 SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
+# AF-030 (CL-8) — background KB quality re-scoring. curate() in audit mode is
+# cheap (local scoring + one graph write per artifact, NO LLM calls; synopsis
+# generation stays off), but it is never re-run after ingest, so quality scores
+# go stale as artifacts accrue edits and relationships. Weekly Sunday 4:30 AM by
+# default. Empty string disables the cron; the job is ALSO gated off by default
+# behind CERID_CURATOR_CRON_ENABLED (read in app/scheduler.py) so an operator
+# opts in explicitly — mirrors the SCHEDULE_BACKFILL_ENRICHMENT convention.
+SCHEDULE_CURATOR = os.getenv("SCHEDULE_CURATOR", "30 4 * * 0")  # Sunday 4:30 AM
 # Phase E (bi-temporal memory plan) — once-per-session summarization scan
 # cadence. Default every 15 min; empty string disables the cron. The scan is
 # dark behind ENABLE_SESSION_SUMMARIZATION (config/features.py, default OFF), so
@@ -986,7 +994,10 @@ ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv(
 # core/ingest/parsers/ + chunker registry — each CSV row, Markdown
 # section, and Python function/class becomes its own chunk with
 # structural metadata (column_headers, heading_path,
-# file:start_line:end_line) preserved.
+# file:start_line:end_line) stamped on the chunk. NOTE (AF-059): only
+# ``heading_path`` is consumed (by markdown_strategy during chunking);
+# the rest are stamped for provenance/future use but have no store-side
+# reader today — they are preserved, not yet consumed.
 # Set ENABLE_LAYOUT_AWARE_PARSING=false to revert to the legacy
 # flat-text chunker.
 ENABLE_LAYOUT_AWARE_PARSING = os.getenv(
@@ -1046,6 +1057,16 @@ def embedding_version_for_domain(domain: str) -> str:
 # Mirrors the BACKFILL_ENRICHMENT_BATCH / _PACE_S knob pair.
 REEMBED_JOB_BATCH_SIZE = int(os.getenv("REEMBED_JOB_BATCH_SIZE", "200"))
 REEMBED_JOB_PACE_S = float(os.getenv("REEMBED_JOB_PACE_S", "0.0"))
+
+# HyPE backfill job (AF-049 — HypeBackfillJob, indexes existing chunks after
+# RETRIEVAL_HYPE_ENABLED flips on; ingest only ever covers new chunks). Each
+# indexed chunk is an LLM call, so MAX_CHUNKS caps a single run's spend — a
+# capped run logs the cap and re-running skips already-indexed chunks, so
+# repeated runs converge. BATCH_SIZE is the Chroma page size; PACE_S throttles
+# between per-chunk LLM calls.
+HYPE_BACKFILL_BATCH_SIZE = int(os.getenv("HYPE_BACKFILL_BATCH_SIZE", "200"))
+HYPE_BACKFILL_MAX_CHUNKS = int(os.getenv("HYPE_BACKFILL_MAX_CHUNKS", "500"))
+HYPE_BACKFILL_PACE_S = float(os.getenv("HYPE_BACKFILL_PACE_S", "0.0"))
 
 # Smart routing: when enabled, "auto" model selection in chat uses the smart
 # router to pick the best model based on query complexity and availability.

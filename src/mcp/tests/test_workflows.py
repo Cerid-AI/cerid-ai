@@ -306,6 +306,38 @@ class TestWorkflowCRUD:
 # ---------------------------------------------------------------------------
 
 
+class TestCuratorNode:
+    """AF-016 regression: the ingest_and_curate curator node must call
+    curate() with the real graph store, not the query string."""
+
+    def test_curator_node_passes_real_driver_not_query_string(self):
+        from app.routers.workflows import _execute_agent_node
+
+        sentinel_driver = MagicMock(name="neo4j_driver")
+        sentinel_chroma = MagicMock(name="chroma_client")
+        recorded: dict = {}
+
+        async def fake_curate(neo4j_driver=None, *, chroma_client=None, **kw):
+            recorded["neo4j_driver"] = neo4j_driver
+            recorded["chroma_client"] = chroma_client
+            return {"status": "ok", "scored": 0}
+
+        with patch("app.agents.curator.curate", fake_curate), \
+             patch("app.deps.get_neo4j", return_value=sentinel_driver), \
+             patch("app.deps.get_chroma", return_value=sentinel_chroma):
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(
+                _execute_agent_node("curator", {"query": "some query text"})
+            )
+            loop.close()
+
+        # The driver slot must carry the real driver, never the query string.
+        assert recorded["neo4j_driver"] is sentinel_driver
+        assert recorded["neo4j_driver"] != "some query text"
+        assert recorded["chroma_client"] is sentinel_chroma
+        assert result == {"status": "ok", "scored": 0}
+
+
 class TestWorkflowExecution:
     @patch("app.routers.workflows.get_redis")
     @patch("app.routers.workflows._execute_agent_node")

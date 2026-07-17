@@ -185,6 +185,23 @@ class ReembedResponse(BaseModel):
     message: str
 
 
+class HypeBackfillRequest(BaseModel):
+    domain: str | None = Field(
+        None, description="Restrict to one domain (None = every domain)"
+    )
+    force: bool = Field(
+        False,
+        description="Re-index every chunk, ignoring the already-indexed skip-set",
+    )
+
+
+class HypeBackfillResponse(BaseModel):
+    status: str
+    job_id: str | None
+    domain: str | None
+    message: str
+
+
 class DomainVersionDistribution(BaseModel):
     total: int
     versions: dict[str, int]
@@ -475,6 +492,63 @@ async def reembed_corpus(req: ReembedRequest | None = None):
         domain=domain,
         message=(
             f"Enqueued re-embed job {job_id} for {scope}"
+            f"{' (force=true)' if force else ''}."
+        ),
+    )
+
+
+@router.post("/admin/kb/hype-backfill", response_model=HypeBackfillResponse)
+async def hype_backfill_corpus(req: HypeBackfillRequest | None = None):
+    """Enqueue the HyPE backfill job (AF-049).
+
+    HyPE indexing runs only at ingest, so flipping ``RETRIEVAL_HYPE_ENABLED``
+    on covers only chunks ingested after the flip. This enqueues a resumable
+    background job that pages each domain's collection and generates the
+    hypothetical-question embeddings for existing chunks that don't have them
+    yet. The job is a no-op while the flag is off, is bounded per run by
+    ``HYPE_BACKFILL_MAX_CHUNKS`` (LLM cost — a capped run logs the cap; re-run
+    to continue, already-indexed chunks are skipped), and busts the query
+    caches when it indexes anything.
+
+    Returns immediately with a ``job_id``; progress is on ``GET
+    /processor/status`` / ``/processor/recent``. ``enqueue_if_absent`` collapses
+    a duplicate call against the same domain+force while one is pending/running.
+    """
+    domain = req.domain if req else None
+    force = req.force if req else False
+
+    if domain is not None and domain not in config.DOMAINS:
+        raise HTTPException(status_code=404, detail=f"Unknown domain: {domain}")
+
+    from app.db.redis.processor_queue import RedisJobQueue
+    from app.processor.jobs.hype_backfill import HypeBackfillJob
+
+    try:
+        queue = RedisJobQueue(get_redis())
+        job = HypeBackfillJob(domain=domain, force=force)
+        record = job.new_record(payload={"domain": domain, "force": force})
+        job_id = await queue.enqueue_if_absent(record)
+    except Exception as e:
+        logger.error("Failed to enqueue HyPE backfill job: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to enqueue HyPE backfill job: {e}"
+        )
+
+    if job_id is None:
+        return HypeBackfillResponse(
+            status="already_running",
+            job_id=None,
+            domain=domain,
+            message="A matching HyPE backfill job is already pending or running.",
+        )
+
+    scope = f"domain={domain}" if domain else "all domains"
+    return HypeBackfillResponse(
+        status="enqueued",
+        job_id=job_id,
+        domain=domain,
+        message=(
+            f"Enqueued HyPE backfill job {job_id} for {scope}"
             f"{' (force=true)' if force else ''}."
         ),
     )

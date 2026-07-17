@@ -213,6 +213,26 @@ async def install_pack(
             )
             new_state = upsert_installed(load_install_state(state_path), record)
             save_install_state(state_path, new_state)
+            # AF-051: a version bump replaces the state record but previously left
+            # the prior version's artifacts in Chroma + Neo4j as orphans. Now that
+            # the new version is committed, remove the superseded artifacts through
+            # the content-lifecycle coordinator (fans across all stores + busts
+            # caches). Only fires on a real version change; best-effort per artifact.
+            if existing is not None and existing.version != pack.version:
+                from app.deps import get_neo4j
+                from app.services.content_lifecycle import remove_content
+                _neo4j = get_neo4j()
+                _new_ids = set(ingested_artifact_ids)
+                for _old_aid in existing.artifact_ids:
+                    if _old_aid in _new_ids:
+                        continue
+                    try:
+                        await asyncio.to_thread(remove_content, _old_aid, neo4j=_neo4j)
+                    except Exception as _cleanup_exc:  # noqa: BLE001
+                        log_swallowed_error(
+                            "services.knowledge_packs.version_bump_cleanup",
+                            _cleanup_exc,
+                        )
             logger.info(
                 "Pack %s@%s installed: %d artifacts (%d files in archive)",
                 pack.id, pack.version, len(ingested_artifact_ids),

@@ -923,9 +923,11 @@ def ingest_content(
         ]
         # Lift frontmatter off the first text chunk so it doesn't get
         # written into every chunk's ChromaDB metadata (the dict lives on
-        # the Artifact node, not on each chunk).  We still leave the
-        # JSON-serialised form on chunk 0 so consumers that want per-doc
-        # frontmatter from chroma retrieval can read it back.
+        # the Artifact node, not on each chunk). AF-058: the JSON is parsed
+        # here purely to populate the Artifact's frontmatter — it is NOT
+        # re-stored on the chunk. The prior code re-attached it to chunk 0
+        # "for downstream consumers (search filters etc.)", but no store-side
+        # consumer ever read it back, so that copy was dead storage.
         if pre_chunk_metadatas:
             fm_json = pre_chunk_metadatas[0].pop("frontmatter_json", None)
             if fm_json:
@@ -938,9 +940,6 @@ def ingest_content(
                     # call frame up, so a decode failure here is a real
                     # bug (not user input).  Surface at warn level.
                     logger.warning("frontmatter_json decode failed: %s", e)
-                # Re-attach the JSON so chunk 0's metadata still carries it
-                # for downstream consumers (search filters etc.).
-                pre_chunk_metadatas[0]["frontmatter_json"] = fm_json
     else:
         fname_for_header = (metadata or {}).get("filename", "")
         sub_cat_for_header = (metadata or {}).get("sub_category", "")

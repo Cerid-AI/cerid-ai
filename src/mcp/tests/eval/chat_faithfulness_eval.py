@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -373,12 +372,10 @@ def run_eval(
         )
 
     overall = _mean(scored)
-    floor = None
+    floor = common.gate_floor(_GATE_ENV)
     gate_passed: bool | None = None
-    floor_env = os.getenv(_GATE_ENV)
-    if floor_env is not None and overall is not None:
-        floor = floor_env
-        gate_passed = overall >= float(floor_env)
+    if floor is not None and overall is not None:
+        gate_passed = overall >= floor
 
     summary: dict[str, Any] = {
         "harness": "chat_faithfulness_eval",

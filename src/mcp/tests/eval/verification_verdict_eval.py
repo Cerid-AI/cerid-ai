@@ -45,6 +45,8 @@ from typing import Any
 
 import httpx
 
+from tests.eval._live_eval_common import gate_floor
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _SCRIPT_DIR = Path(__file__).parent
 _DEFAULT_CASES = _SCRIPT_DIR / "datasets" / "verification_cases_v2.jsonl"
@@ -423,23 +425,19 @@ def summarize(case_results: list[CaseResult], *, n_cases_total: int) -> dict[str
 def _apply_floors(summary: dict[str, Any]) -> tuple[bool, list[str]]:
     """Check env-gated floors. Returns (gated, violations). ``gated`` is False
     (report-only) unless at least one floor env var is set."""
-    min_accuracy = os.getenv("VERDICT_EVAL_MIN_ACCURACY")
-    max_timeout_rate = os.getenv("VERDICT_EVAL_MAX_TIMEOUT_RATE")
-    gated = bool(min_accuracy or max_timeout_rate)
+    floor = gate_floor("VERDICT_EVAL_MIN_ACCURACY")
+    ceiling = gate_floor("VERDICT_EVAL_MAX_TIMEOUT_RATE")
+    gated = floor is not None or ceiling is not None
     violations: list[str] = []
 
-    if min_accuracy is not None:
-        floor = float(min_accuracy)
-        if summary["overall_accuracy"] < floor:
-            violations.append(
-                f"overall_accuracy {summary['overall_accuracy']} < VERDICT_EVAL_MIN_ACCURACY {floor}"
-            )
-    if max_timeout_rate is not None:
-        ceiling = float(max_timeout_rate)
-        if summary["timeout_rate"] > ceiling:
-            violations.append(
-                f"timeout_rate {summary['timeout_rate']} > VERDICT_EVAL_MAX_TIMEOUT_RATE {ceiling}"
-            )
+    if floor is not None and summary["overall_accuracy"] < floor:
+        violations.append(
+            f"overall_accuracy {summary['overall_accuracy']} < VERDICT_EVAL_MIN_ACCURACY {floor}"
+        )
+    if ceiling is not None and summary["timeout_rate"] > ceiling:
+        violations.append(
+            f"timeout_rate {summary['timeout_rate']} > VERDICT_EVAL_MAX_TIMEOUT_RATE {ceiling}"
+        )
     return gated, violations
 
 

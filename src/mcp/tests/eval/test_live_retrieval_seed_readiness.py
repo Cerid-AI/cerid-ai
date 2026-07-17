@@ -13,6 +13,8 @@ testable in isolation, mirroring the "structural" layer pattern used by
 """
 from __future__ import annotations
 
+import pytest
+
 from tests.eval import _live_eval_common as common
 from tests.eval.live_retrieval_eval import _build_arg_parser, decide_seed_failure
 
@@ -70,3 +72,50 @@ def test_cli_allow_not_ready_defaults_off() -> None:
 def test_cli_allow_not_ready_flag_parses() -> None:
     args = _build_arg_parser().parse_args(["--allow-not-ready"])
     assert args.allow_not_ready is True
+
+
+# ---------------------------------------------------------------------------
+# gate_floor — env-gated threshold parsing (nightly-eval crash regression)
+#
+# A set-but-EMPTY gate var (``RETRIEVAL_EVAL_MIN_RECALL5=""``) crashed the
+# nightly quality-evals gate every night: ``os.getenv`` returns ``""`` (not
+# ``None``), so the naive ``if getenv(x) is not None: float(x)`` hit
+# ``float("")`` → ValueError. ``gate_floor`` normalizes empty/whitespace → None.
+# ---------------------------------------------------------------------------
+_GATE_VAR = "TEST_GATE_FLOOR_PROBE"
+
+
+def test_gate_floor_unset_is_none(monkeypatch) -> None:
+    monkeypatch.delenv(_GATE_VAR, raising=False)
+    assert common.gate_floor(_GATE_VAR) is None
+
+
+def test_gate_floor_empty_string_is_none(monkeypatch) -> None:
+    """The nightly-crash case: set-but-empty must mean 'no gate', not float('')."""
+    monkeypatch.setenv(_GATE_VAR, "")
+    assert common.gate_floor(_GATE_VAR) is None
+
+
+def test_gate_floor_whitespace_is_none(monkeypatch) -> None:
+    monkeypatch.setenv(_GATE_VAR, "   ")
+    assert common.gate_floor(_GATE_VAR) is None
+
+
+def test_gate_floor_parses_value(monkeypatch) -> None:
+    monkeypatch.setenv(_GATE_VAR, "0.85")
+    assert common.gate_floor(_GATE_VAR) == 0.85
+
+
+def test_gate_floor_zero_still_gates(monkeypatch) -> None:
+    """A falsy-but-valid '0' is a real threshold, not 'unset'."""
+    monkeypatch.setenv(_GATE_VAR, "0")
+    result = common.gate_floor(_GATE_VAR)
+    assert result == 0.0
+    assert result is not None
+
+
+def test_gate_floor_malformed_raises(monkeypatch) -> None:
+    """A non-empty garbage value surfaces operator misconfig loudly."""
+    monkeypatch.setenv(_GATE_VAR, "not-a-number")
+    with pytest.raises(ValueError):
+        common.gate_floor(_GATE_VAR)

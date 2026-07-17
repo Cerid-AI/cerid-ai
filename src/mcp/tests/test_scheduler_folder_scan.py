@@ -96,6 +96,33 @@ async def test_scan_uses_watched_folder_paths_not_scan_paths(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_watched_folder_scan_threads_config_quality_and_size_caps(tmp_path, monkeypatch):
+    """AF-048: the watched-folders branch must pass the operator's
+    SCAN_MIN_QUALITY / SCAN_MAX_FILE_SIZE_MB into scan_folder, not the
+    hardcoded scan_folder defaults (0.4 / 50)."""
+    import config
+    from app.scheduler import _run_folder_scan
+
+    monkeypatch.setattr(config, "SCAN_MIN_QUALITY", 0.72, raising=False)
+    monkeypatch.setattr(config, "SCAN_MAX_FILE_SIZE_MB", 7, raising=False)
+
+    rec = {**_FOLDER, "path": str(tmp_path)}
+    fake = _FakeRedis([rec])
+    captured: dict = {}
+
+    def fake_scan_folder(path, **kwargs):
+        captured.update(kwargs)
+        return _fake_scan_results(["ingested"])
+
+    with patch("app.scheduler.get_redis", return_value=fake), \
+         patch("app.services.folder_scanner.scan_folder", side_effect=fake_scan_folder):
+        await _run_folder_scan()
+
+    assert captured.get("min_quality") == 0.72
+    assert captured.get("max_file_size_mb") == 7
+
+
+@pytest.mark.asyncio
 async def test_once_mode_folder_scans_then_disables(tmp_path):
     from app.scheduler import _run_folder_scan
 

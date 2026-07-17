@@ -275,6 +275,38 @@ async def _run_stale_detection() -> None:
         logger.error(f"Scheduled stale detection failed: {e}")
 
 
+async def _run_curator() -> None:
+    """Re-run KB quality scoring in the background (AF-030, CL-8).
+
+    Quality scores are computed at ingest but never refreshed, so they drift as
+    artifacts accrue edits and relationships. This audit-mode pass re-scores each
+    domain's artifacts and stores the fresh scores in the graph. Audit mode is
+    cheap — local scoring + a graph write, NO LLM calls (synopsis generation
+    stays off). Registered only when the operator opts in via
+    CERID_CURATOR_CRON_ENABLED (see start_scheduler)."""
+    start = time.time()
+    try:
+        from app.agents.curator import curate
+        result = await curate(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+            mode="audit",
+        )
+        scored = result.get("artifacts_scored", 0) if isinstance(result, dict) else 0
+        avg = result.get("avg_quality_score", 0.0) if isinstance(result, dict) else 0.0
+        duration = time.time() - start
+        _log_execution("curator", "success", duration, f"{scored} scored, avg {avg}")
+        logger.info(
+            "Scheduled curator completed: %s scored (avg %.4f) in %.1fs",
+            scored, avg, duration,
+        )
+    except Exception as e:
+        log_swallowed_error('app.scheduler', e)
+        duration = time.time() - start
+        _log_execution("curator", "error", duration, str(e))
+        logger.error(f"Scheduled curator failed: {e}")
+
+
 async def _run_sync_export() -> None:
     """Scheduled incremental export to sync directory."""
     start = time.time()
@@ -467,16 +499,26 @@ async def _run_folder_scan() -> None:
                     continue
                 ingested = skipped = errored = 0
                 try:
+                    # AF-048: thread the operator's quality/size caps into the
+                    # watched-folders path too — previously only the legacy
+                    # branch passed them, so watched folders silently used the
+                    # scan_* defaults (0.4 / 50) regardless of config.
+                    _scan_min_quality = getattr(config, "SCAN_MIN_QUALITY", 0.4)
+                    _scan_max_file_mb = getattr(config, "SCAN_MAX_FILE_SIZE_MB", 50)
                     if rec.get("is_vault"):
                         scan_iter = scan_vault(
                             path,
                             rec.get("vault_config"),
                             exclude_patterns=set(rec.get("exclude_patterns") or []),
+                            min_quality=_scan_min_quality,
+                            max_file_size_mb=_scan_max_file_mb,
                         )
                     else:
                         scan_iter = scan_folder(
                             path,
                             exclude_patterns=set(rec.get("exclude_patterns") or []),
+                            min_quality=_scan_min_quality,
+                            max_file_size_mb=_scan_max_file_mb,
                         )
                     async for result in scan_iter:
                         if result.status == "ingested":
@@ -1384,8 +1426,10 @@ async def _run_webhook_drain() -> None:
             k.decode() if isinstance(k, bytes) else k
             for k in rc.scan_iter(match="cerid:webhook_inbox:*", count=100)
         ]
-        ingested = failed = 0
+        ingested = failed = drained = 0  # AF-019: drained is the GLOBAL per-run bound
         for key in keys:
+            if drained >= max_per_run:  # AF-019: cap across ALL matched keys, not per-key
+                break
             source_id = key.rsplit(":", 1)[-1]
             # Resolve the source's domain once per key (default general).
             domain = "general"
@@ -1401,12 +1445,11 @@ async def _run_webhook_drain() -> None:
                             domain = _row["d"]
                 except Exception as exc:  # noqa: BLE001 — domain lookup best-effort
                     log_swallowed_error("app.scheduler.webhook_drain.domain", exc)
-            n = 0
-            while n < max_per_run:
+            while drained < max_per_run:
                 raw = rc.lpop(key)
                 if raw is None:
                     break
-                n += 1
+                drained += 1
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8", "replace")
                 try:
@@ -1440,7 +1483,7 @@ async def _run_webhook_drain() -> None:
                         log_swallowed_error("app.scheduler.webhook_drain.deadletter", dlx)
                     log_swallowed_error("app.scheduler.webhook_drain.ingest", exc)
         duration = time.time() - start
-        detail = f"keys={len(keys)} ingested={ingested} failed={failed}"
+        detail = f"keys={len(keys)} ingested={ingested} failed={failed} drained={drained}/{max_per_run}"
         _log_execution("webhook_drain", "success", duration, detail)
         if ingested or failed:
             logger.info("webhook_drain: %s in %.1fs", detail, duration)
@@ -1695,6 +1738,24 @@ def start_scheduler() -> AsyncIOScheduler:
             name="Enrichment backfill (Track A)",
             replace_existing=True,
             max_instances=1,  # block overlapping runs (LLM cost)
+        )
+
+    # AF-030 (CL-8) — background KB quality re-scoring (audit mode). Operator
+    # opt-in via CERID_CURATOR_CRON_ENABLED; off by default even though
+    # SCHEDULE_CURATOR carries a cron. Audit mode is cheap (local scoring + a
+    # graph write, no LLM), so max_instances=1 just prevents a slow run from
+    # stacking on itself.
+    if (
+        os.getenv("CERID_CURATOR_CRON_ENABLED", "").lower() in ("true", "1", "yes")
+        and config.SCHEDULE_CURATOR
+    ):
+        _scheduler.add_job(
+            _run_curator,
+            CronTrigger.from_crontab(config.SCHEDULE_CURATOR),
+            id="curator",
+            name="KB quality re-scoring (curator audit)",
+            replace_existing=True,
+            max_instances=1,
         )
 
     # Sync export (optional — empty SCHEDULE_SYNC_EXPORT disables)

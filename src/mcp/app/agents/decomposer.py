@@ -14,7 +14,6 @@ import logging
 from typing import Any
 
 import config
-from config import DOMAINS
 from core.utils.circuit_breaker import get_breaker
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.text import STOPWORDS as _STOPWORDS
@@ -74,7 +73,7 @@ def _get_adjacent_domains(requested: list[str]) -> dict[str, float]:
     adjacent: dict[str, float] = {}
     for req in requested:
         explicit = config.DOMAIN_AFFINITY.get(req, {})
-        for other in DOMAINS:
+        for other in config.DOMAINS:  # AF-033: live read (import-time bind went stale on runtime domains)
             if other in requested_set:
                 continue
             weight = explicit.get(other, config.CROSS_DOMAIN_DEFAULT_AFFINITY)
@@ -177,18 +176,20 @@ async def multi_domain_query(
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results."""
     if domains is None:
-        domains = DOMAINS
+        domains = config.DOMAINS
 
     # Custom/client-defined domains are allowed (GA P0.1): external clients
     # ingest to their own domain names. Unknown domains are queried when their
     # collection exists and degrade to empty results otherwise (see
     # query_domain below). Warn, never reject — a hard 400 forces client shims.
-    custom_domains = [d for d in domains if d not in DOMAINS]
+    # AF-033: live ``config.DOMAINS`` so runtime-added domains aren't misfiled
+    # as "custom" after a POST /taxonomy/domain without a restart.
+    custom_domains = [d for d in domains if d not in config.DOMAINS]
     if custom_domains:
         logger.warning(
             "multi_domain_query: non-built-in domain(s) %s — querying as custom "
             "client domains (built-in: %s)",
-            custom_domains, DOMAINS,
+            custom_domains, config.DOMAINS,
         )
 
     if chroma_client is None:

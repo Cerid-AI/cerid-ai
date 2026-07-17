@@ -266,8 +266,8 @@ class TestChromaDBCircuitBreaker:
         from app.agents.decomposer import multi_domain_query
 
         with patch("app.agents.decomposer.get_chroma", return_value=mock_chroma), \
-             patch("app.agents.decomposer.DOMAINS", ["general"]), \
              patch("app.agents.decomposer.config") as mock_config:
+            mock_config.DOMAINS = ["general"]
             mock_config.collection_name = lambda d: f"kb_{d}"
             # CircuitOpenError propagates — the caller (query_agent) handles degradation
             with pytest.raises(CircuitOpenError):
@@ -405,9 +405,9 @@ class TestParallelExecution:
         breaker.reset()
 
         with patch("app.agents.decomposer.get_chroma", return_value=mock_chroma), \
-             patch("app.agents.decomposer.DOMAINS", ["general"]), \
              patch("app.agents.decomposer.config") as mock_config:
 
+            mock_config.DOMAINS = ["general"]
             mock_config.collection_name = lambda d: f"kb_{d}"
             mock_config.HYBRID_VECTOR_WEIGHT = 0.7
             mock_config.HYBRID_KEYWORD_WEIGHT = 0.3

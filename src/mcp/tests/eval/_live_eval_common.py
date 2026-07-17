@@ -69,6 +69,23 @@ def mcp_base() -> str:
     return os.getenv("MCP_BASE", DEFAULT_MCP_BASE)
 
 
+def gate_floor(env_name: str) -> float | None:
+    """Parse an optional numeric gate threshold from ``env_name``.
+
+    Returns ``None`` when the variable is unset *or* set-but-empty/whitespace,
+    so a blank value cleanly means "no gate" instead of crashing on
+    ``float("")``. ``os.getenv`` returns ``""`` (not ``None``) for a set-but-
+    empty var, so the naive ``if os.getenv(x) is not None: float(x)`` pattern
+    died every night on an empty ``RETRIEVAL_EVAL_MIN_RECALL5`` in the nightly
+    quality-evals gate. A malformed *non-empty* value still raises, surfacing
+    operator misconfiguration loudly rather than silently disabling the gate.
+    """
+    raw = os.getenv(env_name)
+    if raw is None or not raw.strip():
+        return None
+    return float(raw.strip())
+
+
 def _key_from_dotenv(var_name: str) -> str:
     """Best-effort read of ``var_name`` from the nearest repo ``.env``.
 

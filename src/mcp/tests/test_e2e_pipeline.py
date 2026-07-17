@@ -8,7 +8,7 @@ pdfplumber, etc.) are pre-stubbed by conftest.py's ``pytest_configure()``.
 
 Mocking strategy mirrors test_services_ingestion.py:
 - Patch ``services.ingestion.get_redis/get_neo4j/get_chroma`` for ingest tests
-- Patch ``agents.decomposer.config`` + ``agents.decomposer.DOMAINS`` for query tests
+- Patch ``agents.decomposer.config`` (set ``.DOMAINS`` on the mock) for query tests
 - Patch verification internals at their own module paths
 - TestFullUserJourney mocks at function level (ingest_content, multi_domain_query, etc.)
 """
@@ -223,7 +223,6 @@ class TestQueryRetrievalPipeline:
         return asyncio.run(coro)
 
     @patch("app.agents.decomposer.config")
-    @patch("app.agents.decomposer.DOMAINS", ["coding", "general"])
     def test_query_returns_relevant_chunks(self, mock_config):
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -255,7 +254,6 @@ class TestQueryRetrievalPipeline:
         assert results[0]["relevance"] > results[1]["relevance"]
 
     @patch("app.agents.decomposer.config")
-    @patch("app.agents.decomposer.DOMAINS", ["coding"])
     def test_query_hybrid_search(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -328,7 +326,6 @@ class TestQueryRetrievalPipeline:
         assert result["context"] == ""
 
     @patch("app.agents.decomposer.config")
-    @patch("app.agents.decomposer.DOMAINS", ["coding"])
     def test_query_empty_collection(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -350,7 +347,6 @@ class TestQueryRetrievalPipeline:
         assert results == []
 
     @patch("app.agents.decomposer.config")
-    @patch("app.agents.decomposer.DOMAINS", ["coding", "finance"])
     def test_query_domain_filtering(self, mock_config):
         mock_config.DOMAINS = ["coding", "finance"]
         mock_config.collection_name = lambda d: f"domain_{d}"

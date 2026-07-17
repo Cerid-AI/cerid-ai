@@ -348,7 +348,16 @@ async def scan_folder(
                             sub_category=sub_cat,
                             client_source="folder_scanner",
                         )
-                    except (OSError, ValueError):
+                    except (OSError, ValueError) as _ingest_exc:
+                        # AF-022: ingest_file failed (e.g. Path.resolve on a
+                        # read-only overlay mount). The parse+ingest_content
+                        # fallback loses layout-aware pre_chunked output, so log
+                        # the degrade instead of silently downgrading it.
+                        from core.utils.swallowed import log_swallowed_error
+                        log_swallowed_error(
+                            "app.services.folder_scanner.ingest_file_fallback",
+                            _ingest_exc,
+                        )
                         # Fallback: parse file content, then ingest as text
                         parsed = await asyncio.to_thread(_parse_file, file_path)
                         text = parsed.get("text", "")

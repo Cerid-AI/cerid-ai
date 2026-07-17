@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -184,10 +183,10 @@ def run_eval(
             )
 
     overall = _mean_metrics([r["metrics"] for r in per_query])
-    floor = os.getenv(_GATE_ENV)
+    floor = common.gate_floor(_GATE_ENV)
     gate_passed: bool | None = None
     if not failed and floor is not None and overall["recall@5"] is not None:
-        gate_passed = overall["recall@5"] >= float(floor)
+        gate_passed = overall["recall@5"] >= floor
 
     summary: dict[str, Any] = {
         "harness": "live_retrieval_eval",

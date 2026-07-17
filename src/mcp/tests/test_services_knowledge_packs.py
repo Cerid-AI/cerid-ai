@@ -186,6 +186,51 @@ async def test_install_pack_idempotent_same_version(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_install_pack_version_bump_removes_prior_artifacts(tmp_path):
+    """AF-051: bumping a pack's version removes the prior version's artifacts
+    through the content-lifecycle coordinator, so Chroma/Neo4j don't accumulate
+    orphans across upgrades."""
+    state_path = tmp_path / "state.json"
+    staging_root = tmp_path / "staging"
+    ingest, calls = _make_ingest_stub()
+
+    v1dir = tmp_path / "v1"
+    v1dir.mkdir()
+    archive1, _, manifest1 = _build_pack_archive(v1dir, version="1.0.0")
+    rec1 = await install_pack(
+        manifest1, state_path=state_path, staging_root=staging_root,
+        download=_make_download_stub(archive1), ingest=ingest,
+    )
+    v1_ids = set(rec1.artifact_ids)
+    assert v1_ids  # the two content files
+
+    v2dir = tmp_path / "v2"
+    v2dir.mkdir()
+    archive2, _, manifest2 = _build_pack_archive(v2dir, version="2.0.0")
+    removed: list[str] = []
+
+    def _fake_remove(aid, neo4j=None):
+        removed.append(aid)
+        return {"ok": True}
+
+    with patch("app.services.content_lifecycle.remove_content", side_effect=_fake_remove), \
+         patch("app.deps.get_neo4j", return_value=object()):
+        rec2 = await install_pack(
+            manifest2, state_path=state_path, staging_root=staging_root,
+            download=_make_download_stub(archive2), ingest=ingest,
+        )
+
+    assert rec2.version == "2.0.0"
+    # Prior version's artifacts removed via the coordinator; new ones untouched.
+    assert set(removed) == v1_ids
+    assert not (set(removed) & set(rec2.artifact_ids))
+    # State now records only the new version.
+    persisted = load_install_state(state_path)
+    assert len(persisted) == 1
+    assert persisted[0].version == "2.0.0"
+
+
+@pytest.mark.asyncio
 async def test_install_pack_per_file_overrides(tmp_path):
     archive_path, digest, _ = _build_pack_archive(tmp_path)
     # Override sub_category on one of the files via the manifest's `files` list.

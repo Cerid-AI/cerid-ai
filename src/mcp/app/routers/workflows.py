@@ -378,7 +378,15 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
 
     elif name == "curator":
         from app.agents.curator import curate
-        result = await curate(query_text) if asyncio.iscoroutinefunction(curate) else curate(query_text)
+        from app.deps import get_chroma, get_neo4j
+        # AF-016: previously passed ``query_text`` (a str) into the first
+        # positional ``neo4j_driver`` slot, so the curator wrapped a string as
+        # its graph store and did nothing. Pass the real stores (audit mode —
+        # non-destructive scoring) like the sibling rectify/maintenance nodes.
+        result = await curate(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+        )
         return result if isinstance(result, dict) else {"status": str(result)}
 
     elif name == "triage":
