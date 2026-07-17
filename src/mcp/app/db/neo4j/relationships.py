@@ -172,6 +172,65 @@ def _extract_references(content: str, filename: str) -> set[str]:
     return refs
 
 
+def _batch_merge_relationships(
+    driver,
+    source_id: str,
+    edges: list[dict[str, Any]],
+    rel_type: str,
+) -> int:
+    """MERGE ``rel_type`` edges from ``source_id`` to every edge's target in ONE
+    UNWIND query (AF-090).
+
+    Replaces the old per-edge ``create_relationship`` loop — ``discover_relationships``
+    used to fire up to ~240 sequential single-edge MERGEs (each opening its own
+    session) on the hot ingest path. ``edges`` is a list of
+    ``{"target_id": str, "props": dict}``; it is deduped by ``target_id``
+    (first-wins props) and self-edges are dropped, so the batch matches the old
+    loop's first-wins idempotency exactly. Returns the count of NEWLY created
+    edges — pre-existing edges are left untouched (same ``ON CREATE`` semantics as
+    ``create_relationship``). Newness is measured by an ``OPTIONAL MATCH`` against
+    the pre-MERGE graph state, so the count is exact regardless of timestamp
+    resolution.
+    """
+    if rel_type not in config.GRAPH_RELATIONSHIP_TYPES:
+        logger.warning(f"Unknown relationship type: {rel_type}")
+        return 0
+    seen: dict[str, dict[str, Any]] = {}
+    for edge in edges:
+        tid = edge.get("target_id")
+        if tid and tid != source_id and tid not in seen:
+            seen[tid] = edge.get("props") or {}
+    if not seen:
+        return 0
+
+    payload = [{"target_id": tid, "props": props} for tid, props in seen.items()]
+    created_at = utcnow_iso()
+    # rel_type is validated against GRAPH_RELATIONSHIP_TYPES above (a fixed
+    # allowlist, never user input), so its interpolation into the query is safe;
+    # dynamic rel types would otherwise require APOC.
+    cypher = (
+        "UNWIND $edges AS edge "
+        "MATCH (s:Artifact {id: $source_id}), (t:Artifact {id: edge.target_id}) "
+        f"OPTIONAL MATCH (s)-[existing:{rel_type}]->(t) "
+        f"MERGE (s)-[r:{rel_type}]->(t) "
+        "ON CREATE SET r += edge.props, r.created_at = $created_at "
+        "RETURN sum(CASE WHEN existing IS NULL THEN 1 ELSE 0 END) AS new_count"
+    )
+    with driver.session() as session:
+        record = session.run(
+            cypher,
+            source_id=source_id,
+            edges=payload,
+            created_at=created_at,
+        ).single()
+    new_count = int(record["new_count"]) if record and record["new_count"] is not None else 0
+    if new_count:
+        logger.debug(
+            "Batched %d new %s edge(s) from %s", new_count, rel_type, source_id[:8]
+        )
+    return new_count
+
+
 def discover_relationships(
     driver,
     artifact_id: str,
@@ -180,7 +239,12 @@ def discover_relationships(
     keywords_json: str,
     content: str = "",
 ) -> int:
-    """Discover and create relationships between a newly ingested artifact and existing ones."""
+    """Discover and create relationships between a newly ingested artifact and existing ones.
+
+    AF-090: each strategy collects its candidate edges from a single read query,
+    then writes them all in ONE batched UNWIND MERGE (``_batch_merge_relationships``)
+    instead of a per-edge ``create_relationship`` loop.
+    """
     created = 0
     new_keywords = _parse_keywords(keywords_json)
 
@@ -188,6 +252,7 @@ def discover_relationships(
     # Artifacts with the same parent directory in their filename path
     parent_dir = os.path.dirname(filename)
     if parent_dir and parent_dir != ".":
+        s1_edges: list[dict[str, Any]] = []
         with driver.session() as session:
             result = session.run(
                 "MATCH (a:Artifact) "
@@ -200,17 +265,15 @@ def discover_relationships(
                 parent_prefix=parent_dir + "/",
             )
             for record in result:
-                if create_relationship(
-                    driver,
-                    artifact_id,
-                    record["id"],
-                    "RELATES_TO",
-                    {"reason": f"same directory: {parent_dir}"},
-                ):
-                    created += 1
+                s1_edges.append({
+                    "target_id": record["id"],
+                    "props": {"reason": f"same directory: {parent_dir}"},
+                })
+        created += _batch_merge_relationships(driver, artifact_id, s1_edges, "RELATES_TO")
 
     # --- Strategy 2: Keyword overlap ---
     if len(new_keywords) >= config.GRAPH_MIN_KEYWORD_OVERLAP:
+        s2_edges: list[dict[str, Any]] = []
         with driver.session() as session:
             # Find artifacts that share keywords (within same or related domains)
             result = session.run(
@@ -225,22 +288,20 @@ def discover_relationships(
                 other_keywords = _parse_keywords(record["keywords"])
                 overlap = new_keywords & other_keywords
                 if len(overlap) >= config.GRAPH_MIN_KEYWORD_OVERLAP:
-                    if create_relationship(
-                        driver,
-                        artifact_id,
-                        record["id"],
-                        "RELATES_TO",
-                        {
+                    s2_edges.append({
+                        "target_id": record["id"],
+                        "props": {
                             "reason": f"shared keywords: {', '.join(sorted(overlap)[:5])}",
                             "overlap_count": len(overlap),
                         },
-                    ):
-                        created += 1
+                    })
+        created += _batch_merge_relationships(driver, artifact_id, s2_edges, "RELATES_TO")
 
     # --- Strategy 3: Content references (imports, file mentions) ---
     if content:
         refs = _extract_references(content, filename)
         if refs:
+            s3_edges: list[dict[str, Any]] = []
             with driver.session() as session:
                 # Batch all ref lookups in a single UNWIND query
                 result = session.run(
@@ -253,14 +314,11 @@ def discover_relationships(
                     ref_names=list(refs),
                 )
                 for record in result:
-                    if create_relationship(
-                        driver,
-                        artifact_id,
-                        record["id"],
-                        "REFERENCES",
-                        {"reason": f"references {record['filename']}"},
-                    ):
-                        created += 1
+                    s3_edges.append({
+                        "target_id": record["id"],
+                        "props": {"reason": f"references {record['filename']}"},
+                    })
+            created += _batch_merge_relationships(driver, artifact_id, s3_edges, "REFERENCES")
 
     if created > 0:
         logger.info(

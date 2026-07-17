@@ -16,6 +16,7 @@ from app.db.neo4j.artifacts import (
     update_artifact,
 )
 from app.db.neo4j.relationships import (
+    _batch_merge_relationships,
     create_relationship,
     discover_relationships,
     find_related_artifacts,
@@ -458,27 +459,36 @@ class TestFindRelatedArtifacts:
 # Tests: discover_relationships
 # ---------------------------------------------------------------------------
 
+def _batch_result(new_count):
+    """A session.run() result whose .single() reports a batch's new_count
+    (AF-090 — discover_relationships now writes one UNWIND MERGE per strategy)."""
+    res = MagicMock()
+    res.single.return_value = _mock_record(new_count=new_count)
+    return res
+
+
 class TestDiscoverRelationships:
-    @patch("app.db.neo4j.relationships.create_relationship")
     @patch("app.db.neo4j.relationships.config")
-    def test_same_directory_discovery(self, mock_config, mock_create_rel):
+    def test_same_directory_discovery(self, mock_config):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
-        mock_create_rel.return_value = True
 
         driver, session = _mock_driver()
         neighbor = _mock_record(id="neighbor-1")
-        session.run.return_value = iter([neighbor])
+        # Only strategy 1 runs (dir path, no keywords, no content):
+        #   call 1 = read neighbors, call 2 = batched UNWIND MERGE.
+        session.run.side_effect = [iter([neighbor]), _batch_result(1)]
 
         count = discover_relationships(
             driver, "art-1", "src/utils/helper.py", "coding", "[]"
         )
-        assert count >= 1
-        mock_create_rel.assert_called()
+        assert count == 1
+        # The write is a single batched UNWIND MERGE, not a per-edge loop.
+        write_cypher = session.run.call_args_list[1].args[0]
+        assert "UNWIND" in write_cypher and "MERGE" in write_cypher
 
-    @patch("app.db.neo4j.relationships.create_relationship")
     @patch("app.db.neo4j.relationships.config")
-    def test_root_file_skips_directory_strategy(self, mock_config, mock_create_rel):
+    def test_root_file_skips_directory_strategy(self, mock_config):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
 
         driver, session = _mock_driver()
@@ -490,45 +500,57 @@ class TestDiscoverRelationships:
         # Root file has no parent_dir — should skip directory strategy
         assert count == 0
 
-    @patch("app.db.neo4j.relationships.create_relationship")
     @patch("app.db.neo4j.relationships.config")
-    def test_keyword_overlap_discovery(self, mock_config, mock_create_rel):
+    def test_keyword_overlap_discovery(self, mock_config):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
-        mock_create_rel.return_value = True
 
         driver, session = _mock_driver()
-        # First call (directory) returns empty, second call (keywords) returns match
         other = _mock_record(id="other-1", keywords='["python", "fastapi", "rest"]')
-        session.run.return_value = iter([other])
+        # Only strategy 2 runs: call 1 = read candidates, call 2 = batch write.
+        session.run.side_effect = [iter([other]), _batch_result(1)]
 
         count = discover_relationships(
             driver, "art-1", "readme.md", "coding",
             '["python", "fastapi", "testing"]'
         )
         # python + fastapi overlap >= 2 → should create relationship
-        assert count >= 1
+        assert count == 1
 
-    @patch("app.db.neo4j.relationships.create_relationship")
     @patch("app.db.neo4j.relationships.config")
-    def test_content_reference_discovery(self, mock_config, mock_create_rel):
+    def test_keyword_below_threshold_creates_nothing(self, mock_config):
+        mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
+        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
+
+        driver, session = _mock_driver()
+        # Only 1 shared keyword ("python") — below the overlap threshold, so no
+        # edge is collected and the batch write never runs.
+        other = _mock_record(id="other-1", keywords='["python", "django"]')
+        session.run.side_effect = [iter([other])]
+
+        count = discover_relationships(
+            driver, "art-1", "readme.md", "coding", '["python", "fastapi"]'
+        )
+        assert count == 0
+        assert session.run.call_count == 1  # read only, no batch write
+
+    @patch("app.db.neo4j.relationships.config")
+    def test_content_reference_discovery(self, mock_config):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 100  # Disable keyword strategy
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
-        mock_create_rel.return_value = True
 
         driver, session = _mock_driver()
         ref_match = _mock_record(id="ref-1", filename="config.py")
-        session.run.return_value = iter([ref_match])
+        session.run.side_effect = [iter([ref_match]), _batch_result(1)]
 
         count = discover_relationships(
             driver, "art-1", "main.py", "coding", "[]",
             content="import os\nfrom config import settings"
         )
-        assert count >= 1
+        assert count == 1
 
-    @patch("app.db.neo4j.relationships.create_relationship")
     @patch("app.db.neo4j.relationships.config")
-    def test_no_content_skips_reference_strategy(self, mock_config, mock_create_rel):
+    def test_no_content_skips_reference_strategy(self, mock_config):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 100
 
         driver, session = _mock_driver()
@@ -538,6 +560,66 @@ class TestDiscoverRelationships:
             driver, "art-1", "readme.md", "coding", "[]", content=""
         )
         assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: _batch_merge_relationships (AF-090)
+# ---------------------------------------------------------------------------
+
+class TestBatchMergeRelationships:
+    @patch("app.db.neo4j.relationships.config")
+    def test_invalid_rel_type_returns_zero_without_query(self, mock_config):
+        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+        driver, session = _mock_driver()
+
+        n = _batch_merge_relationships(
+            driver, "a1", [{"target_id": "a2", "props": {}}], "BOGUS"
+        )
+        assert n == 0
+        session.run.assert_not_called()
+
+    @patch("app.db.neo4j.relationships.config")
+    def test_empty_edges_returns_zero_without_query(self, mock_config):
+        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+        driver, session = _mock_driver()
+
+        n = _batch_merge_relationships(driver, "a1", [], "RELATES_TO")
+        assert n == 0
+        session.run.assert_not_called()
+
+    @patch("app.db.neo4j.relationships.config")
+    def test_dedups_by_target_first_wins_and_drops_self(self, mock_config):
+        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+        driver, session = _mock_driver()
+        session.run.return_value = _batch_result(2)
+
+        edges = [
+            {"target_id": "t1", "props": {"reason": "first"}},
+            {"target_id": "t1", "props": {"reason": "second"}},  # dup → dropped
+            {"target_id": "t2", "props": {"reason": "keep"}},
+            {"target_id": "a1", "props": {"reason": "self"}},     # self → dropped
+        ]
+        n = _batch_merge_relationships(driver, "a1", edges, "RELATES_TO")
+        assert n == 2  # from the mocked new_count
+
+        payload = session.run.call_args.kwargs["edges"]
+        targets = [e["target_id"] for e in payload]
+        assert targets == ["t1", "t2"]          # deduped, self-edge dropped
+        first = next(e for e in payload if e["target_id"] == "t1")
+        assert first["props"]["reason"] == "first"  # first-wins props
+        # The write is a single batched UNWIND MERGE.
+        assert "UNWIND" in session.run.call_args.args[0]
+
+    @patch("app.db.neo4j.relationships.config")
+    def test_returns_query_new_count(self, mock_config):
+        mock_config.GRAPH_RELATIONSHIP_TYPES = ["REFERENCES"]
+        driver, session = _mock_driver()
+        session.run.return_value = _batch_result(0)  # all edges pre-existed
+
+        n = _batch_merge_relationships(
+            driver, "a1", [{"target_id": "t1", "props": {}}], "REFERENCES"
+        )
+        assert n == 0
 
 
 # ---------------------------------------------------------------------------
