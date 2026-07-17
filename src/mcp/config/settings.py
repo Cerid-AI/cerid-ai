@@ -861,6 +861,15 @@ SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 # behind CERID_CURATOR_CRON_ENABLED (read in app/scheduler.py) so an operator
 # opts in explicitly — mirrors the SCHEDULE_BACKFILL_ENRICHMENT convention.
 SCHEDULE_CURATOR = os.getenv("SCHEDULE_CURATOR", "30 4 * * 0")  # Sunday 4:30 AM
+# AF-032 (CL-8) — entity embedding-merge sweep. Ingest runs only Tiers A+B of
+# resolve_canonical (alias-table + string-normalize) to stay lean; the Tier-C
+# embedding-based merge is this deliberate maintenance sweep (the same
+# `scripts/merge_entity_aliases.py --mode embedding --apply` an operator would
+# run by hand). Weekly Sunday 5:30 AM by default (after compute_entity_embeddings
+# at 3:15 has produced fresh vectors). DOUBLE-gated: registered only when
+# CERID_ENTITY_MERGE_CRON_ENABLED opts in AND the sweep no-ops unless
+# ENTITY_RESOLUTION_EMBED is on. Empty string disables the cron.
+SCHEDULE_ENTITY_MERGE = os.getenv("SCHEDULE_ENTITY_MERGE", "30 5 * * 0")  # Sunday 5:30 AM
 # Phase E (bi-temporal memory plan) — once-per-session summarization scan
 # cadence. Default every 15 min; empty string disables the cron. The scan is
 # dark behind ENABLE_SESSION_SUMMARIZATION (config/features.py, default OFF), so

@@ -664,7 +664,7 @@ MCP_TOOLS = [
     },
     {
         "name": "pkb_knowledge_pack_install",
-        "description": "Download → verify (hash) → ingest a knowledge pack from the registry. Idempotent at the same version (re-running with the same `pack_id` is a no-op). **Use when** opting into a curated corpus surfaced by `pkb_knowledge_pack_list`. **Returns** `{pack_id, version, domain, artifact_count, installed_at}`. Long-running for big packs; not gated by tier.",
+        "description": "Queue a background job to download → verify (hash) → ingest a knowledge pack from the registry. Runs asynchronously — big packs are memory-heavy and installing inline previously OOM'd (same fix the REST path took). Idempotent: the same `pack_id` already installed at that version returns `already_installed`, and an in-flight install returns its existing `job_id`. **Use when** opting into a curated corpus surfaced by `pkb_knowledge_pack_list`. **Returns** `{pack_id, job_id, status: 'queued'}` — or `{pack_id, status: 'already_installed', version}`; poll `pkb_knowledge_pack_list`, where the pack appears under `installed` once the job finishes. Not gated by tier.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -676,10 +676,10 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "pack_id": {"type": "string"},
-                "version": {"type": "string"},
-                "domain": {"type": "string"},
-                "artifact_count": {"type": "integer"},
-                "installed_at": {"type": "string"},
+                "job_id": {"type": "string", "description": "Background install job id (queued case)"},
+                "status": {"type": "string", "description": "'queued' or 'already_installed'"},
+                "version": {"type": "string", "description": "Present when already_installed"},
+                "poll": {"type": "string", "description": "How to check for completion"},
             },
         },
     },
@@ -974,23 +974,49 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             "installed": [p.to_dict() for p in state],
         }
     elif name == "pkb_knowledge_pack_install":
+        # AF-011: enqueue a background KnowledgePackInstallJob instead of
+        # installing inline. Inline install loaded an entire pack into the
+        # caller's memory and OOM'd on big packs mid-beta — the REST path took
+        # exactly this fix. Mirrors install_pack_endpoint: already-installed
+        # short-circuit, in-flight-job dedup, then enqueue. The pack surfaces
+        # under pkb_knowledge_pack_list's "installed" when the job finishes.
         from app.services.knowledge_packs import (
+            active_install_jobs,
             default_registry_path,
-            install_pack_default,
+            default_state_path,
+            enqueue_install_job,
         )
-        from core.knowledge.packs import load_registry
+        from core.knowledge.packs import (
+            find_installed,
+            load_install_state,
+            load_registry,
+        )
         pack_id = arguments.get("pack_id", "")
         registry = load_registry(default_registry_path())
         pack = registry.get(pack_id)
         if pack is None:
             raise ValueError(f"Pack {pack_id!r} not in registry")
-        record = await install_pack_default(pack)
+
+        existing = find_installed(load_install_state(default_state_path()), pack_id)
+        if existing is not None and existing.version == pack.version:
+            return {
+                "pack_id": pack_id,
+                "status": "already_installed",
+                "version": pack.version,
+            }
+
+        active = await asyncio.to_thread(active_install_jobs)
+        job_id = active.get(pack_id) or await asyncio.to_thread(
+            enqueue_install_job, pack_id,
+        )
         return {
-            "pack_id": record.pack_id,
-            "version": record.version,
-            "domain": record.domain,
-            "artifact_count": len(record.artifact_ids),
-            "installed_at": record.installed_at,
+            "pack_id": pack_id,
+            "job_id": job_id,
+            "status": "queued",
+            "poll": (
+                "pkb_knowledge_pack_list — the pack appears under `installed` "
+                "when the job finishes"
+            ),
         }
     elif name == "pkb_knowledge_pack_uninstall":
         from app.services.knowledge_packs import uninstall_pack_default

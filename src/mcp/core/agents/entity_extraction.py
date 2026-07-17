@@ -289,6 +289,12 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
         if confidence < min_confidence:
             continue
 
+        # AF-032: no ``embed=`` here on purpose — ingest runs only Tiers A+B
+        # (alias-table + string-normalize) to stay lean. The Tier-C embedding
+        # merge is the deliberate maintenance sweep run out-of-band, on a
+        # schedule (scheduler.py ``entity_embedding_merge`` cron, gated by
+        # CERID_ENTITY_MERGE_CRON_ENABLED) or by hand via
+        # ``scripts/merge_entity_aliases.py --mode embedding --apply``.
         cid = resolve_canonical(name, ent_type)
         if not cid.endswith(":"):  # at least one slug character
             if cid in seen:

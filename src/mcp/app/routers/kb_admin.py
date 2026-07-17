@@ -1057,6 +1057,27 @@ class DismissDuplicatesRequest(BaseModel):
     artifact_ids: list[str]
 
 
+#: Redis SET of full ``content_hash`` values for duplicate groups the operator
+#: has dismissed. list_duplicates filters these out so a dismissed group stays
+#: hidden across restarts (AF-028) instead of reappearing on every fetch.
+_DISMISSED_DUPLICATES_KEY = "cerid:kb:dismissed_duplicate_hashes"
+
+
+async def _dismissed_duplicate_hashes() -> set[str]:
+    """Content-hashes the operator has dismissed (empty when Redis is absent)."""
+    import asyncio
+
+    redis = get_redis()
+    if redis is None:
+        return set()
+    try:
+        raw = await asyncio.to_thread(redis.smembers, _DISMISSED_DUPLICATES_KEY)
+    except Exception as exc:  # noqa: BLE001 — best-effort filter, never fail the list
+        log_swallowed_error("app.routers.kb_admin.dismissed_duplicate_hashes", exc)
+        return set()
+    return {h.decode() if isinstance(h, bytes) else str(h) for h in (raw or set())}
+
+
 @router.get("/admin/kb/duplicates", response_model=DuplicatesResponse)
 async def list_duplicates(min_similarity: float = 0.85):
     """Group artifacts by exact ``content_hash``. Sprint 2 will add fuzzy similarity."""
@@ -1073,9 +1094,10 @@ async def list_duplicates(min_similarity: float = 0.85):
         if ch:
             by_hash[ch].append(art)
 
+    dismissed = await _dismissed_duplicate_hashes()
     groups: list[DuplicateGroup] = []
     for ch, arts in by_hash.items():
-        if len(arts) < 2:
+        if len(arts) < 2 or ch in dismissed:
             continue
         groups.append(DuplicateGroup(
             content_hash_prefix=ch[:12],
@@ -1119,10 +1141,33 @@ async def merge_duplicates(req: MergeDuplicatesRequest):
 
 @router.post("/admin/kb/duplicates/dismiss", response_model=DismissDuplicatesResponse)
 async def dismiss_duplicates(req: DismissDuplicatesRequest):
-    """Mark a duplicate group as dismissed (Sprint 2: persist to filter future fetches).
+    """Dismiss a duplicate group so it stops surfacing in list_duplicates (AF-028).
 
-    No-op for now; treated as acknowledged so the UI can hide the group locally.
+    A group is identified by the shared ``content_hash`` of its members, so we map
+    the posted artifact_ids to their content_hash(es) via Neo4j and persist those
+    hashes to a Redis set that ``list_duplicates`` filters against. Persists across
+    restarts; a dismissed group only reappears if its content changes (new hash).
     """
+    import asyncio
+
+    neo4j = get_neo4j()
+    rows = await asyncio.to_thread(list_duplicate_artifacts, neo4j)
+    ids = set(req.artifact_ids)
+    hashes = {
+        r["content_hash"]
+        for r in rows
+        if r.get("id") in ids and r.get("content_hash")
+    }
+
+    redis = get_redis()
+    if redis is not None and hashes:
+        try:
+            await asyncio.to_thread(
+                redis.sadd, _DISMISSED_DUPLICATES_KEY, *hashes
+            )
+        except Exception as exc:  # noqa: BLE001 — persistence best-effort
+            log_swallowed_error("app.routers.kb_admin.dismiss_duplicates", exc)
+
     return {"status": "ok", "dismissed": len(req.artifact_ids)}
 
 

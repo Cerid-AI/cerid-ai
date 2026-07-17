@@ -307,6 +307,41 @@ async def _run_curator() -> None:
         logger.error(f"Scheduled curator failed: {e}")
 
 
+async def _run_entity_embedding_merge() -> None:
+    """Scheduled Tier-C entity embedding-merge sweep (AF-032, CL-8).
+
+    Ingest runs only Tiers A+B of resolve_canonical (alias-table + string-
+    normalize) to stay lean, so embedding-similar duplicate entities accumulate
+    unmerged. This is the deliberate maintenance sweep that runs Tier C over the
+    precomputed entity embeddings and collapses clusters via the reversible
+    merge_entities machinery (dry_run=False). Double-gated: registered only when
+    CERID_ENTITY_MERGE_CRON_ENABLED opts in, and run_embedding_resolution itself
+    no-ops unless ENTITY_RESOLUTION_EMBED is on. Runs in a worker thread because
+    run_embedding_resolution drives its own event loop (asyncio.run) internally."""
+    start = time.time()
+    try:
+        from scripts.merge_entity_aliases import run_embedding_resolution
+        result = await asyncio.to_thread(
+            run_embedding_resolution, get_neo4j(), dry_run=False,
+        )
+        merged = (
+            result.get("merge_clusters", result.get("merged_clusters", 0))
+            if isinstance(result, dict) else 0
+        )
+        duration = time.time() - start
+        _log_execution(
+            "entity_embedding_merge", "success", duration, f"{merged} clusters merged",
+        )
+        logger.info(
+            "Scheduled entity embedding-merge: %s clusters in %.1fs", merged, duration,
+        )
+    except Exception as e:
+        log_swallowed_error('app.scheduler', e)
+        duration = time.time() - start
+        _log_execution("entity_embedding_merge", "error", duration, str(e))
+        logger.error(f"Scheduled entity embedding-merge failed: {e}")
+
+
 async def _run_sync_export() -> None:
     """Scheduled incremental export to sync directory."""
     start = time.time()
@@ -1754,6 +1789,24 @@ def start_scheduler() -> AsyncIOScheduler:
             CronTrigger.from_crontab(config.SCHEDULE_CURATOR),
             id="curator",
             name="KB quality re-scoring (curator audit)",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # AF-032 (CL-8) — Tier-C entity embedding-merge sweep. Operator opt-in via
+    # CERID_ENTITY_MERGE_CRON_ENABLED; off by default even though
+    # SCHEDULE_ENTITY_MERGE carries a cron, and the sweep is a second time
+    # no-op unless ENTITY_RESOLUTION_EMBED is on. max_instances=1 — merges
+    # mutate the graph, so a slow run must never stack on itself.
+    if (
+        os.getenv("CERID_ENTITY_MERGE_CRON_ENABLED", "").lower() in ("true", "1", "yes")
+        and config.SCHEDULE_ENTITY_MERGE
+    ):
+        _scheduler.add_job(
+            _run_entity_embedding_merge,
+            CronTrigger.from_crontab(config.SCHEDULE_ENTITY_MERGE),
+            id="entity_embedding_merge",
+            name="Entity embedding-merge sweep (Tier C)",
             replace_existing=True,
             max_instances=1,
         )
