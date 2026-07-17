@@ -684,8 +684,6 @@ async def sdk_ingest_voice_note(request: Request) -> dict:
             "general",
             {
                 "kind": "voice_note",
-                "ingest_source": "voice_note_endpoint",
-                "duration_words": len(text.split()),
             },
             skip_quality=False,
         )
