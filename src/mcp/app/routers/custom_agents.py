@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.services.strict_agents_policy import enforce_strict_mode
@@ -171,7 +171,7 @@ async def delete_agent(agent_id: str):
 
 
 @router.post("/custom-agents/{agent_id}/query")  # response-model-allowed: dynamic response (shape varies)
-async def query_agent(agent_id: str, body: AgentQueryRequest):
+async def query_agent(agent_id: str, body: AgentQueryRequest, request: Request):
     """Execute a query using a custom agent's configuration.
 
     Loads the agent definition, builds an overlay config (system prompt,
@@ -193,24 +193,55 @@ async def query_agent(agent_id: str, body: AgentQueryRequest):
             detail="Streaming is not supported on custom-agent queries; use stream=false.",
         )
 
-    # Delegate to the query agent with the custom agent's configuration
-    from core.agents.query_agent import agent_query_full
+    # Delegate to the query agent through the guarded seam so Private Mode +
+    # consumer isolation are enforced on this transport too (E1 Phase 1). E1
+    # CR-095: honor the agent's configured rag_mode — a 'smart' agent (the stored
+    # default) runs kb/memory/external orchestration via the guarded smart seam,
+    # not the manual kb-only path it was previously stuck on regardless of config.
+    from app.services.request_policy import build_request_context
 
-    result = await agent_query_full(
-        query=body.query,
-        domains=agent.get("domains") or None,
-        model=agent.get("model_override") or None,
-        top_k=10,
-        # Wire the full store set like every other answer-path caller. Without
-        # neo4j_driver the post-retrieval active-learning join is skipped, so
-        # archived (soft-deleted / quarantined) artifacts would still surface
-        # here — the residual AF-001 hole on the /custom_agents path. This also
-        # restores semantic cache + graph expansion this path was missing.
+    # E1 CR-087: resolve the caller's consumer identity so a restricted consumer
+    # cannot escape its allowed_domains wall via a custom agent.
+    request_context = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    rag_mode = agent.get("rag_mode", "smart")
+    # Wire the full store set like every other answer-path caller. Without
+    # neo4j_driver the post-retrieval active-learning join is skipped, so archived
+    # (soft-deleted / quarantined) artifacts would still surface here — the
+    # residual AF-001 hole on the /custom_agents path. This also restores semantic
+    # cache + graph expansion this path was missing.
+    _stores = dict(
         chroma_client=get_chroma(),
         redis_client=get_redis(),
         neo4j_driver=get_neo4j(),
         graph_store=get_graph_store(),
     )
+    from app.concurrency import KB_POOL
+
+    # E1 CR-096: gate under KB_POOL like /agent/query + A2A (CR-091) so unbounded
+    # concurrent custom-agent retrieval — smart or manual — cannot starve the
+    # /health + /observability routes the pool exists to protect.
+    async with KB_POOL.acquire():
+        if rag_mode in ("smart", "custom_smart"):
+            from app.agents.retrieval_orchestrator import guarded_orchestrated_query
+            result = await guarded_orchestrated_query(
+                request_context=request_context,
+                query=body.query,
+                rag_mode=rag_mode,
+                domains=agent.get("domains") or None,
+                model=agent.get("model_override") or None,
+                top_k=10,
+                **_stores,
+            )
+        else:
+            from core.agents.guarded_retrieval import guarded_agent_query_full
+            result = await guarded_agent_query_full(
+                request_context=request_context,
+                query=body.query,
+                domains=agent.get("domains") or None,
+                model=agent.get("model_override") or None,
+                top_k=10,
+                **_stores,
+            )
     # Attach agent context so the caller can apply system_prompt/temperature
     result["agent_config"] = {
         "system_prompt": agent.get("system_prompt", ""),

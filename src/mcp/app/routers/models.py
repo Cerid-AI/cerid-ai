@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from pydantic import BaseModel, Field
 
 from config.providers import PROVIDER_REGISTRY
@@ -47,9 +46,6 @@ router = APIRouter(prefix="/models", tags=["models"])
 _logger = logging.getLogger("ai-companion.models")
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-# In Docker the MCP server runs from /app (= src/mcp/), so the repo-relative
-# path ../../stacks/bifrost doesn't exist.  Use BIFROST_CONFIG_DIR env var
-# when running in a container, or fall back to repo-relative resolution.
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _MODEL_CONFIG_PATH = _DATA_DIR / "model_config.json"
@@ -61,15 +57,6 @@ import config as _config  # noqa: E402
 _ROUTING_TIERS_OVERLAY_PATH = Path(
     getattr(_config, "ROUTING_TIERS_OVERLAY_PATH", str(_DATA_DIR / "routing_tiers.json"))
 )
-
-_TEMPLATE_DIR = Path(
-    os.getenv(
-        "BIFROST_CONFIG_DIR",
-        str(Path(__file__).resolve().parent.parent.parent.parent / "stacks" / "bifrost"),
-    )
-)
-_BIFROST_CONFIG_PATH = _TEMPLATE_DIR / "config.yaml"
-_TEMPLATE_NAME = "config.yaml.template"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -83,10 +70,6 @@ DEFAULT_ASSIGNMENTS: dict[str, str] = {
     "categorization": "meta-llama/llama-3.3-70b-instruct:free",
     "synopsis": "meta-llama/llama-3.3-70b-instruct:free",
 }
-
-DEFAULT_FALLBACK_MODELS: list[str] = ["openai/gpt-4o-mini", "google/gemini-2.5-flash"]
-DEFAULT_MONTHLY_BUDGET: float = 20.0
-
 
 # ── Pydantic models ─────────────────────────────────────────────────────────
 
@@ -117,6 +100,12 @@ class AvailableModel(BaseModel):
 class AvailableModelsResponse(BaseModel):
     models: list[AvailableModel]
     total: int
+
+
+class ModelCatalogResponse(BaseModel):
+    ids: list[str]  # currently-dispatchable openrouter/-prefixed model ids
+    source: str  # "live_catalog" | "unavailable"
+    count: int
 
 
 # ── Persistence helpers ──────────────────────────────────────────────────────
@@ -161,48 +150,6 @@ def _get_all_known_models() -> set[str]:
     return models
 
 
-# ── Bifrost config generation ────────────────────────────────────────────────
-
-
-def generate_bifrost_config(assignments: dict[str, str]) -> str:
-    """Render the Bifrost config.yaml from the Jinja2 template.
-
-    Falls back to defaults for any missing assignment keys.
-    Returns the rendered YAML string.
-    """
-    merged = dict(DEFAULT_ASSIGNMENTS)
-    merged.update(assignments)
-
-    template_vars = {
-        "coding_model": merged.get("coding", DEFAULT_ASSIGNMENTS["coding"]),
-        "research_model": merged.get("research", DEFAULT_ASSIGNMENTS["research"]),
-        "simple_model": merged.get("simple", DEFAULT_ASSIGNMENTS["simple"]),
-        "general_model": merged.get("general", DEFAULT_ASSIGNMENTS["general"]),
-        "classifier_model": merged.get("classifier", DEFAULT_ASSIGNMENTS["classifier"]),
-        "fallback_models": json.dumps(DEFAULT_FALLBACK_MODELS),
-        "monthly_budget": DEFAULT_MONTHLY_BUDGET,
-    }
-
-    try:
-        env = Environment(  # nosec B701 — YAML config template, not HTML
-            loader=FileSystemLoader(str(_TEMPLATE_DIR)),
-            autoescape=False,  # YAML template, XSS not applicable
-            keep_trailing_newline=True,
-        )
-        template = env.get_template(_TEMPLATE_NAME)
-    except TemplateNotFound:
-        raise FileNotFoundError(
-            f"Bifrost template not found at {_TEMPLATE_DIR / _TEMPLATE_NAME}"
-        )
-
-    rendered = template.render(**template_vars)
-
-    _BIFROST_CONFIG_PATH.write_text(rendered)
-    _logger.info("Generated Bifrost config at %s", _BIFROST_CONFIG_PATH)
-
-    return rendered
-
-
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -222,7 +169,7 @@ async def get_assignments():
 
 @router.put("/assignments", response_model=UpdateResponse)
 async def update_assignments(body: ModelAssignments):
-    """Update model assignments, persist to disk, and regenerate Bifrost config."""
+    """Update model assignments and persist to disk (applied live, no restart)."""
     if not body.assignments:
         raise HTTPException(status_code=422, detail="assignments must not be empty")
 
@@ -258,23 +205,14 @@ async def update_assignments(body: ModelAssignments):
 
     _save_config(current)
 
-    # Regenerate Bifrost config
-    try:
-        generate_bifrost_config(current)
-    except FileNotFoundError as exc:
-        _logger.warning("Could not regenerate Bifrost config: %s", exc)
-        return UpdateResponse(
-            success=True,
-            restart_required=True,
-            message="Assignments saved but Bifrost template not found. "
-            "Config will apply on next stack rebuild.",
-        )
-
+    # Role assignments are read live via _current_assignments() (e.g. chat.py's
+    # smart-route fallback + the /doctor compat report), so a saved change applies
+    # to the next request — no restart needed. (The Bifrost config regeneration
+    # this used to trigger was removed: Bifrost was retired 2026-04-17.)
     return UpdateResponse(
         success=True,
-        restart_required=True,
-        message="Assignments saved and Bifrost config regenerated. "
-        "Restart Bifrost to apply changes.",
+        restart_required=False,
+        message="Assignments saved — applied immediately.",
     )
 
 
@@ -298,6 +236,11 @@ async def _compute_model_updates() -> dict:
     profile = getattr(_settings, "CERID_HARDWARE_PROFILE", "")
     resolved = resolve_assignments(current, ids, hardware_profile=profile) if ids else dict(current)
     updates = diff_assignments(current, resolved)
+    # E1 CR-075: stamp each update with a stable id so a dismissal pins the
+    # target — a later, newer target for the same role surfaces as a fresh
+    # (undismissed) update. Pure metadata; apply ignores it.
+    for _u in updates:
+        _u["id"] = _update_id(_u)
     return {
         "updates": updates,
         "new": updates,
@@ -349,10 +292,10 @@ def _refresh_routing_tiers_overlay(catalog_ids_list: list[str]) -> list[dict[str
 
 async def apply_latest_assignments() -> dict:
     """Fetch the catalog, resolve the latest in-family model per role, and —
-    if anything changed — persist the new assignments and regenerate the
-    Bifrost config. Returns the applied diff. Used by the scheduler auto-update
-    job and the ``POST /models/updates/apply`` endpoint. (Bifrost restart still
-    required for the change to take effect, as with manual assignment edits.)"""
+    if anything changed — persist the new assignments. Returns the applied diff.
+    Used by the scheduler auto-update job and the ``POST /models/updates/apply``
+    endpoint. Changes apply immediately (assignments are read live), so no restart
+    is required."""
     result = await _compute_model_updates()
     applied: list[dict[str, str]] = result["updates"]
 
@@ -370,18 +313,45 @@ async def apply_latest_assignments() -> dict:
         }
 
     _save_config(result["resolved"])
-    try:
-        generate_bifrost_config(result["resolved"])
-    except FileNotFoundError as exc:
-        _logger.warning("Bifrost config regen skipped (template missing): %s", exc)
     for row in applied:
         _logger.info("model auto-update: %s %s -> %s", row["role"], row["from"], row["to"])
     return {
         "applied": applied,
-        "restart_required": True,
+        "restart_required": False,
         "catalog_size": result["catalog_size"],
         "tier_updates": tier_diff,
     }
+
+
+# E1 CR-075: dismissals are persisted to a global Redis set so a dismissed
+# update notification stays dismissed across polls, instead of the old
+# stateless no-op that let _compute_model_updates re-surface it every time.
+# Only the notification surfaces (list/check) filter; the explicit apply path is
+# deliberately unaffected (dismissing hides a nag, it does not veto adoption).
+_DISMISSED_UPDATES_KEY = "cerid:model_updates:dismissed"
+
+
+def _update_id(update: dict) -> str:
+    """Stable id for a role's in-family update — pins the target model."""
+    return f"{update['role']}:{update['to']}"
+
+
+def _dismissed_update_ids() -> set[str]:
+    """The set of dismissed update ids. Fail open (empty) so a Redis outage
+    shows all updates rather than silently hiding them."""
+    try:
+        from app.deps import get_redis
+        raw = get_redis().smembers(_DISMISSED_UPDATES_KEY)
+    except Exception as exc:  # noqa: BLE001 — best-effort; fail open
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("models.dismissed_update_ids", exc)
+        return set()
+    return {m.decode() if isinstance(m, bytes) else m for m in raw}
+
+
+def _drop_dismissed(updates: list[dict]) -> list[dict]:
+    dismissed = _dismissed_update_ids()
+    return [u for u in updates if u.get("id") not in dismissed]
 
 
 @router.get("/updates")  # response-model-allowed: dynamic response (shape varies)
@@ -389,6 +359,9 @@ async def list_model_updates():
     """Latest in-family model updates available per role (live OpenRouter check)."""
     result = await _compute_model_updates()
     result.pop("resolved", None)
+    visible = _drop_dismissed(result["updates"])
+    result["updates"] = visible
+    result["new"] = visible
     return result
 
 
@@ -396,13 +369,14 @@ async def list_model_updates():
 async def check_model_updates():
     """Check OpenRouter for newer in-family models per role (dry-run, no apply)."""
     result = await _compute_model_updates()
+    visible = _drop_dismissed(result["updates"])
     return {
         "checked": True,
         "success": True,
-        "new_updates": len(result["updates"]),
-        "new_count": len(result["updates"]),
+        "new_updates": len(visible),
+        "new_count": len(visible),
         "deprecated_count": 0,
-        "updates": result["updates"],
+        "updates": visible,
         "last_checked": result["last_checked"],
         "catalog_size": result["catalog_size"],
     }
@@ -416,14 +390,20 @@ async def apply_model_updates():
 
 @router.post("/updates/dismiss/{update_id}", response_model=DismissModelUpdateResponse)
 async def dismiss_model_update(update_id: str):
-    """Dismiss a model update notification."""
+    """Dismiss a model update notification — persisted so it stays dismissed
+    across polls (E1 CR-075; formerly a stateless no-op)."""
+    try:
+        from app.deps import get_redis
+        get_redis().sadd(_DISMISSED_UPDATES_KEY, update_id)
+    except Exception as exc:  # noqa: BLE001 — best-effort persistence
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("models.dismiss_model_update", exc)
     return {"dismissed": True, "id": update_id}
 
 
 @router.get("/available", response_model=AvailableModelsResponse)
 async def list_available_models():
     """List all models available from configured providers."""
-    import os
 
     models: list[AvailableModel] = []
     seen: set[str] = set()
@@ -454,6 +434,24 @@ async def list_available_models():
             )
 
     return AvailableModelsResponse(models=models, total=len(models))
+
+
+@router.get("/catalog", response_model=ModelCatalogResponse)
+async def get_model_catalog():
+    """Authoritative set of currently-dispatchable model ids, validated against
+    the live OpenRouter catalog (its public ``/models`` endpoint — no key).
+
+    The FE filters its static display catalog against this set so a delisted id
+    (E1 CR-004) cannot render as selectable — structural drift prevention rather
+    than a hardcoded list that silently rots. Fail-soft: an unreachable/empty
+    catalog returns ``source="unavailable"`` with no ids, and the FE then shows
+    its full catalog rather than over-filtering to nothing.
+    """
+    catalog = await fetch_openrouter_catalog()
+    if not catalog:
+        return ModelCatalogResponse(ids=[], source="unavailable", count=0)
+    ids = sorted(f"openrouter/{cid}" for cid in catalog_ids(catalog))
+    return ModelCatalogResponse(ids=ids, source="live_catalog", count=len(ids))
 
 
 @router.get("/doctor")  # response-model-allowed: dynamic response (shape varies)

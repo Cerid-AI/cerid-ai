@@ -90,7 +90,8 @@ class TestAgentQueryL2:
         assert body["domains_searched"] == []
         assert body["total_results"] == 0
         assert body["confidence"] == 0.0
-        assert body["kb_bypassed"] is True
+        # E1 CR-032/062: empty envelope is the L2 signal (no kb_bypassed stamp).
+        assert "kb_bypassed" not in body
         mock_retrieve.assert_not_called()
 
     def test_l0_calls_retrieval_normally(self, agent_query_client, fake_redis):
@@ -116,7 +117,7 @@ class TestAgentQueryL2:
         assert res.status_code == 200, res.text
         body = res.json()
         assert body["total_results"] == 1
-        assert body.get("kb_bypassed") is not True
+        assert "kb_bypassed" not in body
         mock_retrieve.assert_called_once()
 
 
@@ -257,6 +258,16 @@ class TestStripInjectedContextUnit:
         out = self._strip(fake_redis, monkeypatch, 2, msgs)
         assert [m.role for m in out] == ["user"]
 
+    def test_l2_strips_via_stable_sentinel(self, fake_redis, monkeypatch):
+        # E1 CR-080: the backstop matches the FE's stable KB_CONTEXT_SENTINEL, not
+        # the preamble copy. This message carries the sentinel + a REWORDED preamble
+        # (copy changed) and NO <document>/<memory> tag, so only the sentinel can
+        # catch it — proving the L2 gate is decoupled from the human-readable copy.
+        msgs = [_Msg("system", "<!--cerid:kb-context-->\nYou may consult the files below."),
+                _Msg("user", "what did I write?")]
+        out = self._strip(fake_redis, monkeypatch, 2, msgs)
+        assert [m.role for m in out] == ["user"]
+
     def test_l2_preserves_plain_system_instruction(self, fake_redis, monkeypatch):
         msgs = [_Msg("system", "You are a helpful assistant."), _Msg("user", "hi")]
         out = self._strip(fake_redis, monkeypatch, 2, msgs)
@@ -316,7 +327,8 @@ class TestGenerationBoundaryStrip:
             return _gen()
 
         monkeypatch.setattr(chat_router, "_attempt_stream", _fake_attempt)
-        monkeypatch.setattr(chat_router, "_resolve_api_key", lambda request: "sk-test")
+        async def _fake_key_l2(request): return "sk-test"  # pragma: allowlist secret
+        monkeypatch.setattr(chat_router, "_resolve_api_key", _fake_key_l2)
         app = FastAPI()
         app.include_router(chat_router.router)
         return TestClient(app, raise_server_exceptions=False), captured

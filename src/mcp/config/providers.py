@@ -76,6 +76,24 @@ PROVIDER_REGISTRY: dict[str, dict] = {
             "grok-4.3",
         ],
     },
+    # E1 CR-108: google was advertised by PROVIDER_CONFIGS + env-exported by
+    # PUT /providers/config and is consumable via BYOK (_DIRECT_WIRE gemini
+    # dispatch), but was absent here — so POST /providers/google/validate 404'd
+    # and no endpoint could validate a stored key. Gemini validates via a GET to
+    # the generativelanguage models endpoint with an x-goog-api-key header.
+    "google": {
+        "name": "google",
+        "display_name": "Google (Gemini)",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "env_var": "GOOGLE_API_KEY",
+        "test_endpoint": "/models",
+        "requires_api_key": True,
+        "models": [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3.1-flash-lite",
+        ],
+    },
     "ollama": {
         "name": "ollama",
         "display_name": "Ollama (Local)",
@@ -132,6 +150,12 @@ async def validate_provider_key(provider: str, api_key: str) -> tuple[bool, str]
                 # Ollama runs locally, no auth needed
                 resp = await client.get(
                     f"{entry['base_url']}{entry['test_endpoint']}",
+                )
+            elif provider == "google":
+                # Gemini authenticates with an x-goog-api-key header, not Bearer.
+                resp = await client.get(
+                    f"{entry['base_url']}{entry['test_endpoint']}",
+                    headers={"x-goog-api-key": api_key},
                 )
             else:
                 # OpenRouter, OpenAI, xAI all use GET with Bearer token

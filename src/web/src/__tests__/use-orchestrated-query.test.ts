@@ -68,4 +68,26 @@ describe("useOrchestratedQuery — error propagation", () => {
     expect(result.current.isError).toBe(false)
     expect(result.current.confidence).toBe(0.9)
   })
+
+  it("CR-010: exposes low ordinal-relevance results without a client-side floor", async () => {
+    // Post-rerank relevance is an ordinal cross-encoder sigmoid; the old 0.35
+    // client floor re-created the emptied-envelope bug the backend already
+    // fixed by flooring on its calibrated scale pre-rerank.
+    mockOrchestrated.mockResolvedValue({
+      results: [
+        { content: "c", relevance: 0.28, artifact_id: "hot", filename: "hot.py", domain: "coding", chunk_index: 0 },
+        { content: "c2", relevance: 0.09, artifact_id: "warm", filename: "warm.py", domain: "coding", chunk_index: 0 },
+      ],
+      confidence: 0.18,
+      total_results: 2,
+      execution_time_ms: 9,
+      source_breakdown: null,
+    })
+    const { result } = renderHook(
+      () => useOrchestratedQuery("indirect-evidence question", "smart"),
+      { wrapper: createWrapper() },
+    )
+    await waitFor(() => expect(result.current.hasQueried).toBe(true))
+    expect(result.current.results.map((r) => r.artifact_id)).toEqual(["hot", "warm"])
+  })
 })

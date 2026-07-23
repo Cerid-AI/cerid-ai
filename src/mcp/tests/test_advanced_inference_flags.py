@@ -205,3 +205,73 @@ async def test_all_flags_on_together(monkeypatch: pytest.MonkeyPatch) -> None:
     assert p["format"] == "json"
     assert p["options"]["temperature"] == 0.0  # constrained decode wins
     assert p["options"]["draft_model"] == "phi3:mini"
+
+
+# ---------------------------------------------------------------------------
+# CR-070 — the STREAMING local path applies speculative decode too (it used to
+# drop the draft model its non-streaming twin applied).
+# ---------------------------------------------------------------------------
+
+
+def _wire_stream_capture(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Wire a fake httpx client whose ``stream()`` records the posted payload."""
+    captured: dict[str, Any] = {}
+
+    class _FakeStreamResp:
+        status_code = 200
+
+        async def aiter_lines(self) -> Any:
+            for _ in ():  # empty async iterator
+                yield ""
+
+        async def aread(self) -> bytes:
+            return b""
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeStreamCtx:
+        def __init__(self, payload: dict) -> None:
+            captured["payload"] = payload
+
+        async def __aenter__(self) -> _FakeStreamResp:
+            return _FakeStreamResp()
+
+        async def __aexit__(self, *_a: Any) -> bool:
+            return False
+
+    fake_client = MagicMock()
+    fake_client.stream = lambda method, url, *, json: _FakeStreamCtx(json)  # noqa: ARG005
+    monkeypatch.setattr(mod, "_get_ollama_client", AsyncMock(return_value=fake_client))
+    monkeypatch.setenv("OLLAMA_URL", "http://test-host:11434")
+    monkeypatch.setattr(mod.config, "OLLAMA_DEFAULT_MODEL", "llama3.2:3b", raising=False)
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_MODEL", "", raising=False)
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_streaming_path_passes_draft_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _wire_stream_capture(monkeypatch)
+    _reset_flags(monkeypatch)
+    monkeypatch.setattr(mod.config, "ENABLE_SPECULATIVE_DECODE", True, raising=False)
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_DRAFT_MODEL", "phi3:mini", raising=False)
+
+    async for _ in mod._stream_ollama(
+        [{"role": "user", "content": "hi"}], temperature=0.0, max_tokens=50,
+    ):
+        pass
+
+    assert captured["payload"]["options"]["draft_model"] == "phi3:mini"
+
+
+@pytest.mark.asyncio
+async def test_streaming_baseline_has_no_draft_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _wire_stream_capture(monkeypatch)
+    _reset_flags(monkeypatch)
+
+    async for _ in mod._stream_ollama(
+        [{"role": "user", "content": "hi"}], temperature=0.5, max_tokens=100,
+    ):
+        pass
+
+    assert captured["payload"]["options"] == {"temperature": 0.5, "num_predict": 100}

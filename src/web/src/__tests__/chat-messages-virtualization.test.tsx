@@ -44,6 +44,7 @@ function makeMessages(n: number): ChatMessage[] {
 
 const COMMON_PROPS = {
   isStreaming: false,
+  conversationId: "conv-test",
   selectedVerificationMsgId: null,
   verificationStatusForMsg: null,
   halReport: null,

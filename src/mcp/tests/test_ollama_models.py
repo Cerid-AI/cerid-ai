@@ -20,10 +20,12 @@ class TestRecommendedModels:
     """RECOMMENDED_MODELS covers all pipeline stages that can use Ollama."""
 
     def test_recommended_models_covers_all_stages(self):
-        """Every PIPELINE_PROVIDERS stage (except always-bifrost stages) has a recommendation."""
-        # Stages that are always routed to bifrost and never use Ollama
-        bifrost_only = {"verification_complex", "chat_generation"}
-        ollama_eligible = set(PIPELINE_PROVIDERS.keys()) - bifrost_only
+        """Every PIPELINE_PROVIDERS stage has a RECOMMENDED_MODELS recommendation.
+
+        E1 CR-006 dropped the always-bifrost verification_complex/chat_generation
+        keys (no live call_internal_llm stage), so every remaining stage is
+        Ollama-eligible."""
+        ollama_eligible = set(PIPELINE_PROVIDERS.keys())
 
         for stage in ollama_eligible:
             assert stage in RECOMMENDED_MODELS, (

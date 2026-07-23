@@ -10,7 +10,8 @@ surface (REST /agent/query, MCP pkb_agent_query, A2A, custom agents, /query,
 
 - ``exclude_packs`` is forwarded to the core retrieval primitive (RPB-2 fix).
 - provenance (``source_type`` / ``pack_id``) survives the wrapper.
-- the KB-only ``low_confidence`` signal is stamped (B2a invariant).
+- E1 CR-032: write-only degradation stamps (low_confidence, source_status,
+  reranker_status, domains_no_results, kb_bypassed) are NOT on the envelope.
 - the conversation-only stub fires when KB is disabled.
 - external augmentation is a no-op when the CRAG registry is unwired (so the
   path is safe in tests / the public mirror / any unconfigured deployment).
@@ -20,6 +21,14 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+_CR032_WRITE_ONLY = (
+    "low_confidence",
+    "source_status",
+    "reranker_status",
+    "domains_no_results",
+    "kb_bypassed",
+)
 
 
 @pytest.mark.asyncio
@@ -38,19 +47,20 @@ async def test_forwards_exclude_packs_and_preserves_provenance():
     # provenance survives the full path
     assert out["sources"][0]["pack_id"] == "vet-benefits"
     assert out["sources"][0]["source_type"] == "pack"
-    # strong KB (0.9 >= 0.4 default threshold) → not low-confidence
-    assert out["low_confidence"] is False
+    for key in _CR032_WRITE_ONLY:
+        assert key not in out, f"CR-032: {key} must not be stamped on the envelope"
 
 
 @pytest.mark.asyncio
-async def test_low_confidence_stamped_on_weak_kb():
+async def test_no_low_confidence_stamp_on_weak_kb():
+    """CR-032: low_confidence is write-only — not stamped even on weak KB."""
     from core.agents.query_agent import agent_query_full
 
     fake = {"results": [{"relevance": 0.1}], "sources": [], "confidence": 0.1}
     with patch("core.agents.query_agent.agent_query", new=AsyncMock(return_value=fake)):
         out = await agent_query_full(query="q", external_augmentation=False)
 
-    assert out["low_confidence"] is True
+    assert "low_confidence" not in out
 
 
 @pytest.mark.asyncio
@@ -63,8 +73,9 @@ async def test_conversation_only_stub_when_kb_disabled():
 
     mock_aq.assert_not_called()
     assert out["strategy"] == "conversation_only"
-    assert out["source_status"] == {"kb": "disabled"}
-    assert out["low_confidence"] is True  # empty results → low confidence
+    assert out["results"] == []
+    for key in _CR032_WRITE_ONLY:
+        assert key not in out, f"CR-032: {key} must not be stamped on the envelope"
 
 
 @pytest.mark.asyncio
@@ -80,9 +91,10 @@ async def test_external_augmentation_noop_when_registry_unwired():
     with patch("core.agents.query_agent.agent_query", new=AsyncMock(return_value=fake)):
         out = await agent_query_full(query="q", external_augmentation=True)
 
-    # Gate would fire (weak KB) but firing is a no-op → result unchanged + stamped.
+    # Gate would fire (weak KB) but firing is a no-op → result unchanged.
     assert out["sources"] == [{"source_type": "kb"}]
-    assert out["low_confidence"] is True
+    assert "low_confidence" not in out
+
 
 @pytest.mark.asyncio
 async def test_confidence_clamped_to_unit_interval():

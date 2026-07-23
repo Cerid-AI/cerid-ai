@@ -51,7 +51,6 @@ class ListConfiguredProvidersResponse(BaseModel):
 class GetInternalProviderResponse(BaseModel):
     provider: Any
     model: Any
-    intelligence_model: Any
     ollama_available: Any
 
 
@@ -218,7 +217,6 @@ async def get_internal_provider():
     return {
         "provider": getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
         "model": getattr(config, "INTERNAL_LLM_MODEL", ""),
-        "intelligence_model": getattr(config, "INTELLIGENCE_MODEL", ""),
         "ollama_available": ollama_available,
     }
 
@@ -228,15 +226,21 @@ async def set_internal_provider(body: dict):
     """Update internal LLM provider configuration (runtime, not persisted to .env)."""
     provider = body.get("provider", "openrouter")
     model = body.get("model", "")
-    intelligence_model = body.get("intelligence_model", "")
 
-    if provider not in ("openrouter", "ollama"):
-        raise HTTPException(status_code=400, detail="Provider must be 'openrouter' or 'ollama'")
+    # E1 CR-040: quenchforge is a first-class provider everywhere else
+    # (internal_llm dispatch, PATCH /settings, the settings-options doc) — accept
+    # it here too so the providers API can switch to the recommended Mac+AMD backend.
+    if provider not in ("openrouter", "ollama", "quenchforge"):
+        raise HTTPException(
+            status_code=400,
+            detail="Provider must be 'openrouter', 'ollama', or 'quenchforge'",
+        )
 
-    config.INTERNAL_LLM_PROVIDER = provider
-    config.INTERNAL_LLM_MODEL = model
-    if intelligence_model:
-        config.INTELLIGENCE_MODEL = intelligence_model
+    # E1 CR-007/100: write the switch to the canonical (env) plane so the
+    # dispatch-side readers (get_routing_snapshot, smart_router, /health) see it —
+    # pre-fix this wrote config attrs only, invisible to every env-reading path.
+    from core.routing.provider_state import set_active_provider
+    set_active_provider(provider, model)
 
     return {"status": "updated", "provider": provider, "model": model}
 
@@ -299,10 +303,10 @@ async def enable_ollama():
                    "Start with: ollama serve (macOS) or docker compose --profile ollama up -d",
         )
 
-    # Update runtime config
-    config.INTERNAL_LLM_PROVIDER = "ollama"
-    if not config.INTERNAL_LLM_MODEL:
-        config.INTERNAL_LLM_MODEL = config.OLLAMA_DEFAULT_MODEL
+    # Update runtime config on the canonical (env) plane (E1 CR-007/100).
+    from core.routing.provider_state import set_active_provider
+    model = config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL
+    set_active_provider("ollama", model)
 
     return {
         "status": "enabled",
@@ -315,7 +319,8 @@ async def enable_ollama():
 @router.post("/ollama/disable", response_model=DisableOllamaResponse)
 async def disable_ollama():
     """Disable Ollama — fall back to OpenRouter for pipeline tasks."""
-    config.INTERNAL_LLM_PROVIDER = "openrouter"
+    from core.routing.provider_state import set_active_provider
+    set_active_provider("openrouter")
     return {"status": "disabled", "provider": "openrouter"}
 
 
@@ -573,6 +578,14 @@ async def update_model_provider_config(body: dict):
                 os.environ[env_var] = updates["api_key"]
         if "url" in updates:
             state.url = updates["url"]
+            # E1 CR-099: the local-backend URL was write-only (no dispatch
+            # reader — dispatch resolves QUENCHFORGE_URL/OLLAMA_URL from env via
+            # provider_state.local_backend_url). Project the edit onto that env
+            # plane so it actually takes effect.
+            if pname == "quenchforge":
+                os.environ["QUENCHFORGE_URL"] = updates["url"]
+            elif pname == "ollama":
+                os.environ["OLLAMA_URL"] = updates["url"]
         if "is_default" in updates:
             # Only one provider can be default
             if updates["is_default"]:
@@ -585,6 +598,14 @@ async def update_model_provider_config(body: dict):
         cfg.model_overrides.update(body["model_overrides"])
 
     save_config(redis, cfg)
+
+    # E1 CR-008: project the enabled direct providers onto the canonical (env)
+    # plane so BYOK dispatch (chat + call_llm) takes effect immediately on this
+    # runtime, not only after the next restart. The coherent writer, mirroring how
+    # the provider-switch endpoints route through set_active_provider.
+    from core.routing.model_providers import enabled_direct_providers
+    from core.routing.provider_state import project_byok_env
+    project_byok_env(enabled_direct_providers(cfg))
 
     return {"status": "updated"}
 

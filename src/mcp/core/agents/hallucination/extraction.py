@@ -535,8 +535,13 @@ async def _extract_claims_llm(
     from core.routing.smart_router import CHEAP_MODELS
 
     fallback_models = [
-        config.LLM_INTERNAL_MODEL,                            # Free tier (Llama 3.3 70B)
-        config.VERIFICATION_MODEL,                             # Paid (GPT-4o-mini)
+        # E1 CR-071: lead with a GENUINELY free model. The previous first entry
+        # was config.LLM_INTERNAL_MODEL — the INTERNAL model, already attempted via
+        # call_internal_llm just above (and possibly a bare local name that 400s on
+        # OpenRouter) — yet labeled here as the free tier. CATEGORIZE_MODELS["smart"]
+        # is the real ":free" Llama 3.3 slug, so "try free models first" holds.
+        config.CATEGORIZE_MODELS["smart"],                    # Free tier (Llama 3.3 70B :free)
+        config.VERIFICATION_MODEL,                            # Paid (GPT-4o-mini)
         str(CHEAP_MODELS["gemini-flash"]["id"]),              # Cheap-tier fallback
     ]
     # Deduplicate while preserving order

@@ -140,6 +140,38 @@ describe("ModelsCategory — 4-state matrix", () => {
     expect(await screen.findByText(/a1b2/)).toBeInTheDocument()
   })
 
+  it("CR-047: saving an OpenRouter key invalidates the models-catalog query", async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/settings/openrouter-key")) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({ configured: false, last4: null }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      return mockApis()(url)
+    }))
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries")
+    render(
+      <QueryClientProvider client={qc}>
+        <ModelsCategory {...defaultProps} />
+      </QueryClientProvider>,
+    )
+    const input = await screen.findByLabelText("OpenRouter API key (write-only)")
+    await user.type(input, "sk-or-testkey-123456")
+    const controls = input.parentElement as HTMLElement
+    await user.click(within(controls).getByRole("button", { name: /Save/i }))
+    // The chat model dropdown gates on ["models-catalog"] dispatchability, which
+    // resolves against OpenRouter auth — a new key must refetch it (CR-047).
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["models-catalog"] }),
+    )
+    // E1 R11: setup-status also gates the dropdown disabled state.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["setup-status"] })
+  })
+
   it("empty: Whisper with zero models renders empty list", async () => {
     vi.stubGlobal("fetch", mockApis())
     render(<ModelsCategory {...defaultProps} />, { wrapper })
@@ -247,24 +279,49 @@ describe("ModelSelect — routing-provider gating", () => {
     expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument()
   })
 
-  it("renders 'Unavailable' (not 'Not configured') for an id absent from the provider's advertised list", async () => {
-    const missingId = "openrouter/openai/o3-mini"
-    vi.stubGlobal("fetch", mockConfiguredProvidersApi([
-      { name: "openrouter", models: MODELS.map((m) => m.id).filter((id) => id !== missingId) },
-    ]))
+  // E1 CR-031: "Unavailable" is decided solely by the live /models/catalog, not
+  // the hand-maintained /providers/configured advertised list (which flagged
+  // most rows as a false-positive). A model absent from the advertised list but
+  // present in the live catalog must NOT be badged.
+  it("does NOT badge 'Unavailable' from the hand-maintained provider list — only the live catalog decides", async () => {
+    const absentFromRegistry = "openrouter/openai/o3-mini"  // in catalog, not advertised
+    const delisted = "openrouter/x-ai/grok-4.5"             // absent from live catalog
+    const liveIds = MODELS.map((m) => m.id).filter((id) => id !== delisted)
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/models/catalog")) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({ ids: liveIds, source: "live_catalog", count: liveIds.length }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      if (url.includes("/providers/configured")) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            providers: [{
+              name: "openrouter", display_name: "OpenRouter", requires_api_key: true,
+              key_set: true, key_preview: null,
+              models: MODELS.map((m) => m.id).filter((id) => id !== absentFromRegistry),
+            }],
+            total: 1,
+          }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve("{}") })
+    }))
     const options = await openModelSelect(["openrouter"])
-    // Row stays selectable — absence from the advertised subset is a hint,
-    // not a hard gate (the provider may serve models beyond its default list).
-    const target = options.find((o) => o.textContent?.includes("o3-mini"))
-    expect(target).toBeDefined()
+    // The delisted model proves the live catalog resolved — it IS "Unavailable".
+    const delistedRow = options.find((o) => o.textContent?.includes("Grok"))!
     await waitFor(() => {
-      expect(within(target!).getByText(/unavailable/i)).toBeInTheDocument()
+      expect(delistedRow).toHaveAttribute("data-disabled")
     })
+    expect(within(delistedRow).getByText(/unavailable/i)).toBeInTheDocument()
+    // The registry-absent-but-catalog-present model must carry no false badge.
+    const target = options.find((o) => o.textContent?.includes("o3-mini"))!
     expect(target).not.toHaveAttribute("data-disabled")
-    expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument()
-    // Advertised rows carry no hint
-    const ok = options.find((o) => o.textContent?.includes("GPT-4o Mini"))
-    expect(within(ok!).queryByText(/unavailable/i)).not.toBeInTheDocument()
+    expect(within(target).queryByText(/unavailable/i)).not.toBeInTheDocument()
   })
 
   it("still enables brand-matched rows for direct-key setups (brand fallback)", async () => {
@@ -288,5 +345,42 @@ describe("ModelSelect — routing-provider gating", () => {
       expect(opt).toHaveAttribute("data-disabled")
     }
     expect(screen.getAllByText(/not configured/i).length).toBeGreaterThanOrEqual(1)
+  })
+
+  // E1 CR-004: a model absent from the live /models/catalog (e.g. delisted) is
+  // disabled + "Unavailable" so a stale hardcoded catalog entry can't be picked.
+  it("disables a model absent from the live /models/catalog", async () => {
+    const delistedId = "openrouter/x-ai/grok-4.5"
+    const liveIds = MODELS.map((m) => m.id).filter((id) => id !== delistedId)
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/models/catalog")) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({ ids: liveIds, source: "live_catalog", count: liveIds.length }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      if (url.includes("/providers/configured")) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            providers: [{ name: "openrouter", display_name: "OpenRouter", requires_api_key: true, key_set: true, key_preview: null, models: MODELS.map((m) => m.id) }],
+            total: 1,
+          }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve("{}") })
+    }))
+    const options = await openModelSelect(["openrouter"])
+    const target = options.find((o) => o.textContent?.includes("Grok"))
+    expect(target).toBeDefined()
+    await waitFor(() => {
+      expect(target).toHaveAttribute("data-disabled")
+    })
+    expect(within(target!).getByText(/unavailable/i)).toBeInTheDocument()
+    // A model present in the catalog stays enabled.
+    const ok = options.find((o) => o.textContent?.includes("GPT-4o Mini"))
+    expect(ok).not.toHaveAttribute("data-disabled")
   })
 })

@@ -192,6 +192,29 @@ describe("KnowledgePane", () => {
     })
   })
 
+  // E1 R3 / CR-010 tail: absolute 0.35 floor emptied ordinal post-rerank hits.
+  it("renders low-ordinal search hits (no absolute 0.35 floor)", async () => {
+    mockQueryKB.mockResolvedValue({
+      results: [{
+        content: "low ordinal but real match",
+        relevance: 0.22,
+        artifact_id: "a-low",
+        filename: "ordinal-hit.pdf",
+        domain: "research",
+        chunk_index: 0,
+        collection: "domain_research",
+        ingested_at: new Date().toISOString(),
+      }],
+    })
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    const input = screen.getByPlaceholderText(/search artifacts/i)
+    fireEvent.change(input, { target: { value: "ordinal query text" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => {
+      expect(screen.getByText("ordinal-hit.pdf")).toBeInTheDocument()
+    })
+  })
+
   it("clears search on Escape key", async () => {
     render(<KnowledgePane />, { wrapper: createWrapper() })
     const input = screen.getByPlaceholderText(/search artifacts/i)

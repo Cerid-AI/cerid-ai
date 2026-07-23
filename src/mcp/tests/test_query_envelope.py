@@ -39,7 +39,10 @@ def test_envelope_degraded_path_preserves_external():
     assert out["strategy"] == "degraded_budget_exhausted"
     assert len(out["results"]) == 1
     assert len(out["source_breakdown"]["external"]) == 1
-    assert out["source_status"]["external"] == "ok"  # external DID finish
+    # E1 CR-032: source_status is not serialized (internal statuses still drive
+    # mark_degraded — external bucket remains populated above).
+    assert "source_status" not in out
+    assert env.external_status == "ok"
 
 
 def test_envelope_empty_when_nothing_ran():
@@ -48,11 +51,10 @@ def test_envelope_empty_when_nothing_ran():
     out = env.to_dict()
     assert out["results"] == []
     assert out["source_breakdown"] == {"kb": [], "memory": [], "external": []}
-    assert out["source_status"] == {
-        "kb": "timeout",
-        "memory": "timeout",
-        "external": "timeout",
-    }
+    assert "source_status" not in out
+    assert env.kb_status == "timeout"
+    assert env.memory_status == "timeout"
+    assert env.external_status == "timeout"
 
 
 def test_envelope_merge_external_post_degrade():
@@ -64,7 +66,8 @@ def test_envelope_merge_external_post_degrade():
     out = env.to_dict()
     assert len(out["results"]) == 1
     assert out["source_breakdown"]["external"][0]["relevance"] == 0.42
-    assert out["source_status"]["external"] == "ok"
+    assert "source_status" not in out
+    assert env.external_status == "ok"
 
 
 def test_envelope_round_trip_legacy():

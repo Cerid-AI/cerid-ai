@@ -130,6 +130,12 @@ describe("useVerificationStream", () => {
     expect(result.current.report).not.toBeNull()
     expect(result.current.report?.summary.total).toBe(2)
     expect(result.current.sessionClaimsChecked).toBe(2)
+    // CR-078: the "Extracted N claims" log reads the real count from
+    // extraction_complete (which fires before any claim_extracted), not the
+    // still-zero local counter.
+    expect(
+      result.current.activityLog.some((e) => e.message === "Extracted 2 claims (llm)"),
+    ).toBe(true)
   })
 
   // --- Error scenarios ---
@@ -510,6 +516,30 @@ describe("useVerificationStream", () => {
       expect(result.current.report?.summary.verified).toBe(2)
       expect(result.current.report?.summary.uncertain).toBe(0)
       expect(result.current.report?.claims[1].status).toBe("verified")
+    })
+
+    it("CR-065: surfaces a report-persistence failure in the activity log", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1,
+        { type: "summary_update", verified: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55 },
+        { type: "persisted", success: false },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-persist-fail", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      // A failed durable persist must be visible, not silently dropped.
+      expect(
+        result.current.activityLog.some(
+          (e) => e.type === "error" && /not saved|persistence failed/i.test(e.message),
+        ),
+      ).toBe(true)
     })
 
     it("ignores post-summary claim_verified events for unknown indices", async () => {

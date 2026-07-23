@@ -33,12 +33,12 @@ def get_recommended_models() -> dict[str, str]:
     """Recommended models per pipeline stage, using configured default."""
     model = _default_model()
     return {
+        # E1 CR-006: keys track the live PIPELINE_PROVIDERS stage names.
         "claim_extraction": model,
-        "query_decomposition": model,
+        "query_decompose": model,
         "topic_extraction": model,
-        "memory_resolution": model,
-        "verification_simple": model,
-        "reranking": model,
+        "memory_conflict_resolve": model,
+        "rerank_llm": model,
         "embedding": "nomic-embed-text",  # dedicated embedding model
     }
 

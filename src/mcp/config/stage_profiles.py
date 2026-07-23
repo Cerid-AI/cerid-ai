@@ -168,15 +168,27 @@ def env_pin_for(stage: str) -> str | None:
     return pinned or None
 
 
+def _profile_for(stage: str) -> tuple[TaskType, Hardness] | None:
+    """Look up a stage's profile, falling back to the part before the first "/"
+    for sub-stages (E1 CR-014: live call sites use slashed sub-stage names like
+    "brief/daily" and "hype_index/generate" that the exact-only lookup missed,
+    silently dropping their tier to the INTERNAL_LLM_MODEL default). Exact match
+    wins so explicit sub-stage profiles (e.g. faithfulness/decompose) are kept."""
+    profile = STAGE_PROFILES.get(stage)
+    if profile is None and "/" in stage:
+        profile = STAGE_PROFILES.get(stage.split("/", 1)[0])
+    return profile
+
+
 def hardness_for(stage: str) -> Hardness | None:
     """Return the classified hardness for a stage, or ``None`` if unknown."""
-    profile = STAGE_PROFILES.get(stage)
+    profile = _profile_for(stage)
     return profile[1] if profile else None
 
 
 def task_type_for(stage: str) -> TaskType | None:
     """Return the classified task type for a stage, or ``None`` if unknown."""
-    profile = STAGE_PROFILES.get(stage)
+    profile = _profile_for(stage)
     return profile[0] if profile else None
 
 

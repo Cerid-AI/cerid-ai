@@ -454,7 +454,7 @@ export function HallucinationPanel({
 
     setRetryingClaims((prev) => new Set(prev).add(index))
     try {
-      const result = await verifySingleClaim(claims[index].claim, conversationId)
+      const result = await verifySingleClaim(claims[index].claim, conversationId, index)
       if (result) {
         onClaimUpdate?.(index, result)
       }

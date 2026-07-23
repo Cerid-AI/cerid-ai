@@ -176,3 +176,26 @@ class TestPipelineProviders:
 
         payload = degradation_status()
         assert set(payload["pipeline_providers"].keys()) == self.EXPECTED_STAGES
+
+
+class TestInferenceRoutingSurface:
+    """E1 CR-023 — /health/status must carry the inference_routing snapshot.
+
+    The local-LLM/rerank fallback degradation is recorded on /health's
+    inference_routing block, but degradation_status() (served by /health/status)
+    omitted it, so no GUI polling this endpoint could show a live
+    serving!=configured fallback.
+    """
+
+    @patch("app.routers.health.health_check", return_value={})
+    def test_status_includes_inference_routing_snapshot(self, _mock_health, monkeypatch):
+        snap = {"llm": {"configured": "ollama", "serving": "openrouter", "degraded": True}}
+        monkeypatch.setattr(
+            "core.utils.inference_routing.get_routing_snapshot", lambda: snap
+        )
+        from app.routers.health import degradation_status
+
+        payload = degradation_status()
+        assert payload.get("inference_routing") == snap, (
+            "/health/status omits the inference_routing fallback snapshot (CR-023)"
+        )

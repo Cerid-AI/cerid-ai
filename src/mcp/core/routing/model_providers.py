@@ -131,16 +131,37 @@ class ModelProviderConfig:
 # ---------------------------------------------------------------------------
 
 
+def _overlay_env_keys(config: ModelProviderConfig) -> None:
+    """E1 CR-097: overlay each direct provider's API key from its env var onto a
+    Redis-loaded config. Env is the canonical key plane, so a rotation via
+    .env/setup wins over the (key-stripped) Redis snapshot."""
+    for name, info in PROVIDER_CONFIGS.items():
+        if name in ("ollama", "quenchforge"):
+            continue
+        state = config.providers.get(name)
+        if state is None:
+            continue
+        env_key = os.getenv(info["env_var"], "")
+        if env_key:
+            state.api_key = env_key
+
+
 def load_config(redis_client) -> ModelProviderConfig:  # noqa: ANN001
-    """Load provider config from Redis, falling back to env vars."""
+    """Load provider config from Redis, falling back to env vars.
+
+    E1 CR-097: env takes precedence for API keys. The Redis doc holds only
+    structural state (keys are stripped on save); keys are overlaid from env on
+    read, so a rotation via .env/setup is visible even after a PUT snapshot.
+    """
     config = ModelProviderConfig()
 
-    # Try Redis first
+    # Try Redis first (structural state), then overlay env keys (authoritative).
     if redis_client:
         try:
             raw = redis_client.get(_REDIS_KEY)
             if raw:
                 config = ModelProviderConfig.from_dict(json.loads(raw))
+                _overlay_env_keys(config)
                 return config
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error
@@ -178,9 +199,17 @@ def load_config(redis_client) -> ModelProviderConfig:  # noqa: ANN001
 
 
 def save_config(redis_client, config: ModelProviderConfig) -> None:  # noqa: ANN001
-    """Save provider config to Redis."""
+    """Save provider config to Redis.
+
+    E1 CR-097: API keys are NEVER persisted to Redis — they live in the env
+    plane (canonical). Only structural state (enabled/url/is_default/overrides)
+    is stored; load_config overlays keys from env on read.
+    """
     if redis_client:
-        redis_client.set(_REDIS_KEY, json.dumps(config.to_dict()))
+        doc = config.to_dict()
+        for pstate in doc.get("providers", {}).values():
+            pstate["api_key"] = ""
+        redis_client.set(_REDIS_KEY, json.dumps(doc))
         logger.info("Model provider config saved to Redis")
 
 
@@ -203,10 +232,13 @@ def resolve_provider_for_model(
     3. Free OpenRouter fallback for free-tier models
     4. ``("none", "")`` if nothing available
     """
-    # Determine native provider from model ID
+    # Determine native provider from model ID. Tier ids carry the ``openrouter/``
+    # prefix but MODEL_TO_PROVIDER keys are bare — strip it before matching or the
+    # direct-key branch can never fire (E1 CR-008).
+    native_id = model_id.removeprefix("openrouter/")
     native_provider: str | None = None
     for prefix, provider in MODEL_TO_PROVIDER.items():
-        if model_id.startswith(prefix):
+        if native_id.startswith(prefix):
             native_provider = provider
             break
 
@@ -228,6 +260,25 @@ def resolve_provider_for_model(
 
     # 4. Nothing available
     return "none", ""
+
+
+def enabled_direct_providers(config: ModelProviderConfig) -> dict[str, str]:
+    """Return ``{provider: api_key}`` for the enabled DIRECT providers.
+
+    Direct = neither the aggregator (OpenRouter) nor a local daemon
+    (ollama/quenchforge) — derived from :data:`PROVIDER_CONFIGS` flags so the set
+    stays single-sourced. Feeds ``provider_state.project_byok_env`` at boot and on
+    PUT /providers/config, so the canonical env marker reflects the persisted
+    BYOK enablement (E1 CR-008).
+    """
+    out: dict[str, str] = {}
+    for name, state in config.providers.items():
+        info = PROVIDER_CONFIGS.get(name, {})
+        if info.get("is_aggregator") or info.get("is_local"):
+            continue
+        if state.enabled and state.api_key:
+            out[name] = state.api_key
+    return out
 
 
 # ---------------------------------------------------------------------------

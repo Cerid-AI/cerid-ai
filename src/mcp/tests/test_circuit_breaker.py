@@ -184,3 +184,33 @@ def test_external_datasource_breakers_are_tolerant():
         cb = get_breaker(name)
         assert cb.failure_threshold == 3, f"{name} threshold={cb.failure_threshold}"
         assert cb.recovery_timeout == 30, f"{name} recovery={cb.recovery_timeout}"
+
+
+# ---------------------------------------------------------------------------
+# Manual record_success / record_failure (CR-068: streaming paths that can't
+# route through call() still feed the breaker)
+# ---------------------------------------------------------------------------
+
+
+class TestManualRecord:
+    @pytest.mark.asyncio
+    async def test_record_failure_opens_after_threshold(self):
+        cb = AsyncCircuitBreaker("manual-a", failure_threshold=2, recovery_timeout=60)
+        await cb.record_failure(RuntimeError("server down"))
+        assert cb.state == CircuitState.CLOSED
+        await cb.record_failure(RuntimeError("server down"))
+        assert cb.state == CircuitState.OPEN
+
+    @pytest.mark.asyncio
+    async def test_record_failure_ignores_client_errors(self):
+        cb = AsyncCircuitBreaker("manual-b", failure_threshold=1, recovery_timeout=60)
+        await cb.record_failure(RuntimeError("HTTP 404 not found"))
+        # A 4xx must not count toward tripping the breaker.
+        assert cb.state == CircuitState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_record_success_resets_failure_count(self):
+        cb = AsyncCircuitBreaker("manual-c", failure_threshold=3, recovery_timeout=60)
+        await cb.record_failure(RuntimeError("server down"))
+        await cb.record_success()
+        assert cb._failure_count == 0

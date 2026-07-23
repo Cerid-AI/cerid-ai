@@ -336,19 +336,22 @@ export function useSettings() {
       }
     }).catch(() => { /* Server unavailable — use localStorage values */ })
 
-    // Hydrate private mode from server
+    // Hydrate private mode from the server. Private mode is a single GLOBAL
+    // server flag (Redis cerid:private_mode:global), not a per-browser
+    // preference, so the server is authoritative: reconcile the local cache from
+    // it on every load, not just when unset. A stale localStorage value that
+    // disagrees with the server otherwise turns conversation sync into a silent
+    // server-side no-op — the client keeps POSTing saves the server drops
+    // because it (correctly) thinks private mode is on (CR-020). On a server
+    // error fetchPrivateMode throws, so the local value is kept.
     fetchPrivateMode()
       .then((pm) => {
-        if (localStorage.getItem("cerid-private-mode") === null) {
-          setPrivateModeEnabled(pm.enabled)
-          persist("cerid-private-mode", String(pm.enabled))
-        }
-        if (localStorage.getItem("cerid-private-mode-level") === null) {
-          setPrivateModeLevel(pm.level)
-          persist("cerid-private-mode-level", String(pm.level))
-        }
+        setPrivateModeEnabled(pm.enabled)
+        setPrivateModeLevel(pm.level)
+        persist("cerid-private-mode", String(pm.enabled))
+        persist("cerid-private-mode-level", String(pm.level))
       })
-      .catch(() => { /* Server unavailable — use localStorage values */ })
+      .catch(() => { /* Server unavailable — keep localStorage values */ })
   }, [hydrateFeedback, hydrateAutoInject, hydrateHallucination, hydrateMemory])
 
   const toggleDashboard = useCallback(() => {

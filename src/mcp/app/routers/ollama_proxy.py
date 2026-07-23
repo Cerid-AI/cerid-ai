@@ -278,15 +278,24 @@ async def _stream_chat(
                             continue
                         # Ollama streams NDJSON — convert to SSE
                         yield f"data: {line}\n\n"
-        except httpx.ConnectError:
+            # A clean stream is a success — let the breaker recover from
+            # HALF_OPEN and reset the failure count.
+            await breaker.record_success()
+        except httpx.ConnectError as exc:
+            # Feed the breaker: a streamed failure that is only surfaced as a
+            # 200 SSE error event must still count toward tripping the breaker
+            # this endpoint gates on, or it can never open (CR-068).
+            await breaker.record_failure(exc)
             error_payload = json.dumps(
                 {"error": f"Cannot connect to Ollama at {base_url}"}
             )
             yield f"data: {error_payload}\n\n"
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as exc:
+            await breaker.record_failure(exc)
             error_payload = json.dumps({"error": "Ollama stream timed out"})
             yield f"data: {error_payload}\n\n"
         except Exception as exc:
+            await breaker.record_failure(exc)
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('app.routers.ollama_proxy', exc)
             logger.error("Ollama stream error: %s", exc)

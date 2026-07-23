@@ -126,6 +126,29 @@ describe("KnowledgeConsole CH7 controls", () => {
     const { container } = render(<KnowledgeConsole {...baseProps()} />, { wrapper })
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  it("CR-010: relevance footer shows relative ranking, not an aggregate %", () => {
+    // `confidence` is the mean of ordinal post-rerank scores, so rendering it as
+    // "50%" was miscalibrated. The footer now shows a relative bar labelled
+    // "ranked by match" with no absolute aggregate percentage.
+    render(
+      <KnowledgeConsole
+        {...baseProps({
+          hasQueried: true,
+          confidence: 0.5,
+          kbSources: [{
+            content: "grounded chunk", relevance: 0.28, artifact_id: "a1",
+            filename: "grounded.py", domain: "coding", chunk_index: 0,
+            collection: "kb_coding", ingested_at: "2026-01-15T10:00:00Z",
+          }],
+        })}
+      />,
+      { wrapper },
+    )
+    expect(screen.getByText(/ranked by match/i)).toBeInTheDocument()
+    // The aggregate "50%" confidence badge is gone (0.5 → "50%" under the old code).
+    expect(screen.queryByText("50%")).toBeNull()
+  })
 })
 
 describe("KnowledgeConsole — data-source indicator (P0-C.4)", () => {

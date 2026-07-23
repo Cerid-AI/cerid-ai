@@ -3,9 +3,11 @@
 Invariants:
     * ``results`` is always ``flatten(source_breakdown.{kb,memory,external})``.
     * ``sources`` mirrors ``results`` (legacy alias for GUI compatibility).
-    * ``source_status`` is always set for all three keys.
     * Calling ``mark_degraded`` never drops already-collected results.
     * ``confidence`` is recomputed from the current result pool.
+    * E1 CR-032: write-only ``source_status`` / ``low_confidence`` /
+      ``reranker_status`` / ``domains_no_results`` / ``kb_bypassed`` are not
+      part of the public envelope (``degraded_reason`` remains UI-facing).
 
 Lives in ``core/`` (not ``app/``) so that ``core.agents.query_agent`` can
 emit the degraded-path envelope without violating the
@@ -91,6 +93,8 @@ class QueryEnvelope:
 
     def to_dict(self) -> dict[str, Any]:
         flat = [i.to_dict() for i in (self.kb + self.memory + self.external)]
+        # Internal kb/memory/external status fields still drive mark_degraded;
+        # they are not serialized (E1 CR-032).
         return {
             "results": flat,
             "sources": flat,
@@ -98,11 +102,6 @@ class QueryEnvelope:
                 "kb": [i.to_dict() for i in self.kb],
                 "memory": [i.to_dict() for i in self.memory],
                 "external": [i.to_dict() for i in self.external],
-            },
-            "source_status": {
-                "kb": self.kb_status,
-                "memory": self.memory_status,
-                "external": self.external_status,
             },
             "context": self.context,
             "answer": self.answer,

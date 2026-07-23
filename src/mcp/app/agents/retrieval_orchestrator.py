@@ -42,6 +42,63 @@ def set_custom_rag_handler(fn):
     _custom_rag_fn = fn
 
 
+async def guarded_orchestrated_query(
+    *,
+    request_context: Any,
+    query: str,
+    rag_mode: str = "smart",
+    domains: list[str] | None = None,
+    top_k: int = 10,
+    use_reranking: bool = True,
+    conversation_messages: list[dict[str, str]] | None = None,
+    chroma_client: Any = None,
+    redis_client: Any = None,
+    neo4j_driver: Any = None,
+    graph_store: Any = None,
+    context_sources: dict | None = None,
+    model: str | None = None,
+    exclude_packs: bool = False,
+) -> dict[str, Any]:
+    """Policy-enforcing wrapper over :func:`orchestrated_query` — the smart-mode
+    sibling of :func:`core.agents.guarded_retrieval.guarded_agent_query_full`.
+
+    Private-Mode L2 short-circuits to the KB-bypass envelope BEFORE any retrieval;
+    otherwise consumer isolation (``allowed_domains`` / ``strict_domains``) and the
+    honored per-request directives (``skip_cache`` / ``metadata_filter`` /
+    ``budget_seconds``) come from ``request_context`` — never loose kwargs a caller
+    might forget. This lets a transport run smart-mode kb/memory/external
+    orchestration WITHOUT dropping the guard the canonical ``/agent/query`` handler
+    applies before its smart/manual split, so e.g. a custom agent configured
+    ``rag_mode='smart'`` is honored while staying behind the private-mode /
+    consumer boundary (E1 CR-095).
+    """
+    from core.agents.guarded_retrieval import kb_bypassed_envelope
+
+    if request_context.blocks_kb:
+        return kb_bypassed_envelope()
+
+    return await orchestrated_query(
+        query=query,
+        rag_mode=rag_mode,
+        domains=domains,
+        top_k=top_k,
+        use_reranking=use_reranking,
+        conversation_messages=conversation_messages,
+        chroma_client=chroma_client,
+        redis_client=redis_client,
+        neo4j_driver=neo4j_driver,
+        graph_store=graph_store,
+        context_sources=context_sources,
+        allowed_domains=request_context.allowed_domains_list(),
+        strict_domains=request_context.strict_domains,
+        skip_cache=request_context.skip_cache,
+        metadata_filter=request_context.metadata_filter,
+        budget_seconds=request_context.budget_seconds,
+        model=model,
+        exclude_packs=exclude_packs,
+    )
+
+
 async def orchestrated_query(
     query: str,
     rag_mode: str = "manual",
@@ -90,7 +147,6 @@ async def orchestrated_query(
                 "domains_searched": [], "total_results": 0,
                 "token_budget_used": 0, "graph_results": 0, "results": [],
                 "strategy": "conversation_only",
-                "source_status": {"kb": "disabled"},
             }
         result = await agent_query(
             query=query,
@@ -102,6 +158,7 @@ async def orchestrated_query(
             redis_client=redis_client,
             neo4j_driver=neo4j_driver,
             graph_store=graph_store,
+            memory_enabled=_mem_on,
             **kwargs,
         )
         return result
@@ -109,16 +166,14 @@ async def orchestrated_query(
     # --- Smart / Custom Smart: parallel KB + memory recall ---
     import time as _time
 
-    source_status: dict[str, str] = {
-        "kb": "ok" if _kb_on else "disabled",
-        "memory": "ok" if _mem_on else "disabled",
-        "external": "ok" if _ext_on else "disabled",
-    }
+    # E1 CR-032: no write-only source_status on the public envelope.
     timings: dict[str, float] = {}
 
     # Only create tasks for enabled sources
     parallel_start = _time.monotonic()
 
+    # E1 R18: when the orchestrator owns memory_task, disable agent_query's
+    # internal memory surface so the flatten does not double-count memories.
     kb_task = asyncio.create_task(agent_query(
         query=query,
         domains=domains,
@@ -129,6 +184,7 @@ async def orchestrated_query(
         redis_client=redis_client,
         neo4j_driver=neo4j_driver,
         graph_store=graph_store,
+        memory_enabled=False if _mem_on else _mem_on,
         **kwargs,
     )) if _kb_on else None
 
@@ -166,23 +222,19 @@ async def orchestrated_query(
                               AttributeError, TypeError, KeyError)):
         logger.error("KB query failed: %s", kb_result)
         kb_result = {"results": [], "context": "", "strategy": "error"}
-        source_status["kb"] = "error"
     elif isinstance(kb_result, BaseException):
         logger.error("KB query failed with unexpected error: %s", kb_result)
         kb_result = {"results": [], "context": "", "strategy": "error"}
-        source_status["kb"] = "error"
 
     # Handle memory exceptions
     if isinstance(memory_results, BaseException):
         logger.warning("Memory recall failed: %s", memory_results)
         memory_results = []
-        source_status["memory"] = "error"
 
     # Handle external source exceptions (fire-and-forget — never block KB)
     if isinstance(external_results, BaseException):
         logger.warning("External source query failed: %s", external_results)
         external_results = []
-        source_status["external"] = "error"
 
     # Separate any legacy external-tagged KB results and merge with real external
     ext_start = _time.monotonic()
@@ -212,8 +264,6 @@ async def orchestrated_query(
         })
 
     timings["external_ms"] = round((_time.monotonic() - ext_start) * 1000, 1)
-    if not external_sources and source_status["external"] != "disabled":
-        source_status["external"] = "no_results"
 
     # Format memory results for source_breakdown
     memory_sources = [
@@ -251,8 +301,23 @@ async def orchestrated_query(
     # Enrich the base result with orchestrator data
     kb_result["source_breakdown"] = source_breakdown
     kb_result["rag_mode"] = rag_mode
-    kb_result["source_status"] = source_status
     kb_result["_timings"] = timings
+
+    # Honor the flatten invariant: the flat results/sources pool must equal
+    # flatten(source_breakdown) so the SDK, the retrieval_ndcg metric, and the
+    # console see memory + external hits — not just KB (CR-055). The base result
+    # carried KB-only values, and the KB-error branch shipped a 3-key dict with
+    # no sources/confidence/total_results at all. Rebuilding here fixes both;
+    # confidence becomes the mean relevance over the FULL pool (a deliberate
+    # semantics change — eval floors are re-baselined alongside).
+    flat_pool = [*kb_sources, *memory_sources, *external_sources]
+    kb_result["results"] = flat_pool
+    kb_result["sources"] = flat_pool
+    kb_result["total_results"] = len(flat_pool)
+    _relevances = [s.get("relevance", 0.0) for s in flat_pool]
+    kb_result["confidence"] = (
+        round(sum(_relevances) / len(_relevances), 4) if _relevances else 0.0
+    )
 
     # Append memory context to the assembled context string
     if memory_sources:

@@ -19,7 +19,7 @@ import config
 from app.concurrency import KB_POOL
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
-from app.services.private_mode import private_blocks
+from app.services.private_mode import private_blocks, saves_blocked
 from config.features import require_feature
 from core.utils.swallowed import log_swallowed_error
 
@@ -79,8 +79,11 @@ class AgentQueryRequest(BaseModel):
     cost_sensitivity: str | None = Field(
         None,
         description=(
-            "User cost preference: 'low' | 'medium' | 'high'. When None the "
-            "server resolves it from the consumer registry (Task 17)."
+            "Cost preference: 'low' | 'medium' | 'high'. When None it is resolved "
+            "via the request -> consumer-registry -> persisted COST_SENSITIVITY "
+            "chain (app.services.request_policy.resolve_cost_sensitivity, E1 CR-028). "
+            "Retrieval ranking itself is not cost-routed; the resolved value steers "
+            "LLM model selection on the chat/generation paths."
         ),
     )
     # --- Query scope (high-level intent) ---
@@ -117,7 +120,7 @@ class AgentQueryResponse(BaseModel):
     """Response from ``POST /agent/query`` — the canonical retrieval envelope.
 
     ``extra="allow"`` so the agent pipeline can evolve its return shape (surface
-    metadata, timings, ``low_confidence``, CRAG/Self-RAG fields, cache markers)
+    metadata, timings, CRAG/Self-RAG fields, cache markers)
     without breaking the typed contract — mirrors the SDK response models. Phase 1
     typed the producer that ``/sdk/v1/query`` delegates to (audit ACG-2 / RPB-4).
     """
@@ -284,6 +287,7 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
     # caller must get the same query-only behavior the web client applies
     # locally: no KB retrieval at all, not even a cache lookup.
     if private_blocks(2):
+        # E1 CR-032/062: empty envelope only — no write-only kb_bypassed stamp.
         return {
             "context": "",
             "sources": [],
@@ -291,7 +295,6 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
             "domains_searched": [],
             "total_results": 0,
             "confidence": 0.0,
-            "kb_bypassed": True,
         }
     # Heavy RAG path is gated by KB_POOL so /health, /observability, and
     # other lightweight routes served by HEALTH_POOL are never starved by
@@ -316,12 +319,43 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             if req.strict_domains is None:
                 req.strict_domains = True
 
+        # Consumer domain isolation: resolve the consumer BEFORE the cache check
+        # so the result cache is keyed by the consumer's effective domain scope
+        # (E1 CR-001). Otherwise a strict consumer is served the unrestricted
+        # 'gui' result on a cache HIT — the isolation applied downstream at
+        # query_agent.py:2357 is bypassed entirely on a warm cache.
+        from config.settings import CONSUMER_REGISTRY
         from utils.query_cache import get_cached, set_cached
+        client_id = request.headers.get("x-client-id", "gui")
+        consumer = CONSUMER_REGISTRY.get(client_id, CONSUMER_REGISTRY.get("_default", {}))
+        allowed_domains = consumer.get("allowed_domains")
+        # Per-request strict_domains can only tighten (True), never loosen the consumer default
+        consumer_strict = consumer.get("strict_domains", False)
+        strict_domains = req.strict_domains if req.strict_domains else consumer_strict
+        consumer_scope = ",".join(sorted(allowed_domains)) if allowed_domains else "__all__"
 
         has_context = bool(req.conversation_messages)
         domain_key = f"{','.join(sorted(req.domains)) if req.domains else 'all'}|rerank={req.use_reranking}"
-        if not has_context and not req.skip_cache:
-            cached = get_cached(req.query, domain_key, req.top_k)
+        # E1 R16 / CR-001: C1 exact-match key must isolate Memory ON/OFF,
+        # context_sources, rag_mode, and scoped retrieval. Mirror C2: skip C1
+        # entirely when metadata_filter / exclude_packs narrow the result set
+        # (a general-key hit would cross that wall).
+        _cs = req.context_sources or {}
+        _mem = "1" if _cs.get("memory", True) is not False else "0"
+        _kb = "1" if _cs.get("kb", True) is not False else "0"
+        _ext = "1" if _cs.get("external", True) is not False else "0"
+        _c1_scoped = bool(req.metadata_filter) or bool(req.exclude_packs)
+        if req.metadata_filter:
+            import json as _json
+            _mf = _json.dumps(req.metadata_filter, sort_keys=True, default=str)
+        else:
+            _mf = ""
+        c1_hint = (
+            f"{consumer_scope}|mem={_mem}|kb={_kb}|ext={_ext}"
+            f"|rag={req.rag_mode or 'manual'}|mf={_mf}"
+        )
+        if not has_context and not req.skip_cache and not _c1_scoped:
+            cached = get_cached(req.query, domain_key, req.top_k, context_hint=c1_hint)
             if cached:
                 # ``get_cached`` stamps ``cached: True`` + ``cache_age_ms`` on
                 # the payload; the metrics middleware reads the body and sets
@@ -339,20 +373,8 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             else config.ENABLE_STEP_TIMING
         )
 
-        # Consumer domain isolation: look up allowed_domains and strict_domains
-        from config.settings import CONSUMER_REGISTRY
-        client_id = request.headers.get("x-client-id", "gui")
-        consumer = CONSUMER_REGISTRY.get(client_id, CONSUMER_REGISTRY.get("_default", {}))
-        allowed_domains = consumer.get("allowed_domains")
-        # Per-request strict_domains can only tighten (True), never loosen the consumer default
-        consumer_strict = consumer.get("strict_domains", False)
-        strict_domains = req.strict_domains if req.strict_domains else consumer_strict
-
-        _threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
-
         if req.rag_mode in ("smart", "custom_smart"):
             from app.agents.retrieval_orchestrator import orchestrated_query
-            from core.agents.crag import kb_low_confidence
             from core.agents.self_rag import maybe_self_rag
             result = await orchestrated_query(
                 query=req.query,
@@ -372,11 +394,17 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 strict_domains=strict_domains,
                 model=req.model,
                 exclude_packs=req.exclude_packs,
+                # E1 CR-009: the smart branch previously dropped these three
+                # (the manual branch forwarded them), so a document-scoped or
+                # skip_cache/budget-overridden request silently searched the
+                # whole KB with the semantic cache live. orchestrated_query's
+                # **kwargs propagate them into agent_query.
+                skip_cache=req.skip_cache,
+                metadata_filter=req.metadata_filter,
+                budget_seconds=req.budget_seconds,
             )
-            # Smart mode shares the canonical path's low-confidence stamp +
-            # Self-RAG (the manual path gets these inside agent_query_full).
-            if isinstance(result, dict):
-                result["low_confidence"] = kb_low_confidence(result, _threshold)
+            # Smart mode shares Self-RAG with the manual path (agent_query_full).
+            # E1 CR-032: low_confidence stamp removed (write-only; no production readers).
             result = await maybe_self_rag(
                 result,
                 req.response_text,
@@ -393,7 +421,6 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             # the wrapper just supplies the store handles + header-derived
             # isolation params, so MCP/A2A/custom-agent callers reach the SAME path.
             from core.agents.query_agent import agent_query_full
-            _cs = req.context_sources or {}
             result = await agent_query_full(
                 query=req.query,
                 domains=req.domains,
@@ -416,6 +443,11 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 response_text=req.response_text,
                 enable_self_rag=req.enable_self_rag,
                 budget_seconds=req.budget_seconds,
+                # E1 CR-016: honor the context_sources.memory opt-out on the
+                # manual path (the FE 'always' RAG mode lands here). Previously
+                # only kb/external were read, so a user who toggled Memory off
+                # still had recalled personal memories enter their answer.
+                memory_enabled=_cs.get("memory", True) is not False,
             )
 
         # Envelope invariant (preservation I2): every /agent/query response
@@ -463,8 +495,8 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         degraded = isinstance(result, dict) and (
             bool(result.get("budget_exceeded")) or not result.get("sources")
         )
-        if not has_context and not req.skip_cache and not degraded:
-            set_cached(req.query, domain_key, req.top_k, result)
+        if not has_context and not req.skip_cache and not degraded and not _c1_scoped:
+            set_cached(req.query, domain_key, req.top_k, result, context_hint=c1_hint)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -605,6 +637,12 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
 
         from app.db.neo4j.memory import create_memory_node
         from core.agents.hallucination import check_hallucinations
+
+        # Private Mode L1+ ("skip saves") suppresses the verification report's
+        # durable twin stores — the Redis hall:{cid} snapshot (gated inside
+        # check_hallucinations via persist_report) and the Neo4j auto-persist
+        # below — matching the memory-promotion gate (CR-018/086).
+        persist_report = not saves_blocked()
         result = await check_hallucinations(
             response_text=req.response_text,
             conversation_id=req.conversation_id,
@@ -616,6 +654,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             user_query=req.user_query,
             expert_mode=req.expert_mode,
             create_memory_fn=_verified_memory_fn(create_memory_node),
+            persist_report=persist_report,
         )
         result["mode"] = "thorough"
 
@@ -624,7 +663,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
         # /verification/save endpoint stays available for consumers
         # with explicit persistence workflows.
         result["persisted"] = False
-        if req.persist and not result.get("skipped"):
+        if req.persist and persist_report and not result.get("skipped"):
             claims_payload = result.get("claims") or []
             if claims_payload:
                 try:
@@ -818,8 +857,10 @@ class MemoryRecallResponse(BaseModel):
 async def memory_recall_endpoint(req: MemoryRecallRequest):
     """Recall memories relevant to a query."""
     try:
-        from app.agents.memory import recall_memories
-        results = await recall_memories(
+        from app.services.request_policy import build_request_context
+        from core.agents.guarded_retrieval import guarded_recall_memories
+        results = await guarded_recall_memories(
+            request_context=build_request_context(),
             query=req.query,
             chroma_client=get_chroma(),
             neo4j_driver=get_neo4j(),
@@ -850,6 +891,15 @@ class VerifyStreamRequest(BaseModel):
     source_artifact_ids: list[str] = Field(
         default_factory=list,
         description="KB artifact IDs that were injected into the LLM prompt (anti-circularity)",
+    )
+    single_claim_index: int | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Set by a per-claim retry: response_text is ONE claim from an existing "
+            "N-claim report and its fresh verdict must be MERGED into the durable "
+            "hall:{cid} report at this index, not replace it (E1 CR-019)."
+        ),
     )
 
 
@@ -888,6 +938,12 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
             from app.db.neo4j.artifacts import save_verification_report as _save_report
             from app.db.neo4j.memory import create_memory_node as _create_mem_fn
             from core.agents.hallucination import verify_response_streaming
+
+            # Private Mode L1+ ("skip saves") suppresses the report's durable
+            # twin stores (Redis hall:{cid} + the Neo4j save_report_fn); both are
+            # gated inside verify_response_streaming via persist_report, matching
+            # the memory-promotion gate (CR-018).
+            persist_report = not saves_blocked()
 
             logger.info(
                 "Verify stream started for conversation=%s (model=%s, query_len=%d)",
@@ -936,6 +992,8 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 source_artifact_ids=req.source_artifact_ids,
                 create_memory_fn=_verified_memory_fn(_create_mem_fn),
                 save_report_fn=_save_report_fn,
+                persist_report=persist_report,
+                merge_claim_index=req.single_claim_index,
             )
 
             # Read events with a keepalive timeout — if no event arrives
@@ -1051,10 +1109,19 @@ class SaveVerificationRequest(BaseModel):
 @require_feature("truth_audit")
 async def save_verification_report(req: SaveVerificationRequest):
     """Persist a verification report to Neo4j for long-term storage."""
+    # Private Mode L1+ ("skip saves") forbids durably persisting the report's
+    # verbatim claims + source snippets; return the success-shaped skip the
+    # write-path gating contract uses (CR-086).
+    if saves_blocked():
+        return {"status": "skipped", "report_id": None}
+
     from app.db.neo4j.artifacts import save_verification_report as _save
 
     try:
-        report_id = _save(
+        # The writer does up to 2N sequential SYNC Neo4j round-trips; offload it
+        # so a verification save doesn't block the event loop on every report (CR-022).
+        report_id = await asyncio.to_thread(
+            _save,
             get_neo4j(),
             conversation_id=req.conversation_id,
             claims=req.claims,

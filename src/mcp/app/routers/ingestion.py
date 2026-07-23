@@ -121,13 +121,19 @@ class IngestFileRequest(BaseModel):
 
 
 class FeedbackIngestRequest(BaseModel):
-    user_message: str
-    assistant_response: str
+    # user_message/assistant_response default to "" so a message-sentiment ping
+    # (E1 CR-043) can post just conversation_id + message_id + sentiment; the
+    # full-turn feedback-loop ingest still supplies both.
+    user_message: str = ""
+    assistant_response: str = ""
     model: str = ""
     conversation_id: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: int = 0
+    # E1 CR-043: thumbs sentiment ("up" | "down") for a single assistant message.
+    sentiment: str | None = None
+    message_id: str = ""
 
 
 class BatchIngestItem(BaseModel):
@@ -352,6 +358,42 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
     # Backend gate: reject if feedback loop is disabled server-side
     if not config.ENABLE_FEEDBACK_LOOP:
         return {"status": "skipped", "reason": "Feedback loop disabled (ENABLE_FEEDBACK_LOOP=false)"}
+
+    # E1 CR-043: a message-sentiment ping (thumbs up/down) is a lightweight write
+    # to the feedback-loop store — NOT a turn to re-ingest. Record it and ack,
+    # skipping the conversation-metrics + heavy turn-ingest path below.
+    if req.sentiment is not None:
+        sentiment = req.sentiment.strip().lower()
+        if sentiment not in ("up", "down"):
+            raise HTTPException(
+                status_code=422,
+                detail="sentiment must be 'up' or 'down'",
+            )
+        if not (req.message_id or "").strip() and not (req.conversation_id or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="message_id or conversation_id is required for sentiment feedback",
+            )
+        try:
+            from core.utils.cache import log_conversation_sentiment
+            log_conversation_sentiment(
+                get_redis(),
+                conversation_id=req.conversation_id,
+                message_id=req.message_id,
+                sentiment=sentiment,
+            )
+        except Exception as e:
+            log_swallowed_error(
+                "routers.ingestion.feedback_sentiment", e, redis_client=get_redis(),
+            )
+        return JSONResponse(status_code=202, content={"status": "sentiment_recorded"})
+
+    # Empty body / no sentiment and no turn payload → 422 (audit empty-feedback).
+    if not (req.user_message or req.assistant_response or req.input_tokens or req.output_tokens):
+        raise HTTPException(
+            status_code=422,
+            detail="feedback body is empty — provide sentiment or turn fields",
+        )
 
     # Fast synchronous ack: conversation metrics are a cheap Redis write
     # and power the live usage panes, so they land at request time.

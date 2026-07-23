@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Terminal, Zap } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
+import { isLocalProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { TrustScoreChip } from "@/components/trust-score"
 import { BackendStatusPill } from "@/components/layout/backend-status-pill"
@@ -129,7 +130,7 @@ export function StatusBar({
               </div>
               {health.pipeline_providers && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {Object.values(health.pipeline_providers).filter(p => p === "ollama").length}/
+                  {Object.values(health.pipeline_providers).filter(isLocalProvider).length}/
                   {Object.values(health.pipeline_providers).length} stages local
                 </p>
               )}
@@ -174,7 +175,7 @@ export function StatusBar({
             </TooltipTrigger>
             <TooltipContent side="top" className="space-y-1">
               <p className="font-medium text-red-400">OpenRouter Authentication Failed</p>
-              <p className="text-muted-foreground">API key may be invalid or expired. Verification and external LLM calls will fall back to Bifrost.</p>
+              <p className="text-muted-foreground">API key may be invalid or expired. Verification and external LLM calls will fail until it is restored — there is no fallback gateway. Local Ollama-served stages are unaffected.</p>
               <p className="text-muted-foreground">Check your OPENROUTER_API_KEY in .env</p>
             </TooltipContent>
           </Tooltip>
@@ -190,28 +191,32 @@ export function StatusBar({
             </TooltipTrigger>
             <TooltipContent side="top" className="space-y-1">
               <p className="font-medium text-orange-400">OpenRouter Circuit Breaker Open</p>
-              <p className="text-muted-foreground">Too many consecutive failures. Calls are being routed through Bifrost until the circuit resets.</p>
+              <p className="text-muted-foreground">Too many consecutive failures. OpenRouter calls are paused until the circuit resets; stages routed to local Ollama continue unaffected.</p>
             </TooltipContent>
           </Tooltip>
         )}
 
-        {/* Ollama / pipeline indicator */}
+        {/* Local pipeline indicator (ollama | quenchforge — E1 R5 / CR-024) */}
         {health?.pipeline_providers && (() => {
-          const localCount = Object.values(health.pipeline_providers).filter(p => p === "ollama").length
+          const localCount = Object.values(health.pipeline_providers).filter(isLocalProvider).length
           const totalStages = Object.values(health.pipeline_providers).length
+          const localLabel = health.internal_llm_provider === "quenchforge" ? "Quenchforge" : "Ollama"
           if (localCount > 0) {
             return (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="flex items-center gap-1 text-label-xs text-green-600 dark:text-green-400">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    Ollama: {health.internal_llm_model || "active"} ({localCount}/{totalStages} local)
+                    {localLabel}: {health.internal_llm_model || "active"} ({localCount}/{totalStages} local)
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="space-y-1">
-                  <p className="font-medium">Ollama — Local LLM</p>
+                  <p className="font-medium">{localLabel} — Local LLM</p>
                   <p className="text-muted-foreground">{localCount} of {totalStages} pipeline stages running locally ($0)</p>
                   <p className="text-muted-foreground">Model: {health.internal_llm_model || "configured"}</p>
+                  {health.inference_routing != null && (
+                    <p className="text-muted-foreground">Routing snapshot available</p>
+                  )}
                 </TooltipContent>
               </Tooltip>
             )

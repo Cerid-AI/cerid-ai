@@ -63,8 +63,12 @@ async def test_stream_falls_back_when_local_fails_before_first_token():
 
 
 @pytest.mark.asyncio
-async def test_stream_partial_then_fail_does_not_duplicate():
-    """A local failure AFTER partial output stops cleanly — no fallback re-emit."""
+async def test_stream_partial_then_fail_raises_without_duplicating():
+    """A local failure AFTER partial output RAISES so the caller knows the answer
+    is truncated (E1 CR-093 — pre-fix this returned silently, and the inline-gate
+    consumer computed claims over the partial text as if complete), WITHOUT
+    re-emitting a duplicate full answer at this layer (the consumer decides the
+    fallback)."""
     from core.utils import internal_llm
 
     async def fake_stream_partial(*_a, **_k):
@@ -72,16 +76,17 @@ async def test_stream_partial_then_fail_does_not_duplicate():
         raise httpx.TimeoutException("mid-stream")
 
     fallback = AsyncMock(return_value="WHOLE DIFFERENT ANSWER")
+    out: list[str] = []
     with patch.object(internal_llm, "_resolve_stage_provider", return_value="ollama"), \
          patch.object(internal_llm, "_stream_ollama", new=fake_stream_partial), \
          patch.object(internal_llm, "call_internal_llm", new=fallback):
-        out = [
-            t async for t in internal_llm.call_internal_llm_stream(
+        with pytest.raises(httpx.TimeoutException):
+            async for t in internal_llm.call_internal_llm_stream(
                 [{"role": "user", "content": "hi"}], stage="test_partial",
-            )
-        ]
-    assert out == ["partial output "]
-    fallback.assert_not_called()
+            ):
+                out.append(t)
+    assert out == ["partial output "]  # partial reached the consumer before the raise
+    fallback.assert_not_called()       # no duplicate full-answer re-emit at this layer
 
 
 @pytest.mark.asyncio

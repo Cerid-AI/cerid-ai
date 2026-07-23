@@ -65,7 +65,7 @@ class TestMemoryRecallEnvelope:
     @pytest.mark.asyncio
     async def test_empty_recall_returns_object(self, client):
         with patch(
-            "app.agents.memory.recall_memories",
+            "core.agents.memory.recall_memories",
             new=AsyncMock(return_value=[]),
         ):
             res = client.post("/agent/memory/recall", json={"query": "test"})
@@ -83,7 +83,7 @@ class TestMemoryRecallEnvelope:
             {"content": "memory 2", "adjusted_score": 0.7},
         ]
         with patch(
-            "app.agents.memory.recall_memories",
+            "core.agents.memory.recall_memories",
             new=AsyncMock(return_value=results),
         ):
             res = client.post(
@@ -103,7 +103,7 @@ class TestMemoryRecallEnvelope:
             {"content": "low", "adjusted_score": 0.2},
         ]
         with patch(
-            "app.agents.memory.recall_memories",
+            "core.agents.memory.recall_memories",
             new=AsyncMock(return_value=results),
         ):
             res = client.post(
@@ -120,7 +120,7 @@ class TestMemoryRecallEnvelope:
         return on the error path would re-introduce the bug for callers
         that hit the failure branch."""
         with patch(
-            "app.agents.memory.recall_memories",
+            "core.agents.memory.recall_memories",
             new=AsyncMock(side_effect=RuntimeError("neo4j is sad")),
         ):
             res = client.post("/agent/memory/recall", json={"query": "test"})

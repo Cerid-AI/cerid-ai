@@ -13,7 +13,6 @@ from unittest.mock import patch
 import pytest
 
 from config.constants import (
-    BIFROST_TIMEOUT,
     CHUNK_OVERLAP_RATIO,
     CONFIDENCE_CEILING,
     CONFIDENCE_FLOOR,
@@ -198,7 +197,6 @@ class TestConstants:
             HEALTH_CACHE_TTL,
             OLLAMA_READ_TIMEOUT,
             OLLAMA_CONNECT_TIMEOUT,
-            BIFROST_TIMEOUT,
             VERIFICATION_TIMEOUT,
             QUERY_CACHE_TTL,
             MONTHLY_BUDGET_USD,

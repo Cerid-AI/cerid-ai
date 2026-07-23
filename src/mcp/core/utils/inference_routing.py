@@ -53,7 +53,8 @@ def get_routing_snapshot() -> dict[str, dict[str, Any]]:
     rather than ``None`` so the JSON wire is stable across operators
     with different env configurations.
     """
-    llm_provider = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter").strip().lower()
+    from core.routing.provider_state import active_provider
+    llm_provider = active_provider()
     embed_provider = os.getenv("EMBEDDINGS_PROVIDER", "sidecar").strip().lower()
     rerank_provider = os.getenv("RERANK_PROVIDER", "sidecar").strip().lower()
     local_url = _resolve_local_url()

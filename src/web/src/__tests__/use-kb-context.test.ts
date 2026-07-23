@@ -138,6 +138,25 @@ describe("useKBContext", () => {
     expect(result.current.results[0].artifact_id).toBe("a1")
   })
 
+  it("CR-010: keeps low ordinal-relevance results (no client-side absolute floor)", async () => {
+    // Post-rerank relevance is an ordinal cross-encoder sigmoid; a correct top
+    // chunk can score ~0.28. The old 0.45 client floor emptied the envelope —
+    // the backend already floors on its calibrated scale pre-rerank.
+    mockQueryKB.mockResolvedValue({
+      results: [
+        makeResult({ artifact_id: "hot", filename: "hot.py", relevance: 0.28 }),
+        makeResult({ artifact_id: "warm", filename: "warm.py", relevance: 0.11 }),
+      ],
+      confidence: 0.2,
+      total_results: 2,
+      execution_time_ms: 40,
+    })
+    const wrapper = createWrapper()
+    const { result } = renderHook(() => useKBContext("indirect-evidence question"), { wrapper })
+    await waitFor(() => expect(result.current.results.length).toBe(2))
+    expect(result.current.results.map((r) => r.artifact_id)).toEqual(["hot", "warm"])
+  })
+
   it("manages manual search", async () => {
     const wrapper = createWrapper()
     const { result } = renderHook(() => useKBContext("original query"), { wrapper })

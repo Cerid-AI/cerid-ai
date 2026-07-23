@@ -328,11 +328,15 @@ def degradation_status() -> dict:
     base["uptime_seconds"] = int(time.time() - _start_time)
     base.setdefault("features", {})
 
-    # Pipeline provider routing — tells the frontend which tasks use local models
-    import config
-    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
-    ollama_reachable = base.get("ollama", {}).get("reachable", False)
-    is_local = provider == "ollama" and ollama_reachable
+    # Pipeline provider routing — tells the frontend which tasks use local models.
+    # E1 CR-024: resolve the provider + local-ness through the one authority so a
+    # quenchforge deployment (also local, on :11434) is not reported as cloud.
+    # This table is a *configuration* signal (which provider is set to serve each
+    # stage); daemon liveness is surfaced separately (degradation_tier +
+    # inference_routing's inference_health annotation), so it does not gate here.
+    from core.routing.provider_state import active_provider, is_local_provider
+    provider = active_provider()
+    is_local = is_local_provider(provider)
     base["pipeline_providers"] = {
         "claim_extraction": provider if is_local else "openrouter",
         "query_decomposition": provider if is_local else "openrouter",
@@ -359,6 +363,17 @@ def degradation_status() -> dict:
         base["inference"] = inference_health_payload()
     except Exception as exc:
         log_swallowed_error("app.routers.health.inference_health_payload", exc)
+
+    # E1 CR-023: surface the local-LLM/rerank fallback degradation the /health
+    # inference_routing snapshot records. /health/status previously omitted it, so
+    # a GUI polling this endpoint could not show a live serving!=configured
+    # fallback (pipeline_providers above is config-intent, not runtime liveness).
+    try:
+        from core.utils.inference_routing import get_routing_snapshot
+        base["inference_routing"] = get_routing_snapshot()
+    except Exception as exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.degradation_inference_routing", exc)
+        base.setdefault("inference_routing", {})
 
     # OpenRouter auth probe — runs on extended health only (15s poll interval)
     # Cached for 30s to avoid hammering the OpenRouter auth endpoint.

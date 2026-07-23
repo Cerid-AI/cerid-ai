@@ -263,3 +263,50 @@ describe("useSettings", () => {
     })
   })
 })
+
+describe("useSettings — private mode reconciliation (E1 CR-020)", () => {
+  function routed(routes: Record<string, { ok?: boolean; status?: number; body: unknown }>) {
+    return vi.fn((url: string) => {
+      for (const [key, r] of Object.entries(routes)) {
+        if (url.includes(key)) {
+          return Promise.resolve({
+            ok: r.ok ?? true,
+            status: r.status ?? 200,
+            json: () => Promise.resolve(r.body),
+            text: () => Promise.resolve(JSON.stringify(r.body)),
+          })
+        }
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve("{}") })
+    })
+  }
+
+  it("reconciles a stale local private flag from the authoritative server", async () => {
+    // Local cache says private is OFF, but the global server flag is ON. The old
+    // code only hydrated when the local value was unset, so the stale "false"
+    // stuck and the client kept POSTing saves the server silently dropped.
+    localStorage.setItem("cerid-private-mode", "false")
+    localStorage.setItem("cerid-private-mode-level", "0")
+    vi.stubGlobal("fetch", routed({ "/settings/private-mode": { body: { level: 1 } } }))
+
+    const { result } = renderHook(() => useSettings())
+
+    await waitFor(() => expect(result.current.privateModeEnabled).toBe(true))
+    expect(result.current.privateModeLevel).toBe(1)
+    expect(localStorage.getItem("cerid-private-mode")).toBe("true")
+    expect(localStorage.getItem("cerid-private-mode-level")).toBe("1")
+  })
+
+  it("keeps the local private flag when the server errors (no flip to not-private)", async () => {
+    localStorage.setItem("cerid-private-mode", "true")
+    localStorage.setItem("cerid-private-mode-level", "1")
+    vi.stubGlobal("fetch", routed({ "/settings/private-mode": { ok: false, status: 500, body: {} } }))
+
+    const { result } = renderHook(() => useSettings())
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+
+    // Server errored → fetchPrivateMode threw → local (private) value preserved.
+    expect(result.current.privateModeEnabled).toBe(true)
+    expect(localStorage.getItem("cerid-private-mode")).toBe("true")
+  })
+})

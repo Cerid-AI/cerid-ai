@@ -152,6 +152,17 @@ describe("recommendModel", () => {
     expect(result.savingsVsCurrent).toBeGreaterThanOrEqual(0)
   })
 
+  it("CR-054: flags a temporal correctness upgrade so it surfaces without savings", () => {
+    // A time-sensitive query on a non-web-search model routes to the web-search
+    // model as a correctness upgrade — marked so the banner isn't suppressed by
+    // the savings threshold even though it costs more.
+    const nonSearch = MODELS.find((m) => !m.capabilities?.webSearch)!
+    const result = recommendModel("what's the latest news today?", nonSearch, emptyMessages, 0)
+    expect(result.model.capabilities?.webSearch).toBe(true)
+    expect(result.model.id).not.toBe(nonSearch.id)
+    expect(result.correctnessUpgrade).toBe(true)
+  })
+
   it("reasoning contains score or optimal note", () => {
     const result = recommendModel("hello", defaultModel, emptyMessages, 0)
     expect(result.reasoning).toMatch(/score|optimal/)
@@ -208,7 +219,7 @@ describe("recommendModel", () => {
       "high",
     )
     // Grok has webSearch: true — should be preferred
-    const grok = MODELS.find((m) => m.id === "openrouter/x-ai/grok-4.1-fast")!
+    const grok = MODELS.find((m) => m.id === "openrouter/x-ai/grok-4.5")!
     expect(result.model.id).toBe(grok.id)
   })
 })

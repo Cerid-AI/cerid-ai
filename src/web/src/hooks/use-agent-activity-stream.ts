@@ -127,6 +127,15 @@ export function useAgentActivityStream(
 
       es.onopen = () => {
         if (cancelled) return
+        // A successful (re)connect is proof of health — reset the back-off
+        // counter here, not only in onmessage. On an idle console the only
+        // traffic is named `heartbeat` events that never reach onmessage, so
+        // without this reset transient reconnects accumulate to a permanent
+        // "unavailable" even though the stream is healthy (CR-048).
+        if (retryCountRef.current !== 0) {
+          retryCountRef.current = 0
+          setRetryCount(0)
+        }
         setStatus("open")
         setError(null)
       }

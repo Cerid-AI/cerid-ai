@@ -14,7 +14,6 @@ from langgraph.graph import END, StateGraph
 
 import config
 from app.parsers import PARSER_REGISTRY, parse_file
-from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata
 
 logger = logging.getLogger("ai-companion.triage")
@@ -168,19 +167,11 @@ def extract_metadata_node(state: TriageStateDict) -> TriageStateDict:
     return {**state, "metadata": merged}
 
 
-def chunk_node(state: TriageStateDict) -> TriageStateDict:
-    """Chunk the parsed text for vector storage."""
-    text = state.get("parsed_text", "")
-    ctx_header = make_context_header(
-        filename=state.get("filename", ""),
-        domain=state.get("domain", ""),
-        sub_category=state.get("metadata", {}).get("sub_category", ""),
-    )
-    chunks = chunk_text(
-        text, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
-        context_header=ctx_header,
-    )
-    return {**state, "chunks": chunks}
+# E1 CR-063: the former ``chunk_node`` was removed — it ran ``chunk_text`` over
+# the parsed text and stashed the result in ``state["chunks"]``, but every
+# consumer of the triage graph feeds ``parsed_text`` to ``ingest_content`` (which
+# re-chunks), so the triage-side chunks were computed and then discarded. Triage
+# is a route/categorize step; chunking belongs to ingestion.
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +208,7 @@ def build_triage_graph() -> StateGraph:
     Build the LangGraph triage workflow.
 
     Flow:
-        validate -> parse -> route_categorization -> [categorize?] -> extract_metadata -> chunk -> END
+        validate -> parse -> route_categorization -> [categorize?] -> extract_metadata -> END
 
     Error handling: any node can set status="error", routing to error_end.
     """
@@ -229,7 +220,6 @@ def build_triage_graph() -> StateGraph:
     graph.add_node("route_categorization", route_categorization)  # type: ignore[type-var]
     graph.add_node("categorize", categorize_node)  # type: ignore[type-var]
     graph.add_node("extract_metadata", extract_metadata_node)  # type: ignore[type-var]
-    graph.add_node("chunk", chunk_node)  # type: ignore[type-var]
     graph.add_node("error_end", lambda state: state)  # type: ignore[type-var]
 
     # Set entry point
@@ -249,8 +239,7 @@ def build_triage_graph() -> StateGraph:
         "extract_metadata": "extract_metadata",
     })
     graph.add_edge("categorize", "extract_metadata")
-    graph.add_edge("extract_metadata", "chunk")
-    graph.add_edge("chunk", END)
+    graph.add_edge("extract_metadata", END)
     graph.add_edge("error_end", END)
 
     return graph

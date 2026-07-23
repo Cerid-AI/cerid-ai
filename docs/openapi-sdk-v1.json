@@ -56,7 +56,7 @@
                 "type": "null"
               }
             ],
-            "description": "User cost preference: 'low' | 'medium' | 'high'. When None the server resolves it from the consumer registry (Task 17).",
+            "description": "Cost preference: 'low' | 'medium' | 'high'. When None it is resolved via the request -> consumer-registry -> persisted COST_SENSITIVITY chain (app.services.request_policy.resolve_cost_sensitivity, E1 CR-028). Retrieval ranking itself is not cost-routed; the resolved value steers LLM model selection on the chat/generation paths.",
             "title": "Cost Sensitivity"
           },
           "domains": {

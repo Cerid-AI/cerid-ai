@@ -544,10 +544,14 @@ class TestAgentQuery:
             )
 
         required = {"context", "sources", "confidence", "domains_searched",
-                     "total_results", "token_budget_used", "graph_results", "results"}
+                     "total_results", "token_budget_used", "graph_results", "results",
+                     "execution_time_ms"}
         assert required.issubset(set(response.keys()))
         assert response["total_results"] == 1
         assert isinstance(response["confidence"], float)
+        # CR-039: a real wall-clock, not the permanent 0ms the FE used to show.
+        assert isinstance(response["execution_time_ms"], int)
+        assert response["execution_time_ms"] >= 0
 
     @patch("core.agents.query_agent.log_event")
     @patch("core.agents.query_agent.rerank_results")

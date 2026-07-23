@@ -163,15 +163,11 @@ export function useOrchestratedQuery(
     [sourceBreakdown, externalEnabled],
   )
 
-  // Filtered results (same relevance threshold as use-kb-context)
-  const MIN_RELEVANCE = 0.35
-  const filteredResults = useMemo(() => {
-    const raw = data?.results ?? []
-    if (raw.some((r) => r.relevance > 0)) {
-      return raw.filter((r) => r.relevance >= MIN_RELEVANCE)
-    }
-    return raw
-  }, [data])
+  // No client-side absolute floor: the backend floors on its calibrated
+  // retrieval scale pre-rerank and returns a ranked set, then rerank replaces
+  // `relevance` with an ordinal cross-encoder sigmoid. An absolute FE threshold
+  // on that ordinal score re-created the emptied-envelope bug (CR-010).
+  const filteredResults = useMemo(() => data?.results ?? [], [data])
 
   return {
     results: filteredResults,

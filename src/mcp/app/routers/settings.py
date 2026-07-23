@@ -767,11 +767,15 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
                     f"Must be one of {valid_internal}"
                 ),
             )
-        os.environ["INTERNAL_LLM_PROVIDER"] = req.internal_llm_provider
-        config.INTERNAL_LLM_PROVIDER = req.internal_llm_provider  # type: ignore[attr-defined]
+        # E1 CR-089: route through the write authority so OLLAMA_ENABLED stays
+        # coherent with the active provider — pre-fix this wrote INTERNAL_LLM_PROVIDER
+        # env+attr but never OLLAMA_ENABLED, so choosing 'ollama' split dispatch.
+        from core.routing.provider_state import set_active_provider
+        set_active_provider(req.internal_llm_provider, req.internal_llm_model)
         updated["internal_llm_provider"] = req.internal_llm_provider
-
-    if req.internal_llm_model is not None:
+        if req.internal_llm_model is not None:
+            updated["internal_llm_model"] = req.internal_llm_model
+    elif req.internal_llm_model is not None:
         os.environ["INTERNAL_LLM_MODEL"] = req.internal_llm_model
         config.INTERNAL_LLM_MODEL = req.internal_llm_model  # type: ignore[attr-defined]
         updated["internal_llm_model"] = req.internal_llm_model
@@ -901,9 +905,14 @@ async def set_private_mode(req: PrivateModeRequest):
 
 @router.delete("/settings/private-mode", response_model=ResetPrivateModeResponse)
 async def reset_private_mode():
-    """Reset private mode to level 0 (disabled)."""
+    """Reset private mode to level 0 (disabled).
+
+    E1 R13: store explicit ``0`` instead of deleting the key — key-deletion
+    made seed_private_mode_from_env treat "off" as "unset" and re-apply the
+    env level on restart, contradicting the runtime off choice.
+    """
     redis = get_redis()
-    redis.delete(_PRIVATE_MODE_KEY)
+    redis.set(_PRIVATE_MODE_KEY, "0")
     logger.info("Private mode reset to 0")
     return {"level": 0}
 
@@ -989,6 +998,7 @@ async def wipe_private_session(req: SessionWipeRequest):
             req.conversation_id,
             sync_dir=_sync_dir() or None,
             neo4j_driver=neo4j_driver,
+            redis_client=get_redis(),
         )
     except Exception as exc:
         log_swallowed_error("session_wipe.orchestrator", exc, context={"conversation_id": req.conversation_id})

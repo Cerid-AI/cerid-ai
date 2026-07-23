@@ -50,6 +50,7 @@ from core.agents.hallucination.patterns import (  # noqa: F401
 from core.agents.hallucination.persistence import (  # noqa: F401
     REDIS_HALLUCINATION_PREFIX,
     REDIS_HALLUCINATION_TTL,
+    delete_hallucination_report,
     get_hallucination_report,
 )
 
@@ -101,6 +102,7 @@ __all__ = [
     "verify_response_streaming",
     "verify_claim",
     "verify_claims",
+    "delete_hallucination_report",
     "get_hallucination_report",
     # Enums
     "NLIUse",

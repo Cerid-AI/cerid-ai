@@ -528,11 +528,14 @@ export function ChatToolbar({
               </MenuCheckboxItem>
               <MenuSeparator />
               <MenuLabel>Injection threshold</MenuLabel>
+              {/* Values are fractions of the top match's score, not absolute
+                  relevance: post-rerank scores are ordinal, so an absolute floor
+                  could suppress a correct top match (CR-010). */}
               {[
-                { value: 0.10, label: "Broad — include loosely related docs" },
-                { value: 0.15, label: "Standard — balanced relevance" },
-                { value: 0.25, label: "Focused — only highly relevant" },
-                { value: 0.40, label: "Strict — exact matches only" },
+                { value: 0.10, label: "Broad — loosely related to the top match" },
+                { value: 0.15, label: "Standard — balanced vs the top match" },
+                { value: 0.25, label: "Focused — close to the top match" },
+                { value: 0.40, label: "Strict — near the top match only" },
               ].map((t) => (
                 <MenuRadioItem key={t.value} checked={autoInjectThreshold === t.value} onClick={() => setAutoInjectThreshold(t.value)}>
                   {t.label}

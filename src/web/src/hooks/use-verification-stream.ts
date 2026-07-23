@@ -308,13 +308,18 @@ export function useVerificationStream(
               if (cancelled) break
 
               switch (event.type) {
-                case "extraction_complete":
+                case "extraction_complete": {
                   setExtractionMethod(event.method ?? null)
                   setPhase("verifying")
                   hasReceivedEventsRef.current = true
-                  logEntry(`Extracted ${extractedClaimCount} claim${extractedClaimCount !== 1 ? "s" : ""} (${event.method ?? "unknown"})`, "info")
+                  // extraction_complete carries the real claim count and fires
+                  // BEFORE the per-claim claim_extracted events, so the local
+                  // counter is still 0 here — read event.count (CR-078).
+                  const claimCount = event.count ?? extractedClaimCount
+                  logEntry(`Extracted ${claimCount} claim${claimCount !== 1 ? "s" : ""} (${event.method ?? "unknown"})`, "info")
                   logEntry("Querying knowledge base...", "info")
                   break
+                }
 
                 case "claim_extracted":
                   extractedClaimCount++
@@ -433,6 +438,17 @@ export function useVerificationStream(
                           : c
                       }),
                     )
+                  }
+                  break
+
+                case "persisted":
+                  // E1 CR-065: the backend emits this after attempting the durable
+                  // Neo4j save. Surface a failure so a silent persist error is
+                  // visible in the log instead of dropped — the verdicts are shown
+                  // but were not saved for later revisits. success:true is the
+                  // quiet happy path.
+                  if (event.success === false) {
+                    logEntry("Report not saved — persistence failed (verdicts shown but not stored)", "error")
                   }
                   break
 

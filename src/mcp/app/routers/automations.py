@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.deps import get_redis
+from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
@@ -218,14 +218,31 @@ async def execute_automation(automation: Automation) -> AutomationRun:
     start = time.time()
     try:
         # Run query through agent pipeline
-        from core.agents.query_agent import agent_query  # retrieval-import-allowed: INGEST path stays KB-only
-
-        result = await agent_query(
-            query=automation.prompt,
-            domains=automation.domains if automation.domains else None,
-            top_k=10,
-            use_reranking=True,
+        from app.concurrency import KB_POOL
+        from app.services.request_policy import build_request_context
+        from core.agents.guarded_retrieval import (
+            guarded_agent_query_full,  # retrieval-import-allowed: automation runs the KB query pipeline
         )
+
+        # E1 Phase 1 / CR-002: route through the guarded seam WITH store clients
+        # (the prior agent_query call passed none, so multi_domain_query raised
+        # "chroma_client is required" on every run and the feature was dark).
+        # external_augmentation stays off — automations remain KB-only.
+        # E1 CR-096: gate under KB_POOL like /agent/query + A2A (CR-091) so a burst
+        # of scheduled automations cannot starve /health + /observability.
+        async with KB_POOL.acquire():
+            result = await guarded_agent_query_full(
+                request_context=build_request_context(),
+                query=automation.prompt,
+                domains=automation.domains if automation.domains else None,
+                top_k=10,
+                use_reranking=True,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                graph_store=get_graph_store(),
+                external_augmentation=False,
+            )
 
         # Handle action type
         if automation.action == AutomationAction.INGEST:

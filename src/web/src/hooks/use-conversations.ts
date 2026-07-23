@@ -12,8 +12,12 @@ import {
 } from "@/lib/api"
 
 const STORAGE_KEY = "cerid-conversations"
+// Delete tombstones: ids whose local delete hasn't been acked by the server.
+// Persisted so a failed/remote-replica delete can't resurrect on mount (CR-092).
+const TOMBSTONE_KEY = "cerid-conversation-tombstones"
 const MAX_CONVERSATIONS = 50
-const SAVE_DEBOUNCE_MS = 500
+const LOCAL_DEBOUNCE_MS = 500
+const SERVER_DEBOUNCE_MS = 2000
 
 /** Read private mode flag from localStorage (avoids cross-hook coupling). */
 function isPrivateModeActive(): boolean {
@@ -77,6 +81,26 @@ function saveConversations(convos: Conversation[]) {
   }
 }
 
+function loadTombstones(): Set<string> {
+  try {
+    const raw = localStorage.getItem(TOMBSTONE_KEY)
+    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveTombstones(ids: Set<string>) {
+  try {
+    localStorage.setItem(TOMBSTONE_KEY, JSON.stringify([...ids]))
+  } catch {
+    // localStorage may be full or unavailable
+  }
+}
+
+/** A queued server mutation for one conversation id. */
+type ServerOp = { kind: "upsert"; convo: Conversation } | { kind: "delete" }
+
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -104,56 +128,132 @@ export function useConversations() {
     })
   }, [])
 
-  // Debounced save: flushes to localStorage at most every SAVE_DEBOUNCE_MS.
-  // Immediate saves (create, delete, model change) call saveConversations directly.
-  // High-frequency updates (streaming chunks) use debouncedSave.
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingRef = useRef<Conversation[] | null>(null)
+  // ── Persistence coordinator ─────────────────────────────────────────────
+  // Single owner of localStorage + server sync for every mutator. Each mutator
+  // reduces to a pure state update plus `persist(next, …)`: one localStorage
+  // channel and a per-id server queue. This replaces the old scatter where
+  // some mutators synced and others didn't (CR-060/CR-110), a single-slot
+  // server debounce dropped syncs (CR-083), a stale debounced snapshot could
+  // clobber an immediate write (CR-101), and deletes left no tombstone (CR-092).
 
-  const debouncedSave = useCallback((convos: Conversation[]) => {
-    pendingRef.current = convos
-    if (!saveTimerRef.current) {
-      saveTimerRef.current = setTimeout(() => {
-        saveTimerRef.current = null
-        if (pendingRef.current) {
-          saveConversations(pendingRef.current)
-          pendingRef.current = null
-        }
-      }, SAVE_DEBOUNCE_MS)
+  // Delete tombstones — persisted; consulted by the mount merge so a deleted
+  // conversation can't be re-added from a server replica (CR-092).
+  const tombstonesRef = useRef<Set<string>>(loadTombstones())
+
+  const addTombstone = useCallback((id: string) => {
+    if (!tombstonesRef.current.has(id)) {
+      tombstonesRef.current.add(id)
+      saveTombstones(tombstonesRef.current)
     }
   }, [])
 
-  // Cloud sync: fire-and-forget server persistence (debounced for streaming)
-  const serverSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingServerSyncRef = useRef<Conversation | null>(null)
-
-  const syncToServer = useCallback((convo: Conversation) => {
-    // Skip server sync in private mode — conversations stay local only
-    if (isPrivateModeActive()) return
-    pendingServerSyncRef.current = convo
-    if (!serverSyncTimerRef.current) {
-      serverSyncTimerRef.current = setTimeout(() => {
-        serverSyncTimerRef.current = null
-        const pending = pendingServerSyncRef.current
-        if (pending) {
-          pendingServerSyncRef.current = null
-          syncConversation(pending).catch(() => { /* fire-and-forget */ })
-        }
-      }, 2000)
+  const clearTombstone = useCallback((id: string) => {
+    if (tombstonesRef.current.delete(id)) {
+      saveTombstones(tombstonesRef.current)
     }
   }, [])
 
-  // Flush any pending save on unmount
+  // localStorage channel — one debounce timer. `flushLocalNow` cancels the
+  // pending timer before writing, so a stale streaming snapshot can never fire
+  // after (and revert) a delete/archive (CR-101). The timer always persists the
+  // freshest snapshot handed to `scheduleLocal`.
+  const localTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const localPendingRef = useRef<Conversation[] | null>(null)
+
+  const flushLocalNow = useCallback((convos: Conversation[]) => {
+    if (localTimerRef.current) {
+      clearTimeout(localTimerRef.current)
+      localTimerRef.current = null
+    }
+    localPendingRef.current = null
+    saveConversations(convos)
+  }, [])
+
+  const scheduleLocal = useCallback((convos: Conversation[]) => {
+    localPendingRef.current = convos
+    if (!localTimerRef.current) {
+      localTimerRef.current = setTimeout(() => {
+        localTimerRef.current = null
+        if (localPendingRef.current) {
+          saveConversations(localPendingRef.current)
+          localPendingRef.current = null
+        }
+      }, LOCAL_DEBOUNCE_MS)
+    }
+  }, [])
+
+  // Server channel — per-id debounced flush (a Map, not one shared slot), so a
+  // second conversation syncing inside the window can't drop the first's
+  // pending sync (CR-083). Private mode is resolved at flush time and applies
+  // symmetrically to upserts AND deletes — private means local-only, so neither
+  // leaves the browser (CR-061). Local tombstones still suppress resurrection.
+  const serverTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const serverPendingRef = useRef<Map<string, ServerOp>>(new Map())
+
+  const flushServer = useCallback((id: string) => {
+    const timer = serverTimersRef.current.get(id)
+    if (timer) {
+      clearTimeout(timer)
+      serverTimersRef.current.delete(id)
+    }
+    const op = serverPendingRef.current.get(id)
+    serverPendingRef.current.delete(id)
+    if (!op) return
+    if (isPrivateModeActive()) return  // local-only; symmetric for upsert + delete
+    if (op.kind === "delete") {
+      deleteConversationSync(id)
+        .then(() => clearTombstone(id))         // server acked → forget the tombstone
+        .catch(() => { /* keep tombstone; retried by the mount merge */ })
+    } else {
+      syncConversation(op.convo).catch(() => { /* fire-and-forget; mount merge re-pushes */ })
+    }
+  }, [clearTombstone])
+
+  const enqueueServer = useCallback((id: string, op: ServerOp, immediate = false) => {
+    serverPendingRef.current.set(id, op)  // latest op per id wins
+    if (immediate) {
+      flushServer(id)
+      return
+    }
+    if (!serverTimersRef.current.has(id)) {
+      serverTimersRef.current.set(id, setTimeout(() => flushServer(id), SERVER_DEBOUNCE_MS))
+    }
+  }, [flushServer])
+
+  // Persist a post-mutation state: localStorage (immediate for structural
+  // changes, debounced for high-frequency streaming) + an optional server op.
+  const persist = useCallback((
+    next: Conversation[],
+    opts: { convoId?: string; server?: ServerOp; streaming?: boolean; immediateServer?: boolean } = {},
+  ) => {
+    if (opts.streaming) scheduleLocal(next)
+    else flushLocalNow(next)
+    if (opts.convoId && opts.server) enqueueServer(opts.convoId, opts.server, opts.immediateServer)
+  }, [scheduleLocal, flushLocalNow, enqueueServer])
+
+  // Flush any pending local write + drain queued server ops on unmount. The
+  // timer/queue Maps are created once and never reassigned, so capturing them
+  // at setup is identical to reading the refs in cleanup.
   useEffect(() => {
+    const serverTimers = serverTimersRef.current
+    const serverPending = serverPendingRef.current
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      if (pendingRef.current) saveConversations(pendingRef.current)
-      if (serverSyncTimerRef.current) clearTimeout(serverSyncTimerRef.current)
-      if (pendingServerSyncRef.current) {
-        syncConversation(pendingServerSyncRef.current).catch(() => {})
+      if (localTimerRef.current) clearTimeout(localTimerRef.current)
+      if (localPendingRef.current) saveConversations(localPendingRef.current)
+      for (const timer of serverTimers.values()) clearTimeout(timer)
+      if (!isPrivateModeActive()) {
+        for (const [id, op] of serverPending) {
+          if (op.kind === "delete") {
+            deleteConversationSync(id).then(() => clearTombstone(id)).catch(() => {})
+          } else {
+            syncConversation(op.convo).catch(() => {})
+          }
+        }
       }
+      serverTimers.clear()
+      serverPending.clear()
     }
-  }, [])
+  }, [clearTombstone])
 
   const create = useCallback((model: string) => {
     const convo: Conversation = {
@@ -164,17 +264,17 @@ export function useConversations() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
+    // A brand-new id can't be a deleted one; drop any stale tombstone.
+    clearTombstone(convo.id)
     setConversations((prev) => {
       const next = [convo, ...prev]
-      saveConversations(next)
-      if (!isPrivateModeActive()) {
-        syncConversation(convo).catch(() => { /* fire-and-forget */ })
-      }
+      flushLocalNow(next)
       return next
     })
     setActiveId(convo.id)
+    enqueueServer(convo.id, { kind: "upsert", convo }, true)
     return convo.id
-  }, [])
+  }, [clearTombstone, flushLocalNow, enqueueServer])
 
   const addMessage = useCallback((convoId: string, message: ChatMessage) => {
     setConversations((prev) => {
@@ -186,12 +286,11 @@ export function useConversations() {
           : c.title
         return { ...c, messages, title, updatedAt: Date.now() }
       })
-      saveConversations(next)
       const updated = next.find((c) => c.id === convoId)
-      if (updated) syncToServer(updated)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       return next
     })
-  }, [syncToServer])
+  }, [persist])
 
   const updateLastMessage = useCallback((convoId: string, content: string) => {
     setConversations((prev) => {
@@ -203,12 +302,11 @@ export function useConversations() {
         }
         return { ...c, messages, updatedAt: Date.now() }
       })
-      debouncedSave(next)
       const updated = next.find((c) => c.id === convoId)
-      if (updated) syncToServer(updated)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined, streaming: true })
       return next
     })
-  }, [debouncedSave, syncToServer])
+  }, [persist])
 
   const updateLastMessageModel = useCallback((convoId: string, model: string) => {
     setConversations((prev) => {
@@ -221,26 +319,32 @@ export function useConversations() {
         }
         return { ...c, messages, updatedAt: Date.now() }
       })
-      debouncedSave(next)
+      // Route through the server too — model-fallback attribution on an aborted
+      // stream was previously localStorage-only and never reached the server (CR-110).
+      const updated = next.find((c) => c.id === convoId)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined, streaming: true })
       return next
     })
-  }, [debouncedSave])
+  }, [persist])
 
   const updateModel = useCallback((convoId: string, model: string) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
         c.id === convoId ? { ...c, model, updatedAt: Date.now() } : c
       )
-      saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       return next
     })
-  }, [])
+  }, [persist])
 
   const remove = useCallback((convoId: string) => {
+    // Tombstone before the delete so a failed/remote-replica DELETE can't
+    // resurrect this conversation on the next mount merge (CR-092).
+    addTombstone(convoId)
     setConversations((prev) => {
       const next = prev.filter((c) => c.id !== convoId)
-      saveConversations(next)
-      deleteConversationSync(convoId).catch(() => { /* fire-and-forget */ })
+      flushLocalNow(next)
       // Derive next active ID from fresh state (avoids stale closure)
       setActiveId((currentId) => {
         if (currentId !== convoId) return currentId
@@ -248,27 +352,55 @@ export function useConversations() {
       })
       return next
     })
-  }, [])
+    enqueueServer(convoId, { kind: "delete" }, true)
+  }, [addTombstone, flushLocalNow, enqueueServer])
 
   const replaceMessages = useCallback((convoId: string, newMessages: ChatMessage[]) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
         c.id === convoId ? { ...c, messages: newMessages, updatedAt: Date.now() } : c,
       )
-      saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       return next
     })
-  }, [])
+  }, [persist])
+
+  /** Apply a compressed history summary, preserving any messages appended after
+   *  the snapshot the compression ran on (e.g. the in-flight turn). Reads the
+   *  conversation's CURRENT messages atomically here, so a compression that
+   *  resolves after the turn advanced replaces only the summarized prefix
+   *  instead of wholesale-overwriting and wiping the live turn (CR-003). */
+  const mergeCompressedHistory = useCallback(
+    (convoId: string, compressed: ChatMessage[], originalCount: number) => {
+      setConversations((prev) => {
+        const target = prev.find((c) => c.id === convoId)
+        // Skip if the list shrank below the snapshot (cleared/replaced under us)
+        // — the compression is stale; don't corrupt the conversation.
+        if (!target || target.messages.length < originalCount) return prev
+        const tail = target.messages.slice(originalCount)
+        const merged = [...compressed, ...tail]
+        const next = prev.map((c) =>
+          c.id === convoId ? { ...c, messages: merged, updatedAt: Date.now() } : c,
+        )
+        const updated = next.find((c) => c.id === convoId)
+        persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
+        return next
+      })
+    },
+    [persist],
+  )
 
   const clearMessages = useCallback((convoId: string) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
         c.id === convoId ? { ...c, messages: [], updatedAt: Date.now() } : c,
       )
-      saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       return next
     })
-  }, [])
+  }, [persist])
 
   /** Persist a verification report for a specific message in localStorage. */
   const saveVerification = useCallback((convoId: string, msgId: string, report: HallucinationReport | null) => {
@@ -283,12 +415,11 @@ export function useConversations() {
         }
         return { ...c, verificationReports: reports, updatedAt: Date.now() }
       })
-      saveConversations(next)
       const updated = next.find((c) => c.id === convoId)
-      if (updated) syncToServer(updated)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       return next
     })
-  }, [syncToServer])
+  }, [persist])
 
   /** Get the stored verification report for a specific message. */
   const getVerification = useCallback((convoId: string, msgId: string): HallucinationReport | null => {
@@ -314,19 +445,19 @@ export function useConversations() {
       const next = prev.map((c) =>
         c.id === convoId ? { ...c, title: newTitle, updatedAt: Date.now() } : c
       )
-      saveConversations(next)
       const updated = next.find((c) => c.id === convoId)
-      if (updated) syncToServer(updated)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       return next
     })
-  }, [syncToServer])
+  }, [persist])
 
   const archive = useCallback((convoId: string) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
         c.id === convoId ? { ...c, archived: true, updatedAt: Date.now() } : c
       )
-      saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       setActiveId((currentId) => {
         if (currentId !== convoId) return currentId
         const firstActive = next.find((c) => !c.archived)
@@ -334,17 +465,18 @@ export function useConversations() {
       })
       return next
     })
-  }, [])
+  }, [persist])
 
   const unarchive = useCallback((convoId: string) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
         c.id === convoId ? { ...c, archived: false, updatedAt: Date.now() } : c
       )
-      saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
       return next
     })
-  }, [])
+  }, [persist])
 
   const archivedCount = useMemo(
     () => conversations.filter((c) => c.archived).length,
@@ -362,19 +494,18 @@ export function useConversations() {
   const bulkDelete = useCallback((ids: string[]) => {
     if (ids.length === 0) return
     const idSet = new Set(ids)
+    for (const id of ids) addTombstone(id)
     setConversations((prev) => {
       const next = prev.filter((c) => !idSet.has(c.id))
-      saveConversations(next)
-      for (const id of ids) {
-        deleteConversationSync(id).catch(() => {})
-      }
+      flushLocalNow(next)
       setActiveId((currentId) => {
         if (!currentId || !idSet.has(currentId)) return currentId
         return next[0]?.id ?? null
       })
       return next
     })
-  }, [])
+    for (const id of ids) enqueueServer(id, { kind: "delete" }, true)
+  }, [addTombstone, flushLocalNow, enqueueServer])
 
   const bulkArchive = useCallback((ids: string[]) => {
     if (ids.length === 0) return
@@ -383,7 +514,10 @@ export function useConversations() {
       const next = prev.map((c) =>
         idSet.has(c.id) ? { ...c, archived: true, updatedAt: Date.now() } : c
       )
-      saveConversations(next)
+      flushLocalNow(next)
+      for (const c of next) {
+        if (idSet.has(c.id)) enqueueServer(c.id, { kind: "upsert", convo: c })
+      }
       setActiveId((currentId) => {
         if (!currentId || !idSet.has(currentId)) return currentId
         const firstActive = next.find((c) => !c.archived)
@@ -391,7 +525,7 @@ export function useConversations() {
       })
       return next
     })
-  }, [])
+  }, [flushLocalNow, enqueueServer])
 
   // Hydrate from server on mount — per-conversation version-vector merge
   // (audit F-7). For each ID we compare `updatedAt` on both sides:
@@ -401,9 +535,11 @@ export function useConversations() {
   //   - local newer      → push local record to server (existing
   //                         fire-and-forget semantics)
   //   - equal/unset      → no-op
-  // Without this, the first local edit on any machine permanently shadowed
-  // changes from other machines because the previous merge only accepted
-  // server-only records.
+  // A tombstoned id (locally deleted, delete not yet acked) is never re-added;
+  // the delete is re-attempted instead. A tombstone is only cleared when the
+  // server actually acks the delete (flushServer's success path) — NOT when a
+  // fetch merely omits the id, since an empty/partial response is ambiguous and
+  // would drop a still-needed tombstone, resurrecting the conversation (CR-092).
   const serverHydratedRef = useRef(false)
   useEffect(() => {
     if (serverHydratedRef.current) return
@@ -412,12 +548,19 @@ export function useConversations() {
     fetchSyncedConversations()
       .then((serverConvos) => {
         setConversations((local) => {
+          const tombstones = tombstonesRef.current
           const byId = new Map(local.map((c) => [c.id, c] as const))
           const serverIds = new Set<string>()
           let changed = false
 
           for (const sc of serverConvos) {
             serverIds.add(sc.id)
+            if (tombstones.has(sc.id)) {
+              // Deleted locally but the server still has it → re-attempt the
+              // delete and do NOT resurrect the record.
+              enqueueServer(sc.id, { kind: "delete" })
+              continue
+            }
             const existing = byId.get(sc.id)
             if (!existing) {
               byId.set(sc.id, sc)
@@ -436,10 +579,11 @@ export function useConversations() {
             }
           }
 
-          // Push any local-only conversations the server is missing.
+          // Push any local-only conversations the server is missing (never a
+          // tombstoned id — that would re-create what we just deleted).
           if (!isPrivateModeActive()) {
             for (const c of local) {
-              if (!serverIds.has(c.id)) {
+              if (!serverIds.has(c.id) && !tombstones.has(c.id)) {
                 syncConversation(c).catch(() => { /* fire-and-forget */ })
               }
             }
@@ -454,12 +598,12 @@ export function useConversations() {
         })
       })
       .catch(() => { /* Server unavailable */ })
-  }, [])
+  }, [enqueueServer])
 
   return {
     conversations, visibleConversations, active, activeId, setActiveId,
     create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove, rename,
-    replaceMessages, clearMessages,
+    replaceMessages, mergeCompressedHistory, clearMessages,
     verifiedConversations, markVerified, clearVerified,
     saveVerification, getVerification, getAllVerificationReports,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,

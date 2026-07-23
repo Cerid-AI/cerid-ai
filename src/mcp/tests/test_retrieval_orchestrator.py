@@ -177,6 +177,48 @@ class TestSmartMode:
         assert "memory" in sb
         assert "external" in sb
 
+    def test_smart_mode_honors_flatten_invariant(self):
+        """CR-055: results/sources must equal flatten(source_breakdown) so the
+        SDK, retrieval_ndcg, and the console see memory + external, not just KB."""
+        with (
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("app.agents.retrieval_orchestrator._query_external_sources", new_callable=AsyncMock, return_value=[]),
+        ):
+            mock_aq.return_value = _fake_kb_result()
+            mock_recall.return_value = _fake_memory_results()
+
+            result = _run(orchestrated_query(query="test", rag_mode="smart"))
+
+        sb = result["source_breakdown"]
+        flat = [*sb["kb"], *sb["memory"], *sb["external"]]
+        assert result["results"] == flat
+        assert result["sources"] == flat
+        assert result["total_results"] == len(flat)
+        # memory + external now visible in the flat pool (was KB-only before)
+        assert any(s.get("source_type") == "memory" for s in result["results"])
+        assert any(s.get("source_type") == "external" for s in result["results"])
+        # confidence is the mean relevance over the FULL pool
+        rels = [s.get("relevance", 0.0) for s in flat]
+        assert result["confidence"] == round(sum(rels) / len(rels), 4)
+
+    def test_smart_mode_kb_error_branch_ships_full_keys(self):
+        """CR-055: even when KB errors, the envelope carries sources / confidence
+        / total_results (not a 3-key partial dict), and memory still surfaces."""
+        with (
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock, side_effect=ValueError("boom")),
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock, return_value=_fake_memory_results()),
+            patch("app.agents.retrieval_orchestrator._query_external_sources", new_callable=AsyncMock, return_value=[]),
+        ):
+            result = _run(orchestrated_query(query="test", rag_mode="smart"))
+
+        assert {"sources", "confidence", "total_results"} <= set(result.keys())
+        # E1 CR-032: source_status not serialized; KB error still empties KB
+        # while memory surfaces via the flatten invariant (CR-055).
+        assert "source_status" not in result
+        assert result.get("strategy") == "error"
+        assert any(s.get("source_type") == "memory" for s in result["results"])
+
     def test_smart_mode_separates_external_from_kb(self):
         """External results (with source_url) should be in external, not kb."""
         with (

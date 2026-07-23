@@ -133,18 +133,32 @@ async def gated_synthesis(
     """
     # Lazy import keeps this module's import graph shallow (and avoids any
     # future cycle through core.utils.internal_llm).
-    from core.utils.internal_llm import call_internal_llm_stream
+    import httpx
+
+    from core.utils.internal_llm import call_internal_llm, call_internal_llm_stream
 
     parts: list[str] = []
-    async for piece in inline_nli_gate(
-        call_internal_llm_stream(
-            messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stage=stage,
-        ),
-        context=context,
-        on_suppress=on_suppress,
-    ):
-        parts.append(piece)
+    try:
+        async for piece in inline_nli_gate(
+            call_internal_llm_stream(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stage=stage,
+            ),
+            context=context,
+            on_suppress=on_suppress,
+        ):
+            parts.append(piece)
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+        # E1 CR-093: the local stream dropped mid-answer. Returning the partial
+        # would feed claims/citations computed over truncated text and present it
+        # as verified, so fall back to a COMPLETE non-streaming synthesis. Ungated
+        # is acceptable — a mid-stream failure means gating could not finish anyway,
+        # and the answer still gets post-hoc verification downstream.
+        log_swallowed_error("core.agents.hallucination.inline_gate.stream_fallback", exc)
+        full = await call_internal_llm(
+            messages, temperature=temperature, max_tokens=max_tokens, stage=stage,
+        )
+        return full.strip()
     return "".join(parts).strip()

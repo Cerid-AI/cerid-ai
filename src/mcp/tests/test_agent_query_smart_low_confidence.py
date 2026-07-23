@@ -1,18 +1,16 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression: ``/agent/query`` must bind ``low_confidence`` on the smart path.
+"""Regression: ``/agent/query`` smart path must not 500.
 
 Eval finding (2026-06-11): the smart / custom_smart branch called
 ``orchestrated_query`` and then fell straight through to
 ``result["low_confidence"] = _kb_low_conf`` — but ``_kb_low_conf`` was only
-assigned inside the *manual* branch. Every ``rag_mode="smart"`` request (the
-chat UI default — ``settings.rag_mode ?? "smart"``) raised
-``UnboundLocalError`` and returned HTTP 500, breaking RAG retrieval for the
-default configuration.
+assigned inside the *manual* branch. Every ``rag_mode="smart"`` request raised
+``UnboundLocalError`` and returned HTTP 500.
 
-These tests pin the contract end-to-end through the router so a future refactor
-that re-introduces the unbound-variable path is caught at PR time.
+E1 CR-032 removed the write-only ``low_confidence`` stamp entirely. These tests
+still pin that smart mode returns 200 without the UnboundLocalError path.
 """
 
 from __future__ import annotations
@@ -52,7 +50,6 @@ def _fake_orchestrated(results):
             "domains_searched": ["general"],
             "total_results": len(results),
             "results": results,
-            "source_status": {"kb": "ok"},
             "source_breakdown": {"kb": results, "memory": [], "external": []},
         }
 
@@ -60,8 +57,8 @@ def _fake_orchestrated(results):
 
 
 @pytest.mark.parametrize("rag_mode", ["smart", "custom_smart"])
-def test_smart_mode_does_not_crash_and_binds_low_confidence(client, rag_mode):
-    """smart / custom_smart return 200 with ``low_confidence`` present."""
+def test_smart_mode_returns_200_without_unbound_local(client, rag_mode):
+    """smart / custom_smart return 200 (the UnboundLocalError path is gone)."""
     strong = [{"relevance": 0.85, "content": "strong hit"}]
     with patch(
         "app.agents.retrieval_orchestrator.orchestrated_query",
@@ -74,14 +71,14 @@ def test_smart_mode_does_not_crash_and_binds_low_confidence(client, rag_mode):
 
     assert res.status_code == 200, res.text
     body = res.json()
-    # The bug returned {"detail": "cannot access local variable '_kb_low_conf'..."}.
-    assert "low_confidence" in body, f"low_confidence missing for {rag_mode}: {body}"
-    # Strong KB hit → not low-confidence.
-    assert body["low_confidence"] is False
+    # Must not be the UnboundLocalError 500 payload.
+    assert "detail" not in body or "UnboundLocal" not in str(body.get("detail", ""))
+    # E1 CR-032: write-only stamp removed.
+    assert "low_confidence" not in body
 
 
-def test_smart_mode_weak_kb_marks_low_confidence(client):
-    """A weak/empty orchestrated result still binds low_confidence = True."""
+def test_smart_mode_weak_kb_still_200(client):
+    """A weak/empty orchestrated result returns 200 without low_confidence stamp."""
     with patch(
         "app.agents.retrieval_orchestrator.orchestrated_query",
         new=_fake_orchestrated([]),
@@ -92,4 +89,4 @@ def test_smart_mode_weak_kb_marks_low_confidence(client):
         )
 
     assert res.status_code == 200, res.text
-    assert res.json()["low_confidence"] is True
+    assert "low_confidence" not in res.json()

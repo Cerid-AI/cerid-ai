@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from core.retrieval.semantic_cache import (
+    _LAST_INVALIDATED_KEY,
     cache_lookup,
     cache_store,
     flush_cache,
@@ -196,6 +197,23 @@ class TestCacheLookup:
 
         cache_store("query one", emb1, {"answer": "yes", "sources": [{"filename": "y.md"}]}, redis, ttl=300)
         assert cache_lookup(emb2, redis, threshold=0.99) is None
+
+    def test_stale_hit_is_not_served(self, _reset_backend):
+        """CR-046: a candidate stored before the last invalidation watermark must
+        NOT be served — it's evicted and treated as a miss (the invalidation
+        SCAN/delete missed it)."""
+        redis = _mock_redis()
+        emb = _random_embedding(seed=21)
+        cache_store("stale q", emb, {"context": "old answer", "sources": [{"filename": "x.md"}]}, redis, ttl=300)
+        # Serves fine before any invalidation.
+        assert cache_lookup(emb, redis, threshold=0.9) is not None
+
+        # Stamp an invalidation watermark AFTER the entry was stored.
+        redis.setex(_LAST_INVALIDATED_KEY, 9999, str(time.time() + 1000))
+
+        # The stale entry must not be served, and it's evicted from the index.
+        assert cache_lookup(emb, redis, threshold=0.9) is None
+        assert _reset_backend.count() == 0, "stale entry was not evicted"
 
     def test_orphan_evicted_when_payload_expired(self, _reset_backend):
         """Index entry whose Redis payload TTL'd should be lazy-deleted."""
@@ -486,7 +504,9 @@ class TestStaleHitDetection:
 
         result = cache_lookup(emb, redis, threshold=0.5)
 
-        assert result is not None  # staleness is observability-only, still served
+        # CR-046: a stale hit is now suppressed, not served — but the metric still
+        # fires so the missed invalidation remains observable.
+        assert result is None
         raw = redis.zrange("cerid:metrics:cache_stale_hit_count", 0, -1)
         assert len(raw) == 1
 

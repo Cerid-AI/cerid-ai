@@ -234,7 +234,9 @@ class TestExecuteToolAgents:
     @patch("app.tools.get_redis")
     @patch("app.tools.get_chroma")
     @patch("app.tools.get_neo4j")
-    def test_pkb_agent_query(self, mock_neo4j, mock_chroma, mock_redis):
+    @patch("app.tools.get_graph_store")
+    def test_pkb_agent_query(self, mock_graph_store, mock_neo4j, mock_chroma, mock_redis):
+        mock_graph_store.return_value = MagicMock()
         mock_neo4j.return_value = MagicMock()
         mock_chroma.return_value = MagicMock()
         mock_redis.return_value = MagicMock()
@@ -252,8 +254,10 @@ class TestExecuteToolAgents:
     @patch("app.tools.get_redis")
     @patch("app.tools.get_chroma")
     @patch("app.tools.get_neo4j")
-    def test_pkb_agent_query_forwards_pack_scope(self, mock_neo4j, mock_chroma, mock_redis):
+    @patch("app.tools.get_graph_store")
+    def test_pkb_agent_query_forwards_pack_scope(self, mock_graph_store, mock_neo4j, mock_chroma, mock_redis):
         """exclude_packs (personal-first) + metadata_filter reach agent_query."""
+        mock_graph_store.return_value = MagicMock()
         mock_neo4j.return_value = MagicMock()
         mock_chroma.return_value = MagicMock()
         mock_redis.return_value = MagicMock()

@@ -251,7 +251,7 @@ class TestStreamingTimeouts:
 
         # Patch verify_claim and individual extraction helpers with fast fakes.
         # The streaming path now uses adaptive per-claim timeouts (12s for
-        # non-web claims) instead of the old config.STREAMING_PER_CLAIM_TIMEOUT.
+        # non-web claims) instead of a single fixed per-claim timeout.
         # Raising TimeoutError directly from verify_claim is equivalent to
         # asyncio.wait_for raising it, and avoids waiting the full 12s.
         with (
@@ -298,8 +298,7 @@ class TestStreamingTimeouts:
         with (
             _mock_streaming_extraction(["Claim 1.", "Claim 2.", "Claim 3."], method="heuristic"),
             patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
-            patch("config.STREAMING_PER_CLAIM_TIMEOUT", 5),  # High so per-claim doesn't trigger first
-            patch("config.STREAMING_TOTAL_TIMEOUT", 0.3),  # Low total timeout
+            patch("config.STREAMING_TOTAL_TIMEOUT", 0.3),  # Low total timeout (adaptive per-claim >> 0.3s)
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []

@@ -412,15 +412,31 @@ class TestExecuteAutomation:
             "sources": [{"content": "c", "relevance": 0.9}],
             "confidence": 0.85,
         }
+        # E1 Phase 1 / CR-002: execute_automation now routes through the guarded
+        # seam WITH store clients (the old path passed none and errored on every
+        # run). Patch the seam + capture its kwargs to assert the stores are wired.
+        captured: dict = {}
+
+        async def _fake_guarded(**kwargs):
+            captured.update(kwargs)
+            return mock_result
+
         with (
             patch("app.routers.automations.get_redis", return_value=redis),
-            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock, return_value=mock_result),
+            patch("app.routers.automations.get_chroma", return_value=MagicMock()),
+            patch("app.routers.automations.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.automations.get_graph_store", return_value=MagicMock()),
+            patch("core.agents.guarded_retrieval.guarded_agent_query_full", side_effect=_fake_guarded),
         ):
             run = await execute_automation(auto)
             assert run.status == "success"
             assert run.error is None
             assert run.result is not None
             assert run.result["confidence"] == 0.85
+            # CR-002 regression guard: the query pipeline must receive real stores.
+            assert captured.get("chroma_client") is not None
+            assert captured.get("neo4j_driver") is not None
+            assert captured.get("request_context") is not None
 
     @pytest.mark.asyncio
     async def test_execute_error_captured(self) -> None:
@@ -436,9 +452,15 @@ class TestExecuteAutomation:
             created_at="2026-03-01T00:00:00+00:00",
             updated_at="2026-03-01T00:00:00+00:00",
         )
+        async def _boom(**kwargs):
+            raise RuntimeError("boom")
+
         with (
             patch("app.routers.automations.get_redis", return_value=redis),
-            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock, side_effect=RuntimeError("boom")),
+            patch("app.routers.automations.get_chroma", return_value=MagicMock()),
+            patch("app.routers.automations.get_neo4j", return_value=MagicMock()),
+            patch("app.routers.automations.get_graph_store", return_value=MagicMock()),
+            patch("core.agents.guarded_retrieval.guarded_agent_query_full", side_effect=_boom),
         ):
             run = await execute_automation(auto)
             assert run.status == "error"

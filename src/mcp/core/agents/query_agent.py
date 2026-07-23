@@ -20,7 +20,6 @@ import httpx
 import numpy as np
 
 import config
-from config import DOMAINS
 from core.context.identity import chunk_matches_tenant, with_tenant_scope
 from core.contracts.stores import GraphStore
 from core.observability.span_helpers import breadcrumb, span
@@ -250,7 +249,7 @@ def _get_adjacent_domains(requested: list[str]) -> dict[str, float]:
     adjacent: dict[str, float] = {}
     for req in requested:
         explicit = config.DOMAIN_AFFINITY.get(req, {})
-        for other in DOMAINS:
+        for other in config.DOMAINS:
             if other in requested_set:
                 continue
             weight = explicit.get(other, config.CROSS_DOMAIN_DEFAULT_AFFINITY)
@@ -466,19 +465,19 @@ async def multi_domain_query(
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results."""
     if domains is None:
-        domains = DOMAINS
+        domains = config.DOMAINS
 
     # Custom/client-defined domains are allowed: external clients use Cerid as
     # a backend and ingest to their own domain names. Built-in DOMAINS are the
     # default set; an unknown domain is queried when its collection exists and
     # degrades to empty results otherwise (see query_domain below). Warn, never
     # reject — a hard 400 forces external clients into shims (GA P0.1).
-    custom_domains = [d for d in domains if d not in DOMAINS]
+    custom_domains = [d for d in domains if d not in config.DOMAINS]
     if custom_domains:
         logger.warning(
             "multi_domain_query: non-built-in domain(s) %s — querying as custom "
             "client domains (built-in: %s)",
-            custom_domains, DOMAINS,
+            custom_domains, config.DOMAINS,
         )
 
     if chroma_client is None:
@@ -663,7 +662,11 @@ async def multi_domain_query(
                     if bm25_map:
                         try:
                             bm25_only_ids = list(bm25_map.keys())
-                            fetched = collection.get(
+                            # ChromaDB's client is sync HTTP — offload so the
+                            # BM25-only chunk hydration doesn't block the event
+                            # loop while domains query in parallel (CR-021).
+                            fetched = await asyncio.to_thread(
+                                collection.get,
                                 ids=bm25_only_ids,
                                 include=["documents", "metadatas"],
                             )
@@ -1003,16 +1006,19 @@ async def graph_expand_results_via_entities(
     existing_artifact_ids = set(seed_ids)
     expanded: list[dict[str, Any]] = []
 
-    for artifact_id, shared_count in related_pairs:
+    async def _fetch_for_artifact(
+        artifact_id: str, shared_count: int,
+    ) -> tuple[str, int, dict[str, Any], str, dict[str, Any]] | None:
+        """Resolve + query one related artifact's chunks. Returns None to skip."""
         meta = by_id.get(artifact_id)
         if not meta or artifact_id in existing_artifact_ids:
-            continue
+            return None
         domain = meta["domain"]
         try:
             collection = chroma_client.get_collection(name=config.collection_name(domain))
         except Exception as e:  # noqa: BLE001 — collection-missing is a valid skip
             logger.debug("collection missing for domain %s: %s", domain, e)
-            continue
+            return None
         try:
             # Phase O.1: exclude pending chunks from entity-neighbourhood expansion.
             fetched = await asyncio.to_thread(
@@ -1026,7 +1032,21 @@ async def graph_expand_results_via_entities(
             )
         except Exception as e:  # noqa: BLE001 — chroma failure → skip this artifact
             logger.debug("chroma fetch failed for %s: %s", artifact_id, e)
+            return None
+        return artifact_id, shared_count, meta, domain, fetched
+
+    # Fan the per-artifact Chroma queries out concurrently rather than awaiting
+    # them one at a time — they are independent round-trips (CR-082). Result
+    # assembly below stays sequential (gather preserves order) so the chunk
+    # dedup against existing_chunk_ids remains deterministic.
+    fetch_results = await asyncio.gather(
+        *(_fetch_for_artifact(aid, sc) for aid, sc in related_pairs)
+    )
+
+    for item in fetch_results:
+        if item is None:
             continue
+        artifact_id, shared_count, meta, domain, fetched = item
         if not fetched["ids"] or not fetched["ids"][0]:
             continue
         # Boost related-via-entity scores by shared-entity count (mild),
@@ -1759,6 +1779,7 @@ async def agent_query(
     metadata_filter: dict | None = None,
     exclude_packs: bool = False,
     budget_seconds: float | None = None,
+    memory_enabled: bool = True,
 ) -> dict[str, Any]:
     """Budget-gated public entry for multi-domain query.
 
@@ -1799,6 +1820,7 @@ async def agent_query(
                 skip_cache=skip_cache,
                 metadata_filter=metadata_filter,
                 exclude_packs=exclude_packs,
+                memory_enabled=memory_enabled,
             ),
             timeout=budget,
         )
@@ -1844,6 +1866,7 @@ async def agent_query_full(
     response_text: str | None = None,
     enable_self_rag: bool | None = None,
     budget_seconds: float | None = None,
+    memory_enabled: bool = True,
 ) -> dict[str, Any]:
     """Canonical full agentic-retrieval path.
 
@@ -1858,19 +1881,19 @@ async def agent_query_full(
     query cache, header parsing, smart-mode orchestrator, ndcg metric,
     HTTPException mapping) stay in the thin router wrapper.
     """
-    from core.agents.crag import augment_external_crag, kb_low_confidence
+    from core.agents.crag import augment_external_crag
     from core.agents.self_rag import maybe_self_rag
 
     threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
 
     if not kb_enabled:
         # Conversation-only path: no KB to retrieve from.
+        # E1 CR-032: no source_status / low_confidence write-only stamps.
         result: dict[str, Any] = {
             "context": "", "sources": [], "confidence": 0.0,
             "domains_searched": [], "total_results": 0,
             "token_budget_used": 0, "graph_results": 0, "results": [],
             "strategy": "conversation_only",
-            "source_status": {"kb": "disabled"},
         }
     else:
         result = await agent_query(
@@ -1891,16 +1914,15 @@ async def agent_query_full(
             metadata_filter=metadata_filter,
             exclude_packs=exclude_packs,
             budget_seconds=budget_seconds,
+            memory_enabled=memory_enabled,
         )
 
-    # B2a: capture KB-only confidence BEFORE any external augmentation.
-    kb_low_conf = kb_low_confidence(result, threshold)
-
+    # External CRAG may fire on low KB confidence; the low_confidence boolean is
+    # no longer stamped on the response (E1 CR-032 — write-only, zero readers).
     if external_augmentation:
         result = await augment_external_crag(result, query, domains, threshold)
 
     if isinstance(result, dict):
-        result["low_confidence"] = kb_low_conf
         # Canonical-boundary clamp: confidence is a 0-1 contract for every
         # surface (SDK model enforces le=1 and 500s otherwise); boosted
         # relevances on small corpora can push the impl's average past 1.
@@ -1978,7 +2000,7 @@ async def _augment_with_hype(
             return results
 
         # Build the list of base collection names from the effective domains.
-        _domains = domains or DOMAINS
+        _domains = domains or config.DOMAINS
         collection_names = [config.collection_name(d) for d in _domains]
 
         # Embed query once.  _ef returns list[list[float]]; take first row.
@@ -2255,9 +2277,20 @@ async def _agent_query_impl(
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
     exclude_packs: bool = False,
+    memory_enabled: bool = True,
 ) -> dict[str, Any]:
-    """Execute multi-domain query with reranking, graph expansion, and context assembly."""
+    """Execute multi-domain query with reranking, graph expansion, and context assembly.
+
+    ``memory_enabled`` honors the caller's ``context_sources.memory`` tri-state
+    gate: when False the personal-context memory surface is suppressed so a user
+    who toggled Memory off never has recalled memories enter their answer
+    (CR-016). Defaults True — the historical always-on behavior.
+    """
     timer = StepTimer(enabled=debug_timing)
+    # Unconditional wall-clock start (StepTimer is a debug timer, off by default,
+    # so its "total" is absent in production) — surfaces real retrieval latency
+    # in the envelope so the Knowledge Console isn't a permanent 0ms (CR-039).
+    _wall_start = time.monotonic()
     # GA P0.5 A1a — compute the surface route once and surface it in every
     # return path so callers/UI/eval can see which surface intent fired.
     _surface_route = _surface_route_dict(query)
@@ -2279,7 +2312,15 @@ async def _agent_query_impl(
     _cache_domains = list(domains) if domains else None
     _query_embedding: np.ndarray | None = None
     with timer.step("semantic_cache_lookup"):
-        if ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache:
+        # E1 CR-001 tail: a narrowing directive (document metadata filter or pack
+        # exclusion) scopes retrieval to a subset the general semantic cache must
+        # neither serve to unfiltered queries nor be populated by. Skipping the
+        # lookup also skips the store (below) — it is gated on _query_embedding,
+        # which is only set inside this block.
+        if (
+            ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache
+            and metadata_filter is None and not exclude_packs
+        ):
             try:
                 from core.retrieval.semantic_cache import cache_lookup
                 from core.utils.embeddings import get_embedding_function
@@ -2291,6 +2332,8 @@ async def _agent_query_impl(
                     )
                     cached = cache_lookup(
                         _query_embedding, redis_client, domains=_cache_domains,
+                        allowed_domains=allowed_domains,
+                        memory_enabled=memory_enabled,
                     )
                     if cached is not None:
                         cached["semantic_cache_hit"] = True
@@ -2319,7 +2362,7 @@ async def _agent_query_impl(
                 "context": "",
                 "sources": [],
                 "confidence": 0.0,
-                "domains_searched": domains if domains else DOMAINS,
+                "domains_searched": domains if domains else config.DOMAINS,
                 "total_results": 0,
                 "token_budget_used": 0,
                 "graph_results": 0,
@@ -2418,7 +2461,11 @@ async def _agent_query_impl(
     # GA P0.5 A2 — memory surface. For personal-context queries, recall episodic
     # memories and merge them so they participate in rerank/assembly. Behind the
     # surface-bias flag ENABLE_SURFACE_BIASED_RETRIEVAL (default ON).
-    if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "personal_context":
+    if (
+        ENABLE_SURFACE_BIASED_RETRIEVAL
+        and memory_enabled
+        and _surface_route.get("intent") == "personal_context"
+    ):
         with timer.step("memory_surface"):
             _mem = await _recall_memory_surface(
                 search_query, chroma_client, neo4j_driver, effective_top_k,
@@ -2448,7 +2495,7 @@ async def _agent_query_impl(
 
     # Search adjacent domains at reduced weight when specific domains are requested.
     # Skipped when strict_domains=True (consumer isolation — no cross-domain bleed).
-    if not strict_domains and domains and set(domains) != set(DOMAINS):
+    if not strict_domains and domains and set(domains) != set(config.DOMAINS):
         adjacent = _get_adjacent_domains(domains)
         if adjacent:
             cross_results = await multi_domain_query(
@@ -2456,6 +2503,10 @@ async def _agent_query_impl(
                 domains=list(adjacent.keys()),
                 top_k=max(3, top_k // 2),
                 chroma_client=chroma_client,
+                # E1 CR-057: honor the document/metadata scope on the adjacent-
+                # domain bleed too, or a file-scoped answer admits out-of-file
+                # chunks from adjacent domains.
+                metadata_filter=metadata_filter,
             )
             for r in cross_results:
                 r["relevance"] = round(
@@ -2762,34 +2813,30 @@ async def _agent_query_impl(
             log_swallowed_error('core.agents.query_agent', e)
             logger.warning(f"Failed to log query: {e}")
 
-    # Reranker status — first non-empty value across `results` so callers can
-    # surface degradation (`onnx_failed_no_fallback`, `llm_circuit_open`,
-    # `disabled`, etc.). Set per-result by `rerank_results`; aggregated here so
-    # the envelope carries the signal without consumers having to iterate.
-    reranker_status = next(
-        (r.get("reranker_status") for r in results if r.get("reranker_status")),
-        None,
-    )
-
+    # E1 CR-032: envelope no longer carries write-only reranker_status /
+    # domains_no_results (zero production readers; only tests pinned them).
+    # domains_searched (CR-074) stays as the informational domain signal.
     result_dict: dict[str, Any] = {
         "context": context,
         "sources": sources,
         "confidence": round(confidence, 4),
-        "domains_searched": domains if domains else DOMAINS,
+        # Report the domains actually searched (after conversations-drop,
+        # follow-up cap, and consumer allow-listing), not the raw requested set
+        # (CR-074).
+        "domains_searched": list(effective_domains) if effective_domains else list(config.DOMAINS),
         "total_results": len(results),
         "token_budget_used": char_count,
         "graph_results": graph_results_added,
         "results": results,
         "surface_route": _surface_route,
-        "reranker_status": reranker_status,
-        "domains_no_results": _domains_no_results(
-            list(effective_domains) if effective_domains else list(DOMAINS), results
-        ),
     }
 
     timings = timer.result()
     if timings:
         result_dict["_timings"] = timings
+    # Real wall-clock the two FE hooks read (was produced by no backend → a
+    # permanent 0ms in the Knowledge Console) — CR-039.
+    result_dict["execution_time_ms"] = round((time.monotonic() - _wall_start) * 1000)
 
     # Semantic cache store — persist result for similar future queries
     if ENABLE_SEMANTIC_CACHE and redis_client and _query_embedding is not None:
@@ -2797,7 +2844,8 @@ async def _agent_query_impl(
             from core.retrieval.semantic_cache import cache_store
             cache_store(
                 query, _query_embedding, result_dict, redis_client,
-                domains=_cache_domains,
+                domains=_cache_domains, allowed_domains=allowed_domains,
+                memory_enabled=memory_enabled,
             )
         except Exception as e:  # noqa: BLE001 — observability boundary
             log_swallowed_error(

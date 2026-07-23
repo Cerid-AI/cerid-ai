@@ -37,7 +37,7 @@ async def _route(monkeypatch: pytest.MonkeyPatch, *, cascade: bool, ollama_ok: b
 @pytest.mark.asyncio
 async def test_simple_chat_uses_free_tier_when_cascade_off(monkeypatch: pytest.MonkeyPatch) -> None:
     decision = await _route(monkeypatch, cascade=False, ollama_ok=True, models=["llama3.2:3b"])
-    assert decision.provider == "openrouter_free"
+    assert decision.provider == "openrouter_paid"
     assert "llama-3.3" in decision.model.lower()
 
 
@@ -57,7 +57,7 @@ async def test_simple_chat_falls_back_to_free_when_cascade_on_but_no_ollama(
 ) -> None:
     """Cascade on + ollama down → use the same free-tier fallback as before."""
     decision = await _route(monkeypatch, cascade=True, ollama_ok=False, models=[])
-    assert decision.provider == "openrouter_free"
+    assert decision.provider == "openrouter_paid"
 
 
 @pytest.mark.asyncio
@@ -66,7 +66,7 @@ async def test_simple_chat_falls_back_when_ollama_has_no_models(
 ) -> None:
     """Reachable but empty Ollama → cascade declines to point users at a no-op."""
     decision = await _route(monkeypatch, cascade=True, ollama_ok=True, models=[])
-    assert decision.provider == "openrouter_free"
+    assert decision.provider == "openrouter_paid"
 
 
 @pytest.mark.asyncio

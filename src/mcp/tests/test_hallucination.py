@@ -777,15 +777,16 @@ class TestStreamingPersistence:
             ):
                 events.append(event)
 
-        # Verify Redis was called with setex
-        mock_redis.setex.assert_called_once()
-        call_args = mock_redis.setex.call_args
-        key = call_args[0][0]
-        assert key == f"{REDIS_HALLUCINATION_PREFIX}conv-persist-1"
+        # E1 R9: provisional + final hall:{cid} writes (both post-sweep;
+        # final may add consistency_issue annotations). At least one setex,
+        # typically two.
+        assert mock_redis.setex.call_count >= 1
+        keys = [c[0][0] for c in mock_redis.setex.call_args_list]
+        assert all(k == f"{REDIS_HALLUCINATION_PREFIX}conv-persist-1" for k in keys)
 
-        # Verify stored data is valid JSON with correct structure
-        stored_json = call_args[0][2]
-        stored = json.loads(stored_json)
+        # Verify final stored payload (last write) is valid JSON with structure
+        call_args = mock_redis.setex.call_args_list[-1]
+        stored = json.loads(call_args[0][2])
         assert stored["conversation_id"] == "conv-persist-1"
         assert stored["summary"]["total"] == 2
         assert stored["summary"]["verified"] == 1

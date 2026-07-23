@@ -36,9 +36,11 @@ export function useModelRouter({
       costSensitivity,
     )
 
-    // Only show if recommending a different model with meaningful savings
+    // Only show if recommending a different model with meaningful savings — or a
+    // correctness upgrade (temporal → web-search model), which is worth surfacing
+    // even when it costs more so it isn't silently suppressed (CR-054).
     if (rec.model.id === currentModel.id) return null
-    if (rec.savingsVsCurrent < 0.0001) return null
+    if (rec.savingsVsCurrent < 0.0001 && !rec.correctnessUpgrade) return null
     return rec
   }, [routingMode, dismissed, messages, currentModel, kbInjections, costSensitivity])
 

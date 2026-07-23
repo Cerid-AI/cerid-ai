@@ -131,6 +131,7 @@ def wipe_conversation_state(
     *,
     sync_dir: str | None,
     neo4j_driver: Any | None,
+    redis_client: Any | None = None,
 ) -> dict[str, Any]:
     """Best-effort erase of whatever persisted for ``conversation_id``.
 
@@ -153,7 +154,23 @@ def wipe_conversation_state(
         "verified_memories_deleted": 0,
         "verified_memories_failed": 0,
         "verification_report_deleted": False,
+        "hallucination_cache_deleted": False,
     }
+
+    # E1 CR-012: the durable Redis hall:{cid} verification report — verbatim
+    # claims + source snippets — survived a wipe for its 7-day TTL because only
+    # the Neo4j :VerificationReport node was deleted below. Clear it too.
+    if redis_client is not None:
+        try:
+            from core.agents.hallucination import delete_hallucination_report
+            summary["hallucination_cache_deleted"] = delete_hallucination_report(
+                redis_client, conversation_id
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort per store, see module docstring
+            log_swallowed_error(
+                "session_wipe.hallucination_cache", exc,
+                context={"conversation_id": conversation_id},
+            )
 
     if sync_dir:
         try:

@@ -109,6 +109,30 @@ def log_conversation_metrics(
         logger.warning(f"Failed to log conversation metrics: {e}")
 
 
+def log_conversation_sentiment(
+    redis_client,
+    conversation_id: str,
+    message_id: str,
+    sentiment: str,
+) -> None:
+    """Record a per-message thumbs sentiment in the chat feedback-loop store.
+
+    E1 CR-043: message thumbs up/down feedback previously POSTed to
+    ``/artifacts/{message_id}/feedback`` — an id-space mismatch (a chat-message
+    uuid is not an artifact id) with the wrong schema, so it was structurally
+    dark. Stored as a hash keyed by ``message_id`` so re-rating (thumbs toggling)
+    overwrites rather than floods, alongside the same conversation the feedback
+    loop already tracks.
+    """
+    key = f"{REDIS_CONV_METRICS_PREFIX}{conversation_id}:sentiment"
+    try:
+        redis_client.hset(key, message_id, sentiment)
+        redis_client.expire(key, REDIS_CONV_METRICS_TTL)
+    except Exception as e:
+        log_swallowed_error('core.utils.cache', e)
+        logger.warning(f"Failed to log conversation sentiment: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Verification metrics storage
 # ---------------------------------------------------------------------------

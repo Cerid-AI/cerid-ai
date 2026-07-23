@@ -16,6 +16,7 @@ import logging
 import pathlib
 import re
 import time
+from collections.abc import Sequence
 from typing import Any
 
 import config
@@ -41,6 +42,7 @@ from core.agents.hallucination.patterns import (
 from core.agents.hallucination.persistence import (
     REDIS_HALLUCINATION_PREFIX,
     REDIS_HALLUCINATION_TTL,
+    get_hallucination_report,
 )
 from core.agents.hallucination.verification import (
     _check_history_consistency,
@@ -255,8 +257,17 @@ async def check_hallucinations(
     user_query: str | None = None,
     expert_mode: bool = False,
     create_memory_fn: Any = None,
+    *,
+    persist_report: bool = True,
 ) -> dict[str, Any]:
-    """Extract claims, verify each against KB, and store results in Redis."""
+    """Extract claims, verify each against KB, and store results in Redis.
+
+    ``persist_report`` (keyword-only) gates the durable ``hall:{cid}`` Redis
+    write. Callers pass ``False`` when Private Mode blocks server-side saves
+    (see ``app.services.private_mode.saves_blocked``); the app layer owns that
+    decision because ``core`` cannot read private mode. Defaults ``True`` so
+    every existing caller is unchanged.
+    """
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
     min_length = config.HALLUCINATION_MIN_RESPONSE_LENGTH
@@ -336,7 +347,7 @@ async def check_hallucinations(
     if len(current_event_claims) >= 2:
         batch_model = config.VERIFICATION_CURRENT_EVENT_MODEL
         if expert_mode:
-            batch_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+            batch_model = config.VERIFICATION_EXPERT_WEB_MODEL
         try:
             batch_verdicts = await asyncio.wait_for(
                 verify_claims_batch_external(
@@ -414,12 +425,13 @@ async def check_hallucinations(
         },
     }
 
-    try:
-        key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
-        redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
-    except Exception as e:
-        log_swallowed_error('core.agents.hallucination.streaming', e)
-        logger.warning("Failed to store hallucination report in Redis: %s", e)
+    if persist_report:
+        try:
+            key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+            redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
+        except Exception as e:
+            log_swallowed_error('core.agents.hallucination.streaming', e)
+            logger.warning("Failed to store hallucination report in Redis: %s", e)
 
     # --- Promote verified facts to empirical memories (non-streaming path) ---
     verified_count = status_counts.get("verified", 0)
@@ -495,6 +507,77 @@ async def check_hallucinations(
 # Streaming orchestration
 # ---------------------------------------------------------------------------
 
+def _summarize_claims(
+    claims: Sequence[dict[str, Any] | None],
+) -> tuple[dict[str, int], float]:
+    """Recompute (status counts, overall_score) from a claims list.
+
+    Single source of truth for a report's summary: every present claim lands in
+    exactly one bucket, so verified+unverified+uncertain+skipped == total (the
+    CR-037/CR-107 invariant — the summary agrees with its own claims array). A
+    ``status='error'`` claim the sweep could not resolve folds into uncertain
+    (matching the main loop's pre-sweep semantics) rather than vanishing from
+    every counter. ``overall`` = mean similarity over assessed verified/unverified
+    claims, which includes deadline-fallback verified claims (CR-115).
+    """
+    verified = sum(1 for r in claims if r and r.get("status") == "verified")
+    unverified = sum(1 for r in claims if r and r.get("status") == "unverified")
+    skipped = sum(1 for r in claims if r and r.get("status") == "skipped")
+    # Everything present that is not verified/unverified/skipped (uncertain,
+    # error, timeout, any unknown status) counts as uncertain so the total holds.
+    uncertain = sum(
+        1 for r in claims
+        if r and r.get("status") not in ("verified", "unverified", "skipped")
+    )
+    assessed = [
+        float(r.get("similarity", 0.0)) for r in claims
+        if r and r.get("status") in ("verified", "unverified")
+    ]
+    overall = round(sum(assessed) / len(assessed), 3) if assessed else 0.0
+    counts = {
+        "verified": verified,
+        "unverified": unverified,
+        "uncertain": uncertain,
+        "skipped": skipped,
+        "total": len(claims),
+    }
+    return counts, overall
+
+
+def _merge_retry_into_existing(
+    redis_client,
+    conversation_id: str,
+    index: int,
+    new_verdict: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], dict[str, int], float] | None:
+    """E1 CR-019: fold a single-claim retry verdict into the existing durable report.
+
+    Returns ``(claims, counts, overall)`` for the existing ``hall:{cid}`` report
+    with ``claims[index]`` replaced by ``new_verdict`` (recomputed summary), or
+    ``None`` when there is no existing report / the index is out of range / the
+    retry produced no verdict — in which case the caller must SKIP the durable
+    persist rather than clobber the N-claim report with a 1-claim one.
+    """
+    if new_verdict is None:
+        return None
+    existing = get_hallucination_report(redis_client, conversation_id)
+    if not existing:
+        return None
+    claims = existing.get("claims")
+    if not isinstance(claims, list) or not (0 <= index < len(claims)):
+        return None
+    merged_claim = dict(new_verdict)
+    # A re-verification refreshes the verdict, not the human's thumbs signal —
+    # preserve any prior user_feedback on this claim.
+    prior = claims[index]
+    if isinstance(prior, dict) and "user_feedback" in prior and "user_feedback" not in merged_claim:
+        merged_claim["user_feedback"] = prior["user_feedback"]
+    merged = list(claims)
+    merged[index] = merged_claim
+    counts, overall = _summarize_claims(merged)
+    return merged, counts, overall
+
+
 async def verify_response_streaming(
     response_text: str,
     conversation_id: str,
@@ -509,6 +592,9 @@ async def verify_response_streaming(
     source_artifact_ids: list[str] | None = None,
     create_memory_fn: Any = None,
     save_report_fn: Any = None,
+    *,
+    persist_report: bool = True,
+    merge_claim_index: int | None = None,
 ):
     """Streaming verification generator — yields claim results as they are verified.
 
@@ -529,6 +615,16 @@ async def verify_response_streaming(
     bound closure here — mirrors the ``create_memory_fn`` DI pattern. A
     ``{"type": "persisted", "success": bool}`` event is yielded after the
     save attempt so the frontend can skip its own redundant save call.
+
+    ``merge_claim_index`` marks a single-claim retry (E1 CR-019): the FE re-runs
+    ONE claim from an N-claim report through this same endpoint (``response_text``
+    is just that claim, under the original ``conversation_id``). Without it, the
+    run's durable persist would REPLACE the N-claim ``hall:{cid}`` Redis + Neo4j
+    report with a 1-claim report, destroying the other claims' verdicts and
+    invalidating their feedback indices. When set, the fresh verdict is instead
+    MERGED into ``claims[merge_claim_index]`` of the existing durable report
+    (recomputing the summary), and if there is no existing report / the index is
+    out of range the durable persist is SKIPPED rather than clobbering it.
     """
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
@@ -810,7 +906,7 @@ async def verify_response_streaming(
     if current_event_claims and len(current_event_claims) >= 2:
         batch_model = config.VERIFICATION_CURRENT_EVENT_MODEL
         if expert_mode:
-            batch_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+            batch_model = config.VERIFICATION_EXPERT_WEB_MODEL
 
         async def _run_batch() -> None:
             """Run batch verification concurrently with individual claims."""
@@ -963,6 +1059,13 @@ async def verify_response_streaming(
             "reason": result.get("reason", ""),
             "verification_method": result.get("verification_method", "kb"),
             "verification_model": result.get("verification_model"),
+            # E1 CR-042: NLI entailment/contradiction + memory_source are computed
+            # by verify_claim and kept in the persisted report, but were dropped
+            # here — so the FE provenance popover's NLI verdict was dark on every
+            # streamed claim. Emit them so the wire shape matches the stored truth.
+            "nli_entailment": result.get("nli_entailment"),
+            "nli_contradiction": result.get("nli_contradiction"),
+            "memory_source": result.get("memory_source"),
             "source_urls": result.get("source_urls", []),
             "verification_answer": result.get("verification_answer", ""),
             # Expert-mode authoritative evidence — surfaces per-source NLI
@@ -988,17 +1091,104 @@ async def verify_response_streaming(
             **({"circular_source": True} if result.get("circular_source") else {}),
         }
 
-    tasks = [_verify_indexed(i, claim) for i, claim in enumerate(claims)]
+    def _fallback_result(j: int) -> dict[str, Any]:
+        """Canonical settled result for a claim the total deadline left unverified.
+
+        E1 CR-036: same shape as a ``verify_claim`` result — top-level status /
+        similarity / verification_method / source_filename — so it flows through
+        ``_claim_verified_event`` and the persisted report identically, instead of
+        the old divergent event that nested the verdict and leaked the sentinel
+        ``kb_only_timeout`` / ``timeout`` label into the ``source`` (source_filename)
+        field. A KB-only verdict is used when Phase-2 evidence exists, else a plain
+        timeout verdict.
+        """
+        evidence = _claim_evidence.get(j)
+        # E1 R15: always include ``claim`` so interrupted-run report entries
+        # retain the claim text for UI + feedback indices.
+        claim_text = claims[j] if 0 <= j < len(claims) else ""
+        if evidence and evidence["kb_quality"] >= 0.35:
+            kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
+            sources = [
+                r.get("source", "") for r in evidence["kb_results"][:3] if r.get("source")
+            ]
+            return {
+                "claim": claim_text,
+                "status": kb_status,
+                "similarity": evidence["kb_quality"],
+                "confidence": evidence["kb_quality"],
+                "reason": "KB-only verdict (verification timeout)",
+                "verification_method": "kb_only_timeout",
+                "source_filename": sources[0] if sources else "",
+                "source_urls": [],
+            }
+        return {
+            "claim": claim_text,
+            "status": "uncertain",
+            "similarity": 0.0,
+            "confidence": 0.0,
+            "reason": "Verification timeout — insufficient evidence",
+            "verification_method": "timeout",
+            "source_filename": "",
+        }
+
+    def _settle_timeouts():
+        """Settle every claim the total deadline left unverified.
+
+        E1 CR-037: writes the fallback result into ``collected_results`` (so the
+        persisted claims array + summary counts + feedback indices agree with the
+        UI, instead of counting claims the report never stored) and emits each
+        through the shared ``_claim_verified_event`` builder.
+        """
+        nonlocal verified_count, uncertain_count
+        for j in range(len(claims)):
+            if collected_results[j] is not None:
+                continue  # already has a verdict
+            result = _fallback_result(j)
+            collected_results[j] = result
+            if result["status"] == "verified":
+                verified_count += 1
+            else:
+                uncertain_count += 1
+            yield _claim_verified_event(j, result)
+
+    # Real Task objects (not bare coroutines) so the deadline break can cancel
+    # the still-pending ones — asyncio.as_completed would otherwise wrap them in
+    # internal tasks we hold no reference to (E1 CR-106).
+    tasks = [asyncio.ensure_future(_verify_indexed(i, claim))
+             for i, claim in enumerate(claims)]
+
+    async def _drain_background() -> None:
+        """Cancel-and-drain the still-pending background verification work.
+
+        E1 CR-105/106. Called on the deadline break (BEFORE ``_settle_timeouts``,
+        so a late ``batch_task`` completion can't race the fallback verdicts by
+        overwriting ``collected_results``) and again after the loop (so a normal
+        exit doesn't orphan a still-running batch task, and an exception-
+        interrupted loop doesn't leak its in-flight per-claim tasks). Leaked
+        per-claim tasks otherwise keep holding the *process-global* claim-verify
+        semaphore + burning LLM spend after their verdicts can no longer be used;
+        a leaked batch task mutates ``collected_results`` at a nondeterministic
+        point vs. the report snapshot. Idempotent — done tasks are skipped, so
+        the second call is a no-op on the happy path.
+        """
+        pending = [t for t in tasks if not t.done()]
+        if batch_task is not None and not batch_task.done():
+            pending.append(batch_task)
+        if not pending:
+            return
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     # Total deadline prevents the verification loop from running forever.
     # Individual claims have per-claim timeouts, but the total deadline
     # catches edge cases where many claims each take close to the limit.
     stream_deadline = time.monotonic() + config.STREAMING_TOTAL_TIMEOUT
 
-    # Wrap verification loop in try/except to guarantee summary emission.
-    # Without this, an unhandled exception (e.g., task cancellation, httpx
-    # connection pool error) would terminate the async generator before the
-    # summary event is yielded, causing the frontend to show "stream interrupted".
+    # Wrap verification loop in try/except/finally to guarantee summary emission
+    # AND background drain. Without finally, a client disconnect (GeneratorExit
+    # into this async generator — not Exception) orphans batch/claim tasks
+    # (E1 R8 / CR-105 disconnect leg).
     try:
         for coro in asyncio.as_completed(tasks):
             # Check total deadline before awaiting the next result
@@ -1012,49 +1202,14 @@ async def verify_response_streaming(
                     len(claims),
                 )
                 stream_interrupted = True
-                # Phase-aware fallback: use KB-only verdict for claims with evidence
-                completed_indices: set[int] = {
-                    j for j in range(len(claims)) if collected_results[j] is not None
-                }
-                for j in range(len(claims)):
-                    if j in completed_indices:
-                        continue  # Already has a verdict
-                    evidence = _claim_evidence.get(j)
-                    if evidence and evidence["kb_quality"] >= 0.35:
-                        # Phase 2 completed — use KB-only verdict
-                        kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
-                        yield {
-                            "type": "claim_verified",
-                            "index": j,
-                            "claim": claims[j],
-                            "verdict": {
-                                "status": kb_status,
-                                "confidence": evidence["kb_quality"],
-                                "reason": "KB-only verdict (verification timeout)",
-                                "sources": [
-                                    r.get("source", "") for r in evidence["kb_results"][:3]
-                                    if r.get("source")
-                                ],
-                            },
-                            "source": "kb_only_timeout",
-                        }
-                        if kb_status == "verified":
-                            verified_count += 1
-                        else:
-                            uncertain_count += 1
-                    else:
-                        uncertain_count += 1
-                        yield {
-                            "type": "claim_verified",
-                            "index": j,
-                            "claim": claims[j],
-                            "verdict": {
-                                "status": "uncertain",
-                                "confidence": 0.0,
-                                "reason": "Verification timeout — insufficient evidence",
-                            },
-                            "source": "timeout",
-                        }
+                # E1 CR-105/106: cancel the in-flight verify tasks + batch task
+                # before settling, so they stop holding the process-global
+                # semaphore and can't race the fallback verdicts.
+                await _drain_background()
+                # E1 CR-036/037: settle timed-out claims through the shared builder
+                # AND into collected_results (was a divergent, uncollected event).
+                for _fallback_ev in _settle_timeouts():
+                    yield _fallback_ev
                 break
             try:
                 i, result = await asyncio.wait_for(coro, timeout=remaining)
@@ -1064,48 +1219,13 @@ async def verify_response_streaming(
                     "(%ds total)", config.STREAMING_TOTAL_TIMEOUT,
                 )
                 stream_interrupted = True
-                # Phase-aware fallback: use KB-only verdict for claims with evidence
-                completed_indices_2: set[int] = {
-                    j for j in range(len(claims)) if collected_results[j] is not None
-                }
-                for j in range(len(claims)):
-                    if j in completed_indices_2:
-                        continue
-                    evidence = _claim_evidence.get(j)
-                    if evidence and evidence["kb_quality"] >= 0.35:
-                        kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
-                        yield {
-                            "type": "claim_verified",
-                            "index": j,
-                            "claim": claims[j],
-                            "verdict": {
-                                "status": kb_status,
-                                "confidence": evidence["kb_quality"],
-                                "reason": "KB-only verdict (verification timeout)",
-                                "sources": [
-                                    r.get("source", "") for r in evidence["kb_results"][:3]
-                                    if r.get("source")
-                                ],
-                            },
-                            "source": "kb_only_timeout",
-                        }
-                        if kb_status == "verified":
-                            verified_count += 1
-                        else:
-                            uncertain_count += 1
-                    else:
-                        uncertain_count += 1
-                        yield {
-                            "type": "claim_verified",
-                            "index": j,
-                            "claim": claims[j],
-                            "verdict": {
-                                "status": "uncertain",
-                                "confidence": 0.0,
-                                "reason": "Verification timeout — insufficient evidence",
-                            },
-                            "source": "timeout",
-                        }
+                # E1 CR-105/106: cancel in-flight verify + batch tasks before
+                # settling (identical to the deadline-check branch above).
+                await _drain_background()
+                # E1 CR-036/037: settle via the shared builder + collected_results
+                # (identical to the deadline-check branch above).
+                for _fallback_ev in _settle_timeouts():
+                    yield _fallback_ev
                 break
             except Exception as task_exc:
                 logger.warning("Verification task failed: %s", task_exc)
@@ -1193,6 +1313,10 @@ async def verify_response_streaming(
             "claims_total": len(claims),
             "recoverable": True,
         }
+    finally:
+        # E1 CR-105 / R8: always drain — covers happy path, deadline, Exception,
+        # and GeneratorExit (client disconnect / SSE teardown). Idempotent.
+        await _drain_background()
 
     # --- Consistency checking (cross-turn + internal contradictions) ---
     # Launch as a background task so it overlaps with summary emission and
@@ -1206,7 +1330,17 @@ async def verify_response_streaming(
     # GUARANTEED summary emission — the frontend relies on receiving this event
     # to transition from "verifying" to "done".  Without it, the stream appears
     # interrupted and the UI shows an error.
-    overall = (assessed_confidence / assessed_count) if assessed_count > 0 else 0
+    # E1 CR-115: derive overall from the claim set's similarity rather than the
+    # assessed_confidence/count accumulators — _settle_timeouts records a
+    # deadline-fallback verified claim's similarity into collected_results but not
+    # into those accumulators, so an interrupted run otherwise reports verified>0
+    # with overall_confidence 0.
+    _assessed_sims = [
+        float((r or {}).get("similarity", 0.0))
+        for r in collected_results
+        if r and r.get("status") in ("verified", "unverified")
+    ]
+    overall = (sum(_assessed_sims) / len(_assessed_sims)) if _assessed_sims else 0
     yield {
         "type": "summary",
         "overall_confidence": round(overall, 3),
@@ -1221,31 +1355,11 @@ async def verify_response_streaming(
         **({"credit_exhausted": True} if credit_exhausted else {}),
     }
 
-    # --- Persist to Redis (same format as batch path) ---
-    status_counts = {
-        "verified": verified_count,
-        "unverified": unverified_count,
-        "uncertain": uncertain_count,
-        "skipped": skipped_count,
-    }
-    report = {
-        "conversation_id": conversation_id,
-        "timestamp": utcnow_iso(),
-        "skipped": False,
-        "threshold": threshold,
-        "model": model,
-        "extraction_method": method,
-        "claims": [r for r in collected_results if r is not None],
-        "summary": {
-            "total": len(claims),
-            **status_counts,
-        },
-    }
-    try:
-        key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
-        redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
-    except Exception as e:
-        log_swallowed_error("core.agents.hallucination.streaming.persist_streaming_report", e)
+    # The report build + Redis persist + memory promotion moved BELOW the Round-2
+    # sweep (E1 CR-044/045): building them here snapshotted collected_results
+    # BEFORE the sweep resolved timeout/error claims, so the persisted hall:{cid}
+    # report and the memory-promotion input were stale while the SSE stream + Neo4j
+    # write got the corrected verdicts.
 
     # --- Round 2 sweep: retry timed-out and errored claims ---
     # Claims that timed out (sim=0.0, method=timeout) or errored were not
@@ -1298,12 +1412,14 @@ async def verify_response_streaming(
             # Budget exhaustion is an expected fallback path, not an error.
             logger.info("Sweep retry budget exhausted")
 
-        # Recount after sweep
+        # Recount after sweep. E1 CR-107: fold status='error' into uncertain (a
+        # claim the sweep could not resolve must not vanish from every counter),
+        # matching _summarize_claims and the pre-sweep main-loop semantics.
         verified_count = sum(1 for r in collected_results if r and r.get("status") == "verified")
         unverified_count = sum(1 for r in collected_results if r and r.get("status") == "unverified")
         uncertain_count = sum(
             1 for r in collected_results
-            if r and r.get("status") not in ("verified", "unverified", "skipped", "error", None)
+            if r and r.get("status") not in ("verified", "unverified", "skipped")
         )
 
         # Push the corrected verdicts to the frontend. The summary above was
@@ -1333,9 +1449,91 @@ async def verify_response_streaming(
                 ) if assessed else 0.0,
             }
 
+    # --- Build + persist the AUTHORITATIVE post-sweep report (E1 CR-044/045) ---
+    # Built here — after the retry sweep resolved timeout/error claims and
+    # recounted — so the Redis hall:{cid} snapshot and the memory-promotion input
+    # both reflect the settled verdicts, matching the SSE stream + the Neo4j write.
+    run_claims = [r for r in collected_results if r is not None]
+    # E1 CR-104/107/115/067: derive the authoritative summary from the persisted
+    # claims array itself (single source of truth) rather than the counters kept
+    # by side-effect across the main loop, _settle_timeouts, and the recount. This
+    # counts every present claim regardless of which actor wrote it (CR-104), folds
+    # status='error' into the total (CR-107), and computes overall from claim
+    # similarity so deadline-fallback verified claims contribute (CR-115) and the
+    # score agrees with the counts rather than a stale pre-sweep one (CR-067).
+    status_counts, run_overall = _summarize_claims(run_claims)
+    report = {
+        "conversation_id": conversation_id,
+        "timestamp": utcnow_iso(),
+        "skipped": False,
+        "threshold": threshold,
+        "model": model,
+        "extraction_method": method,
+        "claims": run_claims,
+        "summary": status_counts,
+    }
+
+    # E1 CR-019: the durable stores (Redis hall:{cid} + the Neo4j save_report_fn)
+    # get the DURABLE report, which diverges from the fresh run report only on a
+    # single-claim retry: there the run verified just one claim, and replacing the
+    # N-claim report with it would destroy the other claims' verdicts + feedback
+    # indices. Merge the one verdict into the existing report instead; if there is
+    # no existing report / bad index, skip the durable persist (never clobber).
+    # `report` (the fresh run) is what promotion sees, so a retry only promotes its
+    # own claim rather than re-promoting the whole merged report.
+    durable_claims = run_claims
+    durable_counts: dict[str, int] = dict(status_counts)
+    durable_overall = round(run_overall, 3)
+    skip_durable = False
+    if merge_claim_index is not None:
+        merged = _merge_retry_into_existing(
+            redis_client, conversation_id, merge_claim_index,
+            run_claims[0] if run_claims else None,
+        )
+        if merged is None:
+            skip_durable = True
+        else:
+            durable_claims, durable_counts, durable_overall = merged
+
+    durable_report = report if merge_claim_index is None else {
+        **report,
+        "claims": durable_claims,
+        "summary": {
+            "total": durable_counts["total"],
+            "verified": durable_counts["verified"],
+            "unverified": durable_counts["unverified"],
+            "uncertain": durable_counts["uncertain"],
+            "skipped": durable_counts["skipped"],
+        },
+    }
+    # E1 R9: provisional hall:{cid} write NOW (post-sweep authoritative report)
+    # so claim feedback submitted during the consistency await does not land on
+    # a previous conversation's report. Final write after consistency fold-in
+    # overwrites with consistency_issue annotations (CR-113).
+    if persist_report and not skip_durable:
+        try:
+            key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+            redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
+        except Exception as e:
+            log_swallowed_error(
+                "core.agents.hallucination.streaming.provisional_hall_persist", e,
+            )
+    # E1 CR-113: final Redis hall:{cid} write still runs AFTER the consistency
+    # fold-in below so the durable copy carries consistency_issue annotations.
+
     # --- Promote verified facts to empirical memories (fire-and-forget) ---
     _create_mem_fn = create_memory_fn
-    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0 and _create_mem_fn is not None:
+    # E1 CR-116: skip promotion on interrupted / credit-exhausted runs, mirroring
+    # the Neo4j auto-persist gate below — a partial run's verified_count includes
+    # deadline-fallback verdicts, and promoting them creates :Memory nodes from a
+    # report that was deliberately never durably saved.
+    if (
+        config.ENABLE_VERIFIED_MEMORY_PROMOTION
+        and verified_count > 0
+        and _create_mem_fn is not None
+        and not stream_interrupted
+        and not credit_exhausted
+    ):
         try:
             from core.agents.verified_memory import promote_verified_facts
 
@@ -1430,6 +1628,19 @@ async def verify_response_streaming(
                     redis_client=redis_client,
                 )
 
+    # E1 CR-113: persist the durable Redis hall:{cid} report HERE — after the
+    # consistency fold-in mutated collected_results (whose dicts durable_report's
+    # claims share by reference on the common non-merge path) — so the Redis copy
+    # carries consistency_issue like the Neo4j write below. Deferred from the
+    # report-build site above, where it serialized before the fold-in and left the
+    # two stores permanently disagreeing on consistency_issue.
+    if persist_report and not skip_durable:
+        try:
+            key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+            redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
+        except Exception as e:
+            log_swallowed_error("core.agents.hallucination.streaming.persist_streaming_report", e)
+
     # --- Sprint C auto-persist (Neo4j artifact store) -----------------------
     # Mirrors the non-streaming /agent/hallucination endpoint's behavior so
     # the FE does not need to issue a redundant /verification/save call after
@@ -1444,19 +1655,23 @@ async def verify_response_streaming(
     persisted = False
     if (
         save_report_fn is not None
+        and persist_report
+        and not skip_durable  # E1 CR-019: don't clobber the Neo4j report on a bad-index retry
         and not stream_interrupted
         and not credit_exhausted
         and claims
     ):
         try:
+            # E1 CR-019: durable_* is the merged N-claim report on a single-claim
+            # retry, else the fresh run — matching the Redis hall:{cid} write above.
             save_report_fn(
                 conversation_id=conversation_id,
-                claims=[r for r in collected_results if r is not None],
-                overall_score=round(overall, 3),
-                verified=verified_count,
-                unverified=unverified_count,
-                uncertain=uncertain_count,
-                total=len(claims),
+                claims=durable_claims,
+                overall_score=durable_overall,
+                verified=durable_counts["verified"],
+                unverified=durable_counts["unverified"],
+                uncertain=durable_counts["uncertain"],
+                total=durable_counts["total"],
             )
             persisted = True
         except Exception as exc:

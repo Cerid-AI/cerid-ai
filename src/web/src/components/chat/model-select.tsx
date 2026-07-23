@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select"
 import { MODELS } from "@/lib/types"
 import type { ModelCapabilities, ModelOption } from "@/lib/types"
-import { fetchConfiguredProviders } from "@/lib/api/settings"
+import { fetchModelCatalog } from "@/lib/api/settings"
 import { formatCost } from "@/lib/utils"
 import { estimateTurnCost } from "@/lib/model-router"
 
@@ -75,24 +75,19 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
     return new Set(configuredProviders.map((p) => p.toLowerCase()))
   }, [configuredProviders])
 
-  // Live advertised model lists per provider (best-effort decoration): a
-  // model whose routing provider IS configured but whose id is absent from
-  // that provider's advertised list gets an "Unavailable" hint instead of
-  // the misleading "Not configured". The helper is non-throwing, so a
-  // failed fetch just means no hints render.
-  const { data: providerCatalog } = useQuery({
-    queryKey: ["providers-configured"],
-    queryFn: () => fetchConfiguredProviders(),
+  // Currently-dispatchable id set, validated against the live OpenRouter
+  // catalog (E1 CR-004): a delisted id (absent from the catalog) is disabled +
+  // "Unavailable" so a stale hardcoded catalog entry can't be selected. null =
+  // catalog unknown (fetch failed / source "unavailable") → do NOT filter.
+  const { data: modelCatalog } = useQuery({
+    queryKey: ["models-catalog"],
+    queryFn: () => fetchModelCatalog(),
     staleTime: 300_000,
   })
-  const advertisedByProvider = useMemo(() => {
-    if (!providerCatalog?.providers?.length) return null
-    const map = new Map<string, Set<string>>()
-    for (const p of providerCatalog.providers) {
-      map.set(p.name.toLowerCase(), new Set(p.models ?? []))
-    }
-    return map
-  }, [providerCatalog])
+  const dispatchableSet = useMemo(() => {
+    if (modelCatalog?.source !== "live_catalog" || !modelCatalog.ids.length) return null
+    return new Set(modelCatalog.ids)
+  }, [modelCatalog])
 
   const grouped = useMemo(() => groupByProvider(MODELS), [])
 
@@ -107,13 +102,9 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
     configuredSet.has(routingProvider(m.id)) ||
     configuredSet.has(m.provider.toLowerCase())
 
-  // true/false when the provider's advertised list is known; null = unknown
-  // (no catalog data for that provider) — render no hint in that case.
-  const isModelAdvertised = (m: ModelOption): boolean | null => {
-    const advertised = advertisedByProvider?.get(routingProvider(m.id))
-    if (!advertised) return null
-    return advertised.has(m.id)
-  }
+  // true/false when the live catalog is known; null = unknown (don't filter).
+  const isModelDispatchable = (m: ModelOption): boolean | null =>
+    dispatchableSet === null ? null : dispatchableSet.has(m.id)
 
   return (
     <Select value={value} onValueChange={onChange}>
@@ -136,9 +127,13 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
                 const cost = estimateTurnCost(m, 2000, 500)
                 const top = m.capabilities ? topCapability(m.capabilities) : null
                 const configured = isModelConfigured(m)
-                const unavailable = configured && isModelAdvertised(m) === false
+                const dispatchable = isModelDispatchable(m)
+                // "Unavailable" comes only from the authoritative live OpenRouter
+                // catalog — the old hand-maintained provider registry falsely
+                // flagged most rows (CR-031).
+                const unavailable = dispatchable === false
                 return (
-                  <SelectItem key={m.id} value={m.id} disabled={!configured}>
+                  <SelectItem key={m.id} value={m.id} disabled={!configured || dispatchable === false}>
                     <span className="truncate">{m.label}</span>
                     {top && (
                       <span className="ml-1.5 shrink-0 rounded bg-muted px-1 py-0.5 text-label-xs text-muted-foreground">

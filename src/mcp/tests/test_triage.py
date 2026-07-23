@@ -12,7 +12,6 @@ import tempfile
 from unittest.mock import patch
 
 from app.agents.triage import (
-    chunk_node,
     extract_metadata_node,
     parse_node,
     route_categorization,
@@ -223,25 +222,9 @@ class TestExtractMetadataNode:
         assert result["metadata"]["tags"] == "important,review"
 
 
-# ---------------------------------------------------------------------------
-# Tests: chunk_node
-# ---------------------------------------------------------------------------
-
-class TestChunkNode:
-    @patch("app.agents.triage.chunk_text")
-    def test_produces_chunks(self, mock_chunk):
-        mock_chunk.return_value = ["chunk 1", "chunk 2"]
-        state = _base_state(parsed_text="some text to chunk")
-        result = chunk_node(state)
-        assert result["chunks"] == ["chunk 1", "chunk 2"]
-        mock_chunk.assert_called_once()
-
-    @patch("app.agents.triage.chunk_text")
-    def test_empty_text(self, mock_chunk):
-        mock_chunk.return_value = []
-        state = _base_state(parsed_text="")
-        result = chunk_node(state)
-        assert result["chunks"] == []
+# E1 CR-063: TestChunkNode was removed with the dead chunk_node — the triage
+# graph no longer chunks (ingestion re-chunks parsed_text; triage-side chunks
+# were computed and discarded).
 
 
 # ---------------------------------------------------------------------------

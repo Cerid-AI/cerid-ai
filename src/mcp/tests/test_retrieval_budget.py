@@ -146,8 +146,8 @@ def test_agent_query_budget_gate_returns_degraded_on_timeout():
     result = _run(run())
     assert result["budget_exceeded"] is True
     assert result["strategy"] == "degraded_budget_exhausted"
-    assert result["source_status"]["kb"] == "timeout"
-    assert result["source_status"]["external"] == "timeout"
+    # E1 CR-032: source_status not on the public envelope; degraded_reason is.
+    assert "source_status" not in result
     assert "longer than the configured budget" in result["degraded_reason"]
 
 

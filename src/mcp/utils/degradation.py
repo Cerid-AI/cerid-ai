@@ -27,7 +27,11 @@ __all__ = ["DegradationTier", "DegradationManager"]
 # Breaker names grouped by logical service.
 _CHROMADB_BREAKERS = ("chromadb", "bifrost-rerank")
 _NEO4J_BREAKERS = ("neo4j",)
-_LLM_BREAKERS = ("bifrost-verify", "bifrost-claims", "openrouter", "ollama")
+# The active LLM breakers: cloud (openrouter) + the two local chat backends
+# (ollama / quenchforge-chat, per internal_llm._call_ollama). The retired
+# bifrost-* breakers were dropped — they never open, so an all-open "LLM down"
+# check that included them could never fire (E1 CR-052).
+_LLM_BREAKERS = ("openrouter", "ollama", "quenchforge-chat")
 
 
 class DegradationTier(Enum):
@@ -47,7 +51,36 @@ def _is_breaker_open(name: str) -> bool:
         return False  # assume healthy if we can't check
 
 
+def _configured_llm_breakers() -> tuple[str, ...]:
+    """Breakers that count for the CACHED tier on *this* install (E1 R4 / CR-052).
+
+    ``get_breaker()`` auto-creates CLOSED breakers for never-dispatched names,
+    so requiring *all* of ``_LLM_BREAKERS`` open made CACHED unreachable on a
+    cloud-only default (ollama + quenchforge-chat stay CLOSED forever). Only
+    breakers for providers that are enabled / configured count.
+    """
+    import os
+
+    provider = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter").strip().lower()
+    has_or = bool(os.getenv("OPENROUTER_API_KEY", "").strip())
+    ollama_on = os.getenv("OLLAMA_ENABLED", "").strip().lower() in ("true", "1", "yes")
+    qf_url = bool(os.getenv("QUENCHFORGE_URL", "").strip())
+
+    names: list[str] = []
+    if provider == "openrouter" or has_or:
+        names.append("openrouter")
+    if provider == "ollama" or ollama_on:
+        names.append("ollama")
+    if provider == "quenchforge" or qf_url:
+        names.append("quenchforge-chat")
+
+    # Default install / unknown provider: openrouter is the cloud plane.
+    return tuple(names) if names else ("openrouter",)
+
+
 def _all_open(names: tuple[str, ...]) -> bool:
+    if not names:
+        return False
     return all(_is_breaker_open(n) for n in names)
 
 
@@ -78,7 +111,8 @@ class DegradationManager:
         # do retrieval) rather than blocking everything.
         if redis_is_down and (chromadb_open or neo4j_open):
             return DegradationTier.OFFLINE
-        if _all_open(_LLM_BREAKERS):
+        # E1 R4: only configured LLM breakers must be open for CACHED.
+        if _all_open(_configured_llm_breakers()):
             return DegradationTier.CACHED
         if redis_is_down:
             # Redis down but ChromaDB + Neo4j healthy: skip caching, still retrieve
@@ -109,7 +143,7 @@ class DegradationManager:
         svc = {
             "chromadb": "down" if _any_open(_CHROMADB_BREAKERS) else "up",
             "neo4j": "down" if _any_open(_NEO4J_BREAKERS) else "up",
-            "llm": "down" if _all_open(_LLM_BREAKERS) else "up",
+            "llm": "down" if _all_open(_configured_llm_breakers()) else "up",
             "redis": "down" if _redis_down() else "up",
         }
         degraded: list[str] = []

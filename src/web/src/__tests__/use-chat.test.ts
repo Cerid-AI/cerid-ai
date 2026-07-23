@@ -74,6 +74,37 @@ describe("useChat", () => {
     expect(result.current.isStreaming).toBe(false)
   })
 
+  it("CR-077: reflects OpenRouter's substituted actual_model in the resolved model", async () => {
+    const onMessageStart = vi.fn()
+    const onMessageUpdate = vi.fn()
+    const onModelResolved = vi.fn()
+
+    mockStreamChat.mockImplementation(
+      async (
+        _msgs: unknown,
+        _model: unknown,
+        onChunk: (chunk: string) => void,
+        _signal: unknown,
+        onModelInfo?: (info: { resolved_model: string; actual_model?: string }) => void,
+      ) => {
+        onModelInfo?.({ resolved_model: "gpt-4o-mini", actual_model: "gpt-4o-mini-2024-07-18" })
+        onChunk("hi")
+      },
+    )
+
+    const { result } = renderHook(() =>
+      useChat({ onMessageStart, onMessageUpdate, onModelResolved }),
+    )
+
+    await act(async () => {
+      await result.current.send("conv-1", [{ role: "user", content: "Hi" }], "openrouter/openai/gpt-4o-mini")
+    })
+
+    // The badge + feedback/memory attribution must report what actually
+    // answered (the substituted model), not the requested id.
+    expect(onModelResolved).toHaveBeenLastCalledWith("conv-1", "openrouter/gpt-4o-mini-2024-07-18")
+  })
+
   it("sets isStreaming during send", async () => {
     const onMessageStart = vi.fn()
     const onMessageUpdate = vi.fn()
@@ -170,7 +201,15 @@ describe("useChat", () => {
       longResponse,
       "model-1",
       "conv-1",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
     )
+    // CR-081: tokens must be non-zero so the feedback-loop conversation metrics
+    // aren't a permanent zero.
+    const call = mockIngestFeedback.mock.calls[0]
+    expect(call[4]).toBeGreaterThan(0)  // input tokens
+    expect(call[5]).toBeGreaterThan(0)  // output tokens
   })
 
   it("does not trigger feedback when disabled", async () => {

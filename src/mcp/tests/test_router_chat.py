@@ -329,7 +329,8 @@ class TestChatTelemetry:
         from app.routers.chat import get_chat_route_counts_today
 
         counts = get_chat_route_counts_today(fake)
-        assert counts == {"explicit": 1, "auto": 0, "fallback": 0}
+        # "auto_failed" bucket added in E1 CR-050 (observable smart-route failure).
+        assert counts == {"explicit": 1, "auto": 0, "auto_failed": 0, "fallback": 0}
 
     def test_model_latency_recorded_on_success(self, monkeypatch):
         import fakeredis

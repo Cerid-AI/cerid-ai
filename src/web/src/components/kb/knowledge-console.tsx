@@ -536,11 +536,13 @@ export function KnowledgeConsole({
       {/* Footer — relevance + source summary */}
       {hasQueried && totalSources > 0 && (
         <div className="border-t bg-muted/30 px-3 py-2">
-          {/* Relevance bar */}
+          {/* Relevance bar — relative ordering, not a calibrated score.
+              Post-rerank relevance is an ordinal cross-encoder sigmoid, so we
+              show a relative bar and drop the miscalibrated "%" (CR-010). */}
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-label-sm text-muted-foreground">Relevance</span>
-            <ProgressBar pct={confidencePct} className="flex-1" />
-            <span className="text-label-sm font-medium tabular-nums">{confidencePct}%</span>
+            <ProgressBar pct={confidencePct} label="Relative match strength" className="flex-1" />
+            <span className="text-label-xs text-muted-foreground">ranked by match</span>
           </div>
           <div className="flex items-center justify-between text-label-xs text-muted-foreground">
             <span>

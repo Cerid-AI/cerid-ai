@@ -173,3 +173,36 @@ class TestValidateModels:
 
             assert len(result["valid"]) > 0
             assert result["catalog_size"] == len(mock_catalog["data"])
+
+    @pytest.mark.asyncio
+    async def test_cr072_populates_pricing_cache_from_live_catalog(self):
+        """validate_models must populate the pricing cache so get_pricing returns
+        the LIVE OpenRouter price, not the hardcoded fallback. E1 CR-072 wired this
+        into the startup lifespan; before, validate_models was never called so the
+        cache stayed permanently empty and get_pricing always returned fallbacks."""
+        import utils.model_registry as mr
+
+        mock_catalog = {
+            "data": [
+                # Deliberately different from the fallback (0.15, 0.60) so a cache
+                # hit is distinguishable from the fallback path.
+                {"id": "openai/gpt-4o-mini", "pricing": {"prompt": "0.0000005", "completion": "0.000002"}},
+            ],
+        }
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_catalog
+        mock_response.raise_for_status = MagicMock()
+
+        mr._pricing_cache.pop("openrouter/openai/gpt-4o-mini", None)
+        with patch("utils.model_registry.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await mr.validate_models()
+
+        # Live per-1M price from the catalog, not the (0.15, 0.60) fallback.
+        assert mr.get_pricing("openrouter/openai/gpt-4o-mini") == (0.5, 2.0)

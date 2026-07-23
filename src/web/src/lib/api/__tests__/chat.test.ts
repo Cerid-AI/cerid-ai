@@ -2,9 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { ingestFeedback } from "@/lib/api/chat"
+import { ingestFeedback, streamChat } from "@/lib/api/chat"
 
 beforeEach(() => vi.clearAllMocks())
+
+describe("streamChat", () => {
+  it("CR-026: forwards cost_sensitivity from chatSettings to the request payload", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+        c.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, body })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await streamChat(
+      [{ role: "user", content: "hi" }], "auto", () => {},
+      undefined, undefined, { cost_sensitivity: "low" },
+    )
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const payload = JSON.parse(init.body as string)
+    expect(payload.cost_sensitivity).toBe("low")
+    expect(payload.model).toBe("auto")
+  })
+})
 
 describe("ingestFeedback", () => {
   it("treats the 202 queued ack as success (fire-and-forget contract)", async () => {

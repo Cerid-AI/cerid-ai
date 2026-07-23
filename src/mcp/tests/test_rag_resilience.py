@@ -248,9 +248,12 @@ class TestChromaDBCircuitBreaker:
         assert breaker.name == "chromadb"
 
     @pytest.mark.asyncio
-    async def test_query_domain_raises_on_circuit_open(self):
-        """When chromadb breaker is OPEN, CircuitOpenError propagates to caller."""
-        from core.utils.circuit_breaker import CircuitOpenError, CircuitState, get_breaker
+    async def test_query_domain_degrades_on_circuit_open(self):
+        """When the chromadb breaker is OPEN, multi_domain_query degrades gracefully
+        — the per-domain CircuitOpenError is caught and that domain returns empty —
+        rather than propagating it. E1 CR-056: the deleted app/agents/decomposer
+        fork raised; the live core.agents.query_agent path degrades."""
+        from core.utils.circuit_breaker import CircuitState, get_breaker
 
         breaker = get_breaker("chromadb")
         breaker._state = CircuitState.OPEN
@@ -263,16 +266,14 @@ class TestChromaDBCircuitBreaker:
         mock_chroma.list_collections.return_value = [col_stub]
         mock_chroma.get_collection.return_value = mock_collection
 
-        from app.agents.decomposer import multi_domain_query
+        from core.agents.query_agent import multi_domain_query
 
-        with patch("app.agents.decomposer.get_chroma", return_value=mock_chroma), \
-             patch("app.agents.decomposer.config") as mock_config:
+        with patch("core.agents.query_agent.config") as mock_config:
             mock_config.DOMAINS = ["general"]
             mock_config.collection_name = lambda d: f"kb_{d}"
-            # CircuitOpenError propagates — the caller (query_agent) handles degradation
-            with pytest.raises(CircuitOpenError):
-                await multi_domain_query("test query", domains=["general"],
-                                         chroma_client=mock_chroma)
+            results = await multi_domain_query("test query", domains=["general"],
+                                               chroma_client=mock_chroma)
+            assert results == []
 
         breaker.reset()
 
@@ -354,7 +355,8 @@ class TestParallelExecution:
             from app.agents.retrieval_orchestrator import orchestrated_query
             result = await orchestrated_query(query="test", rag_mode="smart")
 
-        assert result["source_status"]["kb"] == "ok"
+        # E1 CR-032: source_status not serialized; memory empty on failure.
+        assert "source_status" not in result
         assert result["source_breakdown"]["memory"] == []
 
     @pytest.mark.asyncio
@@ -399,13 +401,12 @@ class TestParallelExecution:
         mock_chroma.list_collections.return_value = [col_stub]
         mock_chroma.get_collection.return_value = mock_collection
 
-        from app.agents.decomposer import multi_domain_query
+        from core.agents.query_agent import multi_domain_query
         from core.utils.circuit_breaker import get_breaker
         breaker = get_breaker("chromadb")
         breaker.reset()
 
-        with patch("app.agents.decomposer.get_chroma", return_value=mock_chroma), \
-             patch("app.agents.decomposer.config") as mock_config:
+        with patch("core.agents.query_agent.config") as mock_config:
 
             mock_config.DOMAINS = ["general"]
             mock_config.collection_name = lambda d: f"kb_{d}"

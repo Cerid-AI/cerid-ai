@@ -8,7 +8,7 @@ pdfplumber, etc.) are pre-stubbed by conftest.py's ``pytest_configure()``.
 
 Mocking strategy mirrors test_services_ingestion.py:
 - Patch ``services.ingestion.get_redis/get_neo4j/get_chroma`` for ingest tests
-- Patch ``agents.decomposer.config`` (set ``.DOMAINS`` on the mock) for query tests
+- Patch ``core.agents.query_agent.config`` (set ``.DOMAINS`` on the mock) for query tests
 - Patch verification internals at their own module paths
 - TestFullUserJourney mocks at function level (ingest_content, multi_domain_query, etc.)
 """
@@ -214,7 +214,7 @@ class TestIngestionPipeline:
 class TestQueryRetrievalPipeline:
     """Tests for query -> retrieval pipeline.
 
-    Patches target agents.decomposer (where multi_domain_query lives) and
+    Patches target core.agents.query_agent (where multi_domain_query lives) and
     core.retrieval.bm25 (which multi_domain_query calls internally).
     """
 
@@ -222,7 +222,7 @@ class TestQueryRetrievalPipeline:
         import asyncio
         return asyncio.run(coro)
 
-    @patch("app.agents.decomposer.config")
+    @patch("core.agents.query_agent.config")
     def test_query_returns_relevant_chunks(self, mock_config):
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -242,7 +242,7 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = collection
         chroma_client.list_collections.return_value = []
 
-        from app.agents.decomposer import multi_domain_query
+        from core.agents.query_agent import multi_domain_query
         with patch("core.retrieval.bm25.is_available", return_value=False):
             results = self._run(multi_domain_query(
                 "What database did we choose?", domains=["coding"],
@@ -253,7 +253,7 @@ class TestQueryRetrievalPipeline:
         assert results[0]["content"] == "PostgreSQL uses MVCC"
         assert results[0]["relevance"] > results[1]["relevance"]
 
-    @patch("app.agents.decomposer.config")
+    @patch("core.agents.query_agent.config")
     def test_query_hybrid_search(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -272,7 +272,7 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = collection
         chroma_client.list_collections.return_value = []
 
-        from app.agents.decomposer import multi_domain_query
+        from core.agents.query_agent import multi_domain_query
         with patch("core.retrieval.bm25.is_available", return_value=True), \
              patch("core.retrieval.bm25.search_bm25", return_value=[("chunk_1", 0.9)]):
             results = self._run(multi_domain_query(
@@ -325,7 +325,7 @@ class TestQueryRetrievalPipeline:
         assert result["total_results"] == 0
         assert result["context"] == ""
 
-    @patch("app.agents.decomposer.config")
+    @patch("core.agents.query_agent.config")
     def test_query_empty_collection(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -340,13 +340,13 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = collection
         chroma_client.list_collections.return_value = []
 
-        from app.agents.decomposer import multi_domain_query
+        from core.agents.query_agent import multi_domain_query
         with patch("core.retrieval.bm25.is_available", return_value=False):
             results = self._run(multi_domain_query(
                 "anything", domains=["coding"], chroma_client=chroma_client))
         assert results == []
 
-    @patch("app.agents.decomposer.config")
+    @patch("core.agents.query_agent.config")
     def test_query_domain_filtering(self, mock_config):
         mock_config.DOMAINS = ["coding", "finance"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -364,7 +364,7 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = coding_coll
         chroma_client.list_collections.return_value = []
 
-        from app.agents.decomposer import multi_domain_query
+        from core.agents.query_agent import multi_domain_query
         with patch("core.retrieval.bm25.is_available", return_value=False):
             results = self._run(multi_domain_query(
                 "async patterns", domains=["coding"], chroma_client=chroma_client))
@@ -527,7 +527,7 @@ class TestFullUserJourney:
         artifact_id = ingest_result["artifact_id"]
 
         # --- Phase 2: Query (mock multi_domain_query at function level) ---
-        from app.agents.assembler import assemble_context
+        from core.agents.query_agent import assemble_context
 
         mock_query_results = [
             {"content": "PostgreSQL uses MVCC for concurrent access and supports ACID",
@@ -538,9 +538,9 @@ class TestFullUserJourney:
              "sub_category": "", "tags_json": "[]", "keywords": "[]"},
         ]
 
-        with patch("app.agents.decomposer.multi_domain_query",
+        with patch("core.agents.query_agent.multi_domain_query",
                     new_callable=AsyncMock, return_value=mock_query_results):
-            from app.agents.decomposer import multi_domain_query
+            from core.agents.query_agent import multi_domain_query
             query_results = await multi_domain_query(
                 "What database did we choose and why?",
                 domains=["coding"])
@@ -589,10 +589,10 @@ class TestFullUserJourney:
             "sub_category": "", "tags_json": "[]", "keywords": "[]",
         }
 
-        with patch("app.agents.decomposer.multi_domain_query",
+        with patch("core.agents.query_agent.multi_domain_query",
                     new_callable=AsyncMock,
                     return_value=[coding_result, finance_result]):
-            from app.agents.decomposer import multi_domain_query
+            from core.agents.query_agent import multi_domain_query
             results = await multi_domain_query(
                 "How does API rate limiting affect our systems?",
                 domains=["coding", "finance"])

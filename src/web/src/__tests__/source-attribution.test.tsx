@@ -127,6 +127,20 @@ describe("SourceAttribution", () => {
     // Highest relevance kept
     expect(screen.getByText("85%")).toBeInTheDocument()
   })
+
+  it("CR-010: shows low ordinal-relevance sources (no client-side absolute floor)", async () => {
+    // Post-rerank relevance is an ordinal cross-encoder sigmoid; a correct
+    // citation can score ~0.28. The old 0.45 display floor hid it entirely,
+    // emptying the source attribution on a genuinely grounded answer.
+    const user = userEvent.setup()
+    const sources: SourceRef[] = [
+      { artifact_id: "hot", filename: "grounded.py", domain: "coding", relevance: 0.28, chunk_index: 0 },
+    ]
+    render(<SourceAttribution sources={sources} />)
+    expect(screen.getByText("1 source")).toBeInTheDocument()
+    await user.click(screen.getByText("1 source"))
+    expect(screen.getByText("grounded.py")).toBeInTheDocument()
+  })
 })
 
 describe("SourceAttribution \u2014 external (Task 5)", () => {

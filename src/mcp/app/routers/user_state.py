@@ -15,6 +15,7 @@ import config
 from app.services.private_mode import private_blocks
 from app.sync.user_state import (
     delete_conversation,
+    list_conversation_ids,
     read_conversation,
     read_conversations,
     read_preferences,
@@ -59,11 +60,11 @@ def get_user_state_summary():
         return {"settings": {}, "preferences": {}, "conversation_ids": []}
     settings = read_settings(sd)
     preferences = read_preferences(sd)
-    conversations = read_conversations(sd)
+    # ids are the filename stems — no need to decrypt every conversation (CR-058).
     return {
         "settings": settings,
         "preferences": preferences,
-        "conversation_ids": [c.get("id") for c in conversations if c.get("id")],
+        "conversation_ids": list_conversation_ids(sd),
     }
 
 
@@ -124,10 +125,24 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
 @router.delete("/conversations/{conv_id}", response_model=RemoveConversationResponse)
 def remove_conversation(conv_id: str):
     """Delete a conversation by ID."""
+    # E1 CR-061: private_blocks on DELETE — saves already gated; delete was asymmetric.
+    if private_blocks(1):
+        raise HTTPException(status_code=403, detail="Private mode blocks conversation deletes")
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=412, detail="Sync directory not configured")
     delete_conversation(sd, conv_id)
+    # E1 CR-012: also drop the durable hall:{cid} verification report so a deleted
+    # conversation does not leave its verbatim claims + source snippets cached in
+    # Redis for the 7-day TTL. Best-effort — the conversation delete already
+    # succeeded; a Redis outage must not fail the request.
+    try:
+        from app.deps import get_redis
+        from core.agents.hallucination import delete_hallucination_report
+        delete_hallucination_report(get_redis(), conv_id)
+    except Exception as exc:  # noqa: BLE001 — best-effort cache purge
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("user_state.remove_conversation.hall_cache", exc)
     return {"deleted": conv_id}
 
 

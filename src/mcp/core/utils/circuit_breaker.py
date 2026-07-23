@@ -113,6 +113,19 @@ class AsyncCircuitBreaker:
             await self._on_success()
             return result
 
+    async def record_success(self) -> None:
+        """Record a successful call for a path that can't route through ``call()``
+        — e.g. a streaming generator whose outcome is only known mid-iteration."""
+        await self._on_success()
+
+    async def record_failure(self, exc: Exception) -> None:
+        """Record a failed call for a streaming/manual path, honoring the same
+        client-error + excluded-exception filtering as ``call()`` so only genuine
+        upstream failures count toward tripping the breaker."""
+        if isinstance(exc, self.excluded_exceptions) or _is_client_error(exc):
+            return
+        await self._on_failure(exc)
+
     async def _on_success(self) -> None:
         async with self._lock:
             # Use the computed state (which derives HALF_OPEN from OPEN + elapsed time)

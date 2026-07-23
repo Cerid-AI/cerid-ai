@@ -15,11 +15,11 @@ from typing import Any
 
 import config
 from app.db import neo4j as graph
-from app.deps import get_chroma, get_neo4j, get_redis
+from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.routers.artifacts import recategorize
 from app.routers.health import health_check, list_collections
 from app.services.ingestion import ingest_content, ingest_file
-from app.services.private_mode import private_blocks
+from app.services.private_mode import private_blocks, saves_blocked
 from app.tool_registry import (
     TOOL_REGISTRY,
     InvalidToolError,
@@ -755,7 +755,9 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
     elif name == "pkb_collections":
         return await asyncio.to_thread(list_collections)
     elif name == "pkb_agent_query":
-        from core.agents.query_agent import agent_query_full
+        from app.concurrency import KB_POOL
+        from app.services.request_policy import build_request_context
+        from core.agents.guarded_retrieval import guarded_agent_query_full
         from core.retrieval.surface_router import route as _surface_route
 
         # Phase K3.3 — surface-aware query.
@@ -785,17 +787,27 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             except Exception:  # noqa: BLE001
                 wiki_page = None
 
-        result = await agent_query_full(
-            query=query_text,
-            domains=arguments.get("domains"),
-            top_k=arguments.get("top_k", 10),
-            use_reranking=arguments.get("use_reranking", True),
-            chroma_client=get_chroma(),
-            redis_client=get_redis(),
-            neo4j_driver=get_neo4j(),
-            exclude_packs=arguments.get("exclude_packs", False),
-            metadata_filter=arguments.get("metadata_filter"),
-        )
+        # E1 CR-096: gate under KB_POOL like /agent/query + A2A (CR-091) so
+        # unbounded concurrent MCP retrieval cannot starve /health + /observability.
+        async with KB_POOL.acquire():
+            result = await guarded_agent_query_full(
+                request_context=build_request_context(
+                    skip_cache=arguments.get("skip_cache", False),
+                    metadata_filter=arguments.get("metadata_filter"),
+                ),
+                query=query_text,
+                domains=arguments.get("domains"),
+                top_k=arguments.get("top_k", 10),
+                use_reranking=arguments.get("use_reranking", True),
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                # E1 CR-025: graph expansion + quality/summary enrichment need the
+                # graph store; without it this MCP path returns flatter results than
+                # /agent/query for the same query.
+                graph_store=get_graph_store(),
+                exclude_packs=arguments.get("exclude_packs", False),
+            )
 
         # Attach surface route metadata + wiki page when fetched.
         result["surface_route"] = {
@@ -898,6 +910,9 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             neo4j_driver=get_neo4j(),
             redis_client=get_redis(),
             threshold=arguments.get("threshold"),
+            # Private Mode L1+ suppresses the durable hall:{cid} report on this
+            # MCP transport too, matching the REST handlers (CR-018/086).
+            persist_report=not saves_blocked(),
         )
     elif name == "pkb_memory_extract":
         from app.agents.memory import extract_and_store_memories

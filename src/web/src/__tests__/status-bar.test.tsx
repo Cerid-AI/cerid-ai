@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { StatusBar } from "@/components/layout/status-bar"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
@@ -76,6 +77,51 @@ describe("StatusBar", () => {
     )
     render(<StatusBar />, { wrapper })
     expect(await screen.findByText("Some services degraded")).toBeInTheDocument()
+  })
+
+  // CR-069: Bifrost was retired 2026-04-17 — the OpenRouter failure tooltips
+  // must not promise a fallback gateway that no longer exists.
+  it("CR-069: OpenRouter auth-error tooltip does not promise a Bifrost fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ ...mockHealthy, openrouter_auth_ok: false }),
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<StatusBar />, { wrapper })
+    const badge = await screen.findByText(/OpenRouter: Auth Error/i)
+    await user.hover(badge)
+    await waitFor(() => expect(screen.getAllByText(/no fallback gateway/i).length).toBeGreaterThan(0))
+    expect(screen.queryAllByText(/Bifrost/i)).toHaveLength(0)
+  })
+
+  it("CR-069: OpenRouter circuit-open tooltip does not promise a Bifrost fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              ...mockHealthy,
+              openrouter_auth_ok: true,
+              circuit_breakers: { openrouter: "open" },
+            }),
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<StatusBar />, { wrapper })
+    const badge = await screen.findByText(/OpenRouter: Circuit Open/i)
+    await user.hover(badge)
+    await waitFor(() => expect(screen.getAllByText(/circuit resets/i).length).toBeGreaterThan(0))
+    expect(screen.queryAllByText(/Bifrost/i)).toHaveLength(0)
   })
 
   // CH-CREDITS: a recovered "ok" credits status must not render the stale

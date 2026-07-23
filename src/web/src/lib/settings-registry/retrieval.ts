@@ -49,7 +49,7 @@ export const RETRIEVAL_DEFS: SettingDef[] = [
     group: "contextInjection",
     level: "core",
     label: "Injection threshold",
-    helpText: "Minimum relevance score (0–1) a document must reach before being auto-injected. Lower = more context injected; higher = only high-confidence matches.",
+    helpText: "How close to the best match a document must score to be auto-injected, as a fraction of the top hit (0–1). Relevance scores are ordinal, so this is relative to the strongest result, not an absolute cutoff. Lower = more context injected; higher = only near-top matches.",
     scopeOfEffect: SERVER,
     keywords: ["Essentials", "auto_inject_threshold", "threshold", "relevance", "confidence"],
     type: "number",

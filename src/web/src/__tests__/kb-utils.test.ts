@@ -228,7 +228,7 @@ describe("getContextBudget", () => {
   })
 
   it("returns grok budget for grok model", () => {
-    expect(getContextBudget("openrouter/x-ai/grok-4.1-fast")).toBe(MODEL_CONTEXT_CHAR_BUDGETS["grok"])
+    expect(getContextBudget("openrouter/x-ai/grok-4.5")).toBe(MODEL_CONTEXT_CHAR_BUDGETS["grok"])
   })
 
   it("returns default 40000 for unknown model", () => {

@@ -275,6 +275,48 @@ class TestChatStream:
                 await chat_completion(req)
             assert exc_info.value.status_code == 503
 
+    @pytest.mark.asyncio
+    async def test_stream_failure_feeds_the_circuit_breaker(self):
+        """A streamed upstream failure is surfaced as a 200 SSE error event, but
+        must ALSO be recorded to the breaker — otherwise the breaker this
+        endpoint gates on can never open (CR-068)."""
+        from app.routers.ollama_proxy import ChatMessage, OllamaChatRequest, chat_completion
+        from core.utils.circuit_breaker import get_breaker
+
+        breaker = get_breaker("ollama")
+        before = breaker._failure_count
+
+        class _RaisingStreamCtx:
+            async def __aenter__(self):
+                raise httpx.ConnectError("Connection refused")
+
+            async def __aexit__(self, *_a):
+                return False
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(return_value=_RaisingStreamCtx())
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        req = OllamaChatRequest(
+            model="llama3.2",
+            messages=[ChatMessage(role="user", content="Hello")],
+            stream=True,
+        )
+
+        with _enable_ollama(), patch(
+            "app.routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client
+        ):
+            resp = await chat_completion(req)
+            body = b""
+            async for chunk in resp.body_iterator:
+                body += chunk if isinstance(chunk, bytes) else chunk.encode()
+
+        # The 200 SSE error event is still emitted…
+        assert b"error" in body
+        # …but the breaker learned about the failure.
+        assert breaker._failure_count == before + 1
+
 
 # ---------------------------------------------------------------------------
 # Provider validation (no auth required)

@@ -371,21 +371,31 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
 }
 
 /** Thumbs up/down feedback buttons for assistant messages. */
-function FeedbackButtons({ messageId }: { messageId: string }) {
+function FeedbackButtons({ messageId, conversationId }: { messageId: string; conversationId?: string }) {
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null)
 
   const submit = useCallback(async (rating: "up" | "down") => {
-    setFeedback(rating)
     try {
-      await fetch(`${MCP_BASE}/artifacts/${messageId}/feedback`, {
+      // E1 CR-043: record into the chat feedback-loop store keyed by
+      // (conversation_id, message_id). Paint success only after 2xx (operator
+      // direction) — pre-fix setFeedback before the POST so a dark failure
+      // still looked like a recorded thumb.
+      const res = await fetch(`${MCP_BASE}/ingest/feedback`, {
         method: "POST",
         headers: mcpHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ rating, source: "message_bubble" }),
+        body: JSON.stringify({
+          conversation_id: conversationId ?? "",
+          message_id: messageId,
+          sentiment: rating,
+        }),
       })
+      if (res.ok) {
+        setFeedback(rating)
+      }
     } catch {
-      // Non-blocking — feedback is best-effort
+      // Non-blocking — feedback is best-effort; leave prior UI state
     }
-  }, [messageId])
+  }, [messageId, conversationId])
 
   return (
     <>
@@ -427,6 +437,8 @@ function FeedbackButtons({ messageId }: { messageId: string }) {
 
 interface MessageBubbleProps {
   message: ChatMessage
+  /** Active conversation id — for per-message thumbs feedback (CR-043). */
+  conversationId?: string
   verificationStatus?: MessageVerificationStatus
   verificationClaims?: HallucinationClaim[]
   inlineMarkups?: boolean
@@ -443,7 +455,7 @@ interface MessageBubbleProps {
   onReVerify?: () => void
 }
 
-export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, isStreaming, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick, onReVerify }: MessageBubbleProps) {
+export function MessageBubble({ message, conversationId, verificationStatus, verificationClaims, inlineMarkups, isStreaming, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick, onReVerify }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const [correcting, setCorrecting] = useState(false)
   const [correctionText, setCorrectionText] = useState("")
@@ -699,7 +711,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
                 </Tooltip>
               </TooltipProvider>
             )}
-            <FeedbackButtons messageId={message.id} />
+            <FeedbackButtons messageId={message.id} conversationId={conversationId} />
           </div>
         )}
 

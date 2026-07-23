@@ -369,6 +369,7 @@ async def validate_key(req: KeyValidationRequest) -> KeyValidationResponse:
                 "openai": "OPENAI_API_KEY",
                 "anthropic": "ANTHROPIC_API_KEY",
                 "xai": "XAI_API_KEY",
+                "google": "GOOGLE_API_KEY",  # E1 CR-108
             }
             env_var = env_map.get(req.provider.lower(), "")
             api_key = os.getenv(env_var, "")
@@ -395,6 +396,7 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
         "openai": "https://api.openai.com/v1/models",
         "anthropic": "https://api.anthropic.com/v1/models",
         "xai": "https://api.x.ai/v1/models",
+        "google": "https://generativelanguage.googleapis.com/v1beta/models",  # E1 CR-108
     }
 
     if provider not in url_map:
@@ -405,6 +407,8 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
     if provider == "anthropic":
         headers["x-api-key"] = api_key
         headers["anthropic-version"] = "2023-06-01"
+    elif provider == "google":
+        headers["x-goog-api-key"] = api_key  # E1 CR-108: Gemini auth header
     else:
         headers["Authorization"] = f"Bearer {api_key}"
 

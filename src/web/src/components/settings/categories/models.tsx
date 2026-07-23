@@ -67,6 +67,15 @@ function OpenRouterKeyInline() {
       setDraft("")
       toast.success("OpenRouter key saved")
       qc.invalidateQueries({ queryKey: ["openrouter-key-status"] })
+      // E1 CR-047: the chat model dropdown gates on the live catalog's
+      // dispatchable-id set (["models-catalog"]), which is resolved against
+      // OpenRouter auth. A new key changes what is dispatchable, so the catalog
+      // must be refetched — otherwise the dropdown keeps showing the pre-key
+      // availability until an unrelated refetch happens.
+      qc.invalidateQueries({ queryKey: ["models-catalog"] })
+      // E1 R11: setup-status (staleTime 60s) also gates the models dropdown
+      // disabled state — invalidate so key-save unblocks within the same turn.
+      qc.invalidateQueries({ queryKey: ["setup-status"] })
     },
     onError: (err) => {
       setRowError(err instanceof Error ? err.message : "Save failed")

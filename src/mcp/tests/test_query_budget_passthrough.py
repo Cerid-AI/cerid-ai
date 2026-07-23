@@ -11,11 +11,16 @@ discount it. Live-proven: the first live-retrieval baseline scored
 cross-domain queries 0.0 because degraded-empties read as misses.
 """
 
+# E1 CR-087: query_endpoint now resolves the caller's consumer via the request
+# headers; a header-less fake resolves to the default (gui, unrestricted).
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.routers.query import QueryRequest, query_endpoint
+
+_REQ = SimpleNamespace(headers={})
 
 _DEGRADED_RESULT = {
     "context": "",
@@ -49,7 +54,7 @@ def _patches(result):
 async def test_degraded_envelope_passes_through():
     patches = _patches(_DEGRADED_RESULT)
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
-        resp = await query_endpoint(QueryRequest(query="anything"))
+        resp = await query_endpoint(QueryRequest(query="anything"), _REQ)
     assert resp["budget_exceeded"] is True
     assert "budget" in (resp["degraded_reason"] or "")
     assert resp["sources"] == []
@@ -59,7 +64,7 @@ async def test_degraded_envelope_passes_through():
 async def test_normal_result_defaults_not_degraded():
     patches = _patches(_NORMAL_RESULT)
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
-        resp = await query_endpoint(QueryRequest(query="anything"))
+        resp = await query_endpoint(QueryRequest(query="anything"), _REQ)
     assert resp["budget_exceeded"] is False
     assert resp["degraded_reason"] is None
     assert resp["sources"] == [{"filename": "doc.md"}]
@@ -78,7 +83,7 @@ async def test_budget_seconds_reaches_agent_query():
     patches = _patches(_NORMAL_RESULT)
     with patch("core.agents.query_agent.agent_query_full", new=mock), \
          patches[1], patches[2], patches[3], patches[4], patches[5]:
-        await query_endpoint(QueryRequest(query="anything", budget_seconds=60.0))
+        await query_endpoint(QueryRequest(query="anything", budget_seconds=60.0), _REQ)
     assert mock.await_args.kwargs.get("budget_seconds") == 60.0
 
 
@@ -88,7 +93,7 @@ async def test_budget_seconds_default_is_none():
     patches = _patches(_NORMAL_RESULT)
     with patch("core.agents.query_agent.agent_query_full", new=mock), \
          patches[1], patches[2], patches[3], patches[4], patches[5]:
-        await query_endpoint(QueryRequest(query="anything"))
+        await query_endpoint(QueryRequest(query="anything"), _REQ)
     assert mock.await_args.kwargs.get("budget_seconds") is None
 
 
@@ -104,5 +109,5 @@ async def test_skip_cache_reaches_agent_query():
     patches = _patches(_NORMAL_RESULT)
     with patch("core.agents.query_agent.agent_query_full", new=mock), \
          patches[1], patches[2], patches[3], patches[4], patches[5]:
-        await query_endpoint(QueryRequest(query="anything", skip_cache=True))
+        await query_endpoint(QueryRequest(query="anything", skip_cache=True), _REQ)
     assert mock.await_args.kwargs.get("skip_cache") is True

@@ -170,6 +170,31 @@ def _resolve_stage_model(stage: str | None) -> str:
         return ""
 
 
+def _build_ollama_options(
+    temperature: float, max_tokens: int, json_mode: bool,
+) -> dict[str, Any]:
+    """Build the Ollama/Quenchforge ``options`` block — additive advanced flags,
+    all default-off. Shared by the streaming and non-streaming local paths so
+    speculative + constrained decode apply to BOTH; the streaming twin used to
+    drop the speculative-decode draft model the non-streaming path applied
+    (CR-070). The wire stays valid against stock Ollama and Quenchforge.
+    """
+    options: dict[str, Any] = {"temperature": temperature, "num_predict": max_tokens}
+    if json_mode and getattr(config, "ENABLE_CONSTRAINED_DECODE", False):
+        # Constrained decode pairs with json_mode by forcing deterministic
+        # output — otherwise the model can still emit valid JSON that varies
+        # per sample. Operators wanting freshness override the flag.
+        options["temperature"] = 0.0
+    if getattr(config, "ENABLE_SPECULATIVE_DECODE", False):
+        draft_model = (
+            getattr(config, "INTERNAL_LLM_DRAFT_MODEL", "")
+            or os.getenv("INTERNAL_LLM_DRAFT_MODEL", "")
+        )
+        if draft_model:
+            options["draft_model"] = draft_model
+    return options
+
+
 def _build_chat_payload(
     model: str,
     messages: list[dict[str, str]],
@@ -199,6 +224,18 @@ def _build_chat_payload(
     if getattr(config, "ENABLE_PROMPT_PREFIX_CACHE", False):
         payload["keep_alive"] = getattr(config, "PROMPT_PREFIX_KEEP_ALIVE", "30m")
     return payload
+
+
+def _ensure_json_prompt_token(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """OpenAI/OpenRouter reject ``response_format=json_object`` with HTTP 400
+    unless the literal token "json" appears in the prompt (E1 CR-103). Local
+    backends are lenient, so a caller that asks for JSON without saying "json"
+    succeeds locally and 400s on the cloud path. Append a system nudge when the
+    token is absent so json-mode is reachable on every OpenRouter path — both the
+    direct branch and the local->cloud fallback."""
+    if any("json" in str(m.get("content", "")).lower() for m in messages):
+        return messages
+    return [*messages, {"role": "system", "content": "Respond with valid JSON only."}]
 
 
 async def call_internal_llm(
@@ -247,19 +284,24 @@ async def call_internal_llm(
             provider, stage, resolved_model or "<caller-default>",
         )
 
+    json_mode = response_format is not None and response_format.get("type") == "json_object"
     if provider in ("ollama", "quenchforge"):
         return await _call_ollama(
             messages,
             provider=provider,
+            model=resolved_model,
+            stage=stage,
             temperature=temperature,
             max_tokens=max_tokens,
-            json_mode=response_format is not None and response_format.get("type") == "json_object",
+            json_mode=json_mode,
         )
     else:
-        # Default: direct OpenRouter via unified client
+        # Default: direct OpenRouter via unified client. CR-103: apply the same
+        # json-token guard the local->cloud fallback uses, so a json-mode caller
+        # whose stage resolves DIRECTLY to openrouter doesn't 400.
         from core.utils.llm_client import call_llm
         return await call_llm(
-            messages,
+            _ensure_json_prompt_token(messages) if json_mode else messages,
             model=resolved_model,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -274,6 +316,8 @@ async def _call_ollama(
     max_tokens: int,
     json_mode: bool = False,
     provider: str = "ollama",
+    model: str = "",
+    stage: str | None = None,
 ) -> str:
     """Call a local Ollama-protocol backend (stock Ollama or Quenchforge).
 
@@ -293,7 +337,12 @@ async def _call_ollama(
         base_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         label = "Ollama"
         start_hint = "is 'ollama serve' running?"
-    model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
+    # E1 CR-038: honor a stage-resolved / override model when it names a LOCAL
+    # model (a bare id like "llama3.1-8b"). A tier id ("openrouter/...", carries a
+    # "/") can't be served by the local daemon, so use the local default there.
+    local_model = model if (model and "/" not in model) else (
+        getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
+    )
     # Breaker key is provider- AND workload-specific. Pre-v0.93.9 both providers
     # shared the "ollama" breaker; v0.93.9 split by provider. The chat path now
     # also gets its OWN "quenchforge-chat" breaker, separate from the
@@ -303,28 +352,11 @@ async def _call_ollama(
     # (healthy, fast) embed/rerank slots too — locking out the whole backend.
     breaker = get_breaker("quenchforge-chat") if provider == "quenchforge" else get_breaker("ollama")
 
-    # Advanced flags (default off). When any is set, additive payload fields
-    # are surfaced; the wire stays valid against stock Ollama and Quenchforge.
-    options: dict[str, Any] = {
-        "temperature": temperature,
-        "num_predict": max_tokens,
-    }
-    if json_mode and getattr(config, "ENABLE_CONSTRAINED_DECODE", False):
-        # Constrained decode pairs with json_mode by forcing deterministic
-        # output — otherwise the model can still emit valid JSON that varies
-        # per sample. Operators wanting freshness override the flag.
-        options["temperature"] = 0.0
-    if getattr(config, "ENABLE_SPECULATIVE_DECODE", False):
-        draft_model = (
-            getattr(config, "INTERNAL_LLM_DRAFT_MODEL", "")
-            or os.getenv("INTERNAL_LLM_DRAFT_MODEL", "")
-        )
-        if draft_model:
-            options["draft_model"] = draft_model
+    options = _build_ollama_options(temperature, max_tokens, json_mode)
 
     async def _do_call() -> str:
         payload = _build_chat_payload(
-            model, messages, options, stream=False, json_mode=json_mode,
+            local_model, messages, options, stream=False, json_mode=json_mode,
         )
         client = await _get_ollama_client()
         resp = await client.post(
@@ -425,7 +457,7 @@ async def _call_ollama(
         "llm",
         configured=provider,
         served_by="openrouter",
-        detail=str(last_exc) if last_exc else "",
+        detail=f"stage={stage or '<none>'}: {last_exc}" if last_exc else f"stage={stage or '<none>'}",
     )
     del last_exc  # informational only; the fall-through path doesn't need it
 
@@ -435,24 +467,16 @@ async def _call_ollama(
     # like memory extraction that request structured JSON get it on fallback.
     from core.utils.llm_client import call_llm
 
-    fallback_messages = messages
-    fallback_response_format = None
-    if json_mode:
-        fallback_response_format = {"type": "json_object"}
-        # OpenAI/OpenRouter reject response_format=json_object unless the word
-        # "json" appears somewhere in the prompt (HTTP 400). A local backend
-        # (Ollama/Quenchforge) is lenient, so a caller that asked for JSON
-        # without literally saying "json" succeeds locally but 400s on the
-        # cloud fallback. Guarantee the token defensively so the fallback is
-        # actually reachable for every json-mode caller.
-        if not any("json" in str(m.get("content", "")).lower() for m in messages):
-            fallback_messages = [
-                *messages,
-                {"role": "system", "content": "Respond with valid JSON only."},
-            ]
+    fallback_messages = _ensure_json_prompt_token(messages) if json_mode else messages
+    fallback_response_format = {"type": "json_object"} if json_mode else None
+    # E1 CR-102: a stage-resolved OpenRouter model (tier id, carries a "/") is
+    # valid on the cloud fallback — use it instead of always downgrading to the
+    # JSON fallback model. A bare/local hint is not a valid OpenRouter id, so the
+    # known-good fallback model still covers that case.
+    fallback_model = model if (model and "/" in model) else config.INTERNAL_LLM_JSON_FALLBACK_MODEL
     return await call_llm(
         fallback_messages,
-        model=config.INTERNAL_LLM_JSON_FALLBACK_MODEL,
+        model=fallback_model,
         temperature=temperature,
         max_tokens=max_tokens,
         response_format=fallback_response_format,
@@ -480,9 +504,7 @@ async def _stream_ollama(
     else:
         base_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
-    options: dict[str, Any] = {"temperature": temperature, "num_predict": max_tokens}
-    if json_mode and getattr(config, "ENABLE_CONSTRAINED_DECODE", False):
-        options["temperature"] = 0.0
+    options = _build_ollama_options(temperature, max_tokens, json_mode)
     payload = _build_chat_payload(
         model, messages, options, stream=True, json_mode=json_mode,
     )
@@ -536,12 +558,21 @@ async def call_internal_llm_stream(
     """
     default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
     provider = _resolve_stage_provider(stage, default_provider)
+    # E1 CR-111: honor an llm_call_override scoped around this stream — its
+    # docstring promises to cover "every call_internal_llm call inside the block",
+    # and the streaming entry point is one. Only the provider matters here (local
+    # vs cloud branch); the override's model flows through the non-local branch's
+    # call_internal_llm, which re-reads the override.
+    override = _llm_override.get()
+    if override is not None:
+        provider = override[0]
     json_mode = (
         response_format is not None
         and response_format.get("type") == "json_object"
     )
 
     if provider in ("ollama", "quenchforge"):
+        from core.utils import inference_health
         yielded_any = False
         try:
             async for chunk in _stream_ollama(
@@ -553,6 +584,9 @@ async def call_internal_llm_stream(
             ):
                 yielded_any = True
                 yield chunk
+            # E1 CR-093: record the streaming success so the breaker + /health see
+            # it — the streaming path was previously invisible to inference_health.
+            inference_health.record_success("llm", provider=provider)
             return
         except (
             httpx.ConnectError,
@@ -561,10 +595,20 @@ async def call_internal_llm_stream(
         ) as exc:
             log_swallowed_error("core.utils.internal_llm.stream_fallback", exc)
             if yielded_any:
-                # Partial stream already delivered — restarting would duplicate
-                # content, so stop here rather than fall back to a full call.
-                return
-            # No tokens yet → safe to fall back to the non-streaming path below.
+                # E1 CR-093: partial content already reached the consumer, so
+                # re-streaming would duplicate it — we do NOT retry. But the answer
+                # is TRUNCATED: record the degradation and RAISE so the caller knows
+                # it is incomplete. Pre-fix this returned SILENTLY, and the inline-gate
+                # consumer computed claims/citations over the partial text and
+                # presented it as verified. gated_synthesis catches this and falls
+                # back to a complete non-streaming synthesis.
+                inference_health.record_fallback(
+                    "llm", configured=provider, served_by="openrouter",
+                    detail=str(exc),
+                )
+                raise
+            # No tokens yet → safe to fall back to the non-streaming path below
+            # (call_internal_llm records its own success/fallback outcome).
 
     # Non-local provider, or local streaming failed before first token.
     full = await call_internal_llm(

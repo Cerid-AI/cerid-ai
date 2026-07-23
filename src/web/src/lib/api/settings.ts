@@ -351,6 +351,22 @@ export async function fetchConfiguredProviders(): Promise<ConfiguredProvidersRes
   return res.json()
 }
 
+export interface ModelCatalogResponse {
+  ids: string[]
+  source: string // "live_catalog" | "unavailable"
+  count: number
+}
+
+/** Non-throwing — the currently-dispatchable model-id set, validated against
+ *  the live OpenRouter catalog (E1 CR-004). A failed fetch or
+ *  source !== "live_catalog" means "unknown": callers MUST NOT filter (show the
+ *  full catalog) rather than over-filter to nothing. */
+export async function fetchModelCatalog(): Promise<ModelCatalogResponse> {
+  const res = await fetch(`${MCP_BASE}/models/catalog`, { headers: mcpHeaders() })
+  if (!res.ok) return { ids: [], source: "unavailable", count: 0 }
+  return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // Ollama / Internal LLM
 
@@ -497,9 +513,9 @@ export async function fetchVaultProfile(id: string): Promise<VaultProfileRespons
   return res.json()
 }
 
-export async function fetchInternalProvider(): Promise<{ provider: string; model: string; intelligence_model: string; ollama_available: boolean }> {
+export async function fetchInternalProvider(): Promise<{ provider: string; model: string; ollama_available: boolean }> {
   const res = await fetch(`${MCP_BASE}/providers/internal`, { headers: mcpHeaders() })
-  if (!res.ok) return { provider: "bifrost", model: "", intelligence_model: "", ollama_available: false }
+  if (!res.ok) return { provider: "bifrost", model: "", ollama_available: false }
   return res.json()
 }
 
@@ -854,8 +870,14 @@ export async function dismissModelUpdate(updateId: string): Promise<void> {
 
 export async function fetchPrivateMode(): Promise<{ enabled: boolean; level: number }> {
   const res = await fetch(`${MCP_BASE}/settings/private-mode`, { headers: mcpHeaders() })
-  if (!res.ok) return { enabled: false, level: 0 }
-  return res.json()
+  // Throw (not a not-private fallback) so the caller keeps its local value on a
+  // server error instead of reconciling to "off" — flipping a private session
+  // to not-private would start syncing conversations the user meant to keep
+  // local (CR-020). The server returns only `level`; derive `enabled` from it.
+  if (!res.ok) throw new Error(await extractError(res, `Fetch private mode failed: ${res.status}`))
+  const data = await res.json()
+  const level = typeof data.level === "number" ? data.level : 0
+  return { enabled: level > 0, level }
 }
 
 export async function enablePrivateMode(level: number = 1): Promise<void> {

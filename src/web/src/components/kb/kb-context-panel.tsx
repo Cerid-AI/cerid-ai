@@ -254,11 +254,14 @@ export function KBContextPanel({
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 px-3 py-1.5">
                 <span className="text-xs text-muted-foreground">Relevance</span>
-                <ProgressBar pct={confidencePct} className="flex-1" />
-                <span className="text-xs font-medium tabular-nums">{confidencePct}%</span>
+                <ProgressBar pct={confidencePct} label="Relative match strength" className="flex-1" />
+                <span className="text-xs text-muted-foreground">ranked by match</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent>Relevance: {confidencePct}% match to your query</TooltipContent>
+            <TooltipContent>
+              Results are ordered by how well they match your query. The bar shows
+              relative strength, not an absolute percentage.
+            </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )}

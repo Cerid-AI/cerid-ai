@@ -331,9 +331,12 @@ def get_context_budget_for_model(model: str | None) -> int:
     if not model:
         return QUERY_CONTEXT_MAX_CHARS
     model_lower = model.lower().split("/")[-1]  # strip provider prefix
-    for prefix, budget in MODEL_CONTEXT_CHAR_BUDGETS.items():
+    # Longest matching prefix wins, so a specific family (gpt-4o-mini) is not
+    # shadowed by a more general one (gpt-4o) that happens to be earlier in the
+    # dict — insertion order must not decide the budget (CR-073).
+    for prefix in sorted(MODEL_CONTEXT_CHAR_BUDGETS, key=len, reverse=True):
         if model_lower.startswith(prefix):
-            return budget
+            return MODEL_CONTEXT_CHAR_BUDGETS[prefix]
     return QUERY_CONTEXT_MAX_CHARS
 QUERY_RERANK_CANDIDATES = int(os.getenv("QUERY_RERANK_CANDIDATES", "15"))  # max candidates sent to reranker (GA P0.5 B2c: eval-tunable; default unchanged)
 QUERY_CONTEXT_MESSAGES = 5          # max conversation messages used for query enrichment
@@ -640,10 +643,6 @@ VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35
 # ---------------------------------------------------------------------------
 # Streaming Verification Timeouts
 # ---------------------------------------------------------------------------
-# Per-claim timeout: max time for any single claim's full verification
-# (including KB lookup, external calls, and all fallbacks).
-# Per-claim verification timeout (KB lookup + optional LLM verification).
-STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "15"))
 # Extended timeout for expert-tier models (Grok 4 with :online web search)
 STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "30"))
 # CH5: cross-model + web claim verification run on OpenRouter (call_llm_raw).
@@ -654,8 +653,6 @@ STREAMING_CROSS_MODEL_CLAIM_TIMEOUT = float(os.getenv("STREAMING_CROSS_MODEL_CLA
 STREAMING_WEB_CLAIM_TIMEOUT = float(os.getenv("STREAMING_WEB_CLAIM_TIMEOUT", "25"))
 # Total deadline for the entire streaming verification loop (all claims).
 STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
-# Fewer LLM retries on 429 during streaming to avoid compounding delays
-STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 
 # ---------------------------------------------------------------------------
 # Web Search — agentic web search fallback
@@ -839,9 +836,8 @@ MEMORY_TYPE_MIGRATION: dict[str, str] = {
 MEMORY_ACCESS_LOG_MAX = 50
 
 # ---------------------------------------------------------------------------
-# Retrieval Orchestration (RAG modes)
+# Memory Recall
 # ---------------------------------------------------------------------------
-RAG_ORCHESTRATION_MODE = os.getenv("RAG_ORCHESTRATION_MODE", "manual")  # manual|smart|custom_smart
 MEMORY_RECALL_TOP_K = int(os.getenv("MEMORY_RECALL_TOP_K", "5"))
 MEMORY_RECALL_MIN_SCORE = float(os.getenv("MEMORY_RECALL_MIN_SCORE", "0.4"))
 MEMORY_RECALL_TIMEOUT_MS = int(os.getenv("MEMORY_RECALL_TIMEOUT_MS", "200"))
@@ -960,14 +956,8 @@ CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "1800"))  # s
 SEMANTIC_CACHE_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
 # NOTE: SEMANTIC_CACHE_TTL is defined in config/features.py (canonical location, 600s).
 
-# Query decomposition: max sub-queries to generate
-QUERY_DECOMPOSITION_MAX = int(os.getenv("QUERY_DECOMPOSITION_MAX", "3"))
-
 # Reranking: prefer local cross-encoder over LLM for speed
 RERANK_PREFER_LOCAL = os.getenv("RERANK_PREFER_LOCAL", "true").lower() == "true"
-
-# Parallel retrieval: max concurrent domain queries
-PARALLEL_RETRIEVAL_MAX = int(os.getenv("PARALLEL_RETRIEVAL_MAX", "4"))
 
 # ---------------------------------------------------------------------------
 # Ingestion control plane (Workstream E Phase 0)
@@ -1207,16 +1197,19 @@ PROMPT_PREFIX_KEEP_ALIVE = os.getenv("PROMPT_PREFIX_KEEP_ALIVE", "30m")
 
 ENABLE_MODEL_CASCADE = os.getenv("ENABLE_MODEL_CASCADE", "false").lower() == "true"
 
+# E1 CR-029: opt-in escalation of COMPLEX + low-cost-sensitivity queries to the
+# EXPERT tier (smart_router.EXPERT_MODELS). Off by default so "low cost
+# sensitivity" doesn't silently 10x spend — but the tier is now actually
+# reachable (it was maintained, weekly-refreshed, and SDK-advertised with no
+# route() branch that could ever select it).
+ENABLE_EXPERT_ESCALATION = os.getenv("ENABLE_EXPERT_ESCALATION", "false").lower() == "true"
+
 ENABLE_SPECULATIVE_DECODE = os.getenv("ENABLE_SPECULATIVE_DECODE", "false").lower() == "true"
 # Smaller draft model that proposes tokens for the main model to accept/reject
 # when speculative decoding is enabled. Empty = let the backend default apply.
 INTERNAL_LLM_DRAFT_MODEL = os.getenv("INTERNAL_LLM_DRAFT_MODEL", "")
 
 ENABLE_CONSTRAINED_DECODE = os.getenv("ENABLE_CONSTRAINED_DECODE", "false").lower() == "true"
-
-# User-configurable default model for high-value intelligence tasks
-# (verification, expert analysis, complex reasoning)
-INTELLIGENCE_MODEL = os.getenv("INTELLIGENCE_MODEL", "")  # empty = auto-select
 
 # ---------------------------------------------------------------------------
 # Per-Stage Pipeline Providers
@@ -1246,24 +1239,19 @@ INFERENCE_RECHECK_INTERVAL = int(os.getenv("INFERENCE_RECHECK_INTERVAL", "300"))
 # See docs/MODEL_PRELOAD.md for the trade-off.
 _PRELOAD_MODELS_FOR_ENV_EXAMPLE = os.getenv("CERID_PRELOAD_MODELS", "false")
 
+# E1 CR-006: keys MUST match the live call_internal_llm ``stage=`` literals
+# (core.utils.internal_llm._resolve_stage_provider does an exact-match lookup) or
+# the per-stage provider override is silently inert. Renamed to the real stage
+# names; dropped verification_* / chat_generation (verification uses call_llm_raw,
+# chat uses call_llm — neither routes through call_internal_llm, so no stage
+# exists to override, and they defaulted to the retired 'bifrost').
 PIPELINE_PROVIDERS: dict[str, str] = {
     "claim_extraction": os.getenv("PROVIDER_CLAIM_EXTRACTION", _global_provider),
-    "query_decomposition": os.getenv("PROVIDER_QUERY_DECOMPOSITION", _global_provider),
+    "query_decompose": os.getenv("PROVIDER_QUERY_DECOMPOSE", _global_provider),
     "topic_extraction": os.getenv("PROVIDER_TOPIC_EXTRACTION", _global_provider),
-    "memory_resolution": os.getenv("PROVIDER_MEMORY_RESOLUTION", _global_provider),
-    "verification_simple": os.getenv("PROVIDER_VERIFICATION_SIMPLE", _global_provider),
-    "verification_complex": os.getenv("PROVIDER_VERIFICATION_COMPLEX", "bifrost"),
-    "reranking": os.getenv("PROVIDER_RERANKING", _global_provider),
-    "chat_generation": os.getenv("PROVIDER_CHAT_GENERATION", "bifrost"),
+    "memory_conflict_resolve": os.getenv("PROVIDER_MEMORY_CONFLICT_RESOLVE", _global_provider),
+    "rerank_llm": os.getenv("PROVIDER_RERANK_LLM", _global_provider),
 }
-
-
-def get_stage_provider(stage: str) -> str:
-    """Return the LLM provider for a given pipeline stage.
-
-    Falls back to 'bifrost' for unknown stages.
-    """
-    return PIPELINE_PROVIDERS.get(stage, "bifrost")
 
 # ---------------------------------------------------------------------------
 # Email IMAP Poller
@@ -1298,10 +1286,17 @@ REDIS_LOG_MAX = 10_000
 
 # ---------------------------------------------------------------------------
 # Private Mode (Ephemeral Sessions)
-#   Level 1: no history saves, no memory extraction
-#   Level 2: also skip KB context injection (pure LLM)
-#   Level 3: also force local-only models (Ollama)
-#   Level 4: also clear Redis query cache on session end
+#   Canonical level ladder — MUST match the live enforcement in
+#   app/services/private_mode.py and the toolbar (chat-toolbar.tsx). CR-041
+#   reconciled an earlier divergent L3/L4 documentation here.
+#   Level 1: skip history saves + memory extraction + verification-report persist
+#   Level 2: also skip KB/memory context injection (model isolated)
+#   Level 3: also skip audit logging
+#   Level 4: full ephemeral (session-wipe on close)
+# These knobs declare the BOOT posture; the live level is the Redis key
+# cerid:private_mode:global, seeded from these at startup by
+# app.services.private_mode.seed_private_mode_from_env (CR-011) and mutable at
+# runtime via POST /settings/private-mode.
 # ---------------------------------------------------------------------------
 PRIVATE_MODE_ENABLED: bool = os.getenv("CERID_PRIVATE_MODE", "false").lower() == "true"
 PRIVATE_MODE_LEVEL: int = int(os.getenv("CERID_PRIVATE_MODE_LEVEL", "1"))

@@ -254,6 +254,250 @@ def _strip_openrouter_prefix(model: str) -> str:
     return model
 
 
+# ---------------------------------------------------------------------------
+# BYOK direct-provider dispatch (E1 CR-008, Phase 3e-2a)
+# ---------------------------------------------------------------------------
+
+
+class _DirectClientCtx:
+    """One-shot httpx client for a direct BYOK provider base_url.
+
+    Unlike the pooled OpenRouter singleton, direct-provider calls use a fresh
+    client per call (mirroring ``_call_ollama_direct``) — always closed on exit,
+    so no per-loop singleton bookkeeping is needed for the low-volume BYOK path.
+    """
+
+    def __init__(self, base_url: str) -> None:
+        self._base_url = base_url
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> httpx.AsyncClient:
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
+        )
+        return self._client
+
+    async def __aexit__(self, *_: object) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+
+
+def _acquire_direct_client(base_url: str) -> _DirectClientCtx:
+    """Context manager yielding a one-shot httpx client for a BYOK base_url."""
+    return _DirectClientCtx(base_url)
+
+
+async def _call_openai_compatible(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    base_url: str,
+    api_key: str,
+    breaker_name: str,
+    temperature: float = 0.1,
+    max_tokens: int = 500,
+    timeout: float | None = None,
+    response_format: dict | None = None,
+    extra_payload: dict | None = None,
+) -> str:
+    """Dispatch an OpenAI-shaped chat completion to a direct BYOK provider.
+
+    OpenRouter, OpenAI, and xAI all speak the same ``/chat/completions`` wire, so
+    the payload is identical to the OpenRouter path — only ``base_url`` + the
+    bearer key differ (no OpenRouter-specific idempotency/referer headers). Runs
+    under a per-provider ``byok-<provider>`` breaker so a failing direct provider
+    is isolated from the shared OpenRouter breaker.
+    """
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if response_format:
+        payload["response_format"] = response_format
+    if extra_payload:
+        payload.update(extra_payload)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    headers.update(tracing_headers())
+    breaker = get_breaker(breaker_name)
+
+    async def _do_call() -> str:
+        async with _acquire_direct_client(base_url) as client:
+            post_kwargs: dict = {"headers": headers, "json": payload}
+            if timeout is not None:
+                post_kwargs["timeout"] = timeout
+            resp = await client.post("/chat/completions", **post_kwargs)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    return await breaker.call(_do_call)
+
+
+def _split_system_messages(
+    messages: list[dict[str, str]],
+) -> tuple[str, list[dict[str, str]]]:
+    """Split OpenAI-style messages into ``(system_text, non_system_messages)``.
+
+    Anthropic hoists the system prompt to a top-level ``system`` param instead of
+    a ``role: system`` message — all system messages are concatenated; the rest
+    pass through unchanged and in order.
+    """
+    system_parts: list[str] = []
+    convo: list[dict[str, str]] = []
+    for m in messages:
+        if m.get("role") == "system":
+            content = m.get("content", "")
+            if content:
+                system_parts.append(content)
+        else:
+            convo.append(m)
+    return "\n\n".join(system_parts), convo
+
+
+async def _call_anthropic(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    base_url: str,
+    api_key: str,
+    breaker_name: str,
+    temperature: float = 0.1,
+    max_tokens: int = 500,
+    timeout: float | None = None,
+    response_format: dict | None = None,
+) -> str:
+    """Dispatch a chat completion to the Anthropic Messages API (BYOK).
+
+    Translates the OpenAI-shaped request to Anthropic's wire: the system prompt is
+    hoisted to a top-level param, ``max_tokens`` is required, auth is ``x-api-key``
+    + ``anthropic-version`` (not a bearer token), and the ``content[].text``
+    response blocks are concatenated. Anthropic has no ``response_format`` param,
+    so a json-mode request is expressed as a system instruction (mirroring the
+    OpenRouter json fallback). Runs under the ``byok-anthropic`` breaker.
+    """
+    from core.routing.provider_state import ANTHROPIC_VERSION
+
+    system, convo = _split_system_messages(messages)
+    if response_format and response_format.get("type") == "json_object":
+        instruction = "Respond with valid JSON only."
+        system = f"{system}\n\n{instruction}".strip() if system else instruction
+
+    payload: dict = {
+        "model": model,
+        "messages": convo,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if system:
+        payload["system"] = system
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
+    }
+    headers.update(tracing_headers())
+    breaker = get_breaker(breaker_name)
+
+    async def _do_call() -> str:
+        async with _acquire_direct_client(base_url) as client:
+            post_kwargs: dict = {"headers": headers, "json": payload}
+            if timeout is not None:
+                post_kwargs["timeout"] = timeout
+            resp = await client.post("/messages", **post_kwargs)
+            resp.raise_for_status()
+            data = resp.json()
+            return "".join(
+                block.get("text", "")
+                for block in data.get("content", [])
+                if block.get("type") == "text"
+            )
+
+    return await breaker.call(_do_call)
+
+
+def _to_gemini_contents(
+    messages: list[dict[str, str]],
+) -> tuple[str, list[dict]]:
+    """Convert OpenAI-style messages to ``(system_text, gemini_contents)``.
+
+    Gemini hoists the system prompt to ``systemInstruction`` and names the
+    assistant role ``model``; ``contents`` parts carry the text.
+    """
+    system_parts: list[str] = []
+    contents: list[dict] = []
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content", "")
+        if role == "system":
+            if content:
+                system_parts.append(content)
+            continue
+        gemini_role = "model" if role == "assistant" else "user"
+        contents.append({"role": gemini_role, "parts": [{"text": content}]})
+    return "\n\n".join(system_parts), contents
+
+
+async def _call_gemini(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    base_url: str,
+    api_key: str,
+    breaker_name: str,
+    temperature: float = 0.1,
+    max_tokens: int = 500,
+    timeout: float | None = None,
+    response_format: dict | None = None,
+) -> str:
+    """Dispatch a chat completion to the Google Gemini generateContent API (BYOK).
+
+    Translates the OpenAI-shaped request to Gemini's wire: the system prompt hoisted
+    to ``systemInstruction``, ``assistant`` → ``model``, generation params under
+    ``generationConfig`` (``maxOutputTokens`` / ``temperature`` / ``responseMimeType``
+    for json mode), auth via ``x-goog-api-key``, and the
+    ``candidates[].content.parts[].text`` response concatenated. Runs under the
+    ``byok-google`` breaker.
+    """
+    system, contents = _to_gemini_contents(messages)
+    gen_config: dict = {"maxOutputTokens": max_tokens, "temperature": temperature}
+    if response_format and response_format.get("type") == "json_object":
+        gen_config["responseMimeType"] = "application/json"
+    payload: dict = {"contents": contents, "generationConfig": gen_config}
+    if system:
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+
+    headers = {
+        "x-goog-api-key": api_key,
+        "content-type": "application/json",
+    }
+    headers.update(tracing_headers())
+    breaker = get_breaker(breaker_name)
+
+    async def _do_call() -> str:
+        async with _acquire_direct_client(base_url) as client:
+            post_kwargs: dict = {"headers": headers, "json": payload}
+            if timeout is not None:
+                post_kwargs["timeout"] = timeout
+            resp = await client.post(f"/models/{model}:generateContent", **post_kwargs)
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return ""
+            parts = candidates[0].get("content", {}).get("parts", [])
+            return "".join(p.get("text", "") for p in parts)
+
+    return await breaker.call(_do_call)
+
+
 async def call_llm(
     messages: list[dict[str, str]],
     *,
@@ -297,15 +541,61 @@ async def call_llm(
         without an if-else.  When ``model`` is set explicitly, the choice is
         already made and this value is ignored.
     """
+    if not model:
+        model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
+
+    # E1 CR-008: a BYOK direct provider (openai/xai) explicitly enabled for this
+    # model's native provider serves it directly — a BYOK-only user with no
+    # OpenRouter credit must still succeed. Resolved BEFORE the OpenRouter-key
+    # check so the direct path is not blocked by a missing OPENROUTER_API_KEY.
+    # When no BYOK is enabled, byok_target returns None and the OpenRouter path
+    # below runs byte-identically.
+    from core.routing.provider_state import byok_target
+    _target = byok_target(model)
+    if _target is not None:
+        if _target.wire == "anthropic":
+            return await _call_anthropic(
+                messages,
+                model=_target.model,
+                base_url=_target.base_url,
+                api_key=_target.api_key,
+                breaker_name=f"byok-{_target.provider}",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                response_format=response_format,
+            )
+        if _target.wire == "gemini":
+            return await _call_gemini(
+                messages,
+                model=_target.model,
+                base_url=_target.base_url,
+                api_key=_target.api_key,
+                breaker_name=f"byok-{_target.provider}",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                response_format=response_format,
+            )
+        return await _call_openai_compatible(
+            messages,
+            model=_target.model,
+            base_url=_target.base_url,
+            api_key=_target.api_key,
+            breaker_name=f"byok-{_target.provider}",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            response_format=response_format,
+            extra_payload=extra_payload,
+        )
+
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError(
             "OPENROUTER_API_KEY is not configured. Set the key in .env — Bifrost "
             "was retired and is no longer available as a fallback gateway."
         )
-
-    if not model:
-        model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
 
     model = _strip_openrouter_prefix(model)
 
@@ -397,6 +687,15 @@ async def call_llm_raw(
     Used by verification which needs access to annotations (source URLs)
     and the raw message object, not just the text content.
     """
+    # E1 CR-008 (BYOK): call_llm_raw intentionally has NO byok_target branch,
+    # unlike call_llm above. This is the verification web transport — its models
+    # carry OpenRouter's ``:online`` web-search overlay (VERIFICATION_EXPERT_WEB_MODEL
+    # etc.) and return the citation annotations _extract_citation_urls reads. Direct
+    # BYOK providers (api.x.ai / api.openai.com / …) have no ``:online`` model and
+    # return no such annotations, so routing this call through byok_target would
+    # silently break web-search verification. Verification stays OpenRouter-only by
+    # design (operator decision 2026-07-20); a BYOK-only user without an OpenRouter
+    # key cannot run external web verification — a documented limitation, not a bug.
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError(
@@ -461,6 +760,31 @@ async def call_llm_raw(
 # ---------------------------------------------------------------------------
 
 
+# Estimated cost of the OpenRouter fallback model (``_DEFAULT_INTERNAL_MODEL``,
+# meta-llama/llama-3.3-70b-instruct) — the same per-1K rate ``smart_router.route``
+# stamps for the paid llama-3.3 tier. Keep in sync with _DEFAULT_INTERNAL_MODEL.
+_FALLBACK_COST_PER_1K = 0.00015
+
+
+def _openrouter_fallback_decision(original: "RouteDecision", *, model: str) -> "RouteDecision":
+    """E1 CR-013: a RouteDecision reflecting an actual local->OpenRouter fallback.
+
+    The router planned a local (ollama/quenchforge) serve, but the local backend
+    was unavailable and paid OpenRouter served the bytes. Return a decision whose
+    provider/model/cost describe what ACTUALLY served, so the SDK response stops
+    reporting local/free for cloud usage.
+    """
+    from core.routing.smart_router import RouteDecision
+
+    return RouteDecision(
+        model=model,
+        provider="openrouter_paid",
+        reason=f"{original.reason} → local backend unavailable, served by OpenRouter",
+        estimated_cost_per_1k=_FALLBACK_COST_PER_1K,
+        tier_p95_ms=original.tier_p95_ms,
+    )
+
+
 async def route_and_call(
     messages: list[dict[str, str]],
     *,
@@ -511,14 +835,41 @@ async def route_and_call(
     )
 
     if decision.provider == "ollama":
-        # Call Ollama directly
-        content = await _call_ollama_direct(
-            messages,
-            model=decision.model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return content, decision
+        from core.utils import inference_health
+
+        # Call the local backend directly; own the fallback here (not inside the
+        # transport) so the returned decision can be corrected to match the serve.
+        try:
+            content = await _call_ollama_direct(
+                messages,
+                model=decision.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            inference_health.record_success("llm", provider="ollama")
+            return content, decision
+        except Exception as exc:  # noqa: BLE001 — any local transport failure falls back
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("core.utils.llm_client.route_and_call_fallback", exc)
+            _logger.warning("Local backend failed (%s) — falling back to OpenRouter", exc)
+            inference_health.record_fallback(
+                "llm", configured="ollama", served_by="openrouter", detail=str(exc),
+            )
+            # E1 CR-013: OpenRouter now serves the bytes. Use a known-valid
+            # OpenRouter model (INTERNAL_LLM_MODEL may hold a local name that 400s)
+            # AND update the decision so the stamped provider/model/cost describe the
+            # actual serve, not the pre-fallback local plan (provider=ollama/cost=0).
+            content = await call_llm(
+                messages,
+                model=_DEFAULT_INTERNAL_MODEL,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                cost_sensitivity=cost_sensitivity,
+            )
+            return content, _openrouter_fallback_decision(
+                decision, model=_DEFAULT_INTERNAL_MODEL
+            )
     else:
         # Call OpenRouter
         content = await call_llm(
@@ -539,27 +890,30 @@ async def _call_ollama_direct(
     temperature: float,
     max_tokens: int,
 ) -> str:
-    """Direct Ollama call for smart-routed queries."""
+    """Direct local-backend call for smart-routed queries.
+
+    Pure transport: raises on failure. The caller (``route_and_call``) owns the
+    OpenRouter fallback so it can correct the returned RouteDecision to match the
+    actual serve (E1 CR-013) — pre-fix this swallowed the failure and fell back
+    internally, leaving the decision reporting the local plan for cloud bytes.
+    """
     import httpx as _httpx
 
-    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    try:
-        async with _httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{ollama_url}/api/chat",
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "stream": False,
-                    "options": {"temperature": temperature, "num_predict": max_tokens},
-                },
-            )
-            resp.raise_for_status()
-            return resp.json().get("message", {}).get("content", "")
-    except Exception as e:
-        from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error('core.utils.llm_client', e)
-        _logger.warning("Ollama call failed (%s), falling back to OpenRouter", e)
-        return await call_llm(messages, temperature=temperature, max_tokens=max_tokens)
+    from core.routing.provider_state import local_backend_url
+    # E1 CR-098: honor QUENCHFORGE_URL on a quenchforge box — pre-fix this read
+    # OLLAMA_URL only, so the probe validated one daemon and the call hit another.
+    ollama_url = local_backend_url()
+    async with _httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            f"{ollama_url}/api/chat",
+            json={
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                "options": {"temperature": temperature, "num_predict": max_tokens},
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("message", {}).get("content", "")
 
 

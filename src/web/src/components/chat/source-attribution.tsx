@@ -43,11 +43,6 @@ function deduplicateByArtifact(sources: SourceRef[]): SourceRef[] {
   return [...map.values()]
 }
 
-/** Minimum relevance score for a source to appear in the chat bubble.
- *  Matches the Knowledge Console's MIN_RELEVANCE threshold.
- *  Sources below this are too noisy to surface to the user. */
-const MIN_DISPLAY_RELEVANCE = 0.45
-
 export function SourceAttribution({ sources, variant = "card" }: SourceAttributionProps) {
   const [open, setOpen] = useState(false)
 
@@ -55,8 +50,11 @@ export function SourceAttribution({ sources, variant = "card" }: SourceAttributi
     return <SourceBadge sources={sources} />
   }
 
+  // No client-side relevance floor: these are the sources the backend actually
+  // included in the answer's context (already floored pre-rerank + top-k). The
+  // post-rerank `relevance` is an ordinal cross-encoder sigmoid, so an absolute
+  // 0.45 cutoff here hid real citations from grounded answers (CR-010).
   const dedupedSources = deduplicateByArtifact(sources)
-    .filter((s) => s.relevance >= MIN_DISPLAY_RELEVANCE)
 
   if (dedupedSources.length === 0) return null
 

@@ -78,7 +78,7 @@ export const MODELS: ModelOption[] = [
     capabilities: { reasoning: 90, coding: 95, creative: 85, factual: 88, webSearch: false, vision: true, knowledgeCutoff: "2026-01" } },
   { id: "openrouter/anthropic/claude-opus-4.6", label: "Claude Opus 4.6", provider: "Anthropic", contextWindow: 1_000_000, effectiveContextWindow: 800_000, maxOutputTokens: 32_000, inputCostPer1M: 5.0, outputCostPer1M: 25.0,
     capabilities: { reasoning: 95, coding: 93, creative: 92, factual: 93, webSearch: false, vision: true, knowledgeCutoff: "2026-01" } },
-  { id: "openrouter/x-ai/grok-4.1-fast", label: "Grok 4.1", provider: "xAI", contextWindow: 2_000_000, effectiveContextWindow: 1_600_000, maxOutputTokens: 100_000, inputCostPer1M: 0.20, outputCostPer1M: 0.50,
+  { id: "openrouter/x-ai/grok-4.5", label: "Grok 4.5", provider: "xAI", contextWindow: 500_000, effectiveContextWindow: 400_000, maxOutputTokens: 100_000, inputCostPer1M: 2.0, outputCostPer1M: 6.0,
     capabilities: { reasoning: 88, coding: 82, creative: 78, factual: 90, webSearch: true, vision: true, knowledgeCutoff: "2026-03" } },
   // --- Tier A: Strong general-purpose ---
   { id: "openrouter/openai/o3-mini", label: "o3-mini", provider: "OpenAI", contextWindow: 200_000, effectiveContextWindow: 160_000, maxOutputTokens: 100_000, inputCostPer1M: 1.10, outputCostPer1M: 4.40,
@@ -202,7 +202,16 @@ export type PipelineStage =
   | "reranking"
   | "chat_generation"
 
-export type PipelineProviders = Partial<Record<PipelineStage, "ollama" | "bifrost">>
+/** Provider id for a pipeline stage (backend may emit ollama, quenchforge, or cloud). */
+export type PipelineProviderId = "ollama" | "quenchforge" | "openrouter" | "bifrost" | string
+
+export type PipelineProviders = Partial<Record<PipelineStage, PipelineProviderId>>
+
+/** E1 R5 / CR-024: stages on ollama or quenchforge count as local ($0, on-box). */
+export function isLocalProvider(provider: string | null | undefined): boolean {
+  const p = (provider ?? "").toLowerCase()
+  return p === "ollama" || p === "quenchforge"
+}
 
 /** Inference provider status from tiered detection system. */
 export type InferenceTier = "optimal" | "good" | "degraded" | "unknown"
@@ -229,6 +238,8 @@ export interface HealthStatusResponse extends HealthResponse {
   can_generate?: boolean
   feature_tier?: string
   pipeline_providers?: PipelineProviders
+  /** CR-023: per-role routing snapshot from get_routing_snapshot (llm/embed/rerank). */
+  inference_routing?: Record<string, unknown>
   internal_llm_provider?: string
   internal_llm_model?: string
   inference?: InferenceStatus
@@ -738,6 +749,10 @@ export interface ModelRecommendation {
   estimatedCost: number
   reasoning: string
   savingsVsCurrent: number
+  /** True when the switch is a correctness upgrade (a temporal query routed to a
+   *  web-search model), not a cost saving — so a zero/negative-savings switch
+   *  still surfaces in the recommendation banner (CR-054). */
+  correctnessUpgrade?: boolean
 }
 
 export type SwitchStrategy = "continue" | "summarize" | "fresh"

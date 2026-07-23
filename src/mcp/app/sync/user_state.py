@@ -346,6 +346,24 @@ def read_conversations(sync_dir: str) -> list[dict[str, Any]]:
     return results
 
 
+def list_conversation_ids(sync_dir: str) -> list[str]:
+    """Return conversation ids WITHOUT decrypting each file.
+
+    The filename stem is the id (see :func:`write_conversation`) and ``id`` is a
+    sync-metadata key that is never encrypted, so decrypting every conversation
+    just to read ids back — as the summary endpoint did — is pure waste that
+    scales with lifetime message volume on every session load (CR-058). Skips
+    Dropbox conflict copies, same as :func:`read_conversations`.
+    """
+    conv_dir = Path(sync_dir) / "user" / "conversations"
+    if not conv_dir.is_dir():
+        return []
+    return sorted(
+        fp.stem for fp in conv_dir.glob("*.json")
+        if not _is_conflict_copy(fp.name)
+    )
+
+
 def read_conversation(sync_dir: str, conv_id: str) -> dict[str, Any]:
     """Read a single conversation by ID. Returns empty dict if missing."""
     path = Path(sync_dir) / "user" / "conversations" / f"{conv_id}.json"

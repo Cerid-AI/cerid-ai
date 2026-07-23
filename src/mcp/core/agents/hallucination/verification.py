@@ -1269,7 +1269,7 @@ async def _verify_claim_externally(
     _authoritative_result: dict[str, Any] | None = None
     if expert_mode:
         if is_current_event:
-            verify_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+            verify_model = config.VERIFICATION_EXPERT_WEB_MODEL
         else:
             verify_model = config.VERIFICATION_EXPERT_MODEL
         logger.debug("Expert mode: using %s for claim verification", verify_model)

@@ -6,7 +6,10 @@ import { queryKB } from "@/lib/api"
 import type { KBQueryResult } from "@/lib/types"
 
 const MIN_SUGGESTION_LENGTH = 10
-const SUGGESTION_MIN_RELEVANCE = 0.4
+// E1 R3 / CR-010 tail: post-rerank relevance is ordinal — absolute 0.4 emptied
+// suggestions on real hits. Gate relative to the top score (same semantics as
+// use-chat-send auto-inject). 0.4 means "≥ 40% of the best hit".
+const SUGGESTION_RELATIVE_FRACTION = 0.4
 
 interface UseSmartSuggestionsOptions {
   enabled: boolean
@@ -56,9 +59,11 @@ export function useSmartSuggestions({
         const result = await queryKB(text, undefined, max + ids.length)
         // Discard if a newer search has started
         if (gen !== generationRef.current) return
-        const filtered = result.results
-          .filter((r) => !ids.includes(r.artifact_id))
-          .filter((r) => r.relevance >= SUGGESTION_MIN_RELEVANCE)
+        const candidates = result.results.filter((r) => !ids.includes(r.artifact_id))
+        const topRelevance = candidates.reduce((mx, r) => Math.max(mx, r.relevance), 0)
+        const relFloor = topRelevance > 0 ? SUGGESTION_RELATIVE_FRACTION * topRelevance : 0
+        const filtered = candidates
+          .filter((r) => r.relevance >= relFloor)
           .slice(0, max)
         setSuggestions(filtered)
       } catch {

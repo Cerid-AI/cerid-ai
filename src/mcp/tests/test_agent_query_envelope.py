@@ -41,7 +41,6 @@ def _high_confidence_result() -> dict:
         "sources": [src, dict(src)],
         "results": [dict(src), dict(src)],
         "confidence": 1.0,
-        "low_confidence": False,
         "domains_searched": ["general"],
         "total_results": 2,
     }

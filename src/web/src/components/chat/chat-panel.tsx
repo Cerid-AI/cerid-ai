@@ -90,6 +90,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     updateLastMessageModel,
     updateModel,
     replaceMessages,
+    mergeCompressedHistory,
     clearMessages,
   } = useConversationsContext()
 
@@ -128,6 +129,9 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     },
     feedbackEnabled: feedbackLoop,
     privateModeLevel,
+    // E1 CR-026: forward the user's cost preference so the backend smart-router
+    // (model='auto') can honor it — chatSettings were accepted-never-sent.
+    chatSettings: { cost_sensitivity: costSensitivity },
   })
 
   // Default model derived from the user's actually-configured providers —
@@ -178,8 +182,11 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     retry: 1,
     staleTime: 15_000,
   })
+  // E1 R5 / CR-024: quenchforge is local too — literal 'ollama' alone showed 0/N on primary deploy.
   const ollamaLocalCount = ollamaHealth?.pipeline_providers
-    ? Object.values(ollamaHealth.pipeline_providers).filter(p => p === "ollama").length
+    ? Object.values(ollamaHealth.pipeline_providers).filter(
+        (p) => typeof p === "string" && (p === "ollama" || p === "quenchforge"),
+      ).length
     : 0
   const verificationUnavailable = ollamaHealth?.can_verify === false
   const verificationDegraded = !verificationUnavailable && (ollamaHealth?.degradation_tier === "lite")
@@ -408,6 +415,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     addMessage,
     updateModel,
     replaceMessages,
+    mergeCompressedHistory,
     send,
     selectedModel,
     setSelectedModel,
@@ -420,6 +428,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     kbResults: effectiveKBResults,
     clearInjected,
     privateModeLevel,
+    memoryEnabled: contextSources.memory !== false,
     degradedReason: orchestratedContext.degradedReason,
     onBeforeSend: () => setVerificationRecBanner(null),
   })
@@ -462,22 +471,15 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       const truncated = msgs.slice(0, idx)
       replaceMessages(activeId, truncated)
 
-      // Create a correction user message and re-send
-      const correctionMsg: ChatMessage = {
-        id: uuid(),
-        role: "user",
-        content: `[Correction] ${correction}`,
-        timestamp: Date.now(),
-      }
-      addMessage(activeId, correctionMsg)
-
-      const allMessages: Pick<ChatMessage, "role" | "content">[] = [
-        ...truncated,
-        correctionMsg,
-      ]
-      send(activeId, allMessages, selectedModel)
+      // E1 CR-079: re-send the correction through the SAME payload-assembly path
+      // as a normal send (handleSend) so it gets KB auto-injection, private-mode
+      // gating, degradedReason, and auto-routing — the raw send() bypassed all of
+      // that, so corrections reached the model context-free and unrouted. Pass the
+      // truncated history explicitly (baseMessages) to avoid handleSend reading the
+      // stale pre-truncation activeMessages from its closure.
+      handleSend(`[Correction] ${correction}`, truncated)
     },
-    [activeId, active, replaceMessages, addMessage, send, selectedModel],
+    [activeId, active, replaceMessages, handleSend],
   )
 
   const handleEnrich = useCallback(
@@ -799,6 +801,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       {/* Messages */}
       <ChatMessages
         messages={active?.messages ?? []}
+        conversationId={activeId ?? ""}
         isStreaming={isStreaming}
         selectedVerificationMsgId={selectedVerificationMsgId}
         verificationStatusForMsg={verificationStatusForMsg}

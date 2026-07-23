@@ -43,6 +43,11 @@ logger = logging.getLogger("ai-companion.private_mode")
 
 PRIVATE_MODE_KEY = "cerid:private_mode:global"
 
+# Level 1 ("skip saves & sync") is the contract boundary at which every durable
+# server-side save of conversation-derived data must stop — conversation saves,
+# verified-fact memory promotion, and verification-report persistence alike.
+SKIP_SAVES_LEVEL = 1
+
 # Markers the web client stamps onto the single injected ``system`` message
 # (RAG preamble + ``<document>``/``<memory>`` blocks — see
 # src/web/src/lib/rag-prompt.ts + kb-utils.ts). A system message carrying any
@@ -54,7 +59,12 @@ _INJECTION_MARKERS = (
     "<document",
     "<memory",
     "[Remembered Context]",
-    "The user has a personal knowledge base.",
+    # E1 CR-080: match the FE's STABLE sentinel (web/src/lib/rag-prompt.ts
+    # KB_CONTEXT_SENTINEL), stamped at the head of every KB-injected system
+    # message, instead of the human-readable preamble copy. The copy string was
+    # string-coupled — a reword on the FE would silently break this L2 backstop
+    # and leak the KB to the model. Keep byte-identical to the TS constant.
+    "<!--cerid:kb-context-->",
 )
 
 
@@ -77,6 +87,54 @@ def get_private_mode_level() -> int:
 def private_blocks(threshold: int) -> bool:
     """Return True when the current private-mode level is >= ``threshold``."""
     return get_private_mode_level() >= threshold
+
+
+def saves_blocked() -> bool:
+    """True when Private Mode suppresses durable server-side saves (L1+).
+
+    The single named test for the "skip saves & sync" contract. Every transport
+    that would durably persist conversation-derived data gates on this so the
+    same class of write stops at the same level: conversation history saves,
+    verified-fact memory promotion (see
+    ``app.routers.agents._verified_memory_fn``), and the verification-report
+    twin stores (Redis ``hall:{cid}`` + Neo4j ``:VerificationReport``). Reading
+    the level from trusted server state, a direct API/MCP/A2A caller gets the
+    same guarantee the web client applies locally. Fails open (L0) on any error,
+    like :func:`get_private_mode_level`.
+    """
+    return private_blocks(SKIP_SAVES_LEVEL)
+
+
+def seed_private_mode_from_env() -> None:
+    """Seed the global private-mode level from the boot env at startup.
+
+    ``CERID_PRIVATE_MODE`` / ``CERID_PRIVATE_MODE_LEVEL`` (materialized as
+    ``config.settings.PRIVATE_MODE_ENABLED`` / ``PRIVATE_MODE_LEVEL``) declare a
+    hardened install's boot privacy posture, but enforcement reads the level
+    only from :data:`PRIVATE_MODE_KEY` in Redis — nothing wired the env into it,
+    so the knobs were inert and the server ran at level 0 until the GUI toggle
+    (CR-011). This closes that gap: called once from the app lifespan.
+
+    Seeds **only** when the env enables private mode AND the key is currently
+    unset, so a level set at runtime via the toolbar survives a restart rather
+    than being silently reset to the env default. Best-effort — a Redis error at
+    boot must not crash startup (the GUI/API can still set the level later).
+    """
+    from config import settings
+
+    if not getattr(settings, "PRIVATE_MODE_ENABLED", False):
+        return
+    try:
+        redis = get_redis()
+        if redis.get(PRIVATE_MODE_KEY) is None:
+            level = int(getattr(settings, "PRIVATE_MODE_LEVEL", 1))
+            redis.set(PRIVATE_MODE_KEY, str(level))
+            logger.info(
+                "private_mode: seeded global level=%d from env (CERID_PRIVATE_MODE)",
+                level,
+            )
+    except Exception as exc:
+        log_swallowed_error("private_mode.seed_from_env", exc)
 
 
 def _role_of(message: Any) -> str | None:

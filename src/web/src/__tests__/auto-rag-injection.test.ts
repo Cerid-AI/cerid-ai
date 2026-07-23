@@ -119,6 +119,30 @@ describe("Auto-RAG Ephemeral Injection", () => {
     expect(sysMsg!.content).toContain("</document>")
   })
 
+  it("CR-079: handleSend uses the baseMessages override (truncated history), not stale activeMessages", async () => {
+    // A correction re-send truncates the conversation then routes through
+    // handleSend. Without the override it would read the pre-truncation
+    // activeMessages from the closure and re-send the stale history.
+    const truncated = [
+      makeMessage("user", "kept turn"),
+      makeMessage("assistant", "kept reply"),
+    ] as ChatMessage[]
+    const opts = makeOptions({
+      activeMessages: [makeMessage("user", "STALE HISTORY")] as ChatMessage[],
+      autoInject: false,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("[Correction] fix it", truncated)
+    })
+
+    const contents = sentMessages(opts._sendSpy).map((m) => m.content)
+    expect(contents).toContain("kept turn")
+    expect(contents).toContain("[Correction] fix it")
+    expect(contents).not.toContain("STALE HISTORY")
+  })
+
   it("does not add system message when KB returns empty", async () => {
     mockQueryKB.mockResolvedValue({ results: [] })
 
@@ -150,6 +174,31 @@ describe("Auto-RAG Ephemeral Injection", () => {
     expect(sysMsg).toBeDefined()
     expect(sysMsg!.content).toContain("above.py")
     expect(sysMsg!.content).not.toContain("below.py")
+  })
+
+  it("CR-010: auto-inject gates relative to the top hit, not an absolute floor", async () => {
+    // Post-rerank relevance is an ordinal cross-encoder sigmoid: a correct top
+    // chunk can score ~0.30. The old absolute 0.40 floor injected NOTHING here
+    // (emptied envelope). Relative-to-top keeps the strong hits (≥40% of the
+    // best = 0.12) and still drops a far-weaker tail chunk.
+    // Distinct content so deduplicateChunks (content-based) keeps them separate.
+    const top = makeKBResult({ artifact_id: "a1", relevance: 0.30, filename: "top.py", content: "Auth config lives in the settings module top." })
+    const near = makeKBResult({ artifact_id: "a2", relevance: 0.28, filename: "near.py", content: "The same design is described near the top here." })
+    const weak = makeKBResult({ artifact_id: "a3", relevance: 0.03, filename: "weak.py", content: "An unrelated tail chunk with weak signal." })
+    mockQueryKB.mockResolvedValue({ results: [top, near, weak] })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.40 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("indirect-evidence question about the design")
+    })
+
+    const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    expect(sysMsg!.content).toContain("top.py")   // 0.30 ≥ 0.40 × 0.30 = 0.12
+    expect(sysMsg!.content).toContain("near.py")  // 0.28 ≥ 0.12
+    expect(sysMsg!.content).not.toContain("weak.py") // 0.03 < 0.12
   })
 
   it("stops adding chunks when context budget is exhausted", async () => {
@@ -558,7 +607,9 @@ describe("Model Receives Context Seamlessly", () => {
 
     const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
     expect(sysMsg).toBeDefined()
-    expect(sysMsg!.content).toMatch(/^The user has a personal knowledge base/)
+    // E1 CR-080: the stable KB-context sentinel leads the injected system message
+    // (the server's L2 backstop matches it), followed by the instruction copy.
+    expect(sysMsg!.content).toMatch(/^<!--cerid:kb-context-->\nThe user has a personal knowledge base/)
   })
 
   // Phase 1.2: type= and date= in injected <document> headers

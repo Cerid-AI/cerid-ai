@@ -135,13 +135,11 @@ FREE_MODELS = {
     "llama-3.3": "openrouter/meta-llama/llama-3.3-70b-instruct",
 }
 
-# Single source of truth for the last-resort free-tier downgrade used by the
-# failover wrappers when no provider serves the originally-routed model. The
-# ``:free`` id is the OpenRouter routing slug probed for provider availability;
-# the bare id is what the RouteDecision carries. Both derive from FREE_MODELS
-# so this can't drift from the tier table above.
-_FREE_FALLBACK_MODEL = FREE_MODELS["llama-3.3"][len("openrouter/"):]  # bare id
-_FREE_FALLBACK_PROBE_ID = f"{_FREE_FALLBACK_MODEL}:free"
+# E1 CR-027: the FREE tier dispatches this PAID llama-3.3 slug, so its
+# RouteDecision must stamp the real paid rate + provider="openrouter_paid" —
+# not provider="openrouter_free"/cost=0.0. Matches the paid llama-3.3 per-1K
+# rate the CR-013 local->cloud fallback uses (llm_client._FALLBACK_COST_PER_1K).
+_LLAMA_33_PAID_COST_PER_1K = 0.00015
 
 # Cheap tier: catalog-refreshed 2026-05-20 against OpenRouter live models.
 # Dict keys are stable identifiers used at call sites — only the underlying
@@ -617,9 +615,9 @@ async def route(
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
-            provider="openrouter_free",
-            reason="free tier model",
-            estimated_cost_per_1k=0.0,
+            provider="openrouter_paid",
+            reason="cheap tier — llama-3.3 (no local backend)",
+            estimated_cost_per_1k=_LLAMA_33_PAID_COST_PER_1K,
             tier_p95_ms=p95,
         )
 
@@ -702,9 +700,9 @@ async def route(
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
-            provider="openrouter_free",
-            reason="simple query — free tier sufficient",
-            estimated_cost_per_1k=0.0,
+            provider="openrouter_paid",
+            reason="simple query — cheap tier (llama-3.3) sufficient",
+            estimated_cost_per_1k=_LLAMA_33_PAID_COST_PER_1K,
             tier_p95_ms=p95,
         )
 
@@ -720,8 +718,23 @@ async def route(
                 estimated_cost_per_1k=0.0003,
                 tier_p95_ms=p95,
             )
-        # medium or low → CAPABLE.  Escalation to EXPERT is kept behind a
-        # separate flag so "low cost sensitivity" doesn't silently 10x spend.
+        # E1 CR-029: COMPLEX + low escalates to the EXPERT tier when the operator
+        # opts in via ENABLE_EXPERT_ESCALATION. Off by default so "low cost
+        # sensitivity" doesn't silently 10x spend — but the tier is now reachable
+        # (it was maintained/refreshed/advertised with no branch that could select
+        # it). Only 'low' escalates; 'medium' stays CAPABLE.
+        if cs == "low" and getattr(config, "ENABLE_EXPERT_ESCALATION", False):
+            p95 = _check_budget("openrouter_expert", slo_budget_ms)
+            expert = EXPERT_MODELS["grok-4"]
+            return RouteDecision(
+                model=_resolve_tier_id(str(expert["id"])),
+                provider="openrouter_paid",
+                reason="complex query — expert tier (low cost sensitivity, escalation enabled)",
+                estimated_cost_per_1k=float(expert["cost"]),
+                tier_p95_ms=p95,
+            )
+        # medium or low → CAPABLE.  Escalation to EXPERT requires
+        # ENABLE_EXPERT_ESCALATION (above) so low sensitivity doesn't 10x spend.
         p95 = _check_budget("openrouter_capable", slo_budget_ms)
         reason = (
             "complex query — best model (low cost sensitivity)"
@@ -740,9 +753,9 @@ async def route(
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
-            provider="openrouter_free",
-            reason="moderate query — free model (high cost sensitivity)",
-            estimated_cost_per_1k=0.0,
+            provider="openrouter_paid",
+            reason="moderate query — cheap llama-3.3 (high cost sensitivity)",
+            estimated_cost_per_1k=_LLAMA_33_PAID_COST_PER_1K,
             tier_p95_ms=p95,
         )
     if cs == "low":
@@ -764,153 +777,6 @@ async def route(
         estimated_cost_per_1k=0.00015,
         tier_p95_ms=p95,
     )
-
-
-# ---------------------------------------------------------------------------
-# Failover-aware routing (wraps route() with provider resolution)
-# ---------------------------------------------------------------------------
-
-
-def route_with_failover(
-    query: str = "",
-    *,
-    task_type: TaskType = TaskType.CHAT,
-    cost_sensitivity: str = "medium",
-    redis_client=None,  # noqa: ANN001
-) -> RouteDecision:
-    """Route with full failover chain and degraded mode detection.
-
-    This is a synchronous wrapper that:
-    1. Loads the model provider config from Redis
-    2. Checks for degraded mode (no providers configured)
-    3. Calls the async ``route()`` internally via the event loop
-    4. Resolves the actual provider+key for the chosen model
-
-    Note: this function itself is sync because deps.get_redis() returns
-    a synchronous Redis client. The inner ``route()`` call uses the
-    already-running event loop via ``asyncio``.
-    """
-    import asyncio
-
-    from core.routing.model_providers import (
-        get_degraded_status,
-        load_config,
-        resolve_provider_for_model,
-    )
-
-    cfg = load_config(redis_client)
-    degraded = get_degraded_status(cfg)
-
-    if degraded.get("degraded") and task_type == TaskType.CHAT:
-        return RouteDecision(
-            model="none",
-            provider="degraded",
-            reason="No LLM provider configured \u2014 add a provider in Settings",
-            estimated_cost_per_1k=0.0,
-        )
-
-    # Get the ideal route (async function — run in current event loop)
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        # We're already inside an async context (FastAPI) — create a task
-        # Instead, provide an async version for callers in async context
-        raise RuntimeError(
-            "route_with_failover() is sync — use aroute_with_failover() in async context"
-        )
-    decision = loop.run_until_complete(
-        route(query, task_type=task_type, cost_sensitivity=cost_sensitivity)
-    )
-
-    # Resolve which provider actually serves this model
-    provider_name, _api_key = resolve_provider_for_model(decision.model, cfg)
-
-    if provider_name == "none":
-        # Try free fallback
-        provider_name, _api_key = resolve_provider_for_model(
-            _FREE_FALLBACK_PROBE_ID, cfg
-        )
-        if provider_name != "none":
-            decision = RouteDecision(
-                model=_FREE_FALLBACK_MODEL,
-                provider=f"{provider_name}_free",
-                reason=f"{decision.reason} (downgraded: no provider for original model)",
-                estimated_cost_per_1k=0.0,
-            )
-        else:
-            decision = RouteDecision(
-                model="none",
-                provider="degraded",
-                reason="No provider available for any model \u2014 configure in Settings",
-                estimated_cost_per_1k=0.0,
-            )
-    else:
-        decision.provider = provider_name
-
-    return decision
-
-
-async def aroute_with_failover(
-    query: str = "",
-    *,
-    task_type: TaskType = TaskType.CHAT,
-    cost_sensitivity: str = "medium",
-    redis_client=None,  # noqa: ANN001
-) -> RouteDecision:
-    """Async version of route_with_failover() for use in FastAPI handlers.
-
-    Failover chain:
-    1. Check degraded mode (no providers configured at all)
-    2. Get ideal route via ``route()``
-    3. Resolve provider: direct key → OpenRouter → free fallback → degraded
-    """
-    from core.routing.model_providers import (
-        get_degraded_status,
-        load_config,
-        resolve_provider_for_model,
-    )
-
-    cfg = load_config(redis_client)
-    degraded = get_degraded_status(cfg)
-
-    if degraded.get("degraded") and task_type == TaskType.CHAT:
-        return RouteDecision(
-            model="none",
-            provider="degraded",
-            reason="No LLM provider configured \u2014 add a provider in Settings",
-            estimated_cost_per_1k=0.0,
-        )
-
-    # Get the ideal route
-    decision = await route(
-        query, task_type=task_type, cost_sensitivity=cost_sensitivity
-    )
-
-    # Resolve which provider actually serves this model
-    provider_name, _api_key = resolve_provider_for_model(decision.model, cfg)
-
-    if provider_name == "none":
-        # Try free fallback
-        provider_name, _api_key = resolve_provider_for_model(
-            _FREE_FALLBACK_PROBE_ID, cfg
-        )
-        if provider_name != "none":
-            decision = RouteDecision(
-                model=_FREE_FALLBACK_MODEL,
-                provider=f"{provider_name}_free",
-                reason=f"{decision.reason} (downgraded: no provider for original model)",
-                estimated_cost_per_1k=0.0,
-            )
-        else:
-            decision = RouteDecision(
-                model="none",
-                provider="degraded",
-                reason="No provider available for any model \u2014 configure in Settings",
-                estimated_cost_per_1k=0.0,
-            )
-    else:
-        decision.provider = provider_name
-
-    return decision
 
 
 # ---------------------------------------------------------------------------

@@ -467,6 +467,16 @@ async def lifespan(app: FastAPI):
             "security_notice: Redis password empty — set REDIS_PASSWORD for production"
         )
 
+    # Seed the global private-mode level from the boot env (CERID_PRIVATE_MODE /
+    # CERID_PRIVATE_MODE_LEVEL) so a hardened install enforces from boot rather
+    # than running at level 0 until the GUI toggle (E1 CR-011). No-op unless the
+    # env enables private mode and the Redis key is unset.
+    try:
+        from app.services.private_mode import seed_private_mode_from_env
+        seed_private_mode_from_env()
+    except Exception as e:
+        log_swallowed_error("app.main.seed_private_mode", e)
+
     # Startup: initialize Neo4j schema + run migrations
     try:
         driver = get_neo4j()
@@ -839,15 +849,42 @@ async def lifespan(app: FastAPI):
     if os.getenv("OPENROUTER_API_KEY"):
         asyncio.ensure_future(_openrouter_auth_probe_loop())
 
+    # E1 CR-008: project the persisted BYOK direct-provider enablement into the
+    # canonical (env) plane so both transports (chat + call_llm) dispatch direct
+    # keys after a bare restart — not only after a PUT /providers/config. Without
+    # this, the BYOK_DIRECT_PROVIDERS marker is empty on boot and a configured
+    # direct key silently reverts to OpenRouter. Best-effort: Redis-down must not
+    # gate startup.
+    try:
+        from app.deps import get_redis
+        from core.routing.model_providers import enabled_direct_providers, load_config
+        from core.routing.provider_state import project_byok_env
+        # Name must not shadow earlier ``import config as _cfg`` in this function
+        # (mypy treats that as Module for the whole scope).
+        provider_cfg = load_config(get_redis())
+        project_byok_env(enabled_direct_providers(provider_cfg))
+        # E1 R10 / CR-099: re-project persisted local-backend URLs onto the env
+        # plane at boot (BYOK keys already projected above). Without this, a
+        # Settings-saved quenchforge/ollama URL works until restart then reverts.
+        for _pname, _envk in (("quenchforge", "QUENCHFORGE_URL"), ("ollama", "OLLAMA_URL")):
+            _st = provider_cfg.providers.get(_pname)
+            if _st is not None and getattr(_st, "url", None):
+                os.environ[_envk] = _st.url
+    except Exception as e:
+        log_swallowed_error("app.main.project_byok_env", e)
+
     # Bifrost was fully retired (audit C-4 + follow-up 2026-04-17). Chat,
     # smart-router, and the last pipeline callers (topic extraction,
     # contextual chunking, maintenance health probes) all route direct to
     # OpenRouter via core.utils.llm_client.call_llm. No pre-warm required.
 
-    import config as _startup_config
+    # Pre-warm Ollama client pool (for pipeline tasks). Gate on the env plane:
+    # OLLAMA_ENABLED is an env var, never a config-module attribute, so the old
+    # getattr(config, "OLLAMA_ENABLED", False) gate was always False and this
+    # pre-warm was dead code even with OLLAMA_ENABLED=true (E1 CR-109).
+    from core.routing.provider_state import ollama_enabled
 
-    # Pre-warm Ollama client pool (for pipeline tasks)
-    if getattr(_startup_config, "OLLAMA_ENABLED", False):
+    if ollama_enabled():
         try:
             from core.utils.internal_llm import _get_ollama_client
             await _get_ollama_client()
@@ -864,6 +901,17 @@ async def lifespan(app: FastAPI):
         logger.info("Reranker ONNX model pre-warmed")
     except Exception as e:
         log_swallowed_error("app.main.prewarm_reranker", e)
+
+    # E1 CR-072: run the model-registry validation its module docstring promises
+    # ("auto-validates against OpenRouter on startup"). It was never wired, so the
+    # pricing cache stayed empty and deprecated model ids went undetected. Fire it
+    # in the background so a slow/offline OpenRouter never delays boot —
+    # validate_models degrades gracefully to hardcoded defaults on network failure.
+    try:
+        from utils.model_registry import validate_models
+        asyncio.create_task(validate_models())
+    except Exception as e:
+        log_swallowed_error("app.main.model_registry_validate", e)
 
     # Pre-warm embedding model (ONNX inference session)
     try:

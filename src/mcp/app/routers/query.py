@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
@@ -72,7 +72,7 @@ class QueryRequest(BaseModel):
 
 
 @router.post("/query", response_model=QueryEndpointResponse)
-async def query_endpoint(req: QueryRequest):
+async def query_endpoint(req: QueryRequest, request: Request):
     """KB search over the canonical retrieval path (rerank, provenance,
     ``exclude_packs``, tenant-scope). ``external_augmentation`` is off — this is
     a KB search, not an agentic query, so it never fires external sources.
@@ -88,21 +88,33 @@ async def query_endpoint(req: QueryRequest):
             "timestamp": utcnow_iso(),
         }
 
+    from app.concurrency import KB_POOL
+    from app.services.request_policy import build_request_context
     from core.agents.query_agent import agent_query_full
 
-    result = await agent_query_full(
-        query=req.query,
-        domains=[req.domain],
-        top_k=req.top_k,
-        exclude_packs=req.exclude_packs,
-        budget_seconds=req.budget_seconds,
-        skip_cache=req.skip_cache,
-        external_augmentation=False,
-        chroma_client=get_chroma(),
-        redis_client=get_redis(),
-        neo4j_driver=get_neo4j(),
-        graph_store=get_graph_store(),
-    )
+    # E1 CR-087: resolve the caller's consumer identity so its allowed_domains /
+    # strict_domains wall is applied here too — a restricted consumer must not
+    # escape its allow-list by using /query instead of /agent/query.
+    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    # E1 CR-096: gate under KB_POOL like /agent/query + A2A (CR-091) so unbounded
+    # concurrent retrieval on /query cannot starve the /health + /observability
+    # routes the pool exists to protect.
+    async with KB_POOL.acquire():
+        result = await agent_query_full(
+            query=req.query,
+            domains=[req.domain],
+            top_k=req.top_k,
+            exclude_packs=req.exclude_packs,
+            budget_seconds=req.budget_seconds,
+            skip_cache=req.skip_cache,
+            external_augmentation=False,
+            allowed_domains=ctx.allowed_domains_list(),
+            strict_domains=ctx.strict_domains,
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+            neo4j_driver=get_neo4j(),
+            graph_store=get_graph_store(),
+        )
     return {
         "context": result.get("context", ""),
         "sources": result.get("sources", []),

@@ -153,16 +153,17 @@ def _record_cache_invalidation(redis_client: Any, count: int, trigger: str) -> N
         log_swallowed_error("core.retrieval.semantic_cache.invalidation_metric", exc)
 
 
-def _check_stale_hit(redis_client: Any, payload: dict[str, Any], entry_id: str) -> None:
-    """Flag a hit served from an entry that predates the last known
-    invalidation — evidence the invalidation SCAN missed it or the backend
-    ``delete(where={})`` failed, rather than the corpus being confirmed
-    fresh. One extra Redis GET on the hit path only; never raises.
+def _check_stale_hit(redis_client: Any, payload: dict[str, Any], entry_id: str) -> bool:
+    """Return True when a candidate predates the last known invalidation —
+    evidence the invalidation SCAN missed it or the backend ``delete(where={})``
+    failed, rather than the corpus being confirmed fresh. The caller must NOT
+    serve a stale entry (CR-046). One extra Redis GET on the hit path only;
+    never raises.
     """
     try:
         watermark_raw = redis_client.get(_LAST_INVALIDATED_KEY)
         if not watermark_raw:
-            return  # no invalidation has run yet — nothing to compare against
+            return False  # no invalidation has run yet — nothing to compare against
         last_invalidated_at = float(watermark_raw)
         stored_at = float(payload.get("stored_at", 0.0))
         if stored_at < last_invalidated_at:
@@ -172,13 +173,42 @@ def _check_stale_hit(redis_client: Any, payload: dict[str, Any], entry_id: str) 
             )
             from utils.metrics import MetricsCollector
             MetricsCollector(redis_client).record_metric("cache_stale_hit_count", 1.0)
+            return True
     except Exception as exc:
         log_swallowed_error("core.retrieval.semantic_cache.stale_hit_check", exc)
+    return False
 
 
-def _scope_token(domains: list[str] | None) -> str:
-    """Canonical token for the domain filter a result was computed under."""
-    return ",".join(sorted(domains)) if domains else "__all__"
+def _scope_token(
+    domains: list[str] | None,
+    allowed_domains: list[str] | None = None,
+    *,
+    memory_enabled: bool = True,
+) -> str:
+    """Canonical token for the domain filter, consumer wall, and memory gate.
+
+    ``allowed_domains`` is the calling consumer's effective domain restriction
+    (``None`` = unrestricted, e.g. gui/a2a/_default). Folding it into the token
+    stops a strict consumer (cerid-finance, trading-agent) from receiving an
+    unrestricted consumer's cached result under the same raw domain filter —
+    the C2 half of CR-001, mirroring the C1 ``context_hint`` consumer scope.
+
+    ``memory_enabled`` (E1 R16 / CR-016): a memory-ON envelope must never be
+    served to the same query with Memory OFF. Default True keeps the historical
+    token so unrestricted+memory-on entries stay backward-compatible.
+
+    Backward-compatible by construction: when ``allowed_domains is None`` and
+    memory is on, the token is the historical domain-only string.
+    """
+    domain_part = ",".join(sorted(domains)) if domains else "__all__"
+    if allowed_domains is None:
+        base = domain_part
+    else:
+        allow_part = ",".join(sorted(allowed_domains)) if allowed_domains else "__all__"
+        base = f"{domain_part}|allow={allow_part}"
+    if not memory_enabled:
+        return f"{base}|mem=0"
+    return base
 
 
 # ANN candidates examined per lookup — the nearest embedding may belong to a
@@ -191,14 +221,20 @@ def cache_lookup(
     redis_client: Any,
     threshold: float | None = None,
     domains: list[str] | None = None,
+    allowed_domains: list[str] | None = None,
+    *,
+    memory_enabled: bool = True,
 ) -> dict[str, Any] | None:
     """Check if a semantically similar query exists in the cache.
 
     ``domains`` must match the scope the entry was stored under — the same
     query text against different domain filters returns different results
     (live-caught 2026-07-13: a cross-domain query was served another
-    domain's cached result at sim=1.0). Legacy scope-less entries never
-    match and age out via TTL.
+    domain's cached result at sim=1.0). ``allowed_domains`` must likewise match
+    the consumer wall the entry was stored under, so a strict consumer never
+    receives an unrestricted consumer's result (CR-001). ``memory_enabled``
+    scopes Memory ON vs OFF (E1 R16). Legacy scope-less entries never match
+    and age out via TTL.
 
     Returns the cached result dict, or None on miss / disabled / error.
     """
@@ -207,7 +243,7 @@ def cache_lookup(
         return None
 
     thresh = threshold if threshold is not None else SEMANTIC_CACHE_THRESHOLD
-    scope = _scope_token(domains)
+    scope = _scope_token(domains, allowed_domains, memory_enabled=memory_enabled)
 
     try:
         if backend.count() == 0:
@@ -248,7 +284,16 @@ def cache_lookup(
             if payload.get("domain_scope") != scope:
                 continue
 
-            _check_stale_hit(redis_client, payload, entry_id)
+            if _check_stale_hit(redis_client, payload, entry_id):
+                # Predates the last invalidation — the SCAN/delete missed it.
+                # Do NOT serve it; evict the orphan and try the next candidate
+                # (or fall through to a miss) so a stale answer can't be returned
+                # after the corpus changed (CR-046).
+                try:
+                    backend.delete(ids=[entry_id])
+                except Exception as exc:
+                    log_swallowed_error("core.retrieval.semantic_cache.stale_evict", exc)
+                continue
 
             logger.info(
                 "Semantic cache hit (sim=%.4f, id=%s, scope=%s)",
@@ -274,13 +319,17 @@ def cache_store(
     ttl: int | None = None,
     max_entries: int | None = None,
     domains: list[str] | None = None,
+    allowed_domains: list[str] | None = None,
+    *,
+    memory_enabled: bool = True,
 ) -> None:
     """Store a query result in the semantic cache.
 
     Result payload goes to Redis (with TTL); embedding goes to the chroma
     collection backend (no native TTL — orphans evicted lazily on lookup).
-    The entry is keyed and scope-tagged by ``domains`` so lookups never
-    cross domain filters.
+    The entry is keyed and scope-tagged by ``domains``, the consumer's
+    ``allowed_domains`` wall, and ``memory_enabled`` so lookups never cross
+    domain filters, consumer isolation, or Memory ON/OFF (CR-001 / R16).
     """
     backend = _get_backend()
     if backend is None:
@@ -295,7 +344,7 @@ def cache_store(
         return
 
     cache_ttl = ttl if ttl is not None else SEMANTIC_CACHE_TTL
-    scope = _scope_token(domains)
+    scope = _scope_token(domains, allowed_domains, memory_enabled=memory_enabled)
 
     try:
         entry_id = hashlib.sha256(f"{scope}|{query}".encode()).hexdigest()[:16]

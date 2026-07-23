@@ -357,9 +357,11 @@ export function KnowledgePane() {
   const errorDetail = activeSearch ? searchErrorDetail : browseErrorDetail
   const refetch = activeSearch ? refetchSearch : refetchArtifacts
 
-  const MIN_RELEVANCE = 0.35
+  // E1 R3 / CR-010 tail: post-rerank relevance is an ordinal cross-encoder
+  // sigmoid — an absolute floor (was 0.35) emptied the Library-tab pane on the
+  // same class of hits CR-010 removed elsewhere. Keep ranking order; no floor.
   const allResults: KBQueryResult[] = activeSearch
-    ? deduplicateByArtifact(searchResults?.results ?? []).filter((r) => r.relevance >= MIN_RELEVANCE)
+    ? deduplicateByArtifact(searchResults?.results ?? [])
     : (artifacts ?? [])
         .filter((a) => !activeDomain || a.domain === activeDomain)
         .filter((a) => !taxonomyFilter.subCategory || a.sub_category === taxonomyFilter.subCategory)

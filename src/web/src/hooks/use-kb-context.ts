@@ -109,15 +109,14 @@ export function useKBContext(
     setActiveManualQuery("")
   }, [])
 
-  // Client-side relevance + tag filtering
-  const MIN_RELEVANCE = 0.45
+  // Tag filtering only. The backend applies its calibrated relevance floor
+  // pre-rerank (query_agent Step 4.95) and returns a ranked, top-k set; the
+  // post-rerank `relevance` field is an ordinal cross-encoder sigmoid, so a
+  // client-side absolute floor here re-created the emptied-envelope bug the
+  // backend already fixed server-side — dropping correct chunks that scored
+  // ~0.28 on the ordinal scale (CR-010).
   const filteredResults = useMemo(() => {
-    const rawResults = data?.results ?? []
-    let results = rawResults
-    // Filter out low-relevance results (skip if all relevance=0, e.g., browse mode)
-    if (results.some((r) => r.relevance > 0)) {
-      results = results.filter((r) => r.relevance >= MIN_RELEVANCE)
-    }
+    const results = data?.results ?? []
     if (activeTags.length === 0) return results
     return results.filter((r) => {
       const rTags = r.tags ?? []

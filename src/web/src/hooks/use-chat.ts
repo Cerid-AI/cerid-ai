@@ -3,7 +3,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { streamChat, ingestFeedback, extractMemories } from "@/lib/api"
-import { uuid } from "@/lib/utils"
+import { uuid, estimateTokenCount } from "@/lib/utils"
 import type { ChatMessage, SourceRef } from "@/lib/types"
 
 export interface ModelFallbackEvent {
@@ -19,9 +19,12 @@ interface UseChatOptions {
   onModelFallback?: (event: ModelFallbackEvent) => void
   feedbackEnabled?: boolean
   privateModeLevel?: number
+  /** User chat settings forwarded to the backend (E1 CR-026 — cost_sensitivity
+   *  lets the backend smart-router honor the user's cost preference). */
+  chatSettings?: { temperature?: number; top_p?: number; cost_sensitivity?: string }
 }
 
-export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onModelFallback, feedbackEnabled, privateModeLevel = 0 }: UseChatOptions) {
+export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onModelFallback, feedbackEnabled, privateModeLevel = 0, chatSettings }: UseChatOptions) {
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const onModelFallbackRef = useRef(onModelFallback)
@@ -41,6 +44,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
     async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sourcesUsed?: SourceRef[], degradedReason?: string) => {
       setIsStreaming(true)
       abortRef.current = new AbortController()
+      const startedAt = Date.now()
 
       const assistantMsg: ChatMessage = {
         id: uuid(),
@@ -85,6 +89,12 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
         }, abortRef.current.signal, (info) => {
           const prevModel = resolvedModel
           resolvedModel = `openrouter/${info.resolved_model}`
+          // OpenRouter can substitute the served model mid-stream; when it does,
+          // reflect the actual model so the badge + feedback/memory attribution
+          // report what really answered, not the requested id (CR-077).
+          if (info.actual_model) {
+            resolvedModel = `openrouter/${info.actual_model}`
+          }
           onModelResolved?.(convoId, resolvedModel)
           // Detect backend model fallback and surface to UI
           if (info.fallback_model) {
@@ -94,7 +104,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
               originalError: info.original_error,
             })
           }
-        })
+        }, chatSettings)
         // Flush any remaining throttled content
         if (rafId) { cancelAnimationFrame(rafId); rafId = null }
         flushUpdate()
@@ -120,8 +130,18 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
           if (feedbackEnabled && !aborted && accumulated.length > 100) {
             const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")
             if (lastUserMsg) {
-              ingestFeedback(lastUserMsg.content, accumulated, resolvedModel, convoId)
-                .catch((err) => console.warn("[feedback-loop]", err))
+              // Send estimated tokens + measured latency so the feedback-loop
+              // conversation metrics aren't always zero (CR-081) — the backend
+              // only records them when non-zero.
+              ingestFeedback(
+                lastUserMsg.content,
+                accumulated,
+                resolvedModel,
+                convoId,
+                estimateTokenCount(lastUserMsg.content),
+                estimateTokenCount(accumulated),
+                Date.now() - startedAt,
+              ).catch((err) => console.warn("[feedback-loop]", err))
             }
           }
 
@@ -134,7 +154,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
         }
       }
     },
-    [onMessageStart, onMessageUpdate, onModelResolved, feedbackEnabled, privateModeLevel],
+    [onMessageStart, onMessageUpdate, onModelResolved, feedbackEnabled, privateModeLevel, chatSettings],
   )
 
   const stop = useCallback(() => {

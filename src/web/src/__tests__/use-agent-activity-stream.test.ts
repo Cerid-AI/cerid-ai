@@ -94,6 +94,31 @@ describe("useAgentActivityStream", () => {
     expect(result.current.entries[0]?.agent).toBe("QueryAgent")
   })
 
+  it("CR-048: a successful reconnect resets the retry counter with no data frames", () => {
+    const { result } = renderHook(() =>
+      useAgentActivityStream({ url: "http://example/stream", maxRetries: 5 }),
+    )
+    act(() => {
+      MockEventSource.instances[0]!.emitError()
+    })
+    expect(result.current.retryCount).toBe(1)
+
+    // Back-off elapses → reconnect.
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(MockEventSource.instances).toHaveLength(2)
+
+    // The reconnect succeeds but the idle console only sends named `heartbeat`
+    // events that never reach onmessage — onopen alone must reset the counter,
+    // or transient blips accumulate to a permanent "unavailable" (CR-048).
+    act(() => {
+      MockEventSource.instances[1]!.emitOpen()
+    })
+    expect(result.current.status).toBe("open")
+    expect(result.current.retryCount).toBe(0)
+  })
+
   it("retries with exponential back-off, then gives up after maxRetries", () => {
     const { result } = renderHook(() =>
       useAgentActivityStream({

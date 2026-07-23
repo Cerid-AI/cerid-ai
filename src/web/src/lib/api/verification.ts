@@ -7,24 +7,11 @@ import type { HallucinationClaim } from "../types"
 
 // --- Hallucination Detection ---
 
-export async function saveVerificationReport(report: {
-  conversation_id: string
-  claims: Array<Record<string, unknown>>
-  overall_score: number
-  verified: number
-  unverified: number
-  uncertain: number
-  total: number
-}): Promise<void> {
-  const res = await fetch(`${MCP_BASE}/verification/save`, {
-    method: "POST",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(report),
-  })
-  if (!res.ok) {
-    console.warn("[verification] Failed to persist report:", res.status)
-  }
-}
+// E1 CR-065: saveVerificationReport was removed here — Sprint C moved report
+// persistence server-side (verify_response_streaming persists to Neo4j and emits
+// a "persisted" SSE event the stream hook now surfaces on failure). The FE helper
+// was dead code with no callers; the POST /verification/save endpoint remains for
+// external SDK consumers.
 
 export function streamVerification(
   responseText: string,
@@ -84,6 +71,7 @@ export type { ClaimVerificationResult }
 export async function verifySingleClaim(
   claimText: string,
   conversationId: string,
+  claimIndex: number,
 ): Promise<ClaimVerificationResult | null> {
   const res = await fetch(`${MCP_BASE}/agent/verify-stream`, {
     method: "POST",
@@ -92,6 +80,11 @@ export async function verifySingleClaim(
       response_text: claimText,
       conversation_id: conversationId,
       expert_mode: true,
+      // E1 CR-019: this is a per-claim retry — the backend must MERGE the fresh
+      // verdict into the durable N-claim report at this index, not replace the
+      // whole report with a 1-claim one (which wiped the other claims' verdicts
+      // and broke their feedback indices).
+      single_claim_index: claimIndex,
     }),
   })
   if (!res.ok || !res.body) return null

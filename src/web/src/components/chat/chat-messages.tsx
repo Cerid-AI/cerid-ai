@@ -78,6 +78,8 @@ function buildStatusFromReport(report: HallucinationReport): MessageVerification
 
 interface ChatMessagesProps {
   messages: ChatMessage[]
+  /** Active conversation id — threaded to per-message thumbs feedback (CR-043). */
+  conversationId: string
   isStreaming: boolean
   /** ID of the currently selected verification message (for full inline markup). */
   selectedVerificationMsgId: string | null
@@ -117,6 +119,7 @@ function MessageRow({
   msg,
   i,
   messages,
+  conversationId,
   isStreaming,
   selectedVerificationMsgId,
   verificationStatusForMsg,
@@ -210,6 +213,7 @@ function MessageRow({
       {divider}
       <MessageBubble
         message={msg}
+        conversationId={conversationId}
         verificationStatus={msgVerificationStatus}
         verificationClaims={msgClaims}
         inlineMarkups={msgInlineMarkups}

@@ -27,6 +27,9 @@ interface UseChatSendOptions {
   addMessage: (convoId: string, msg: ChatMessage) => void
   updateModel: (convoId: string, modelId: string) => void
   replaceMessages?: (convoId: string, msgs: ChatMessage[]) => void
+  /** Apply a compressed history summary, preserving messages appended after the
+   *  `originalCount`-length snapshot the compression ran on (CR-003). */
+  mergeCompressedHistory?: (convoId: string, compressed: ChatMessage[], originalCount: number) => void
 
   // Chat send primitive
   send: (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sources?: SourceRef[], degradedReason?: string) => void
@@ -58,6 +61,10 @@ interface UseChatSendOptions {
    *  client-side and a backend gate cannot un-inject it. */
   privateModeLevel: number
 
+  /** E1 R16 / CR-016: when false, skip client-side ``recallMemories`` auto-inject
+   *  so Memory-off matches the toolbar contextSources.memory toggle. Defaults true. */
+  memoryEnabled?: boolean
+
   /** Non-empty when retrieval breached its time budget for the current query.
    *  Propagated onto the assistant ChatMessage so MessageBubble can render a
    *  warning banner explaining the answer is ungrounded. */
@@ -71,7 +78,7 @@ interface UseChatSendReturn {
   autoRouteNotice: string | null
   lastAutoInjectCount: number
   resetAutoInjectCount: () => void
-  handleSend: (content: string) => Promise<void>
+  handleSend: (content: string, baseMessages?: ChatMessage[]) => Promise<void>
 }
 
 /**
@@ -107,15 +114,21 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
   const injectedHistoryRef = useRef<Set<string>>(new Set())
 
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, baseMessages?: ChatMessage[]) => {
       options.onBeforeSend?.()
+
+      // E1 CR-079: the conversation history this send builds on. A correction
+      // re-send passes the already-truncated history explicitly (baseMessages)
+      // rather than relying on options.activeMessages — which is a closure over
+      // the pre-truncation render and would otherwise re-send the stale history.
+      const history = baseMessages ?? options.activeMessages ?? []
 
       // Auto-routing: silently switch model if recommendation exists
       let modelToUse = options.selectedModel
       if (options.routingMode === "auto") {
         const currentObj = MODELS.find((m) => m.id === options.selectedModel) ?? MODELS[0]
         const rec = recommendModel(
-          content, currentObj, options.activeMessages ?? [],
+          content, currentObj, history,
           options.injectedContext.length, options.costSensitivity,
         )
         if (rec.model.id !== options.selectedModel && rec.savingsVsCurrent > 0.0001) {
@@ -143,6 +156,13 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       // inject NOTHING — no manual context, no auto-inject, no memory recall.
       // This is the single boundary that enforces the toolbar's privacy promise.
       const bypassKB = options.privateModeLevel >= 2
+
+      // E1 R7 / CR-079: correction re-send passes baseMessages (truncated history).
+      // Clear session inject dedup so chunks from discarded answers do not block
+      // re-injection for the correction (the message that most needs grounding).
+      if (baseMessages != null) {
+        injectedHistoryRef.current = new Set()
+      }
 
       // Combine manually injected + auto-injected context
       // Skip chunks already sent to the model in prior turns (session dedup)
@@ -174,10 +194,14 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
             injectAbort.abort()
             resolve(null)
           }, 500))
-          // Fire KB query and memory recall in parallel with shared timeout
+          // E1 R16: honor contextSources.memory — do not recall when Memory is off.
+          const memoryOn = options.memoryEnabled !== false
+          // Fire KB query and (optional) memory recall in parallel with shared timeout
           const [freshKB, freshMemories] = await Promise.all([
             Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal, excludePacks: !options.includePacks }), timeout]).catch(() => null),
-            Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => []),
+            memoryOn
+              ? Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => [])
+              : Promise.resolve([]),
           ])
           if (freshKB?.results?.length) {
             freshResults = freshKB.results
@@ -186,35 +210,44 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           // Clone first — when the KB query returned nothing, freshResults
           // still aliases the caller's kbResults state array (mirrors the
           // warm-cache branch below); mutating it duplicates memory entries.
-          if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+          if (memoryOn && Array.isArray(freshMemories) && freshMemories.length > 0) {
             freshResults = [...(freshResults ?? [])]
             for (const mem of freshMemories) {
               freshResults.push(memoryToKBResult(mem))
             }
           }
         } else if (!cacheCold && content.length > 2) {
-          // Cache warm — skip queryKB but still pull fresh memories
+          // Cache warm — skip queryKB but still pull fresh memories when Memory is on
           // (memories aren't covered by the TanStack KB cache).
-          const freshMemories = await recallMemories(content, 3).catch(() => [])
-          if (Array.isArray(freshMemories) && freshMemories.length > 0) {
-            // Avoid mutating the caller's kbResults array (it's a React
-            // state reference). Clone before pushing memory pseudo-results.
-            freshResults = [...freshResults]
-            for (const mem of freshMemories) {
-              freshResults.push(memoryToKBResult(mem))
+          if (options.memoryEnabled !== false) {
+            const freshMemories = await recallMemories(content, 3).catch(() => [])
+            if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+              // Avoid mutating the caller's kbResults array (it's a React
+              // state reference). Clone before pushing memory pseudo-results.
+              freshResults = [...freshResults]
+              for (const mem of freshMemories) {
+                freshResults.push(memoryToKBResult(mem))
+              }
             }
           }
         }
         if (freshResults.length > 0) {
           const modelObj = MODELS.find((m) => m.id === modelToUse) ?? MODELS[0]
-          const historyTokens = (options.activeMessages ?? []).reduce((sum, m) => sum + estimateTokenCount(m.content), 0)
+          const historyTokens = history.reduce((sum, m) => sum + estimateTokenCount(m.content), 0)
           const userTokens = estimateTokenCount(content)
           const manualTokens = manuallyInjected.reduce((sum, r) => sum + estimateTokenCount(r.content), 0)
           const reservedTokens = historyTokens + userTokens + manualTokens + 1200
           let remainingBudget = modelObj.effectiveContextWindow - reservedTokens
 
+          // CR-010: post-rerank relevance is an ordinal cross-encoder sigmoid
+          // (provider-dependent scale), so an absolute threshold could suppress
+          // a correct top match. Gate each candidate on its score RELATIVE to
+          // the best available hit — autoInjectThreshold now means "fraction of
+          // the top match" (e.g. 0.40 ⇒ keep chunks scoring ≥ 40% of the best).
+          const topRelevance = freshResults.reduce((mx, r) => Math.max(mx, r.relevance), 0)
+          const relFloor = topRelevance > 0 ? options.autoInjectThreshold * topRelevance : 0
           const candidates = freshResults
-            .filter((r) => r.relevance >= options.autoInjectThreshold
+            .filter((r) => r.relevance >= relFloor
               && !injectedIds.has(r.artifact_id)
               && !priorInjected.has(`${r.artifact_id}:${r.chunk_index}`))
           for (const c of candidates) {
@@ -270,7 +303,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         if (priorInjected.size > 0) {
           const priorFiles = new Set<string>()
           for (const key of priorInjected) {
-            const msg = (options.activeMessages ?? []).find(
+            const msg = history.find(
               (m) => m.sourcesUsed?.some((s) => `${s.artifact_id}:${s.chunk_index}` === key),
             )
             if (msg) {
@@ -303,7 +336,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         console.log(`[kb-inject] System message (${allMessages[0].content.length} chars) with ${dedupedSources.length} sources`)
       }
 
-      allMessages.push(...(options.activeMessages ?? []), userMsg)
+      allMessages.push(...history, userMsg)
 
       // ── Proactive history pruning ──
       // If conversation history exceeds 70% of effective context window,
@@ -321,11 +354,17 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
         // Fire-and-forget: compress via backend for higher-quality pruning
         // and persist the compressed history for future turns.
-        if (options.replaceMessages && !compressingRef.current) {
+        if (options.mergeCompressedHistory && !compressingRef.current) {
           const capturedConvoId = convoId
+          // Snapshot the exact history the compression runs on. On resolution we
+          // replace only these first `originalCount` messages, preserving the
+          // in-flight turn appended during the async window (CR-003) — a
+          // wholesale replace here wiped the current user+assistant turn.
+          const snapshot = history
+          const originalCount = snapshot.length
           compressingRef.current = true
           compressConversation(
-            (options.activeMessages ?? []).map((m) => ({ role: m.role, content: m.content })),
+            snapshot.map((m) => ({ role: m.role, content: m.content })),
             targetTokens,
           )
             .then((result) => {
@@ -336,7 +375,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
                 content: m.content,
                 timestamp: Date.now() - (result.messages.length - i) * 1000,
               }))
-              options.replaceMessages!(capturedConvoId, compressed)
+              options.mergeCompressedHistory!(capturedConvoId, compressed, originalCount)
               if (import.meta.env.DEV) {
                 console.log(
                   `[history] Compressed ${result.original_tokens} → ${result.compressed_tokens} tokens ` +

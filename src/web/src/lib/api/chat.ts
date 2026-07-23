@@ -48,7 +48,7 @@ export async function streamChat(
   onChunk: (text: string) => void,
   signal?: AbortSignal,
   onModelInfo?: (info: ChatModelInfo) => void,
-  chatSettings?: { temperature?: number; top_p?: number },
+  chatSettings?: { temperature?: number; top_p?: number; cost_sensitivity?: string },
 ): Promise<void> {
   const url = `${MCP_BASE}/chat/stream`
   const payload: Record<string, unknown> = {
@@ -59,6 +59,11 @@ export async function streamChat(
   }
   if (chatSettings?.top_p != null) {
     payload.top_p = chatSettings.top_p
+  }
+  // E1 CR-026: forward the user's cost preference so the backend smart-router
+  // (when model='auto') can honor it — chatSettings were accepted-never-sent.
+  if (chatSettings?.cost_sensitivity) {
+    payload.cost_sensitivity = chatSettings.cost_sensitivity
   }
   const res = await fetch(url, {
     method: "POST",
@@ -313,10 +318,14 @@ export async function syncConversationsBulk(conversations: Conversation[]): Prom
 }
 
 export async function deleteConversationSync(convId: string): Promise<void> {
-  await fetch(`${MCP_BASE}/user-state/conversations/${convId}`, {
+  const res = await fetch(`${MCP_BASE}/user-state/conversations/${convId}`, {
     method: "DELETE",
     headers: mcpHeaders(),
   })
+  // Reject on a non-2xx so the caller can keep a delete tombstone until the
+  // server actually acks the removal — a swallowed 500 is how deleted
+  // conversations resurrect on the next mount-merge (E1 CR-092).
+  if (!res.ok) throw new Error(await extractError(res, `Delete failed: ${res.status}`))
 }
 
 export async function syncPreferences(prefs: Record<string, unknown>): Promise<void> {

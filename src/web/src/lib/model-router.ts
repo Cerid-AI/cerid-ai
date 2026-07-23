@@ -258,6 +258,7 @@ export function recommendModel(
     estimatedCost: bestCost,
     reasoning,
     savingsVsCurrent: Math.max(0, savings),
+    correctnessUpgrade: switchedForTemporalSearch,
   }
 }
 
