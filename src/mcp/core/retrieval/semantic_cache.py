@@ -271,9 +271,11 @@ def cache_lookup(
             if not result_raw:
                 # Payload expired (Redis TTL) but the index still has the
                 # embedding — lazy-evict the orphan so the index doesn't
-                # grow unbounded as TTLs cycle.
+                # grow unbounded as TTLs cycle. Also drop age-index score
+                # so FIFO eviction bookkeeping stays accurate.
                 try:
                     backend.delete(ids=[entry_id])
+                    redis_client.zrem(_AGE_INDEX_KEY, entry_id)
                 except Exception as exc:
                     log_swallowed_error("core.retrieval.semantic_cache.orphan_evict", exc)
                 continue
@@ -288,9 +290,12 @@ def cache_lookup(
                 # Predates the last invalidation — the SCAN/delete missed it.
                 # Do NOT serve it; evict the orphan and try the next candidate
                 # (or fall through to a miss) so a stale answer can't be returned
-                # after the corpus changed (CR-046).
+                # after the corpus changed (CR-046). Drop age-index entry too
+                # (stale-evict age-index leak residual).
                 try:
                     backend.delete(ids=[entry_id])
+                    redis_client.delete(_entry_key(entry_id))
+                    redis_client.zrem(_AGE_INDEX_KEY, entry_id)
                 except Exception as exc:
                     log_swallowed_error("core.retrieval.semantic_cache.stale_evict", exc)
                 continue

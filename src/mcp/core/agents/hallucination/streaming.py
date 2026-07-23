@@ -540,6 +540,10 @@ def _summarize_claims(
         "uncertain": uncertain,
         "skipped": skipped,
         "total": len(claims),
+        # Count of claims that contributed to overall (verified/unverified).
+        # Interrupted runs still report this so clients can distinguish
+        # "0 assessed" from "summary omitted the field" (audit residual).
+        "assessed": len(assessed),
     }
     return counts, overall
 

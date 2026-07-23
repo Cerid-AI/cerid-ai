@@ -100,20 +100,30 @@ class A2ATaskHistory(BaseModel):
 
 
 class KnowledgeQueryInput(BaseModel):
-    """Full knowledge-query parameter surface — parity with REST /agent/query."""
+    """A2A knowledge-query surface — the common REST /agent/query knobs.
+
+    Not full parity with every REST field (no rag_mode/context_sources/etc.);
+    peers use REST for the complete contract. Bounds match the REST top_k
+    envelope so an unbounded A2A caller cannot force an unbounded retrieval.
+    """
     model_config = ConfigDict(populate_by_name=True, extra="ignore",
                               protected_namespaces=())
 
-    query: str = Field("", validation_alias=AliasChoices("text", "query"))
+    query: str = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("text", "query"),
+        description="Natural-language query (aliases: text, query)",
+    )
     domains: list[str] | None = None
-    top_k: int = 10
+    top_k: int = Field(10, ge=1, le=100)
     use_reranking: bool = True
     conversation_messages: list[dict] | None = None
     skip_cache: bool = False
     metadata_filter: dict | None = None
     exclude_packs: bool = False
     strict_domains: bool = False
-    budget_seconds: float | None = None
+    budget_seconds: float | None = Field(default=None, ge=0.1, le=300.0)
     model: str | None = None
 
 

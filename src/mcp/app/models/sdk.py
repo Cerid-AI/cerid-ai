@@ -224,7 +224,12 @@ class SDKLLMCompleteResponse(_SDKBase):
 
     content: str = Field(description="LLM-generated text content")
     model: str = Field(description="Model ID actually used (after smart-routing)")
-    provider: str = Field(description="Routing provider: ollama | openrouter_free | openrouter_paid")
+    provider: str = Field(
+        description=(
+            "Routing provider label: ollama | quenchforge | openrouter_paid "
+            "(legacy openrouter_free stamp removed by CR-027 cost honesty)"
+        ),
+    )
     reason: str = Field(default="", description="Why this model was selected")
     estimated_cost_per_1k: float = Field(
         default=0.0, ge=0.0,

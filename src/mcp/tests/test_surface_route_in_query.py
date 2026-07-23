@@ -17,7 +17,6 @@ import pytest
 
 from core.agents.query_agent import (
     _agent_query_impl,
-    _domains_no_results,
     _recall_memory_surface,
     _recall_wiki_surface,
     _should_skip_graph,
@@ -71,21 +70,6 @@ class TestSurfaceRouteInResult:
         assert result["retrieval_skipped"] is True
         assert result["surface_route"]["intent"] == "compiled_summary"
         assert result["surface_route"]["primary"] == "wiki"
-
-
-class TestDomainsNoResults:
-    """GA P0.5 B2b — report which requested domains returned nothing."""
-
-    def test_flags_domains_with_zero_results(self):
-        results = [{"domain": "coding", "relevance": 0.9}]
-        assert _domains_no_results(["coding", "finance"], results) == ["finance"]
-
-    def test_empty_results_flags_all_requested(self):
-        assert _domains_no_results(["a", "b"], []) == ["a", "b"]
-
-    def test_all_domains_hit_returns_empty(self):
-        results = [{"domain": "a"}, {"domain": "b"}]
-        assert _domains_no_results(["a", "b"], results) == []
 
 
 class TestShouldSkipGraph:

@@ -490,12 +490,16 @@ async def _stream_ollama(
     max_tokens: int,
     json_mode: bool = False,
     provider: str = "ollama",
+    model: str | None = None,
 ) -> AsyncIterator[str]:
     """Stream assistant-content deltas from a local Ollama-protocol backend.
 
     Yields each ``message.content`` fragment as the NDJSON stream arrives.
     Errors (connect/timeout/HTTP) propagate to the caller, which decides
     whether to fall back — this generator does not swallow them.
+
+    ``model`` defaults to ``INTERNAL_LLM_MODEL`` / ``OLLAMA_DEFAULT_MODEL``;
+    :func:`llm_call_override` may pass an explicit model (E1 residual).
     """
     if provider == "quenchforge":
         base_url = getattr(config, "QUENCHFORGE_URL", "") or os.getenv(
@@ -503,10 +507,14 @@ async def _stream_ollama(
         )
     else:
         base_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
+    resolved_model = (
+        model
+        or getattr(config, "INTERNAL_LLM_MODEL", "")
+        or config.OLLAMA_DEFAULT_MODEL
+    )
     options = _build_ollama_options(temperature, max_tokens, json_mode)
     payload = _build_chat_payload(
-        model, messages, options, stream=True, json_mode=json_mode,
+        resolved_model, messages, options, stream=True, json_mode=json_mode,
     )
 
     client = await _get_ollama_client()
@@ -560,12 +568,13 @@ async def call_internal_llm_stream(
     provider = _resolve_stage_provider(stage, default_provider)
     # E1 CR-111: honor an llm_call_override scoped around this stream — its
     # docstring promises to cover "every call_internal_llm call inside the block",
-    # and the streaming entry point is one. Only the provider matters here (local
-    # vs cloud branch); the override's model flows through the non-local branch's
-    # call_internal_llm, which re-reads the override.
+    # and the streaming entry point is one. Provider selects local vs cloud;
+    # model must also apply on the local branch (residual: was ignored there).
     override = _llm_override.get()
+    override_model: str | None = None
     if override is not None:
         provider = override[0]
+        override_model = override[1] or None
     json_mode = (
         response_format is not None
         and response_format.get("type") == "json_object"
@@ -581,6 +590,7 @@ async def call_internal_llm_stream(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 json_mode=json_mode,
+                model=override_model,
             ):
                 yielded_any = True
                 yield chunk

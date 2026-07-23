@@ -221,10 +221,27 @@ async def orchestrated_query(
     if isinstance(kb_result, (RetrievalError, ValueError, OSError, RuntimeError,
                               AttributeError, TypeError, KeyError)):
         logger.error("KB query failed: %s", kb_result)
-        kb_result = {"results": [], "context": "", "strategy": "error"}
+        # Minimal error envelope — flatten rebuild below fills sources/confidence.
+        kb_result = {
+            "results": [],
+            "sources": [],
+            "context": "",
+            "confidence": 0.0,
+            "total_results": 0,
+            "strategy": "error",
+            "error": str(kb_result),
+        }
     elif isinstance(kb_result, BaseException):
         logger.error("KB query failed with unexpected error: %s", kb_result)
-        kb_result = {"results": [], "context": "", "strategy": "error"}
+        kb_result = {
+            "results": [],
+            "sources": [],
+            "context": "",
+            "confidence": 0.0,
+            "total_results": 0,
+            "strategy": "error",
+            "error": str(kb_result),
+        }
 
     # Handle memory exceptions
     if isinstance(memory_results, BaseException):

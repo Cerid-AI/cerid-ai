@@ -706,7 +706,7 @@
             "type": "string"
           },
           "provider": {
-            "description": "Routing provider: ollama | openrouter_free | openrouter_paid",
+            "description": "Routing provider label: ollama | quenchforge | openrouter_paid (legacy openrouter_free stamp removed by CR-027 cost honesty)",
             "title": "Provider",
             "type": "string"
           },

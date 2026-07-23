@@ -211,9 +211,9 @@ def byok_target(model: str) -> BYOKTarget | None:
     3. that provider is in the canonical enable marker (explicit operator intent,
        NOT bare key presence — a stray setup-wizard key must not reroute traffic);
     4. a key is present for it;
-    5. an adapter exists for the provider's completion wire (:data:`_DIRECT_WIRE`).
-       Google still needs its generateContent adapter (3e-2c) — until then it
-       resolves to ``None`` so the call falls through to OpenRouter.
+    5. an adapter exists for the provider's completion wire (:data:`_DIRECT_WIRE`)
+       — openai/xai use the OpenAI wire; anthropic the Messages wire; google the
+       Gemini generateContent wire (``"gemini"``).
     """
     # E1 R2: ``:online`` is an OpenRouter web-search feature, not a native model
     # id. Stripping it and sending the remainder to xAI still cannot serve the

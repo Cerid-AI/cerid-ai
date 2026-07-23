@@ -2204,17 +2204,6 @@ async def _recall_memory_surface(
     ]
 
 
-def _domains_no_results(requested: list[str], results: list[dict[str, Any]]) -> list[str]:
-    """Requested domains that contributed zero results (GA P0.5 B2b).
-
-    Surfaced so a caller/UI can distinguish "this domain returned nothing"
-    from a generic empty answer — the "my notes vanished" UX the audit flagged
-    as the top retrieval complaint. Behaviour-neutral; pure signal.
-    """
-    hit = {r.get("domain") for r in results}
-    return [d for d in requested if d not in hit]
-
-
 # Kept only as the "discount" policy's scale factor — see
 # config.features.RAG_CONVERSATIONS_POLICY for why "exclude" is now the
 # default instead.
