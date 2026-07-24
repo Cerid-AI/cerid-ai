@@ -1,10 +1,12 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-06-13 (RAG Quality Program close-out — see P0 status note below). Prior: 2026-06-02 (Commercial-GA Track 1: Pro feature truth-up & gating
-> lock-in and External agent / client backend support both **landed** — see ✅ markers below).
-> **Current candidate:** `v1.0.0-rc2.1`. The release-candidate captures Phases A–N of the
-> master plan + the K-program (K1–K6) + visualization polish (L, M). The `-rc` suffix
-> drops when the Commercial-GA program below closes.
+> **Last updated:** 2026-07-24 (Tier A audit + remediation T0–T4 shipped — honesty, MCP
+> lifecycle/privacy P0, full sync CLI, local chat stream, analytics 4-state. Status:
+> [`docs/superpowers/specs/2026-07-24-status-open-items.md`](superpowers/specs/2026-07-24-status-open-items.md).
+> Prior: 2026-06-13 RAG Quality Program close-out; 2026-06-02 Commercial-GA Track 1).
+> **Current candidate:** `v1.0.0-rc2.1` (still latest tag). Engineering continues on `main`
+> (~1000 commits post-rc2.1 including E1 + Tier A). The `-rc` suffix drops when the
+> Commercial-GA / GA_CHECKLIST program below closes and `v1.0.0` is tagged.
 > **Currently shipped:** Atlas (decomposition icicle) + Constellation cartographic map,
 > Subjects/Sources/Settings consolidation (4-pane), the registry-driven Settings redesign
 > (SEXTANT) and the Subjects UX cycles (TRELLIS domain backbone / Tephra timeline / FOLIO
