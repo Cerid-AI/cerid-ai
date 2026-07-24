@@ -1848,31 +1848,35 @@ def start_scheduler() -> AsyncIOScheduler:
     # entities whose summaries are overdue (next_refresh_due elapsed)
     # and weren't picked up by the on-ingest subscriber (Phase K1.3).
     # Bounded to WIKI_STALE_SWEEP_LIMIT (default 100) per night.
-    _scheduler.add_job(
-        _run_wiki_stale_sweep,
-        CronTrigger.from_crontab(
-            getattr(config, "SCHEDULE_WIKI_STALE_SWEEP", "0 3 * * *"),
-        ),
-        id="wiki_stale_sweep",
-        name="Wiki refresh sweep (stale entities)",
-        replace_existing=True,
-        max_instances=1,
-    )
+    # Empty SCHEDULE_WIKI_STALE_SWEEP disables (settings.py).
+    if getattr(config, "SCHEDULE_WIKI_STALE_SWEEP", "0 3 * * *"):
+        _scheduler.add_job(
+            _run_wiki_stale_sweep,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_WIKI_STALE_SWEEP", "0 3 * * *"),
+            ),
+            id="wiki_stale_sweep",
+            name="Wiki refresh sweep (stale entities)",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # Phase K2.4 — weekly wiki drift lint (Sunday 4 AM, after the
     # tombstone purge). Two-pass scan: (a) entities with open
     # contradictions on stale summaries (force refresh), (b) high-
     # mention entities with no summary (debounced refresh).
-    _scheduler.add_job(
-        _run_wiki_drift_lint,
-        CronTrigger.from_crontab(
-            getattr(config, "SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * 0"),
-        ),
-        id="wiki_drift_lint",
-        name="Wiki drift lint (contradictions + coverage gaps)",
-        replace_existing=True,
-        max_instances=1,
-    )
+    # Empty SCHEDULE_WIKI_DRIFT_LINT disables.
+    if getattr(config, "SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * 0"):
+        _scheduler.add_job(
+            _run_wiki_drift_lint,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * 0"),
+            ),
+            id="wiki_drift_lint",
+            name="Wiki drift lint (contradictions + coverage gaps)",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # Graph/atlas freshness — weekly Leiden re-detection + summaries. Gated;
     # empty SCHEDULE_COMMUNITY_REFRESH disables. Writes Entity.community_id so
@@ -2101,18 +2105,20 @@ def start_scheduler() -> AsyncIOScheduler:
 
     # v0.95.1 Phase 6 follow-up — quarantine auto-purge: daily sweep of
     # :Artifact nodes whose purge_after has elapsed. Drops the Neo4j
-    # node + ChromaDB chunks. Soft path is pkb_quarantine; this job is
-    # what eventually hard-deletes.
-    _scheduler.add_job(
-        _run_quarantine_purge,
-        CronTrigger.from_crontab(
-            getattr(config, "SCHEDULE_QUARANTINE_PURGE", "0 3 * * *"),
-        ),
-        id="quarantine_purge",
-        name="Quarantine auto-purge (retention-window expiry)",
-        replace_existing=True,
-        max_instances=1,
-    )
+    # node + ChromaDB chunks (+ BM25/SPLADE via remove_content). Soft path
+    # is pkb_quarantine; this job is what eventually hard-deletes.
+    # Empty SCHEDULE_QUARANTINE_PURGE disables (settings.py).
+    if getattr(config, "SCHEDULE_QUARANTINE_PURGE", "0 3 * * *"):
+        _scheduler.add_job(
+            _run_quarantine_purge,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_QUARANTINE_PURGE", "0 3 * * *"),
+            ),
+            id="quarantine_purge",
+            name="Quarantine auto-purge (retention-window expiry)",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # Phase O.1 — ingest recovery: scan for stale pending Chroma chunks every
     # 60 s and roll them forward or purge.  Uses a processor_queue if one is

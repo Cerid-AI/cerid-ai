@@ -1,18 +1,11 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""E1 Phase-5 — ENABLE_MODEL_CASCADE must not 400 the chat stream (CR-053).
+"""Chat cascade routing — local stream when enabled, cloud fallback when not.
 
-Registry: ``docs/superpowers/specs/2026-07-17-audit-e1-findings-registry.jsonl``
-(CR-053). The chat proxy took ``req.model = decision.model`` from the smart
-router and dispatched it to OpenRouter, discarding ``decision.provider``. With
-ENABLE_MODEL_CASCADE on, the router returns ``provider="ollama"`` with a bare
-Ollama model id (e.g. ``"llama3.2"``); chat has no local Ollama streaming
-transport, so shipping that id to OpenRouter is a guaranteed non-retryable 400.
-
-The fix honors the provider: a local-only decision falls back to the general
-cloud assignment (the same miss-path the routing except-branch uses) instead of
-sending an undispatchable model id upstream. RED-then-GREEN.
+Originally CR-053 (no local stream → never send bare Ollama id to OpenRouter).
+Tier A local-chat: when the local daemon is enabled, honor the ollama decision
+on the OpenAI-compatible local stream instead of remapping to cloud.
 """
 from __future__ import annotations
 
@@ -27,7 +20,7 @@ def _chat_redis(monkeypatch):
     monkeypatch.setattr("app.deps.get_redis", lambda: MagicMock(), raising=False)
 
 
-async def _drive(monkeypatch, decision):
+async def _drive(monkeypatch, decision, *, env: dict | None = None):
     """Run _proxy_stream with model='auto' and a stubbed router decision; return
     the bare_model _attempt_stream was ultimately asked to dispatch."""
     from app.routers import chat as chat_mod
@@ -39,6 +32,10 @@ async def _drive(monkeypatch, decision):
 
     monkeypatch.setattr("utils.smart_router.route", _fake_route, raising=False)
     monkeypatch.setattr(chat_mod, "_current_assignments", lambda: {})
+
+    if env:
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
 
     async def _empty_gen():
         return
@@ -64,10 +61,32 @@ async def _drive(monkeypatch, decision):
 
 
 @pytest.mark.asyncio
-async def test_cascade_ollama_decision_not_dispatched_to_openrouter(monkeypatch):
-    """A provider='ollama' decision must NOT hand a bare Ollama id to OpenRouter.
-    RED on HEAD: req.model = decision.model → 'llama3.2' → guaranteed 400."""
+async def test_cascade_ollama_uses_local_when_enabled(monkeypatch):
+    """With OLLAMA_ENABLED / local provider, cascade keeps the bare local model."""
     from core.routing.smart_router import RouteDecision
+
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
+
+    decision = RouteDecision(
+        model="llama3.2", provider="ollama",
+        reason="simple query — local cascade", estimated_cost_per_1k=0.0,
+    )
+    captured, _chat_mod = await _drive(monkeypatch, decision)
+
+    assert captured["bare_model"] == "llama3.2"
+
+
+@pytest.mark.asyncio
+async def test_cascade_ollama_falls_back_cloud_when_local_disabled(monkeypatch):
+    """Without local daemon enabled, bare Ollama id must not reach OpenRouter."""
+    from core.routing.smart_router import RouteDecision
+
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OLLAMA_ENABLED", "false")
+    monkeypatch.delenv("OLLAMA_ENABLED", raising=False)
+    # Force openrouter + no ollama flag
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "openrouter")
 
     decision = RouteDecision(
         model="llama3.2", provider="ollama",
@@ -78,16 +97,17 @@ async def test_cascade_ollama_decision_not_dispatched_to_openrouter(monkeypatch)
     from app.routers.models import DEFAULT_ASSIGNMENTS
 
     assert captured["bare_model"] != "llama3.2", (
-        "chat dispatched the bare Ollama model to OpenRouter — guaranteed 400 (CR-053)"
+        "chat dispatched the bare Ollama model without local enabled"
     )
     assert captured["bare_model"] == chat_mod._strip_prefix(DEFAULT_ASSIGNMENTS["general"])
 
 
 @pytest.mark.asyncio
 async def test_cascade_cloud_decision_still_honored(monkeypatch):
-    """A dispatchable (cloud) decision must be taken verbatim — the guard is
-    scoped to local-only providers, not a blanket override."""
+    """A dispatchable (cloud) decision must be taken verbatim."""
     from core.routing.smart_router import RouteDecision
+
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "openrouter")
 
     model = "openrouter/meta-llama/llama-3.3-70b-instruct"
     decision = RouteDecision(

@@ -1,19 +1,14 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// LLM cost Sankey — Phase L Day 3.
-//
-// Pro-only. Visualizes per-stage LLM spend over the last 30 days. Left
-// column = pipeline phase (ingest / retrieval / verification / curator
-// / pro_features / other). Right column = individual stage. Flow width =
-// dollars spent.
+// LLM cost Sankey — Phase L Day 3 + Tier A T4b four-state.
 
-import { useEffect, useState } from "react"
 import { Sankey, Tooltip, ResponsiveContainer, Rectangle, Layer } from "recharts"
 import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/empty-state"
 import { DollarSign, Loader2, Sparkles } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { fetchCostByStage, type CostByStageResponse } from "@/lib/api/analytics"
+import { useCostByStage } from "@/hooks/use-analytics"
 
 interface CostSankeyProps {
   windowDays?: number
@@ -21,37 +16,8 @@ interface CostSankeyProps {
 }
 
 export function CostSankey({ windowDays = 30, tier = "community" }: CostSankeyProps) {
-  const [data, setData] = useState<CostByStageResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
   const isPro = tier !== "community"
-
-  useEffect(() => {
-    if (!isPro) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
-      setLoading(false)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    fetchCostByStage(windowDays)
-      .then((d) => {
-        if (!cancelled) {
-          setData(d)
-          setError(null)
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [windowDays, isPro])
+  const { data, isLoading, isError, error, refetch } = useCostByStage(windowDays, isPro)
 
   if (!isPro) {
     return (
@@ -64,7 +30,7 @@ export function CostSankey({ windowDays = 30, tier = "community" }: CostSankeyPr
         </div>
         <div className="absolute inset-0 flex items-center justify-center backdrop-blur-sm">
           <div className="text-center p-4">
-            <Sparkles className="w-8 h-8 mx-auto text-amber-500 mb-2" />
+            <Sparkles className="w-8 h-8 mx-auto text-amber-500 mb-2" aria-hidden="true" />
             <h4 className="text-sm font-semibold">Cost Sankey is Pro-tier</h4>
             <p className="text-xs text-muted-foreground mt-1 max-w-xs">
               See where every dollar of LLM budget goes — by pipeline phase + stage.
@@ -75,40 +41,40 @@ export function CostSankey({ windowDays = 30, tier = "community" }: CostSankeyPr
     )
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
-      <Card className="p-6 flex items-center justify-center text-muted-foreground h-80">
-        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+      <Card className="p-6 flex items-center justify-center text-muted-foreground h-80" role="status">
+        <Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden="true" />
         Loading cost telemetry…
       </Card>
     )
   }
 
-  if (error) {
+  if (isError) {
     return (
-      <Card className="p-4 border-amber-500/30 bg-amber-500/5">
-        <div className="text-sm text-amber-600" role="alert">{error}</div>
+      <Card className="p-4 border-amber-500/30 bg-amber-500/5" data-testid="cost-sankey">
+        <div className="text-sm text-amber-700 dark:text-amber-400" role="alert">
+          {error instanceof Error ? error.message : "Failed to load"}
+        </div>
+        <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => void refetch()}>
+          Retry
+        </Button>
       </Card>
     )
   }
 
   if (!data || data.edges.length === 0) {
     return (
-      <Card className="p-4" data-testid="cost-sankey">
-        <CostSankeyHeader windowDays={windowDays} totalCostUsd={0} />
-        <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">
-          No LLM cost recorded in the last {windowDays} days.
-        </div>
-      </Card>
+      <div data-testid="cost-sankey">
+        <EmptyState
+          icon={DollarSign}
+          title={`No LLM cost recorded in the last ${windowDays} days`}
+          description="Costs appear here once chat, ingest enrichment, or verification use a metered provider."
+        />
+      </div>
     )
   }
 
-  // Build recharts Sankey nodes + links from the edge list. Nodes need
-  // to be unique by name; we collect them in order so the column
-  // visualization is stable (providers on the left, stages on the right).
-  // Namespace node keys by column so a name appearing as BOTH a source and a
-  // target (e.g. the default "other") maps to two distinct nodes instead of
-  // collapsing onto one index — which would render a zero-width self-loop.
   const providers = Array.from(new Set(data.edges.map((e) => e.source)))
   const stages = Array.from(new Set(data.edges.map((e) => e.target)))
   const nodeList = [
@@ -154,7 +120,7 @@ function CostSankeyHeader({ windowDays, totalCostUsd }: {
     <div className="flex items-start justify-between mb-3">
       <div>
         <h3 className="text-base font-semibold flex items-center gap-2">
-          <DollarSign className="w-4 h-4" />
+          <DollarSign className="w-4 h-4" aria-hidden="true" />
           LLM Cost Flow
         </h3>
         <p className="text-xs text-muted-foreground">
@@ -165,7 +131,6 @@ function CostSankeyHeader({ windowDays, totalCostUsd }: {
   )
 }
 
-// Custom node renderer — labels overflow the recharts default
 interface SankeyNodeProps {
   x?: number
   y?: number
@@ -192,7 +157,8 @@ function SankeyNode(props: SankeyNodeProps) {
         y={y + height / 2}
         textAnchor={isLeft ? "end" : "start"}
         dominantBaseline="middle"
-        className={cn("text-label-xxs fill-foreground")}
+        fontSize={11}
+        fill="var(--foreground)"
       >
         {payload?.name}
       </text>

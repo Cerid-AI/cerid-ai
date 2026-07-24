@@ -1,17 +1,13 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Knowledge growth heatmap — Phase L Day 2.
-//
-// GitHub-style commit grid showing artifact ingest activity over the
-// last 365 days. Cells colored by intensity (count / peak_count) using
-// the brand's amber/teal scale. Click a cell to deep-link to Sources →
-// Activity with a date filter.
+// Knowledge growth heatmap — Phase L Day 2 + Tier A T4b four-state.
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { Activity, Loader2 } from "lucide-react"
-import { fetchIngestionByDay, type IngestionByDayResponse } from "@/lib/api/analytics"
+import { useIngestionByDay } from "@/hooks/use-analytics"
 import { cn } from "@/lib/utils"
 
 const WEEKS = 53
@@ -23,40 +19,13 @@ interface GrowthHeatmapProps {
 }
 
 export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapProps) {
-  const [data, setData] = useState<IngestionByDayResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isLoading, isError, error, refetch } = useIngestionByDay(windowDays)
 
-  useEffect(() => {
-    let cancelled = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
-    setLoading(true)
-    fetchIngestionByDay(windowDays)
-      .then((d) => {
-        if (!cancelled) {
-          setData(d)
-          setError(null)
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [windowDays])
-
-  // Build a grid of (week, day) cells indexed by date. Cells without an
-  // ingest event get intensity 0.
   const grid = useMemo(() => {
-    if (!data) return { cells: [], byDate: new Map<string, number>() }
+    if (!data) return { cells: [] as Array<{ date: string; intensity: number; count: number }> }
     const byDate = new Map<string, number>()
     for (const b of data.buckets) byDate.set(b.date, b.intensity)
 
-    // Last cell = today (UTC). Work backwards.
     const today = new Date()
     const cells: Array<{ date: string; intensity: number; count: number }> = []
     for (let i = 0; i < WEEKS * DAYS; i++) {
@@ -67,22 +36,33 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
       const bucket = data.buckets.find((b) => b.date === iso)
       cells.push({ date: iso, intensity, count: bucket?.count ?? 0 })
     }
-    return { cells, byDate }
+    return { cells }
   }, [data])
 
-  if (loading) {
+  if (isLoading) {
     return (
-      <Card className="p-6 flex items-center justify-center text-muted-foreground h-48">
-        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+      <Card className="p-6 flex items-center justify-center text-muted-foreground h-48" role="status">
+        <Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden="true" />
         Loading ingest activity…
       </Card>
     )
   }
 
-  if (error) {
+  if (isError) {
     return (
       <Card className="p-4 border-amber-500/30 bg-amber-500/5">
-        <div className="text-sm text-amber-600" role="alert">{error}</div>
+        <div className="text-sm text-amber-700 dark:text-amber-400" role="alert">
+          {error instanceof Error ? error.message : "Failed to load"}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-2"
+          onClick={() => void refetch()}
+        >
+          Retry
+        </Button>
       </Card>
     )
   }
@@ -92,7 +72,7 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
       <div className="flex items-start justify-between mb-3">
         <div>
           <h3 className="text-base font-semibold flex items-center gap-2">
-            <Activity className="w-4 h-4" />
+            <Activity className="w-4 h-4" aria-hidden="true" />
             Knowledge Growth
           </h3>
           <p className="text-xs text-muted-foreground">
@@ -112,10 +92,8 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
           {grid.cells.map((cell, i) => {
             const week = Math.floor(i / DAYS)
             const day = i % DAYS
-            // Color: linear interpolation between muted and the
-            // brand's teal/amber gradient. Five buckets feels closest
-            // to the GitHub commit grid.
             const bucket = intensityBucket(cell.intensity)
+            const interactive = cell.count > 0
             return (
               <rect
                 key={i}
@@ -127,10 +105,24 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
                 fill={bucket.fill}
                 className={cn(
                   "transition-opacity",
-                  cell.count > 0 && "cursor-pointer hover:opacity-70",
+                  interactive && "cursor-pointer hover:opacity-70",
                 )}
-                onClick={() => cell.count > 0 && onCellClick?.(cell.date, cell.count)}
-                data-testid={cell.count > 0 ? `heatmap-cell-${cell.date}` : undefined}
+                tabIndex={interactive ? 0 : undefined}
+                role={interactive ? "button" : undefined}
+                aria-label={
+                  interactive
+                    ? `${cell.date}: ${cell.count} artifact${cell.count !== 1 ? "s" : ""}`
+                    : undefined
+                }
+                onClick={() => interactive && onCellClick?.(cell.date, cell.count)}
+                onKeyDown={(e) => {
+                  if (!interactive) return
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    onCellClick?.(cell.date, cell.count)
+                  }
+                }}
+                data-testid={interactive ? `heatmap-cell-${cell.date}` : undefined}
               >
                 <title>
                   {cell.date}: {cell.count} artifact{cell.count !== 1 && "s"}
@@ -141,7 +133,6 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
         </svg>
       </div>
 
-      {/* Legend */}
       <div className="flex items-center gap-1.5 pt-2 text-xs text-muted-foreground">
         <span>Less</span>
         {INTENSITY_BUCKETS.map((b, i) => (
@@ -158,15 +149,14 @@ export function GrowthHeatmap({ windowDays = 365, onCellClick }: GrowthHeatmapPr
 }
 
 const INTENSITY_BUCKETS = [
-  { threshold: 0, fill: "var(--chart-heat-0)" },    // no data
-  { threshold: 0.01, fill: "var(--chart-heat-1)" }, // very low
+  { threshold: 0, fill: "var(--chart-heat-0)" },
+  { threshold: 0.01, fill: "var(--chart-heat-1)" },
   { threshold: 0.25, fill: "var(--chart-heat-2)" },
   { threshold: 0.5, fill: "var(--chart-heat-3)" },
-  { threshold: 0.75, fill: "var(--chart-heat-4)" }, // high
+  { threshold: 0.75, fill: "var(--chart-heat-4)" },
 ]
 
-function intensityBucket(intensity: number): typeof INTENSITY_BUCKETS[0] {
-  // Walk thresholds in reverse — first one we exceed wins.
+function intensityBucket(intensity: number): (typeof INTENSITY_BUCKETS)[0] {
   for (let i = INTENSITY_BUCKETS.length - 1; i >= 0; i--) {
     if (intensity >= INTENSITY_BUCKETS[i].threshold) return INTENSITY_BUCKETS[i]
   }

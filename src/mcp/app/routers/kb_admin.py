@@ -4,6 +4,7 @@
 """KB Administration endpoints — rebuild indexes, rescore, regenerate summaries, clear domains, delete artifacts."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import traceback
 from pathlib import Path
@@ -15,7 +16,6 @@ from pydantic import BaseModel, Field
 import config
 from app.agents.curator import curate
 from app.db.neo4j.artifacts import (
-    delete_artifact,
     delete_artifacts_by_domain,
     domain_artifact_stats,
     get_artifact,
@@ -758,38 +758,24 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
 
 @router.delete("/admin/artifacts/{artifact_id}", response_model=DeleteArtifactResponse)
 async def delete_single_artifact(artifact_id: str):
-    """Delete a single artifact from Neo4j and ChromaDB."""
+    """Hard-delete a single artifact via the multi-store lifecycle coordinator."""
     try:
-        neo4j = get_neo4j()
-        chroma = get_chroma()
+        from app.services.content_lifecycle import remove_content
 
-        result = delete_artifact(neo4j, artifact_id)
-        if not result.get("deleted"):
+        removal = await asyncio.to_thread(
+            remove_content, artifact_id, neo4j=get_neo4j(), chroma=get_chroma()
+        )
+        if not removal.found:
             raise HTTPException(status_code=404, detail="Artifact not found")
 
-        # Clean up ChromaDB chunks
-        chunk_ids = result.get("chunk_ids", [])
-        domain = result.get("domain", "")
-        chunks_removed = 0
-        if chunk_ids and domain:
-            coll_name = config.collection_name(domain)
-            try:
-                collection = chroma.get_collection(name=coll_name)
-                collection.delete(ids=chunk_ids)
-                chunks_removed = len(chunk_ids)
-            except Exception as e:
-                log_swallowed_error('app.routers.kb_admin', e)
-                logger.warning("Failed to clean ChromaDB chunks: %s", e)
-
-        await invalidate_cache_non_blocking()
-        _invalidate_semantic_cache_safe("kb_admin.delete_single_artifact")
-
+        chunks_removed = len(removal.chunk_ids or [])
+        filename = ""
         return DeleteArtifactResponse(
             deleted=True,
             artifact_id=artifact_id,
-            filename=result.get("filename", ""),
+            filename=filename,
             chunks_removed=chunks_removed,
-            message=f"Deleted artifact {result.get('filename', artifact_id[:8])}",
+            message=f"Deleted artifact {artifact_id[:8]}",
         )
     except HTTPException:
         raise

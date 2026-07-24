@@ -1056,6 +1056,15 @@ async def archive_old_memories(
             record = result.single()
             archived_count = record["archived_count"] if record else 0
 
+        # Soft-hide without per-id hide_content (batch Cypher); still bust C1/C2
+        # so archived memories are not served warm within the query-cache TTL.
+        if archived_count:
+            try:
+                from utils.query_cache import invalidate_query_caches
+                invalidate_query_caches(trigger="memory.archive_old_memories")
+            except Exception as bust_exc:
+                log_swallowed_error("core.agents.memory.archive_cache_bust", bust_exc)
+
         return {
             "timestamp": utcnow_iso(),
             "retention_days": retention_days,

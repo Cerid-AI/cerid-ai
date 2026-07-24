@@ -248,6 +248,20 @@ def _strip_prefix(model_id: str) -> str:
     return model_id.removeprefix("openrouter/")
 
 
+def _looks_local_model_id(bare_model: str) -> bool:
+    """True for bare Ollama/quenchforge tags (``llama3.2``, ``qwen2.5:7b``)
+    or explicit ``ollama/…`` prefixes — not vendor/OpenRouter ids with a slash."""
+    m = (bare_model or "").strip()
+    if not m:
+        return False
+    if m.startswith("ollama/"):
+        return True
+    # openrouter/openai/…, anthropic/…, x-ai/…, meta-llama/…
+    if "/" in m:
+        return False
+    return True
+
+
 def _resolve_chat_dispatch(bare_model: str, openrouter_key: str) -> tuple[str, str, str, str]:
     """Resolve ``(base_url, api_key, send_model, wire)`` for a chat completion.
 
@@ -255,15 +269,31 @@ def _resolve_chat_dispatch(bare_model: str, openrouter_key: str) -> tuple[str, s
     takes precedence over the OpenRouter key, so a BYOK-only user's chat dispatches
     to the direct API + native model id instead of 401ing against OpenRouter (E1
     CR-008 — the confirmed failure scenario). ``wire`` names the adapter the
-    streaming path must use (``"openai"`` | ``"anthropic"``). Otherwise: the
-    OpenRouter base + resolved key + vendor-prefixed model id (OpenRouter's naming,
-    OpenAI wire). Reads the same env authority both transports share.
+    streaming path must use (``"openai"`` | ``"anthropic"`` | ``"gemini"``).
+
+    Local Ollama/quenchforge: when the active internal provider is local (or the
+    model id is a bare local tag under a local-enabled install), dispatch to the
+    daemon's OpenAI-compatible ``/v1/chat/completions`` so GUI chat works without
+    OpenRouter (Tier A air-gap path). Otherwise: OpenRouter base + key.
     """
-    from core.routing.provider_state import byok_target
+    from core.routing.provider_state import (
+        byok_target,
+        is_local_provider,
+        local_backend_url,
+        ollama_enabled,
+    )
 
     target = byok_target(bare_model)
     if target is not None:
         return target.base_url, target.api_key, target.model, target.wire
+
+    send_model = bare_model.removeprefix("ollama/")
+    local_ready = is_local_provider() or ollama_enabled()
+    if local_ready and _looks_local_model_id(bare_model):
+        base = local_backend_url().rstrip("/")
+        # Ollama + quenchforge expose OpenAI-compatible completions under /v1.
+        return f"{base}/v1", "local", send_model, "openai"  # pragma: allowlist secret — Bearer sentinel, not a real key
+
     return OPENROUTER_BASE, openrouter_key, bare_model, "openai"
 
 
@@ -716,9 +746,12 @@ async def _attempt_stream(
         headers = {
             "Authorization": f"Bearer {dispatch_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://cerid.ai",
-            "X-Title": "Cerid AI",
         }
+        # OpenRouter attribution headers only on cloud — local Ollama/quenchforge
+        # ignore them but some reverse proxies reject unknown headers.
+        if "openrouter.ai" in base_url:
+            headers["HTTP-Referer"] = "https://cerid.ai"
+            headers["X-Title"] = "Cerid AI"
         if request_id:
             headers["X-Request-ID"] = request_id
         req_obj = client.build_request(
@@ -823,24 +856,33 @@ async def _proxy_stream(
                     total_chars=total_chars,
                     kb_injection_count=kb_count,
                 )
-                # Chat streams over OpenRouter + BYOK-direct (cloud) wires only —
-                # there is no local Ollama streaming transport on this path. With
-                # ENABLE_MODEL_CASCADE on, the router can return a
-                # provider="ollama" decision whose model is a bare Ollama id
-                # (e.g. "llama3.2"); dispatching that to OpenRouter is a guaranteed
-                # non-retryable 400 (E1 CR-053). Honor the provider: a local-only
-                # decision falls back to the general cloud assignment — the same
-                # miss-path the except-branch below uses — instead of shipping an
-                # undispatchable model id to OpenRouter.
-                if decision.provider == "ollama":
-                    req.model = _current_assignments().get(
-                        "general", DEFAULT_ASSIGNMENTS["general"]
-                    )
-                    logger.info(
-                        "Smart router chose local %s (%s) but chat has no local "
-                        "streaming transport — using cloud assignment %s (CR-053)",
-                        decision.model, decision.reason, req.model,
-                    )
+                # Local cascade (ollama/quenchforge): dispatch the bare model on
+                # the local OpenAI-compatible stream when the local daemon is the
+                # active provider or OLLAMA_ENABLED. Otherwise fall back to the
+                # general cloud assignment so we never 400 OpenRouter with a bare
+                # Ollama id when local is offline (CR-053 residual).
+                from core.routing.provider_state import is_local_provider, ollama_enabled
+
+                if decision.provider in ("ollama", "quenchforge"):
+                    # is_local_provider("ollama") is a type check (always true for
+                    # the name) — only the active provider / OLLAMA_ENABLED gate
+                    # means the daemon is actually on.
+                    local_ok = is_local_provider() or ollama_enabled()
+                    if local_ok:
+                        req.model = decision.model
+                        logger.info(
+                            "Smart-routed to local %s (%s) via %s stream",
+                            decision.model, decision.reason, decision.provider,
+                        )
+                    else:
+                        req.model = _current_assignments().get(
+                            "general", DEFAULT_ASSIGNMENTS["general"]
+                        )
+                        logger.info(
+                            "Smart router chose local %s but local daemon not "
+                            "enabled — using cloud assignment %s (CR-053)",
+                            decision.model, req.model,
+                        )
                 else:
                     req.model = decision.model
                     logger.info(
@@ -989,9 +1031,9 @@ async def _collect_nonstream_response(
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request):
-    """Stream a chat completion via OpenRouter — or, when the client sets
-    ``stream=false``, return a single JSON ``chat.completion`` instead of SSE
-    (CR-064: the flag was previously accepted and ignored)."""
+    """Stream a chat completion via OpenRouter, BYOK direct, or local
+    Ollama/quenchforge — or, when the client sets ``stream=false``, return a
+    single JSON ``chat.completion`` instead of SSE (CR-064)."""
     # Private Mode L2+ server-side gate: this endpoint forwards the caller's
     # pre-assembled messages verbatim to the provider, so the web client's
     # client-side KB-bypass cannot protect a direct API/SDK caller. Strip any
@@ -1001,16 +1043,41 @@ async def chat_stream(req: ChatRequest, request: Request):
     api_key = await _resolve_api_key(request)
 
     if not api_key:
-        err = {"error": {"message": "OPENROUTER_API_KEY not configured", "type": "config_error"}}
-        if not req.stream:
-            return JSONResponse(err, status_code=503)
-        return StreamingResponse(
-            iter([
-                f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n".encode()
-            ]),
-            media_type="text/event-stream",
-            status_code=503,
-        )
+        from core.routing.provider_state import is_local_provider, ollama_enabled
+
+        # Local-only installs: no OpenRouter key required when the internal
+        # provider is ollama/quenchforge (or OLLAMA_ENABLED). Sentinel key is
+        # replaced by _resolve_chat_dispatch for local OpenAI-compat calls.
+        if is_local_provider() or ollama_enabled():
+            api_key = "local"  # pragma: allowlist secret — non-secret sentinel for local OpenAI-compat Bearer
+            # Prefer a bare local model if the client still has a cloud id.
+            if not _looks_local_model_id(_strip_prefix(req.model)):
+                from core.routing.provider_state import active_provider
+                local_default = os.getenv("INTERNAL_LLM_MODEL", "").strip() or "llama3.2"
+                logger.info(
+                    "Local chat: rewriting model %s → %s (provider=%s)",
+                    req.model, local_default, active_provider(),
+                )
+                req.model = local_default
+        else:
+            err = {
+                "error": {
+                    "message": (
+                        "OPENROUTER_API_KEY not configured. Set a key, or enable a "
+                        "local provider (INTERNAL_LLM_PROVIDER=ollama|quenchforge)."
+                    ),
+                    "type": "config_error",
+                }
+            }
+            if not req.stream:
+                return JSONResponse(err, status_code=503)
+            return StreamingResponse(
+                iter([
+                    f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n".encode()
+                ]),
+                media_type="text/event-stream",
+                status_code=503,
+            )
 
     request_id = request.headers.get("X-Request-ID", "")
     logger.info("Chat proxy: model=%s request_id=%s stream=%s", req.model, request_id, req.stream)

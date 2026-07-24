@@ -891,6 +891,11 @@ SCHEDULE_KNOWLEDGE_STATS_SNAPSHOT = os.getenv(
 SCHEDULE_RETENTION_ENFORCE = os.getenv(
     "SCHEDULE_RETENTION_ENFORCE", "0 2 * * *",
 )
+# Wiki refresh crons (Phase K). Empty string disables (matches sibling SCHEDULE_*).
+SCHEDULE_WIKI_STALE_SWEEP = os.getenv("SCHEDULE_WIKI_STALE_SWEEP", "0 3 * * *")
+SCHEDULE_WIKI_DRIFT_LINT = os.getenv("SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * 0")
+# Hard-delete of quarantine-expired artifacts. Empty string disables.
+SCHEDULE_QUARANTINE_PURGE = os.getenv("SCHEDULE_QUARANTINE_PURGE", "0 3 * * *")
 
 # Auto-adopt the latest in-family model per role from the OpenRouter catalog.
 # MODEL_AUTO_UPDATE_ENABLED gates the scheduler job; set "false" to keep the

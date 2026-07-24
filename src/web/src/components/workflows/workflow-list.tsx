@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { Workflow, WorkflowRun } from "@/lib/types"
 import {
   fetchWorkflows,
@@ -82,41 +83,45 @@ function RunStatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 
 export default function WorkflowList({ onEdit, onCreate, onDuplicate }: WorkflowListProps) {
-  const [workflows, setWorkflows] = useState<Workflow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const {
+    data: workflows = [],
+    isLoading: loading,
+    isError,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: ["workflows"],
+    queryFn: async () => {
+      const resp = await fetchWorkflows()
+      return Array.isArray(resp.workflows) ? resp.workflows : []
+    },
+  })
+  const error = isError
+    ? (queryError instanceof Error ? queryError.message : "Failed to load workflows")
+    : null
+  const load = useCallback(() => {
+    void refetch()
+  }, [refetch])
+
   const [expandedRuns, setExpandedRuns] = useState<Record<string, WorkflowRun[]>>({})
   const [loadingRuns, setLoadingRuns] = useState<string | null>(null)
   const [runsError, setRunsError] = useState<Record<string, string>>({})
   const [deleting, setDeleting] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const resp = await fetchWorkflows()
-      setWorkflows(Array.isArray(resp.workflows) ? resp.workflows : [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load workflows")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
-  useEffect(() => { load() }, [load])
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const handleDelete = useCallback(async (wf: Workflow) => {
     setDeleting(wf.id)
+    setDeleteError(null)
     try {
       await deleteWorkflow(wf.id)
-      setWorkflows((prev) => prev.filter((w) => w.id !== wf.id))
+      await queryClient.invalidateQueries({ queryKey: ["workflows"] })
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed")
+      setDeleteError(e instanceof Error ? e.message : "Delete failed")
     } finally {
       setDeleting(null)
     }
-  }, [])
+  }, [queryClient])
 
   const toggleRuns = useCallback(async (wfId: string) => {
     if (expandedRuns[wfId]) {
@@ -159,7 +164,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
   if (error) {
     return (
       <div className="p-3">
-        <PaneError title="Failed to load workflows" description={error} onRetry={load} />
+        <PaneError title="Failed to load workflows" description={error} onRetry={() => void load()} />
       </div>
     )
   }
@@ -174,7 +179,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
           <Badge variant="outline" className="ml-1.5 text-label-xs">{workflows.length}</Badge>
         </h2>
         <div className="flex gap-1.5">
-          <Button variant="ghost" size="sm" aria-label="Refresh workflows" onClick={load}>
+          <Button variant="ghost" size="sm" aria-label="Refresh workflows" onClick={() => void load()}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Button size="sm" onClick={onCreate}>
@@ -182,6 +187,11 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
           </Button>
         </div>
       </div>
+      {deleteError ? (
+        <div className="px-3 pt-2">
+          <PaneError title="Delete failed" description={deleteError} onRetry={() => setDeleteError(null)} />
+        </div>
+      ) : null}
 
       {workflows.length === 0 ? (
         <div className="p-3 space-y-3 max-w-xl mx-auto w-full">

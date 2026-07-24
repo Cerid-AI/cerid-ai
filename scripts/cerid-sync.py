@@ -166,80 +166,46 @@ def cmd_export(
     os.makedirs(sync_dir, exist_ok=True)
 
     exit_code = 0
-
-    # --- Neo4j ---
-    header("Exporting Neo4j artifacts...")
-    artifact_ids = None
+    header("Running full export_all (artifacts, chroma, bm25, memories, entities, conversations, redis, tombstones)...")
     try:
-        result = cerid_sync_lib.export_neo4j(
+        result = cerid_sync_lib.export_all(
             driver=neo4j_driver,
+            chroma_url=CHROMA_HOST_URL,
+            redis_client=redis_client,
             sync_dir=sync_dir,
+            machine_id=machine_id,
             since=since,
             domains=domains,
         )
-        artifact_ids = result.get("artifact_ids")
-        ok(f"Neo4j: {result.get('artifacts', 0)} artifacts, {result.get('domains', 0)} domains, {result.get('relationships', 0)} relationships")
-    except Exception as exc:
-        err(f"Neo4j export failed: {exc}")
-        exit_code = 1
-
-    # --- ChromaDB ---
-    header("Exporting ChromaDB vectors...")
-    try:
-        result = cerid_sync_lib.export_chroma(
-            chroma_url=CHROMA_HOST_URL,
-            sync_dir=sync_dir,
-            artifact_ids=artifact_ids,
-            filter_domains=domains,
+        neo = result.get("neo4j") or {}
+        ok(
+            f"Neo4j: {neo.get('artifacts', 0)} artifacts, "
+            f"{neo.get('domains', 0)} domains, {neo.get('relationships', 0)} relationships"
         )
-        ok(f"ChromaDB: {result.get('total_chunks', 0)} chunks across {len(result.get('domains', {}))} domains")
-    except Exception as exc:
-        err(f"ChromaDB export failed: {exc}")
-        exit_code = 1
-
-    # --- Tombstones ---
-    header("Exporting tombstones...")
-    try:
-        result = cerid_sync_lib.export_tombstones(sync_dir=sync_dir)
-        ok(f"Tombstones: {result.get('tombstones_exported', 0)} entries ({result.get('new_entries', 0)} new, {result.get('purged_expired', 0)} purged)")
-    except Exception as exc:
-        err(f"Tombstone export failed: {exc}")
-        exit_code = 1
-
-    # --- BM25 ---
-    header("Exporting BM25 indexes...")
-    try:
-        result = cerid_sync_lib.export_bm25(sync_dir=sync_dir)
-        ok(f"BM25: {result.get('files_copied', 0)} corpus files, {result.get('total_chunks', 0)} chunks")
-    except Exception as exc:
-        err(f"BM25 export failed: {exc}")
-        exit_code = 1
-
-    # --- Redis audit log ---
-    header("Exporting Redis audit log...")
-    try:
-        result = cerid_sync_lib.export_redis(
-            redis_client=redis_client,
-            sync_dir=sync_dir,
+        chroma = result.get("chroma") or {}
+        ok(
+            f"ChromaDB: {chroma.get('total_chunks', 0)} chunks across "
+            f"{len(chroma.get('domains', {}) or {})} domains"
         )
-        ok(f"Redis: {result.get('entries_exported', 0)} audit events")
+        bm25 = result.get("bm25") or {}
+        ok(f"BM25: {bm25.get('files_copied', 0)} corpus files, {bm25.get('total_chunks', 0)} chunks")
+        mem = result.get("memories") or {}
+        ok(f"Memories: {mem.get('memories', mem.get('count', 0))} nodes")
+        ent = result.get("entities") or {}
+        ok(f"Entities: {ent.get('entities', ent.get('count', 0))} nodes")
+        conv = result.get("conversations") or {}
+        ok(f"Conversations: {conv.get('conversations', conv.get('count', 0))} files")
+        red = result.get("redis") or {}
+        ok(f"Redis: {red.get('entries_exported', 0)} audit events")
+        tomb = result.get("tombstones") or {}
+        ok(
+            f"Tombstones: {tomb.get('tombstones_exported', 0)} entries "
+            f"({tomb.get('new_entries', 0)} new, {tomb.get('purged_expired', 0)} purged)"
+        )
+        ok(f"Manifest written to {sync_dir}/manifest.json")
     except Exception as exc:
-        err(f"Redis export failed: {exc}")
+        err(f"export_all failed: {exc}")
         exit_code = 1
-
-    # --- Manifest ---
-    if exit_code == 0:
-        header("Writing manifest...")
-        try:
-            cerid_sync_lib.write_manifest(
-                sync_dir=sync_dir,
-                machine_id=machine_id,
-                is_incremental=since is not None,
-            )
-            ok(f"Manifest written to {sync_dir}/manifest.json")
-        except Exception as exc:
-            err(f"Manifest write failed: {exc}")
-            exit_code = 1
 
     # --- Cleanup ---
     neo4j_driver.close()
@@ -312,76 +278,44 @@ def cmd_import(
         return 1
 
     exit_code = 0
-
-    # --- Tombstones (before import, so deleted artifacts aren't re-imported) ---
-    header("Applying tombstones...")
+    header("Running full import_all (tombstones, neo4j, chroma, bm25, memories, entities, conversations, redis)...")
     try:
-        last_sync_at = manifest.get("last_exported_at")
-        tomb_result = cerid_sync_lib.apply_tombstones(
+        result = cerid_sync_lib.import_all(
             driver=neo4j_driver,
             chroma_url=CHROMA_HOST_URL,
-            sync_dir=sync_dir,
-        )
-        ok(f"Tombstones: {tomb_result.get('deleted', 0)} deleted, {tomb_result.get('skipped_own_machine', 0)} skipped (own machine)")
-    except Exception as exc:
-        err(f"Tombstone apply failed: {exc}")
-        exit_code = 1
-        last_sync_at = None
-
-    # --- Neo4j ---
-    header("Importing Neo4j artifacts...")
-    try:
-        result = cerid_sync_lib.import_neo4j(
-            driver=neo4j_driver,
+            redis_client=redis_client,
             sync_dir=sync_dir,
             force=force,
             conflict_strategy=conflict_strategy,
-            last_sync_at=last_sync_at,
         )
-        created = result.get("artifacts_created", 0)
-        updated = result.get("artifacts_updated", 0)
-        skipped = result.get("artifacts_skipped", 0)
-        conflicts = result.get("artifacts_conflict", 0)
+        neo = result.get("neo4j") or {}
+        created = neo.get("artifacts_created", 0)
+        updated = neo.get("artifacts_updated", 0)
+        skipped = neo.get("artifacts_skipped", 0)
+        conflicts = neo.get("artifacts_conflict", 0)
         msg = f"Neo4j: {created} created, {updated} updated, {skipped} skipped"
         if conflicts:
             msg += f", {conflicts} conflicts ({conflict_strategy})"
         ok(msg)
-    except Exception as exc:
-        err(f"Neo4j import failed: {exc}")
-        exit_code = 1
-
-    # --- ChromaDB ---
-    header("Importing ChromaDB vectors...")
-    try:
-        result = cerid_sync_lib.import_chroma(
-            chroma_url=CHROMA_HOST_URL,
-            sync_dir=sync_dir,
-            force=force,
+        chroma = result.get("chroma") or {}
+        ok(f"ChromaDB: {chroma.get('total_added', 0)} added, {chroma.get('total_skipped', 0)} skipped")
+        bm25 = result.get("bm25") or {}
+        ok(f"BM25: {bm25.get('chunks_added', 0)} added, {bm25.get('chunks_skipped', 0)} skipped")
+        mem = result.get("memories") or {}
+        ok(f"Memories: {mem.get('imported', mem.get('count', 0))}")
+        ent = result.get("entities") or {}
+        ok(f"Entities: {ent.get('imported', ent.get('count', 0))}")
+        conv = result.get("conversations") or {}
+        ok(f"Conversations: {conv.get('imported', conv.get('count', 0))}")
+        red = result.get("redis") or {}
+        ok(f"Redis: {red.get('entries_added', 0)} added, {red.get('entries_skipped', 0)} skipped")
+        tomb = result.get("tombstones") or {}
+        ok(
+            f"Tombstones: {tomb.get('deleted', 0)} deleted, "
+            f"{tomb.get('skipped_own_machine', 0)} skipped (own machine)"
         )
-        ok(f"ChromaDB: {result.get('total_added', 0)} added, {result.get('total_skipped', 0)} skipped")
     except Exception as exc:
-        err(f"ChromaDB import failed: {exc}")
-        exit_code = 1
-
-    # --- BM25 ---
-    header("Importing BM25 indexes...")
-    try:
-        result = cerid_sync_lib.import_bm25(sync_dir=sync_dir)
-        ok(f"BM25: {result.get('chunks_added', 0)} added, {result.get('chunks_skipped', 0)} skipped")
-    except Exception as exc:
-        err(f"BM25 import failed: {exc}")
-        exit_code = 1
-
-    # --- Redis audit log ---
-    header("Importing Redis audit log...")
-    try:
-        result = cerid_sync_lib.import_redis(
-            redis_client=redis_client,
-            sync_dir=sync_dir,
-        )
-        ok(f"Redis: {result.get('entries_added', 0)} added, {result.get('entries_skipped', 0)} skipped")
-    except Exception as exc:
-        err(f"Redis import failed: {exc}")
+        err(f"import_all failed: {exc}")
         exit_code = 1
 
     # --- Cleanup ---

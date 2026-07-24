@@ -173,34 +173,33 @@ class TestClearDomain:
 
 class TestDeleteArtifact:
     def test_delete_not_found(self, client: TestClient):
+        from app.services.content_lifecycle import RemovalResult
+
         with (
             patch("app.routers.kb_admin.get_neo4j"),
             patch("app.routers.kb_admin.get_chroma"),
-            patch("app.routers.kb_admin.delete_artifact", return_value={"deleted": False, "reason": "not_found"}),
+            patch(
+                "app.services.content_lifecycle.remove_content",
+                return_value=RemovalResult(found=False, artifact_id="nonexistent-id"),
+            ),
         ):
             res = client.delete("/admin/artifacts/nonexistent-id")
         assert res.status_code == 404
 
     def test_delete_success(self, client: TestClient):
-        delete_result = {
-            "deleted": True,
-            "artifact_id": "art-123",
-            "domain": "code",
-            "filename": "test.py",
-            "chunk_ids": ["c1", "c2", "c3"],
-        }
-        mock_collection = MagicMock()
-        mock_chroma = MagicMock()
-        mock_chroma.get_collection.return_value = mock_collection
+        from app.services.content_lifecycle import RemovalResult
 
+        removal = RemovalResult(
+            found=True,
+            artifact_id="art-123",
+            domain="code",
+            chunk_ids=["c1", "c2", "c3"],
+        )
         with (
             patch("app.routers.kb_admin.get_neo4j"),
-            patch("app.routers.kb_admin.get_chroma", return_value=mock_chroma),
-            patch("app.routers.kb_admin.delete_artifact", return_value=delete_result),
-            patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
-            patch("app.routers.kb_admin.config") as mock_config,
+            patch("app.routers.kb_admin.get_chroma"),
+            patch("app.services.content_lifecycle.remove_content", return_value=removal),
         ):
-            mock_config.collection_name.return_value = "domain_code"
             res = client.delete("/admin/artifacts/art-123")
 
         assert res.status_code == 200
@@ -249,44 +248,37 @@ class TestSemanticCacheInvalidationHook:
     rebuild.
     """
 
-    def test_delete_artifact_invalidates_semantic_cache(self, client: TestClient):
-        delete_result = {
-            "deleted": True,
-            "artifact_id": "art-123",
-            "domain": "code",
-            "filename": "test.py",
-            "chunk_ids": ["c1"],
-        }
-        mock_collection = MagicMock()
-        mock_chroma = MagicMock()
-        mock_chroma.get_collection.return_value = mock_collection
+    def test_delete_artifact_routes_through_remove_content(self, client: TestClient):
+        """Admin hard-delete must use the multi-store lifecycle coordinator
+        (BM25/SPLADE + C1/C2/C3 bust) — not Neo4j+Chroma-only."""
+        from app.services.content_lifecycle import RemovalResult
 
+        removal = RemovalResult(
+            found=True,
+            artifact_id="art-123",
+            domain="code",
+            chunk_ids=["c1"],
+        )
         with (
             patch("app.routers.kb_admin.get_neo4j"),
-            patch("app.routers.kb_admin.get_chroma", return_value=mock_chroma),
-            patch("app.routers.kb_admin.delete_artifact", return_value=delete_result),
-            patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
-            patch("app.routers.kb_admin.invalidate_semantic_cache") as mock_sem_invalidate,
-            patch("app.routers.kb_admin.config") as mock_config,
+            patch("app.routers.kb_admin.get_chroma"),
+            patch(
+                "app.services.content_lifecycle.remove_content",
+                return_value=removal,
+            ) as mock_remove,
         ):
-            mock_config.collection_name.return_value = "domain_code"
             res = client.delete("/admin/artifacts/art-123")
 
         assert res.status_code == 200
-        mock_sem_invalidate.assert_called_once()
-        _, kwargs = mock_sem_invalidate.call_args
-        assert kwargs.get("trigger") == "kb_admin.delete_single_artifact"
+        mock_remove.assert_called_once()
+
 
     def test_clear_domain_invalidates_semantic_cache(self, client: TestClient):
-        mock_artifacts = [{"id": "art-1", "filename": "test.py"}]
-        delete_result = {
-            "deleted": True, "artifact_id": "art-1", "domain": "code",
-            "filename": "test.py", "chunk_ids": [],
-        }
-
         with (
-            patch("app.routers.kb_admin.list_artifacts", return_value=mock_artifacts),
-            patch("app.routers.kb_admin.delete_artifact", return_value=delete_result),
+            patch(
+                "app.routers.kb_admin.delete_artifacts_by_domain",
+                return_value={"deleted": 1, "chunks": 0},
+            ),
             patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
             patch("app.routers.kb_admin.invalidate_semantic_cache") as mock_sem_invalidate,
             patch("app.routers.kb_admin.get_chroma"),

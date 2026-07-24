@@ -3,15 +3,20 @@
 > Audience: operator running a Cerid instance.
 > Companion: [`docs/OPERATIONS.md`](OPERATIONS.md).
 > Driver: [`tasks/2026-05-10-v0.92-final-plan.md`](../tasks/2026-05-10-v0.92-final-plan.md) Phase P.
-> Status: **skeleton — fleshed out as P.1–P.3 land.**
+> Status: **operator guide (processor + pointer to full APScheduler census).**  
+> Full job table: [`docs/superpowers/specs/2026-07-23-ta-a5-job-census.md`](superpowers/specs/2026-07-23-ta-a5-job-census.md).
 
 ## 1. What the processor does
 
-The Background Processor is one queue, one worker, one throttle. Every
-unit of background work in Cerid — parsing new documents, extracting
-entities, refreshing community summaries, generating wiki pages,
-consolidating memory, composing the daily brief, running the weekly
-LongMemEval — runs through it.
+The Background Processor is one queue, one worker, one throttle for
+**enqueued** work — parsing new documents, extracting entities, refreshing
+community summaries, generating wiki pages, consolidating memory, composing
+the daily brief, and similar jobs that use the Redis-backed processor queue.
+
+**APScheduler** (in `app/scheduler.py`) is a **separate** plane: crons and
+interval jobs (folder scan, webhook drain, model auto-update, graph nightly
+jobs, etc.). Pausing or disabling the processor **does not** stop in-process
+scheduler runners.
 
 The processor lives inside the existing `app/main.py` container. It
 does not require a separate service or deployment. It uses Redis (already
@@ -32,8 +37,11 @@ when something looks off.
 
 Switch in: Monitoring → Processor → Settings.
 
-**Pausing is non-destructive.** Pending jobs stay queued. Resume picks
-up where it left off. Disabling pauses; it does not delete.
+**Pausing is non-destructive for the processor queue.** Pending processor
+jobs stay queued. Resume picks up where it left off. Disabling pauses
+dequeue; it does not delete. **It does not pause APScheduler** — in-process
+crons (rectify, polls, webhook drain, …) keep firing unless you stop the
+MCP process or empty their `SCHEDULE_*` crons.
 
 **Mode-fallback safety:** in Hybrid mode, each job is evaluated as it
 runs — while the month's recorded spend is under the cap, jobs whose token
@@ -192,12 +200,12 @@ REDIS_URL=redis://redis:6379/0
 PROCESSOR_REDIS_KEY_PREFIX=cerid:proc
 ```
 
-## 10. Knowledge-graph nightly jobs
+## 10. Knowledge-graph nightly jobs (subset)
 
-Three scheduled jobs maintain the graph-derived data behind the Subjects
-panes. All are gated (an empty `SCHEDULE_*` disables them), `max_instances=1`,
-and **$0** — pure Cypher / local compute, no LLM spend. They run back-to-back
-in the early-morning window so the Atlas/Constellation/Timeline surfaces wake
+The full APScheduler inventory is ~30+ jobs (see the [job census](superpowers/specs/2026-07-23-ta-a5-job-census.md)).
+This section documents only the **$0 graph layout/trust** trio behind Subjects
+panes. Empty `SCHEDULE_*` disables these three; `max_instances=1`. They run
+back-to-back in the early-morning window so Atlas/Constellation/Timeline wake
 to fresh data.
 
 | Job id | Default cron | Trigger | Writes / produces |
@@ -218,12 +226,6 @@ map (`derive_domains` → `cerid:graph:emb3d:*`, etc.) also lives there. See
 
 ## 11. Status
 
-**This document is a skeleton.** Sections expand as Phase P ships:
-
-- Section 2 (Modes) — finalized when P.3 lands.
-- Section 4 (Cost) — pricing table reference + actual-tracking details
-  expand with P.3.
-- Section 7 (Worst-day playbook) — fleshed out from chaos-suite findings
-  in P.4.
-- Section 9 (Env reference) — final list audited against
-  `scripts/gen_env_example.py` at P.3 close.
+Processor modes, cost caps, and the graph nightly trio are implemented.
+For the complete scheduler table (defaults, opt-in flags, tests), use
+[`2026-07-23-ta-a5-job-census.md`](superpowers/specs/2026-07-23-ta-a5-job-census.md).

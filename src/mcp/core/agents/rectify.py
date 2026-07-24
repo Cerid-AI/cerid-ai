@@ -178,7 +178,12 @@ def resolve_duplicates(
     keep_artifact_id: str,
     redis_client=None,
 ) -> dict[str, Any]:
-    """Resolve a duplicate set by keeping one artifact and removing the rest."""
+    """Resolve a duplicate set by keeping one artifact and multi-store-removing the rest.
+
+    Deletes Neo4j + Chroma + BM25 + SPLADE for each discarded artifact and busts
+    query caches (same contract as ``content_lifecycle.remove_content``, without
+    importing ``app/``).
+    """
     with neo4j_driver.session() as session:
         result = session.run(
             """
@@ -195,15 +200,32 @@ def resolve_duplicates(
         if artifact["id"] == keep_artifact_id:
             continue
 
-        chunk_ids = json.loads(artifact.get("chunk_ids", "[]"))
+        raw_chunks = artifact.get("chunk_ids", "[]")
+        if isinstance(raw_chunks, list):
+            chunk_ids = raw_chunks
+        else:
+            chunk_ids = json.loads(raw_chunks or "[]")
+        domain = artifact["domain"]
         if chunk_ids:
             try:
-                collection = chroma_client.get_collection(name=config.collection_name(artifact['domain']))
+                collection = chroma_client.get_collection(name=config.collection_name(domain))
                 collection.delete(ids=chunk_ids)
             except Exception as e:
                 from core.utils.swallowed import log_swallowed_error
                 log_swallowed_error('core.agents.rectify', e)
                 logger.warning(f"Failed to delete chunks for {artifact['id']}: {e}")
+            try:
+                from core.retrieval.bm25 import remove_chunks as bm25_remove
+                bm25_remove(domain, chunk_ids)
+            except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error("core.agents.rectify.bm25_remove", e)
+            try:
+                from core.retrieval.sparse_index import remove_chunks as sparse_remove
+                sparse_remove(domain, chunk_ids)
+            except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error("core.agents.rectify.sparse_remove", e)
 
         try:
             with neo4j_driver.session() as session:
@@ -240,6 +262,17 @@ def resolve_duplicates(
                 from core.utils.swallowed import log_swallowed_error
                 log_swallowed_error('core.agents.rectify', e)
                 logger.debug(f"Failed to log rectify event: {e}")
+
+    if removed:
+        try:
+            from utils.query_cache import invalidate_query_caches
+            invalidate_query_caches(
+                trigger="rectify.resolve_duplicates",
+                redis=redis_client,
+            )
+        except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("core.agents.rectify.cache_bust", e)
 
     return {
         "kept": keep_artifact_id,

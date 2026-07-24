@@ -80,7 +80,12 @@ class TestChatStreamEndpoint:
             assert chat_module._env_openrouter_key() == "placeholder-bravo"
 
     def test_returns_503_when_no_api_key(self):
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}, clear=False):  # pragma: allowlist secret
+        env = {
+            "OPENROUTER_API_KEY": "",
+            "INTERNAL_LLM_PROVIDER": "openrouter",
+            "OLLAMA_ENABLED": "false",
+        }
+        with patch.dict(os.environ, env, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/chat/stream", json={
@@ -89,6 +94,38 @@ class TestChatStreamEndpoint:
             })
             assert resp.status_code == 503
             assert "OPENROUTER_API_KEY" in resp.text
+
+    def test_allows_local_provider_without_openrouter_key(self):
+        """GUI chat works with INTERNAL_LLM_PROVIDER=ollama and no cloud key."""
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.aclose = AsyncMock()
+        mock_response.aread = AsyncMock(return_value=b"")
+
+        async def fake_aiter():
+            yield b'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        mock_response.aiter_bytes = fake_aiter
+
+        env = {
+            "OPENROUTER_API_KEY": "",
+            "INTERNAL_LLM_PROVIDER": "ollama",
+            "OLLAMA_ENABLED": "true",
+            "OLLAMA_URL": "http://127.0.0.1:11434",
+            "INTERNAL_LLM_MODEL": "llama3.2",
+        }
+        with patch.dict(os.environ, env, clear=False):  # pragma: allowlist secret
+            app = _make_app()
+            client = TestClient(app)
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
+                _setup_mock_client(mock_client_cls, mock_response)
+                resp = client.post("/chat/stream", json={
+                    "model": "llama3.2",
+                    "messages": [{"role": "user", "content": "hello"}],
+                })
+            assert resp.status_code == 200
+            assert "Hi" in resp.text or "cerid_meta" in resp.text
 
     def test_emits_cerid_meta_event(self):
         """The first SSE event should be a cerid_meta with model info."""

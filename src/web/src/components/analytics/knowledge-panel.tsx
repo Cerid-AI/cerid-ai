@@ -1,43 +1,14 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Knowledge panel — Phase K6.2.
-//
-// Surfaces the six metrics from the redesign §9 so operators (and
-// users) can see at a glance whether the knowledge architecture is
-// compounding as intended:
-//   1. Wiki coverage
-//   2. Active-entity coverage
-//   3. Unresolved contradictions
-//   4. Knowledge log activity (24h)
-//   5. Wiki page count
-//   6. Stale entity count (derived)
-//
-// Reads from /health.wiki_freshness which K6.1 populated. Lightweight
-// component — pure data display, no animation.
+// Knowledge panel — Phase K6.2 + Tier A T4b four-state.
 
 import { useEffect, useRef, useState } from "react"
 import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { AlertTriangle, BookOpen, Clock, GitMerge, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { mcpUrl, mcpHeaders } from "@/lib/api/common"
-
-interface WikiFreshness {
-  available: boolean
-  total_entities?: number
-  entities_with_summary?: number
-  coverage_pct?: number
-  active_entities?: number
-  active_entities_with_summary?: number
-  active_coverage_pct?: number
-  unresolved_contradictions?: number
-  log_activity_24h?: number
-  reason?: string
-}
-
-interface HealthResponse {
-  wiki_freshness?: WikiFreshness
-}
+import { useWikiFreshness } from "@/hooks/use-analytics"
 
 interface MetricCardProps {
   label: string
@@ -88,51 +59,42 @@ function MetricCard({ label, value, hint, icon, warn }: MetricCardProps) {
 }
 
 export function KnowledgePanel() {
-  const [data, setData] = useState<WikiFreshness | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isLoading, isError, error, refetch } = useWikiFreshness()
 
-  useEffect(() => {
-    let cancelled = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
-    setLoading(true)
-    fetch(mcpUrl("/health").toString(), { headers: mcpHeaders() })
-      .then((r) => r.json() as Promise<HealthResponse>)
-      .then((body) => {
-        if (cancelled) return
-        if (body.wiki_freshness) {
-          setData(body.wiki_freshness)
-        } else {
-          setError("Wiki freshness metrics not exposed yet")
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <Card className="p-6 flex items-center justify-center text-muted-foreground text-sm">
-        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+      <Card className="p-6 flex items-center justify-center text-muted-foreground text-sm" role="status">
+        <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
         Loading knowledge metrics…
       </Card>
     )
   }
 
-  if (error || !data || !data.available) {
+  if (isError) {
     return (
       <Card className="p-4 border-amber-500/40 bg-amber-500/5" data-testid="knowledge-panel-degraded">
-        <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-sm">
-          <AlertTriangle className="w-4 h-4" />
-          Knowledge metrics unavailable: {error || data?.reason || "unknown"}
+        <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-sm" role="alert">
+          <AlertTriangle className="w-4 h-4" aria-hidden="true" />
+          Knowledge metrics unavailable:{" "}
+          {error instanceof Error ? error.message : "unknown"}
         </div>
+        <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => void refetch()}>
+          Retry
+        </Button>
+      </Card>
+    )
+  }
+
+  if (!data || !data.available) {
+    return (
+      <Card className="p-4 border-amber-500/40 bg-amber-500/5" data-testid="knowledge-panel-degraded">
+        <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-sm" role="alert">
+          <AlertTriangle className="w-4 h-4" aria-hidden="true" />
+          Knowledge metrics unavailable: {data?.reason || "unknown"}
+        </div>
+        <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => void refetch()}>
+          Retry
+        </Button>
       </Card>
     )
   }

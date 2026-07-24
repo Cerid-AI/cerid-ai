@@ -320,3 +320,16 @@ class TestExecuteToolAgents:
                 execute_tool("pkb_maintain", {"actions": ["health"]})
             )
         mock_maint.assert_called_once()
+
+    @patch("app.tools.private_blocks", return_value=True)
+    def test_pkb_memory_extract_blocked_by_private_mode(self, _mock_pb):
+        """MCP extract must match REST private_blocks(1) (TA-A2-G7)."""
+        with patch("app.agents.memory.extract_and_store_memories", new_callable=AsyncMock) as mock_ex:
+            result = asyncio.run(
+                execute_tool(
+                    "pkb_memory_extract",
+                    {"response_text": "I prefer dark mode", "conversation_id": "c1"},
+                )
+            )
+        assert result == {"stored": False, "skipped": "private_mode"}
+        mock_ex.assert_not_called()

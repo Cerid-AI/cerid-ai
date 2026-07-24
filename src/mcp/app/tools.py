@@ -915,6 +915,9 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             persist_report=not saves_blocked(),
         )
     elif name == "pkb_memory_extract":
+        # Parity with REST POST /agent/memory/extract (private_blocks L1).
+        if private_blocks(1):
+            return {"stored": False, "skipped": "private_mode"}
         from app.agents.memory import extract_and_store_memories
         return await extract_and_store_memories(
             response_text=arguments.get("response_text", ""),

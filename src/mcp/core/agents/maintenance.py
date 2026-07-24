@@ -126,13 +126,35 @@ async def check_llm_health() -> str:
 # Stale artifact management
 # ---------------------------------------------------------------------------
 
+def _purge_lexical_indexes(domain: str, chunk_ids: list[str]) -> None:
+    """Drop BM25 + SPLADE postings for chunk_ids (best-effort)."""
+    if not chunk_ids or not domain:
+        return
+    try:
+        from core.retrieval.bm25 import remove_chunks as bm25_remove
+        bm25_remove(domain, chunk_ids)
+    except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("core.agents.maintenance.bm25_remove", e)
+    try:
+        from core.retrieval.sparse_index import remove_chunks as sparse_remove
+        sparse_remove(domain, chunk_ids)
+    except Exception as e:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("core.agents.maintenance.sparse_remove", e)
+
+
 def purge_artifacts(
     neo4j_driver,
     chroma_client: Any,
     artifact_ids: list[str],
     redis_client=None,
 ) -> dict[str, Any]:
-    """Remove specified artifacts from Neo4j and ChromaDB."""
+    """Hard-delete artifacts from Neo4j, Chroma, BM25, and SPLADE + bust query caches.
+
+    Mirrors the multi-store contract of ``content_lifecycle.remove_content`` without
+    importing ``app/`` (core layering).
+    """
     purged = []
     errors = []
 
@@ -164,6 +186,7 @@ def purge_artifacts(
                     from core.utils.swallowed import log_swallowed_error
                     log_swallowed_error('core.agents.maintenance', e)
                     logger.warning(f"Failed to delete chunks for {artifact_id}: {e}")
+                _purge_lexical_indexes(domain, chunk_ids)
 
             with neo4j_driver.session() as session:
                 session.run(
@@ -196,6 +219,17 @@ def purge_artifacts(
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('core.agents.maintenance', e)
             errors.append({"id": artifact_id, "error": str(e)})
+
+    if purged:
+        try:
+            from utils.query_cache import invalidate_query_caches
+            invalidate_query_caches(
+                trigger="maintenance.purge_artifacts",
+                redis=redis_client,
+            )
+        except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("core.agents.maintenance.cache_bust", e)
 
     return {
         "purged": purged,

@@ -5,11 +5,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { axe } from "jest-axe"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactElement } from "react"
 import { CostSankey } from "@/components/analytics/cost-sankey"
 import { QualityTimeline } from "@/components/analytics/quality-timeline"
 import { GrowthHeatmap } from "@/components/analytics/growth-heatmap"
 import { TrustSunburst } from "@/components/analytics/trust-sunburst"
 import { AnalyticsPanel } from "@/components/analytics/analytics-panel"
+
+function renderWithQuery(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
 
 // Recharts uses ResizeObserver — jsdom doesn't have it. Stub before render.
 class _RO {
@@ -58,7 +67,7 @@ describe("GrowthHeatmap", () => {
       total: 0,
       peak_count: 0,
     })
-    render(<GrowthHeatmap windowDays={365} />)
+    renderWithQuery(<GrowthHeatmap windowDays={365} />)
     await screen.findByTestId("growth-heatmap")
     // 53 weeks × 7 days = 371 cells in the SVG (some are future-of-today
     // but the component clips client-side); we just confirm the grid is
@@ -80,7 +89,7 @@ describe("GrowthHeatmap", () => {
     })
     const onClick = vi.fn()
     const user = userEvent.setup()
-    render(<GrowthHeatmap onCellClick={onClick} />)
+    renderWithQuery(<GrowthHeatmap onCellClick={onClick} />)
     const cell = await screen.findByTestId(`heatmap-cell-${today}`)
     await user.click(cell)
     expect(onClick).toHaveBeenCalledWith(today, 5)
@@ -88,8 +97,9 @@ describe("GrowthHeatmap", () => {
 
   it("renders error when fetch fails", async () => {
     mockFetchIngestion.mockRejectedValue(new Error("backend down"))
-    render(<GrowthHeatmap />)
+    renderWithQuery(<GrowthHeatmap />)
     expect(await screen.findByRole("alert")).toHaveTextContent(/backend down/)
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
   })
 })
 
@@ -101,14 +111,14 @@ describe("GrowthHeatmap — axe-clean", () => {
       total: 0,
       peak_count: 0,
     })
-    const { container } = render(<GrowthHeatmap />)
+    const { container } = renderWithQuery(<GrowthHeatmap />)
     await screen.findByTestId("growth-heatmap")
     expect(await axe(container)).toHaveNoViolations()
   })
 
   it("is axe-clean in error state", async () => {
     mockFetchIngestion.mockRejectedValue(new Error("backend down"))
-    const { container } = render(<GrowthHeatmap />)
+    const { container } = renderWithQuery(<GrowthHeatmap />)
     await screen.findByRole("alert")
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -119,7 +129,7 @@ describe("GrowthHeatmap — axe-clean", () => {
 
 describe("CostSankey", () => {
   it("renders Pro-lock when tier is community", async () => {
-    render(<CostSankey tier="community" />)
+    renderWithQuery(<CostSankey tier="community" />)
     expect(await screen.findByText(/Pro-tier/i)).toBeInTheDocument()
     expect(mockFetchCost).not.toHaveBeenCalled()
   })
@@ -131,7 +141,7 @@ describe("CostSankey", () => {
       stages: [],
       edges: [],
     })
-    render(<CostSankey tier="pro" />)
+    renderWithQuery(<CostSankey tier="pro" />)
     await screen.findByTestId("cost-sankey")
     expect(screen.getByText(/No LLM cost recorded/i)).toBeInTheDocument()
   })
@@ -149,7 +159,7 @@ describe("CostSankey", () => {
         { source: "pro_features", target: "inbox_triage", value: 0.7345 },
       ],
     })
-    render(<CostSankey tier="pro" />)
+    renderWithQuery(<CostSankey tier="pro" />)
     await screen.findByTestId("cost-sankey")
     expect(screen.getByText(/\$1\.2345/)).toBeInTheDocument()
   })
@@ -157,7 +167,7 @@ describe("CostSankey", () => {
 
 describe("CostSankey — axe-clean", () => {
   it("is axe-clean in Pro-lock state (community tier)", async () => {
-    const { container } = render(<CostSankey tier="community" />)
+    const { container } = renderWithQuery(<CostSankey tier="community" />)
     await screen.findByText(/Pro-tier/i)
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -169,7 +179,7 @@ describe("CostSankey — axe-clean", () => {
       stages: [],
       edges: [],
     })
-    const { container } = render(<CostSankey tier="pro" />)
+    const { container } = renderWithQuery(<CostSankey tier="pro" />)
     await screen.findByTestId("cost-sankey")
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -187,7 +197,7 @@ describe("CostSankey — axe-clean", () => {
         { source: "pro_features", target: "inbox_triage", value: 0.7345 },
       ],
     })
-    const { container } = render(<CostSankey tier="pro" />)
+    const { container } = renderWithQuery(<CostSankey tier="pro" />)
     await screen.findByTestId("cost-sankey")
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -198,7 +208,7 @@ describe("CostSankey — axe-clean", () => {
 
 describe("QualityTimeline", () => {
   it("renders Pro-lock for community tier", async () => {
-    render(<QualityTimeline tier="community" />)
+    renderWithQuery(<QualityTimeline tier="community" />)
     expect(await screen.findByText(/Pro-tier/i)).toBeInTheDocument()
   })
 
@@ -214,7 +224,7 @@ describe("QualityTimeline", () => {
       })),
       latest: { ndcg: null, faithfulness: null, memory_recall: null, verification_accuracy: null },
     })
-    render(<QualityTimeline tier="pro" />)
+    renderWithQuery(<QualityTimeline tier="pro" />)
     await screen.findByTestId("quality-timeline")
     expect(screen.getByText(/No quality metrics/i)).toBeInTheDocument()
   })
@@ -227,7 +237,7 @@ describe("QualityTimeline", () => {
       ],
       latest: { ndcg: 0.87, faithfulness: 0.92, memory_recall: 0.81, verification_accuracy: 0.95 },
     })
-    render(<QualityTimeline tier="pro" />)
+    renderWithQuery(<QualityTimeline tier="pro" />)
     await screen.findByTestId("quality-timeline")
     expect(screen.getByText("0.87")).toBeInTheDocument()
     expect(screen.getByText("0.92")).toBeInTheDocument()
@@ -236,7 +246,7 @@ describe("QualityTimeline", () => {
 
 describe("QualityTimeline — axe-clean", () => {
   it("is axe-clean in Pro-lock state (community tier)", async () => {
-    const { container } = render(<QualityTimeline tier="community" />)
+    const { container } = renderWithQuery(<QualityTimeline tier="community" />)
     await screen.findByText(/Pro-tier/i)
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -253,7 +263,7 @@ describe("QualityTimeline — axe-clean", () => {
       })),
       latest: { ndcg: null, faithfulness: null, memory_recall: null, verification_accuracy: null },
     })
-    const { container } = render(<QualityTimeline tier="pro" />)
+    const { container } = renderWithQuery(<QualityTimeline tier="pro" />)
     await screen.findByTestId("quality-timeline")
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -266,7 +276,7 @@ describe("QualityTimeline — axe-clean", () => {
       ],
       latest: { ndcg: 0.87, faithfulness: 0.92, memory_recall: 0.81, verification_accuracy: 0.95 },
     })
-    const { container } = render(<QualityTimeline tier="pro" />)
+    const { container } = renderWithQuery(<QualityTimeline tier="pro" />)
     await screen.findByTestId("quality-timeline")
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -384,7 +394,7 @@ describe("AnalyticsPanel", () => {
       latest: {},
     })
 
-    render(<AnalyticsPanel tier="pro" />)
+    renderWithQuery(<AnalyticsPanel tier="pro" />)
     await waitFor(() => {
       expect(screen.getByTestId("trust-sunburst")).toBeInTheDocument()
       expect(screen.getByTestId("growth-heatmap")).toBeInTheDocument()
@@ -403,7 +413,7 @@ describe("AnalyticsPanel", () => {
     mockFetchIngestion.mockResolvedValue({
       window_days: 365, buckets: [], total: 0, peak_count: 0,
     })
-    render(<AnalyticsPanel tier="community" />)
+    renderWithQuery(<AnalyticsPanel tier="community" />)
     await waitFor(() => {
       expect(screen.getByTestId("trust-sunburst")).toBeInTheDocument()
       expect(screen.getByTestId("growth-heatmap")).toBeInTheDocument()
@@ -444,7 +454,7 @@ describe("AnalyticsPanel — axe-clean", () => {
       latest: {},
     })
 
-    const { container } = render(<AnalyticsPanel tier="pro" />)
+    const { container } = renderWithQuery(<AnalyticsPanel tier="pro" />)
     await waitFor(() => {
       expect(screen.getByTestId("trust-sunburst")).toBeInTheDocument()
       expect(screen.getByTestId("growth-heatmap")).toBeInTheDocument()
@@ -464,7 +474,7 @@ describe("AnalyticsPanel — axe-clean", () => {
     mockFetchIngestion.mockResolvedValue({
       window_days: 365, buckets: [], total: 0, peak_count: 0,
     })
-    const { container } = render(<AnalyticsPanel tier="community" />)
+    const { container } = renderWithQuery(<AnalyticsPanel tier="community" />)
     await screen.findAllByText(/Pro-tier/i)
     expect(await axe(container)).toHaveNoViolations()
   })
