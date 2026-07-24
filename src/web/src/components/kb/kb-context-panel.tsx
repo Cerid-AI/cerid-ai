@@ -467,17 +467,17 @@ export function KBContextPanel({
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <FileText className="h-3 w-3 shrink-0 text-teal-500" />
               <span className="tabular-nums font-medium text-foreground">{kbStats.total_artifacts}</span>
-              <span className="hidden min-[320px]:inline">docs</span>
+              <span className="hidden sm:inline">docs</span>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Layers className="h-3 w-3 shrink-0 text-teal-500" />
               <span className="tabular-nums font-medium text-foreground">{kbStats.total_chunks}</span>
-              <span className="hidden min-[320px]:inline">vectors</span>
+              <span className="hidden sm:inline">vectors</span>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Database className="h-3 w-3 shrink-0 text-teal-500" />
               <span className="tabular-nums font-medium text-foreground">{Object.keys(kbStats.domains).length}</span>
-              <span className="hidden min-[320px]:inline">domains</span>
+              <span className="hidden sm:inline">domains</span>
             </div>
           </div>
         )}
@@ -500,7 +500,7 @@ export function KBContextPanel({
                   {archiveMode ? "Archive" : "Extract only"}
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top" className="max-w-[200px] text-xs">
+              <TooltipContent side="top" className="max-w-48 text-xs">
                 {archiveMode
                   ? "Files are archived to ~/cerid-archive/ and extracted for KB"
                   : "Files are parsed for KB data only — originals are not stored"}
