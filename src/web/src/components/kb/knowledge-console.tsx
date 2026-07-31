@@ -28,14 +28,12 @@ import {
   Settings2,
   Search,
 } from "lucide-react"
-import { Plus } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { DomainFilter } from "./domain-filter"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { cn } from "@/lib/utils"
 import { fetchDataSources, updateSettings } from "@/lib/api"
 import { useNavigation } from "@/contexts/navigation-context"
-import { CustomApiDialog } from "./custom-api-dialog"
 import { IngestionProgress } from "./ingestion-progress"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
@@ -392,7 +390,6 @@ export function KnowledgeConsole({
 }: KnowledgeConsoleProps) {
   const confidencePct = Math.round(confidence * 100)
   const totalSources = kbSources.length + memorySources.length + externalSources.length
-  const [customApiOpen, setCustomApiOpen] = useState(false)
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -514,19 +511,16 @@ export function KnowledgeConsole({
                   externalSources.map((r, i) => <ExternalSourceCard key={`ext-${i}`} result={r} />)
                 )}
                 <DataSourceIndicator />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-1 h-6 gap-1 text-label-xs w-full"
-                  onClick={() => setCustomApiOpen(true)}
-                >
-                  <Plus className="h-3 w-3" /> Add Custom API
-                </Button>
-                <CustomApiDialog
-                  open={customApiOpen}
-                  onClose={() => setCustomApiOpen(false)}
-                  onSave={async () => { setCustomApiOpen(false) }}
-                />
+                {/*
+                  "Add Custom API" is hidden until a backend exists. The dialog
+                  is fully built and its Test Connection really fires, but no
+                  source kind accepts a custom API definition — the nearest,
+                  `external_adapter`, is availability "coming_soon" (declared in
+                  SOURCE_KINDS, not implemented — app/routers/sources.py:148).
+                  The prior wiring passed onSave={() => setCustomApiOpen(false)},
+                  silently discarding a 7-field form as if it had saved.
+                  Restore the button in the same commit that lands the endpoint.
+                */}
               </SourceSection>
             </>
           )}

@@ -607,6 +607,19 @@ async def lifespan(app: FastAPI):
         log_swallowed_error('app.main', e)
         logger.warning(f"Contradiction-ledger sink wiring failed (ledger disabled): {e}")
 
+    # Metamorphic scoring (Pro) — same DI seam. The scorer's import interface is
+    # app-side, the only sensible caller (the streaming verifier) is core-side,
+    # and without this wiring the feature has no caller at all despite shipping
+    # a plugin, a TIER_MATRIX row and a frontend type.
+    try:
+        from app.agents.hallucination.metamorphic import metamorphic_score
+        from core.agents.hallucination.metamorphic_sink import set_metamorphic_sink
+
+        set_metamorphic_sink(metamorphic_score)
+    except Exception as e:
+        log_swallowed_error('app.main', e)
+        logger.warning(f"Metamorphic sink wiring failed (scoring disabled): {e}")
+
     # Wire the connector ingest sink into core/ingest via DI (same pattern) so
     # SourceConnector.fetch_since can persist fetched feed entries via the real
     # ingest_content without a core→app import. Powers the source_poll worker.
@@ -664,6 +677,17 @@ async def lifespan(app: FastAPI):
             enqueue_job(EntityExtractionJob(**payload), payload=payload)
 
         set_entity_extraction_enqueue(_enqueue_memory_entity_extraction)
+    except Exception as e:
+        log_swallowed_error('app.main', e)
+
+    # Let log_swallowed_error reach Redis without every call site passing a
+    # client — only ~25 of 1,000+ sites did, so the counters behind
+    # /health.swallowed_errors_last_hour were never written.
+    try:
+        from app.deps import get_redis as _get_redis_for_swallowed
+        from core.utils.swallowed import set_swallowed_redis_sink
+
+        set_swallowed_redis_sink(_get_redis_for_swallowed)
     except Exception as e:
         log_swallowed_error('app.main', e)
         logger.warning(f"Memory→entity extraction wiring failed: {e}")

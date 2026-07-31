@@ -367,8 +367,28 @@ async def _run_sync_export() -> None:
         )
         neo4j_count = result.get("neo4j", {}).get("artifacts", 0)
         duration = time.time() - start
-        _log_execution("sync_export", "success", duration, f"{neo4j_count} artifacts")
-        logger.info("Scheduled sync export: %d artifacts in %.1fs", neo4j_count, duration)
+        # A vector export that failed every domain still returns a
+        # success-shaped dict. Reporting "success" off the Neo4j count alone is
+        # how a backup with zero vectors in it looked healthy — surface it.
+        chroma = result.get("chroma", {}) or {}
+        failed_domains = chroma.get("failed_domains") or {}
+        chunks = chroma.get("total_chunks", 0)
+        if failed_domains or (neo4j_count and not chunks):
+            detail = (
+                f"{neo4j_count} artifacts but chroma incomplete: "
+                f"{chunks} chunks, failed={sorted(failed_domains)}"
+            )
+            _log_execution("sync_export", "error", duration, detail)
+            logger.error("Scheduled sync export INCOMPLETE: %s", detail)
+        else:
+            _log_execution(
+                "sync_export", "success", duration,
+                f"{neo4j_count} artifacts, {chunks} chunks",
+            )
+            logger.info(
+                "Scheduled sync export: %d artifacts, %d chunks in %.1fs",
+                neo4j_count, chunks, duration,
+            )
     except Exception as e:
         log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
@@ -927,12 +947,23 @@ async def _run_k_program_metrics() -> None:
         import subprocess
         from pathlib import Path
 
-        # Walk up from this file to the repo root (src/mcp/app/scheduler.py).
-        repo_root = Path(__file__).resolve().parents[3]
-        script = repo_root / "scripts" / "k_program_metrics.py"
-        if not script.exists():
-            logger.warning(
-                "k_program_metrics script not found at %s — skip", script,
+        # Locate the repo root by looking for the script, rather than assuming a
+        # fixed depth. `parents[3]` assumed the source layout
+        # (src/mcp/app/scheduler.py); in the container the file is
+        # /app/app/scheduler.py, which has only 3 parents — so this raised
+        # IndexError *before* reaching the not-found guard below, failing the job
+        # every midnight instead of skipping cleanly.
+        here = Path(__file__).resolve()
+        script = None
+        for parent in here.parents:
+            candidate = parent / "scripts" / "k_program_metrics.py"
+            if candidate.exists():
+                script = candidate
+                break
+        if script is None:
+            logger.info(
+                "k_program_metrics script not present (host-side operator tool) "
+                "— skipping scheduled run",
             )
             return
         # Use the same Python the container is running.
@@ -940,7 +971,7 @@ async def _run_k_program_metrics() -> None:
 
         result = subprocess.run(
             [_sys.executable, str(script), "--cron"],
-            cwd=str(repo_root),
+            cwd=str(script.parent.parent),
             capture_output=True,
             text=True,
             check=False,
@@ -1710,7 +1741,16 @@ def start_scheduler() -> AsyncIOScheduler:
     if _scheduler is not None:
         return _scheduler
 
-    _scheduler = AsyncIOScheduler()
+    # APScheduler's default misfire_grace_time is 1s. Several jobs share the
+    # 03:00 tick and the first ones block the event loop with sync Neo4j work
+    # for ~1.5s, so later jobs on the same tick were discarded as "missed" —
+    # the nightly wiki-refresh sweep never ran once in the 6 days of logs
+    # examined, pinning wiki coverage at 47%. coalesce collapses a backlog into
+    # one run rather than a thundering herd after downtime.
+    # (services/briefs/scheduler.py already set a 3600s grace for this reason.)
+    _scheduler = AsyncIOScheduler(
+        job_defaults={"misfire_grace_time": 300, "coalesce": True},
+    )
 
     _scheduler.add_job(
         _run_rectify,

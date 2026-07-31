@@ -17,6 +17,7 @@ import { useEffect } from "react"
 import { Cable, Clock, Lock, Monitor } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
+import { DataState } from "@/components/ui/data-state"
 import { listSourceKinds } from "@/lib/api/sources"
 import type { SourceKindMetaExt } from "./source-kind-meta"
 import { descriptorFor } from "./source-kind-icons"
@@ -30,7 +31,7 @@ interface SourcesEmptyGalleryProps {
 }
 
 export function SourcesEmptyGallery({ onSelectKind, onOpenConnector }: SourcesEmptyGalleryProps) {
-  const { data: kinds, isLoading } = useQuery<SourceKindMetaExt[]>({
+  const { data: kinds, isLoading, isError, refetch } = useQuery<SourceKindMetaExt[]>({
     queryKey: ["source-kinds"],
     queryFn: listSourceKinds,
     staleTime: 60_000,
@@ -41,11 +42,18 @@ export function SourcesEmptyGallery({ onSelectKind, onOpenConnector }: SourcesEm
     // no-op: keyed render covers it
   }, [])
 
-  if (isLoading || !kinds) {
+  // `isLoading || !kinds` collapsed loading and failure into one branch, so a
+  // failed fetch left "Loading sources…" on screen forever — the exact stuck-
+  // spinner case DataState exists to prevent. This is a new user's first
+  // screen; an unrecoverable spinner reads as a broken product.
+  if (isLoading || isError || !kinds) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading sources…
-      </div>
+      <DataState
+        loading={isLoading}
+        error={isError || (!kinds && !isLoading)}
+        onRetry={() => void refetch()}
+        loadingLabel="Loading sources…"
+      />
     )
   }
 

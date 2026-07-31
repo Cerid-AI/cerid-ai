@@ -115,9 +115,56 @@ def stack_reachable(mcp_base: str) -> bool:
         return False
 
 
+# Fixtures that actually open a connection to the stack at test scope. Kept
+# deliberately narrow: ``mcp_base`` and ``stack_reachable`` appear in *every*
+# test's closure because the session-scoped autouse orphan sweep depends on
+# them, so treating those as evidence of live use would re-gate everything and
+# silently undo this fix.
+LIVE_STACK_FIXTURES = frozenset({
+    "http_client",
+    "http_headers",
+    "neo4j_driver",
+    "cleanup_ids",
+})
+
+
+def uses_live_stack(request: pytest.FixtureRequest) -> bool:
+    """True when this test needs a running stack.
+
+    Two ways to qualify:
+
+    * it resolves a live-stack fixture — ``request.fixturenames`` includes
+      transitive dependencies, so requesting ``http_client`` counts even though
+      ``mcp_base`` is never named directly; or
+    * it is explicitly marked ``@pytest.mark.live_stack``.
+
+    The marker exists because some tests reach the stack *without* a fixture —
+    they drive a router that calls ``get_redis()`` / ``get_neo4j()`` internally,
+    so no fixture name reveals the dependency. Fixture-shape inference cannot
+    see those, and on 2026-07-31 three of them turned CI's stackless ``test``
+    job red the moment this gate stopped skipping everything by directory.
+    If a test needs the stack, say so with the marker.
+    """
+    if request.node.get_closest_marker("live_stack") is not None:
+        return True
+    return bool(LIVE_STACK_FIXTURES & set(request.fixturenames))
+
+
 @pytest.fixture(autouse=True)
-def _gate_on_stack(request: pytest.FixtureRequest, stack_reachable: bool) -> None:
-    if not stack_reachable:
+def _gate_on_stack(request: pytest.FixtureRequest) -> None:
+    """Skip on an unreachable stack — but only for tests that need one.
+
+    This package auto-marks every test as ``preservation``, and until
+    2026-07-30 it also gated every one of them on the stack probe. Of the 239
+    tests here, only ~66 resolve a live-stack fixture; the other ~173 are fully
+    mocked and were being skipped for the absence of something they never touch.
+    That cost real coverage in every stackless run (``make ci-local``, a laptop,
+    a fork PR) and inflated "254 live gates" into a number roughly 3.5x the live
+    reality. Mocked tests now run everywhere; live tests still skip cleanly.
+    """
+    if not uses_live_stack(request):
+        return
+    if not request.getfixturevalue("stack_reachable"):
         record_preservation_skip(request, "stack", _SKIP_REASON_STACK)
 
 

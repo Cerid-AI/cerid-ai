@@ -90,7 +90,8 @@ const AGENTS: AgentDefinition[] = [
     icon: Brain,
     description:
       "Mine recent conversations for durable facts, decisions, and preferences; store as memory nodes.",
-    endpoint: "/agent/extract-memories",
+    endpoint: "/agent/memory/extract-recent",
+    body: { conversations: 3 },
   },
   {
     id: "self-rag",
@@ -99,6 +100,7 @@ const AGENTS: AgentDefinition[] = [
     description:
       "Run the self-validation loop — re-check the last response for unsupported claims + fill coverage gaps.",
     endpoint: "/agent/self-rag-enhance",
+    body: {},
   },
 ]
 

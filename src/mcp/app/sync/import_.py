@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 
 import config
 from app.sync._helpers import (
@@ -35,6 +34,7 @@ from app.sync._helpers import (
     _default_sync_dir,
     _ensure_dir,
     _iter_jsonl,
+    _v2_collections_base,
 )
 from app.sync.conflicts import (
     ConflictStrategy,
@@ -46,17 +46,6 @@ from app.sync.user_state import read_conversations, write_conversation
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
-
-
-def _v2_collections_base(chroma_url: str) -> str:
-    """Return the chromadb 1.x v2 collections base path for the default
-    tenant/database. The 0.5-era /api/v1/collections endpoints were
-    retired; 1.x scopes every collection under tenant + database.
-    """
-    return (
-        f"{chroma_url}/api/v2/tenants/{DEFAULT_TENANT}"
-        f"/databases/{DEFAULT_DATABASE}/collections"
-    )
 
 
 def import_neo4j(
@@ -322,6 +311,10 @@ def import_chroma(
     chroma_dir = Path(sync_dir) / CHROMA_SUBDIR
 
     domain_stats: dict[str, dict[str, int | str]] = {}
+    # Batch POSTs that failed. Without this a restore in which every batch
+    # errored returns total_added=0 and no error field — byte-identical to a
+    # restore that had nothing to do. Same defect the export side shipped with.
+    failed_domains: dict[str, str] = {}
     total_added = 0
     total_skipped = 0
 
@@ -378,6 +371,7 @@ def import_chroma(
                     from core.utils.swallowed import log_swallowed_error
                     log_swallowed_error('app.sync.import_', exc)
                     logger.error("ChromaDB batch add failed for %s: %s", coll_name, exc)
+                    failed_domains[domain] = str(exc)
                     return 0
                 finally:
                     batch_ids.clear()
@@ -414,6 +408,7 @@ def import_chroma(
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('app.sync.import_', exc)
             logger.error("ChromaDB import failed for domain '%s': %s", domain, exc)
+            failed_domains[domain] = str(exc)
             domain_stats[domain] = {"added": added, "skipped": skipped, "error": str(exc)}
             continue
 
@@ -424,6 +419,11 @@ def import_chroma(
             "ChromaDB import domain '%s': %d added, %d skipped", domain, added, skipped
         )
 
+    if failed_domains:
+        logger.error(
+            "ChromaDB import completed with failures in %d domain(s): %s",
+            len(failed_domains), ", ".join(sorted(failed_domains)),
+        )
     logger.info(
         "ChromaDB import complete: %d total added, %d total skipped",
         total_added, total_skipped,
@@ -432,6 +432,7 @@ def import_chroma(
         "domains": domain_stats,
         "total_added": total_added,
         "total_skipped": total_skipped,
+        "failed_domains": failed_domains,
     }
 
 
@@ -908,8 +909,18 @@ def import_all(
                 "Data may be out of sync — re-run import to complete."
             )
 
+        # Read the authoritative field rather than re-deriving it from the
+        # per-domain "error" key: that key is written only by the outer
+        # handler, so a domain whose batch POSTs all failed (the common
+        # disk-full / Chroma-down case) never appeared here.
         chroma_domains = chroma_result.get("domains", {})
-        failed_domains = [d for d, stats in chroma_domains.items() if isinstance(stats, dict) and "error" in stats]
+        failed_domains = sorted(
+            set(chroma_result.get("failed_domains", {}))
+            | {
+                d for d, stats in chroma_domains.items()
+                if isinstance(stats, dict) and "error" in stats
+            }
+        )
         if failed_domains:
             consistency_warnings.append(
                 f"ChromaDB import failed for domains: {', '.join(failed_domains)}. "

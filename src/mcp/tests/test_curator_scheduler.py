@@ -103,4 +103,48 @@ def test_schedule_curator_setting_exposed():
     from config import settings
 
     assert hasattr(settings, "SCHEDULE_CURATOR")
-    assert settings.SCHEDULE_CURATOR == "30 4 * * 0"  # Sunday 4:30 AM
+    assert settings.SCHEDULE_CURATOR == "30 4 * * sun"
+
+
+def test_weekly_schedules_fire_on_their_documented_day():
+    """Assert the day a job actually fires, not the literal cron string.
+
+    APScheduler's ``CronTrigger.from_crontab`` maps day-of-week ``0`` to
+    **Monday**, unlike standard cron. Every weekly default was written as ``0``
+    and commented "Sunday", so they all fired a day late — and this test pinned
+    the wrong string in place, asserting ``"30 4 * * 0"  # Sunday 4:30 AM``.
+
+    Named weekdays remove the ambiguity; asserting the resolved fire day means a
+    future edit back to a bare integer fails here instead of silently shifting
+    the maintenance window.
+    """
+    from datetime import datetime, timezone
+
+    from apscheduler.triggers.cron import CronTrigger
+
+    from config import settings
+
+    # A Thursday, so "next fire" is unambiguous for any weekday.
+    base = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
+    expected = {
+        "SCHEDULE_CURATOR": "Sun",
+        "SCHEDULE_COMMUNITY_REFRESH": "Sun",
+        "SCHEDULE_MEMORY_CONSOLIDATION": "Sun",
+        "SCHEDULE_STALE_DETECTION": "Sun",
+        "SCHEDULE_WIKI_DRIFT_LINT": "Sun",
+        "SCHEDULE_ENTITY_MERGE": "Sun",
+        "SCHEDULE_MODEL_AUTO_UPDATE": "Mon",
+    }
+    wrong: dict[str, str] = {}
+    for name, want_day in expected.items():
+        expr = getattr(settings, name, "")
+        if not expr:  # empty = disabled by design
+            continue
+        fires = CronTrigger.from_crontab(expr, timezone=timezone.utc).get_next_fire_time(
+            None, base
+        )
+        got = fires.strftime("%a")
+        if got != want_day:
+            wrong[name] = f"{expr!r} fires {got}, expected {want_day}"
+
+    assert not wrong, f"weekly schedules fire on the wrong day: {wrong}"

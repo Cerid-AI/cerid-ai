@@ -667,7 +667,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   </div>
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                    <span>Privacy-first &mdash; your data never leaves your machine</span>
+                    <span>
+                      Privacy-first &mdash; your knowledge stores stay on your machine;
+                      inference goes to the provider you choose
+                    </span>
                   </div>
                 </div>
                 <p className="text-center text-xs text-muted-foreground/80">

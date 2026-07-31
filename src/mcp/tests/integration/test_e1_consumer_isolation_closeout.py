@@ -27,6 +27,10 @@ from unittest.mock import MagicMock
 import fakeredis
 import pytest
 
+# Drives the agent-query path, which calls get_redis() internally — the
+# dependency is invisible to fixture-shape inference, so declare it.
+pytestmark = pytest.mark.live_stack
+
 _FINANCE = ["finance", "general"]
 
 

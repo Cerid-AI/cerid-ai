@@ -248,7 +248,16 @@ function AgentRow({
               </Badge>
             )}
             {agent.tools && agent.tools.length > 0 && (
-              <Badge variant="outline" className="text-label-xs">tools: {agent.tools.length}</Badge>
+              // Custom-agent queries run retrieval and return the agent's config
+              // for the caller to apply — tool dispatch is not implemented, so
+              // this reads as "declared", not "N working capabilities".
+              <Badge
+                variant="outline"
+                className="text-label-xs"
+                title={`Declared tools (not yet executed): ${agent.tools.join(", ")}`}
+              >
+                tools declared: {agent.tools.length}
+              </Badge>
             )}
           </div>
         </div>

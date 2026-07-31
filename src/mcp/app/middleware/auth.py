@@ -28,6 +28,20 @@ EXEMPT_PATHS = {"/health", "/", "/docs", "/openapi.json", "/redoc", "/.well-know
 # /health/ping) — probes must reach the app without the API key.
 EXEMPT_PREFIXES = ("/health/", "/mcp/", "/auth/", "/a2a/")
 
+# /mcp/ and /a2a/ are exempt only while the server is bound to loopback, where
+# "reachable" already means "local process." In LAN mode
+# (CERID_BIND_ADDR=0.0.0.0) that assumption is false and the exemption would
+# expose every MCP tool — including deletes and purges — unauthenticated to the
+# whole network, contradicting docs/LAN_REMOTE_ACCESS.md. Keeping loopback
+# exempt preserves headerless local MCP clients (see this repo's .mcp.json).
+_LOOPBACK_ONLY_EXEMPT_PREFIXES = ("/mcp/", "/a2a/")
+
+
+def _is_loopback_bind() -> bool:
+    """True when the server is bound to a loopback address only."""
+    bind = os.getenv("CERID_BIND_ADDR", "127.0.0.1").strip()
+    return bind in ("127.0.0.1", "::1", "localhost", "")
+
 
 def _redact_ip(ip: str) -> str:
     """Hash-redact an IP address for safe logging."""
@@ -40,9 +54,13 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_key: str | None = None):
         super().__init__(app)
         self.api_key = api_key or os.getenv("CERID_API_KEY", "")
+        # Bind address is fixed for the process lifetime — resolve once.
+        self._loopback_bind = _is_loopback_bind()
         if not self.api_key and not APIKeyMiddleware._warned_no_key:
             logger.warning("API key auth is disabled — all requests will pass through unauthenticated")
             APIKeyMiddleware._warned_no_key = True
+        if not self._loopback_bind:
+            logger.info("Non-loopback bind — MCP/A2A surfaces require X-API-Key")
 
     async def dispatch(self, request: Request, call_next):
         # Skip auth if no key configured
@@ -55,8 +73,11 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if path in EXEMPT_PATHS:
             return await call_next(request)
         for prefix in EXEMPT_PREFIXES:
-            if path.startswith(prefix):
-                return await call_next(request)
+            if not path.startswith(prefix):
+                continue
+            if prefix in _LOOPBACK_ONLY_EXEMPT_PREFIXES and not self._loopback_bind:
+                break  # LAN mode — fall through to the key check
+            return await call_next(request)
 
         # Check header
         provided = request.headers.get("X-API-Key", "")

@@ -84,4 +84,8 @@ def test_schedule_entity_merge_setting_exposed():
     from config import settings
 
     assert hasattr(settings, "SCHEDULE_ENTITY_MERGE")
-    assert settings.SCHEDULE_ENTITY_MERGE == "30 5 * * 0"  # Sunday 5:30 AM
+    # Named weekday, not `0`: APScheduler maps day-of-week 0 to *Monday*, so
+    # the old "30 5 * * 0" fired a day after the "Sunday" the comment claimed.
+    # test_curator_scheduler.py asserts the resolved fire day for every weekly
+    # schedule, which is the guard that actually prevents the off-by-one.
+    assert settings.SCHEDULE_ENTITY_MERGE == "30 5 * * sun"

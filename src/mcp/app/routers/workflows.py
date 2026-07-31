@@ -372,8 +372,16 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
     query_text = input_data.get("query", input_data.get("text", ""))
 
     if name == "query":
+        from app.deps import get_chroma
         from core.agents.query_agent import lightweight_kb_query
-        results = await lightweight_kb_query(query_text, top_k=input_data.get("top_k", 5))
+        # chroma_client is required (query_agent.py raises without it) and every
+        # sibling branch below threads its stores. Omitting it here failed node 1
+        # of the three built-in templates that open with a query node.
+        results = await lightweight_kb_query(
+            query_text,
+            top_k=input_data.get("top_k", 5),
+            chroma_client=get_chroma(),
+        )
         return {"results": results, "query": query_text}
 
     elif name == "curator":

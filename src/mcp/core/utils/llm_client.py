@@ -33,11 +33,42 @@ import httpx
 
 from core.utils.circuit_breaker import get_breaker
 from core.utils.tracing import get_request_id, tracing_headers
+from errors import ProviderError
 
 if TYPE_CHECKING:
     from core.routing.smart_router import RouteDecision
 
 _logger = logging.getLogger("ai-companion.llm_client")
+
+
+def _extract_content(data: dict) -> str:
+    """Pull the assistant message out of an OpenAI-compatible response.
+
+    OpenAI-compatible gateways (OpenRouter included) return **HTTP 200** with an
+    ``{"error": {...}}`` body for moderation blocks, routing failures and
+    upstream provider errors. Chained ``.get()`` defaults turned those into an
+    empty string, so the failure travelled silently through every downstream
+    stage as "the model returned nothing" — the silent-zero class the 2026-05-17
+    ablations already surfaced once.
+
+    Raise instead, so the circuit breaker and retry path can see it.
+    """
+    err = data.get("error")
+    if err:
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        code = err.get("code") if isinstance(err, dict) else None
+        raise ProviderError(
+            f"provider returned an error envelope on HTTP 200"
+            f"{f' (code={code})' if code else ''}: {msg}"
+        )
+
+    choices = data.get("choices")
+    if not choices:
+        raise ProviderError(
+            "provider response contained neither 'choices' nor 'error' "
+            f"(keys={sorted(data)[:8]})"
+        )
+    return choices[0].get("message", {}).get("content", "") or ""
 
 # Free-tier default when no model is supplied and ``INTERNAL_LLM_MODEL`` is
 # unset. Mirrors the smart-router FREE tier (``smart_router.FREE_MODELS``) so
@@ -335,7 +366,7 @@ async def _call_openai_compatible(
             resp = await client.post("/chat/completions", **post_kwargs)
             resp.raise_for_status()
             data = resp.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return _extract_content(data)
 
     return await breaker.call(_do_call)
 
@@ -627,7 +658,7 @@ async def call_llm(
             resp.raise_for_status()
             reset_auth_failure_count()
             data = resp.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return _extract_content(data)
 
     try:
         return await breaker.call(_do_call)

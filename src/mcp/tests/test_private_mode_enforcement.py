@@ -14,8 +14,12 @@ locally, once the global private-mode level is >= 1:
   * ``POST /agent/memory/extract``           (memory_extract_endpoint)
   * ``POST /sdk/v1/feedback``                (submit_claim_feedback)
 
-Also covers ``app.services.private_mode.get_private_mode_level``'s
-fail-open-to-0 behavior when Redis is unreachable.
+Also covers ``app.services.private_mode.get_private_mode_level``'s behaviour
+when Redis is unreachable. That used to be fail-open-to-0; as of 2026-07-30 it
+holds the last successfully-read level instead, because failing open silently
+deactivated every server-side guarantee for API/SDK/MCP callers, which have no
+client-side skip to fall back on. See tests/test_private_mode_redis_failure.py
+for the full contract.
 """
 from __future__ import annotations
 
@@ -51,13 +55,43 @@ def fake_redis():
 # ---------------------------------------------------------------------------
 
 
-class TestGetPrivateModeLevelFailOpen:
-    def test_returns_0_when_redis_raises(self, monkeypatch):
+class TestGetPrivateModeLevelRedisFailure:
+    """Redis unreachable → hold the last known level, not 0.
+
+    ``_last_known_level`` is a module global, so these tests pin it explicitly
+    rather than inheriting whatever an earlier test in the session read.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cold_cache(self):
+        import app.services.private_mode as pm
+
+        pm._last_known_level = 0
+        yield
+        pm._last_known_level = 0
+
+    def test_returns_0_when_redis_raises_and_no_level_was_ever_read(self, monkeypatch):
+        """Cold start with Redis already down — 0 is the only honest answer."""
         def _boom():
             raise ConnectionError("redis unreachable")
 
         monkeypatch.setattr("app.services.private_mode.get_redis", _boom)
         assert get_private_mode_level() == 0
+
+    def test_holds_the_last_known_level_when_redis_raises(self, fake_redis, monkeypatch):
+        """The regression guard: a blip must not silently drop the user to 0."""
+        fake_redis.set(PRIVATE_MODE_KEY, "3")
+        monkeypatch.setattr("app.services.private_mode.get_redis", lambda: fake_redis)
+        assert get_private_mode_level() == 3
+
+        def _boom():
+            raise ConnectionError("redis unreachable")
+
+        monkeypatch.setattr("app.services.private_mode.get_redis", _boom)
+        assert get_private_mode_level() == 3, (
+            "private mode failed open to 0 on a Redis error — every server-side "
+            "guarantee silently deactivated for callers with no client-side skip"
+        )
 
     def test_returns_level_from_redis(self, fake_redis, monkeypatch):
         fake_redis.set(PRIVATE_MODE_KEY, "1")

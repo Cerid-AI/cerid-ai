@@ -186,8 +186,13 @@ def _invalidate_caches(trigger: str, redis: Any | None = None) -> None:
         return
 
     try:
-        from utils.query_cache import invalidate_query_caches
-        invalidate_query_caches(trigger=trigger, redis=client)  # C1 + C2 (internally defensive)
+        # Threaded, not blocking: both invalidators SCAN the whole Redis
+        # keyspace, so on a large DB this added 30-150s to every delete while
+        # the stores themselves were already consistent in <1s. The ingest
+        # re-ingest path (ingestion.py) uses the threaded variant for exactly
+        # this reason; deletes were left on the blocking one.
+        from utils.query_cache import invalidate_query_caches_threaded
+        invalidate_query_caches_threaded(trigger=trigger, redis=client)  # C1 + C2
     except Exception as exc:  # noqa: BLE001 — query-cache bust is best-effort freshness
         log_swallowed_error("content_lifecycle.query_cache_bust", exc)
 

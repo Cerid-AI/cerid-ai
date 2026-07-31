@@ -1171,6 +1171,23 @@ async def _verify_claim_externally(
             "source_urls": [],
         }
 
+    # External verification always egresses to OpenRouter (call_llm_raw is
+    # hard-wired to it), carrying claim text and KB snippets. On a local-provider
+    # install that contradicts the operator's choice, so honour the opt-out.
+    if not getattr(config, "ALLOW_CLOUD_EGRESS_WHEN_LOCAL", True):
+        from core.routing.provider_state import is_local_provider
+        if is_local_provider():  # no-arg = the *active* provider
+            return {
+                "status": "uncertain",
+                "confidence": 0.3,
+                "reason": (
+                    "External verification skipped — local inference provider "
+                    "active and ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false"
+                ),
+                "verification_method": "none",
+                "source_urls": [],
+            }
+
     # Deadline gate: with almost no budget left, an external call can only
     # end in the caller's wait_for firing mid-flight. Return a retryable
     # timeout verdict (never cached — see _is_transport_failure_verdict;

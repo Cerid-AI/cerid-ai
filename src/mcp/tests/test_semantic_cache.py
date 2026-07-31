@@ -113,10 +113,21 @@ class _FakeBackend:
                 "distances": [[1.0 - t[1] for t in top]],
             }
 
+    def get(self) -> dict:
+        with self._lock:
+            return {"ids": list(self._ids)}
+
     def delete(self, ids=None, where=None) -> None:
         with self._lock:
             if where is not None and not ids:
-                # Empty-where == clear all (mirrors chromadb 0.5+ semantics)
+                # chromadb 1.x REJECTS an empty `where` rather than treating it
+                # as clear-all. The fake previously mirrored the 0.5 semantics,
+                # which let the production clear-all path throw on every
+                # mutation while these tests stayed green. Match the real server.
+                if not where:
+                    raise ValueError(
+                        "Expected where to have exactly one operator, got {} in delete"
+                    )
                 self._ids.clear()
                 self._embs.clear()
                 self._meta.clear()

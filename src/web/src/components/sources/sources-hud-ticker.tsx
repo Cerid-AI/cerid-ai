@@ -15,6 +15,7 @@
  * visual weight — F9 is the trophy case, F6 is the speedometer.
  */
 
+import { AlertCircle } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchKnowledgeStats, type KnowledgeStats } from "@/lib/api/knowledge-stats"
 import { listSources, type SourceRecord } from "@/lib/api/sources"
@@ -23,7 +24,7 @@ import { cn } from "@/lib/utils"
 const TOTAL_SOURCE_KINDS = 22
 
 export function SourcesHudTicker() {
-  const { data: stats } = useQuery<KnowledgeStats>({
+  const { data: stats, isError: statsError } = useQuery<KnowledgeStats>({
     queryKey: ["knowledge-stats"],
     queryFn: fetchKnowledgeStats,
     refetchInterval: 30_000,
@@ -35,6 +36,22 @@ export function SourcesHudTicker() {
     refetchInterval: 60_000,
     staleTime: 55_000,
   })
+
+  // A bare `if (!stats) return null` made a failed fetch look identical to a
+  // still-loading one: the whole strip silently disappeared and the numbers it
+  // had been showing simply stopped existing, with nothing to indicate the
+  // figures were stale rather than zero.
+  if (statsError) {
+    return (
+      <div
+        role="status"
+        className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground"
+      >
+        <AlertCircle className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
+        <span>Live stats unavailable — figures may be out of date.</span>
+      </div>
+    )
+  }
 
   if (!stats) return null
 

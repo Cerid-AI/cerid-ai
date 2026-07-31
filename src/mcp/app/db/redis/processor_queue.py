@@ -41,6 +41,23 @@ def _job_key(job_id: str) -> str:
     return f"{_PREFIX}:job:{job_id}"
 
 
+# Job records are the processor's audit trail, not durable state, and had no
+# expiry at all — 104,873 keys and growing ~1.4k/day on a single-user install.
+# That unbounded keyspace is what made the delete-path cache invalidation (a
+# full-keyspace SCAN) take 30-150s per delete. The TTL is refreshed on every
+# write, so an in-flight or repeatedly-updated job never expires mid-run;
+# finished records simply age out.
+JOB_RECORD_TTL_S = 14 * 24 * 3600  # 14 days
+
+
+def _touch_job_ttl(redis_client: Any, job_id: str) -> None:
+    """(Re)arm the retention window on a job record. Best-effort."""
+    try:
+        redis_client.expire(_job_key(job_id), JOB_RECORD_TTL_S)
+    except Exception as exc:  # noqa: BLE001 — retention is housekeeping, never fatal
+        log_swallowed_error("app.db.redis.processor_queue.ttl", exc)
+
+
 _RUNNING_KEY = f"{_PREFIX}:running"
 _PAUSED_KEY = f"{_PREFIX}:paused"
 _RECENT_KEY = f"{_PREFIX}:recent"
@@ -158,6 +175,7 @@ def enqueue_job(
     # redis-py's hset typing requires Mapping[str|bytes, bytes|float|int|str];
     # our values are all str so this is correct at runtime.
     redis_client.hset(_job_key(record.id), mapping=mapping)  # type: ignore[arg-type]
+    _touch_job_ttl(redis_client, record.id)
     redis_client.lpush(_queue_key(record.priority), record.id)
     return record.id
 
@@ -285,6 +303,7 @@ class RedisJobQueue:
     async def _save_record(self, record: JobRecord) -> None:
         mapping = _record_to_mapping(record)
         await self._run(self._r.hset, _job_key(record.id), mapping=mapping)
+        await self._run(self._r.expire, _job_key(record.id), JOB_RECORD_TTL_S)
 
     async def _load_record(self, job_id: str) -> JobRecord | None:
         mapping = await self._run(self._r.hgetall, _job_key(job_id))
@@ -371,6 +390,7 @@ class RedisJobQueue:
         """
         try:
             await self._run(self._r.hset, _job_key(job_id), "progress", str(float(progress)))
+            await self._run(self._r.expire, _job_key(job_id), JOB_RECORD_TTL_S)
         except Exception as exc:  # noqa: BLE001 — progress persistence is best-effort
             log_swallowed_error("processor.redis_queue.update_progress", exc, context={"job_id": job_id})
 

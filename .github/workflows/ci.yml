@@ -305,7 +305,21 @@ jobs:
             fi
           done
           if [ "$fail" -eq 1 ]; then exit 1; fi
-      - name: NPM dependency audit
+      # Blocking gate covers what actually ships to users. The dev toolchain is
+      # audited too, but advisory-only: since 2026-07 the eslint 9.x tree pulls
+      # minimatch@3 -> brace-expansion@1 (GHSA-mh99-v99m-4gvg), whose sole fix is
+      # brace-expansion@5 — an ESM-first package whose CJS build exports an
+      # object, so an override breaks every v3-era `require()` consumer. npm's
+      # own remediation is `eslint@10`, a breaking major. Blocking on an
+      # unreachable DoS in the linter (it would require attacker control of our
+      # eslint config) bought nothing and hid the production result.
+      # Revisit when the repo moves to eslint 10 — then drop the split.
+      # Mirrors the same split in cerid-ai-internal; this workflow is
+      # hand-maintained, so sync-repos.py cannot propagate it.
+      - name: NPM dependency audit (production — blocking)
+        run: npm audit --audit-level=high --omit=dev
+      - name: NPM dependency audit (dev toolchain — advisory)
+        continue-on-error: true
         run: npm audit --audit-level=high
       - name: License audit (Node)
         run: npx license-checker --failOn "GPL-2.0;GPL-3.0" --production

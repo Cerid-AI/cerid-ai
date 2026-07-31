@@ -88,6 +88,8 @@ class _CacheBackend(Protocol):
         where: dict[str, Any] | None = None,
     ) -> None: ...
 
+    def get(self) -> dict[str, Any]: ...
+
     def count(self) -> int: ...
 
 
@@ -459,10 +461,20 @@ def invalidate_cache(redis_client: Any, trigger: str = "unspecified") -> int:
         backend = _get_backend()
         if backend is not None:
             try:
-                # Empty `where` clears the whole collection in chromadb 0.5+.
-                backend.delete(where={})
+                # chromadb 1.x rejects an empty `where` ("Expected where to have
+                # exactly one operator") — the 0.5-era clear-all idiom used here
+                # threw on every mutation, so the embedding index was never
+                # actually cleared. Delete by id instead.
+                existing = backend.get() or {}
+                ids = [str(i) for i in (existing.get("ids") or [])]
+                if ids:
+                    backend.delete(ids=ids)
             except Exception as exc:
-                log_swallowed_error("core.retrieval.semantic_cache.backend_clear", exc)
+                log_swallowed_error(
+                    "core.retrieval.semantic_cache.backend_clear",
+                    exc,
+                    redis_client=redis_client,
+                )
 
         # Watermark for cache_lookup's stale-hit check — deliberately
         # outside the semcache: prefix so the SCAN above never sweeps it.

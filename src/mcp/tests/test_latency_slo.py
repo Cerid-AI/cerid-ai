@@ -43,6 +43,19 @@ pytestmark = pytest.mark.benchmark_slo
 MCP_URL = os.getenv("CERID_MCP_URL", "http://localhost:8888")  # env-capture-allowed: benchmark target URL — set once per CI run
 
 
+def _auth_headers() -> dict[str, str]:
+    """Auth header for the live stack, mirroring ``tests/beta/conftest.py``.
+
+    The MCP enforces ``X-API-Key`` on ``/api/*`` and ``/sdk/*``. These
+    benchmarks previously sent only ``X-Client-ID``, so every request 401'd
+    against any stack with a key configured — the assertions never measured
+    latency at all. An empty key leaves requests unauthenticated, matching the
+    beta harness's backward-compatible behaviour.
+    """
+    key = os.getenv("CERID_API_KEY", "")
+    return {"X-API-Key": key} if key else {}
+
+
 def _cold_query_payload() -> dict:
     """Unique query per call — defeats the Redis query cache."""
     return {
@@ -55,7 +68,7 @@ def _cold_query_payload() -> dict:
 @pytest.mark.benchmark(group="agent_query_cold", min_rounds=5, disable_gc=True)
 def test_agent_query_cold_under_3s(benchmark):
     """R5-1 STRICT: cold /agent/query under 3 s p95 on single populated domain."""
-    with httpx.Client(base_url=MCP_URL, timeout=10.0) as client:
+    with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=10.0) as client:
 
         def _run():
             response = client.post(
@@ -78,7 +91,7 @@ def test_agent_query_cold_under_3s(benchmark):
 @pytest.mark.benchmark(group="agent_query_warm", min_rounds=10, disable_gc=True)
 def test_agent_query_warm_under_300ms(benchmark):
     """R5-1 STRICT: warm cache /agent/query under 300 ms max."""
-    with httpx.Client(base_url=MCP_URL, timeout=5.0) as client:
+    with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=5.0) as client:
         # Warm the cache once with a stable query
         warm_payload = {"query": "slo-warm-stable", "domains": ["general"], "top_k": 3}
         client.post("/agent/query", json=warm_payload, headers={"X-Client-ID": "slo-harness"})
@@ -114,7 +127,7 @@ def test_chat_stream_ttft_under_2s(benchmark):
             "max_tokens": 10,
         }
         start = time.perf_counter()
-        with httpx.Client(base_url=MCP_URL, timeout=10.0) as client:
+        with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=10.0) as client:
             with client.stream(
                 "POST",
                 "/chat/stream",
@@ -170,7 +183,7 @@ def test_longshot_surface_under_500ms(benchmark):
     for a small fixed result-set.
     """
     payload = {"asset": "*", "date_range": "30d"}
-    with httpx.Client(base_url=MCP_URL, timeout=30.0) as client:
+    with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=30.0) as client:
 
         def _run():
             response = client.post(
@@ -209,7 +222,7 @@ def test_memory_extract_under_10s(benchmark):
         "conversation_id": f"slo-{uuid.uuid4().hex[:12]}",
         "model": "openai/gpt-4o-mini",
     }
-    with httpx.Client(base_url=MCP_URL, timeout=30.0) as client:
+    with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=30.0) as client:
 
         def _run():
             response = client.post(

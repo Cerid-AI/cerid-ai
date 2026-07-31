@@ -77,8 +77,27 @@ def test_c2_store_lookup_isolated_by_memory(monkeypatch: pytest.MonkeyPatch) -> 
                     "distances": [[1.0 - t[1] for t in top]],
                 }
 
+        def get(self) -> dict:
+            return {"ids": list(self._ids)}
+
         def delete(self, ids=None, where=None) -> None:
-            pass
+            # Was a bare `pass`: it neither rejected an empty `where` (the
+            # chromadb 1.x behaviour that hid a production defect) nor actually
+            # removed rows, so orphan-eviction assertions passed vacuously.
+            # See tests/helpers/fake_chroma.py for the canonical double.
+            if where is not None and not ids:
+                if not where:
+                    raise ValueError(
+                        "Expected where to have exactly one operator, got {} in delete"
+                    )
+                self._ids.clear()
+                self._embs.clear()
+                return
+            for eid in ids or []:
+                if eid in self._ids:
+                    j = self._ids.index(eid)
+                    del self._ids[j]
+                    del self._embs[j]
 
         def count(self) -> int:
             return len(self._ids)

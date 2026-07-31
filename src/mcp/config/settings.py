@@ -187,7 +187,7 @@ SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * 
 #    skip-existing bounds it) — weekly, Sunday 02:00 UTC.
 #  - Constellation 3D coords (fallback layout, no LLM) — nightly 03:30 UTC.
 #  - Memory archival sweep (safe, no LLM re-abstraction) — weekly, Sunday 05:00.
-SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * 0")
+SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * sun")
 # Per-entity embeddings — 15 min before compute_umap_3d so layout picks up fresh vectors.
 SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS = os.getenv("SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *")
 SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
@@ -196,7 +196,7 @@ SCHEDULE_COMPUTE_TRUST_STATE = os.getenv("SCHEDULE_COMPUTE_TRUST_STATE", "31 3 *
 # Domain backbone derivation — 1 min after compute_trust_state.
 # Independent of umap: runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
 SCHEDULE_DERIVE_DOMAINS = os.getenv("SCHEDULE_DERIVE_DOMAINS", "32 3 * * *")
-SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * 0")
+SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * sun")
 # Cap LLM summaries generated per community-refresh run so a first run on a
 # large corpus can't issue an unbounded GPU batch. skip-existing already bounds
 # steady state; this bounds the cold-start. 0 / unset = no cap.
@@ -620,6 +620,19 @@ VERIFICATION_EXPERT_WEB_MODEL = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
+# Cloud egress on a local-provider install
+# ---------------------------------------------------------------------------
+# Two paths send user content to OpenRouter even when the configured inference
+# provider is local: the internal-LLM fallback (when the local backend times
+# out or its breaker opens) and external claim verification. Both default ON to
+# preserve existing behaviour. Operators who chose local inference *for privacy*
+# set this false to keep content on the box — the local failure surfaces as an
+# error and verification degrades to KB-only instead of silently egressing.
+ALLOW_CLOUD_EGRESS_WHEN_LOCAL = (
+    os.getenv("ALLOW_CLOUD_EGRESS_WHEN_LOCAL", "true").lower() == "true"
+)
+
+# ---------------------------------------------------------------------------
 # External (Cross-Model) Verification
 # ---------------------------------------------------------------------------
 ENABLE_EXTERNAL_VERIFICATION = os.getenv("ENABLE_EXTERNAL_VERIFICATION", "true").lower() == "true"
@@ -847,7 +860,7 @@ MEMORY_RECALL_TIMEOUT_MS = int(os.getenv("MEMORY_RECALL_TIMEOUT_MS", "200"))
 # ---------------------------------------------------------------------------
 SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 AM
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
-SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  # Sunday 4 AM
+SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * sun")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 # AF-030 (CL-8) — background KB quality re-scoring. curate() in audit mode is
 # cheap (local scoring + one graph write per artifact, NO LLM calls; synopsis
@@ -856,7 +869,7 @@ SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 # default. Empty string disables the cron; the job is ALSO gated off by default
 # behind CERID_CURATOR_CRON_ENABLED (read in app/scheduler.py) so an operator
 # opts in explicitly — mirrors the SCHEDULE_BACKFILL_ENRICHMENT convention.
-SCHEDULE_CURATOR = os.getenv("SCHEDULE_CURATOR", "30 4 * * 0")  # Sunday 4:30 AM
+SCHEDULE_CURATOR = os.getenv("SCHEDULE_CURATOR", "30 4 * * sun")  # Sunday 4:30 AM
 # AF-032 (CL-8) — entity embedding-merge sweep. Ingest runs only Tiers A+B of
 # resolve_canonical (alias-table + string-normalize) to stay lean; the Tier-C
 # embedding-based merge is this deliberate maintenance sweep (the same
@@ -865,7 +878,7 @@ SCHEDULE_CURATOR = os.getenv("SCHEDULE_CURATOR", "30 4 * * 0")  # Sunday 4:30 AM
 # at 3:15 has produced fresh vectors). DOUBLE-gated: registered only when
 # CERID_ENTITY_MERGE_CRON_ENABLED opts in AND the sweep no-ops unless
 # ENTITY_RESOLUTION_EMBED is on. Empty string disables the cron.
-SCHEDULE_ENTITY_MERGE = os.getenv("SCHEDULE_ENTITY_MERGE", "30 5 * * 0")  # Sunday 5:30 AM
+SCHEDULE_ENTITY_MERGE = os.getenv("SCHEDULE_ENTITY_MERGE", "30 5 * * sun")  # Sunday 5:30 AM
 # Phase E (bi-temporal memory plan) — once-per-session summarization scan
 # cadence. Default every 15 min; empty string disables the cron. The scan is
 # dark behind ENABLE_SESSION_SUMMARIZATION (config/features.py, default OFF), so
@@ -878,7 +891,13 @@ SCHEDULE_SESSION_SUMMARIES = os.getenv("SCHEDULE_SESSION_SUMMARIES", "*/15 * * *
 # Six metrics emitted: wiki coverage, p95 staleness, faithfulness,
 # chunks-per-answer, memory→entity linkage, contradiction p95 — each
 # appended to tasks/<monday>-k-program-metrics.md via --cron.
-SCHEDULE_K_PROGRAM_METRICS = os.getenv("SCHEDULE_K_PROGRAM_METRICS", "0 0 * * *")
+# Empty by default: `scripts/k_program_metrics.py` is a HOST-side operator tool.
+# It resolves its own repo root, puts `<root>/src/mcp` on sys.path, reads the
+# repo `.env` and appends to `tasks/` — none of which exist inside the container,
+# where `/app` *is* `src/mcp`. Scheduled in-container it failed every midnight.
+# Operators run it from a checkout (or a bind-mounted repo) and may set this cron
+# there; see docs/RUNBOOK_PRODUCTION.md.
+SCHEDULE_K_PROGRAM_METRICS = os.getenv("SCHEDULE_K_PROGRAM_METRICS", "")
 # Daily Knowledge Stats snapshot for the Sources pane hero card's
 # sparklines. Default midnight UTC. One MERGE per day; idempotent
 # across reruns.
@@ -893,7 +912,7 @@ SCHEDULE_RETENTION_ENFORCE = os.getenv(
 )
 # Wiki refresh crons (Phase K). Empty string disables (matches sibling SCHEDULE_*).
 SCHEDULE_WIKI_STALE_SWEEP = os.getenv("SCHEDULE_WIKI_STALE_SWEEP", "0 3 * * *")
-SCHEDULE_WIKI_DRIFT_LINT = os.getenv("SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * 0")
+SCHEDULE_WIKI_DRIFT_LINT = os.getenv("SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * sun")
 # Hard-delete of quarantine-expired artifacts. Empty string disables.
 SCHEDULE_QUARANTINE_PURGE = os.getenv("SCHEDULE_QUARANTINE_PURGE", "0 3 * * *")
 
@@ -902,7 +921,7 @@ SCHEDULE_QUARANTINE_PURGE = os.getenv("SCHEDULE_QUARANTINE_PURGE", "0 3 * * *")
 # pinned assignments. Same-family + must-exist-in-catalog bounds the drift;
 # model_config.json stays revertible via PUT /models/assignments.
 MODEL_AUTO_UPDATE_ENABLED = os.getenv("MODEL_AUTO_UPDATE_ENABLED", "true").lower() in ("true", "1")
-SCHEDULE_MODEL_AUTO_UPDATE = os.getenv("SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * 1")  # Mon 6 AM
+SCHEDULE_MODEL_AUTO_UPDATE = os.getenv("SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * mon")  # Mon 6 AM
 
 # Routing-tiers overlay: a JSON map {original_tier_id: resolved_id} written by
 # the weekly model_auto_update job (app/routers/models.py::apply_latest_assignments)

@@ -23,6 +23,16 @@ def _patch_chat_redis(monkeypatch):
     exponential-backoff cost against an unreachable Redis host.
     """
     monkeypatch.setattr("app.deps.get_redis", lambda: MagicMock(), raising=False)
+    # Drop the process-wide chat httpx pool. Earlier tests (or a prior case
+    # in this module) may have filled ``_chat_client`` with a real
+    # AsyncClient bound to a dead event loop; patching
+    # ``httpx.AsyncClient`` only affects *new* constructions, so a stale
+    # singleton silently bypasses the mock and hits the network.
+    import app.routers.chat as chat_mod
+
+    chat_mod._chat_client = None
+    yield
+    chat_mod._chat_client = None
 
 
 def _make_app():
@@ -35,8 +45,14 @@ def _make_app():
 
 def _setup_mock_client(mock_client_cls, mock_response):
     """Configure a mock httpx.AsyncClient that uses build_request + send."""
+    import app.routers.chat as chat_mod
+
+    # Ensure the next ``_get_chat_client()`` call constructs via the patch.
+    chat_mod._chat_client = None
+
     mock_client = AsyncMock()
     mock_client.aclose = AsyncMock()
+    mock_client.is_closed = False
     mock_client_cls.return_value = mock_client
 
     mock_request = MagicMock()

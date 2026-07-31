@@ -33,6 +33,22 @@ def parse_llm_json(content: str) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError as err:
+        # "Extra data": a complete JSON value followed by trailing content
+        # (commentary, a second object, a stray fence). Local models do this
+        # routinely, and truncation-repair below cannot help — the value isn't
+        # truncated. Take the first complete value and drop the tail.
+        if err.msg.startswith("Extra data"):
+            try:
+                value, end = json.JSONDecoder().raw_decode(text)
+            except json.JSONDecodeError:
+                pass
+            else:
+                _logger.info(
+                    "Recovered JSON with trailing content (used=%d of %d bytes)",
+                    end, len(text),
+                )
+                return value
+
         repaired = _truncate_and_close(text)
         if repaired is None:
             raise

@@ -202,6 +202,21 @@ print(
     f"{redis_r.get('entries_exported', 0)} Redis audit entries, "
     f"{conversations_r.get('conversations', 0)} conversations"
 )
+
+# Fail loudly on a vector-free backup. A Chroma export that errors on every
+# domain still returns a success-shaped dict; printing "0 Chroma chunks" as an
+# ordinary summary line is how an unrestorable archive looked healthy. The
+# operator only finds out when a restore comes back with no vectors.
+_failed = chroma_r.get("failed_domains") or {}
+_chunks = chroma_r.get("total_chunks", 0)
+if _failed or (neo4j_r.get("artifacts", 0) and not _chunks):
+    print(
+        f"ERROR: vector export incomplete — {_chunks} chunks exported, "
+        f"failed domains: {sorted(_failed) or 'none'}. "
+        "Refusing to archive a backup that cannot be restored.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 PYEOF
     then
         echo "" >&2

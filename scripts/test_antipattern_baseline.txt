@@ -1,0 +1,45 @@
+# Per-file test-antipattern baseline — SHRINK-ONLY.
+# Regenerate after burn-down: python scripts/lint-test-antipatterns.py --update
+#
+# These rules were written after the fact (2026-07-30 graduation sweep),
+# so the suite carries a residue. A new test file has an implicit
+# baseline of 0, so the gate is blocking for new code while the residue
+# burns down opportunistically. Counts can never climb.
+#
+# SEED THIS IN cerid-ai-internal ONLY. The public mirror strips test files,
+# so it reports a LOWER count and --check passes there; running --update in
+# public would bake that lower number in and make internal fail against its
+# own tree.
+#
+# Highest-value burn-down targets first: TA004 (the tautology — the test
+# asserts the fixture it supplied) then TA003 (blanket config mock —
+# silently stops the code under test from running). TA001/TA002 are
+# order-dependence hazards, cheap to fix.
+# total=147 files=27 [TA001×9, TA002×2, TA003×123, TA004×13]
+2	src/mcp/tests/integration/test_processor_chaos.py
+2	src/mcp/tests/integration/test_processor_end_to_end.py
+9	src/mcp/tests/test_archive.py
+1	src/mcp/tests/test_connectors_router.py
+15	src/mcp/tests/test_contextual.py
+7	src/mcp/tests/test_curator.py
+4	src/mcp/tests/test_data_sources.py
+7	src/mcp/tests/test_e2e_pipeline.py
+3	src/mcp/tests/test_ingestion.py
+3	src/mcp/tests/test_kb_admin.py
+1	src/mcp/tests/test_llm_client_loop_safety.py
+15	src/mcp/tests/test_maintenance.py
+2	src/mcp/tests/test_memory.py
+2	src/mcp/tests/test_memory_agent.py
+3	src/mcp/tests/test_memory_consolidation.py
+24	src/mcp/tests/test_neo4j_expanded.py
+2	src/mcp/tests/test_nli_verification.py
+9	src/mcp/tests/test_query_agent.py
+2	src/mcp/tests/test_rag_resilience.py
+8	src/mcp/tests/test_rectify.py
+1	src/mcp/tests/test_relevance_floor_scale.py
+1	src/mcp/tests/test_sdk_contract.py
+2	src/mcp/tests/test_sdk_endpoints.py
+7	src/mcp/tests/test_simulated_sessions.py
+11	src/mcp/tests/test_sync.py
+2	src/mcp/tests/test_taxonomy.py
+2	src/mcp/tests/test_webhooks.py

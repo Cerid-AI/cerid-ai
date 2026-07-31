@@ -22,6 +22,7 @@ from app.sync._helpers import (
     _default_sync_dir,
     _ensure_dir,
     _iter_jsonl,
+    _v2_collections_base,
 )
 
 logger = logging.getLogger("ai-companion.sync")
@@ -206,14 +207,19 @@ def _delete_chroma_chunks(chroma_url: str, domain: str, chunk_ids: list[str]) ->
     coll_name = config.collection_name(domain)
     try:
         resp = httpx.get(
-            f"{chroma_url}/api/v1/collections/{coll_name}",
+            f"{_v2_collections_base(chroma_url)}/{coll_name}",
             timeout=10.0,
         )
         if resp.status_code != HTTPStatus.OK:
+            # Bare-returning here is how a delete silently fails to propagate.
+            logger.warning(
+                "Tombstone ChromaDB delete skipped for %s: collection lookup "
+                "returned HTTP %s", domain, resp.status_code,
+            )
             return
         coll_id = resp.json().get("id", coll_name)
         del_resp = httpx.post(
-            f"{chroma_url}/api/v1/collections/{coll_id}/delete",
+            f"{_v2_collections_base(chroma_url)}/{coll_id}/delete",
             json={"ids": chunk_ids},
             timeout=30.0,
         )

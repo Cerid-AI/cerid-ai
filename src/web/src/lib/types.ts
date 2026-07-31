@@ -678,7 +678,10 @@ export interface CurateResponse {
 /** Shared fields across streaming and completed claim types. */
 export interface BaseClaim {
   claim: string
-  claim_type?: "factual" | "evasion" | "ignorance" | "citation"
+  // Keep in sync with ClaimType in core/agents/hallucination/models.py — the
+  // backend has always been able to emit "recency" on claim_extracted /
+  // claim_verified, but it was missing from this union until 2026-07-30.
+  claim_type?: "factual" | "evasion" | "ignorance" | "citation" | "recency"
   source_artifact_id?: string
   source_domain?: string
   source_snippet?: string

@@ -101,7 +101,7 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, CapabilityDescriptor> = {
     description: "Real-time observability metrics (latency p95, cache hit rate, throughput) on the Health tab.",
   },
   private_mode: {
-    description: "Block every outbound network call (LLM, web search, telemetry). Useful for offline / air-gapped deployments.",
+    description: "Escalating privacy levels: skip saves (L1), bypass the knowledge base (L2), skip audit logging (L3), full ephemeral session (L4). Does not block LLM egress — choose a local provider for that.",
     tier: "vault",
   },
   basic_workflows: {

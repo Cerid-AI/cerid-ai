@@ -1345,9 +1345,31 @@ async def verify_response_streaming(
         if r and r.get("status") in ("verified", "unverified")
     ]
     overall = (sum(_assessed_sims) / len(_assessed_sims)) if _assessed_sims else 0
+
+    # Metamorphic scoring (Pro): mutate each factoid and re-test it against the
+    # same KB context the claims were verified against. Reached via a DI sink
+    # because core cannot import the app-side plugin interface. The stub returns
+    # its own skip sentinel when the feature is gated or the plugin is absent,
+    # so the key is present-and-honest rather than silently missing.
+    _metamorphic: dict[str, Any] | None = None
+    try:
+        from core.agents.hallucination.metamorphic_sink import get_metamorphic_sink
+
+        _sink = get_metamorphic_sink()
+        if _sink is not None:
+            _ctx = "\n".join(
+                str((r or {}).get("source_snippet", "") or "")
+                for r in collected_results
+            ).strip()
+            if _ctx:
+                _metamorphic = await _sink(response_text, _ctx)
+    except Exception as exc:  # noqa: BLE001 — scoring is additive, never fatal
+        log_swallowed_error("hallucination.metamorphic", exc)
+
     yield {
         "type": "summary",
         "overall_confidence": round(overall, 3),
+        **({"metamorphic_score": _metamorphic} if _metamorphic else {}),
         "verified": verified_count,
         "unverified": unverified_count,
         "uncertain": uncertain_count,
@@ -1458,6 +1480,15 @@ async def verify_response_streaming(
     # recounted — so the Redis hall:{cid} snapshot and the memory-promotion input
     # both reflect the settled verdicts, matching the SSE stream + the Neo4j write.
     run_claims = [r for r in collected_results if r is not None]
+    # Stamp the extraction category onto the persisted claims. _claim_type was
+    # computed per claim for the SSE events and the per-claim timeout, but was
+    # never written back into collected_results — so report["claims"] reached
+    # promote_verified_facts with no type at all and its ignorance/evasion/
+    # citation filter could never fire, silently promoting meta-claims like
+    # "I don't know" into permanent empirical memories.
+    for _claim in run_claims:
+        if not _claim.get("claim_type"):
+            _claim["claim_type"] = _claim_type(str(_claim.get("claim", "")))
     # E1 CR-104/107/115/067: derive the authoritative summary from the persisted
     # claims array itself (single source of truth) rather than the counters kept
     # by side-effect across the main loop, _settle_timeouts, and the recount. This

@@ -541,6 +541,7 @@ async def get_timeline(
         cypher = (
             "MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity {canonical_id: $entity}) "
             "WHERE m.created_at >= $start AND m.created_at <= $end "
+            "AND coalesce(a.archived, false) = false "
             "RETURN substring(m.created_at, 0, 10) AS ts, false AS is_birth, count(*) AS c "
             "UNION ALL "
             "MATCH (e:Entity {canonical_id: $entity}) "
@@ -557,6 +558,7 @@ async def get_timeline(
         cypher = (
             "MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity) "
             "WHERE m.created_at >= $start AND m.created_at <= $end "
+            "AND coalesce(a.archived, false) = false "
             "RETURN substring(m.created_at, 0, 10) AS ts, false AS is_birth, count(*) AS c "
             "UNION ALL "
             "MATCH (e:Entity) "
@@ -813,6 +815,10 @@ class Embeddings3DResponse(BaseModel):
     cached: bool = False
     computed_at: str | None = None
     isolated_count: int = 0       # degree-0 nodes hidden when include_isolated=False
+    # True when the in-scope edge set hit GRAPH_EMBEDDINGS_3D_MAX_LINKS. Without
+    # this a capped payload is indistinguishable from a sparse graph, and nodes
+    # whose edges were cut render as orphans that isolated_count does not count.
+    links_truncated: bool = False
 
 
 def _embeddings_3d_cache_key(
@@ -901,7 +907,7 @@ async def get_embeddings_3d(
         for r in rows
     ]
 
-    links = await _query_embeddings_3d_links(
+    links, links_truncated = await _query_embeddings_3d_links(
         [r["id"] for r in rows],
     )
 
@@ -912,6 +918,7 @@ async def get_embeddings_3d(
         cached=False,
         computed_at=computed_at,
         isolated_count=isolated_count,
+        links_truncated=links_truncated,
     )
 
     if redis:
@@ -936,23 +943,37 @@ _KIND_MAP: dict[str, str] = {
 
 async def _query_embeddings_3d_links(
     scope_ids: list[str],
-) -> list[tuple[int, int, float, str]]:
+) -> tuple[list[tuple[int, int, float, str]], bool]:
     """CO_MENTIONED and SIMILAR_TO edges between in-scope entities, as index 4-tuples.
 
     Each tuple is (src_idx, tgt_idx, weight, kind) where kind is "co_mention"
     for CO_MENTIONED edges and "similar" for SIMILAR_TO edges.  Indices into
     the caller's entity list.
 
-    One unparameterized-shape query — scoping happens in Python so the
-    filtered/subset variants reuse it unchanged.
+    Returns (links, truncated).  ``truncated`` is True when the in-scope edge
+    set hit ``_EMBEDDINGS_3D_MAX_LINKS`` — callers must surface it, because a
+    silently-capped edge set is indistinguishable from a sparse graph.
+
+    Scoping is applied **in Cypher**, not afterwards in Python.  Until the
+    2026-07-30 fix this took a *global* top-N-by-weight slice and then discarded
+    the out-of-scope rows, so the cap was spent on edges that could never
+    render: against a 32,271-edge graph the 25,000 cap was saturated by
+    unrelated high-weight edges and 11.84% of returned nodes arrived with no
+    links at all, drawing connected entities as orphans and contradicting the
+    endpoint's own ``isolated_count``.
     """
     driver = get_neo4j()
     if driver is None or not scope_ids:
-        return []
+        return [], False
 
+    # UNWIND drives the canonical_id index for the source side; the target side
+    # is checked against the same set so both endpoints are guaranteed to have
+    # a slot in the caller's entity list.
     cypher = """
-        MATCH (a:Entity)-[r:CO_MENTIONED|SIMILAR_TO]->(b:Entity)
-        WHERE a.umap_x IS NOT NULL AND b.umap_x IS NOT NULL
+        UNWIND $scope_ids AS sid
+        MATCH (a:Entity {canonical_id: sid})-[r:CO_MENTIONED|SIMILAR_TO]->(b:Entity)
+        WHERE b.canonical_id IN $scope_ids
+          AND a.umap_x IS NOT NULL AND b.umap_x IS NOT NULL
         RETURN
             a.canonical_id AS s,
             b.canonical_id AS t,
@@ -964,7 +985,11 @@ async def _query_embeddings_3d_links(
 
     def _run() -> list[dict[str, Any]]:
         with driver.session() as session:
-            return list(session.run(cypher, max_links=_EMBEDDINGS_3D_MAX_LINKS).data())
+            return list(session.run(
+                cypher,
+                scope_ids=scope_ids,
+                max_links=_EMBEDDINGS_3D_MAX_LINKS,
+            ).data())
 
     try:
         edge_rows = await asyncio.to_thread(_run)
@@ -972,19 +997,110 @@ async def _query_embeddings_3d_links(
         # silent-catch-allowed: links are an enhancement layer — a failed
         # edge query must not take down the node payload.
         logger.warning("emb3d links query failed: %s", exc)
-        return []
+        return [], False
+
+    truncated = len(edge_rows) >= _EMBEDDINGS_3D_MAX_LINKS
+    if truncated:
+        logger.warning(
+            "emb3d links hit the %d cap for %d in-scope entities — some "
+            "connected nodes will render without edges",
+            _EMBEDDINGS_3D_MAX_LINKS, len(scope_ids),
+        )
 
     index_of = {eid: i for i, eid in enumerate(scope_ids)}
     links: list[tuple[int, int, float, str]] = []
+    connected: set[str] = set()
     for row in edge_rows:
-        si = index_of.get(str(row.get("s") or ""))
-        ti = index_of.get(str(row.get("t") or ""))
+        s_id, t_id = str(row.get("s") or ""), str(row.get("t") or "")
+        si = index_of.get(s_id)
+        ti = index_of.get(t_id)
         if si is None or ti is None or si == ti:
             continue
         neo4j_kind = str(row.get("kind") or "CO_MENTIONED")
         kind = _KIND_MAP.get(neo4j_kind, "co_mention")
         links.append((si, ti, float(row.get("w") or 1.0), kind))
-    return links
+        connected.add(s_id)
+        connected.add(t_id)
+
+    if truncated:
+        rescued = await _rescue_orphaned_links(
+            [eid for eid in scope_ids if eid not in connected], index_of,
+        )
+        links.extend(rescued)
+
+    return links, truncated
+
+
+async def _rescue_orphaned_links(
+    missing_ids: list[str],
+    index_of: dict[str, int],
+) -> list[tuple[int, int, float, str]]:
+    """Give every still-linkless entity its single strongest edge.
+
+    A weight-ranked ``LIMIT`` is the wrong shape for this payload. Measured
+    against the live graph on 2026-07-30: 32,271 candidate edges against a
+    25,000 cap left **583 entities with real edges holding none of them**, and
+    the renderer drew all 583 as orphans while the same response reported
+    ``isolated_count: 442``. The graph looked ~32% more fragmented than it is,
+    and the discrepancy was filed for weeks as a data-hygiene chore.
+
+    Scoping the cap (the obvious reading) does not fix this: the node query's
+    own limit is 10,000 and the graph holds ~5,370 entities, so every entity is
+    already in scope and the in-scope edge set *is* the global one. The cap
+    itself is the cause, so the fix has to change what the budget is spent on.
+
+    One extra edge per affected node is bounded by the node count, keeps the
+    payload compact, and guarantees the invariant that actually matters: a node
+    rendered without links genuinely has none.
+    """
+    if not missing_ids:
+        return []
+
+    driver = get_neo4j()
+    if driver is None:
+        return []
+
+    cypher = """
+        UNWIND $missing AS mid
+        MATCH (a:Entity {canonical_id: mid})-[r:CO_MENTIONED|SIMILAR_TO]-(b:Entity)
+        WHERE b.canonical_id IN $scope
+          AND a.umap_x IS NOT NULL AND b.umap_x IS NOT NULL
+          AND b.canonical_id <> mid
+        WITH mid, b, coalesce(r.weight, r.score, 1.0) AS w, type(r) AS kind
+        ORDER BY w DESC
+        WITH mid, collect({t: b.canonical_id, w: w, kind: kind})[0] AS best
+        RETURN mid AS s, best.t AS t, best.w AS w, best.kind AS kind
+    """
+
+    def _run() -> list[dict[str, Any]]:
+        with driver.session() as session:
+            return list(session.run(
+                cypher, missing=missing_ids, scope=list(index_of),
+            ).data())
+
+    try:
+        rows = await asyncio.to_thread(_run)
+    except (OSError, RuntimeError, ValueError) as exc:
+        # silent-catch-allowed: the rescue pass is a refinement on top of an
+        # already-usable payload; failing it must not drop the links we have.
+        logger.warning("emb3d orphan-rescue query failed: %s", exc)
+        return []
+
+    rescued: list[tuple[int, int, float, str]] = []
+    for row in rows:
+        si = index_of.get(str(row.get("s") or ""))
+        ti = index_of.get(str(row.get("t") or ""))
+        if si is None or ti is None or si == ti:
+            continue
+        kind = _KIND_MAP.get(str(row.get("kind") or "CO_MENTIONED"), "co_mention")
+        rescued.append((si, ti, float(row.get("w") or 1.0), kind))
+
+    if rescued:
+        logger.info(
+            "emb3d orphan-rescue restored %d edge(s) for %d capped-out entities",
+            len(rescued), len(missing_ids),
+        )
+    return rescued
 
 
 async def _query_embeddings_3d(
@@ -1120,6 +1236,7 @@ class GraphMapResponse(BaseModel):
     cached: bool = False
     layout_fallback: bool = False
     isolated_count: int = 0       # degree-0 nodes hidden when include_isolated=False
+    links_truncated: bool = False  # in-scope edges hit GRAPH_EMBEDDINGS_3D_MAX_LINKS
 
 
 # Per-layout cache keys — keyed under the emb3d wildcard bust pattern
@@ -1273,7 +1390,7 @@ async def get_graph_map(
         for r in rows
     ]
 
-    links = await _query_embeddings_3d_links([r["id"] for r in rows])
+    links, links_truncated = await _query_embeddings_3d_links([r["id"] for r in rows])
 
     # Community artifacts — degrade gracefully if missing.
     # Try per-layout key first, fall back to the legacy key.
@@ -1310,6 +1427,7 @@ async def get_graph_map(
         cached=False,
         layout_fallback=layout_fallback,
         isolated_count=isolated_count,
+        links_truncated=links_truncated,
     )
 
     if redis:
@@ -1720,6 +1838,7 @@ async def get_timeline_strata(
     mention_cypher = """
         MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity)
         WHERE m.created_at >= $start AND m.created_at <= $end
+          AND coalesce(a.archived, false) = false
         WITH e, substring(m.created_at, 0, 10) AS day, count(*) AS mentions
         RETURN
             coalesce(e.community_id, '__null__') AS community_id,
@@ -2225,6 +2344,7 @@ async def get_timeline_track(
     cypher = """
         MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity {canonical_id: $canonical_id})
         WHERE m.created_at >= $start AND m.created_at <= $end
+          AND coalesce(a.archived, false) = false
         WITH a, m
         ORDER BY m.created_at DESC
         LIMIT $max_events
@@ -2339,6 +2459,7 @@ async def get_timeline_track(
             WHERE e.created_at >= $start AND e.created_at <= $end
             MATCH (a:Artifact)-[:MENTIONS]->(focal:Entity {canonical_id: $canonical_id})
             WHERE (a)-[:MENTIONS]->(e)
+              AND coalesce(a.archived, false) = false
             RETURN DISTINCT
                 coalesce(e.name, e.canonical_id) AS name,
                 e.canonical_id AS slug,
@@ -2371,6 +2492,7 @@ async def get_timeline_track(
             MATCH (e:Entity {canonical_id: $canonical_id})<-[:MENTIONS]-(a:Artifact)
             MATCH (vr:VerificationReport)-[:EXTRACTED_FROM]->(a)
             WHERE vr.created_at >= $start AND vr.created_at <= $end
+              AND coalesce(a.archived, false) = false
             RETURN
                 count(vr) AS reports,
                 sum(coalesce(vr.verified, 0)) AS verified,

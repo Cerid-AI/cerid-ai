@@ -87,9 +87,21 @@ class _FakeBackend:
             top = sims[:n_results]
             return {"ids": [[t[0] for t in top]], "distances": [[1.0 - t[1] for t in top]]}
 
+    def get(self) -> dict:
+        with self._lock:
+            return {"ids": list(self._ids)}
+
     def delete(self, ids=None, where=None) -> None:
         with self._lock:
             if where is not None and not ids:
+                # chromadb 1.x REJECTS an empty `where` instead of treating it
+                # as clear-all. Mirroring the 0.5 semantics here let the
+                # production clear-all path throw on every mutation while this
+                # (preservation-marked) gate stayed green.
+                if not where:
+                    raise ValueError(
+                        "Expected where to have exactly one operator, got {} in delete"
+                    )
                 self._ids.clear()
                 self._embs.clear()
                 self._meta.clear()

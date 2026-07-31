@@ -25,7 +25,7 @@ AGENT_TEMPLATES: list[dict[str, Any]] = [
             "well-structured answer with inline citations. If the evidence is inconclusive, "
             "say so explicitly rather than speculating."
         ),
-        "tools": ["pkb_agent_query", "pkb_list_artifacts", "web_search"],
+        "tools": ["pkb_agent_query", "pkb_artifacts", "pkb_web_search"],
         "domains": [],
         "rag_mode": "smart",
         "temperature": 0.4,
@@ -43,7 +43,7 @@ AGENT_TEMPLATES: list[dict[str, Any]] = [
             "documentation from the knowledge base when suggesting improvements. Be direct "
             "and actionable — prioritise the most impactful findings first."
         ),
-        "tools": ["pkb_agent_query", "pkb_list_artifacts"],
+        "tools": ["pkb_agent_query", "pkb_artifacts"],
         "domains": ["code"],
         "rag_mode": "smart",
         "temperature": 0.3,
@@ -62,7 +62,7 @@ AGENT_TEMPLATES: list[dict[str, Any]] = [
             "evidence that supports your assessment. Never assume — if evidence is lacking, "
             "mark the claim as Uncertain."
         ),
-        "tools": ["pkb_agent_query", "pkb_verify", "web_search"],
+        "tools": ["pkb_agent_query", "pkb_check_hallucinations", "pkb_web_search"],
         "domains": [],
         "rag_mode": "smart",
         "temperature": 0.2,
@@ -83,9 +83,9 @@ AGENT_TEMPLATES: list[dict[str, Any]] = [
         ),
         "tools": [
             "pkb_agent_query",
-            "pkb_list_artifacts",
+            "pkb_artifacts",
             "pkb_recategorize",
-            "pkb_delete_artifact",
+            "pkb_artifact_delete",
         ],
         "domains": [],
         "rag_mode": "simple",

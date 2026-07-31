@@ -77,6 +77,61 @@ MIN_RESPONSE_LENGTH = 100
 MEMORY_LLM_BUDGET_S = float(os.getenv("MEMORY_LLM_BUDGET_S", "6.0"))
 MEMORY_CONFLICT_LLM_BUDGET_S = float(os.getenv("MEMORY_CONFLICT_LLM_BUDGET_S", "3.0"))
 
+# The budgets above are sized against OpenRouter p95. A local daemon
+# (ollama / quenchforge) is an order of magnitude slower — llama3.1-8b measured
+# ~39s for this exact extraction prompt — so on a local-provider install the
+# cloud-tuned ceiling times out EVERY extraction, `extract_memories` returns [],
+# and no memory is ever created. Local installs get a proportionate ceiling.
+_DEFAULT_MEMORY_LLM_BUDGET_S = 6.0
+_LOCAL_MEMORY_LLM_BUDGET_S = 90.0
+
+
+def active_provider_is_local() -> bool:
+    """True when inference is served by a local daemon. Never raises."""
+    try:
+        from core.routing.provider_state import is_local_provider
+        return bool(is_local_provider())  # no-arg = the *active* provider
+    except Exception as exc:  # noqa: BLE001 — never let budget resolution break callers
+        log_swallowed_error("core.agents.memory.budget_resolve", exc)
+        return False
+
+
+def resolve_llm_budget_s(configured: float, shipped_default: float, local_default: float) -> float:
+    """Pick an LLM call budget for the active provider.
+
+    An explicit env override (or a test monkeypatching the module constant)
+    always wins — only the *shipped default* is provider-adjusted.
+    """
+    if configured != shipped_default:
+        return configured
+    return local_default if active_provider_is_local() else configured
+
+
+def _resolve_memory_budget_s() -> float:
+    """Extraction budget for the active provider."""
+    return resolve_llm_budget_s(
+        MEMORY_LLM_BUDGET_S,
+        _DEFAULT_MEMORY_LLM_BUDGET_S,
+        _LOCAL_MEMORY_LLM_BUDGET_S,
+    )
+
+
+# Conflict resolution shares the extraction problem: 3s is an OpenRouter-tuned
+# ceiling, and on local inference it timed out repeatedly (8 swallowed
+# `resolve_conflict_timeout` events in one hour on this host), so conflicting
+# memories were never reconciled.
+_DEFAULT_MEMORY_CONFLICT_BUDGET_S = 3.0
+_LOCAL_MEMORY_CONFLICT_BUDGET_S = 45.0
+
+
+def _resolve_conflict_budget_s() -> float:
+    """Conflict-resolution budget for the active provider."""
+    return resolve_llm_budget_s(
+        MEMORY_CONFLICT_LLM_BUDGET_S,
+        _DEFAULT_MEMORY_CONFLICT_BUDGET_S,
+        _LOCAL_MEMORY_CONFLICT_BUDGET_S,
+    )
+
 MEMORY_TYPES = {
     "empirical", "decision", "preference", "project_context", "temporal", "conversational",
     "fact", "action_item",  # Legacy aliases
@@ -145,7 +200,7 @@ async def extract_memories(
                 response_format={"type": "json_object"},
                 stage="memory_extract",
             ),
-            timeout=MEMORY_LLM_BUDGET_S,
+            timeout=_resolve_memory_budget_s(),
         )
         memories = parse_llm_json(content)
         # LLM may return a single object instead of an array — normalize
@@ -184,7 +239,7 @@ async def extract_memories(
         log_swallowed_error("core.agents.memory.extract_memories_timeout", exc)
         logger.warning(
             "Memory extraction LLM call exceeded %.1fs budget — returning []",
-            MEMORY_LLM_BUDGET_S,
+            _resolve_memory_budget_s(),
         )
         return []
     except Exception as e:
@@ -668,7 +723,7 @@ async def resolve_memory_conflict(
                 response_format={"type": "json_object"},
                 stage="memory_conflict_resolve",
             ),
-            timeout=MEMORY_CONFLICT_LLM_BUDGET_S,
+            timeout=_resolve_conflict_budget_s(),
         )
         parsed = parse_llm_json(content)
 
@@ -725,7 +780,7 @@ async def resolve_memory_conflict(
         log_swallowed_error("core.agents.memory.resolve_conflict_timeout", exc)
         logger.warning(
             "Memory conflict resolution exceeded %.1fs budget — defaulting to coexist",
-            MEMORY_CONFLICT_LLM_BUDGET_S,
+            _resolve_conflict_budget_s(),
         )
         return {"action": "coexist", "reason": "timeout", "merged_text": None}
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:

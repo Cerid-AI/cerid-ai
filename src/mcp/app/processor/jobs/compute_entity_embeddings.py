@@ -126,21 +126,33 @@ class ComputeEntityEmbeddingsJob(BaseJob):
         # Resolve the embedding function for the name-embed fallback.
         embed_fn = await asyncio.to_thread(self._get_embed_fn)
 
-        # Compute one embedding per entity.
+        # Compute one embedding per entity — in a worker thread.
+        #
+        # This loop is CPU-bound per entity and, on the name-embed fallback,
+        # makes a *synchronous* HTTP call per entity. Run inline on the event
+        # loop across thousands of entities it starved the app heartbeat, the
+        # 45s watchdog force-exited the process, docker restarted it, the worker
+        # resumed the still-pending job and blocked again — 23 consecutive kills
+        # in one night, taking four downstream graph jobs down with it. Its
+        # siblings (_get_embed_fn above, _write_embeddings below) were already
+        # offloaded; this one was missed.
         model_name: str = config.EMBEDDING_MODEL
-        rows_to_write: list[dict[str, Any]] = []
-        skipped = 0
-        for row in entity_rows:
-            vec = self._compute_embedding(
-                row, chunk_embedding_index, embed_fn
-            )
-            if vec is None:
-                skipped += 1
-                continue
-            rows_to_write.append({
-                "id": row["id"],
-                "embedding": json.dumps(vec.tolist()),
-            })
+
+        def _compute_all() -> tuple[list[dict[str, Any]], int]:
+            rows: list[dict[str, Any]] = []
+            missed = 0
+            for row in entity_rows:
+                vec = self._compute_embedding(row, chunk_embedding_index, embed_fn)
+                if vec is None:
+                    missed += 1
+                    continue
+                rows.append({
+                    "id": row["id"],
+                    "embedding": json.dumps(vec.tolist()),
+                })
+            return rows, missed
+
+        rows_to_write, skipped = await asyncio.to_thread(_compute_all)
 
         await progress_cb(0.85)
 

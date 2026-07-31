@@ -1106,8 +1106,10 @@ async def pkb_answer_with_citations(
     claims, _method = await extract_claims(answer, user_query=question)
     citations = []
     unsupported = []
+    # agent_query's envelope carries chunk text under "content" — "text" is
+    # the pkb_artifact_get chunk shape and is never present here.
     chunks_by_text = [
-        (r.get("text", ""), r) for r in results
+        (r.get("content", ""), r) for r in results
     ]
     for claim in claims:
         claim_words = set(claim.lower().split())
@@ -1125,7 +1127,7 @@ async def pkb_answer_with_citations(
                 "source": {
                     "artifact_id": best_chunk.get("artifact_id", ""),
                     "chunk_id": best_chunk.get("chunk_id", ""),
-                    "text_snippet": (best_chunk.get("text") or "")[:300],
+                    "text_snippet": (best_chunk.get("content") or "")[:300],
                 },
                 "confidence": round(float(best_score), 3),
             })

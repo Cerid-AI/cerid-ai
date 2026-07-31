@@ -282,6 +282,60 @@ services:
       start_period: 300s
 
   # ──────────────────────────────────────────────
+  # Layer 2b: Background memory worker
+  # ──────────────────────────────────────────────
+
+  # Drains the `cerid-memory` RQ queue. Memory extraction is an LLM call sized
+  # against cloud latency; on a local daemon it is ~15× slower, and running it
+  # inline blew the interactive p99<10s SLO (measured >120s once per-memory
+  # consolidation and conflict-resolution are included). With this worker
+  # running, `is_memory_async_mode()` auto-enables on local-inference installs
+  # and the request returns 202 immediately.
+  #
+  # Safe to stop: the eligibility probe checks for a live worker and falls back
+  # to the synchronous path rather than enqueuing into a queue nobody drains.
+  # Slower, but no memory is ever lost.
+  memory-worker:
+    container_name: ai-companion-memory-worker
+    build:
+      context: .
+      dockerfile: src/mcp/Dockerfile
+      args:
+        CERID_PRELOAD_MODELS: ${CERID_PRELOAD_MODELS:-false}
+    command: ["python", "-m", "rq.cli", "worker", "cerid-memory"]
+    working_dir: /app
+    volumes:
+      - ./src/mcp:/app
+      - ./.env:/host-env/.env
+      - ${HOME}/cerid-archive:/archive:cached
+      - ${CERID_SYNC_DIR_HOST:-${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}}:/sync
+    env_file:
+      - .env
+    environment:
+      - CERID_ENV_FILE=/host-env/.env
+      - CHROMA_URL=http://ai-companion-chroma:8000
+      - NEO4J_URI=bolt://ai-companion-neo4j:7687
+      - NEO4J_USER=neo4j
+      - PYTHONPATH=/app
+      - RQ_REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD:-changeme-redis}@ai-companion-redis:6379/0}
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    networks:
+      - llm-network
+    init: true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  # ──────────────────────────────────────────────
   # Layer 3: Frontend
   # ──────────────────────────────────────────────
 

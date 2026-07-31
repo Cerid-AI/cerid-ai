@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
+
 import config
 
 logger = logging.getLogger("ai-companion.sync")
@@ -42,6 +44,18 @@ TOMBSTONES_JSONL = "tombstones.jsonl"
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
+
+def _v2_collections_base(chroma_url: str) -> str:
+    """Return the chromadb 1.x v2 collections base path for the default
+    tenant/database. The 0.5-era /api/v1/collections endpoints were
+    retired — 1.x answers them with 410 and scopes every collection
+    under tenant + database.
+    """
+    return (
+        f"{chroma_url}/api/v2/tenants/{DEFAULT_TENANT}"
+        f"/databases/{DEFAULT_DATABASE}/collections"
+    )
 
 
 def _default_sync_dir() -> str:

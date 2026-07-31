@@ -56,12 +56,20 @@ class ClaimStatus(str, Enum):
 
 
 class ClaimType(str, Enum):
-    """Extraction category the claim came from."""
+    """Extraction category the claim came from.
+
+    Must stay a superset of what ``streaming._claim_type`` can return, or a
+    consumer following this module's "read from the model" contract will 422 on
+    real traffic. ``recency`` was missing until 2026-07-30 even though the
+    ``claim_extracted`` / ``claim_verified`` SSE events had always been able to
+    emit it — pinned by tests/test_claim_type_wire_parity.py.
+    """
 
     factual = "factual"
     evasion = "evasion"
     ignorance = "ignorance"
     citation = "citation"
+    recency = "recency"
 
 
 class ClaimVerification(BaseModel):

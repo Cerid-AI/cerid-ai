@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
@@ -23,8 +23,49 @@ logger = logging.getLogger("ai-companion.triage")
 # State definition
 # ---------------------------------------------------------------------------
 
-# State dict type for LangGraph (uses dict internally)
+# State dict type for LangGraph node annotations (nodes spread `{**state, ...}`,
+# so the per-node view stays loose).
 TriageStateDict = dict[str, Any]
+
+
+def _take_latest(_current: Any, incoming: Any) -> Any:
+    """Channel reducer: last write wins.
+
+    ``StateGraph(dict)`` puts the entire state in one ``__root__`` LastValue
+    channel, which permits exactly one writer per superstep. ``extract_metadata``
+    has two inbound edges (direct from ``categorize``, conditional from
+    ``route_categorization``), so any simultaneous write to that channel raises
+    ``InvalidUpdateError``. At runtime only one branch executes, but Sentry's
+    LangGraph integration calls ``get_graph()`` on compile to draw the topology,
+    and that simulation *does* write both — which 500'd every `/agent/triage`
+    call whenever Sentry was enabled (the shipped default).
+
+    Declaring a typed schema gives each field its own channel, and this reducer
+    makes a concurrent write legal (take the newer value) instead of fatal.
+    """
+    return incoming
+
+
+class TriageState(TypedDict, total=False):
+    """Graph state schema — one channel per field, all last-write-wins."""
+
+    file_path: Annotated[str, _take_latest]
+    filename: Annotated[str, _take_latest]
+    domain: Annotated[str, _take_latest]
+    categorize_mode: Annotated[str, _take_latest]
+    tags: Annotated[Any, _take_latest]
+    parsed_text: Annotated[str, _take_latest]
+    file_type: Annotated[str, _take_latest]
+    page_count: Annotated[Any, _take_latest]
+    metadata: Annotated[dict[str, Any], _take_latest]
+    chunks: Annotated[list[Any], _take_latest]
+    content_hash: Annotated[str, _take_latest]
+    artifact_id: Annotated[str, _take_latest]
+    needs_ai_categorization: Annotated[bool, _take_latest]
+    is_structured: Annotated[bool, _take_latest]
+    status: Annotated[str, _take_latest]
+    error: Annotated[str, _take_latest]
+    result: Annotated[dict[str, Any], _take_latest]
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +253,7 @@ def build_triage_graph() -> StateGraph:
 
     Error handling: any node can set status="error", routing to error_end.
     """
-    graph = StateGraph(dict)  # type: ignore[type-var]
+    graph = StateGraph(TriageState)
 
     # Add nodes
     graph.add_node("validate", validate_node)  # type: ignore[type-var]

@@ -63,6 +63,28 @@ RUN useradd -m -u 1000 cerid
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Drop pip from the RUNTIME image. Its vendored copies of msgpack and
+# setuptools were the image's only remaining HIGH Trivy findings
+# (GHSA-6v7p-g79w-8964, CVE-2025-47273), and there is no upstream fix to wait
+# for: pip 26.1.2 — the newest release — vendors msgpack==1.1.2 and
+# setuptools==70.3.0, and so does pip's main branch. Upgrading pip changes
+# nothing.
+#
+# Removing it is the real fix rather than a suppression. Nothing here needs
+# pip: CMD is uvicorn, no code shells out to it, and every "pip install ..."
+# string in the tree is operator guidance in an error message. It also matches
+# the plugin convention stated above — optional dependencies belong in a
+# plugin-specific build layer or the sidecar, not installed into a running
+# container. The real setuptools (81.0.0, from requirements.lock, above both
+# fixed versions) is untouched and still provides pkg_resources.
+#
+# If a future build layer needs pip, install it in THAT stage; do not restore
+# it here.
+RUN python -m pip uninstall -y pip \
+    && rm -rf /usr/local/lib/python3.12/site-packages/pip \
+              /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+              /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 # Copy preloaded models if they exist (no-op if CERID_PRELOAD_MODELS=false)
 RUN mkdir -p /home/cerid/.cache/huggingface
 COPY --from=models /root/.cache/huggingface/ /home/cerid/.cache/huggingface/

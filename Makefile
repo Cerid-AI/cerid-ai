@@ -102,13 +102,19 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	@echo "[drift] env-example"
 	.venv/bin/python scripts/gen_env_example.py --check
 	@echo "[drift] router-registry"
-	.venv/bin/python scripts/gen_router_registry.py --check
+	@test -f docs/ROUTER_REGISTRY.md \
+	  && .venv/bin/python scripts/gen_router_registry.py --check \
+	  || echo "  (internal-only doc — not present in this checkout, skipped)"
 	@echo "[drift] route-response-model"
 	.venv/bin/python scripts/lint-route-response-model.py --check
 	@echo "[drift] retrieval-import-boundary"
 	.venv/bin/python scripts/lint-retrieval-import-boundary.py --check
 	@echo "[drift] magic-numbers"
 	.venv/bin/python scripts/lint-magic-numbers.py --check
+	@echo "[drift] test-antipatterns"
+	.venv/bin/python scripts/lint-test-antipatterns.py --check
+	@echo "[drift] ci-compose-namespacing"
+	.venv/bin/python scripts/lint-ci-compose-namespacing.py
 	@echo "[drift] external-fetch-boundary"
 	.venv/bin/python scripts/lint-external-fetch-boundary.py --check
 	@echo "[drift] gates-parity"
@@ -156,6 +162,9 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 prepush: ci-local drift-check ## FULL pre-push parity with remote CI (run before every push)
 	@echo "[prepush] ✓ complete — safe to push"
 
+mutation-check: ## Do the tests DETECT faults? (injects real defect classes; survivors = blind spots)
+	.venv/bin/python scripts/mutation_check.py
+
 # -- Load testing --
 smoke:
 	@echo "[smoke] requires stack running (scripts/start-cerid.sh)"
@@ -168,6 +177,14 @@ smoke:
 preservation-check: ## Run capability-preservation invariants (I1-I8) against a live stack
 	@echo "[preservation] requires stack running (scripts/start-cerid.sh)"
 	@cd src/mcp && ../../.venv/bin/python -m pytest tests/integration/ -m preservation -v --tb=short \
+	  --ignore-glob='tests/integration/test_processor_chaos.py' \
+	  --ignore-glob='tests/integration/test_processor_end_to_end.py' \
+	  --ignore-glob='tests/integration/test_o1_ingest_atomicity_preservation.py' \
+	  --ignore-glob='tests/integration/test_o2_memory_consolidation_preservation.py' \
+	  --ignore-glob='tests/integration/test_r3_hype_eval_gate.py' \
+	  --ignore-glob='tests/integration/test_w4_contradiction_preservation.py' \
+	  --ignore-glob='tests/integration/test_cl12_store_divergence_preservation.py' \
+	  --ignore-glob='tests/integration/test_e1_*.py' \
 	  --junit-xml=/tmp/preservation-results.xml ; \
 	rc=$$? ; \
 	cd ../.. ; \

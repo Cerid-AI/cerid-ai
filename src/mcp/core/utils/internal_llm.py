@@ -450,9 +450,23 @@ async def _call_ollama(
         last_exc = exc
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
         last_exc = exc  # the specific failure was already logged in the retry loop
-    # Local backend exhausted — fall back to OpenRouter. Record the degradation
-    # so /health.inference_routing.llm reports serving=openrouter / degraded
-    # instead of advertising the local provider that just failed.
+    # Local backend exhausted. Falling back to OpenRouter re-sends the identical
+    # payload (user content) to the cloud — which is exactly what an operator who
+    # chose local inference for privacy does not want. Honour the opt-out before
+    # egressing.
+    if not getattr(config, "ALLOW_CLOUD_EGRESS_WHEN_LOCAL", True):
+        logger.error(
+            "%s failed and ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false — not falling "
+            "back to OpenRouter (stage=%s)", label, stage or "<none>",
+        )
+        raise RuntimeError(
+            f"Local inference provider {provider!r} is unavailable and cloud "
+            f"fallback is disabled (ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false)."
+        ) from last_exc
+
+    # Record the degradation so /health.inference_routing.llm reports
+    # serving=openrouter / degraded instead of advertising the local provider
+    # that just failed.
     inference_health.record_fallback(
         "llm",
         configured=provider,

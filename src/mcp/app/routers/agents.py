@@ -204,6 +204,21 @@ class MemoryExtractionRequest(BaseModel):
     model: str = ""
 
 
+class MemoryExtractRecentRequest(BaseModel):
+    """No-payload trigger: mine the N most recent conversations."""
+
+    conversations: int = Field(3, ge=1, le=25)
+
+
+class SelfRagEnhanceRequest(BaseModel):
+    """No-payload trigger: defaults to the most recent assistant response."""
+
+    response_text: str = ""
+    conversation_id: str = ""
+    query: str = ""
+    model: str = ""
+
+
 class MemoryArchiveRequest(BaseModel):
     retention_days: int = Field(180, ge=1, le=3650)
 
@@ -785,15 +800,22 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
             redis_client=get_redis(),
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
-        logger.info(
-            "memory_extract_ok",
-            extra={
-                "stage": "memory_extract",
-                "model": req.model,
-                "response_len": len(req.response_text or ""),
-                "elapsed_ms": round(elapsed_ms, 1),
-            },
-        )
+        # `extract_memories` swallows its own timeout and returns [], so a total
+        # failure reaches here indistinguishable from "nothing worth extracting".
+        # Logging both as `memory_extract_ok` is how a fully-broken extraction
+        # path stayed invisible: log the empty case distinctly.
+        extracted = (result or {}).get("memories_extracted", 0)
+        log_extra = {
+            "stage": "memory_extract",
+            "model": req.model,
+            "response_len": len(req.response_text or ""),
+            "elapsed_ms": round(elapsed_ms, 1),
+            "memories_extracted": extracted,
+        }
+        if extracted:
+            logger.info("memory_extract_ok", extra=log_extra)
+        else:
+            logger.warning("memory_extract_empty", extra=log_extra)
         return result
     except Exception as e:
         elapsed_ms = (time.perf_counter() - started) * 1000
@@ -806,6 +828,129 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
                 "exc_type": type(e).__name__,
             },
         )
+        raise HTTPException(status_code=500, detail="Internal error processing request")
+
+
+def _recent_assistant_turns(limit: int) -> list[tuple[str, str]]:
+    """Return up to *limit* recent (conversation_id, assistant_text) pairs.
+
+    Newest first. Conversations are stored per-file under the sync dir; the
+    assistant turns are the ones worth mining for durable memory.
+    """
+    from app.sync.user_state import read_conversations
+
+    convs = read_conversations(config.SYNC_DIR)
+
+    def _last_ts(c: dict[str, Any]) -> float:
+        msgs = c.get("messages") or []
+        return float(msgs[-1].get("timestamp", 0) or 0) if msgs else 0.0
+
+    out: list[tuple[str, str]] = []
+    for conv in sorted(convs, key=_last_ts, reverse=True):
+        text = "\n\n".join(
+            str(m.get("content") or "")
+            for m in (conv.get("messages") or [])
+            if m.get("role") == "assistant" and m.get("content")
+        ).strip()
+        if text:
+            out.append((str(conv.get("id") or ""), text))
+        if len(out) >= limit:
+            break
+    return out
+
+
+@router.post("/agent/memory/extract-recent")  # response-model-allowed: dynamic response (shape varies)
+async def memory_extract_recent_endpoint(req: MemoryExtractRecentRequest):
+    """Mine recent conversations for durable memories — no payload required.
+
+    The Agents-pane card is a no-input trigger whose stated job is "mine recent
+    conversations"; `/agent/memory/extract` requires caller-supplied text, so the
+    card had no reachable endpoint. This supplies the server-side source.
+    """
+    if private_blocks(1):
+        return {"stored": False, "skipped": "private_mode"}
+    try:
+        from app.agents.memory import extract_and_store_memories
+
+        turns = _recent_assistant_turns(req.conversations)
+        if not turns:
+            return {
+                "conversations_scanned": 0,
+                "memories_extracted": 0,
+                "memories_stored": 0,
+                "detail": "No conversations with assistant turns found.",
+            }
+
+        extracted = stored = 0
+        for conv_id, text in turns:
+            result = await extract_and_store_memories(
+                response_text=text,
+                conversation_id=conv_id or "recent",
+                model="",
+                chroma_client=get_chroma(),
+                neo4j_driver=get_neo4j(),
+                redis_client=get_redis(),
+            )
+            extracted += int((result or {}).get("memories_extracted", 0) or 0)
+            stored += int((result or {}).get("memories_stored", 0) or 0)
+
+        return {
+            "conversations_scanned": len(turns),
+            "memories_extracted": extracted,
+            "memories_stored": stored,
+        }
+    except Exception as e:
+        logger.error(f"Recent-memory extraction error: {e}")
+        raise HTTPException(status_code=500, detail="Internal error processing request")
+
+
+@router.post("/agent/self-rag-enhance")  # response-model-allowed: dynamic response (shape varies)
+async def self_rag_enhance_endpoint(req: SelfRagEnhanceRequest):
+    """Re-check a response for unsupported claims and fill coverage gaps.
+
+    With no ``response_text`` supplied, falls back to the most recent assistant
+    turn — matching the Agents-pane card, which is a no-input trigger described
+    as "re-check the last response".
+    """
+    try:
+        from app.services.request_policy import build_request_context
+        from core.agents.guarded_retrieval import guarded_agent_query_full
+        from core.agents.self_rag import self_rag_enhance
+
+        response_text = (req.response_text or "").strip()
+        conversation_id = req.conversation_id or ""
+        if not response_text:
+            recent = _recent_assistant_turns(1)
+            if not recent:
+                return {
+                    "skipped": True,
+                    "reason": "no_recent_response",
+                    "detail": "No prior assistant response to validate.",
+                }
+            conversation_id, response_text = recent[0]
+
+        # Route through the guarded surface, not agent_query directly — it
+        # applies private-mode gating and consumer scoping that a raw call skips.
+        query_result = await guarded_agent_query_full(
+            request_context=build_request_context(),
+            query=req.query or response_text[:300],
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            redis_client=get_redis(),
+        )
+        result = await self_rag_enhance(
+            query_result=query_result,
+            response_text=response_text,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            redis_client=get_redis(),
+            model=req.model or None,
+        )
+        if conversation_id:
+            result.setdefault("conversation_id", conversation_id)
+        return result
+    except Exception as e:
+        logger.error(f"Self-RAG enhance error: {e}")
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 

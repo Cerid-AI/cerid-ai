@@ -117,6 +117,12 @@ def test_stream_true_still_returns_sse(monkeypatch):
 def test_stream_false_without_api_key_is_json_503(monkeypatch):
     async def _no_key(request): return ""
     monkeypatch.setattr(chat, "_resolve_api_key", _no_key)
+    # Local provider path accepts a sentinel key and rewrites cloud model
+    # ids — pin cloud-only so this case still asserts the JSON 503 config
+    # error when OpenRouter is missing (not a 502 from a local connect fail).
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OLLAMA_ENABLED", "false")
+    chat._chat_client = None
 
     resp = _client().post("/chat/stream", json={
         "model": "openrouter/openai/gpt-4o-mini",

@@ -77,7 +77,13 @@ describe("SetupWizard", () => {
     expect(screen.getByText(/grounded in your own documents/)).toBeInTheDocument()
     expect(screen.getByText(/Multi-domain knowledge base/)).toBeInTheDocument()
     expect(screen.getByText(/Verify every AI response/)).toBeInTheDocument()
-    expect(screen.getByText(/your data never leaves your machine/)).toBeInTheDocument()
+    // Deliberately asserts the *honest* privacy claim. This previously pinned
+    // "your data never leaves your machine", which is false under defaults —
+    // chat/query context, verification, and categorization all reach the
+    // configured provider. See the 2026-07-29 GA functional-readiness audit.
+    expect(
+      screen.getByText(/your knowledge stores stay on your machine/)
+    ).toBeInTheDocument()
   })
 
   it("shows Get Started button on welcome step", () => {

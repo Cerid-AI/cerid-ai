@@ -9,7 +9,8 @@ When `grok-handoff` is invoked (optionally with a reason), you should:
 ### 1. Git & Work Context
 - Run git status, recent commits, dirty files, branch info
 - Check `tasks/todo.md` for open items
-- Check `tasks/lessons.md` for recent insights
+- Check `tasks/lessons.md` for recent insights (an index of what is enforced and
+  where; recovery procedures live in `docs/RUNBOOK_INCIDENTS.md`)
 
 ### 2. Architecture & Preservation Snapshot
 - Run `grok-preserve`

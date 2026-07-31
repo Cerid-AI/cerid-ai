@@ -68,20 +68,46 @@ _INJECTION_MARKERS = (
 )
 
 
+# Last level successfully read from Redis. Consulted only when Redis is
+# unreachable — see get_private_mode_level.
+_last_known_level: int = 0
+
+
 def get_private_mode_level() -> int:
     """Return the current global private-mode level (0 = disabled).
 
-    Fails open to 0 on any error (Redis down, bad value, etc.) —
-    privacy gating must never break normal operation, and the client
-    applies its own skip logic independently of this server check.
+    On a Redis error this returns the **last level successfully read**, not 0.
+
+    The previous behaviour failed open to 0, reasoning that "the client applies
+    its own skip logic independently". That holds only for the browser: direct
+    API, SDK and MCP callers have no client-side skip, so a transient Redis
+    blip silently deactivated every L1-L4 server-side guarantee for them, with
+    nothing in the response to say so. In a privacy-first product a dropped
+    guarantee must not be the quiet default.
+
+    Falling back to the last-known level is safe in both directions because the
+    level itself lives in Redis: if Redis is unreachable nobody can have changed
+    it, so the cached value *is* the current value. It also cannot break a
+    normal install — an instance that never enabled private mode caches 0 and
+    behaves exactly as before. Only a cold start with Redis already down yields
+    0 without ever having observed the real level, and that case is logged.
     """
+    global _last_known_level
     try:
         redis = get_redis()
         level = redis.get(PRIVATE_MODE_KEY)
-        return int(level) if level is not None else 0
+        resolved = int(level) if level is not None else 0
+        _last_known_level = resolved
+        return resolved
     except Exception as exc:
         log_swallowed_error("private_mode.get_level", exc)
-        return 0
+        if _last_known_level:
+            logger.warning(
+                "private-mode level unreadable (Redis error) — holding last "
+                "known level %d rather than failing open to 0",
+                _last_known_level,
+            )
+        return _last_known_level
 
 
 def private_blocks(threshold: int) -> bool:

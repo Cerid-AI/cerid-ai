@@ -371,9 +371,23 @@ def api_key_status(request: Request):
 # Usage metering
 # ---------------------------------------------------------------------------
 
+# Flip to True in the same change that adds the first production call to
+# ``utils.usage.record_query`` / ``record_ingestion``. Kept honest by
+# tests/test_usage_metering_wired.py, which fails in both directions.
+_USAGE_METERING_WIRED = False
+
+
 @router.get("/me/usage")  # response-model-allowed: dynamic response (shape varies)
 def user_usage(request: Request):
-    """Return the current month's usage counters for the authenticated user."""
+    """Return the current month's usage counters for the authenticated user.
+
+    ``metered`` is False because nothing increments these counters yet:
+    ``utils.usage.record_query`` / ``record_ingestion`` exist and are tested but
+    have no production call site, so the totals are structurally always zero.
+    The field is here so an experimental multi-user operator cannot mistake an
+    unwired meter for genuine zero consumption. Wire the recorders into the
+    query and ingestion paths before removing it.
+    """
     user = _get_authenticated_user(request)
     from utils.usage import get_usage
-    return get_usage(get_redis(), user["id"])
+    return {**get_usage(get_redis(), user["id"]), "metered": _USAGE_METERING_WIRED}

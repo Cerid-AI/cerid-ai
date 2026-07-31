@@ -37,6 +37,24 @@ from errors import RetrievalError
 # extract_and_store_memories so this is the most-load-bearing budget.
 CONSOLIDATION_LLM_BUDGET_S = 3.0
 
+# ...and mirrors its provider problem too. On local inference the 3s ceiling
+# timed out (6 swallowed `classify_timeout` events in one hour on this host),
+# so ADD/UPDATE classification never returned and no memory was ever superseded
+# — the KB had zero SUPERSEDES relationships across its entire history.
+_DEFAULT_CONSOLIDATION_BUDGET_S = 3.0
+_LOCAL_CONSOLIDATION_BUDGET_S = 45.0
+
+
+def _resolve_consolidation_budget_s() -> float:
+    """Consolidation budget for the active provider."""
+    from core.agents.memory import resolve_llm_budget_s
+
+    return resolve_llm_budget_s(
+        CONSOLIDATION_LLM_BUDGET_S,
+        _DEFAULT_CONSOLIDATION_BUDGET_S,
+        _LOCAL_CONSOLIDATION_BUDGET_S,
+    )
+
 logger = logging.getLogger("ai-companion.memory_consolidation")
 
 # Similarity threshold for candidate retrieval — below this, treat as new info
@@ -160,7 +178,7 @@ async def _llm_classify(
                 max_tokens=200,
                 stage="memory_consolidation",
             ),
-            timeout=CONSOLIDATION_LLM_BUDGET_S,
+            timeout=_resolve_consolidation_budget_s(),
         )
         parsed = parse_llm_json(content)
 
@@ -193,7 +211,7 @@ async def _llm_classify(
         log_swallowed_error("core.agents.memory_consolidation.classify_timeout", exc)
         logger.warning(
             "Memory consolidation exceeded %.1fs budget — defaulting to ADD",
-            CONSOLIDATION_LLM_BUDGET_S,
+            _resolve_consolidation_budget_s(),
         )
         _fire_failure_callback("timeout")
         return MemoryAction(action="ADD", reason="timeout")

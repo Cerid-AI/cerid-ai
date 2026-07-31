@@ -164,6 +164,16 @@ def _reset_llm_client():
     with contextlib.suppress(Exception):  # best-effort wiki-fetcher registry reset
         from core.agents.query_agent import set_wiki_page_fetcher
         set_wiki_page_fetcher(None)
+    # Private mode holds the last level it successfully read, so an unreachable
+    # Redis keeps enforcing rather than silently failing open (see
+    # app/services/private_mode.py). That is a process-lifetime cache, which is
+    # right in production — the level lives in Redis, so if Redis is down nobody
+    # can have changed it — but across tests it launders one case's level into
+    # the next: a test that enabled private mode left later tests getting 403s
+    # from endpoints they expected to reach.
+    with contextlib.suppress(Exception):  # best-effort private-mode cache reset
+        import app.services.private_mode as _pm_mod
+        _pm_mod._last_known_level = 0
     # Reset all circuit breakers to prevent cross-test state leakage.
     # The "bifrost-*" breaker names survive as legacy identifiers for
     # historical call-site categories (rerank/claims/verify/...); Bifrost

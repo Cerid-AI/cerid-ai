@@ -384,72 +384,55 @@ class TestVerificationPipeline:
     core.utils.internal_llm.call_internal_llm (the LLM call site).
     """
 
-    @pytest.mark.asyncio
-    async def test_verify_supported_claim(self):
-        """Claim matches KB content -> verified.
+    # Until 2026-07-30 this class opened with three tests that patched
+    # ``verify_claim``, immediately called the patch, and asserted the fixture
+    # they had just supplied — exercising unittest.mock and nothing else, while
+    # counting toward the e2e suite. They are replaced by the coverage they
+    # claimed: a real run of the streaming pipeline, with only the leaf verifier
+    # mocked, asserting that each distinct verdict actually reaches the SSE
+    # stream and the summary. Per-claim verifier behaviour is unit-tested in
+    # test_hallucination.py; what belongs *here* is the wiring between them.
+    @staticmethod
+    def _streaming_env(monkeypatch):
+        """Override only the gates, on the real config module.
 
-        Mocks verify_claim at the function boundary since the real
-        implementation has deep config/LLM dependencies tested in
-        test_hallucination.py (210 tests).
+        ``patch("...streaming.config")`` replaces the whole module with a
+        MagicMock, so every attribute the test does not explicitly set becomes a
+        MagicMock too. The verification loop compares several of them against
+        ints, dies on ``'<=' not supported between MagicMock and int``, and
+        swallows the error — leaving a stream with claim events but no verdicts.
+        Any test asserting only on extraction and summary passes anyway, which
+        is how these tests looked healthy while covering nothing.
         """
-        supported_result = {
-            "claim": "PostgreSQL uses MVCC",
-            "status": "verified", "confidence": 0.95,
-            "method": "kb_cross_model", "similarity": 0.92,
-            "source_urls": [],
-            "explanation": "Matches known PostgreSQL info",
-        }
-        with patch("core.agents.hallucination.verification.verify_claim",
-                    new_callable=AsyncMock, return_value=supported_result):
-            from core.agents.hallucination.verification import verify_claim
-            result = await verify_claim("PostgreSQL uses MVCC",
-                                        MagicMock(), MagicMock(), MagicMock())
+        import config as real_config
+        from core.agents.hallucination import streaming as streaming_mod
 
-        assert result["status"] in ("verified", "uncertain")
-        assert result["confidence"] == 0.95
+        monkeypatch.setattr(streaming_mod.config, "HALLUCINATION_MIN_RESPONSE_LENGTH", 50)
+        monkeypatch.setattr(streaming_mod.config, "HALLUCINATION_MAX_CLAIMS", 10)
+        monkeypatch.setattr(streaming_mod.config, "HALLUCINATION_THRESHOLD", 0.6)
+        monkeypatch.setattr(streaming_mod.config, "ENABLE_VERIFIED_MEMORY_PROMOTION", False)
+        return real_config
 
     @pytest.mark.asyncio
-    async def test_verify_no_evidence(self):
-        """No KB match -> uncertain."""
-        uncertain_result = {
-            "claim": "The sky is made of cheese",
-            "status": "uncertain", "confidence": 0.4,
-            "method": "external", "similarity": 0.1,
-            "source_urls": [],
-            "explanation": "No evidence found",
-        }
-        with patch("core.agents.hallucination.verification.verify_claim",
-                    new_callable=AsyncMock, return_value=uncertain_result):
-            from core.agents.hallucination.verification import verify_claim
-            result = await verify_claim("The sky is made of cheese",
-                                        MagicMock(), MagicMock(), MagicMock())
+    @pytest.mark.parametrize(
+        ("status", "confidence", "summary_bucket"),
+        [
+            ("verified", 0.95, "verified"),
+            ("unverified", 0.20, "unverified"),
+            ("uncertain", 0.40, "uncertain"),
+        ],
+    )
+    async def test_verdict_propagates_through_the_pipeline(
+        self, monkeypatch, status, confidence, summary_bucket,
+    ):
+        """A verifier verdict must reach both the claim event and the summary.
 
-        assert result["status"] in ("uncertain", "unverified")
-        assert result["confidence"] == 0.4
-
-    @pytest.mark.asyncio
-    async def test_verify_numerical_claim(self):
-        """Exact numbers from KB -> verified."""
-        numerical_result = {
-            "claim": "The Eiffel Tower is 330 meters tall",
-            "status": "verified", "confidence": 0.98,
-            "method": "kb_cross_model", "similarity": 0.95,
-            "source_urls": [],
-            "explanation": "Exact match: 330 meters found in KB",
-        }
-        with patch("core.agents.hallucination.verification.verify_claim",
-                    new_callable=AsyncMock, return_value=numerical_result):
-            from core.agents.hallucination.verification import verify_claim
-            result = await verify_claim("The Eiffel Tower is 330 meters tall",
-                                        MagicMock(), MagicMock(), MagicMock())
-
-        assert result["status"] in ("verified", "uncertain")
-        assert result["confidence"] == 0.98
-
-    @pytest.mark.asyncio
-    async def test_verify_streaming_format(self):
-        """SSE event format: extraction_complete, claim_extracted, claim results, summary."""
+        The heuristic extractor handles this response, so nothing in the
+        extraction path is stubbed — only the leaf verifier is.
+        """
         from core.agents.hallucination.streaming import verify_response_streaming
+
+        self._streaming_env(monkeypatch)
 
         chroma_client, collection = _chroma_mocks()
         collection.query.return_value = _chroma_query_result([], [], [], [])
@@ -460,23 +443,127 @@ class TestVerificationPipeline:
                          "It was first released in 1996. " * 5)
 
         events = []
-        with patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock) as mock_ex, \
-             patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock) as mock_vc, \
-             patch("core.agents.hallucination.streaming.config") as mc, \
+        with patch("core.agents.hallucination.streaming.verify_claim",
+                   new_callable=AsyncMock) as mock_vc, \
              patch("core.agents.hallucination.streaming._check_history_consistency",
                    new_callable=AsyncMock, return_value=None), \
              patch("utils.agent_events.emit_agent_event"):
-            mc.HALLUCINATION_THRESHOLD = 0.6
-            mc.HALLUCINATION_MIN_RESPONSE_LENGTH = 50
-            mc.HALLUCINATION_MAX_CLAIMS = 10
-            mc.VERIFICATION_CURRENT_EVENT_MODEL = "openai/gpt-4o-mini"
-            mc.VERIFICATION_EXPERT_MODEL = "xai/grok-4"
-
-            mock_ex.return_value = (
-                ["PostgreSQL uses MVCC", "ACID transactions supported"], "llm")
             mock_vc.return_value = {
-                "status": "verified", "confidence": 0.9,
-                "claim": "PostgreSQL uses MVCC", "method": "kb_similarity",
+                "claim": "PostgreSQL uses MVCC",
+                "status": status,
+                "similarity": confidence,
+                "confidence": confidence,
+                "verification_method": "kb_cross_model",
+            }
+            async for event in verify_response_streaming(
+                    long_response, conversation_id="conv-verdict",
+                    chroma_client=chroma_client, neo4j_driver=driver,
+                    redis_client=MagicMock()):
+                events.append(event)
+
+        # The verifier was genuinely invoked by the pipeline, not by the test.
+        assert mock_vc.await_count >= 1, (
+            "pipeline never called verify_claim — the verification loop bailed "
+            f"before doing any work. Events: {[e.get('type') for e in events]}"
+        )
+
+        verdicts = [e for e in events if e.get("type") == "claim_verified"]
+        assert verdicts, (
+            f"no claim_verified event emitted; got {[e.get('type') for e in events]}"
+        )
+        assert all(v["status"] == status for v in verdicts), (
+            f"pipeline reshaped the verdict: emitted "
+            f"{[v['status'] for v in verdicts]}, verifier returned {status!r}"
+        )
+
+        summary = events[-1]
+        assert summary.get("type") == "summary"
+        assert summary.get(summary_bucket, 0) >= 1, (
+            f"verdict {status!r} did not land in the {summary_bucket!r} summary "
+            f"bucket: {summary}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_every_claim_event_carries_a_type(self, monkeypatch):
+        """claim_type must be on the wire for every claim.
+
+        The category drives ``promote_verified_facts``' meta-claim filter. While
+        it was computed for the SSE event but never written back into the
+        persisted claims, "I don't know" answers were eligible for promotion to
+        permanent, non-decaying empirical memories.
+        """
+        from core.agents.hallucination.models import ClaimType
+        from core.agents.hallucination.streaming import verify_response_streaming
+
+        self._streaming_env(monkeypatch)
+
+        chroma_client, collection = _chroma_mocks()
+        collection.query.return_value = _chroma_query_result([], [], [], [])
+        driver, _ = _neo4j_mocks()
+
+        events = []
+        with patch("core.agents.hallucination.streaming.verify_claim",
+                   new_callable=AsyncMock) as mock_vc, \
+             patch("core.agents.hallucination.streaming._check_history_consistency",
+                   new_callable=AsyncMock, return_value=None), \
+             patch("utils.agent_events.emit_agent_event"):
+            mock_vc.return_value = {
+                "claim": "PostgreSQL uses MVCC", "status": "verified",
+                "similarity": 0.9, "confidence": 0.9,
+            }
+            async for event in verify_response_streaming(
+                    ("PostgreSQL uses MVCC for concurrent access. "
+                     "The database supports ACID transactions. "
+                     "It was first released in 1996. " * 5),
+                    conversation_id="conv-type",
+                    chroma_client=chroma_client, neo4j_driver=driver,
+                    redis_client=MagicMock()):
+                events.append(event)
+
+        typed = [e for e in events if e.get("type") == "claim_extracted"]
+        assert typed, "no claim_extracted events emitted"
+
+        known = {c.value for c in ClaimType}
+        for event in typed:
+            assert event.get("claim_type") in known, (
+                f"claim event carries an untypable claim_type "
+                f"{event.get('claim_type')!r}; the canonical ClaimType model "
+                f"accepts only {sorted(known)}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_verify_streaming_format(self, monkeypatch):
+        """SSE event format: extraction_complete, claim_extracted, claim results, summary.
+
+        Previously patched ``streaming.extract_claims`` — a symbol
+        ``verify_response_streaming`` never calls (it uses
+        ``_extract_claims_heuristic`` / ``_extract_claims_llm`` directly), so the
+        stub was inert and the real extractor ran. Combined with the blanket
+        ``config`` mock that killed the verification loop, this asserted only
+        that three event types appear. Now it runs the real extraction path and
+        additionally pins that verdicts actually arrive.
+        """
+        from core.agents.hallucination.streaming import verify_response_streaming
+
+        self._streaming_env(monkeypatch)
+
+        chroma_client, collection = _chroma_mocks()
+        collection.query.return_value = _chroma_query_result([], [], [], [])
+        driver, _ = _neo4j_mocks()
+
+        long_response = ("PostgreSQL uses MVCC for concurrent access. "
+                         "The database supports ACID transactions. "
+                         "It was first released in 1996. " * 5)
+
+        events = []
+        with patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock) as mock_vc, \
+             patch("core.agents.hallucination.streaming._check_history_consistency",
+                   new_callable=AsyncMock, return_value=None), \
+             patch("utils.agent_events.emit_agent_event"):
+            mock_vc.return_value = {
+                "status": "verified", "similarity": 0.9, "confidence": 0.9,
+                "claim": "PostgreSQL uses MVCC",
+                "verification_method": "kb_similarity",
             }
             async for event in verify_response_streaming(
                 long_response, conversation_id="conv-123",
@@ -487,9 +574,14 @@ class TestVerificationPipeline:
         event_types = [e.get("type") for e in events]
         assert "extraction_complete" in event_types
         assert "claim_extracted" in event_types
+        assert "claim_verified" in event_types, (
+            "the stream produced no verdicts — the verification loop never ran. "
+            f"Events: {event_types}"
+        )
         assert events[-1].get("type") == "summary"
         summary = events[-1]
         assert "verified" in summary and "unverified" in summary and "total" in summary
+        assert summary["total"] >= 1
 
 
 # ===========================================================================

@@ -35,6 +35,58 @@ logger = logging.getLogger("ai-companion.verified_memory")
 _PROMOTE_LOCKS: dict[str, asyncio.Lock] = {}
 
 
+# Provenance keys the canonical adapter can resolve from the nested
+# ``sources: [{...}]`` shape onto the flat production shape.
+_PROVENANCE_KEYS = (
+    "source_artifact_id",
+    "source_filename",
+    "source_domain",
+    "source_snippet",
+)
+
+
+def _normalize_claim(raw: Any) -> dict[str, Any]:
+    """Resolve claim provenance across the three historical claim shapes.
+
+    ``core.agents.hallucination.models`` declares one canonical claim shape and
+    one adapter (``ClaimVerification.from_legacy_dict``). This module never
+    adopted it: it read the *speculative* nested ``sources: [{artifact_id}]``
+    shape while ``verify_claim`` has only ever emitted the flat
+    ``source_artifact_id``, so every promoted memory landed with empty
+    provenance — the P1.4 defect class the canonical model exists to eliminate,
+    reproduced in a module that predates its adoption.
+
+    Only **provenance** is lifted from the adapter, and only where the raw claim
+    left it empty. Returning ``model_dump()`` wholesale is not safe here: it
+    materializes every field with a default, so a defaulted ``status`` /
+    ``similarity`` / ``claim_type`` becomes indistinguishable from a supplied
+    one and silently shadows the legacy aliases (``verdict``, ``confidence``,
+    ``type``) that the filters below fall back to. Defaults must not outrank
+    real data.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    if raw.get("source_artifact_id") or not raw.get("sources"):
+        return raw  # already flat, or nothing nested to fold — no work to do
+    try:
+        from core.agents.hallucination.models import ClaimVerification
+
+        resolved = ClaimVerification.from_legacy_dict(raw).model_dump()
+    except Exception as exc:  # noqa: BLE001 — adapter must never block promotion
+        from core.utils.swallowed import log_swallowed_error
+
+        log_swallowed_error("core.agents.verified_memory.normalize_claim", exc)
+        return raw
+
+    merged = dict(raw)
+    for key in _PROVENANCE_KEYS:
+        if not merged.get(key) and resolved.get(key):
+            merged[key] = resolved[key]
+    if not merged.get("source_urls") and resolved.get("source_urls"):
+        merged["source_urls"] = resolved["source_urls"]
+    return merged
+
+
 def _claim_lock(claim_text: str) -> asyncio.Lock:
     normalized = " ".join(claim_text.strip().lower().split())
     key = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -85,12 +137,15 @@ async def promote_verified_facts(
 
     _SKIP_TYPES = {"ignorance", "evasion", "citation"}
 
-    for claim_data in claims:
+    for raw_claim in claims:
         try:
+            claim_data = _normalize_claim(raw_claim)
             verdict = claim_data.get("status", claim_data.get("verdict", ""))
             # Production claims use "similarity", verification reports use "confidence"
             confidence = float(claim_data.get("similarity", claim_data.get("confidence", 0.0)))
-            claim_type = claim_data.get("type", "factual")
+            # "type" is the legacy report key; "claim_type" is what the live
+            # pipeline stamps. Reading only "type" made Filter 3 dead code.
+            claim_type = claim_data.get("claim_type") or claim_data.get("type") or "factual"
             claim_text = claim_data.get("claim", "")
             # Real KB-NLI entailment exists only on the kb_nli verification path;
             # cross-model-verified claims carry no NLI score (None here). We do
@@ -160,12 +215,12 @@ async def promote_verified_facts(
                     counts["errors"] += 1
                     continue
 
-                source_artifacts = claim_data.get("sources", [])
-                primary_artifact_id = (
-                    source_artifacts[0].get("artifact_id", "")
-                    if source_artifacts
-                    else ""
-                )
+                # _normalize_claim has already folded the nested
+                # ``sources: [{artifact_id}]`` shape onto the flat production
+                # key, so one read covers both. Reading only the nested shape
+                # left every promoted memory with empty provenance, because
+                # verify_claim has only ever emitted the flat one.
+                primary_artifact_id = claim_data.get("source_artifact_id", "")
 
                 memory_id = create_memory_fn(neo4j_driver, {
                     "text": claim_text,

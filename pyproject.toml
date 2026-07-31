@@ -51,6 +51,7 @@ markers = [
     "benchmark_slo: Latency SLO benchmarks — require a running MCP stack (excluded from default pytest run)",
     "preservation: Capability-preservation gates for the consolidation program — run against a live stack, merge-gate for every sprint. See tasks/2026-04-19-consolidation-program.md",
     "chaos: Integration tests for the background processor — fakeredis, no Docker required",
+    "live_stack: Needs a running stack but takes no live-stack fixture (drives a router that calls get_redis/get_neo4j internally). Honoured by tests/integration/conftest.py::uses_live_stack — fixture-shape inference cannot detect these.",
 ]
 
 [tool.importlinter]
@@ -65,3 +66,37 @@ forbidden_modules = ["app", "routers", "services", "middleware", "parsers", "syn
 
 # config→utils boundary removed: config.settings legitimately imports utils.model_registry
 # The critical boundary (core must not import app) is enforced above
+
+# ---------------------------------------------------------------------------
+# Mutation testing (mutmut) — measures whether the suite DETECTS injected
+# faults, not merely whether it executes lines. Added after the 2026-07-29
+# audit found green tests coexisting with a backup that silently discarded the
+# entire vector store: coverage said "tested", mutation testing asks "would a
+# defect here be caught?".
+#
+# Scoped to the modules where a green-but-blind suite is most dangerous —
+# data durability, lifecycle, privacy gating, auth. Widen deliberately: each
+# mutant re-runs the selected tests, so cost scales with paths × suite time.
+#
+#   .venv/bin/mutmut run          # generate + test mutants
+#   .venv/bin/mutmut results      # surviving mutants = blind spots
+#   .venv/bin/mutmut show <id>    # the exact undetected change
+# ---------------------------------------------------------------------------
+[tool.mutmut]
+source_paths = [
+    "src/mcp/app/sync/export.py",
+    "src/mcp/app/sync/tombstones.py",
+    "src/mcp/app/services/private_mode.py",
+    "src/mcp/app/middleware/auth.py",
+]
+# Scoped to the tests that actually cover the mutated modules. mutmut requires
+# a green baseline and re-runs this selection per mutant, so pointing it at the
+# whole suite both failed (integration tests need a live stack) and would cost
+# ~90s × N mutants.
+pytest_add_cli_args_test_selection = [
+    "src/mcp/tests/test_sync.py",
+    "src/mcp/tests/test_sync_full_surface.py",
+    "src/mcp/tests/test_middleware_auth.py",
+    "src/mcp/tests/test_mcp_auth_lan_gating.py",
+    "src/mcp/tests/test_domain_privacy.py",
+]

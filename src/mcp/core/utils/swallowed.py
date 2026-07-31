@@ -26,12 +26,41 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger("ai-companion.swallowed")
 
 _REDIS_KEY_FMT = "cerid:swallowed:{module}"
 _DEFAULT_WINDOW_S = 3600
+
+
+# ---------------------------------------------------------------------------
+# Redis DI sink (core/ must never import app/ — see docs/CONVENTIONS.md).
+#
+# Only ~25 of 1,000+ log_swallowed_error call sites passed redis_client=, so the
+# `cerid:swallowed:*` counters were never written and
+# /health.swallowed_errors_last_hour reported a permanent zero while jobs failed
+# nightly. Rather than touch 1,000 call sites, the app layer installs a getter
+# once at startup and the helper resolves Redis itself.
+# ---------------------------------------------------------------------------
+_redis_sink: Callable[[], Any] | None = None
+
+
+def set_swallowed_redis_sink(fn: Callable[[], Any] | None) -> None:
+    """Install (or clear) the callable that returns a Redis client."""
+    global _redis_sink
+    _redis_sink = fn
+
+
+def _resolve_redis() -> Any | None:
+    """Best-effort Redis handle from the sink; never raises."""
+    if _redis_sink is None:
+        return None
+    try:
+        return _redis_sink()
+    except Exception:  # noqa: BLE001  # silent-catch-meta: observability must never raise
+        return None
 
 
 def log_swallowed_error(
@@ -83,6 +112,8 @@ def log_swallowed_error(
     except Exception:  # noqa: BLE001  # silent-catch-meta: observability layer must never raise/recurse
         pass
 
+    if redis_client is None:
+        redis_client = _resolve_redis()
     if redis_client is None:
         return
     try:

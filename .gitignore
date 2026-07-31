@@ -125,6 +125,9 @@ tasks/
 .claude/plans/
 # Claude Code session lock files — runtime artifacts, expire on session end
 .claude/*.lock
+# Agent worktrees — live `git worktree` checkouts (184MB as of 2026-07-30).
+# Registered in .git/worktrees, so they are real checkouts, never repo content.
+.claude/worktrees/
 
 # Runtime log artifacts
 src/mcp/rag-api-logs.txt
@@ -143,3 +146,4 @@ docker-compose.override.yml
 # Eval harness outputs (Phase 0 quality program)
 src/mcp/tests/eval/out/
 scripts/out/
+.mutation-check.lock

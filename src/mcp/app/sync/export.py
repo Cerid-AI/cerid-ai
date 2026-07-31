@@ -31,6 +31,7 @@ from app.sync._helpers import (
     RELATIONSHIPS_JSONL,
     _default_sync_dir,
     _ensure_dir,
+    _v2_collections_base,
     _write_jsonl,
 )
 from app.sync.manifest import write_manifest
@@ -169,6 +170,7 @@ def export_chroma(
     out_dir = _ensure_dir(os.path.join(sync_dir, CHROMA_SUBDIR))
 
     domain_counts: dict[str, int] = {}
+    failed_domains: dict[str, str] = {}
     total_chunks = 0
     target_domains = filter_domains or config.DOMAINS
 
@@ -179,7 +181,7 @@ def export_chroma(
 
         try:
             coll_resp = httpx.get(
-                f"{chroma_url}/api/v1/collections/{coll_name}",
+                f"{_v2_collections_base(chroma_url)}/{coll_name}",
                 timeout=30.0,
             )
             if coll_resp.status_code in (400, 404):
@@ -195,7 +197,7 @@ def export_chroma(
                 offset = 0
                 while True:
                     resp = httpx.post(
-                        f"{chroma_url}/api/v1/collections/{collection_id}/get",
+                        f"{_v2_collections_base(chroma_url)}/{collection_id}/get",
                         json={
                             "include": ["documents", "metadatas", "embeddings"],
                             "limit": CHROMA_BATCH_SIZE,
@@ -237,23 +239,34 @@ def export_chroma(
         except httpx.HTTPStatusError as exc:
             logger.error("ChromaDB HTTP error for %s: %s", coll_name, exc)
             domain_counts[domain] = chunk_count
+            failed_domains[domain] = f"HTTP {exc.response.status_code}"
             continue
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('app.sync.export', exc)
             logger.error("ChromaDB export failed for %s: %s", coll_name, exc)
             domain_counts[domain] = chunk_count
+            failed_domains[domain] = str(exc)
             continue
 
         domain_counts[domain] = chunk_count
         total_chunks += chunk_count
         logger.info("ChromaDB exported %d chunks for domain '%s'", chunk_count, domain)
 
+    if failed_domains:
+        # A vector export that fails every domain but returns a success-shaped
+        # dict is how a backup silently ships with no vectors in it. Callers
+        # must be able to tell the difference.
+        logger.error(
+            "ChromaDB export incomplete: %d/%d domains failed (%s)",
+            len(failed_domains), len(target_domains), failed_domains,
+        )
     logger.info("ChromaDB export complete: %d total chunks → %s", total_chunks, out_dir)
     return {
         "domains": domain_counts,
         "total_chunks": total_chunks,
         "output_dir": str(out_dir),
+        "failed_domains": failed_domains,
     }
 
 

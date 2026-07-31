@@ -23,6 +23,7 @@ from app.sync._helpers import (
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
     _default_sync_dir,
+    _v2_collections_base,
 )
 from app.sync.manifest import read_manifest
 
@@ -79,12 +80,12 @@ def compare_status(
         coll_name = config.collection_name(domain)
         try:
             coll_resp = httpx.get(
-                f"{chroma_url}/api/v1/collections/{coll_name}", timeout=10.0
+                f"{_v2_collections_base(chroma_url)}/{coll_name}", timeout=10.0
             )
             if coll_resp.status_code == HTTPStatus.OK:
                 coll_id = coll_resp.json().get("id", coll_name)
                 count_resp = httpx.get(
-                    f"{chroma_url}/api/v1/collections/{coll_id}/count", timeout=10.0
+                    f"{_v2_collections_base(chroma_url)}/{coll_id}/count", timeout=10.0
                 )
                 if count_resp.status_code == HTTPStatus.OK:
                     local["chroma_chunks"][domain] = count_resp.json()
