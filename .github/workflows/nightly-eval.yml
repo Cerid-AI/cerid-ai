@@ -38,6 +38,31 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      # Fail fast and honestly when the credential is dead. Without this every
+      # LLM call 401s, verification degrades every claim to "uncertain", and the
+      # gate reports "overall_accuracy 0.25 < VERDICT_EVAL_MIN_ACCURACY 0.75
+      # FLOOR VIOLATION" — a quality regression that never happened. That misread
+      # is why the failure sat mischaracterised for days: the key had simply been
+      # revoked upstream. An eval that cannot reach its model is not a failing
+      # eval, it is an unmeasured one, and it must say so.
+      - name: Preflight — OpenRouter credential
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::OPENROUTER_API_KEY is not set — the eval would score nothing."
+            exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            https://openrouter.ai/api/v1/auth/key || echo 000)
+          case "$code" in
+            200) echo "OpenRouter credential accepted." ;;
+            401) echo "::error::OpenRouter rejected the key (401) — revoked or expired. Rotate it at https://openrouter.ai/keys and update the OPENROUTER_API_KEY secret in BOTH repos. This is NOT a quality regression; do not chase the accuracy floor."; exit 1 ;;
+            402) echo "::error::OpenRouter credit exhausted (402). Top up before this eval can score anything."; exit 1 ;;
+            000) echo "::error::Could not reach OpenRouter at all (network/DNS). Eval not run."; exit 1 ;;
+            *)   echo "::error::OpenRouter preflight returned HTTP $code — eval not run."; exit 1 ;;
+          esac
 
       # ── self-hosted mac-pro path: containerized ─────────────────────────
       # The eval imports the full MCP runtime; current onnxruntime releases
@@ -111,6 +136,31 @@ jobs:
       CERID_PORT_GUI: "13000"
     steps:
       - uses: actions/checkout@v6
+      # Fail fast and honestly when the credential is dead. Without this every
+      # LLM call 401s, verification degrades every claim to "uncertain", and the
+      # gate reports "overall_accuracy 0.25 < VERDICT_EVAL_MIN_ACCURACY 0.75
+      # FLOOR VIOLATION" — a quality regression that never happened. That misread
+      # is why the failure sat mischaracterised for days: the key had simply been
+      # revoked upstream. An eval that cannot reach its model is not a failing
+      # eval, it is an unmeasured one, and it must say so.
+      - name: Preflight — OpenRouter credential
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::OPENROUTER_API_KEY is not set — the eval would score nothing."
+            exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            https://openrouter.ai/api/v1/auth/key || echo 000)
+          case "$code" in
+            200) echo "OpenRouter credential accepted." ;;
+            401) echo "::error::OpenRouter rejected the key (401) — revoked or expired. Rotate it at https://openrouter.ai/keys and update the OPENROUTER_API_KEY secret in BOTH repos. This is NOT a quality regression; do not chase the accuracy floor."; exit 1 ;;
+            402) echo "::error::OpenRouter credit exhausted (402). Top up before this eval can score anything."; exit 1 ;;
+            000) echo "::error::Could not reach OpenRouter at all (network/DNS). Eval not run."; exit 1 ;;
+            *)   echo "::error::OpenRouter preflight returned HTTP $code — eval not run."; exit 1 ;;
+          esac
       - name: Seed .env from .env.example
         env:
           OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY }}
