@@ -1096,6 +1096,40 @@ def _extract_citation_urls(message: dict[str, Any]) -> list[str]:
     return urls
 
 
+async def build_kb_evidence_block(kb_snippet: str | None, claim: str) -> str:
+    """Render the KB-evidence block injected into the external-verifier prompt.
+
+    Scores *kb_snippet* against *claim* with the configured grounding verifier and
+    renders the label + confidence header. Returns ``""`` for an empty snippet.
+
+    v0.93.10: async-batched NLI so this coalesces with the concurrent
+    ``verify_claim()`` calls in the same ``asyncio.gather()``. Phase 3.1: routed
+    through the grounding verifier and widened to :data:`NLI_PREMISE_CHAR_LIMIT`
+    (the old ``[:512]``-char slice starved expert-mode's 1200-char snippet of
+    ~half its evidence before the tokenizer's 512-*token* budget even applied).
+    """
+    if not kb_snippet:
+        return ""
+    try:
+        _ext_nli = await get_grounding_verifier().score(
+            kb_snippet[:NLI_PREMISE_CHAR_LIMIT], claim
+        )
+        _ext_nli_label = _ext_nli["label"]
+        _ext_nli_conf = (
+            f"entailment={_ext_nli['entailment']:.2f}, "
+            f"contradiction={_ext_nli['contradiction']:.2f}"
+        )
+    except Exception as exc:
+        log_swallowed_error('core.agents.hallucination.verification', exc)
+        _ext_nli_label = "unknown"
+        _ext_nli_conf = ""
+    return (
+        f"\n\nEvidence from knowledge base ({_ext_nli_label}"
+        f"{', ' + _ext_nli_conf if _ext_nli_conf else ''}):\n"
+        f"\"{kb_snippet}\"\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # External (Cross-Model) Verification — Direct Structured Verdict
 # ---------------------------------------------------------------------------
@@ -1396,36 +1430,7 @@ async def _verify_claim_externally(
                 # Include KB snippet when available — gives the verifier
                 # partial evidence from the user's knowledge base to
                 # triangulate against, reducing false "uncertain" verdicts.
-                _ext_nli_label = ""
-                _ext_nli_conf = ""
-                if kb_snippet:
-                    try:
-                        # v0.93.10: async-batched NLI for coalescing with
-                        # the concurrent verify_claim() calls in the same
-                        # asyncio.gather(). See line ~1804 for the full
-                        # rationale. Phase 3.1: routed through the grounding
-                        # verifier + widened to NLI_PREMISE_CHAR_LIMIT (the old
-                        # [:512]-char slice starved expert-mode's 1200-char
-                        # snippet of ~half its evidence before the tokenizer's
-                        # 512-*token* budget even applied).
-                        _ext_nli = await get_grounding_verifier().score(
-                            kb_snippet[:NLI_PREMISE_CHAR_LIMIT], claim
-                        )
-                        _ext_nli_label = _ext_nli["label"]
-                        _ext_nli_conf = (
-                            f"entailment={_ext_nli['entailment']:.2f}, "
-                            f"contradiction={_ext_nli['contradiction']:.2f}"
-                        )
-                    except Exception as exc:
-                        log_swallowed_error('core.agents.hallucination.verification', exc)
-                        _ext_nli_label = "unknown"
-                        _ext_nli_conf = ""
-                kb_block = (
-                    f"\n\nEvidence from knowledge base ({_ext_nli_label}"
-                    f"{', ' + _ext_nli_conf if _ext_nli_conf else ''}):\n"
-                    f"\"{kb_snippet}\"\n"
-                    if kb_snippet else ""
-                )
+                kb_block = await build_kb_evidence_block(kb_snippet, claim)
                 user_prompt = (
                     f"Assess this claim for factual accuracy:\n\n"
                     f"\"{claim}\"{ctx_block}{kb_block}{context_line}{model_context}\n\n{_json_response_fmt}"

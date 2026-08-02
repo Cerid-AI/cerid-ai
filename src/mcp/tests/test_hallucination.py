@@ -432,69 +432,46 @@ class TestVerifyClaim:
         mock_ext.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("core.agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
-    async def test_evidence_carries_created_at_when_present(
-        self, mock_query, _mock_mem, mock_chroma, mock_neo4j, mock_redis
-    ):
-        """Evidence chunks with created_at in metadata expose it on the result dict."""
-        mock_query.return_value = [
-            {
-                "relevance": 0.85,
-                "artifact_id": "art1",
-                "filename": "doc.pdf",
-                "domain": "general",
-                "content": "the sky is blue",
-                "created_at": "2024-03-15T10:00:00Z",
-            }
-        ]
+    @pytest.mark.parametrize(
+        ("metadata", "expected"),
+        [
+            ({"created_at": "2024-03-15T10:00:00Z",
+              "ingested_at": "2024-04-01T00:00:00Z"}, "2024-03-15T10:00:00Z"),
+            ({"ingested_at": "2024-05-01T08:00:00Z"}, "2024-05-01T08:00:00Z"),
+            ({}, None),
+        ],
+        ids=["created_at_wins", "falls_back_to_ingested_at", "none_when_absent"],
+    )
+    async def test_memory_evidence_created_at_projection(self, metadata, expected):
+        """``_query_memories`` projects created_at, falling back to ingested_at.
 
-        # Assert on the evidence dict directly — verify_claim consumes it internally;
-        # the field contract is on the dict that lightweight_kb_query supplies.
-        evidence = mock_query.return_value[0]
-        assert "created_at" in evidence
-        assert evidence["created_at"] == "2024-03-15T10:00:00Z"
+        These three cases were previously asserted by building a dict in the
+        test body and re-computing ``a.get("created_at") or a.get("ingested_at")``
+        against it — one of them said so outright ("Simulate what
+        _format_chroma_result now computes"). That is the production expression
+        copied into the test, so it agreed with production by construction and
+        would have kept agreeing after production changed. The fallback lives in
+        ``_query_memories``; this drives it, with only the Chroma collection faked.
+        """
+        from core.agents.hallucination.verification import _query_memories
 
-    @pytest.mark.asyncio
-    @patch("core.agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("core.agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
-    async def test_evidence_created_at_falls_back_to_ingested_at(
-        self, mock_query, _mock_mem, mock_chroma, mock_neo4j, mock_redis
-    ):
-        """Evidence chunks without created_at but with ingested_at expose ingested_at as created_at."""
-        mock_query.return_value = [
-            {
-                "relevance": 0.85,
-                "artifact_id": "art2",
-                "filename": "doc2.pdf",
-                "domain": "general",
-                "content": "water is wet",
-                # no created_at; has ingested_at
-                "ingested_at": "2024-05-01T08:00:00Z",
-            }
-        ]
-        evidence = mock_query.return_value[0]
-        # Simulate what _format_chroma_result now computes: fallback to ingested_at
-        computed = evidence.get("created_at") or evidence.get("ingested_at") or None
-        assert computed == "2024-05-01T08:00:00Z"
-
-    @pytest.mark.asyncio
-    @patch("core.agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("core.agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
-    async def test_evidence_created_at_is_none_when_absent(
-        self, mock_query, _mock_mem, mock_chroma, mock_neo4j, mock_redis
-    ):
-        """Evidence chunks with neither created_at nor ingested_at yield None for created_at."""
-        evidence = {
-            "relevance": 0.85,
-            "artifact_id": "art3",
-            "filename": "doc3.pdf",
-            "domain": "general",
-            "content": "some fact",
-            # neither created_at nor ingested_at
+        collection = MagicMock()
+        collection.query.return_value = {
+            "ids": [["mem-1"]],
+            "documents": [["the sky is blue"]],
+            "distances": [[0.3]],
+            "metadatas": [[{"artifact_id": "art1", "filename": "doc.pdf",
+                            "memory_type": "fact", **metadata}]],
         }
-        computed = evidence.get("created_at") or evidence.get("ingested_at") or None
-        assert computed is None
+        chroma = MagicMock()
+        chroma.get_collection.return_value = collection
+
+        evidence = await _query_memories("the sky is blue", chroma)
+
+        assert len(evidence) == 1
+        assert evidence[0]["created_at"] == expected
+        assert evidence[0]["memory_source"] is True
+
 
 
 class TestMemoryIntegration:

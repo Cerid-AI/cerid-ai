@@ -1481,7 +1481,7 @@ def apply_metadata_boost(
 
         boost = min(boost, config.QUALITY_METADATA_MAX_BOOST)
         if boost > 0:
-            r["relevance"] = round(r["relevance"] + boost, 4)
+            r["relevance"] = round(min(1.0, r["relevance"] + boost), 4)
             r["metadata_boost"] = round(boost, 4)
 
     return results
@@ -1621,7 +1621,7 @@ def apply_context_alignment_boost(
         if matches:
             alignment = len(matches) / len(context_terms)
             boost = alignment * boost_weight
-            r["relevance"] = round(r["relevance"] + boost, 4)
+            r["relevance"] = round(min(1.0, r["relevance"] + boost), 4)
             r["context_alignment"] = round(alignment, 4)
 
     return results
@@ -2602,7 +2602,7 @@ async def _agent_query_impl(
         ingested = r.get("ingested_at", "")
         if ingested:
             boost = recency_score(ingested) * config.TEMPORAL_RECENCY_WEIGHT
-            r["relevance"] = round(r["relevance"] + boost, 4)
+            r["relevance"] = round(min(1.0, r["relevance"] + boost), 4)
 
     # Step 4.5: Metadata boost — surface tag/sub_category-aligned results before reranking
     results = apply_metadata_boost(results, query)
@@ -2733,7 +2733,7 @@ async def _agent_query_impl(
                     logger.debug("NLI gate removed contradictory result: %s", r.get("filename", "")[:40])
                     continue
                 if nli["entailment"] >= 0.5:
-                    r["relevance"] = round(r["relevance"] + 0.05, 4)
+                    r["relevance"] = round(min(1.0, r["relevance"] + 0.05), 4)
                     r["nli_entailment"] = nli["entailment"]
                 _nli_filtered.append(r)
             # Keep any results beyond top 15 (not NLI-checked, low-ranked)

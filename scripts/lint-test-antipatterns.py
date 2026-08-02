@@ -52,6 +52,17 @@ suite count goes up, and the thing it claims to cover is unprotected.
            15 of these sat in test_simulated_sessions.py, which TA004 saw only
            7 of. — lessons 2026-07-30
 
+    TA006  a patch whose target the test never reaches
+           The weakest shape, and the one that hid longest because there is no
+           call to trace: the test patches something, builds a literal in its
+           own body, and asserts on that literal. The patched path is never
+           entered, so the patch can neither fail nor protect anything.
+           Conservative — fires only when nothing from the patched module is
+           imported or called, the patched symbol is never referenced, and the
+           test nonetheless asserts. Third sighting at time of writing: a patch
+           of a deleted module, three inert @patch(...config) decorators, and
+           TestNliVerificationFastPath. — lessons 2026-08-02
+
 Suppress a deliberate exception on the offending line:
 
     # lint-test-antipatterns: allow TA003 — asserting the mock wiring itself
@@ -86,6 +97,14 @@ BASELINE_PATH = REPO / "scripts" / "test_antipattern_baseline.txt"
 _BRIDGE_MODULES = {"config", "app.tools", "core.utils"}
 
 _SUPPRESS = "lint-test-antipatterns: allow"
+
+# Calls that do not count as "exercising the codebase" for TA006.
+_INERT_CALLS = {
+    "dict", "list", "set", "tuple", "str", "int", "float", "bool", "len",
+    "range", "sorted", "any", "all", "getattr", "setattr", "hasattr",
+    "isinstance", "print", "repr", "MagicMock", "AsyncMock", "Mock",
+    "PropertyMock", "call", "raises", "approx", "deepcopy", "copy",
+}
 
 
 class Finding:
@@ -137,6 +156,9 @@ class _Visitor(ast.NodeVisitor):
         self.path, self.lines = path, lines
         self.findings: list[Finding] = []
         self._ta005_seen: set[int] = set()
+        # Module-level imports — TA006 uses these to decide whether a
+        # patched module is plausibly reachable from a test body.
+        self._module_imports: set[str] = set()
 
     # -- helpers ------------------------------------------------------
     def _suppressed(self, lineno: int, code: str) -> bool:
@@ -151,6 +173,14 @@ class _Visitor(ast.NodeVisitor):
             self.findings.append(Finding(self.path, lineno, code, message))
 
     # -- rules --------------------------------------------------------
+    def visit_Module(self, node: ast.Module) -> None:
+        for sub in node.body:
+            if isinstance(sub, ast.ImportFrom) and sub.module:
+                self._module_imports.add(sub.module)
+            elif isinstance(sub, ast.Import):
+                self._module_imports.update(a.name for a in sub.names)
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
 
@@ -193,12 +223,116 @@ class _Visitor(ast.NodeVisitor):
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._check_patch_then_import(node)
         self._check_mock_alias_asserted(node)
+        self._check_inert_patch(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._check_patch_then_import(node)
         self._check_mock_alias_asserted(node)
+        self._check_inert_patch(node)
         self.generic_visit(node)
+
+    def _check_inert_patch(self, fn: ast.AST) -> None:
+        """TA006 — a patch whose target the test never reaches.
+
+        The weakest vacuity shape and the one that hid longest, because there
+        is no call to trace: the test patches something, builds a literal in
+        its own body, and asserts on that literal. The patch decorates a code
+        path the test never enters, so it can neither fail nor protect
+        anything.
+
+        Detected conservatively — flagged only when ALL of these hold, so a
+        legitimately-passive patch (suppressing a side effect, silencing a
+        writer) is not caught:
+          * the test imports and calls no symbol from the patched module, and
+          * the mock parameter/alias, if any, is never referenced, and
+          * the function body contains at least one assert (so it claims to
+            verify something).
+
+        Third sighting when this rule was written (2026-08-02): a patch of a
+        deleted module in test_router_user_state, three inert
+        ``@patch(...config)`` decorators, and TestNliVerificationFastPath —
+        which patched ``core.utils.nli.nli_score`` while asserting on a dict
+        it had written itself.
+        """
+        patched: dict[str, int] = {}
+        for dec in getattr(fn, "decorator_list", []):
+            if isinstance(dec, ast.Call):
+                t = _patch_target(dec)
+                if t and "." in t:
+                    patched.setdefault(t, getattr(dec, "lineno", 0))
+        for sub in ast.walk(fn):
+            if isinstance(sub, ast.Call):
+                t = _patch_target(sub)
+                if t and "." in t:
+                    patched.setdefault(t, sub.lineno)
+        if not patched:
+            return
+        if not any(isinstance(s, ast.Assert) for s in ast.walk(fn)):
+            return
+
+        # Decisive condition: the test calls NOTHING from the codebase. Its
+        # only calls are builtins, literal constructors and mock plumbing, so
+        # everything it asserts on was assembled in the test body and no
+        # patched path can have run. A patch reached transitively by
+        # production code is legitimate and by far the common case, so any
+        # real call disqualifies the finding.
+        # Identify the mock-patch calls precisely: those used as a decorator
+        # or as a `with` context expression. Do NOT use _is_patch_call here —
+        # it matches any `.patch(` attribute call, so `client.patch("/route")`
+        # (a real TestClient request driving the router) looks like mock.patch
+        # and would be skipped, making a genuinely-exercising test look inert.
+        def _is_mock_patch(n: ast.AST) -> bool:
+            if not isinstance(n, ast.Call):
+                return False
+            f = n.func
+            nm = (
+                f.attr if isinstance(f, ast.Attribute)
+                else f.id if isinstance(f, ast.Name) else ""
+            )
+            if nm not in {"patch", "object", "multiple"}:
+                return False
+            if not n.args:
+                return True
+            a = n.args[0]
+            if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                # A mock target is a dotted module path. "/wiki/entities/x" is
+                # a TestClient route; "retrieval.chroma" belongs to span(), not
+                # patch(), and is excluded by the callee-name test above.
+                return "." in a.value and "/" not in a.value
+            return True  # patch.object(obj, "attr")
+
+        mock_patch_ids: set[int] = set()
+        for dec in getattr(fn, "decorator_list", []):
+            for n in ast.walk(dec):
+                if _is_mock_patch(n):
+                    mock_patch_ids.add(id(n))
+        for sub in ast.walk(fn):
+            if isinstance(sub, ast.withitem):
+                for n in ast.walk(sub.context_expr):
+                    if _is_mock_patch(n):
+                        mock_patch_ids.add(id(n))
+
+        for sub in ast.walk(fn):
+            if not isinstance(sub, ast.Call) or id(sub) in mock_patch_ids:
+                continue
+            name = (
+                sub.func.attr if isinstance(sub.func, ast.Attribute)
+                else sub.func.id if isinstance(sub.func, ast.Name)
+                else ""
+            )
+            if name not in _INERT_CALLS:
+                return
+
+        for target, lineno in sorted(patched.items(), key=lambda kv: kv[1]):
+            self._add_at(
+                lineno, "TA006",
+                f'patch("{target}") cannot fire: this test calls no function '
+                "from the codebase at all — it builds its values inline and "
+                "asserts on them, so the patched path never runs. The patch "
+                "protects nothing. Drive the code that uses it, or drop both "
+                "the patch and the assertion.",
+            )
 
     def _check_patch_then_import(self, fn: ast.AST) -> None:
         """TA004 — the tautology: import the symbol you just patched."""

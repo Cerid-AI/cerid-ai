@@ -18,9 +18,38 @@ from unittest.mock import patch
 
 import pytest
 
+import config
+from core.agents.hallucination.grounding_verifier import NLI_PREMISE_CHAR_LIMIT
+from core.agents.hallucination.verification import (
+    _verify_claim_externally,
+    build_kb_evidence_block,
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+class _StubVerifier:
+    """Stands in for the configured grounding verifier.
+
+    Records every ``(premise, hypothesis)`` pair so tests can assert what the
+    production helper actually handed the model — including how it sliced the
+    premise.
+    """
+
+    name = "stub"
+
+    def __init__(self, result: dict[str, Any] | Exception):
+        self._result = result
+        self.calls: list[tuple[str, str]] = []
+
+    async def score(self, premise: str, hypothesis: str) -> dict[str, Any]:
+        self.calls.append((premise, hypothesis))
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
+
 
 def _make_nli_result(
     entailment: float = 0.0,
@@ -148,86 +177,134 @@ class TestNliVerificationFastPath:
 
 
 class TestKbBlockNliClassification:
-    """Test that kb_block includes NLI label and confidence for external verifiers."""
+    """Exercise the real ``build_kb_evidence_block`` used by the external verifier.
 
-    @patch("core.utils.nli.nli_score")
-    def test_kb_block_includes_nli_label(self, mock_nli_score):
-        """kb_block should include the NLI label and confidence scores."""
-        mock_nli_score.return_value = _make_nli_result(
-            entailment=0.82, contradiction=0.05, label="entailment",
-        )
+    These tests patch the production dependency (``get_grounding_verifier``) and
+    assert on the block the production helper returns — never on a copy of the
+    construction logic re-implemented in the test body.
+    """
+
+    @pytest.mark.asyncio
+    async def test_kb_block_includes_nli_label(self):
+        """The verifier's label and probabilities reach the rendered kb_block."""
         kb_snippet = "Python was created by Guido van Rossum."
         claim = "Python was created by Guido van Rossum"
 
-        # Simulate the kb_block construction logic
-        _ext_nli_label = ""
-        _ext_nli_conf = ""
-        if kb_snippet:
-            try:
-                from core.utils.nli import nli_score as _ext_nli_fn
-                _ext_nli = _ext_nli_fn(kb_snippet[:512], claim)
-                _ext_nli_label = _ext_nli["label"]
-                _ext_nli_conf = (
-                    f"entailment={_ext_nli['entailment']:.2f}, "
-                    f"contradiction={_ext_nli['contradiction']:.2f}"
-                )
-            except Exception as exc:
-                from core.utils.swallowed import log_swallowed_error
-                log_swallowed_error('tests.test_nli_verification', exc)
-                _ext_nli_label = "unknown"
-                _ext_nli_conf = ""
-        kb_block = (
-            f"\n\nEvidence from knowledge base ({_ext_nli_label}"
-            f"{', ' + _ext_nli_conf if _ext_nli_conf else ''}):\n"
-            f"\"{kb_snippet}\"\n"
-            if kb_snippet else ""
+        verifier = _StubVerifier(
+            _make_nli_result(entailment=0.82, contradiction=0.05, label="entailment"),
         )
+        with patch(
+            "core.agents.hallucination.verification.get_grounding_verifier",
+            return_value=verifier,
+        ):
+            kb_block = await build_kb_evidence_block(kb_snippet, claim)
 
-        assert "entailment" in kb_block
-        assert "entailment=0.82" in kb_block
-        assert "contradiction=0.05" in kb_block
+        assert kb_block.startswith(
+            "\n\nEvidence from knowledge base (entailment, "
+            "entailment=0.82, contradiction=0.05):\n"
+        )
+        assert f'"{kb_snippet}"\n' in kb_block
+        # The hypothesis is the claim; the premise is the (sliced) snippet.
+        assert verifier.calls == [(kb_snippet, claim)]
+
+    @pytest.mark.asyncio
+    async def test_kb_block_premise_honours_nli_premise_char_limit(self):
+        """The premise slice uses NLI_PREMISE_CHAR_LIMIT, not a hardcoded 512.
+
+        Phase 3.1 widened this ceiling; a stale ``[:512]`` would truncate the
+        premise ~4x tighter than the tokenizer's real budget.
+        """
+        assert NLI_PREMISE_CHAR_LIMIT > 512, "guard: limit must exceed the pre-3.1 slice"
+        kb_snippet = "e" * (NLI_PREMISE_CHAR_LIMIT + 500)
+        claim = "some claim"
+
+        verifier = _StubVerifier(_make_nli_result())
+        with patch(
+            "core.agents.hallucination.verification.get_grounding_verifier",
+            return_value=verifier,
+        ):
+            kb_block = await build_kb_evidence_block(kb_snippet, claim)
+
+        premise, hypothesis = verifier.calls[0]
+        assert len(premise) == NLI_PREMISE_CHAR_LIMIT
+        assert premise == kb_snippet[:NLI_PREMISE_CHAR_LIMIT]
+        assert hypothesis == claim
+        # The slice bounds only the premise — the block still quotes the snippet.
         assert kb_snippet in kb_block
 
-    def test_kb_block_empty_when_no_snippet(self):
-        """kb_block should be empty string when kb_snippet is falsy."""
-        kb_snippet = ""
-        kb_block = (
-            f"\n\nEvidence from knowledge base ():\n"
-            f"\"{kb_snippet}\"\n"
-            if kb_snippet else ""
-        )
-        assert kb_block == ""
+    @pytest.mark.asyncio
+    async def test_kb_block_empty_when_no_snippet(self):
+        """No snippet → empty block, and the verifier is never invoked."""
+        verifier = _StubVerifier(_make_nli_result())
+        with patch(
+            "core.agents.hallucination.verification.get_grounding_verifier",
+            return_value=verifier,
+        ):
+            assert await build_kb_evidence_block("", "a claim") == ""
 
-    @patch("core.utils.nli.nli_score", side_effect=RuntimeError("model not loaded"))
-    def test_kb_block_nli_failure_shows_unknown(self, mock_nli_score):
-        """When NLI fails, kb_block should show 'unknown' label."""
+        assert verifier.calls == []
+
+    @pytest.mark.asyncio
+    async def test_kb_block_nli_failure_shows_unknown(self):
+        """When the grounding verifier raises, kb_block shows 'unknown'."""
         kb_snippet = "Some evidence text."
-        claim = "Some claim"
 
-        _ext_nli_label = ""
-        _ext_nli_conf = ""
-        if kb_snippet:
-            try:
-                from core.utils.nli import nli_score as _ext_nli_fn
-                _ext_nli = _ext_nli_fn(kb_snippet[:512], claim)
-                _ext_nli_label = _ext_nli["label"]
-                _ext_nli_conf = (
-                    f"entailment={_ext_nli['entailment']:.2f}, "
-                    f"contradiction={_ext_nli['contradiction']:.2f}"
-                )
-            except Exception as exc:
-                from core.utils.swallowed import log_swallowed_error
-                log_swallowed_error('tests.test_nli_verification', exc)
-                _ext_nli_label = "unknown"
-                _ext_nli_conf = ""
-        kb_block = (
-            f"\n\nEvidence from knowledge base ({_ext_nli_label}"
-            f"{', ' + _ext_nli_conf if _ext_nli_conf else ''}):\n"
-            f"\"{kb_snippet}\"\n"
-            if kb_snippet else ""
-        )
+        verifier = _StubVerifier(RuntimeError("model not loaded"))
+        with patch(
+            "core.agents.hallucination.verification.get_grounding_verifier",
+            return_value=verifier,
+        ):
+            kb_block = await build_kb_evidence_block(kb_snippet, "Some claim")
 
-        assert "unknown" in kb_block
-        assert kb_snippet in kb_block
+        assert kb_block == f'\n\nEvidence from knowledge base (unknown):\n"{kb_snippet}"\n'
         # No confidence scores when NLI failed
         assert "entailment=" not in kb_block
+
+    @pytest.mark.asyncio
+    async def test_external_verifier_prompt_carries_the_kb_block(self):
+        """End-to-end: the rendered block reaches the outgoing verifier prompt.
+
+        Without this, ``build_kb_evidence_block`` could drift into a parallel
+        copy no production code reaches — the exact defect these tests
+        previously embodied.
+        """
+        kb_snippet = "Python was created by Guido van Rossum."
+        claim = "Python was created by Guido van Rossum"
+
+        verifier = _StubVerifier(
+            _make_nli_result(entailment=0.82, contradiction=0.05, label="entailment"),
+        )
+        captured: dict[str, Any] = {}
+
+        async def _fake_call_llm_raw(messages, **kwargs):
+            captured["messages"] = messages
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"status": "supported", "confidence": 0.9, '
+                                '"reason": "ok"}'
+                            ),
+                        },
+                    },
+                ],
+            }
+
+        with (
+            patch.object(config, "ENABLE_EXTERNAL_VERIFICATION", True),
+            patch(
+                "core.agents.hallucination.verification.get_grounding_verifier",
+                return_value=verifier,
+            ),
+            patch("core.utils.llm_client.call_llm_raw", _fake_call_llm_raw),
+        ):
+            await _verify_claim_externally(claim, kb_snippet=kb_snippet)
+
+        user_prompt = captured["messages"][1]["content"]
+        assert (
+            "\n\nEvidence from knowledge base (entailment, "
+            "entailment=0.82, contradiction=0.05):\n"
+            f'"{kb_snippet}"\n'
+        ) in user_prompt
+        assert verifier.calls == [(kb_snippet, claim)]

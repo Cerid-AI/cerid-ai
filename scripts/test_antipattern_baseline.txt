@@ -1,18 +1,4 @@
 # Per-file test-antipattern baseline — SHRINK-ONLY.
-#
-# 2026-08-02: total moved 147 -> 148, and two files' baselines ROSE
-# (test_simulated_sessions 7 -> 22, test_e2e_pipeline 7 -> 8). That is NOT new
-# debt. TA005 was added because TA004's detector was import-shaped and could
-# only see `patch(...)` + `from X import Y`; it was blind to the far more
-# common `result = await mock_aq(...)` form, where the test calls the mock
-# directly and asserts on the fixture it just supplied. Those 16 tautologies
-# were always there — burning down the 13 originally-visible TA004 sites would
-# have lowered this file and certified test_simulated_sessions.py while ~60%
-# of it still asserted nothing.
-#
-# Genuinely fixed in the same pass: TA001 9 -> 0, TA002 2 -> 0, TA003 123 ->
-# 120, TA004 13 -> 12. So 15 real fixes landed while 16 pre-existing defects
-# became visible for the first time. The ruler got better, not the code worse.
 # Regenerate after burn-down: python scripts/lint-test-antipatterns.py --update
 #
 # These rules were written after the fact (2026-07-30 graduation sweep),
@@ -29,11 +15,27 @@
 # asserts the fixture it supplied) then TA003 (blanket config mock —
 # silently stops the code under test from running). TA001/TA002 are
 # order-dependence hazards, cheap to fix.
-# total=148 files=21 [TA003×120, TA004×12, TA005×16]
+#
+# 2026-08-02: 147 -> 120, and TA001/TA002/TA004/TA005 are all now ZERO.
+# The path there matters, because the intermediate number went UP. TA004's
+# detector was import-shaped and could only see `patch(...)` + `from X import
+# Y`; it was blind to `result = await mock_aq(...)` followed by an assert on
+# that result. Adding TA005 surfaced 16 further tautologies (15 of them in
+# test_simulated_sessions.py, which the old count claimed had 7), taking the
+# total to 148 before any were fixed. Burning down the originally-visible 13
+# would have lowered this file while most of that suite still asserted nothing.
+#
+# All 28 were then REWRITTEN to drive real production code, not deleted and not
+# baselined. Every rewrite was falsified against deliberately broken production
+# before being trusted, and one of them found a live bug: relevance boosts were
+# applied unclamped, publishing 1.03 on a documented [0, 1] field.
+#
+# The remaining 120 are all TA003.
+# total=120 files=19 [TA003×120]
 9	src/mcp/tests/test_archive.py
 15	src/mcp/tests/test_contextual.py
 7	src/mcp/tests/test_curator.py
-8	src/mcp/tests/test_e2e_pipeline.py
+4	src/mcp/tests/test_e2e_pipeline.py
 3	src/mcp/tests/test_ingestion.py
 3	src/mcp/tests/test_kb_admin.py
 14	src/mcp/tests/test_maintenance.py
@@ -41,13 +43,11 @@
 2	src/mcp/tests/test_memory_agent.py
 3	src/mcp/tests/test_memory_consolidation.py
 23	src/mcp/tests/test_neo4j_expanded.py
-2	src/mcp/tests/test_nli_verification.py
 9	src/mcp/tests/test_query_agent.py
 2	src/mcp/tests/test_rag_resilience.py
 7	src/mcp/tests/test_rectify.py
 1	src/mcp/tests/test_relevance_floor_scale.py
 1	src/mcp/tests/test_sdk_contract.py
 2	src/mcp/tests/test_sdk_endpoints.py
-22	src/mcp/tests/test_simulated_sessions.py
 11	src/mcp/tests/test_sync.py
 2	src/mcp/tests/test_webhooks.py

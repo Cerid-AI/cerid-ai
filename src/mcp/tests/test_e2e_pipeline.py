@@ -15,6 +15,7 @@ Mocking strategy mirrors test_services_ingestion.py:
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -304,26 +305,44 @@ class TestQueryRetrievalPipeline:
         assert get_cached("novel query", "coding", 10) is None
 
     @pytest.mark.asyncio
-    async def test_query_private_mode(self):
-        """Level 2 privacy returns empty context (no KB retrieval).
+    async def test_query_private_mode_l2_skips_kb_retrieval(self):
+        """Level 2 privacy must short-circuit BEFORE any KB retrieval runs.
 
-        We mock agent_query directly since the real function has deep
-        dependency chains (DegradationTier, semantic cache, etc.) that
-        are already unit-tested elsewhere.
+        This used to patch ``agent_query`` and then call the mock, asserting
+        that a locally-written dict had ``total_results == 0`` — which it did,
+        because the test wrote it. It could not have caught the gate being
+        removed. The old docstring justified that by citing agent_query's deep
+        dependencies, but the L2 contract does not live in agent_query at all:
+        it is an early return in the ``/query`` router
+        (``app/routers/query.py:83``), and it is reachable with nothing mocked
+        except the private-mode level itself.
+
+        The server-side enforcement matters because no response field signals
+        the bypass — QueryEndpointResponse has no ``extra="allow"``, so the
+        empty result IS the signal. If the gate regressed, a Level-2 user's
+        query would silently reach the KB.
         """
+        from app.routers.query import query_endpoint
 
-        private_result = {
-            "context": "", "sources": [], "total_results": 0,
-            "confidence": 0.0, "domains_searched": [],
-            "retrieval_method": "private_mode",
-            "timing": {}, "rerank_mode": "none",
-        }
-        with patch("core.agents.query_agent.agent_query",
-                    new_callable=AsyncMock, return_value=private_result) as mock_aq:
-            result = await mock_aq("test query", domains=["coding"])
+        called: list[str] = []
 
-        assert result["total_results"] == 0
-        assert result["context"] == ""
+        async def _tripwire(*_a, **_kw):
+            called.append("agent_query_full")
+            raise AssertionError("KB retrieval ran under Private Mode L2")
+
+        with patch("app.routers.query.private_blocks", return_value=True) as gate, \
+             patch("core.agents.query_agent.agent_query_full", new=_tripwire):
+            request = MagicMock()
+            request.headers = {}
+            result = await query_endpoint(
+                MagicMock(query="test query", domains=["coding"], n_results=10),
+                request,
+            )
+
+        gate.assert_called_once_with(2), "the gate must test for level 2, not another tier"
+        assert called == [], "retrieval must not be reached at all"
+        assert result["context"] == "" and result["sources"] == []
+        assert result["confidence"] == 0.0
 
     @patch("core.agents.query_agent.config")
     def test_query_empty_collection(self, mock_config):
@@ -630,40 +649,40 @@ class TestFullUserJourney:
              "sub_category": "", "tags_json": "[]", "keywords": "[]"},
         ]
 
-        with patch("core.agents.query_agent.multi_domain_query",
-                    new_callable=AsyncMock, return_value=mock_query_results):
-            from core.agents.query_agent import multi_domain_query
-            query_results = await multi_domain_query(
-                "What database did we choose and why?",
-                domains=["coding"])
-
-        assert len(query_results) >= 1
-        assert "PostgreSQL" in query_results[0]["content"]
-
-        # --- Phase 3: Assemble context ---
+        # --- Phase 2: Assemble context from the retrieved chunks ---
+        # There used to be a "query" phase here that patched
+        # multi_domain_query and then called it, asserting that
+        # mock_query_results contained "PostgreSQL" — which it does, because
+        # this test wrote it 10 lines above. It exercised no product code.
+        # Real multi-domain retrieval is covered by
+        # test_multi_domain_query_merges_across_collections below, which drives
+        # the function for real; here the retrieved chunks feed straight into
+        # assemble_context, which IS production code.
+        query_results = mock_query_results
         context, sources, chars = assemble_context(query_results)
         assert "PostgreSQL" in context
         assert len(sources) == 1 and chars > 0
 
-        # --- Phase 4: Verify a claim (mock at function level) ---
-        mock_verify_result = {
-            "status": "verified", "confidence": 0.95,
-            "claim": "We chose PostgreSQL because it uses MVCC",
-            "method": "kb_similarity",
-        }
-        with patch("core.agents.hallucination.verification.verify_claim",
-                    new_callable=AsyncMock, return_value=mock_verify_result):
-            from core.agents.hallucination.verification import verify_claim
-            verify_result = await verify_claim(
-                "We chose PostgreSQL because it uses MVCC",
-                MagicMock(), MagicMock(), MagicMock(), threshold=0.6)
-
-        assert verify_result["status"] in ("verified", "uncertain")
-        assert "confidence" in verify_result
+        # --- Phase 3: the assembled context is what a verifier would receive ---
+        # A "verify" phase here previously patched verify_claim and then called
+        # it, asserting its own fixture's status was in ("verified",
+        # "uncertain") — true of the literal dict it had just written. Claim
+        # verification has real coverage in test_nli_verification.py against
+        # the actual grounding verifier; repeating a fixture echo here added
+        # nothing. What this journey test can honestly assert is that the
+        # context handed onward carries the evidence for the claim.
+        assert "MVCC" in context, (
+            "the assembled context must carry the sentence a downstream "
+            "verifier would need to ground the MVCC claim"
+        )
+        assert sources[0]["artifact_id"] == artifact_id, (
+            "context assembly must preserve provenance back to the ingested "
+            "artifact — without it a citation cannot be resolved"
+        )
 
     @pytest.mark.asyncio
-    async def test_multi_domain_query(self):
-        """Query spanning multiple domains with proper routing."""
+    async def test_multi_domain_query_merges_across_collections(self):
+        """Real multi-domain fan-out: both collections queried, results merged by relevance."""
         coding_result = {
             "content": "Python async/await pattern for API calls",
             "relevance": 0.80, "artifact_id": "art-c1",
@@ -681,17 +700,76 @@ class TestFullUserJourney:
             "sub_category": "", "tags_json": "[]", "keywords": "[]",
         }
 
-        with patch("core.agents.query_agent.multi_domain_query",
-                    new_callable=AsyncMock,
-                    return_value=[coding_result, finance_result]):
-            from core.agents.query_agent import multi_domain_query
-            results = await multi_domain_query(
-                "How does API rate limiting affect our systems?",
-                domains=["coding", "finance"])
+        # Drive the REAL multi_domain_query. It takes chroma_client as a
+        # parameter, so the boundary we mock is ChromaDB itself — the thing
+        # that genuinely cannot run here — and everything between the call and
+        # the merged result is production code. The previous version patched
+        # multi_domain_query and then called it, so it asserted only that the
+        # two dicts it had written had two different `domain` values.
+        from core.agents.query_agent import multi_domain_query
 
-        assert len(results) == 2
+        def _chroma_payload(content: str, chunk_id: str, artifact_id: str,
+                            filename: str, distance: float) -> dict:
+            return {
+                "ids": [[chunk_id]],
+                "documents": [[content]],
+                "distances": [[distance]],
+                "metadatas": [[{"artifact_id": artifact_id, "filename": filename,
+                                "chunk_index": 0}]],
+            }
+
+        per_collection = {
+            "domain_coding": _chroma_payload(
+                coding_result["content"], "art-c1_chunk_0", "art-c1",
+                "async_patterns.md", 0.30),
+            "domain_finance": _chroma_payload(
+                finance_result["content"], "art-f1_chunk_0", "art-f1",
+                "trading_notes.md", 0.45),
+        }
+
+        client = MagicMock()
+        client.list_collections.return_value = [
+            SimpleNamespace(name=n) for n in per_collection
+        ]
+
+        def _get_collection(name: str):
+            col = MagicMock()
+            col.query.return_value = per_collection[name]
+            return col
+
+        client.get_collection.side_effect = lambda name, **_: _get_collection(name)
+
+        results = await multi_domain_query(
+            "How does API rate limiting affect our systems?",
+            domains=["coding", "finance"],
+            chroma_client=client,
+        )
+
+        # Real assertions: the function fanned out to both collections, tagged
+        # each result with the domain it came from, and merged them.
+        queried = {c.kwargs.get("name") or c.args[0]
+                   for c in client.get_collection.call_args_list}
+        assert queried == {"domain_coding", "domain_finance"}, (
+            f"must query both domain collections, queried {queried}"
+        )
         domains_found = {r["domain"] for r in results}
-        assert "coding" in domains_found and "finance" in domains_found
+        assert domains_found == {"coding", "finance"}
+
+        # Relevance must be derived from the L2 distance, so the nearer chunk
+        # scores higher. Asserted by domain rather than by position on purpose:
+        # multi_domain_query MERGES but does not order — it returns
+        # `all_results` straight out of the per-domain gather, so position
+        # follows the `domains` argument. Sorting is the caller's job
+        # (query_knowledge_base does `results.sort(...)` after dedup). An
+        # earlier draft of this test asserted results[0] was the most relevant
+        # and passed only because "coding" happened to be both first in the
+        # domain list and the nearer hit.
+        by_domain = {r["domain"]: r for r in results}
+        assert by_domain["coding"]["relevance"] > by_domain["finance"]["relevance"], (
+            "L2 distance 0.30 must map to a higher relevance than 0.45"
+        )
+        assert by_domain["coding"]["artifact_id"] == "art-c1"
+        assert by_domain["finance"]["artifact_id"] == "art-f1"
 
     @pytest.mark.asyncio
     async def test_memory_extraction_from_chat(self):
