@@ -10,6 +10,26 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _restore_config_globals():
+    """PATCH /settings assigns straight onto the config module's globals.
+
+    Without this, `categorize_mode: "pro"` leaks out of this module and every
+    later test that reads config.CATEGORIZE_MODE sees "pro" instead of the
+    "smart" default (test_upload_pipeline_contract is the first to notice).
+    The leak used to be masked by test_taxonomy.py reloading the config bridge
+    — which is the laundering TA002 forbids — so it surfaced the moment that
+    reload was removed.
+    """
+    import config
+
+    saved = {name: getattr(config, name) for name in dir(config) if name.isupper()}
+    yield
+    for name, value in saved.items():
+        if getattr(config, name, None) is not value:
+            setattr(config, name, value)
+
+
 def _make_app():
     from app.routers.settings import router
 

@@ -322,21 +322,6 @@ async def _inference_recheck_loop() -> None:
                     "Inference provider %s: %s (%s) -> %s (%s)",
                     direction, old_provider, old_tier.value, new.provider, new.tier.value,
                 )
-                # Emit event for SSE subscribers
-                try:
-                    from events import event_bus
-                    event_bus.emit("inference_provider_changed", {
-                        "old_provider": old_provider,
-                        "old_tier": old_tier.value,
-                        "new_provider": new.provider,
-                        "new_tier": new.tier.value,
-                        "direction": direction,
-                    })
-                except (ImportError, AttributeError) as exc:
-                    log_swallowed_error(
-                        "utils.inference_config.recheck_loop_event_emit",
-                        exc,
-                    )
             else:
                 logger.debug("Inference recheck: no change (%s/%s)", new.provider, new.tier.value)
         except Exception as exc:  # noqa: BLE001

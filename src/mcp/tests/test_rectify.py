@@ -281,8 +281,7 @@ class TestCleanupOrphanedChunks:
         assert result["coding"] == 2
         collection.delete.assert_called_once_with(ids=["c1", "c2"])
 
-    @patch("core.agents.rectify.config")
-    def test_empty_orphans(self, mock_config, mock_chroma):
+    def test_empty_orphans(self, mock_chroma):
         client, collection = mock_chroma
         result = cleanup_orphaned_chunks(client, {})
         assert result == {}

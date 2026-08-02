@@ -123,13 +123,13 @@ class SyncBackendPlugin(CeridPlugin):
     """
     Plugin that provides a sync backend implementation.
 
-    Subclass and implement the sync backend interface methods.
-    See utils/sync_backend.py for the SyncBackend ABC.
+    Subclass and implement the sync backend interface methods. No sync-backend
+    ABC ships in-tree; the plugin defines its own backend contract.
     """
 
     @abstractmethod
     def get_backend_class(self) -> type:
-        """Return the SyncBackend subclass provided by this plugin."""
+        """Return the backend class provided by this plugin."""
         ...
 
     @abstractmethod

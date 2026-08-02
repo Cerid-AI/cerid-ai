@@ -156,8 +156,6 @@ class TestAuthStatus:
         # Stub the registry so it returns a "configured" data source.
         from unittest.mock import MagicMock
 
-        from config.features import is_feature_enabled  # noqa: F401
-
         mock_ds = MagicMock()
         mock_ds.is_configured.return_value = True
 

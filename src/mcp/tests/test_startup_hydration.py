@@ -11,6 +11,26 @@ from unittest.mock import patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _restore_config_globals():
+    """_hydrate_settings_from_sync() assigns straight onto config's globals.
+
+    Nothing here put them back, so COST_SENSITIVITY, HALLUCINATION_THRESHOLD
+    and ENABLE_FEEDBACK_LOOP leaked into every later test in the session
+    (test_verification_quality_regressions' semantic-gate escalation reads
+    HALLUCINATION_THRESHOLD and silently took a different branch at 0.9).
+    The leak used to be masked by test_taxonomy.py reloading the config
+    bridge — the laundering TA002 forbids — so it surfaced when that went.
+    """
+    import config
+
+    saved = {name: getattr(config, name) for name in dir(config) if name.isupper()}
+    yield
+    for name, value in saved.items():
+        if getattr(config, name, None) is not value:
+            setattr(config, name, value)
+
+
 @pytest.fixture()
 def sync_dir(tmp_path: Path) -> Path:
     """Create a temporary sync directory with ``user/`` sub-directory."""

@@ -44,7 +44,10 @@ def reset_singleton_between_tests():
     llm_client._client_loop = None
     saved_loop = None
     try:
-        saved_loop = asyncio.get_event_loop_policy().get_event_loop()
+        # Reading the AMBIENT policy loop is this fixture's entire purpose — it is
+        # saved here and restored after the yield. asyncio.run() would create a new
+        # loop and defeat that. The RuntimeError guard covers "no current loop".
+        saved_loop = asyncio.get_event_loop_policy().get_event_loop()  # lint-test-antipatterns: allow TA001
     except RuntimeError:
         saved_loop = None
     yield

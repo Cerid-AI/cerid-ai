@@ -51,7 +51,11 @@ async def test_six_concurrent_agent_query_all_succeed():
 
 @pytest.mark.integration
 async def test_health_p95_under_agent_load():
-    """F-PERF-04: /health p95 stays < 100ms while /agent/query runs concurrently."""
+    """F-PERF-04: /health stays < 100ms while /agent/query runs concurrently.
+
+    Asserted on the worst of 6 samples — see the comment at the assertion for
+    why that, and not a "p95", is the honest statistic at this sample count.
+    """
     import time
     client_id = f"test-hol-{uuid.uuid4().hex[:8]}"
     headers = {"X-Client-ID": client_id, "Content-Type": "application/json", **_auth_headers()}
@@ -77,8 +81,19 @@ async def test_health_p95_under_agent_load():
                 await t
             except Exception as exc:
                 log_swallowed_error("tests.test_concurrency_rate_limits", exc)
-    p95 = sorted(health_times)[int(0.95 * len(health_times))]
-    assert p95 < 0.1, f"/health p95={p95:.3f}s under load (threshold 100ms)"
+    # 6 samples cannot support a p95. Nearest-rank p95 indexes off
+    # ``len - 1`` (``values[min(n - 1, int(round(pct * (n - 1))))]``, the form
+    # used by app/processor/metrics.py::_percentile), and for n <= 11 that
+    # lands on the last element — so the p95 of 6 samples IS the max. The old
+    # ``sorted(...)[int(0.95 * len(...))]`` indexed off ``n``, which is the
+    # same off-by-one fixed in utils/metrics.py::_aggregate; it returned max
+    # here too, just by accident rather than by definition. Assert on the max
+    # and say so, instead of labelling it a percentile it cannot be.
+    worst = max(health_times)
+    assert worst < 0.1, (
+        f"/health worst-of-{len(health_times)}={worst:.3f}s under load "
+        "(threshold 100ms; n too small for a p95, so max is the statistic)"
+    )
 
 
 @pytest.mark.integration

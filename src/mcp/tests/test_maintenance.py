@@ -193,8 +193,7 @@ class TestPurgeArtifacts:
         assert result["purged"][0]["id"] == "art-1"
         assert result["purged"][0]["chunks_removed"] == 2
 
-    @patch("core.agents.maintenance.config")
-    def test_artifact_not_found(self, mock_config, mock_neo4j, mock_chroma):
+    def test_artifact_not_found(self, mock_neo4j, mock_chroma):
         driver, session = mock_neo4j
         client, collection = mock_chroma
         session.run.return_value.single.return_value = None

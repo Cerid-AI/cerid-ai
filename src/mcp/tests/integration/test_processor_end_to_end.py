@@ -37,8 +37,8 @@ from core.processor.priority import Priority
 
 async def _wait_for_drain(queue: RedisJobQueue, timeout: float = 5.0) -> bool:
     """Poll until all priority buckets are zero or timeout expires."""
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
         sizes = await queue.size_by_priority()
         if sum(sizes.values()) == 0:
             return True

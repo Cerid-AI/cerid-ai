@@ -138,16 +138,36 @@ class TestTaxonomyConfig:
         import config
         import config.taxonomy
 
-        importlib.reload(config.taxonomy)
-        importlib.reload(config)
+        # Reload the LEAF only and re-sync the two attrs the env var feeds
+        # (DOMAINS is derived from TAXONOMY, so they must move together or the
+        # bridge is left self-inconsistent — app.routers.upload gates on
+        # config.DOMAINS while others read config.TAXONOMY).
+        # Reloading `config` itself would re-snapshot every `import *` source at
+        # its CURRENT state, laundering in-session global mutation into the
+        # package attrs for every later test.
+        saved = {
+            "leaf_taxonomy": config.taxonomy.TAXONOMY,
+            "leaf_domains": config.taxonomy.DOMAINS,
+            "taxonomy": config.TAXONOMY,
+            "domains": config.DOMAINS,
+        }
+        try:
+            importlib.reload(config.taxonomy)
+            config.TAXONOMY = config.taxonomy.TAXONOMY
+            config.DOMAINS = config.taxonomy.DOMAINS
 
-        assert "research" in config.TAXONOMY
-        assert "papers" in config.TAXONOMY["research"]["sub_categories"]
-
-        # Clean up: reload to restore original state
-        os.environ.pop("CERID_CUSTOM_DOMAINS", None)
-        importlib.reload(config.taxonomy)
-        importlib.reload(config)
+            assert "research" in config.TAXONOMY
+            assert "papers" in config.TAXONOMY["research"]["sub_categories"]
+            assert "research" in config.DOMAINS
+        finally:
+            # Restore the exact pre-test objects. A second reload would rebuild
+            # them from source and silently drop any runtime-registered domains
+            # (app.startup.domain_rehydration) another test had added.
+            os.environ.pop("CERID_CUSTOM_DOMAINS", None)
+            config.taxonomy.TAXONOMY = saved["leaf_taxonomy"]
+            config.taxonomy.DOMAINS = saved["leaf_domains"]
+            config.TAXONOMY = saved["taxonomy"]
+            config.DOMAINS = saved["domains"]
 
 
 class TestTagVocabulary:

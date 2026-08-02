@@ -407,8 +407,7 @@ class TestCreateRelationship:
 # ---------------------------------------------------------------------------
 
 class TestFindRelatedArtifacts:
-    @patch("app.db.neo4j.relationships.config")
-    def test_empty_artifact_ids(self, mock_config):
+    def test_empty_artifact_ids(self):
         driver, _ = _mock_driver()
         result = find_related_artifacts(driver, [])
         assert result == []

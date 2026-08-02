@@ -70,6 +70,26 @@ QUERIES = [
 ]
 
 
+def nearest_rank(sorted_values: list[float], pct: float) -> float:
+    """Nearest-rank percentile over an ascending list.
+
+    Index off ``len - 1``, never ``len``: ``sorted_values[int(pct * n)]``
+    biases one rank high and collapses to ``max`` for every n <= 20 at p95,
+    so the p95 and max columns print the identical number and the
+    "percentile" is really just the worst sample. Same defect that was fixed
+    in ``utils/metrics.py::_aggregate``; this matches the correct form in
+    ``app/processor/metrics.py::_percentile``.
+
+    Callers still owe an honesty check at small n — the nearest-rank p95 of
+    n <= 11 samples legitimately *is* the max, so report it as a max there
+    rather than dressing it up as a percentile.
+    """
+    if not sorted_values:
+        return 0.0
+    idx = min(len(sorted_values) - 1, int(round(pct * (len(sorted_values) - 1))))
+    return sorted_values[idx]
+
+
 async def timed(coro):
     t0 = time.perf_counter()
     r = await coro
@@ -100,8 +120,13 @@ async def test_health_latency(client, n=20):
     print(f"\n== TEST A: /health x{n} concurrent (worker-starvation probe) ==")
     results = await asyncio.gather(*[get(client, "/health") for _ in range(n)])
     times = [r[0] for r in results]
+    # At the default n=20 the nearest-rank p95 is the 19th-of-20 order
+    # statistic — distinct from max, so the column carries information. The
+    # old `sorted(times)[int(0.95 * n)]` indexed off n and printed max under
+    # a p95 label, making two of these three columns the same number.
+    p95 = nearest_rank(sorted(times), 0.95)
     print(
-        f"  n={n} p50={statistics.median(times):.3f}s p95={sorted(times)[int(0.95 * n)]:.3f}s max={max(times):.3f}s min={min(times):.3f}s"
+        f"  n={n} p50={statistics.median(times):.3f}s p95={p95:.3f}s max={max(times):.3f}s min={min(times):.3f}s"
     )
     print(f"  statuses={set(r[1] for r in results)}")
 
@@ -278,8 +303,13 @@ async def test_head_of_line_blocking(client):
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('tests.load.smoke', exc)
             print(f"  bg drain swallowed: {exc!r}")
+    # 6 samples cannot support a p95 — the nearest-rank p95 of n <= 11 IS the
+    # max, so `sorted(mids)[-1]` under a "p95" label was max wearing a
+    # percentile's name. That relabelling is where the "/health p95 1.86s"
+    # figure carried in the handoffs came from. Print what was measured.
     print(
-        f"  /health during load: p50={statistics.median(mids):.2f}s p95={sorted(mids)[-1]:.2f}s max={max(mids):.2f}s"
+        f"  /health during load (n={len(mids)}, too few for a p95): "
+        f"p50={statistics.median(mids):.2f}s max={max(mids):.2f}s"
     )
     # Wave-1 invariant (Task 8): /health must not serialize behind KB.
     # Pre-Task-8 baseline was p95 4.67s + max 4.67s under 3 bg agent queries.

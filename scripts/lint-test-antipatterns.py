@@ -34,6 +34,24 @@ suite count goes up, and the thing it claims to cover is unprotected.
            nothing else. Three of these sat in test_e2e_pipeline.py's
            TestVerificationPipeline. — lessons 2026-07-30
 
+    TA005  calling the patch alias itself, then asserting on what it returned
+           The same tautology without the import hop — and by far the more
+           common spelling, so TA004's import-shaped matcher never saw it:
+
+               with patch("m.f", new_callable=AsyncMock) as mock_f:
+                   mock_f.return_value = FIXTURE
+                   result = await mock_f(...)     # calls the mock
+               assert "x" in result["context"]    # asserts the fixture
+
+           Fires when a name bound by `as <name>` on a patch() context manager
+           (or assigned from `patch(...).start()`) is called and its return
+           value reaches an `assert` in the same test — directly or through
+           intervening assignments / list accumulation. Asserting on the mock
+           itself (`call_count`, `call_args_list`, `assert_called_once`) is
+           call-wiring verification, not the tautology, and does NOT fire.
+           15 of these sat in test_simulated_sessions.py, which TA004 saw only
+           7 of. — lessons 2026-07-30
+
 Suppress a deliberate exception on the offending line:
 
     # lint-test-antipatterns: allow TA003 — asserting the mock wiring itself
@@ -79,6 +97,25 @@ class Finding:
         return f"{rel}:{self.line}: {self.code} {self.message}"
 
 
+def _is_patch_call(node: ast.AST) -> bool:
+    """True for patch(...), mock.patch(...), patch.object(...)."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == "patch"
+    if isinstance(func, ast.Attribute):
+        if func.attr == "patch":
+            return True
+        if func.attr in {"object", "multiple"}:
+            return _dotted(func.value).rpartition(".")[2] == "patch"
+    return False
+
+
+def _unwrap_await(node: ast.AST) -> ast.AST:
+    return node.value if isinstance(node, ast.Await) else node
+
+
 def _patch_target(node: ast.Call) -> str | None:
     """Return the dotted string target of a patch()/patch.object() call."""
     func = node.func
@@ -99,6 +136,7 @@ class _Visitor(ast.NodeVisitor):
     def __init__(self, path: Path, lines: list[str]):
         self.path, self.lines = path, lines
         self.findings: list[Finding] = []
+        self._ta005_seen: set[int] = set()
 
     # -- helpers ------------------------------------------------------
     def _suppressed(self, lineno: int, code: str) -> bool:
@@ -106,7 +144,9 @@ class _Visitor(ast.NodeVisitor):
         return _SUPPRESS in line and code in line
 
     def _add(self, node: ast.AST, code: str, message: str) -> None:
-        lineno = getattr(node, "lineno", 0)
+        self._add_at(getattr(node, "lineno", 0), code, message)
+
+    def _add_at(self, lineno: int, code: str, message: str) -> None:
         if not self._suppressed(lineno, code):
             self.findings.append(Finding(self.path, lineno, code, message))
 
@@ -152,10 +192,12 @@ class _Visitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._check_patch_then_import(node)
+        self._check_mock_alias_asserted(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._check_patch_then_import(node)
+        self._check_mock_alias_asserted(node)
         self.generic_visit(node)
 
     def _check_patch_then_import(self, fn: ast.AST) -> None:
@@ -186,6 +228,142 @@ class _Visitor(ast.NodeVisitor):
                         "Exercise the real caller instead, or patch the leaf "
                         "dependency rather than the unit under test.",
                     )
+
+    # -- TA005 --------------------------------------------------------
+    @staticmethod
+    def _patch_aliases(fn: ast.AST) -> dict[str, int]:
+        """Names bound to a patch() mock object.
+
+        `with patch(...) as m`, `with patch(...) as m, patch(...) as n`, and the
+        explicit `p = patch(...)` / `m = p.start()` pair. Decorator-injected mock
+        parameters are deliberately out of scope: a decorator mock is normally
+        wiring for the real callee, not a thing the test body calls itself.
+        """
+        aliases: dict[str, int] = {}
+        patchers: set[str] = set()
+        for sub in ast.walk(fn):
+            if isinstance(sub, (ast.With, ast.AsyncWith)):
+                for item in sub.items:
+                    if _is_patch_call(item.context_expr) and isinstance(
+                        item.optional_vars, ast.Name
+                    ):
+                        aliases[item.optional_vars.id] = item.context_expr.lineno
+            elif (
+                isinstance(sub, ast.Assign)
+                and len(sub.targets) == 1
+                and isinstance(sub.targets[0], ast.Name)
+            ):
+                name, value = sub.targets[0].id, sub.value
+                if _is_patch_call(value):
+                    patchers.add(name)
+                elif (
+                    isinstance(value, ast.Call)
+                    and isinstance(value.func, ast.Attribute)
+                    and value.func.attr == "start"
+                    and (
+                        _is_patch_call(value.func.value)
+                        or (
+                            isinstance(value.func.value, ast.Name)
+                            and value.func.value.id in patchers
+                        )
+                    )
+                ):
+                    aliases[name] = value.lineno
+        return aliases
+
+    def _check_mock_alias_asserted(self, fn: ast.AST) -> None:
+        """TA005 — call the patch alias, then assert on what it handed back."""
+        aliases = self._patch_aliases(fn)
+        if not aliases:
+            return
+
+        # Seed: any assignment whose value embeds a call of the alias —
+        # `x = await mock(...)` and `tasks = [mock(q) for q in qs]` alike.
+        # Only a plain-name call counts: `mock.assert_called_once()` and
+        # `mock.call_args` are attribute access on the mock, i.e. call-wiring
+        # verification, and leave no fixture in the assigned value.
+        origin: dict[str, tuple[int, str]] = {}
+
+        def _alias_call_in(node: ast.AST) -> tuple[int, str] | None:
+            for sub in ast.walk(_unwrap_await(node)):
+                if (
+                    isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Name)
+                    and sub.func.id in aliases
+                ):
+                    return (sub.lineno, sub.func.id)
+            return None
+
+        for sub in ast.walk(fn):
+            if (
+                isinstance(sub, ast.Assign)
+                and len(sub.targets) == 1
+                and isinstance(sub.targets[0], ast.Name)
+            ):
+                seed = _alias_call_in(sub.value)
+                if seed:
+                    origin[sub.targets[0].id] = seed
+
+        if not origin:
+            return
+
+        def _tainted_in(node: ast.AST) -> tuple[int, str] | None:
+            for name in ast.walk(node):
+                if isinstance(name, ast.Name) and name.id in origin:
+                    return origin[name.id]
+            return None
+
+        # Propagate one hop at a time until stable: reshaping the fixture
+        # (`found = {s["d"] for s in result["sources"]}`) or accumulating it
+        # (`results.append(result)`) still lands the fixture in the assert.
+        changed = True
+        while changed:
+            changed = False
+            for sub in ast.walk(fn):
+                if (
+                    isinstance(sub, ast.Assign)
+                    and len(sub.targets) == 1
+                    and isinstance(sub.targets[0], ast.Name)
+                    and sub.targets[0].id not in origin
+                ):
+                    src = _tainted_in(sub.value)
+                    if src:
+                        origin[sub.targets[0].id] = src
+                        changed = True
+                elif (
+                    isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr in {"append", "extend"}
+                    and isinstance(sub.func.value, ast.Name)
+                    and sub.func.value.id not in origin
+                ):
+                    for arg in sub.args:
+                        src = _tainted_in(arg)
+                        if src:
+                            origin[sub.func.value.id] = src
+                            changed = True
+                            break
+
+        for sub in ast.walk(fn):
+            if not isinstance(sub, ast.Assert):
+                continue
+            hit = _tainted_in(sub.test)
+            if not hit:
+                continue
+            lineno, alias = hit
+            if lineno in self._ta005_seen:
+                continue
+            self._ta005_seen.add(lineno)
+            self._add_at(
+                lineno, "TA005",
+                f"`{alias}(...)` calls the mock bound by `with patch(...) as "
+                f"{alias}` (line {aliases[alias]}) and the result is asserted on "
+                f"at line {sub.lineno} — the assertion checks the fixture this "
+                "test supplied, so it holds no matter what the real code does. "
+                "Call the real caller and let it reach the mock, or assert on "
+                f"the call wiring ({alias}.call_args / {alias}.call_count) "
+                "instead of the return value.",
+            )
 
 
 def _dotted(node: ast.AST) -> str:

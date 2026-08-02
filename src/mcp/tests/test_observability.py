@@ -182,16 +182,38 @@ class TestAggregation:
         assert agg["p99"] == 42.0
 
     def test_aggregate_percentiles(self):
-        # 100 values from 1-100
+        # 100 values from 1-100.
+        #
+        # These expectations changed on 2026-08-02. The previous ones (p95=96,
+        # p99=100) pinned an off-by-one: the old code indexed ``values[int(n*p)]``
+        # off ``n`` rather than ``n - 1``, biasing one rank high. p99=100 was the
+        # tell — it is the *max*, and for n <= 100 that assertion could never have
+        # read anything else. Nearest-rank over (n - 1) is what
+        # ``app/processor/metrics.py::_percentile`` has always used.
         values = list(range(1, 101))
         points = self._make_points(values)
         agg = MetricsCollector._aggregate(points)
 
         assert agg["count"] == 100
         assert agg["avg"] == 50.5
-        assert agg["p50"] == 51  # index 50 of sorted 1-100
-        assert agg["p95"] == 96  # index 95
-        assert agg["p99"] == 100  # index 99
+        assert agg["p50"] == 51
+        assert agg["p95"] == 95
+        assert agg["p99"] == 99
+        # A real percentile must be distinguishable from the max; the old
+        # formula collapsed p95 to max for every n <= 20 and p99 for n <= 100.
+        assert agg["p99"] < agg["max"]
+
+    def test_p95_is_distinguishable_from_max_on_a_20_sample_window(self):
+        # The regression that motivated the fix: the old formula returned the
+        # max for p95 on every n <= 20, so a dashboard showing p95 and max
+        # showed one number twice and could never distinguish a single slow
+        # outlier from sustained slowness.
+        #
+        # Below ~11 samples p95 legitimately IS the top sample — that is the
+        # percentile, not a bug — so 20 is the smallest honest witness.
+        agg = MetricsCollector._aggregate(self._make_points(list(range(1, 21))))
+        assert agg["max"] == 20
+        assert agg["p95"] == 19
 
     def test_get_aggregated_metrics_covers_all(self):
         redis = _mock_redis()

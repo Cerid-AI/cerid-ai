@@ -14,8 +14,11 @@ if "routers.ingestion" not in sys.modules:
     _stub.ingest_batch = None
     _stub.router = MagicMock()
     sys.modules["routers.ingestion"] = _stub
-    import routers
-    routers.ingestion = _stub
+    # Seed the parent package rather than importing it — src/mcp/routers/ is
+    # internal_only and absent from the public mirror, where this test also runs.
+    if "routers" not in sys.modules:
+        sys.modules["routers"] = ModuleType("routers")
+    sys.modules["routers"].ingestion = _stub
 
 from app.agents.memory import extract_memories
 

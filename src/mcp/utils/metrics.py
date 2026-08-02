@@ -236,11 +236,20 @@ class MetricsCollector:
 
         values = sorted(pt.value for pt in points)
         n = len(values)
+
+        def pct(p: float) -> float:
+            # Nearest-rank over (n - 1). Indexing off ``n`` (the previous
+            # ``values[int(n * p)]``) biases one rank high and collapses to
+            # ``max`` for every n <= 20 at p95 and n <= 100 at p99 — so p95,
+            # p99 and max reported the same number on any realistic window,
+            # which is the tell that the statistic was never computed.
+            return values[min(n - 1, int(round(p * (n - 1))))]
+
         return {
             "avg": sum(values) / n,
-            "p50": values[n // 2],
-            "p95": values[int(n * 0.95)] if n >= 2 else values[-1],
-            "p99": values[int(n * 0.99)] if n >= 2 else values[-1],
+            "p50": pct(0.50),
+            "p95": pct(0.95),
+            "p99": pct(0.99),
             "min": values[0],
             "max": values[-1],
             "count": n,

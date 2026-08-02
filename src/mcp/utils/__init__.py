@@ -8,6 +8,5 @@ Key modules:
   chunker.py         — Semantic text chunking with overlap
   semantic_cache.py  — Quantized int8 query cache with HNSW index
   error_handler.py   — @handle_errors() decorator (the ONE error pattern)
-  retrieval_cache.py — Redis cache with cerid:{domain}:{key} prefix convention
   degradation.py     — Graceful degradation when services are unavailable
 """

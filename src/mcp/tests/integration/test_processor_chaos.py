@@ -140,8 +140,8 @@ async def _wait_for_drain(queue: RedisJobQueue, timeout: float = 10.0) -> bool:
 
     Returns True if drained within ``timeout`` seconds, False otherwise.
     """
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
         sizes = await queue.size_by_priority()
         if sum(sizes.values()) == 0:
             return True

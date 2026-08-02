@@ -150,9 +150,9 @@ async def test_timeout_on_slow_source():
     from core.utils.circuit_breaker import get_breaker
     get_breaker("datasource-slow_source").reset()
 
-    start = asyncio.get_event_loop().time()
+    start = asyncio.get_running_loop().time()
     results = await test_registry.query_all("test", timeout=0.1)  # Use very short timeout for test speed
-    elapsed = asyncio.get_event_loop().time() - start
+    elapsed = asyncio.get_running_loop().time() - start
 
     assert results == []
     # Should have timed out well before 10s
@@ -312,9 +312,9 @@ async def test_query_all_parallel():
     get_breaker("datasource-parallel_a").reset()
     get_breaker("datasource-parallel_b").reset()
 
-    start = asyncio.get_event_loop().time()
+    start = asyncio.get_running_loop().time()
     results = await test_registry.query_all("test", timeout=5.0)
-    elapsed = asyncio.get_event_loop().time() - start
+    elapsed = asyncio.get_running_loop().time() - start
 
     assert len(results) == 2
     # Parallel: should take ~0.1s, not ~0.2s. Allow generous margin.
