@@ -49,6 +49,37 @@ from typing import Any
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src" / "mcp"))
 
+# Below this many observations a percentile is noise, not a measurement.
+# A gate that reports pass/fail from one row states a conclusion it cannot
+# support — and "insufficient data" is a different decision for the operator
+# than "measured and failing".
+_MIN_P95_SAMPLES = 20
+
+# Metrics formally closed as GA gates (owner decision, 2026-08-02). They are
+# still collected and reported — closure is a decision not to *gate* on them,
+# not a decision to stop looking — but they are excluded from the pass count.
+# Authoritative rationale: docs/GA_CHECKLIST.md § "K-program §9 success metrics".
+CLOSED_METRICS: dict[str, str] = {
+    "contradiction_surfacing": (
+        "Closed 2026-08-02. Never had a measurable population: of 14 live "
+        "ContradictionFinding nodes, 13 carry entity_slug='' because their "
+        "source artifact was deleted before the anchor lookup could resolve it "
+        "(one references 'probe-art-1', i.e. test data), so they never got the "
+        "HAS_CONTRADICTION edge this metric traverses. The surviving n=1 cannot "
+        "support a p95. The metric was always self-declared as an approximation "
+        "via summary_updated_at pending UI-view telemetry that was never built. "
+        "Gating GA on a single-user corpus's contradiction latency was not worth "
+        "the telemetry build; revisit if multi-user or a larger corpus makes the "
+        "population real."
+    ),
+}
+
+# How many of the still-gating metrics must pass. Deliberately held at the
+# original absolute count (4) rather than rescaled when a metric was closed:
+# retiring something we cannot measure must not reduce how much evidence GA
+# requires. 4-of-6 became 4-of-5, which is a STRICTER ratio, not a looser one.
+GATE_REQUIRED = 4
+
 
 def _load_dotenv_into_environ() -> None:
     """Best-effort load of repo-root .env so the operator can run this
@@ -153,7 +184,22 @@ def metric_wiki_coverage(driver) -> dict[str, Any]:
 
 
 def metric_wiki_staleness(driver) -> dict[str, Any]:
-    """p95 hours since summary_updated_at for entities with mention_count >= 10."""
+    """p95 hours since summary_updated_at for REFRESHABLE high-mention entities.
+
+    "Refreshable" = at least one ``(:Artifact)-[:MENTIONS]->`` edge, i.e. the
+    entity has a source to summarise from. An entity with none cannot be
+    refreshed at all: ``WikiRefreshJob`` returns
+    ``skipped="no_source_artifacts"`` and writes nothing, so its
+    ``summary_updated_at`` is frozen at whenever it last had a source. Ageing
+    those forever and calling the result "wiki staleness" measures orphaning,
+    not the freshness of the refresh loop — the thing this gate exists to
+    watch. 16 such entities were 25% of the denominator and, being the oldest,
+    *were* the p95 on their own.
+
+    They are NOT hidden: ``unrefreshable`` and ``unrefreshable_p95_hours`` are
+    reported alongside, so a growing orphan population stays visible rather
+    than being laundered out of the gate.
+    """
     if driver is None:
         return {"available": False, "reason": "neo4j_unavailable"}
     try:
@@ -164,10 +210,12 @@ def metric_wiki_staleness(driver) -> dict[str, Any]:
                 MATCH (e:Entity)
                 WHERE coalesce(e.mention_count, 0) >= 10
                   AND e.summary_updated_at IS NOT NULL
-                RETURN e.summary_updated_at AS ts
+                RETURN e.summary_updated_at AS ts,
+                       exists((:Artifact)-[:MENTIONS]->(e)) AS refreshable
                 """
             )
             ages_hours: list[float] = []
+            stuck_hours: list[float] = []
             for r in rows:
                 ts = r["ts"]
                 try:
@@ -175,24 +223,40 @@ def metric_wiki_staleness(driver) -> dict[str, Any]:
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     delta_h = (now - dt).total_seconds() / 3600.0
-                    if delta_h >= 0:
-                        ages_hours.append(delta_h)
+                    if delta_h < 0:
+                        continue
+                    (ages_hours if r["refreshable"] else stuck_hours).append(delta_h)
                 except (ValueError, TypeError):
                     continue
         if not ages_hours:
-            return {"available": True, "target_hours": 168, "actual_hours": None, "denominator": 0}
-        ages_hours.sort()
-        idx = max(0, int(0.95 * len(ages_hours)) - 1)
-        p95 = ages_hours[idx]
+            return {
+                "available": False,
+                "reason": "no_refreshable_entities",
+                "target_hours": 168,
+                "unrefreshable": len(stuck_hours),
+            }
+        p95 = _p95(ages_hours)
         return {
             "available": True,
             "target_hours": 168,  # 7 days
             "actual_hours": round(p95, 2),
             "denominator": len(ages_hours),
             "meets_target": p95 <= 168,
+            # Orphaned-but-summarised entities, surfaced not swallowed.
+            "unrefreshable": len(stuck_hours),
+            "unrefreshable_p95_hours": (
+                round(_p95(stuck_hours), 2) if stuck_hours else None
+            ),
         }
     except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
+
+
+def _p95(values: list[float]) -> float:
+    """p95 by nearest-rank on a copy (callers keep their ordering)."""
+    ordered = sorted(values)
+    idx = max(0, int(0.95 * len(ordered)) - 1)
+    return ordered[idx]
 
 
 # ---------------------------------------------------------------------------
@@ -307,30 +371,65 @@ def metric_chunks_per_answer(redis_client, now: datetime | None = None) -> dict[
 
 
 def metric_memory_entity_linkage(driver) -> dict[str, Any]:
-    """% of memory artifacts with at least one MENTIONS edge."""
+    """% of episodic memories with at least one MENTIONS edge to an Entity.
+
+    Counts BOTH memory representations, because both are recalled:
+
+    * ``(:Memory)`` — verified-claim promotion
+      (``core.agents.verified_memory.promote_verified_facts``).
+    * ``(:Artifact)`` whose ``filename`` starts with ``memory_`` — the
+      conversational path (``core.agents.memory``), which is also what the
+      ``/memories`` router serves.
+
+    Both write their Chroma companion into the ``conversations`` collection —
+    the one ``recall_memories`` queries — so a linkage figure that covers only
+    one of them does not describe the memory surface.
+
+    This previously matched ``(:Artifact)`` carrying a ``memory_type``
+    property. **No node has ever had one** — ``memory_type`` lives in Chroma
+    metadata, not on the Neo4j node — so the metric divided by an empty
+    denominator and reported ``0.0% / meets_target: false``: a *failing gate*
+    that actually meant "nothing measured". An empty denominator now reports
+    ``available: false`` instead, so unmeasured never again reads as failed.
+    """
     if driver is None:
         return {"available": False, "reason": "neo4j_unavailable"}
     try:
         with driver.session() as session:
             row = session.run(
                 """
-                MATCH (m:Artifact)
-                WHERE m.memory_type IS NOT NULL
-                  AND coalesce(m.archived, false) = false
-                WITH count(m) AS total,
-                     sum(CASE WHEN exists((m)-[:MENTIONS]->(:Entity)) THEN 1 ELSE 0 END) AS linked
-                RETURN total, linked
+                CALL {
+                    MATCH (m:Memory)
+                    WHERE coalesce(m.archived, false) = false
+                    RETURN count(m) AS total,
+                           sum(CASE WHEN exists((m)-[:MENTIONS]->(:Entity))
+                                    THEN 1 ELSE 0 END) AS linked
+                    UNION ALL
+                    MATCH (m:Artifact)
+                    WHERE m.filename STARTS WITH 'memory_'
+                      AND coalesce(m.archived, false) = false
+                    RETURN count(m) AS total,
+                           sum(CASE WHEN exists((m)-[:MENTIONS]->(:Entity))
+                                    THEN 1 ELSE 0 END) AS linked
+                }
+                RETURN sum(total) AS total, sum(linked) AS linked
                 """
             ).single()
             total = int(row["total"]) if row else 0
             linked = int(row["linked"]) if row else 0
+        if not total:
+            return {
+                "available": False,
+                "reason": "no_memories",
+                "target_pct": 70.0,
+            }
         return {
             "available": True,
             "target_pct": 70.0,
-            "actual_pct": round(100.0 * linked / total, 2) if total else 0.0,
+            "actual_pct": round(100.0 * linked / total, 2),
             "denominator": total,
             "numerator": linked,
-            "meets_target": (linked / total >= 0.70) if total else False,
+            "meets_target": linked / total >= 0.70,
         }
     except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
@@ -376,11 +475,26 @@ def metric_contradiction_surfacing(driver) -> dict[str, Any]:
                         deltas_hours.append(delta_h)
                 except (ValueError, TypeError):
                     continue
-        if not deltas_hours:
-            return {"available": True, "target_hours": 24, "actual_hours": None, "denominator": 0}
-        deltas_hours.sort()
-        idx = max(0, int(0.95 * len(deltas_hours)) - 1)
-        p95 = deltas_hours[idx]
+        if len(deltas_hours) < _MIN_P95_SAMPLES:
+            # A p95 over one sample is not a p95. This reported
+            # `1066h, meets_target: false` from n=1 — a confident-looking gate
+            # failure manufactured from a single row. 13 of the 14 live
+            # findings carry entity_slug="" because their source artifact was
+            # deleted before the anchor lookup ran (one of them references
+            # "probe-art-1", i.e. test data), so they never got the
+            # HAS_CONTRADICTION edge this metric traverses.
+            return {
+                "available": False,
+                "reason": "insufficient_samples",
+                "target_hours": 24,
+                "denominator": len(deltas_hours),
+                "min_samples": _MIN_P95_SAMPLES,
+                "note": (
+                    "the summary_updated_at approximation cannot carry this gate; "
+                    "closed as a GA gate 2026-08-02 (see closed_rationale)"
+                ),
+            }
+        p95 = _p95(deltas_hours)
         return {
             "available": True,
             "target_hours": 24,
@@ -412,16 +526,25 @@ def collect_all() -> dict[str, Any]:
             "contradiction_surfacing": metric_contradiction_surfacing(driver),
         },
     }
-    # Top-level meets_target summary
+    # Top-level meets_target summary. CLOSED_METRICS are collected and
+    # reported but excluded from the gate arithmetic — see GA_CHECKLIST.
     targets_met = 0
     targets_eval = 0
     for name, m in snapshot["metrics"].items():
+        if name in CLOSED_METRICS:
+            m["gate_status"] = "closed"
+            m["closed_rationale"] = CLOSED_METRICS[name]
+            continue
         if m.get("available") and "meets_target" in m:
             targets_eval += 1
             if m["meets_target"]:
                 targets_met += 1
     snapshot["targets_met"] = targets_met
     snapshot["targets_evaluated"] = targets_eval
+    snapshot["gate_required"] = GATE_REQUIRED
+    snapshot["gate_of"] = len(snapshot["metrics"]) - len(CLOSED_METRICS)
+    snapshot["gate_passes"] = targets_met >= GATE_REQUIRED
+    snapshot["closed_metrics"] = sorted(CLOSED_METRICS)
     if driver is not None:
         driver.close()
     return snapshot

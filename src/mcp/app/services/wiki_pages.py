@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -337,6 +338,56 @@ async def list_entities(
             # Skip malformed rows rather than aborting the whole list
             continue
     return result
+
+
+def _resolve_entity_slug(neo4j_driver: Any, hint: str) -> str | None:
+    """Resolve a free-text entity hint to a real ``canonical_id``.
+
+    Every ``canonical_id`` in this graph is type-prefixed (``asset:sol``,
+    ``loc:wall-street``, ``org:conversations`` — 2,558 of 2,558 summarised
+    entities). A naive slugification of a query hint therefore NEVER matches:
+    "What is SOL?" yields the hint "SOL", slugifies to ``sol``, and the exact
+    lookup misses ``asset:sol``. That is why the compiled-summary wiki surface
+    returned ``None`` for every query — the pages existed the whole time.
+
+    ``surface_router._entity_hint`` always documented its output as feeding a
+    "fuzzy slug lookup"; this is that lookup.
+
+    Resolution order, most-specific first:
+      1. exact ``canonical_id``
+      2. the segment after the type prefix (``asset:sol`` for ``sol``)
+      3. case-insensitive ``name``
+
+    Ties break on ``mention_count DESC`` then ``canonical_id`` so the choice is
+    deterministic — two types can share a suffix (``other:python`` vs a
+    hypothetical ``lang:python``).
+    """
+    cleaned = (hint or "").strip().lower()
+    if not cleaned:
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", cleaned).strip("-")
+    if not slug:
+        return None
+    with neo4j_driver.session() as session:
+        row = session.run(
+            """
+            MATCH (e:Entity)
+            WHERE e.canonical_id = $slug
+               OR split(e.canonical_id, ':')[-1] = $slug
+               OR toLower(coalesce(e.name, '')) = $name
+            RETURN e.canonical_id AS cid,
+                   CASE
+                     WHEN e.canonical_id = $slug THEN 0
+                     WHEN split(e.canonical_id, ':')[-1] = $slug THEN 1
+                     ELSE 2
+                   END AS rank
+            ORDER BY rank, coalesce(e.mention_count, 0) DESC, e.canonical_id
+            LIMIT 1
+            """,
+            slug=slug,
+            name=cleaned,
+        ).single()
+    return row["cid"] if row else None
 
 
 async def get_entity_page(neo4j_driver: Any, slug: str) -> WikiEntityPage | None:

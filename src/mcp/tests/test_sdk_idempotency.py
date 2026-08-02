@@ -169,3 +169,87 @@ class TestSdkIdempotencyUnits:
             r2 = c.post("/sdk/v1/memory/extract", json=body, headers=h)
         assert r1.status_code == 200 and r2.status_code == 200, (r1.text, r2.text)
         assert m.call_count == 1  # wrapper applies on a second endpoint too
+
+
+class TestEveryMutatingPostIsWrapped:
+    """Standing-claim gate for GA_CHECKLIST "Idempotency-Key on all /sdk/v1 POSTs".
+
+    The checklist item says *all*, which makes it a claim that must hold as
+    routes are added — not a one-time audit. It silently went stale once
+    already: it was verified green on 2026-06-05, then ``/ingest/file``,
+    ``/ingest/webhook/{token}`` and ``/ingest/voice-note`` were added without
+    the wrap and nothing rechecked it.
+
+    Enumerating the router means a new mutating POST fails here instead of
+    quietly falsifying the checklist. A genuinely read-only POST is opted out
+    by name below, with the reason recorded.
+    """
+
+    # POSTs that create/modify durable state — each MUST route through
+    # ``idempotent`` so a client retry cannot double-write.
+    MUTATING = {
+        "/sdk/v1/ingest",
+        "/sdk/v1/ingest/file",
+        "/sdk/v1/ingest/external",
+        "/sdk/v1/ingest/webhook/{token}",
+        "/sdk/v1/ingest/voice-note",
+        "/sdk/v1/memory/extract",
+    }
+
+    # POSTs that only read/compute — POST is used for request-body ergonomics,
+    # not because they mutate. A retry is harmless, so no key is required.
+    READ_ONLY = {
+        "/sdk/v1/query",
+        "/sdk/v1/hallucination",
+        "/sdk/v1/llm/complete",
+        "/sdk/v1/search",
+    }
+
+    def _post_paths(self) -> set[str]:
+        from app.routers import sdk
+
+        return {
+            r.path
+            for r in sdk.router.routes
+            if "POST" in getattr(r, "methods", set())
+        }
+
+    def test_route_inventory_is_complete(self):
+        """Every POST is classified — a new one must be triaged, not ignored."""
+        unclassified = self._post_paths() - self.MUTATING - self.READ_ONLY
+        assert not unclassified, (
+            f"New /sdk/v1 POST route(s) {sorted(unclassified)} are unclassified. "
+            "Add to MUTATING (and wrap in `idempotent`) or to READ_ONLY."
+        )
+
+    def test_classified_routes_still_exist(self):
+        """Catches a rename that would otherwise make the gate vacuous."""
+        missing = (self.MUTATING | self.READ_ONLY) - self._post_paths()
+        assert not missing, f"Classified route(s) no longer on the router: {sorted(missing)}"
+
+    def test_every_mutating_post_reaches_idempotent(self):
+        """The endpoint body must call ``idempotent``.
+
+        This is a source check on the resolved route endpoint, so it catches a
+        route added without the wrap. It does NOT prove the call is reached on
+        every branch — the behavioural round-trips above
+        (``TestSdkIngestIdempotency``) cover that for the ingest path.
+        """
+        import inspect
+
+        from app.routers import sdk
+
+        by_path = {
+            r.path: r
+            for r in sdk.router.routes
+            if "POST" in getattr(r, "methods", set())
+        }
+        unwrapped = []
+        for path in sorted(self.MUTATING):
+            route = by_path[path]
+            src = inspect.getsource(route.endpoint)
+            if "idempotent(" not in src:
+                unwrapped.append(path)
+        assert not unwrapped, (
+            f"Mutating POST route(s) not wrapped in `idempotent`: {unwrapped}"
+        )

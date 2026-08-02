@@ -294,7 +294,15 @@ class TestHallucinationEndpointVerifiedMemoryGating:
                 },
             )
         assert res.status_code == 200, res.text
-        assert captured["create_memory_fn"] is mock_create
+        # Not an identity check: at L0 the injected callable wraps
+        # create_memory_node so the new :Memory node also gets entity
+        # extraction enqueued. What matters is that it is non-None (the
+        # promotion guard) and that it delegates to the real writer.
+        injected = captured["create_memory_fn"]
+        assert injected is not None
+        with patch("app.db.redis.processor_queue.enqueue_job"):
+            injected(object(), {"text": "probe"})
+        mock_create.assert_called_once()
 
 
 class TestVerifyStreamEndpointVerifiedMemoryGating:
@@ -349,7 +357,13 @@ class TestVerifyStreamEndpointVerifiedMemoryGating:
             async for _ in resp.body_iterator:
                 pass
 
-        assert captured["create_memory_fn"] is mock_create
+        # See the sibling test above: L0 injects a wrapper around
+        # create_memory_node, not the bare function.
+        injected = captured["create_memory_fn"]
+        assert injected is not None
+        with patch("app.db.redis.processor_queue.enqueue_job"):
+            injected(object(), {"text": "probe"})
+        mock_create.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

@@ -120,6 +120,89 @@ def upsert_entities_for_artifact(
     return stats
 
 
+def upsert_entities_for_memory(
+    driver,
+    memory_id: str,
+    entities: Iterable[Entity],
+) -> dict:
+    """Idempotent UPSERT of ``(:Memory)-[:MENTIONS]->(:Entity)`` edges.
+
+    The episodic-memory counterpart of :func:`upsert_entities_for_artifact`.
+    ``:Memory`` nodes (verified-claim promotion — see
+    ``core.agents.verified_memory.promote_verified_facts``) previously carried
+    no entity edges at all, so the memory surface could not participate in
+    entity-anchored retrieval and the K-program linkage metric measured 0.
+
+    Two deliberate differences from the artifact path:
+
+    * **``e.mention_count`` is NOT incremented.** Every consumer of that
+      property treats it as an *artifact* mention count — the wiki-coverage and
+      staleness gates select on ``mention_count >= 5`` / ``>= 10``, and
+      community detection derives co-mention weight from artifact edges.
+      Folding memory mentions in would silently move those denominators.
+    * **No ``chunk_ids``.** A memory's text lives on the node, not in chunked
+      Chroma documents. Leaving the property unset also keeps these edges out
+      of ``compute_entity_embeddings``, which filters on
+      ``m.chunk_ids IS NOT NULL``.
+    """
+    ent_list = list(entities)
+    stats = {"entities_upserted": 0, "edges_upserted": 0}
+    if not ent_list:
+        return stats
+
+    now = utcnow_iso()
+    payload = [
+        {
+            "canonical_id": e.canonical_id,
+            "name": e.name,
+            "entity_type": e.entity_type,
+            "confidence": float(e.confidence),
+        }
+        for e in ent_list
+    ]
+
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (m:Memory {id: $memory_id})
+            UNWIND $payload AS p
+            MERGE (e:Entity {canonical_id: p.canonical_id})
+              ON CREATE SET
+                e.name = p.name,
+                e.entity_type = p.entity_type,
+                e.created_at = $now,
+                e.updated_at = $now,
+                e.mention_count = 0
+              ON MATCH SET
+                e.updated_at = $now
+            MERGE (m)-[r:MENTIONS]->(e)
+              ON CREATE SET
+                r.confidence = p.confidence,
+                r.created_at = $now
+              ON MATCH SET
+                r.confidence = (
+                  CASE WHEN p.confidence > coalesce(r.confidence, 0)
+                       THEN p.confidence
+                       ELSE r.confidence END
+                )
+            RETURN count(DISTINCT e) AS ents, count(r) AS edges
+            """,
+            memory_id=memory_id,
+            payload=payload,
+            now=now,
+        )
+        row = result.single()
+        if row is not None:
+            stats["entities_upserted"] = int(row["ents"])
+            stats["edges_upserted"] = int(row["edges"])
+
+    logger.debug(
+        "entity_upsert memory=%s entities=%d edges=%d",
+        memory_id, stats["entities_upserted"], stats["edges_upserted"],
+    )
+    return stats
+
+
 def list_entities_for_artifact(driver, artifact_id: str) -> list[dict]:
     """Read-back helper for tests + introspection."""
     with driver.session() as session:
@@ -234,11 +317,17 @@ def _merge_chunk_size(chunk_size: int | None) -> int:
 # ``$loser_id`` / ``$survivor_id`` params — no injection surface.
 # ---------------------------------------------------------------------------
 
-# MENTIONS: (:Artifact)-[:MENTIONS]->(loser). Preserve confidence/chunk_ids/
-# created_at on first re-point; MERGE dedups when the artifact already mentions
-# the survivor.
+# MENTIONS: (:Artifact|:Memory)-[:MENTIONS]->(loser). Preserve confidence/
+# chunk_ids/created_at on first re-point; MERGE dedups when the source already
+# mentions the survivor.
+#
+# The source label is deliberately UNCONSTRAINED. Memory-sourced MENTIONS
+# (upsert_entities_for_memory) are a second producer of this edge type; an
+# `(a:Artifact)`-scoped match would leave them attached to the loser, where the
+# leftover-edge guard in _detach_delete_loser warns and DETACH DELETE then
+# drops them — silent data loss on every entity merge.
 _REPOINT_MENTIONS = """
-MATCH (a:Artifact)-[m_old:MENTIONS]->(:Entity {canonical_id: $loser_id})
+MATCH (a)-[m_old:MENTIONS]->(:Entity {canonical_id: $loser_id})
 WITH a, m_old LIMIT $limit
 MATCH (survivor:Entity {canonical_id: $survivor_id})
 MERGE (a)-[m_new:MENTIONS]->(survivor)
@@ -409,8 +498,10 @@ def _run_chunked_repoint(
     return total
 
 
+# Unconstrained source label, matching _REPOINT_MENTIONS — the tombstone must
+# snapshot memory-sourced mentions too or unmerge restores only a subset.
 _SNAPSHOT_MENTIONS = """
-MATCH (a:Artifact)-[m:MENTIONS]->(:Entity {canonical_id: $loser_id})
+MATCH (a)-[m:MENTIONS]->(:Entity {canonical_id: $loser_id})
 RETURN a.id AS art_id,
        m.confidence AS confidence,
        m.chunk_ids  AS chunk_ids,
@@ -678,10 +769,12 @@ ON MATCH SET
     e.updated_at    = $now
 """
 
+# Both producers key their source node on ``id``; the label predicate keeps the
+# match bounded to the two node types that can own a MENTIONS edge.
 _RESTORE_MENTIONS = """
 MATCH (loser:Entity {canonical_id: $loser_id})
 UNWIND $batch AS b
-MATCH (a:Artifact {id: b.art_id})
+MATCH (a) WHERE a.id = b.art_id AND (a:Artifact OR a:Memory)
 MERGE (a)-[m:MENTIONS]->(loser)
 ON CREATE SET m.confidence = b.confidence,
               m.chunk_ids  = b.chunk_ids,

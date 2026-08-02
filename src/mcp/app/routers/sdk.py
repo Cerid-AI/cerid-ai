@@ -387,13 +387,18 @@ async def sdk_ingest(req: dict, request: Request):
 
 
 @router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
-async def sdk_ingest_file(req: dict):
-    result = await ingest_file(
-        req.get("file_path", ""),
-        domain=req.get("domain", ""),
-        tags=req.get("tags", ""),
+async def sdk_ingest_file(req: dict, request: Request):
+    # Idempotency-Key (GA P0.5 D1): a retried file ingest with the same key
+    # returns the first result instead of ingesting the file twice. `request`
+    # exists solely to reach the header — the body model is `req`.
+    return await idempotent(
+        request,
+        lambda: ingest_file(
+            req.get("file_path", ""),
+            domain=req.get("domain", ""),
+            tags=req.get("tags", ""),
+        ),
     )
-    return result
 
 
 @router.post(
@@ -454,7 +459,17 @@ async def sdk_ingest_external(request: ExternalIngestRequest, http_request: Requ
     status_code=202,
  response_model=SdkIngestWebhookResponse)
 async def sdk_ingest_webhook(token: str, request: Request) -> dict[str, str]:
-    """Token-gated webhook receiver. See module docstring."""
+    """Token-gated webhook receiver. See module docstring.
+
+    Idempotency-Key (GA P0.5 D1): a redelivered payload carrying the same key
+    is accepted once. Senders that omit the header — most third-party webhook
+    producers — are unaffected; ``idempotent`` runs the work unchanged.
+    """
+    return await idempotent(request, lambda: _sdk_ingest_webhook_impl(token, request))
+
+
+async def _sdk_ingest_webhook_impl(token: str, request: Request) -> dict[str, str]:
+    """Webhook body — split out so the route can wrap it in ``idempotent``."""
     import json as _json
 
     from app.db.neo4j import sources as srcdb
@@ -620,7 +635,16 @@ async def sdk_ingest_voice_note(request: Request) -> dict:
     so it can pulse the duration and surface a snippet in the F11
     overlay's result step. Long-running transcription (>10s) is the
     caller's signal to switch to the Meeting Capture pipeline.
+
+    Idempotency-Key (GA P0.5 D1): a retry carrying the same key returns the
+    first transcript instead of re-running transcription and creating a
+    duplicate artifact.
     """
+    return await idempotent(request, lambda: _sdk_ingest_voice_note_impl(request))
+
+
+async def _sdk_ingest_voice_note_impl(request: Request) -> dict:
+    """Voice-note body — split out so the route can wrap it in ``idempotent``."""
     import tempfile
     import time as _time
     from pathlib import Path as _Path

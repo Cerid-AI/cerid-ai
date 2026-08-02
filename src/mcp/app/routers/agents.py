@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from enum import Enum
 from typing import Any
@@ -63,8 +64,49 @@ def _verified_memory_fn(create_fn: Any) -> Any:
     the Neo4j write attempt, leaking the raw claim text into the
     "conversations" collection regardless of what the Neo4j write did.
     Passing ``None`` itself skips promotion — and both its writes — entirely.
+
+    When promotion IS allowed the returned callable also enqueues entity
+    extraction for the new ``:Memory`` node, mirroring what Phase K2.1 already
+    does for conversational (artifact-backed) memories in
+    ``core.agents.memory``. Without it the verified-promotion path produced
+    ``:Memory`` nodes with no ``MENTIONS`` edges at all, so the episodic surface
+    never joined the entity graph.
     """
-    return None if private_blocks(1) else create_fn
+    if private_blocks(1):
+        return None
+
+    def _create_and_link(driver: Any, memory_data: dict[str, Any]) -> str:
+        memory_id = create_fn(driver, memory_data)
+        _enqueue_memory_entity_extraction(memory_id)
+        return memory_id
+
+    return _create_and_link
+
+
+def _enqueue_memory_entity_extraction(memory_id: str) -> None:
+    """Queue entity extraction for a freshly promoted ``:Memory`` node.
+
+    Best-effort and never raises: a queueing failure must not fail the
+    promotion that already committed the node. Gated by the same
+    ``CERID_MEMORY_ENTITY_EXTRACTION_ENABLED`` switch as the artifact path.
+    """
+    if not memory_id:
+        return
+    val = os.environ.get(
+        "CERID_MEMORY_ENTITY_EXTRACTION_ENABLED", "true",
+    ).strip().lower()
+    if val not in ("true", "1", "yes", "on"):
+        return
+    try:
+        from app.db.redis.processor_queue import enqueue_job
+        from app.processor.jobs.memory_entity_extraction import MemoryEntityExtractionJob
+
+        payload = {"memory_id": memory_id, "tenant_id": "default"}
+        enqueue_job(MemoryEntityExtractionJob(**payload), payload=payload)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.agents.memory_entity_extraction_enqueue", exc
+        )
 
 
 class AgentQueryRequest(BaseModel):

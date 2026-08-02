@@ -850,6 +850,16 @@ async def _run_wiki_stale_sweep() -> None:
                         e.summary_edited_by = 'user'
                         AND e.summary_updated_at >= $human_edit_cutoff
                       )
+                      // Skip entities with no artifact to summarise FROM.
+                      // WikiRefreshJob returns skipped="no_source_artifacts"
+                      // for these and writes nothing — including no new
+                      // summary_updated_at — so they re-qualify every night
+                      // and, ranked by mention_count, consume the whole
+                      // nightly budget forever while refreshable entities
+                      // starve. 3,188 of 5,520 entities were in this state.
+                      // They become refreshable again the moment any artifact
+                      // mentions them, via the ingest-triggered path.
+                      AND exists((:Artifact)-[:MENTIONS]->(e))
                     RETURN e.canonical_id AS slug
                     ORDER BY coalesce(e.mention_count, 0) DESC
                     LIMIT $lim

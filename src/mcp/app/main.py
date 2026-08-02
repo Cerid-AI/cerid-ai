@@ -697,29 +697,13 @@ async def lifespan(app: FastAPI):
     # Same core↛app DI pattern; the fetcher resolves the entity hint to a slug and
     # reads the cached summary from Neo4j. Graceful: returns None on miss so C2 is
     # a no-op when the entity has no page.
-    try:
-        import re as _re
+    # Extracted to app.startup.surface_wiring so eval harnesses and scripts that
+    # drive the answer path outside this process wire the SAME fetcher. Inline
+    # here, they silently ran with the wiki surface disabled and measured a
+    # degraded path that looked healthy.
+    from app.startup.surface_wiring import wire_query_surfaces
 
-        from app.deps import get_neo4j as _get_neo4j_for_wiki
-        from app.services.wiki_pages import get_entity_page as _get_entity_page
-        from core.agents.query_agent import set_wiki_page_fetcher
-
-        def _slug_for(hint: str) -> str:
-            return _re.sub(r"[^a-z0-9]+", "-", (hint or "").lower()).strip("-")
-
-        async def _fetch_wiki_page(entity_hint: str) -> dict | None:
-            driver = _get_neo4j_for_wiki()
-            if driver is None or not entity_hint:
-                return None
-            page = await _get_entity_page(driver, _slug_for(entity_hint))
-            if page is None or not page.summary:
-                return None
-            return {"content": page.summary, "title": page.name, "slug": page.slug}
-
-        set_wiki_page_fetcher(_fetch_wiki_page)
-    except Exception as e:
-        log_swallowed_error('app.main', e)
-        logger.warning(f"Wiki-page fetcher wiring failed (C2 surface disabled): {e}")
+    wire_query_surfaces()
 
     # Load plugins
     try:

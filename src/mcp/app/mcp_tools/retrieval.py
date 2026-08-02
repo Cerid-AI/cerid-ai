@@ -980,11 +980,24 @@ async def pkb_answer_with_citations(
         and surface_decision.matched_entity_hint
     ):
         try:
-            from app.services.wiki_pages import get_entity_page  # noqa: PLC0415
+            import asyncio as _asyncio  # noqa: PLC0415
 
-            page = await get_entity_page(
-                get_neo4j(), surface_decision.matched_entity_hint,
+            from app.services.wiki_pages import (  # noqa: PLC0415
+                _resolve_entity_slug,
+                get_entity_page,
             )
+
+            # Resolve the hint to a canonical_id first. Passing the raw hint
+            # ("SOL") as a slug missed every entity, because all canonical_ids
+            # are type-prefixed ("asset:sol") — so this branch produced no wiki
+            # block and the compiled-summary answer silently degraded to
+            # vector-only. Same defect as the C2 fetcher in
+            # app/startup/surface_wiring.py; both call sites need the resolver.
+            _driver = get_neo4j()
+            _slug = await _asyncio.to_thread(
+                _resolve_entity_slug, _driver, surface_decision.matched_entity_hint,
+            )
+            page = await get_entity_page(_driver, _slug) if _slug else None
             if page is not None and getattr(page, "summary", None):
                 wiki_page_meta = {
                     "slug": page.slug,

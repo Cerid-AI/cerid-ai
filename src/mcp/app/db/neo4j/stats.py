@@ -42,9 +42,19 @@ def fetch_current_stats(driver) -> dict[str, Any]:
         MATCH (e:Entity) RETURN count(e) AS entities
     }
     CALL {
-        OPTIONAL MATCH (m:Artifact {memory_type: 'memory'})
-        WITH count(m) AS memories
-        RETURN memories
+        // Both episodic-memory representations. The previous form matched
+        // (:Artifact {memory_type: 'memory'}), of which there has never been a
+        // single node — memory_type is Chroma metadata, not a Neo4j property —
+        // so this counter reported 0 regardless of how many memories existed.
+        // Nested + sum(), not a bare UNION ALL: a two-row CALL subquery would
+        // duplicate every row of the enclosing stats query.
+        CALL {
+            MATCH (m:Memory) RETURN count(m) AS c
+            UNION ALL
+            MATCH (m:Artifact) WHERE m.filename STARTS WITH 'memory_'
+            RETURN count(m) AS c
+        }
+        RETURN sum(c) AS memories
     }
     CALL {
         OPTIONAL MATCH (s:Source) RETURN count(s) AS sources
