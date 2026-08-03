@@ -739,11 +739,21 @@ class TestFullUserJourney:
 
         client.get_collection.side_effect = lambda name, **_: _get_collection(name)
 
-        results = await multi_domain_query(
-            "How does API rate limiting affect our systems?",
-            domains=["coding", "finance"],
-            chroma_client=client,
-        )
+        # Hybrid BM25 fusion is held off for this test. `search_bm25` reads
+        # whatever indexes sit under the RELATIVE `BM25_DATA_DIR`, so what it
+        # returns depends on the developer's on-disk corpus and on the cwd
+        # pytest was launched from — running from `src/mcp` and from the repo
+        # root load different index sets. That made the fused relevance, and
+        # therefore this test, a function of ambient data: it passed from one
+        # cwd and failed from the other on the same tree. The vector fan-out
+        # and merge is what this test is about; hybrid fusion has its own
+        # coverage in the BM25/fusion tests.
+        with patch("core.retrieval.bm25.is_available", return_value=False):
+            results = await multi_domain_query(
+                "How does API rate limiting affect our systems?",
+                domains=["coding", "finance"],
+                chroma_client=client,
+            )
 
         # Real assertions: the function fanned out to both collections, tagged
         # each result with the domain it came from, and merged them.
