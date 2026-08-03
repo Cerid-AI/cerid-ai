@@ -265,23 +265,41 @@ def _p95(values: list[float]) -> float:
 
 
 def metric_faithfulness(redis_client) -> dict[str, Any]:
-    """RAGAS faithfulness on compiled_summary intent class.
+    """RAGAS faithfulness on the compiled_summary intent class, LIVE only.
 
-    Reads from the nightly RAGAS run output, keyed by intent class.
-    The CI ragas-eval job writes results into Redis under
-    ``cerid:ragas:by_intent:<intent>`` as a JSON-encoded summary.
+    Reads ``cerid:ragas:live_by_intent:compiled_summary``, written by the
+    compiled-summary soak from answers the product actually generated.
+
+    It deliberately does NOT read ``cerid:ragas:by_intent:*``, which the nightly
+    ``ragas-eval`` job writes from ``golden_dataset.json`` — hand-authored
+    fixtures whose ground truths were edited to match their own contexts, and
+    which therefore score ~0.9 by construction. Both producers wrote the same
+    key and both land ``compiled_summary`` at **n=30** (30 of the golden 50
+    classify that way; the soak defaults to 30 entities), so the payload gave no
+    way to tell them apart and this metric reported whichever job ran last.
+    **That is the origin of the retracted 0.917** — the nightly's fixture number
+    read as though it were the product's.
+
+    There is no fallback to the fixtures key when the live one is empty. The
+    fallback is the defect: "no soak has run" must read as no data, not as a
+    number measured on something else.
     """
     if redis_client is None:
         return {"available": False, "reason": "redis_unavailable"}
     try:
-        raw = redis_client.get("cerid:ragas:by_intent:compiled_summary")
+        raw = redis_client.get("cerid:ragas:live_by_intent:compiled_summary")
         if not raw:
             return {
                 "available": True,
                 "target": 0.92,
                 "actual": None,
                 "denominator": 0,
-                "note": "no RAGAS by-intent data yet; runs nightly via ragas-eval CI",
+                "note": (
+                    "no LIVE compiled-summary faithfulness yet — run "
+                    "tests/eval/compiled_summary_soak_eval.py in-container. The "
+                    "nightly fixture number is NOT a substitute and is not read "
+                    "here."
+                ),
             }
         data = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
         faithfulness = data.get("faithfulness")

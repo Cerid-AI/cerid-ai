@@ -44,19 +44,62 @@ def test_record_faithfulness_by_intent_roundtrip():
     from core.utils.cache import record_faithfulness_by_intent
 
     redis = _make_fakeredis()
-    record_faithfulness_by_intent(redis, intent="compiled_summary", faithfulness=0.931, n=12)
+    record_faithfulness_by_intent(
+        redis, intent="compiled_summary", faithfulness=0.931, n=12,
+        source="fixtures",
+    )
 
     raw = redis.get("cerid:ragas:by_intent:compiled_summary")
     data = json.loads(raw)
     assert data["faithfulness"] == 0.931
     assert data["n"] == 12
+    assert data["source"] == "fixtures"
+
+
+def test_the_two_producers_do_not_share_a_key():
+    """The collision that produced the retracted 0.917.
+
+    The nightly (hand-authored fixtures, ~0.9 by construction) and the soak
+    (live product answers) both slice by router intent and both land
+    compiled_summary at n=30, so the stored payload gave no way to tell them
+    apart and the GA metric reported whichever ran last.
+    """
+    from core.utils.cache import record_faithfulness_by_intent
+
+    redis = _make_fakeredis()
+    record_faithfulness_by_intent(
+        redis, intent="compiled_summary", faithfulness=0.917, n=30,
+        source="fixtures",
+    )
+    record_faithfulness_by_intent(
+        redis, intent="compiled_summary", faithfulness=0.548, n=30,
+        source="live",
+    )
+
+    fixtures = json.loads(redis.get("cerid:ragas:by_intent:compiled_summary"))
+    live = json.loads(redis.get("cerid:ragas:live_by_intent:compiled_summary"))
+    assert fixtures["faithfulness"] == 0.917, "the fixture number must survive"
+    assert live["faithfulness"] == 0.548, "the live number must not be overwritten"
+
+
+def test_an_unknown_source_is_rejected():
+    """A typo'd source must not silently create a third namespace."""
+    import pytest
+
+    from core.utils.cache import record_faithfulness_by_intent
+
+    with pytest.raises(ValueError, match="source must be one of"):
+        record_faithfulness_by_intent(
+            _make_fakeredis(), intent="compiled_summary", faithfulness=0.9, n=1,
+            source="nightly",
+        )
 
 
 def test_record_faithfulness_by_intent_noop_when_redis_none():
     from core.utils.cache import record_faithfulness_by_intent
 
     # Must not raise.
-    record_faithfulness_by_intent(None, intent="x", faithfulness=0.9, n=1)
+    record_faithfulness_by_intent(None, intent="x", faithfulness=0.9, n=1, source="live")
 
 
 def test_record_faithfulness_never_raises_on_redis_error():
@@ -66,7 +109,9 @@ def test_record_faithfulness_never_raises_on_redis_error():
         def set(self, *_a, **_k):
             raise RuntimeError("redis down")
 
-    record_faithfulness_by_intent(_Boom(), intent="compiled_summary", faithfulness=0.9, n=3)
+    record_faithfulness_by_intent(
+        _Boom(), intent="compiled_summary", faithfulness=0.9, n=3, source="live",
+    )
 
 
 def test_loading_collector_does_not_leak_dotenv_into_environ():
@@ -94,9 +139,34 @@ def test_emit_then_real_metric_faithfulness_reads():
 
     collector = _load_collector()
     redis = _make_fakeredis()
-    record_faithfulness_by_intent(redis, intent="compiled_summary", faithfulness=0.95, n=20)
+    record_faithfulness_by_intent(
+        redis, intent="compiled_summary", faithfulness=0.95, n=20, source="live",
+    )
 
     res = collector.metric_faithfulness(redis)
     assert res["actual"] == 0.95
     assert res["denominator"] == 20
     assert res["meets_target"] is True  # 0.95 >= 0.92 target
+
+
+def test_the_gate_ignores_the_fixture_number():
+    """No fallback: fixture data must never satisfy the live metric.
+
+    Falling back when the live key is empty would report a number measured on
+    self-scoring fixtures as though it were the product's — the exact
+    substitution this metric was retracted for.
+    """
+    from core.utils.cache import record_faithfulness_by_intent
+
+    collector = _load_collector()
+    redis = _make_fakeredis()
+    record_faithfulness_by_intent(
+        redis, intent="compiled_summary", faithfulness=0.917, n=30,
+        source="fixtures",
+    )
+
+    res = collector.metric_faithfulness(redis)
+    assert res["actual"] is None, (
+        "the fixture number must not be reported as live faithfulness"
+    )
+    assert res["denominator"] == 0

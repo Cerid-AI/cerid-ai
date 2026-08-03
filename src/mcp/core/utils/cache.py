@@ -265,6 +265,14 @@ def log_verification_error(
 # reads `cerid:ragas:by_intent:<intent>` during the soak.
 _FAITHFULNESS_BY_INTENT_TTL = 86400 * 40
 
+# Producer -> key prefix. The fixtures prefix is the historical key, kept so the
+# nightly's own trend history is not orphaned; "live" is a distinct namespace so
+# the GA gate can name the population it means.
+_FAITHFULNESS_SOURCES = {
+    "fixtures": "cerid:ragas:by_intent:",
+    "live": "cerid:ragas:live_by_intent:",
+}
+
 
 def record_faithfulness_by_intent(
     redis_client,
@@ -272,21 +280,44 @@ def record_faithfulness_by_intent(
     intent: str,
     faithfulness: float,
     n: int,
+    source: str,
     now: datetime | None = None,
 ) -> None:
-    """Write the per-intent RAGAS faithfulness summary the soak collector reads.
+    """Write a per-intent RAGAS faithfulness summary, namespaced by producer.
 
-    ``scripts/k_program_metrics.py::metric_faithfulness`` reads
-    ``cerid:ragas:by_intent:<intent>`` as JSON ``{faithfulness, n}``. Best-effort:
-    a no-op when redis is unavailable and never raises into the caller — a metric
-    write must not fail an eval run.
+    ``source`` is REQUIRED and it is the whole point of this function's shape.
+    Two producers write per-intent faithfulness and they measure different
+    populations:
+
+    * ``"fixtures"`` — the nightly ``ragas-eval`` job over
+      ``golden_dataset.json``, hand-authored triples whose ground truths were
+      edited to match their own contexts. It scores ~0.9 by construction.
+    * ``"live"`` — the compiled-summary soak over answers the product actually
+      generated from what retrieval actually returned.
+
+    They shared one key. Both slice by the same router intents and both land
+    ``compiled_summary`` at **n=30** — 30 of the golden 50 classify that way,
+    and the soak defaults to 30 entities — so the collision was invisible in
+    the stored payload, and ``metric_faithfulness`` reported whichever job ran
+    last. That is where the retracted 0.917 came from: not an unreproducible
+    measurement, but the nightly's fixture number sitting in the key the soak
+    also writes. The GA gate reads the ``live`` namespace only, and does not
+    fall back to fixtures when it is empty — the fallback IS the defect.
+
+    Best-effort: a no-op when redis is unavailable and never raises into the
+    caller — a metric write must not fail an eval run.
     """
     if redis_client is None:
         return
-    key = f"cerid:ragas:by_intent:{intent}"
+    if source not in _FAITHFULNESS_SOURCES:
+        raise ValueError(
+            f"source must be one of {sorted(_FAITHFULNESS_SOURCES)}, got {source!r}",
+        )
+    key = f"{_FAITHFULNESS_SOURCES[source]}{intent}"
     payload = json.dumps({
         "faithfulness": round(float(faithfulness), 4),
         "n": int(n),
+        "source": source,
         "updated_at": (now or datetime.now(tz=timezone.utc)).isoformat(),
     })
     try:
