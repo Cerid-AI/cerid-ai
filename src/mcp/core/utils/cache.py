@@ -281,6 +281,7 @@ def record_faithfulness_by_intent(
     faithfulness: float,
     n: int,
     source: str,
+    abstention_rate: float | None = None,
     now: datetime | None = None,
 ) -> None:
     """Write a per-intent RAGAS faithfulness summary, namespaced by producer.
@@ -304,6 +305,17 @@ def record_faithfulness_by_intent(
     also writes. The GA gate reads the ``live`` namespace only, and does not
     fall back to fixtures when it is empty — the fallback IS the defect.
 
+    ``abstention_rate`` is stored beside the mean because faithfulness alone can
+    be satisfied by degrading the product. The score is
+    ``entailed_claims / total_claims``, so a one-sentence answer makes one
+    easily-entailed claim and scores 1.000 where a five-sentence overview makes
+    five and scores 0.600 with zero contradictions — and an abstention scores
+    best of all by leaving the mean entirely. Measured A/B (2026-08-03): a
+    richer answer mode raised mean answer length 427 → 640 chars and converted
+    two refusals into substantive answers, and faithfulness *fell* 0.835 →
+    0.763. A gate on the mean alone therefore rewards terseness and refusal, so
+    the collector requires this counter-metric to move the other way.
+
     Best-effort: a no-op when redis is unavailable and never raises into the
     caller — a metric write must not fail an eval run.
     """
@@ -314,12 +326,15 @@ def record_faithfulness_by_intent(
             f"source must be one of {sorted(_FAITHFULNESS_SOURCES)}, got {source!r}",
         )
     key = f"{_FAITHFULNESS_SOURCES[source]}{intent}"
-    payload = json.dumps({
+    body: dict[str, Any] = {
         "faithfulness": round(float(faithfulness), 4),
         "n": int(n),
         "source": source,
         "updated_at": (now or datetime.now(tz=timezone.utc)).isoformat(),
-    })
+    }
+    if abstention_rate is not None:
+        body["abstention_rate"] = round(float(abstention_rate), 4)
+    payload = json.dumps(body)
     try:
         redis_client.set(key, payload)
         redis_client.expire(key, _FAITHFULNESS_BY_INTENT_TTL)

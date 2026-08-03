@@ -141,12 +141,51 @@ def test_emit_then_real_metric_faithfulness_reads():
     redis = _make_fakeredis()
     record_faithfulness_by_intent(
         redis, intent="compiled_summary", faithfulness=0.95, n=20, source="live",
+        abstention_rate=0.0,
     )
 
     res = collector.metric_faithfulness(redis)
     assert res["actual"] == 0.95
     assert res["denominator"] == 20
-    assert res["meets_target"] is True  # 0.95 >= 0.92 target
+    assert res["meets_target"] is True  # clears the floor, abstention at 0
+
+
+def test_a_high_score_bought_by_refusing_does_not_pass():
+    """The floor alone is gameable downward, which is why it can be lowered.
+
+    Faithfulness is entailed/total claims, so terser answers score higher and
+    an abstention leaves the mean entirely. A run that scores well because the
+    product stopped answering must fail, not pass.
+    """
+    from core.utils.cache import record_faithfulness_by_intent
+
+    collector = _load_collector()
+    redis = _make_fakeredis()
+    record_faithfulness_by_intent(
+        redis, intent="compiled_summary", faithfulness=0.98, n=8, source="live",
+        abstention_rate=0.45,
+    )
+
+    res = collector.metric_faithfulness(redis)
+    assert res["actual"] == 0.98, "the score itself is excellent"
+    assert res["meets_target"] is False, (
+        "but 45% of questions went unanswered — that is not quality"
+    )
+
+
+def test_a_run_without_the_counter_metric_does_not_pass_by_default():
+    """A pre-counter-metric soak result must read as unmet, not as passing."""
+    from core.utils.cache import record_faithfulness_by_intent
+
+    collector = _load_collector()
+    redis = _make_fakeredis()
+    record_faithfulness_by_intent(
+        redis, intent="compiled_summary", faithfulness=0.90, n=29, source="live",
+    )
+
+    res = collector.metric_faithfulness(redis)
+    assert res["abstention_rate"] is None
+    assert res["meets_target"] is False
 
 
 def test_the_gate_ignores_the_fixture_number():

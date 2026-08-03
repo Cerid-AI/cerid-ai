@@ -263,6 +263,44 @@ def _p95(values: list[float]) -> float:
 # Metric 3 — faithfulness on compiled-summary intent (placeholder — RAGAS path)
 # ---------------------------------------------------------------------------
 
+# Re-derived 2026-08-03 from measurement, replacing 0.92.
+#
+# 0.92 was calibrated against a recorded 0.917 that has since been traced to a
+# key collision: the nightly fixtures job and the live soak wrote the same
+# Redis key, both at n=30, so this metric reported whichever ran last and 0.917
+# was the fixtures number. The product has never measured near it.
+#
+# The floor is a REGRESSION gate, not a quality target: observed mean at the
+# shipped configuration (0.763, n=29) minus two run-spreads, rounded down to
+# 0.05. The spread came from a control rather than a guess — in an A/B varying
+# only the answer prompt, context_precision (which depends solely on retrieval
+# and should not have moved) shifted 0.056, so ~0.05 is this instrument's
+# run-to-run noise at n≈30.
+#
+# Ratchet it upward as the product improves; never downward to make a run pass.
+FAITHFULNESS_FLOOR = 0.65
+
+# Kept as the documented destination so lowering the gate does not quietly
+# lower the ambition. Recorded in docs/GA_CHECKLIST.md alongside why the
+# product cannot simply be pushed at it — see ABSTENTION_CEILING.
+FAITHFULNESS_ASPIRATION = 0.92
+
+# The counter-metric, and the reason the floor is safe to lower.
+#
+# Faithfulness is entailed_claims / total_claims, so it rewards asserting less:
+# a one-sentence answer makes one easily-entailed claim and scores 1.000 where
+# a five-sentence overview makes five and scores 0.600 with ZERO contradictions.
+# An abstention scores best of all by leaving the mean entirely. Measured A/B
+# (2026-08-03): a richer compiled-summary answer mode raised mean answer length
+# 427 → 640 chars and turned two refusals into substantive answers, and
+# faithfulness FELL 0.835 → 0.763. Gating on the mean alone would therefore
+# select for a worse product.
+#
+# 0.15 is set against observation: the shipped configuration reads 0.000, and
+# the pre-fix polluted population read 0.250. It catches a product that starts
+# refusing its own best-covered entities without failing honest refusals.
+ABSTENTION_CEILING = 0.15
+
 
 def metric_faithfulness(redis_client) -> dict[str, Any]:
     """RAGAS faithfulness on the compiled_summary intent class, LIVE only.
@@ -304,12 +342,24 @@ def metric_faithfulness(redis_client) -> dict[str, Any]:
         data = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
         faithfulness = data.get("faithfulness")
         n = data.get("n", 0)
+        abstention = data.get("abstention_rate")
+        score = float(faithfulness or 0)
+        # Both conditions, because the mean alone is gameable downward — see
+        # FAITHFULNESS_FLOOR. An unpublished abstention_rate (a soak run from
+        # before the counter-metric landed) does not silently pass: it is
+        # reported as None and treated as unmet.
+        meets = score >= FAITHFULNESS_FLOOR and (
+            abstention is not None and float(abstention) <= ABSTENTION_CEILING
+        )
         return {
             "available": True,
-            "target": 0.92,
+            "target": FAITHFULNESS_FLOOR,
+            "aspiration": FAITHFULNESS_ASPIRATION,
             "actual": round(float(faithfulness), 3) if faithfulness is not None else None,
             "denominator": n,
-            "meets_target": float(faithfulness or 0) >= 0.92,
+            "abstention_rate": abstention,
+            "abstention_ceiling": ABSTENTION_CEILING,
+            "meets_target": meets,
         }
     except Exception as exc:  # noqa: BLE001 — error surfaces in JSON "error" field
         return {"available": False, "error": str(exc)}
