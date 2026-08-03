@@ -270,15 +270,22 @@ def _p95(values: list[float]) -> float:
 # Redis key, both at n=30, so this metric reported whichever ran last and 0.917
 # was the fixtures number. The product has never measured near it.
 #
-# The floor is a REGRESSION gate, not a quality target: observed mean at the
-# shipped configuration (0.763, n=29) minus two run-spreads, rounded down to
-# 0.05. The spread came from a control rather than a guess — in an A/B varying
-# only the answer prompt, context_precision (which depends solely on retrieval
-# and should not have moved) shifted 0.056, so ~0.05 is this instrument's
-# run-to-run noise at n≈30.
+# The floor is a REGRESSION gate, not a quality target: the mean of two
+# repeated runs at the shipped configuration (0.763 n=29, 0.776 n=30 → 0.7695)
+# minus two run-spreads, rounded down to 0.05.
+#
+# The spread is 0.013, measured by repeating the run rather than inferred. An
+# earlier derivation used 0.05, taken from context_precision moving 0.056
+# across the Phase 4 A/B on the theory that it depends only on retrieval and so
+# could serve as a control. **That was wrong**: the soak scores
+# context_precision over the contexts the ANSWER cited
+# (``_contexts_for`` reads ``result["citations"]``), so a terser answer cites
+# fewer sources and moves it. Repeating the run with nothing changed put
+# context_precision at 0.787 vs 0.790 — the real noise is an order of magnitude
+# smaller, and the 0.056 was Phase 4 signal being mistaken for noise.
 #
 # Ratchet it upward as the product improves; never downward to make a run pass.
-FAITHFULNESS_FLOOR = 0.65
+FAITHFULNESS_FLOOR = 0.70
 
 # Kept as the documented destination so lowering the gate does not quietly
 # lower the ambition. Recorded in docs/GA_CHECKLIST.md alongside why the
