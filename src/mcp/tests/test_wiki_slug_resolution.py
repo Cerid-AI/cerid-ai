@@ -22,6 +22,8 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+import pytest
+
 
 class _Result:
     def __init__(self, row: dict[str, Any] | None) -> None:
@@ -146,3 +148,61 @@ class TestSurfaceWiringIsShared:
         from app.startup.surface_wiring import wire_query_surfaces
 
         assert callable(wire_query_surfaces)
+
+
+class TestInsufficientSummaryIsNotServedAsGrounding:
+    """A page that denies its own subject must not become the wiki block.
+
+    The block is injected AHEAD of retrieved chunks as high-priority grounding,
+    so serving "Apple Inc. is not mentioned in the provided excerpts. However,
+    the excerpts do discuss Kubernetes..." hands the reader a paragraph that
+    refutes the question and then describes something else. The compiler no
+    longer writes these, but a mature corpus already holds ~30 and this is the
+    read-side guard that makes the answer path safe without deleting them.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stub_page_is_suppressed_and_a_real_page_is_kept(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.mcp_tools.retrieval import pkb_answer_with_citations
+
+        def _page(summary: str):
+            return SimpleNamespace(
+                slug="org:apple-inc", name="Apple Inc.", summary=summary,
+                confidence_band="medium", last_updated_at="2026-08-01T00:00:00Z",
+            )
+
+        async def _run(summary: str) -> dict:
+            with (
+                patch("app.mcp_tools.retrieval.get_neo4j", return_value=MagicMock()),
+                patch("app.mcp_tools.retrieval.get_chroma", return_value=MagicMock()),
+                patch("app.mcp_tools.retrieval.get_redis", return_value=None),
+                patch("app.services.wiki_pages._resolve_entity_slug",
+                      return_value="org:apple-inc"),
+                patch("app.services.wiki_pages.get_entity_page",
+                      new=AsyncMock(return_value=_page(summary))),
+                patch("core.agents.query_agent.agent_query", new=AsyncMock(
+                    return_value={"results": [], "context": "", "domains_searched": []},
+                )),
+                patch("core.utils.internal_llm.call_internal_llm",
+                      new=AsyncMock(return_value="An answer.")),
+            ):
+                return await pkb_answer_with_citations("What is Apple Inc.?")
+
+        stub = await _run(
+            "Apple Inc. is not mentioned in the provided excerpts. However, "
+            "the excerpts do discuss Kubernetes API versioning."
+        )
+        real = await _run(
+            "Apple Inc. is a technology company described in the corpus as the "
+            "maker of the iPhone and the macOS operating system."
+        )
+
+        assert (stub.get("retrieval_meta") or {}).get("wiki_page") is None, (
+            "a summary that denies its subject must not be served as grounding"
+        )
+        assert (real.get("retrieval_meta") or {}).get("wiki_page") is not None, (
+            "a substantive summary must still be served"
+        )

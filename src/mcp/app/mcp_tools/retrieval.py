@@ -986,6 +986,9 @@ async def pkb_answer_with_citations(
                 _resolve_entity_slug,
                 get_entity_page,
             )
+            from core.agents.summary_quality import (  # noqa: PLC0415
+                is_insufficient_summary,
+            )
 
             # Resolve the hint to a canonical_id first. Passing the raw hint
             # ("SOL") as a slug missed every entity, because all canonical_ids
@@ -998,6 +1001,18 @@ async def pkb_answer_with_citations(
                 _resolve_entity_slug, _driver, surface_decision.matched_entity_hint,
             )
             page = await get_entity_page(_driver, _slug) if _slug else None
+            # A page whose summary opens by denying its own subject ("Apple Inc.
+            # is not mentioned in the provided excerpts. However, the excerpts
+            # do discuss Kubernetes…") is worse than no page at all here: it is
+            # injected AHEAD of the retrieved chunks as high-priority grounding,
+            # so the reader is handed a paragraph that refutes the question and
+            # then describes something else. The compiler no longer writes these
+            # (wiki_refresh), but ~30 exist in a mature corpus and suppressing
+            # them at read time fixes the answer path without deleting anything.
+            if page is not None and is_insufficient_summary(
+                getattr(page, "summary", None),
+            ):
+                page = None
             if page is not None and getattr(page, "summary", None):
                 wiki_page_meta = {
                     "slug": page.slug,
@@ -1066,7 +1081,15 @@ async def pkb_answer_with_citations(
         suggested_max_tokens,
     )
 
-    _mode = classify_answer_mode(question)
+    # The surface router already classified this question (above, to decide
+    # whether to pull a wiki page). Feeding that decision in stops the two
+    # classifiers contradicting each other: the router routed "Tell me about X"
+    # to the compiled-summary surface and put a wiki summary at the head of the
+    # context, while this call — with only the question text — returned
+    # EXTRACTIVE, whose rules tell the reader to emit a bare fact with no
+    # sentence wrapper. Analytical questions still win over intent; see
+    # classify_answer_mode.
+    _mode = classify_answer_mode(question, intent=surface_decision.intent)
     # Deterministic analytical operators first: date arithmetic / counting are
     # extracted as structured facts and computed in code (no LLM mental math),
     # removing the off-by-one / miscount errors that survive a strong reader.

@@ -153,3 +153,63 @@ def test_extract_final_answer_pulls_marker() -> None:
     assert extract_final_answer("Answer: draft\nmore\nAnswer: final") == "final"
     # no marker → unchanged (extractive mode)
     assert extract_final_answer("Business Administration") == "Business Administration"
+
+
+# ---------------------------------------------------------------------------
+# COMPILED_SUMMARY — the router's intent decides overview questions
+# ---------------------------------------------------------------------------
+
+class TestCompiledSummaryMode:
+    """The surface router and this classifier used to disagree on one question.
+
+    The router sent "Tell me about X" to the compiled-summary surface and put a
+    wiki page at the head of the context; this function, seeing the same text,
+    returned EXTRACTIVE, whose rules demand "just the fact/value ... no sentence
+    wrapper". The reader was told to summarise and to not write sentences.
+    """
+
+    def test_overview_question_with_router_intent_selects_the_new_mode(self):
+        assert classify_answer_mode(
+            "Tell me about Kubernetes", intent="compiled_summary",
+        ) is AnswerMode.COMPILED_SUMMARY
+        assert classify_answer_mode(
+            "What is Kubernetes?", intent="compiled_summary",
+        ) is AnswerMode.COMPILED_SUMMARY
+
+    def test_without_intent_the_classification_is_unchanged(self):
+        """Every other caller omits intent and must be byte-identical."""
+        assert classify_answer_mode("What is Kubernetes?") is AnswerMode.EXTRACTIVE
+        assert classify_answer_mode("Tell me about Kubernetes") is AnswerMode.EXTRACTIVE
+
+    def test_analytical_questions_outrank_intent(self):
+        """The ordering that protects the LongMemEval temporal/count capability.
+
+        The router can route an analytical question to the wiki surface; intent
+        must not be able to demote it out of its date-arithmetic path.
+        """
+        assert classify_answer_mode(
+            "When did I first mention Tesla?", intent="compiled_summary",
+        ) is AnswerMode.TEMPORAL
+        assert classify_answer_mode(
+            "How many times did I mention Tesla?", intent="compiled_summary",
+        ) is AnswerMode.AGGREGATION
+
+    def test_oracle_question_type_still_wins(self):
+        assert classify_answer_mode(
+            "anything", "temporal-reasoning", intent="compiled_summary",
+        ) is AnswerMode.TEMPORAL
+
+    def test_prompt_forbids_outside_knowledge_and_preamble(self):
+        msgs = build_answer_messages(
+            "What is Kubernetes?", "[memory 1] Kubernetes is an orchestrator.",
+            AnswerMode.COMPILED_SUMMARY,
+        )
+        rules = msgs[-1]["content"].lower()
+        assert "do not add background knowledge" in rules
+        assert "no preamble" in rules
+        assert "unsupported claim" in rules
+
+    def test_token_budget_sits_between_extractive_and_analytical(self):
+        assert suggested_max_tokens(AnswerMode.COMPILED_SUMMARY) == 512
+        assert suggested_max_tokens(AnswerMode.EXTRACTIVE) == 256
+        assert suggested_max_tokens(AnswerMode.TEMPORAL) == 768

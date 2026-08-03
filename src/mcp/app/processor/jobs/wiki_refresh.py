@@ -36,6 +36,10 @@ from decimal import Decimal
 from typing import Any
 
 from core.agents.entity_extraction import is_junk_entity_name
+from core.agents.summary_quality import (
+    INSUFFICIENT_SENTINEL,
+    is_insufficient_summary,
+)
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
@@ -62,6 +66,11 @@ You are summarising a named entity based on excerpts from a knowledge corpus.
 Write 2–3 concise paragraphs describing what is known about this entity, \
 its significance, and key relationships. Use only information from the excerpts \
 provided. Do not invent facts. Be direct and encyclopedic.
+
+If the excerpts contain no substantive information about this entity itself — \
+only passing mentions, or content about something else — reply with exactly \
+{sentinel} and nothing else. Do not write a summary explaining that the \
+entity is absent, and do not summarise the other material instead.
 
 Entity: {entity_name} ({entity_type})
 
@@ -217,6 +226,7 @@ class WikiRefreshJob(BaseJob):
                     entity_name=entity_name,
                     entity_type=entity_type,
                     text=blob,
+                    sentinel=INSUFFICIENT_SENTINEL,
                 ),
             },
         ]
@@ -242,6 +252,25 @@ class WikiRefreshJob(BaseJob):
         summary_text = (summary_text or "").strip()
         if not summary_text:
             return {"skipped": "empty_summary"}
+
+        # Refuse to store a summary that denies its own subject. Left in, these
+        # do active harm rather than merely being useless: the page is served as
+        # high-priority grounding on the answer path, so the reader is handed a
+        # paragraph saying the entity is absent, followed by content about
+        # something else. Both checks run because a local 8B model follows the
+        # sentinel instruction only most of the time.
+        #
+        # An existing summary is deliberately left in place. One thin refresh
+        # (a re-summarise triggered before new artifacts land) should not
+        # delete a good page — the entity keeps its previous text and the next
+        # refresh with better excerpts replaces it.
+        if is_insufficient_summary(summary_text):
+            logger.info(
+                "wiki_refresh.insufficient_excerpts entity=%s chars=%d",
+                self._entity_slug,
+                len(summary_text),
+            )
+            return {"skipped": "insufficient_excerpts"}
 
         await progress_cb(0.6)
 

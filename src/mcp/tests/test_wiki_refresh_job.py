@@ -15,8 +15,9 @@ Coverage:
 """
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -308,3 +309,100 @@ class TestJunkEntityGate:
 
         # Passes the junk gate and reaches the no-artifacts skip instead.
         assert stats == {"skipped": "no_source_artifacts"}
+
+
+# ---------------------------------------------------------------------------
+# _run_pipeline — refusing to store a summary that denies its own subject
+# ---------------------------------------------------------------------------
+
+class TestInsufficientExcerptsAreNotStored:
+    """A summary that opens by denying its subject must never be written.
+
+    The compiler asked for a summary from excerpts that only mention the entity
+    in passing, and the model obliged with fluent prose about the absence:
+    "Apple Inc. is not mentioned in the provided excerpts. However, the excerpts
+    do discuss Kubernetes...". Stored, that page is then served as
+    high-priority grounding on the answer path, so the reader is handed a
+    paragraph denying the thing it was asked about. On the live corpus these
+    are 1.1% of summarised entities but 27% of the thirty most-mentioned.
+
+    These tests drive the real ``_run_pipeline`` and patch only its boundaries
+    (Neo4j reads/writes, Chroma, the LLM), so the skip decision under test is
+    production code rather than a mocked stand-in.
+    """
+
+    @staticmethod
+    def _pipeline_with(llm_reply: str):
+        """Run the real pipeline against a fixed LLM reply; report the write."""
+        from app.processor.jobs.wiki_refresh import WikiRefreshJob
+
+        job = WikiRefreshJob("org:acme")
+        writes: list[tuple] = []
+
+        async def _noop_progress(_pct):
+            return None
+
+        entity = {
+            "name": "Acme Corp",
+            "entity_type": "ORG",
+            "source_artifacts": [{"artifact_id": "art-1"}],
+        }
+        with (
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.deps.get_chroma", return_value=MagicMock()),
+            patch("app.db.neo4j.wiki.get_entity", return_value=entity),
+            patch("app.db.neo4j.wiki.write_entity_summary",
+                  side_effect=lambda *a, **k: writes.append(a)),
+            patch.object(WikiRefreshJob, "_fetch_entity_chunks",
+                         return_value=["Some excerpt text about other things."]),
+            patch("core.utils.internal_llm.call_internal_llm",
+                  new=AsyncMock(return_value=llm_reply)),
+        ):
+            result = asyncio.run(job._run_pipeline(_noop_progress))
+        return result, writes
+
+    def test_sentinel_reply_skips_the_write(self):
+        result, writes = self._pipeline_with("INSUFFICIENT_EXCERPTS")
+        assert result == {"skipped": "insufficient_excerpts"}
+        assert writes == [], "no summary may be written for absent excerpts"
+
+    def test_disclaimer_prose_skips_the_write(self):
+        """The sentinel alone is not enough — an 8B model ignores it often.
+
+        This is the shape actually observed in the live corpus, verbatim.
+        """
+        result, writes = self._pipeline_with(
+            "Apple Inc. is not mentioned in the provided excerpts. However, "
+            "the excerpts do discuss Kubernetes API versioning and its "
+            "deprecation policy across releases."
+        )
+        assert result == {"skipped": "insufficient_excerpts"}
+        assert writes == [], "disclaimer prose must not be stored as a summary"
+
+    def test_a_real_summary_is_still_written(self):
+        """Regression guard: the ordinary path must be untouched."""
+        summary = (
+            "Acme Corp is a manufacturing company described in the corpus as a "
+            "supplier of industrial fasteners. It is associated with two "
+            "procurement contracts referenced across the excerpts."
+        )
+        result, writes = self._pipeline_with(summary)
+        assert result.get("skipped") is None, f"unexpected skip: {result}"
+        assert len(writes) == 1, "a substantive summary must be written"
+        assert writes[0][2] == summary
+
+    def test_a_summary_that_scopes_itself_is_not_rejected(self):
+        """A good summary may still note a limit — that is honest scoping.
+
+        The boundary that keeps the check from eating real pages: the
+        disclaimer shape always LEADS, so only the opening is inspected.
+        """
+        summary = (
+            "Kubernetes is an API-driven container orchestration system, "
+            "described in the corpus through its versioning and deprecation "
+            "policy. The excerpts do not contain information about its "
+            "release cadence."
+        )
+        result, writes = self._pipeline_with(summary)
+        assert result.get("skipped") is None, f"unexpected skip: {result}"
+        assert len(writes) == 1

@@ -40,6 +40,7 @@ class AnswerMode(str, Enum):
     TEMPORAL = "temporal"         # date arithmetic / ordering / duration
     AGGREGATION = "aggregation"   # count / combine across multiple memories
     PREFERENCE = "preference"     # apply a stored user preference
+    COMPILED_SUMMARY = "compiled_summary"  # "what is X" over a compiled wiki page
 
 
 # Oracle path: when a caller knows the question type (the LongMemEval eval does),
@@ -80,13 +81,30 @@ _FREQUENCY_RE = re.compile(
 
 
 def classify_answer_mode(
-    question: str, question_type: str | None = None,
+    question: str,
+    question_type: str | None = None,
+    *,
+    intent: str | None = None,
 ) -> AnswerMode:
     """Pick an answer mode from the question (and an oracle type when supplied).
 
     The eval passes the LongMemEval ``question_type`` label for an oracle route;
     production passes ``None`` and we classify heuristically from the question.
     Temporal is matched before aggregation on purpose ("how many days" → temporal).
+
+    ``intent`` is the surface router's classification, which the retrieval tool
+    has already computed. Passing it closes a real disagreement: the router sent
+    "Tell me about X" down the compiled-summary surface and pulled in a wiki
+    page, while this function — looking at the same question — returned
+    EXTRACTIVE, whose rules demand "just the fact/value, no sentence wrapper".
+    Two classifiers, one question, contradictory instructions. Reuse the
+    router's signal rather than adding a third regex layer.
+
+    Precedence is deliberate: the analytical regexes stay ABOVE ``intent`` so a
+    question like "When did I first mention Tesla?" keeps its date-arithmetic
+    path even when the router routes it to the wiki surface. Those modes carry
+    the LongMemEval temporal/multi-session capability this module was built for,
+    and intent must not be able to demote them.
     """
     if question_type and question_type in _TYPE_TO_MODE:
         return _TYPE_TO_MODE[question_type]
@@ -96,6 +114,8 @@ def classify_answer_mode(
         return AnswerMode.AGGREGATION
     if _PREFERENCE_RE.search(question):
         return AnswerMode.PREFERENCE
+    if intent == AnswerMode.COMPILED_SUMMARY.value:
+        return AnswerMode.COMPILED_SUMMARY
     return AnswerMode.EXTRACTIVE
 
 
@@ -126,6 +146,22 @@ _MODE_INSTRUCTIONS: dict[AnswerMode, str] = {
         "sentence wrapper.\n"
         "- Only if NO span in the memories answers the question, respond "
         "exactly: I don't know."
+    ),
+    AnswerMode.COMPILED_SUMMARY: (
+        "This is an OVERVIEW question about a single subject, and the memories "
+        "include a compiled wiki summary for it.\n"
+        "- Answer in 2-5 sentences of connected prose describing what the "
+        "supplied material records about the subject.\n"
+        "- Use ONLY the supplied memories and summary. Do not add background "
+        "knowledge about the subject from elsewhere, however well known it is "
+        "and however incomplete the supplied material looks. A true fact that "
+        "is not in the memories is still an unsupported claim here.\n"
+        "- If the memories only mention the subject in passing, say what they "
+        "do record and then state plainly that the knowledge base holds no "
+        "fuller description. Do not pad the answer to look complete.\n"
+        "- Answer directly. No preamble ('Based on the memories provided...'), "
+        "no restating the question, and no closing commentary about what the "
+        "memories do or do not contain beyond the one sentence above."
     ),
     AnswerMode.TEMPORAL: (
         "This is a TEMPORAL question — the answer is derived from dates. Work in "
@@ -198,6 +234,10 @@ def build_answer_messages(
 
 def suggested_max_tokens(mode: AnswerMode, extractive_default: int = 256) -> int:
     """Analytical modes need room for the JSON notes + the derivation + answer."""
+    if mode is AnswerMode.COMPILED_SUMMARY:
+        # A few sentences of prose — more than a fact lookup, far less than the
+        # notes-then-derive protocol the analytical modes emit.
+        return max(extractive_default, 512)
     if mode is not AnswerMode.EXTRACTIVE:
         return max(extractive_default, 768)
     return extractive_default
