@@ -361,3 +361,28 @@ class TestExtractedNamesMustAppearInTheText:
             "The nasa budget request was published.", llm_caller=caller,
         )
         assert [e.canonical_id for e in result] == ["org:nasa"]
+
+    async def test_a_name_split_by_formatting_survives(self):
+        """The near-miss that would have deleted real data.
+
+        A first version tested the raw name against the raw text. "Matt
+        Butcher" written across a line break, or as "**Matt Butcher**", failed
+        that test — and the corpus audit built on the same logic listed the
+        Helm creator and Azure Kubernetes Service as fabrications. The
+        fabrications share no tokens at all with their documents, so widening
+        the match separates them without losing genuine entities.
+        """
+        caller = _llm_caller_returning({"entities": [
+            {"name": "Matt Butcher", "type": "PERSON", "confidence": 0.9},
+            {"name": "Azure Kubernetes Service", "type": "ORG", "confidence": 0.9},
+            {"name": "Tim Cook", "type": "PERSON", "confidence": 0.9},
+        ]})
+        text = (
+            "Charts are maintained by **Matt\nButcher** and others.\n"
+            "| Provider | Azure Kubernetes | Service tier |\n"
+        )
+        result = await extract_entities_from_text(text, llm_caller=caller)
+        ids = [e.canonical_id for e in result]
+        assert "person:matt-butcher" in ids, "line-broken emphasis must not delete a real person"
+        assert "org:azure-kubernetes-service" in ids, "table-split name must survive"
+        assert "person:tim-cook" not in ids, "a name sharing no tokens with the text is fabricated"

@@ -280,11 +280,51 @@ async def extract_entities_from_text(
 
 # Corporate/legal suffixes to strip before checking presence, so "Apple Inc."
 # extracted from a document that says "Apple" is kept.
+# Tokens shorter than this carry no discriminating power ("of", "3", "AI") and
+# would let a fabricated name pass on incidental matches.
+_MIN_TOKEN_CHARS = 3
+
 _LEGAL_SUFFIX_RE = re.compile(
     r"[,\s]+(inc|inc\.|corp|corp\.|corporation|ltd|ltd\.|llc|l\.l\.c\.|plc|"
     r"gmbh|s\.a\.|n\.v\.|co|co\.|company|limited)\s*$",
     re.I,
 )
+
+
+def _flatten(text: str) -> str:
+    """Lowercase, strip markdown emphasis, collapse whitespace runs.
+
+    A name is routinely written across a line break or wrapped in emphasis
+    (``**Matt Butcher**``, ``Matt\\nButcher``). A raw substring test misses
+    those and would delete a real entity, so both sides are flattened first.
+    """
+    flat = re.sub(r"[*_`]+", "", (text or "").lower())
+    return re.sub(r"\s+", " ", flat)
+
+
+def _is_present(name: str, haystack: str) -> bool:
+    """Is this entity name supported by the (already flattened) text?
+
+    Three widening tests, each justified by a real case:
+
+    1. the flattened name verbatim;
+    2. the name minus a legal suffix — "Apple Inc." from a page saying "Apple";
+    3. every significant token present somewhere — catches names the source
+       renders differently ("Azure Kubernetes Service" in a table, a person
+       listed surname-first). Weaker, but the fabrications this guards against
+       share NO tokens with their documents at all, so it still separates them
+       cleanly.
+    """
+    flat = _flatten(name)
+    if not flat:
+        return False
+    if flat in haystack:
+        return True
+    stripped = _LEGAL_SUFFIX_RE.sub("", flat).strip()
+    if stripped and stripped in haystack:
+        return True
+    tokens = [t for t in re.split(r"\W+", flat) if len(t) >= _MIN_TOKEN_CHARS]
+    return bool(tokens) and all(t in haystack for t in tokens)
 
 
 def _drop_unsupported(entities: list[Entity], text: str) -> list[Entity]:
@@ -306,13 +346,13 @@ def _drop_unsupported(entities: list[Entity], text: str) -> list[Entity]:
     """
     if not entities:
         return []
-    haystack = text.lower()
+    haystack = _flatten(text)
     kept: list[Entity] = []
     for ent in entities:
-        name = (ent.name or "").strip().lower()
+        name = (ent.name or "").strip()
         if not name:
             continue
-        if name in haystack or _LEGAL_SUFFIX_RE.sub("", name).strip() in haystack:
+        if _is_present(name, haystack):
             kept.append(ent)
         else:
             logger.debug(
