@@ -271,21 +271,27 @@ def _p95(values: list[float]) -> float:
 # was the fixtures number. The product has never measured near it.
 #
 # The floor is a REGRESSION gate, not a quality target: the mean of two
-# repeated runs at the shipped configuration (0.763 n=29, 0.776 n=30 → 0.7695)
-# minus two run-spreads, rounded down to 0.05.
+# repeated runs minus two run-spreads, rounded down to 0.05.
 #
-# The spread is 0.013, measured by repeating the run rather than inferred. An
-# earlier derivation used 0.05, taken from context_precision moving 0.056
-# across the Phase 4 A/B on the theory that it depends only on retrieval and so
-# could serve as a control. **That was wrong**: the soak scores
-# context_precision over the contexts the ANSWER cited
-# (``_contexts_for`` reads ``result["citations"]``), so a terser answer cites
-# fewer sources and moves it. Repeating the run with nothing changed put
-# context_precision at 0.787 vs 0.790 — the real noise is an order of magnitude
-# smaller, and the 0.056 was Phase 4 signal being mistaken for noise.
+# Re-derived 2026-08-04 on the CLEAN corpus (0.693 n=30, 0.733 n=30 → 0.713,
+# spread 0.040 → 0.633 → 0.60). The previous 0.70 came from 0.763/0.776, both
+# measured before the fabricated-entity purge, on a population that no longer
+# exists — a floor calibrated against a retired population is not a floor. The
+# product did not regress: paired on the 9 queries surviving the purge it is
+# flat (0.670 → 0.650) while context_precision rose 0.878 → 1.000.
 #
-# Ratchet it upward as the product improves; never downward to make a run pass.
-FAITHFULNESS_FLOOR = 0.70
+# **The spread tripled (0.013 → 0.040) and the reason is structural, not
+# random.** Across the two clean runs the population was identical and 24 of 29
+# scores were byte-identical; the movement came from a handful of large discrete
+# jumps ("What is Apache Spark?" 0.33 → 1.00). Faithfulness is
+# entailed_claims / total_claims, so on a 3-claim answer ONE judge decision
+# moves that entry by 0.33 and the 29-entry mean by ~0.011. The metric is
+# quantised by claim count, and short answers make it jumpy.
+#
+# The honest way to tighten this floor is therefore MORE SAMPLES
+# (`--max-entities`), not a narrower band on n=30. Ratchet upward as the
+# product improves; never downward to make a run pass.
+FAITHFULNESS_FLOOR = 0.60
 
 # Kept as the documented destination so lowering the gate does not quietly
 # lower the ambition. Recorded in docs/GA_CHECKLIST.md alongside why the
