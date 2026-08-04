@@ -116,11 +116,11 @@ describe("Header injection", () => {
 // ---------------------------------------------------------------------------
 
 describe("KB resource", () => {
-  let mockFetch: ReturnType<typeof vi.fn>;
+  let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
   let client: CeridClient;
 
   beforeEach(() => {
-    mockFetch = vi.fn();
+    mockFetch = vi.fn<typeof fetch>();
     client = createClient(mockFetch);
   });
 
@@ -132,9 +132,9 @@ describe("KB resource", () => {
     expect(result.context).toBe("result");
     expect(result.confidence).toBe(0.9);
 
-    const [url, init] = mockFetch.mock.calls[0];
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://localhost:8888/sdk/v1/query");
-    expect(JSON.parse(init.body)).toEqual({ query: "What is RAG?", top_k: 5 });
+    expect(JSON.parse(init.body as string)).toEqual({ query: "What is RAG?", top_k: 5 });
   });
 
   it("search() POSTs to /sdk/v1/search", async () => {
@@ -331,11 +331,11 @@ describe("KB ingestExternal", () => {
 // ---------------------------------------------------------------------------
 
 describe("System resource", () => {
-  let mockFetch: ReturnType<typeof vi.fn>;
+  let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
   let client: CeridClient;
 
   beforeEach(() => {
-    mockFetch = vi.fn();
+    mockFetch = vi.fn<typeof fetch>();
     client = createClient(mockFetch);
   });
 

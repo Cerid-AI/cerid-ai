@@ -179,7 +179,7 @@ interface LLMCompleteRequest {
 interface LLMCompleteResponse {
     content: string;
     model: string;
-    /** ollama | openrouter_free | openrouter_paid */
+    /** ollama | quenchforge | openrouter_paid */
     provider: string;
     reason: string;
     estimated_cost_per_1k: number;

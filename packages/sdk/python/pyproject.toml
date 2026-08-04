@@ -25,6 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 async = ["httpx[http2]"]
+test = ["pytest", "pytest-asyncio", "jsonschema"]
 
 [build-system]
 requires = ["hatchling"]
