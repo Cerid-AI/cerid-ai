@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Layout orchestrator — bridges a graphology Graph to the
 // atlas-layout.worker.ts and merges resulting positions back into the

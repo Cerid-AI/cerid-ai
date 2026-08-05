@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Persistent name labels for the constellation's hub entities — the
 // top-N by connection degree (graph centrality, matching how the force

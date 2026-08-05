@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Webhook-token service — generates, validates, and looks up the
 signed tokens that gate the ``POST /sdk/v1/ingest/webhook/{token}``

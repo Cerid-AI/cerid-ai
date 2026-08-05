@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { useEffect, useCallback, useState, useMemo, useRef, useSyncExternalStore } from "react"
 import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels"

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Graph visualization API — neighborhood + path + community endpoints.
 
 Phase A of the 2026-05-21 Cerid v1.0 systemic implementation plan. This

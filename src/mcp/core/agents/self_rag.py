@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Self-RAG Validation Loop — verify claims against KB and refine retrieval.
 

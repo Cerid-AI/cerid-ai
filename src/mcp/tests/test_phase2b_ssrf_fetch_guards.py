@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Phase 2b slice 1 — the two previously-unguarded external fetches now route
 through the shared SSRF-guarded ``guarded_get``.

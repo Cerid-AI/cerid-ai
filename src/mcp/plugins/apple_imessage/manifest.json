@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",
+  "license": "BUSL-1.1",
   "description": "Apple iMessage (chat.db) via signed Swift helper; private_mode L2+",
   "feature_flags": ["imessage_reader"],
   "requires": {

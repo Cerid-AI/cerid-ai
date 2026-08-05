@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 
 """GitHub Issues connector plugin — searches issues via the GitHub REST API."""
 from __future__ import annotations

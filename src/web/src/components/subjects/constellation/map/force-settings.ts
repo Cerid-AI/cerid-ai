@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Pure ForceAtlas2 settings + gating for the live 2D map layout. Tuned per
 // the Obsidian-class spec: Barnes-Hut for large graphs, strong gravity so

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Tests for Task 4.3: unified hover intent delay + thicker entity hover cards.
 //   1. HOVER_INTENT_DELAY_MS is 300ms (unified value).

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """End-to-end tests for wikilink edge writes + PendingArtifact resolution
 (RAG Cycle C2.1 Phase C).

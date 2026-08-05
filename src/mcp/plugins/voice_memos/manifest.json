@@ -3,6 +3,7 @@
     "version": "0.1.0",
     "type": "parser",
     "tier": "community",
+    "license": "BUSL-1.1",
     "description": "Mac-native Voice Memos auto-watch + plain Whisper transcription. Community tier. For speaker diarization, calendar stitching, and meeting summaries, see the Pro-tier plugins/meeting_capture plugin.",
     "requires": ["pywhispercpp"],
     "feature_flags": [

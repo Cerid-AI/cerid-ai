@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Pure composed reducer chain for Atlas (Living-Map A1): lens compose →
 // type-chip dim → hover/pin spotlight fade. Extracted from Atlas.tsx so

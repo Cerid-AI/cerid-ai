@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Pure predicates for per-community combos (A10): a user can collapse a
 // single community into one disc from its card. Members (and their incident

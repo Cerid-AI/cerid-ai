@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 // Runtime config precedence (highest first):
 //   1. window.cerid.env  — injected by the Electron desktop preload. Lets the

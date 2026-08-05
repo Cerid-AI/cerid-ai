@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """E1 Phase-1f (part 2) verifiability harness — ALT-TRANSPORT COMPLETENESS probe.
 

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // F-URL-01 — URL state hygiene: switching primary nav (chat → subjects →
 // sources → settings) must strip per-pane sub-tab URL params that no

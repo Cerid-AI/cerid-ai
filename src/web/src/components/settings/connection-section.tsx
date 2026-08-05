@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Server connection panel — desktop-only (rendered from the System settings
 // category). Lets the desktop client run the Cerid stack locally or connect to

@@ -8,8 +8,8 @@
 
 | Tier | License | Audience | Price |
 |------|---------|----------|-------|
-| **Cerid Core** | Apache-2.0 | Developers, researchers, personal use | Free |
-| **Cerid Pro** | BSL-1.1 | Business and power users | $15/mo · $144/yr |
+| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Developers, researchers, personal use | Free |
+| **Cerid Pro** | BUSL-1.1 | Business and power users | $15/mo · $144/yr |
 | **Cerid Enterprise** | Commercial | Regulated and large organizations | Contact |
 
 ## Feature Matrix

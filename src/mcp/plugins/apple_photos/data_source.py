@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Apple Photos DataSource — Phase G.4.
 
 Metadata-only: dates, location, dimensions, favorite/hidden flags,

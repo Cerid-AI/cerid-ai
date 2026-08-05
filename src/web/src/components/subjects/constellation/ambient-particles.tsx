@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Ambient particles for Constellation — Phase B Day 6. Renders a
 // drifting cloud of micro-particles between entities to give the 3D

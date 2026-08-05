@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Deprecated: use TrustBandBadge from @/components/ui/trust-band-badge instead.
 // This file is kept as a thin wrapper so existing tests and barrel exports

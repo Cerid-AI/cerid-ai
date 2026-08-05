@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Contract: /setup/models/status exposes provider per model so the banner
 hides itself when providers are remote (e.g., Quenchforge serves reranker)."""
 from __future__ import annotations

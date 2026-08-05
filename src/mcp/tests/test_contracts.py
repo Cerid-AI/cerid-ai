@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Verify all contract ABCs are importable and abstract."""
 from abc import ABC

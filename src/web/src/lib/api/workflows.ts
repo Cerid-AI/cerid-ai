@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 // Workflow builder metadata — node-type / agent catalog for tooltips and the
 // node detail panel. CRUD + run helpers live in ./settings (§ Workflows).

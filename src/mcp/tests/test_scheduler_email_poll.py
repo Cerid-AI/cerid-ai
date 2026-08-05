@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """The scheduled IMAP poll job (`_run_email_poll`) drives the existing
 `poll_email()` on a cadence and maps its result status to a job-execution log

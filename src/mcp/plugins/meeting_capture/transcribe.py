@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Whisper.cpp transcription via pywhispercpp bindings.
 
 Per the audio-stack research in tasks/2026-05-20-pro-tier-implementation-plan.md

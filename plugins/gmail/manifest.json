@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Gmail OAuth connector for importing emails into Cerid KB",
   "tier": "pro",
-  "license": "BSL-1.1",
+  "license": "BUSL-1.1",
   "entry_point": "plugin.py",
   "capabilities": ["email_sync"],
   "config_schema": {

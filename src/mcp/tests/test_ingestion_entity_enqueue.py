@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Phase K1.1 — verify ingestion enqueues EntityExtractionJob post-commit."""
 from __future__ import annotations

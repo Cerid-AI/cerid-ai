@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 # Generate runtime environment config for the SPA.
 # This allows VITE_MCP_URL and VITE_BIFROST_URL to be overridden at

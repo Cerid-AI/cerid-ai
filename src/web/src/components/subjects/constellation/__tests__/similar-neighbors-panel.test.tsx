@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Tests for the kNN neighbors panel (B5): populated + empty states, the
 // re-pin callback, close, and axe-cleanliness in both states.

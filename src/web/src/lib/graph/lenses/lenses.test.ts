@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Unit tests for the 4 Atlas lenses. Verifies each lens's transform
 // fires the expected visual change on representative inputs, and that

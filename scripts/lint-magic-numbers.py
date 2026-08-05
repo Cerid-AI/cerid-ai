@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Ratchet gate: production magic numbers (ruff PLR2004) may only decrease.
 
 Graduates the ``PLR2004`` sprint from tasks/2026-06-29-rag-api-systemic-audit.md

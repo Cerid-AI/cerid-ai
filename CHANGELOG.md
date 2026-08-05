@@ -2,6 +2,81 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Licensing: Cerid AI moves to FSL-1.1-ALv2
+
+**This release changes the license. Read this section before upgrading.**
+
+### The short version
+
+Cerid AI is now under the **Functional Source License 1.1 with an Apache-2.0
+future license** (`FSL-1.1-ALv2`). Every version becomes Apache-2.0 on its
+second anniversary — the grant is delayed, not withheld, and it is made
+irrevocably up front rather than promised.
+
+FSL is **source-available**, not an open source license. We would rather say
+that plainly than let anyone discover it later.
+
+### Releases before this one are unaffected
+
+**Every version published before this release remains Apache-2.0, forever.**
+The Apache-2.0 grant already made on those releases is irrevocable, and this
+change makes no attempt to withdraw it. If you are running an earlier version,
+your rights under Apache-2.0 continue exactly as they were, including the right
+to fork from that point. FSL binds this version and later ones.
+
+### What you can still do
+
+Subject in every case to the actual text of [`LICENSE`](LICENSE):
+
+- Read, copy, modify, redistribute and **use** the software for any purpose
+  other than a Competing Use.
+- **Run it internally.** Internal use and access is expressly permitted — an
+  individual or an organisation running Cerid AI on its own knowledge, on its
+  own hardware, is doing precisely what the license contemplates. This is the
+  overwhelming majority of how Cerid AI is used, and nothing about it changes.
+- Non-commercial education and non-commercial research.
+- Use it in connection with professional services you provide to a licensee.
+
+### What you cannot do
+
+Make Cerid AI available to others in a commercial product or service that
+substitutes for Cerid AI or offers substantially similar functionality. That is
+the Competing Use the license is drawn around, and it is the only thing this
+change is for.
+
+### The SDKs stay Apache-2.0
+
+Code you write *against* Cerid AI should carry no strings, so the integration
+surface is carved out and stays permissive:
+
+| Path | License |
+|---|---|
+| Repository root, `src/mcp/`, `src/web/` | FSL-1.1-ALv2 (source-available) |
+| `packages/sdk/python`, `packages/sdk/typescript` | Apache-2.0 |
+| `packages/cli`, `packages/widget`, `packages/extension` | Apache-2.0 |
+| `plugins/` | BUSL-1.1 (converts to Apache-2.0 after three years) |
+| `plugins-premium/` | Proprietary — all rights reserved, not distributed |
+
+Each SDK now ships an explicit `LICENSE` in its own directory, so the subtree
+grant does not depend on anyone inferring it from a manifest field.
+
+### Also in this release
+
+- Per-file `SPDX-License-Identifier` headers across `src/`, `scripts/` and
+  `tests/` now read `FSL-1.1-ALv2` and match the root `LICENSE`. Files under
+  `packages/sdk/` still read `Apache-2.0`, as intended.
+- `plugins-premium/` is a new proprietary plugin tier. It is excluded from
+  distribution.
+- `CONTRIBUTING.md` gains a contributor license grant: contributions are
+  licensed to the project owner with the right to relicense and dual-license.
+  This is what makes commercial exceptions possible.
+
+### Questions
+
+For alternative licensing arrangements, or if you are unsure whether your use
+is a Competing Use, contact the copyright holder. We would much rather answer
+the question than have you guess.
+
 ## Unreleased — Graph Living-Map: Obsidian-class knowledge exploration (2026-07-07)
 
 The Subjects graph surfaces (Atlas ego explorer, Constellation map/3D) become a

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Pure graph-migration helpers for Atlas ego re-centering (Living-Map A5).
 // On refocus, the persistent live graph MIGRATES to the next neighborhood

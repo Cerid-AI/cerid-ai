@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "verification",
   "tier": "pro",
-  "license": "BSL-1.1",
+  "license": "BUSL-1.1",
   "description": "Metamorphic claim verification — synonym/antonym mutation entailment checks for per-claim hallucination scoring",
   "feature_flags": ["metamorphic_verification"]
 }

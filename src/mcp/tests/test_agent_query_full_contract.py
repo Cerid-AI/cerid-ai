@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Behavioral parity guard for the canonical retrieval entry ``agent_query_full``.
 
 Phase 1 made ``core.agents.query_agent.agent_query_full`` the single path every

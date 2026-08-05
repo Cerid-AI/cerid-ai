@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Phase B Day 12 — Quick-capture FAB tests. Visible on every pane;
 // ⌘⇧N global; mode switcher (Note/URL/Upload); Escape closes.

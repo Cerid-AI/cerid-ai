@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """CoreSpotlight donor — Phase G.4.
 
 Sends Cerid KB artifacts to macOS Spotlight via the `ceridspotlight`

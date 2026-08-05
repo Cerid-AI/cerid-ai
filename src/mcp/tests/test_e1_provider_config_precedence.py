@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """E1 CR-097: model_providers config plane — env takes precedence for API keys,
 and plaintext keys are never persisted to Redis.

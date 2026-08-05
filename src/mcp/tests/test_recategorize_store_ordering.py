@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """recategorize must move + verify ChromaDB chunks BEFORE flipping the Neo4j
 domain, so a ChromaDB failure leaves both stores on the old domain instead of

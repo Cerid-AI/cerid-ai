@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Unit tests for GET /graph/structural-gaps (Phase 5 "C2").
 
 Surfaces structural holes: community pairs that are semantically close

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 // Public/community edition: the Plan & Billing surface is a static stub.
 // Licensing, upgrades, and checkout are handled on cerid.ai — this

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Tests for pkb_inbox_triage + pkb_inbox_filter MCP tools — Phase J Day 3."""
 from __future__ import annotations

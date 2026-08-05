@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Atlas mode — Meridian v2. The family's 2D analytic graph view.
 // WebGL2 rendering via sigma.js v3; layout via force-atlas2 in a

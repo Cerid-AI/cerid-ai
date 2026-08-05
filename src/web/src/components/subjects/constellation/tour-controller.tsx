@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Constellation tour controller — Phase B Day 7. Renders a "Take a
 // tour" button overlaid on Constellation; clicking generates a tour

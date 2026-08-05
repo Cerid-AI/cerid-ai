@@ -359,7 +359,7 @@ protocol: add to `docker needs[]` and remove `--report-only` after two consecuti
 
 ## Plugins & workflows
 
-- Plugins carry a `manifest.json` (name, version, tier, description, entry). BSL-1.1, converts to Apache-2.0 after 3 years.
+- Plugins carry a `manifest.json` (name, version, tier, description, entry). `plugins/` and `src/mcp/plugins/` are BUSL-1.1 and convert to Apache-2.0 after 3 years; `plugins-premium/` is proprietary (all rights reserved) and is not distributed — it is absent from the public repository by design.
 - Tier gating enforced at load time via `CERID_TIER`.
 - Workflow engine uses Kahn's algorithm for DAG validation — cycles rejected.
 

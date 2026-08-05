@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Atlas saved-views panel — list + save + delete. Floats top-left of
 // the Atlas surface. Pins an Atlas configuration (focal entity + hops

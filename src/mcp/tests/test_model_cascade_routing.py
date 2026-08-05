@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Tests for ENABLE_MODEL_CASCADE — chat routing cascades SIMPLE queries to
 the local backend when one is reachable.

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Audio decoding helpers — ffmpeg subprocess to 16 kHz mono PCM WAV."""
 from __future__ import annotations
 

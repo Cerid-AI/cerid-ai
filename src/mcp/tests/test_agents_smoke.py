@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Smoke tests for the agent modules that previously had zero dedicated
 coverage (rectify, audit, maintenance, self_rag).

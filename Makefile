@@ -160,6 +160,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-no-hardcoded-models.py --strict src/mcp/
 	@echo "[drift] pro-gating"
 	.venv/bin/python scripts/lint-pro-gating.py
+	@echo "[drift] license-headers"
+	.venv/bin/python scripts/lint-license-headers.py
 	@echo "[drift] design-drift (matches CI lint / no-design-drift)"
 	.venv/bin/python scripts/lint-no-design-drift.py --root src/web/src --allow-file scripts/design_drift_allowlist.txt
 	@echo "[drift] ci-required-gates"

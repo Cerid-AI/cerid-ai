@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Betweenness orchestrator (C1) — bridges a node/edge snapshot to
 // graph-metrics.worker.ts and returns the score map. Surface-agnostic (takes

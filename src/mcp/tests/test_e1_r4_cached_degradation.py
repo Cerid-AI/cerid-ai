@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """E1 post-audit M3-6 — R4/CR-052 CACHED tier uses configured LLM breakers only.
 

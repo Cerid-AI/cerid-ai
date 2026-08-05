@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Diagnostics tab — Phase C Day 2. Merges the legacy Monitoring +
 // Agents top-level panes into a single Settings tab with two sub-tabs:

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Screen-reader accessibility layer for Atlas. WebGL canvas content is
 // invisible to assistive tech, so this component renders an off-screen

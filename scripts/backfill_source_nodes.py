@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """CL-1 source-node backfill — link pre-CL-1 artifacts to their :Source and
 recompute per-source counters from graph truth.

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // EntityAnalysisDrawer — CN2: deep multi-layer analysis of a constellation
 // node, shown in a right-anchored side drawer WITHOUT navigating away from

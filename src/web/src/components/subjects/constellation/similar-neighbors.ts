@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Client-side kNN over the SIMILAR_TO edges already shipped by
 // /graph/embeddings/3d (B5). When a node is pinned we surface its strongest

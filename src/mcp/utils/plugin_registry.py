@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Community plugin registry client — fetches plugin metadata from a GitHub-hosted registry."""
 from __future__ import annotations

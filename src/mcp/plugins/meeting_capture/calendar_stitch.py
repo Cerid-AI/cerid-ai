@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Calendar-aware meeting stitching.
 
 When a calendar connector is registered (Google Calendar via MCP or

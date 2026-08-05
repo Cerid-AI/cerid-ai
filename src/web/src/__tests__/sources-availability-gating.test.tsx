@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Source-kind availability gating: unimplemented kinds (coming_soon),
 // OAuth-only kinds, and desktop-helper-backed kinds whose helper is absent

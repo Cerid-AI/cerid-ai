@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 /**
  * E1 M1-3 / R3 — smart-suggestions relative-to-top floor (CR-010 tail).

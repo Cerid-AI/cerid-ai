@@ -1,6 +1,6 @@
 # src/mcp/core/reliability/read_after_write.py
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Read-after-write verification for state-critical Neo4j writes.
 

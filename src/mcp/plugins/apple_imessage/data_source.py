@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Apple iMessage DataSource — Phase 4.2.
 
 Wraps the ``ceridimessage`` Swift helper via subprocess + JSON-over-stdout,

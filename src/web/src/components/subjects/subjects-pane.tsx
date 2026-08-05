@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Subjects pane — consolidates the legacy Knowledge / Wiki / Communities /
 // Memories panes into a single surface with a 4-way mode switcher:

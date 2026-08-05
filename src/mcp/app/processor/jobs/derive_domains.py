@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Derive Entity domain fields: primary_domain, domain_mix, domain_salience, top_tags, primary_subcategory, domains_updated_at.
 

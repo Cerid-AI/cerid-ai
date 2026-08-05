@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Phase M Day 5 — frontend tests for the wiki mini-visualization
 // components (MentionSparkline, ProvenanceSankey, ContradictionLink).

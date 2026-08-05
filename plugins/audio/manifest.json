@@ -4,7 +4,7 @@
   "type": "parser",
   "tier": "pro",
   "description": "Audio transcription via Whisper",
-  "license": "BSL-1.1",
+  "license": "BUSL-1.1",
   "requires": ["faster_whisper"],
   "entry_point": "plugin.py",
   "file_types": [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"]

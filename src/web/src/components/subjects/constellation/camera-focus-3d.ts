@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Pure camera-framing math for community focus / drill-down. Frames a set of
 // 3D points by their (cheap mean-center) bounding sphere and returns a camera

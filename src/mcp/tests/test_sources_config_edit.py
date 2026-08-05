@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Tests for POST /sources/{id}/config (Stage C1/C2 — config editing for all source kinds)."""
 from __future__ import annotations
 

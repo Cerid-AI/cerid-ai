@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Unit tests for the draw-node-hover module.
 // These tests run in jsdom and use a stub canvas that records ctx.font

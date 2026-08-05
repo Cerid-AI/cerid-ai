@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Meeting summary + action-item extraction via the internal LLM router.
 
 Calls flow through ``utils.internal_llm.call_internal_llm`` with the

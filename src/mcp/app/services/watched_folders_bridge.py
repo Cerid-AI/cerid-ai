@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Facade projecting the legacy watched-folders Redis store through the
 canonical /sources API as the `folder` kind. Read-time projection +
 write-through delegation; the watched-folders scanner stays the ingest

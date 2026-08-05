@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """CL-7/AF-012: boot rehydration of operator-created :Domain nodes into config."""
 from __future__ import annotations

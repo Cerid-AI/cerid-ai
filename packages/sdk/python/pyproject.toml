@@ -3,7 +3,11 @@ name = "cerid-sdk"
 version = "0.1.1"
 description = "Python SDK for Cerid AI Knowledge Companion"
 requires-python = ">=3.9"
+# Deliberate carve-out: the SDK stays Apache-2.0 while the repository root is
+# FSL-1.1-ALv2. `license-files` ships packages/sdk/python/LICENSE in the sdist
+# and wheel so the subtree grant travels with the artifact.
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Cerid AI", email = "dev@cerid.ai" }]
 readme = "README.md"
 keywords = ["cerid", "ai", "knowledge-base", "rag", "sdk"]

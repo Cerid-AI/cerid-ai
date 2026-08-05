@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """AF-019 regression: _run_webhook_drain bounds LPOPs across ALL matched
 ``cerid:webhook_inbox:*`` keys per run, not per-key.

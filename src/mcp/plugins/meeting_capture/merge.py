@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Merge Whisper word-timestamps with pyannote speaker turns.
 
 The two pipelines (Whisper + pyannote) run independently on the same

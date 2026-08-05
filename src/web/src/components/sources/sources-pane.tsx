@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Sources pane — Phase B Day 8. Top-level consolidation surface for
 // knowledge ingestion: artifacts, watched folders, external APIs,

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",
+  "license": "BUSL-1.1",
   "description": "Outlook Mail via sibling ms365-mcp container",
   "feature_flags": ["outlook_connector"],
   "requires": {

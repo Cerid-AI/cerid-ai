@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // cosmos.gl "Live" mode (B8) — the self-organizing wow scene. Feeds the corpus
 // into @cosmos.gl/graph, a GPU force-directed layout that runs live: nodes

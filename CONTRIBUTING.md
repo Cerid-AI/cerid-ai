@@ -137,4 +137,63 @@ Minimal skeleton:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0 (or BSL-1.1 for plugins, which converts to Apache-2.0 after three years).
+Cerid AI is licensed under the **Functional Source License 1.1 with an Apache-2.0
+future license** (`FSL-1.1-ALv2`, [`LICENSE`](LICENSE)): every version becomes
+Apache-2.0 on its second anniversary. This is **source-available, not open source**.
+
+The repository is not uniformly licensed. Which license applies depends on where the
+file lives:
+
+| Path | License |
+|---|---|
+| Repository root, `src/mcp/`, `src/web/` | FSL-1.1-ALv2 |
+| `packages/sdk/python`, `packages/sdk/typescript` | Apache-2.0 |
+| `packages/cli`, `packages/widget`, `packages/extension` | Apache-2.0 |
+| `plugins/`, `src/mcp/plugins/` | BUSL-1.1 (converts to Apache-2.0 after three years) |
+
+The Apache-2.0 rows are the surfaces you build against — the SDKs and client
+integrations — so depending on them never pulls FSL terms into your own code. Each of
+those directories carries its own `LICENSE`, and every source file states its license
+in an `SPDX-License-Identifier` header; that header is authoritative for the file.
+
+Releases published before the 2026-08 transition remain Apache-2.0 and stay that way.
+
+### Contributor license grant
+
+The copyright holder offers commercial exceptions to the FSL and may dual-license the
+software. That is only possible if the holder has the rights to relicense every line
+in the tree, which means inbound contributions need an explicit grant. So:
+
+**By submitting a contribution to this repository — a pull request, a patch, a code
+suggestion in an issue, or any other form — you agree to the following.**
+
+1. **Grant.** You grant Justin Michaels ("the Owner") a perpetual, worldwide,
+   non-exclusive, royalty-free, irrevocable, sublicensable and transferable license to
+   reproduce, modify, prepare derivative works of, publicly display, publicly perform,
+   distribute and otherwise exploit your contribution, in whole or in part, in any
+   medium and by any means now known or later developed.
+
+2. **Relicensing and dual licensing.** That license expressly includes the right to
+   license your contribution to third parties under **any** terms the Owner chooses,
+   including FSL-1.1-ALv2, Apache-2.0, BUSL-1.1, a proprietary commercial license, or
+   a commercial exception negotiated with a specific customer. You waive any
+   requirement that the Owner seek further permission for such a relicense.
+
+3. **Patents.** You grant the Owner and every recipient of the software a perpetual,
+   worldwide, non-exclusive, royalty-free, irrevocable patent license to make, have
+   made, use, offer to sell, sell, import and otherwise transfer your contribution,
+   covering only those patent claims you can license that are necessarily infringed by
+   your contribution alone or by its combination with the project.
+
+4. **You keep your copyright.** This is a license, not an assignment. You may use your
+   own contribution however you like, elsewhere.
+
+5. **Representations.** You represent that (a) each contribution is your original work,
+   or you have the right to submit it under these terms; (b) you are legally entitled
+   to grant the above licenses; and (c) if your employer has rights in work you create,
+   you have permission to contribute on their behalf or your employer has waived those
+   rights.
+
+If you use AI tooling to help write a contribution, follow the same convention the
+project does: no AI attribution in commit messages, PR titles, PR descriptions, or
+code comments. Contributions are authored by the human submitting them.

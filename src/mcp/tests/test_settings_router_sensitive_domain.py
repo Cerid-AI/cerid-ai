@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Settings router GET/PATCH coverage for Task 1.2e: the dedicated
 `sensitive_domain_retrieval` opt-in (independent of private_mode level)."""

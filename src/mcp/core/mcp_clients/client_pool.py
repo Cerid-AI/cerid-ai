@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Pool + circuit-breaker management for MCP HTTP clients.
 
 Per Phase 3 D2 of the 2026-05-20 Pro Tier Implementation Plan. Sits between

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Atlas saved views — Phase A Day 12.
 
 Per-user list of named Atlas configurations users can pin. A "view" is

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Drift gate for ``docs/PRODUCT_STORY.md``.
 
 Asserts that the canonical product narrative stays in sync with what

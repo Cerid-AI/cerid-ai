@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Client for /graph/embeddings/3d — UMAP-projected 3D coordinates for
 // every entity in scope. Used by Constellation mode (Phase B).

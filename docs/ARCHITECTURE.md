@@ -51,8 +51,10 @@ cerid-ai-internal/
 ├── docs/                    # ARCHITECTURE.md (this), API_REFERENCE.md, SYNC_PROTOCOL.md,
 │                            # PRESERVATION.md, CONVENTIONS.md, ROUTER_REGISTRY.md
 ├── plugins/                 # BSL-1.1 pro-tier plugins
+├── plugins-premium/         # proprietary premium tier — NOT distributed;
+│                            # absent from the public repository by design
 ├── src/mcp/                 # FastAPI MCP server (Python 3.12)
-│   ├── core/                # Portable orchestrator core (Apache-2.0)
+│   ├── core/                # Portable orchestrator core (FSL-1.1-ALv2)
 │   │   ├── agents/          # Query, memory, hallucination, curator, self_rag, memory_consolidation
 │   │   ├── contracts/       # ABCs: VectorStore, GraphStore, CacheStore, LLMClient
 │   │   ├── retrieval/       # BM25, reranker, semantic cache, query decomposition
@@ -113,7 +115,9 @@ Consumer code imports canonical paths (`core.utils.*`, `app.routers.*`, `app.age
 Three layers, one rule: **core must not import app.**
 
 ### `core/` — portable orchestrator
-- Licensed Apache-2.0 for standalone reuse.
+- Licensed FSL-1.1-ALv2 (source-available) like the rest of the product,
+  with an Apache-2.0 future license at two years. The Apache-2.0 carve-outs
+  are `packages/sdk/**` and the client packages, not `core/`.
 - Zero FastAPI, zero Chroma/Neo4j/Redis driver imports.
 - Abstractions only: `core.contracts.VectorStore`, `GraphStore`, `CacheStore`, `LLMClient`.
 - Houses pipeline algorithms: BM25, reranker, semantic cache, query decomposition, NLI entailment, smart routing, claim canonicalization (`core.agents.hallucination.models.ClaimVerification`).

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Constellation — dual-mode knowledge-graph view.
 //   "map" (default): flat 2D Cartographer map (sigma.js v3, no physics)

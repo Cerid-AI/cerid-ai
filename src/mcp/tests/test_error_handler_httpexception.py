@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """`@handle_errors` must let HTTPException propagate to FastAPI rather than
 swallowing it into a fallback/RoutingError — otherwise routes that raise

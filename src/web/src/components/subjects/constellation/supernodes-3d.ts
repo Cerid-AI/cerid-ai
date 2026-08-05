@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // 3D community super-nodes: group entities by their ancestor community at a
 // Leiden level and place a single node at the members' 3D centroid, sized by

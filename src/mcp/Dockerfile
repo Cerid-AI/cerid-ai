@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 # Build context: repo root (NOT src/mcp/). The build needs pyproject.toml
 # at the repo root to bake the canonical version into /app/VERSION.

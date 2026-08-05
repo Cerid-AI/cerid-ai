@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Tests for utils.domain_privacy (Task 1.2e: dedicated sensitive-domain opt-in,
 decoupled from the private-mode isolation level)."""

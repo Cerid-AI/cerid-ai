@@ -5,6 +5,6 @@
   "description": "Search GitHub Issues via the GitHub REST API",
   "tier": "community",
   "author": "Cerid AI",
-  "license": "Apache-2.0",
+  "license": "BUSL-1.1",
   "requires": []
 }

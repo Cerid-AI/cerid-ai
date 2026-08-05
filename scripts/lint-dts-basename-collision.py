@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Forbid `.d.ts` files sharing a basename with sibling `.ts` files.
 
 Graduates lesson ``tasks/lessons.md::"`.d.ts` files with same basename

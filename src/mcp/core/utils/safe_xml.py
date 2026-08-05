@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Hardened XML parsing for untrusted remote documents (RSS/Atom feeds).
 
 The stdlib ``xml.etree.ElementTree`` expands internal entity definitions and

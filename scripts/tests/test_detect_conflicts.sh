@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Contract test for detect_conflicts() in scripts/lib/healthcheck.sh — the
 # cross-project/dir squatter guard added after the 2026-06-06 install failure

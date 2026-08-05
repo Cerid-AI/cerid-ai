@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Webhook-backed kinds (chat_capture / dev_events) require a provider whose
 // recipe normalizes the inbound payload. The wizard must render a provider

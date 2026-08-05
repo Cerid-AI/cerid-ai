@@ -4,7 +4,7 @@
   "type": "agent",
   "tier": "pro",
   "description": "Custom Smart RAG — per-source weight tuning for retrieval orchestration",
-  "license": "BSL-1.1",
+  "license": "BUSL-1.1",
   "requires": [],
   "entry_point": "plugin.py"
 }

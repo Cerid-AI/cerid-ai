@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Guard against resurrection of the legacy ``src/mcp/db/neo4j`` shim tree.
 
 Prior to the Neo4j unification sprint, the repo carried two Neo4j data-layer

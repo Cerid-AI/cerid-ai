@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Renderer-agnostic in-place attribute tween over a graphology graph
 // (Graph Living-Map S2). One rAF loop drives ALL nodes — never one loop

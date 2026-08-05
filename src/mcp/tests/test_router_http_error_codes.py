@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Routers must signal failure via HTTP status codes, not a 200 + {"error"}
 envelope (FE then shows success while nothing changed)."""

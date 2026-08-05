@@ -5,7 +5,7 @@
 A privacy-first, local-first workspace that unifies your code, finance, projects, and personal artifacts into a context-aware LLM interface with RAG-powered retrieval, intelligent agents, and built-in hallucination detection.
 
 [![Status](https://img.shields.io/badge/Status-Active-green)]()
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/License-FSL--1.1--ALv2-blue)](LICENSE)
 [![CI](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml)
 
 ---
@@ -156,7 +156,25 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 
 ## License
 
-Apache 2.0 (core + app). Plugins use BSL-1.1 (convert to Apache after 3 years).
+Cerid AI is **source-available, not open source**. The core is licensed under the
+[Functional Source License 1.1 with an Apache-2.0 future license](LICENSE)
+(`FSL-1.1-ALv2`): every version becomes Apache-2.0 on its second anniversary.
+
+The repository is not uniformly licensed — which license applies depends on where a
+file lives:
+
+| Path | License |
+|---|---|
+| Repository root, `src/mcp/`, `src/web/` | FSL-1.1-ALv2 |
+| `packages/sdk/python`, `packages/sdk/typescript` | Apache-2.0 |
+| `packages/cli`, `packages/widget`, `packages/extension` | Apache-2.0 |
+| `plugins/`, `src/mcp/plugins/` | BUSL-1.1 (converts to Apache-2.0 after three years) |
+
+The SDKs and client integrations stay permissive on purpose: they are the surfaces
+you build against, so depending on them should never pull FSL terms into your code.
+
+**Releases published before the 2026-08 transition remain Apache-2.0 and stay that
+way** — relicensing is version-forward only and cannot be applied retroactively.
 
 **Star the repo** if this is useful — it helps more people discover private, trustworthy AI tools.
 

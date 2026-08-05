@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Centralized constants — THE source of truth for all magic numbers.
 
 AI agents: import from here. Never hardcode numeric literals in business logic.

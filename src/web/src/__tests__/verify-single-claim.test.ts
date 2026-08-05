@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 // E1 CR-019 — the per-claim retry must tell the backend which claim index it is
 // re-verifying, so the backend MERGES the fresh verdict into the existing N-claim

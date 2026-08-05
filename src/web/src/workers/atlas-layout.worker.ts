@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Atlas layout Web Worker — runs force-atlas2 layout off the main thread
 // so the renderer stays at 60fps during large graph computations.

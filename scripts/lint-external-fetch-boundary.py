@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Ratchet gate: raw redirect-following external fetches may only decrease.
 
 The audit's Cluster-3 done-signal ("forbid external HTTP outside the hardened

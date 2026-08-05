@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Regression tests: guard_or_log is wired at every outbound-fetch call site."""
 from unittest.mock import AsyncMock, MagicMock, patch

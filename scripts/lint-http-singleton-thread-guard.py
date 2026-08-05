@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Lint for module-level ``httpx.AsyncClient`` / ``httpx.Client`` singletons.
 
 The 2026-04-22 beta-test incident (part 2): a module-level

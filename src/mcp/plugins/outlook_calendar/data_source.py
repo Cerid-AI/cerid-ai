@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Outlook Calendar DataSource — Phase F Day 6.
 
 Implements CalendarDataSource Protocol on top of the sibling ms365-mcp

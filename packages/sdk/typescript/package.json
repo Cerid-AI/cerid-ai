@@ -1,6 +1,7 @@
 {
   "name": "@cerid-ai/sdk",
   "version": "0.1.1",
+  "description": "Zero-dependency typed client for the Cerid AI SDK API.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,10 +12,23 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cerid-AI/cerid-ai.git",
+    "directory": "packages/sdk/typescript"
+  },
+  "homepage": "https://cerid.ai",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "prepublishOnly": "npm run build && npm run typecheck && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

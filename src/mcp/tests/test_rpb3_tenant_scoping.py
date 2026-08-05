@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """RPB-3 — every ChromaDB ``collection.query`` in the memory/retrieval path is
 tenant-scoped via ``with_tenant_scope``.

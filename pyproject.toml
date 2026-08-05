@@ -3,7 +3,8 @@ name = "cerid-ai"
 version = "1.0.0rc2.post1"
 description = "Privacy-first Personal AI Knowledge Companion"
 requires-python = ">=3.12"
-license = "Apache-2.0"
+license = "FSL-1.1-ALv2"
+license-files = ["LICENSE"]
 
 [tool.ruff]
 target-version = "py312"

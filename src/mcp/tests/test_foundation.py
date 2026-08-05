@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Tests for foundation modules.
 
 Covers: errors.py, utils/error_handler.py, utils/degradation.py, config/constants.py.

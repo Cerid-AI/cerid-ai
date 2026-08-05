@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels / Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Tests for the design-drift linter (scripts/lint-no-design-drift.py).
 
 All tests use synthetic in-memory fixtures written to ``tmp_path``.

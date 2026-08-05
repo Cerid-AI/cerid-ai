@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",
+  "license": "BUSL-1.1",
   "description": "Apple Mail (.emlx) via signed Swift helper",
   "feature_flags": ["apple_mail_reader"],
   "requires": {

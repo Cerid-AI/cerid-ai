@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Keyboard navigation hook for the Atlas mode. Wires the Atlas spec's
 // keymap (design-system-v2 §3.5; impl-plan Phase A Day 6) onto a

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Unit tests for app.processor.event_hooks + wiki_refresh subscriber (Phase K1.2/K1.3)."""
 from __future__ import annotations

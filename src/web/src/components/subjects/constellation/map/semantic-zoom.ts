@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Pure camera/LOD helpers for semantic zoom. bboxOf computes a camera target
 // (centroid + a zoom ratio proportional to the cluster's graph-space extent)

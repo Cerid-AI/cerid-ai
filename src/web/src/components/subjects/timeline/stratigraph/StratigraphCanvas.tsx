@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Stratigraph canvas: canvas-2D mark layer + SVG time axis + d3-brushX
 // overview strip (bidirectional sync with d3-zoom) + DOM gutter labels.

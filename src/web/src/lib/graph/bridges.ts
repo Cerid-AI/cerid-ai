@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Bridges lens (C1) — score→color mapping. Betweenness centrality (which nodes
 // sit on the most shortest paths between clusters — the graph's connectors) is

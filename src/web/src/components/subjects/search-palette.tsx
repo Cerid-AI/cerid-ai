@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Cmd-K search palette for the Subjects pane. Typing filters by name;
 // results are grouped into a pinned "Best Matches" section (first 5 in

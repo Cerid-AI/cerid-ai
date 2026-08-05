@@ -1,7 +1,7 @@
 ---
 name: cerid-design-context
 description: "Project-specific UI/UX constraints for **Cerid AI repos only** (cerid-ai-internal, cerid-ai, cerid-trading-agent, cerid-boardroom, cerid-* client repos, and any future cerid-derivative repo). Use ONLY when the current working directory is inside such a repo. Composes with global design-intelligence skills (e.g. ui-ux-pro-max) so generic recommendations land on-brand. Covers the stack pin (React 19 + shadcn/ui new-york + Tailwind v4 + lucide), brand voice + anti-patterns (no AI purple/pink gradients, no marketing funnel), the canonical tier-colour system (private mode + verification bands), the 4-state UX matrix required per pane, the active design-drift gate + allowlist, the canonical primitive ladder under src/web/src/components/ui/, the cross-pane navigation contract, and the accessibility floor."
-license: Apache-2.0
+license: FSL-1.1-ALv2
 metadata:
   author: cerid-ai
   version: "0.2.0"

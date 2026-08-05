@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Contract gate: freeze the set of modules that import the retrieval primitives.
 
 Graduates root-cause cluster #1 ("no enforced canonical retrieval path") from

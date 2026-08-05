@@ -4,7 +4,31 @@ Copyright 2024-2026 Cerid AI Contributors
 This product includes software developed by the Cerid AI project
 (https://github.com/cerid-ai/cerid-ai).
 
-Licensed under the Apache License, Version 2.0.
+The product code is licensed under the Functional Source License, Version 1.1,
+with an Apache-2.0 future license (FSL-1.1-ALv2) — see LICENSE. FSL is
+source-available, not an open source license.
+
+"Cerid AI" is a trade name used by Justin Michaels, the copyright holder and
+the Licensor named in LICENSE. Copyright notices in this repository appear in
+both forms — "Cerid AI" and "Justin Michaels" — and refer to the same party.
+The license in LICENSE is granted by that party.
+
+Releases made before the FSL transition were published under the Apache
+License, Version 2.0. That grant is irrevocable and continues to apply to
+those versions; FSL applies to this version and later ones.
+
+Carve-outs within this repository:
+
+- packages/sdk/python, packages/sdk/typescript — Apache-2.0
+  (see the LICENSE file in each directory)
+- packages/cli, packages/widget, packages/extension — Apache-2.0
+  (see the LICENSE file in each directory)
+- plugins/ — Business Source License 1.1, SPDX BUSL-1.1
+  (see plugins/LICENSE)
+
+A proprietary premium plugin tier also exists. It is not distributed and is not
+present in this repository, so no license for it is included here or implied by
+anything in it.
 
 Third-party software used by this project:
 

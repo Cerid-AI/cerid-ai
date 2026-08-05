@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Sigma program registry for Atlas. Centralizes the node + edge
 // program-class wiring so both the production Atlas component and the

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Quick-capture FAB — Phase B Day 12. Floating action button visible
 // from every pane that opens a modal for fast knowledge ingestion via:

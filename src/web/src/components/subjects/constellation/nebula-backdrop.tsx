@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Brand nebula backdrop (B4). A handful of large, faint, additively-blended
 // gas clouds sitting behind the graph — the colored depth that makes the void

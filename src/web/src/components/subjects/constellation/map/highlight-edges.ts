@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Highlight-edge overlay: draws the focus node's incident edges ABOVE the node
 // mesh on a dedicated canvas synced to the Sigma camera (afterRender). Sigma's

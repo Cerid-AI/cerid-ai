@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",
+  "license": "BUSL-1.1",
   "description": "Apple Reminders (EventKit) via signed Swift helper",
   "feature_flags": ["reminders_eventkit"],
   "requires": {

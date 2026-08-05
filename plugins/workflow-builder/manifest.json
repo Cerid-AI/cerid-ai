@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Visual Workflow Builder — DAG composition and execution engine for agent pipelines",
   "tier": "pro",
+  "license": "BUSL-1.1",
   "capabilities": ["workflow-visualization", "dag-composition", "pipeline-execution"],
   "config_schema": {
     "max_nodes_per_workflow": {

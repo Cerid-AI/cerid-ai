@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """E1 CR-043 — /ingest/feedback sentiment validation + empty body 422."""
 from __future__ import annotations

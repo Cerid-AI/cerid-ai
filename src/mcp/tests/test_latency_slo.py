@@ -1,6 +1,6 @@
 # src/mcp/tests/test_latency_slo.py
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Latency SLO assertions — CI fails on regression past the budget.
 

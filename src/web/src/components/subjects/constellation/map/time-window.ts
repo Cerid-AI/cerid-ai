@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Pure time-filtering logic for the map timebar (A9) + timelapse (A8).
 // The histogram is built from the RENDERED entities' created_at (always in

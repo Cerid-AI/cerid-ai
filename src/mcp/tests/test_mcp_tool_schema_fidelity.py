@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """MCP tool schema fidelity gate — prevents the pkb_artifacts bug class.
 
@@ -117,7 +117,7 @@ def test_no_duplicate_tool_names() -> None:
 def test_tool_inventory_meets_minimum() -> None:
     """Sanity check: cerid-kb ships at least the public floor of 51
     tools (the internal build has additional trading-domain tools that
-    are not part of the open-source distribution).
+    are not part of the public distribution).
 
     Floor history:
     * v0.93.10 — 29 tools (pre-overhaul)

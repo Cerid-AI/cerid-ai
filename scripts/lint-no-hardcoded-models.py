@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Lint for hardcoded model-id string literals in src/mcp/.
 
 Model ids pinned as string literals at call sites bypass the catalog's

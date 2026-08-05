@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Time-anchored retrieval: boost dated chunks by proximity to a query time-window.
 
 Pure ``core`` primitive (no ``app`` imports) shared by the eval retrieval

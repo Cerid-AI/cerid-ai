@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """External MCP tool dispatcher — bridges MCPClientManager into the agent
 tool-call path (Sprint 1A.1) with governance + audit (Sprint 1A.2).

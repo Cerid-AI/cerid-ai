@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """CL-12 / Phase-0 divergence probes — the verifiability harness for the
 ingestion / artifact / corpus systemic audit

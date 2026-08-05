@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Deterministic tests for the Apple Reminders connector's ``since``-payload
 parser and the ``fetch_since`` ingest loop (mirrors the Apple Mail tests)."""

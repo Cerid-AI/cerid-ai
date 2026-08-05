@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",
+  "license": "BUSL-1.1",
   "description": "Google Calendar connector via sibling google-workspace-mcp container",
   "feature_flags": ["google_calendar_sync"],
   "requires": {

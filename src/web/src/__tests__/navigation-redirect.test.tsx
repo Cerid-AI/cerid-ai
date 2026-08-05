@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Phase A Day 9 — Subjects consolidation: legacy pane targets
 // (wiki, communities, memories) are transparently redirected to

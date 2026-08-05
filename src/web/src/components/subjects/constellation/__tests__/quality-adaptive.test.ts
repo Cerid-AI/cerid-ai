@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Unit tests for the adaptive-quality helpers in quality.ts and the
 // distance-based label-decimation helper in hub-labels.tsx. Both are

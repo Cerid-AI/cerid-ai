@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """CRAG external-augmentation gate + firing for the canonical retrieval path.
 
 The gate functions (``should_fire_external_crag`` / ``kb_low_confidence`` /

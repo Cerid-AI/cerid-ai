@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "indexer",
   "tier": "pro",
+  "license": "BUSL-1.1",
   "description": "Donates Cerid KB artifacts to macOS Spotlight (CoreSpotlight)",
   "feature_flags": ["spotlight_donation"],
   "requires": {

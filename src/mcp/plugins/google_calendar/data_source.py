@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Google Calendar DataSource — Phase F Day 3.
 
 Implements the CalendarDataSource Protocol on top of the sibling

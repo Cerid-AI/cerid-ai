@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // InstancedMesh node renderer — Phase B Day 5, upgraded for the living
 // neural-net redesign. Still N entities in ONE draw call, plus:

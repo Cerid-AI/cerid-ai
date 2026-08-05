@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """IMAP poller dedup is driven by the processed-UID set, not a UID high-water
 mark. Regression guard: a message that was \\Seen at first poll and later

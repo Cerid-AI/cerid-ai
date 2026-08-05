@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """E1 CR-004: GET /models/catalog serves the currently-dispatchable model-id set,
 validated against the live OpenRouter catalog, so the FE can filter out a

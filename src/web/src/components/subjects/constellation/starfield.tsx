@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Parallax starfield (B4). Two-to-three concentric drei <Stars> shells at
 // differing radius / depth / rotation-speed. As the cathedral auto-rotates the

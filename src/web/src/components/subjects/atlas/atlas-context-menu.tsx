@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Atlas right-click context menu. Sigma's WebGL canvas can't host
 // shadcn's ContextMenu component directly (no DOM target per node),

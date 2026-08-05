@@ -1,0 +1,47 @@
+# Dependency license allowlist — Task 15 (dependency license scanning).
+#
+# Consumed by scripts/lint-license-denylist.py. Entries here are reviewed
+# exceptions to the denylist (GPL-2.0/GPL-3.0, AGPL, SSPL — see that
+# script's docstring for the family-by-family reasoning, including why
+# LGPL is deliberately NOT in the denylist and therefore needs no entry
+# here). Keys are matched case-insensitively against the package name
+# (pip-licenses "Name" field on the python side; the name portion of
+# license-checker's "name@version" key on the npm side, scope included
+# e.g. "@img/sharp-libvips-darwin-x64").
+#
+# Adding an entry here is a human decision, not a mechanical one — prefer
+# swapping the dependency over allowlisting a real copyleft obligation.
+# Every entry must carry a reason a reviewer can evaluate on its own.
+
+python: {}
+
+npm: {}
+
+# --- Non-package-manager dependencies -------------------------------------
+# Nothing below this line is reachable by lint-license-denylist.py — that
+# script only ever inspects `pip-licenses`/`license-checker` output, which
+# only ever covers python/npm package manifests. Recorded here anyway so
+# the exclusion is an explicit, reviewed decision instead of a silent gap
+# a future reader has to rediscover from scratch.
+external_services:
+  - name: "Neo4j Community Edition"
+    license: "GPL-3.0"
+    reason: >
+      Runs as a separate Docker container (the project's neo4j:*-community
+      image -- currently neo4j:2026.04.0-community in docker-compose.yml
+      and neo4j:5.26.21-community in stacks/infrastructure/docker-compose.yml;
+      check both files for the live tag, it moves independently of this
+      entry), started/stopped independently of the application process
+      and reached only over the network (bolt + http). It is never imported,
+      statically or dynamically linked,
+      or redistributed as part of the cerid-ai-internal codebase or its
+      built artifacts — operators supply/run their own Neo4j instance.
+      GPLv3's copyleft triggers on distributing a combined/derivative
+      work; a network client talking to an operator-provided database
+      server is not that (same boundary FSF's own GPL FAQ draws for
+      "mere aggregation" / arm's-length network use). The Python
+      `neo4j` driver package (Apache-2.0) IS a real requirements.txt
+      entry and passes the python scan on its own merits — this entry
+      is about the server binary/image, which the scan was never going
+      to see and was never at risk of flagging; it is documented here
+      per Task 15's brief so the omission is explicit, not silent.

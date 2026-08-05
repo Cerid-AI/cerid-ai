@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Tests for the freshness model (Phase 3.4, 2026-07-13 quality-maximization
 program) — claim freshness classification, evidence recency weighting, and

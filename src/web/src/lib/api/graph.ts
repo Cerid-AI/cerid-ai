@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Graph API client — wraps /graph/* backend endpoints for the Atlas/
 // Constellation/Timeline visualization modes (Cerid v1.0 Phase A onward).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Generate docs/TIER_MATRIX.md from the feature-flag source of truth.
 
@@ -174,11 +174,11 @@ def _render(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
     out.append("| Tier | License | Audience | Price |")
     out.append("|------|---------|----------|-------|")
     out.append(
-        "| **Cerid Core** | Apache-2.0 | Developers, researchers, "
-        "personal use | Free |"
+        "| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Developers, "
+        "researchers, personal use | Free |"
     )
     out.append(
-        "| **Cerid Pro** | BSL-1.1 | Business and power users | "
+        "| **Cerid Pro** | BUSL-1.1 | Business and power users | "
         "$15/mo · $144/yr |"
     )
     out.append(

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Structural-gaps panel (C2) — the graph's advisory surface. Lists community
 // pairs that are semantically close but weakly linked (structural holes worth

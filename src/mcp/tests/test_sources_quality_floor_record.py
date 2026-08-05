@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """`_to_record` must surface the persisted `quality_floor` so the source
 detail UI can seed its slider from it. Without this, "Apply policy" silently

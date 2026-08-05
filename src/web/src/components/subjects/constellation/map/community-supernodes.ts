@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Super-node overlay for the Cartographer map. At overview zoom (camera ratio
 // >= threshold) each Leiden community collapses to a single disc (sized by

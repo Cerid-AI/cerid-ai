@@ -166,4 +166,10 @@ Response (JSON):
 
 ## License
 
-Apache-2.0 — see [LICENSE](../../LICENSE).
+**Apache-2.0** — see [`LICENSE`](LICENSE) in this directory.
+
+This package is a deliberate carve-out. The repository root is
+[FSL-1.1-ALv2](../../LICENSE) (source-available); the widget, the SDKs and the
+other client packages stay Apache-2.0 so that code embedding or integrating
+with Cerid AI carries no strings. Do not read the root `LICENSE` as governing
+this directory.

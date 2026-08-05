@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Thin client for GET /graph/structural-gaps (Phase 5 "C2"): the knowledge
 // graph's structural holes — pairs of communities that are semantically close

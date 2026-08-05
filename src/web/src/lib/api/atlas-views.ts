@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Client for the /atlas/views API. Per-user named snapshots of an
 // Atlas configuration (focal entity + hops + filter + active lenses

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Server-side Private Mode L2 (skip KB) and L3 (skip audit) enforcement
 (Task 1.2a). Extends ``test_private_mode_enforcement.py`` (L1).

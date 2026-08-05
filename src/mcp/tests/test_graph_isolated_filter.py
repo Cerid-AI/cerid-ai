@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """TDD tests for the include_isolated toggle on /graph/* endpoints.
 
 Fixture: 3 connected entities + 2 isolated entities (degree 0).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Lint that every Pro-tier feature flag has at least one runtime gate.
 
 Background: until Phase 1 of the 2026-05-20 Pro Tier Implementation Plan,

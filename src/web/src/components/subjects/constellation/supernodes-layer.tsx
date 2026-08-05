@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // 3D community-collapse LOD — the R3F sibling of the 2D map's
 // useSuperNodeLayer (map/community-supernodes.ts).

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """`safe_fromstring` must parse benign feeds but reject entity-expansion
 (billion-laughs) and external-entity (XXE) payloads, surfacing both as

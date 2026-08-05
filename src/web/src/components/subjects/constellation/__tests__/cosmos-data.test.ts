@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Unit tests for the cosmos.gl data-prep helpers (B8). Pure Float32Array
 // conversions from the /graph/embeddings/3d payload into cosmos.gl's flat

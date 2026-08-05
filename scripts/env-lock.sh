@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 # Encrypt .env → .env.age using the cerid age public key.
 # Safe to run anytime — overwrites previous .env.age.

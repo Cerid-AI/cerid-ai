@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Content-lifecycle coordinator — the single contract every delete-shaped and
 hide-shaped surface funnels through (audit cluster CL-2).

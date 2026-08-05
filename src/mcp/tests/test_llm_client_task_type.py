@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """route_and_call maps unknown client task_type values to safe internal routing.
 
 External clients use Cerid's LLM surface with domain-specific task types

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """E1 post-audit M4 tail — R13 private-mode off marker, R15 claim key, R18 no double memory."""
 from __future__ import annotations

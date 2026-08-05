@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Live ForceAtlas2 layout for the 2D Cartographer map. Runs FA2 in a Web
 // Worker (off main thread) over the SAME graphology graph Sigma renders, so

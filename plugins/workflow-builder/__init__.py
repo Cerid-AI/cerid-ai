@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: BSL-1.1
+# SPDX-License-Identifier: BUSL-1.1
 
 """Cerid Workflow Builder plugin — visual DAG composition and execution for agent pipelines.
 

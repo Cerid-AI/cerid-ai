@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Unit tests for ``core.ingest.vault_config`` (RAG Cycle C2.3 Phase A)."""
 from __future__ import annotations

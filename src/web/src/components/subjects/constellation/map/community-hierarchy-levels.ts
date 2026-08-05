@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Builds per-Leiden-level super-node sets from the level-0 community hulls
 // (data.communities) + the community hierarchy (/graph/community-hierarchy).

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """TDD tests for Phase 4.2 — reversible, chunked entity merge/unmerge +
 embedding-merge candidate generation + LLM adjudication.

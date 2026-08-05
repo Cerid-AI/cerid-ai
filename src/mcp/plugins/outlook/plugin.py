@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Outlook connector plugin — Phase F Day 6.
 
 Routes Outlook Mail queries to the sibling ms365-mcp container (Softeria)

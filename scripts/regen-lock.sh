@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 # Regenerate src/mcp/requirements.lock in a Linux container that matches
 # CI exactly. Running pip-compile on a dev box directly produces a lock

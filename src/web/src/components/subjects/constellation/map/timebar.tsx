@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Timebar (A9 filter + A8 timelapse): a compact histogram of entity birth
 // dates with a drag-to-select time window and a play button that sweeps a

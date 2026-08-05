@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: FSL-1.1-ALv2
 
 """Serves the versioned SDK OpenAPI spec at ``/sdk/v1/openapi.json``.
 
@@ -34,6 +34,10 @@ def _build_sdk_spec() -> dict:
     sdk_app.include_router(sdk_router)
     spec = sdk_app.openapi()
     spec["info"]["contact"] = {"name": "Cerid AI", "url": "https://github.com/Cerid-AI/cerid-ai"}
+    # Deliberate: this spec describes the /sdk/v1 contract, which the Apache-2.0
+    # SDKs in packages/sdk/ implement and which SDK consumers generate clients
+    # against. It is the SDK surface, not the FSL-1.1-ALv2 server that serves it,
+    # so the advertised license is the SDK's. Do not "fix" this to FSL.
     spec["info"]["license"] = {"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"}
     return spec
 

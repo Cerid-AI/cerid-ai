@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Component tests for Timeline v2 (Stratigraph orchestrator, Tephra Cycle-2).
 //   1. 4-state matrix: loading skeleton, error alert, empty state, populated

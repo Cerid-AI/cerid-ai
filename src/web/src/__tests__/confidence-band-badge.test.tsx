@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // ConfidenceBandBadge is now a thin deprecated wrapper around TrustBandBadge.
 // These tests verify the mapping contract (band → trust label) and

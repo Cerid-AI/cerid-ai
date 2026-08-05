@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Unit tests for the client-side kNN SIMILAR_TO ranking (B5). Pure — operates
 // on the already-loaded /graph/embeddings/3d links, no fetch, no WebGL.

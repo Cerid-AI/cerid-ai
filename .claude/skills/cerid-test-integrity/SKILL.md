@@ -1,7 +1,7 @@
 ---
 name: cerid-test-integrity
 description: "Use when writing, reviewing, or trusting tests in Cerid AI repos (cerid-ai-internal, cerid-ai, cerid-trading-agent, cerid-boardroom, cerid-* repos) — and whenever a suite is green but behaviour is wrong, a gate 'passes' suspiciously fast, or you are about to claim something is covered. Encodes the repo's hardest-won lesson: a test that mocks the thing it tests proves nothing, and line coverage cannot tell the difference. Covers the mutation harness (make mutation-check), the vacuous-gate class, mock-drift, assert-intent-not-literals, the lint-test-antipatterns codes TA001-TA006, mock.patch's concurrency unsafety, and the red-green protocol required before calling a fix verified. Scope note: this skill is about whether a TEST can fail; whether a measured NUMBER means anything, and whether a result is valid in the environment it was produced in, are separate concerns."
-license: Apache-2.0
+license: FSL-1.1-ALv2
 metadata:
   author: cerid-ai
   version: "1.0.0"

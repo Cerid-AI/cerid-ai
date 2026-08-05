@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // kNN neighbors panel (B5). When a node is pinned, this floats top-right and
 // lists its strongest SIMILAR_TO neighbors (ranked client-side — see
