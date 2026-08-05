@@ -16,16 +16,29 @@ $deleting_only && exit 0
 
 cd "$(git rev-parse --show-toplevel)"
 
-# `make prepush`, not `make ci-local`. ci-local is a SUBSET: it covers the
-# lint/typecheck/test jobs and nothing else, so drift-check plus the security,
-# sdk-contract, lock-sync and frontend jobs could only fail after a push. On
-# 2026-08-04 that is exactly what happened — main was red for eight consecutive
-# runs on a cryptography advisory and a ReDoS regex, neither of which any local
-# gate was capable of seeing.
-echo "── pre-push: running FULL CI parity (make prepush) ──"
-echo "   this is the whole workflow (~20-25 min); override: git push --no-verify"
-if make prepush; then
-  echo "── pre-push: ✓ full validation passed — pushing ──"
+# ci-local + drift-check, NOT the full `make prepush`.
+#
+# This ran `make ci-local` alone until 2026-08-04, which is a subset — it misses
+# drift-check entirely, so a design-drift or manifest violation could only fail
+# after a push. drift-check is added here.
+#
+# It is deliberately NOT the full `make prepush`. A pre-push hook has a hard
+# ceiling that has nothing to do with what is worth checking: `git push` opens
+# the connection to the remote BEFORE running this hook (it needs the remote
+# refs for the hook's stdin), so a long hook leaves that connection idle.
+# `make prepush` takes ~25 minutes and GitHub closes the SSH connection while it
+# runs — the gate passes, prints "pushing", and the transfer then fails with
+# "Connection to github.com closed by remote host". Verified twice on
+# 2026-08-04; neither push landed.
+#
+# Full parity has two homes instead:
+#   * `make prepush` — run it manually before a significant push.
+#   * the `ci-ok` job — blocking, and on push:main a SKIPPED gate fails too, so
+#     nothing can quietly not-run remotely.
+echo "── pre-push: running local validation (ci-local + drift-check) ──"
+echo "   full parity is `make prepush`; override: git push --no-verify"
+if make ci-local && make drift-check; then
+  echo "── pre-push: ✓ local validation passed — pushing ──"
   exit 0
 fi
 echo "── pre-push: ✗ local validation FAILED — push blocked ──"

@@ -206,9 +206,21 @@ frontend-full: ## The remote `frontend` + `frontend-desktop` jobs (build, bundle
 	@echo "[frontend] npm audit (dev toolchain — advisory)"
 	-cd src/web && npm audit --audit-level=high
 	@echo "[frontend] desktop typecheck"
-	@test -d src/desktop \
-	  && (cd src/desktop && npm run typecheck) \
-	  || echo "  (src/desktop absent — internal-only, skipped)"
+	# Two bugs lived on this line, both vacuous-gate shaped:
+	#   1. it guarded on src/desktop, a path that has never existed, so it
+	#      reported "(skipped)" and checked nothing;
+	#   2. `test -d X && (...) || echo skipped` ALSO swallows a failure INSIDE
+	#      the parens — a broken npm ci printed "skipped" and exited 0.
+	# An if/else keeps the two cases distinct: absent → skip, present → the
+	# commands' own status propagates.
+	# --ignore-scripts: better-sqlite3's node-gyp rebuild fails against the
+	# host's node 25 and is irrelevant to tsc, which needs type definitions,
+	# not compiled natives. CI builds it because it also packages the app.
+	@if [ -d packages/desktop ]; then \
+	  cd packages/desktop && npm ci --no-audit --no-fund --ignore-scripts && npm run typecheck; \
+	else \
+	  echo "  (packages/desktop absent — internal-only mirror, skipped)"; \
+	fi
 
 # FULL pre-push parity with remote CI. Every ci.yml job that can run without
 # Docker or a live stack is chained here; `scripts/lint-gates-parity.py`
