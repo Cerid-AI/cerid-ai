@@ -165,27 +165,45 @@ def is_junk_entity_name(name: str) -> bool:
 # Prompt + extraction
 # ---------------------------------------------------------------------------
 
+# NO NAMED EXAMPLES IN THIS PROMPT. The type list used to read
+# `PERSON: real individuals (e.g., "Elon Musk", "Tim Cook")` and so on across
+# every type, and the model copied those illustrations straight into its output
+# as if it had found them in the text. Reproduced 2026-08-03 on a Python
+# asyncio doc mentioning none of them: the extractor returned BTC, Apple Inc.,
+# Tim Cook, Elon Musk, Tesla Model 3, GPT-4, WWDC, San Francisco, Wall Street
+# and the Federal Reserve at confidence 0.9-1.0 — a 1:1 match with the example
+# set, plus one real entity. It had been doing this on every artifact for
+# months: BTC reached mention_count 117 and Wall Street 132 across documents
+# that never name them, which is also why the wiki compiler produced summaries
+# saying "Apple Inc. is not mentioned in the provided excerpts" — the excerpts
+# genuinely didn't mention it.
+#
+# Types are described by their defining property instead. Any future edit that
+# reintroduces a named example must keep _drop_unsupported() below, which is
+# what actually enforces this.
 _EXTRACTION_PROMPT = """\
 Extract named entities from the text. Output ONLY valid JSON in the exact \
 schema below.
 
+Every name you output MUST appear verbatim in the text. Do not output a name \
+that is not present in the text, however plausible it seems.
+
 Types (use ONLY these):
-- PERSON: real individuals (e.g., "Elon Musk", "Tim Cook")
-- ORG: companies, institutions, governments (e.g., "Apple Inc.", "Federal Reserve")
-- ASSET: tradeable instruments, products, models (e.g., "BTC", "GPT-4", "Tesla Model 3")
-- EVENT: dated occurrences with proper-noun identity (e.g., "2008 financial crisis", "WWDC 2024")
-- DATE: discrete time periods (e.g., "Q3 2024", "March 15, 2026")
-- LOC: physical or political places (e.g., "San Francisco", "Wall Street")
+- PERSON: named individual people
+- ORG: named companies, institutions, agencies or governments
+- ASSET: named tradeable instruments, products or models
+- EVENT: named occurrences with a proper-noun identity
+- DATE: discrete named time periods
+- LOC: named physical or political places
 - OTHER: significant proper nouns that don't fit above
 
 Schema:
 {{"entities": [{{"name": "<verbatim span>", "type": "<TYPE>", "confidence": <0.0-1.0>}}, ...]}}
 
 Skip:
-- Common nouns ("the company", "they", "this product")
-- Pronouns
-- Generic temporal markers ("today", "yesterday", "last year")
-- Single first names without surname unless globally unique (e.g., "Madonna" stays)
+- Common nouns and pronouns
+- Generic temporal markers
+- Single first names without a surname, unless globally unambiguous
 
 Text:
 \"\"\"
@@ -254,7 +272,100 @@ async def extract_entities_from_text(
         )
         return []
 
-    return list(_normalise_entities(parsed, min_confidence=min_confidence))
+    return _drop_unsupported(
+        list(_normalise_entities(parsed, min_confidence=min_confidence)),
+        cleaned,
+    )
+
+
+# Corporate/legal suffixes to strip before checking presence, so "Apple Inc."
+# extracted from a document that says "Apple" is kept.
+# Tokens shorter than this carry no discriminating power ("of", "3", "AI") and
+# would let a fabricated name pass on incidental matches.
+_MIN_TOKEN_CHARS = 3
+
+_LEGAL_SUFFIX_RE = re.compile(
+    r"[,\s]+(inc|inc\.|corp|corp\.|corporation|ltd|ltd\.|llc|l\.l\.c\.|plc|"
+    r"gmbh|s\.a\.|n\.v\.|co|co\.|company|limited)\s*$",
+    re.I,
+)
+
+
+def _flatten(text: str) -> str:
+    """Lowercase, strip markdown emphasis, collapse whitespace runs.
+
+    A name is routinely written across a line break or wrapped in emphasis
+    (``**Matt Butcher**``, ``Matt\\nButcher``). A raw substring test misses
+    those and would delete a real entity, so both sides are flattened first.
+    """
+    flat = re.sub(r"[*_`]+", "", (text or "").lower())
+    return re.sub(r"\s+", " ", flat)
+
+
+def _is_present(name: str, haystack: str) -> bool:
+    """Is this entity name supported by the (already flattened) text?
+
+    Three widening tests, each justified by a real case:
+
+    1. the flattened name verbatim;
+    2. the name minus a legal suffix — "Apple Inc." from a page saying "Apple";
+    3. every significant token present somewhere — catches names the source
+       renders differently ("Azure Kubernetes Service" in a table, a person
+       listed surname-first). Weaker, but the fabrications this guards against
+       share NO tokens with their documents at all, so it still separates them
+       cleanly.
+    """
+    flat = _flatten(name)
+    if not flat:
+        return False
+    if flat in haystack:
+        return True
+    stripped = _LEGAL_SUFFIX_RE.sub("", flat).strip()
+    if stripped and stripped in haystack:
+        return True
+    tokens = [t for t in re.split(r"\W+", flat) if len(t) >= _MIN_TOKEN_CHARS]
+    return bool(tokens) and all(t in haystack for t in tokens)
+
+
+def _drop_unsupported(entities: list[Entity], text: str) -> list[Entity]:
+    """Drop entities whose name does not occur in the source text.
+
+    The mechanical half of the prompt-example fix above. An instruction not to
+    invent names is necessary but not sufficient — the local 8B model that runs
+    this stage follows it only most of the time — and the failure is silent and
+    permanent: a fabricated entity becomes a graph node, accrues MENTIONS edges
+    to documents that never named it, inflates mention_count, and then gets a
+    compiled wiki page written about it.
+
+    Deliberately loose on the matching side so real entities are not lost:
+    matching is case-insensitive and legal suffixes are stripped, so "Apple
+    Inc." survives a document that only writes "Apple". An entity referred to
+    ONLY by pronoun or by an alias sharing no substring with its name is
+    dropped — acceptable, because this runs per-artifact on that artifact's own
+    text, where anything genuinely discussed is named at least once.
+    """
+    if not entities:
+        return []
+    haystack = _flatten(text)
+    kept: list[Entity] = []
+    for ent in entities:
+        name = (ent.name or "").strip()
+        if not name:
+            continue
+        if _is_present(name, haystack):
+            kept.append(ent)
+        else:
+            logger.debug(
+                "entity_extraction.dropped_unsupported name=%r type=%s "
+                "(not present in source text)",
+                ent.name, ent.entity_type,
+            )
+    if len(kept) != len(entities):
+        logger.info(
+            "entity_extraction.dropped %d of %d extracted entities absent from "
+            "the source text", len(entities) - len(kept), len(entities),
+        )
+    return kept
 
 
 def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable[Entity]:

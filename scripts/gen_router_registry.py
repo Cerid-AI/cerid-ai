@@ -21,6 +21,10 @@ when propagating the registry to the public repo.
 
 Parallel pattern to ``gen_env_example.py``. Add to CI as a drift job
 so any new router forces the doc to regenerate.
+
+sync-manifest: allow-internal-ref — the two mentions of sync-repos.py above
+are prose describing who calls this script, not a load-by-path dependency;
+this file runs standalone in the public mirror.
 """
 from __future__ import annotations
 

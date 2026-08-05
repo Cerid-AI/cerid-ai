@@ -2,7 +2,8 @@
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
        test test-all test-eval eval-live-retrieval eval-chat-faithfulness \
        eval-verdict bench-nli-aggrefact \
-       ci-local drift-check prepush smoke slo help
+       ci-local drift-check prepush smoke slo help \
+       security-local sdk-contract-local lock-check frontend-full
 
 # -- Python deps --
 lock-python:
@@ -90,6 +91,10 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	@echo "[ci-local] backend · tests"
 	PYTHONPATH=src/mcp .venv/bin/pytest src/mcp/tests/ --ignore=src/mcp/tests/eval \
 	  -m "not benchmark_slo and not preservation and not integration" -x -q -p no:cacheprovider
+	@echo "[ci-local] ReDoS regex audit (matches CI security / dlint)"
+	.venv/bin/python -m flake8 --select=DUO138 src/mcp/
+	@echo "[ci-local] gate probes (scripts/tests)"
+	.venv/bin/pytest scripts/tests/ -q -p no:cacheprovider
 	@echo "[ci-local] frontend · eslint + tsc + vitest"
 	cd src/web && npx eslint . && npx tsc -b && npx vitest run
 	@echo "[ci-local] secret detection (matches CI security job)"
@@ -157,9 +162,77 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-pro-gating.py
 	@echo "[drift] design-drift (matches CI lint / no-design-drift)"
 	.venv/bin/python scripts/lint-no-design-drift.py --root src/web/src --allow-file scripts/design_drift_allowlist.txt
+	@echo "[drift] ci-required-gates"
+	.venv/bin/python scripts/lint-ci-required-gates.py --workflow .github/workflows/ci.yml
 	@echo "[drift] ✓ drift + lint gates passed"
 
-prepush: ci-local drift-check ## FULL pre-push parity with remote CI (run before every push)
+security-local: ## The remote `security` job, minus nothing (detect-secrets + bandit + pip-audit + dlint)
+	@echo "[security] secret detection"
+	bash scripts/detect-secrets-scan.sh
+	@echo "[security] bandit"
+	.venv/bin/python -m bandit -r src/mcp/ -ll --skip B101,B615 -x src/mcp/tests
+	@echo "[security] ReDoS regex audit (dlint)"
+	.venv/bin/python -m flake8 --select=DUO138 src/mcp/
+	@echo "[security] dependency audit (pip-audit, incl. transitive)"
+	bash scripts/audit-python-deps.sh
+
+# PYTHONPATH rather than `pip install -e` (which is what CI does): a gate must
+# not mutate the developer's venv as a side effect, and it must not depend on
+# whether someone happened to install the SDK earlier. Internal passed this
+# target while public failed for exactly that reason — same class as the
+# ambient-venv problem in scripts/audit-python-deps.sh.
+sdk-contract-local: ## The remote `sdk-contract` job (Python + TypeScript contract tests)
+	@echo "[sdk] python contract tests"
+	PYTHONPATH=packages/sdk/python/src .venv/bin/python -m pytest \
+	  packages/sdk/python/tests/ -q -p no:cacheprovider
+	@echo "[sdk] typescript contract tests"
+	# `npm ci` first, as CI does: without it the target passes or fails on
+	# whether node_modules happens to be present (public had none, and tsc
+	# reported a missing 'node' type definition rather than the real cause).
+	cd packages/sdk/typescript && npm ci --no-audit --no-fund \
+	  && npm run typecheck && npm test
+
+lock-check: ## The remote `lock-sync` job — lock freshness vs requirements.txt
+	@echo "[lock] requirements.lock freshness"
+	bash scripts/check-lock-fresh.sh
+
+frontend-full: ## The remote `frontend` + `frontend-desktop` jobs (build, bundle caps, audits)
+	@echo "[frontend] vite build"
+	cd src/web && npx vite build
+	@echo "[frontend] bundle size caps"
+	bash scripts/check-bundle-size.sh
+	@echo "[frontend] npm audit (production — blocking)"
+	cd src/web && npm audit --omit=dev --audit-level=high
+	@echo "[frontend] npm audit (dev toolchain — advisory)"
+	-cd src/web && npm audit --audit-level=high
+	@echo "[frontend] desktop typecheck"
+	# Two bugs lived on this line, both vacuous-gate shaped:
+	#   1. it guarded on src/desktop, a path that has never existed, so it
+	#      reported "(skipped)" and checked nothing;
+	#   2. `test -d X && (...) || echo skipped` ALSO swallows a failure INSIDE
+	#      the parens — a broken npm ci printed "skipped" and exited 0.
+	# An if/else keeps the two cases distinct: absent → skip, present → the
+	# commands' own status propagates.
+	# --ignore-scripts: better-sqlite3's node-gyp rebuild fails against the
+	# host's node 25 and is irrelevant to tsc, which needs type definitions,
+	# not compiled natives. CI builds it because it also packages the app.
+	@if [ -d packages/desktop ]; then \
+	  cd packages/desktop && npm ci --no-audit --no-fund --ignore-scripts && npm run typecheck; \
+	else \
+	  echo "  (packages/desktop absent — internal-only mirror, skipped)"; \
+	fi
+
+# FULL pre-push parity with remote CI. Every ci.yml job that can run without
+# Docker or a live stack is chained here; `scripts/lint-gates-parity.py`
+# enforces that claim against ci.yml rather than leaving it to memory, so a new
+# CI step must be mirrored here or declared exempt in gates.yaml.
+#
+# DELIBERATELY NOT HERE — these need a live stack or a Docker daemon and have
+# their own targets:
+#   preservation / lint-no-silent-preservation-skips → make preservation-check
+#   benchmark-slo                                    → make slo
+#   docker (hadolint + image build + Trivy)          → merge-time only
+prepush: ci-local drift-check security-local sdk-contract-local lock-check frontend-full ## FULL pre-push parity with remote CI (run before every push)
 	@echo "[prepush] ✓ complete — safe to push"
 
 mutation-check: ## Do the tests DETECT faults? (injects real defect classes; survivors = blind spots)

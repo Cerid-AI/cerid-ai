@@ -62,6 +62,11 @@ jobs:
       - run: pip install import-linter
       - name: Import boundary check
         run: cd src/mcp && lint-imports
+      - name: lint / ci-required-gates
+        # Every job in this workflow must be aggregated by `ci-ok`, or a
+        # skipped gate reads as a passing one. Static half; the runtime half
+        # runs in `ci-ok` itself.
+        run: python scripts/lint-ci-required-gates.py --workflow .github/workflows/ci.yml
 
   typecheck:
     needs: [changes]
@@ -98,6 +103,10 @@ jobs:
         # which boots the full stack; running them here would fail with
         # connection-refused on the bare ubuntu runner.
         run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo and not integration" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
+      - name: Gate probes (scripts/tests)
+        # These prove the drift/lint gates can actually fail. Nothing ran them
+        # until 2026-08-04.
+        run: python -m pytest scripts/tests/ -q
       - name: Upload coverage to Codecov
         if: success()
         uses: codecov/codecov-action@v7
@@ -499,24 +508,37 @@ jobs:
 
   # ── Single required status check ──────────────────────────────────────────
   # Branch protection requires THIS job, not the individual jobs. It always
-  # runs (if: always()), aggregates the real jobs, and passes when they
-  # succeeded OR were skipped — so a docs-only PR (where every job above skips
-  # via the `changes` gate) still gets a green required check. Fixes the
-  # "required check never reported → docs PR blocked forever" deadlock.
+  # runs (if: always()) and aggregates the real jobs.
+  #
+  # A skip is tolerated in general — a docs-only PR skips every job above via
+  # the `changes` gate and must still get a green required check (otherwise the
+  # required check never reports and the PR is blocked forever).
+  #
+  # But on a CODE push to main, a skip means a dependency failed and the gate
+  # behind it never executed — and GitHub renders that as a grey check, not a
+  # red one. `docker` sat skipped for eight consecutive main runs on
+  # 2026-08-03 behind a failing `security` job, accumulating Trivy drift with
+  # no red signal. So `--enforce-ran` is passed for exactly that case:
+  # push + main + changes.code == 'true'.
+  #
+  # The old inline form collapsed results with join(needs.*.result), which lost
+  # the job NAMES — its error read "a required CI job failed", with no way to
+  # tell which. The script names every offender.
   ci-ok:
+    name: ci / all-required-gates-ran
     needs: [changes, lint, typecheck, test, security, lock-sync, frontend, docker]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     steps:
-      - name: Require no failures (skipped is OK)
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Every required gate ran and passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          results='${{ join(needs.*.result, ',') }}'
-          echo "job results: $results"
-          case "$results" in
-            *failure*|*cancelled*)
-              echo "::error::a required CI job failed or was cancelled"
-              exit 1 ;;
-            *)
-              echo "all required jobs passed or were skipped" ;;
-          esac
+          python scripts/lint-ci-required-gates.py \
+            --needs "$NEEDS_JSON" \
+            ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}

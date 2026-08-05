@@ -1,6 +1,6 @@
 ---
 name: cerid-test-integrity
-description: "Use when writing, reviewing, or trusting tests in Cerid AI repos (cerid-ai-internal, cerid-ai, cerid-trading-agent, cerid-boardroom, cerid-* repos) — and whenever a suite is green but behaviour is wrong, a gate 'passes' suspiciously fast, or you are about to claim something is covered. Encodes the repo's hardest-won lesson: a test that mocks the thing it tests proves nothing, and line coverage cannot tell the difference. Covers the mutation harness (make mutation-check), the vacuous-gate class, mock-drift, assert-intent-not-literals, the lint-test-antipatterns codes TA001-TA004, and the red-green protocol required before calling a fix verified."
+description: "Use when writing, reviewing, or trusting tests in Cerid AI repos (cerid-ai-internal, cerid-ai, cerid-trading-agent, cerid-boardroom, cerid-* repos) — and whenever a suite is green but behaviour is wrong, a gate 'passes' suspiciously fast, or you are about to claim something is covered. Encodes the repo's hardest-won lesson: a test that mocks the thing it tests proves nothing, and line coverage cannot tell the difference. Covers the mutation harness (make mutation-check), the vacuous-gate class, mock-drift, assert-intent-not-literals, the lint-test-antipatterns codes TA001-TA006, mock.patch's concurrency unsafety, and the red-green protocol required before calling a fix verified. Scope note: this skill is about whether a TEST can fail; whether a measured NUMBER means anything, and whether a result is valid in the environment it was produced in, are separate concerns."
 license: Apache-2.0
 metadata:
   author: cerid-ai
@@ -84,8 +84,34 @@ genuinely-intended case with
 | **TA002** | `importlib.reload()` of a re-export bridge (`config`, …) | Re-snapshots every `import *` source at its current state, laundering in-session global mutation into package attrs for all later tests. |
 | **TA003** | `patch("mod.config")` | Replaces the module with a MagicMock, so every attribute you did not set is also a MagicMock. Comparisons raise, the code under test swallows it and stops running, and your envelope assertion still passes. Use `monkeypatch.setattr(mod.config, NAME, value)`. |
 | **TA004** | `from mod import f` inside a block patching `"mod.f"` | The call resolves to the mock; the assertion checks the fixture you supplied. |
+| **TA005** | calling the patch alias itself, then asserting on what it returned | You asserted on the value you just supplied. 15 of these sat in one file. |
+| **TA006** | a patch whose target the test never reaches | An inert patch is invisible; the real code ran the whole time. |
+
+**Two detector designs for TA006 were wrong before one worked, and both looked
+reasonable.** The first fired 1,552 times — production reaches a patched symbol
+*transitively*, so "the test doesn't import it" proves nothing. The second
+reused a helper matching any `.patch(` attribute call, so `client.patch("/route")`
+— a real TestClient request — read as mock plumbing and made an exercising test
+look inert. Identify mock patches by callee name AND a dotted, slash-free
+target. **When you write a detector, build a red/green probe covering the
+shapes it must NOT flag**, not only the ones it must.
 
 The ratchet does not catch judgment failures. The rest of this skill does.
+
+## `mock.patch` is not concurrency-safe
+
+Each entrant records the attribute's *current* value as the one to restore, so a
+second coroutine entering while the first holds the patch records the
+already-patched value and writes THAT back on exit.
+
+Five concurrent `_run_query` calls under `asyncio.gather` leaked all five
+feature flags out of `config.features`, and the damage surfaced three files away
+as a `kb_batch` test resolving via `cross_model` — passing alone, failing in the
+suite.
+
+**Enter the patch ONCE around the `gather`, never inside the gathered
+coroutine** (`test_simulated_sessions.py::_pinned_pipeline`). Bisect
+order-dependent failures with a config-snapshot plugin rather than guessing.
 
 ## Mock drift — fakes encode a *past* reality
 
