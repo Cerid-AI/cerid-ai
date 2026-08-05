@@ -1,46 +1,96 @@
 #!/usr/bin/env bash
-# Pre-push hook: run full local validation before allowing a push, so GitHub
-# Action minutes are only spent at merge time (merge queue), not on broken pushes.
+# Pre-push hook: run local validation before allowing a push, so GitHub Action
+# minutes are only spent at merge time (merge queue), not on broken pushes.
 #
 # Install: git config core.hooksPath scripts/hooks   (or: make install-hooks)
-# Escape hatch: git push --no-verify
+# Preferred entry point: `make push` (= scripts/safe-push.sh) — see why below.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS HOOK IS SHAPED THIS WAY — the recurring "connection closed" failure
+# ---------------------------------------------------------------------------
+# `git push` opens the SSH connection to the remote BEFORE running this hook,
+# because it needs the remote refs to feed the hook's stdin. Every second this
+# hook spends validating is a second that connection sits idle, and GitHub
+# closes idle SSH connections. The gate passes, git prints "pushing", and the
+# transfer dies with:
+#
+#     Connection to github.com closed by remote host.
+#
+# Seen twice on 2026-08-04 (this repo) and three more times on 2026-08-05
+# (this repo, the public mirror, cerid-trading-agent). None of those pushes
+# landed. Trimming what the hook runs only moves the threshold — the ORDERING
+# is the defect, not the duration, which is why the earlier fix of dropping
+# from `prepush` to `ci-local + drift-check` did not hold.
+#
+# The escape everyone reaches for is `git push --no-verify`, and it is worse
+# than it looks: the supply-chain guard (no AI-authored / attributed /
+# backdated commits, IronWorm IOC) runs INSIDE `make ci-local`, so bypassing a
+# TRANSPORT problem silently bypasses a SECURITY check. Re-running the guard by
+# hand afterwards is honour-system — the exact class tasks/lessons.md indicts.
+#
+# So the order is inverted instead. `scripts/safe-push.sh` runs the validation
+# FIRST, while no connection is open, records that this exact commit passed,
+# and only then calls `git push`. This hook finds that record and returns in
+# seconds, so the connection never idles.
+#
+# Two invariants keep that honest:
+#   1. The supply-chain guard ALWAYS runs here, BEFORE the record is consulted.
+#      It is fast and it is the security-critical half, so no fast path — and
+#      no stale or hand-written record — can skip it.
+#   2. The record is keyed to the exact commit being pushed and is only written
+#      from a clean tree, so it can never vouch for a tree that is not what
+#      ships. Any mismatch falls through to the full validation below.
+# ---------------------------------------------------------------------------
+
 set -euo pipefail
 
-# Skip when the push only deletes refs (local sha is all-zeros for every ref).
-ZERO=0000000000000000000000000000000000000000
-deleting_only=true
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
-  [ "$local_sha" != "$ZERO" ] && deleting_only=false
-done
-$deleting_only && exit 0
+VALIDATE_ONLY=false
+[ "${1:-}" = "--validate-only" ] && VALIDATE_ONLY=true
 
 cd "$(git rev-parse --show-toplevel)"
 
-# ci-local + drift-check, NOT the full `make prepush`.
-#
-# This ran `make ci-local` alone until 2026-08-04, which is a subset — it misses
-# drift-check entirely, so a design-drift or manifest violation could only fail
-# after a push. drift-check is added here.
-#
-# It is deliberately NOT the full `make prepush`. A pre-push hook has a hard
-# ceiling that has nothing to do with what is worth checking: `git push` opens
-# the connection to the remote BEFORE running this hook (it needs the remote
-# refs for the hook's stdin), so a long hook leaves that connection idle.
-# `make prepush` takes ~25 minutes and GitHub closes the SSH connection while it
-# runs — the gate passes, prints "pushing", and the transfer then fails with
-# "Connection to github.com closed by remote host". Verified twice on
-# 2026-08-04; neither push landed.
-#
-# Full parity has two homes instead:
-#   * `make prepush` — run it manually before a significant push.
-#   * the `ci-ok` job — blocking, and on push:main a SKIPPED gate fails too, so
-#     nothing can quietly not-run remotely.
-echo "── pre-push: running local validation (ci-local + drift-check) ──"
-echo "   full parity is `make prepush`; override: git push --no-verify"
-if make ci-local && make drift-check; then
-  echo "── pre-push: ✓ local validation passed — pushing ──"
+PUSHING_SHA=""
+if ! $VALIDATE_ONLY; then
+  # Skip when the push only deletes refs (local sha is all-zeros for every ref).
+  ZERO=0000000000000000000000000000000000000000
+  deleting_only=true
+  while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    if [ "$local_sha" != "$ZERO" ]; then
+      deleting_only=false
+      PUSHING_SHA="$local_sha"
+    fi
+  done
+  $deleting_only && exit 0
+fi
+
+fail() {
+  echo "── pre-push: ✗ $1 — push blocked ──"
+  echo "   Fix the failures above, then run: make push"
+  exit 1
+}
+
+# -- 1. Supply-chain guard: ALWAYS, and before any record is consulted. --------
+if [ -f scripts/guard-no-ai-commits.sh ]; then
+  echo "[pre-push] supply-chain guard"
+  bash scripts/guard-no-ai-commits.sh || fail "supply-chain guard"
+fi
+
+# -- 2. Did safe-push already validate this exact commit? ---------------------
+STAMP=".git/prepush-validated"
+if ! $VALIDATE_ONLY && [ -n "$PUSHING_SHA" ] && [ -f "$STAMP" ] \
+   && [ "$(cat "$STAMP" 2>/dev/null)" = "$PUSHING_SHA" ]; then
+  echo "── pre-push: ✓ $(printf '%.12s' "$PUSHING_SHA") already validated by safe-push — pushing ──"
   exit 0
 fi
-echo "── pre-push: ✗ local validation FAILED — push blocked ──"
-echo "   Fix the failures above, or override with: git push --no-verify"
-exit 1
+
+# -- 3. Otherwise validate here: correct, but this is the path that times out --
+if ! $VALIDATE_ONLY; then
+  echo "   NOTE: validating inside the hook holds the remote connection open and can"
+  echo "         fail with 'Connection to github.com closed by remote host'."
+  echo "         Prefer: make push"
+fi
+echo "── pre-push: running local validation (ci-local + drift-check) ──"
+echo "   full parity is 'make prepush'"
+make ci-local || fail "ci-local"
+make drift-check || fail "drift-check"
+echo "── pre-push: ✓ local validation passed ──"

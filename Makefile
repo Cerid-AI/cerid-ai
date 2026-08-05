@@ -19,6 +19,9 @@ install-hooks:
 	git config core.hooksPath scripts/hooks
 	@echo "Git hooks installed from scripts/hooks/"
 
+push: ## Validate FIRST, then push (avoids the hook holding the remote connection open)
+	@bash scripts/safe-push.sh $(ARGS)
+
 # -- Build artifacts --
 version-file:
 	@python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" > src/mcp/VERSION
