@@ -77,6 +77,17 @@ _GPL_PATTERNS = [
     re.compile(r"\bGPL-3\.0"),
     re.compile(r"\bGPLv[23]\b"),
     re.compile(r"GNU General Public License"),
+    # Unversioned "GPL". Every pattern above needs a version marker or the full
+    # prose, so a package declaring a bare `license = "GPL"` with no Trove
+    # classifier passed this gate outright — which is exactly what extract-msg
+    # (GPL, no classifiers) did while it was in the tree. An unversioned GPL
+    # declaration is still strong copyleft; refusing it and making the publisher
+    # or an allowlist entry disambiguate is the safe direction.
+    #
+    # \b before GPL means this does NOT match inside LGPL or AGPL — there is no
+    # word boundary between the L/A and the G — so the LGPL carve-out and the
+    # AGPL family both keep their own handling.
+    re.compile(r"\bGPL\b"),
 ]
 _AGPL_PATTERNS = [
     re.compile(r"\bAGPL[-\s]?[123]"),

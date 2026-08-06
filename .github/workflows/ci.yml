@@ -356,12 +356,12 @@ jobs:
           python-version: "3.11"  # public pins 3.11 (see .sync-manifest.yaml); canonical is 3.12
           cache: pip
       - name: Python license scan (pip-licenses)
-        # Pinned for the same reason ruff is: lint-license-denylist.py's regexes
-        # are tuned to this version's JSON shape, and an upstream output change
-        # would defeat the scan as quietly as no scan at all.
+        # Resolves licences from the LOCK via PyPI metadata rather than
+        # installing the tree (which pulls torch just to read metadata), and
+        # scans what actually ships rather than what resolves on the runner.
         run: |
-          pip install -q -r src/mcp/requirements.txt pip-licenses==5.5.5 pyyaml
-          pip-licenses --format=json > /tmp/pip-licenses.json
+          pip install -q pyyaml
+          python scripts/collect-lock-licenses.py --lock src/mcp/requirements.lock --output /tmp/pip-licenses.json
           python scripts/lint-license-denylist.py --tool pip-licenses --input /tmp/pip-licenses.json --label python
       - uses: actions/setup-node@v6
         with:
