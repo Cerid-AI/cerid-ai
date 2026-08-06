@@ -367,6 +367,15 @@ jobs:
         with:
           node-version-file: src/web/.nvmrc
           cache: npm
+          # REQUIRED: `cache: npm` resolves lockfiles from the REPO ROOT, and
+          # this repo has none — they all live under package dirs. Without this
+          # the step fails "Dependencies lock file is not found" and takes the
+          # Node scan with it. Caught on the canonical repo the first time this
+          # job was allowed to reach the step at all.
+          cache-dependency-path: |
+            src/web/package-lock.json
+            packages/widget/package-lock.json
+            packages/sdk/typescript/package-lock.json
       - name: Node license scan (license-checker)
         # The npm roots that ship an artifact in THIS repo: the web bundle, the
         # embeddable widget, and the published SDK. packages/desktop is
