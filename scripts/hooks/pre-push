@@ -49,6 +49,15 @@ VALIDATE_ONLY=false
 
 cd "$(git rev-parse --show-toplevel)"
 
+# git EXPORTS its repository pointers to hooks, and this hook runs the repo's test suite. Any test
+# that shells out to `git` inherits them, and `cwd` does not decide which repository git writes to —
+# an ambient GIT_DIR outranks it. On 2026-08-05 that combination wrote `core.bare = true` and a
+# fixture identity into the operator's own .git/config, from a hook exactly like this one.
+# Cleared AFTER the `cd` above, so the hook still resolves its own repo the way git intended and
+# only what it spawns is scrubbed.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX GIT_QUARANTINE_PATH
+
 PUSHING_SHA=""
 if ! $VALIDATE_ONLY; then
   # Skip when the push only deletes refs (local sha is all-zeros for every ref).
