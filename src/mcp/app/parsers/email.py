@@ -446,12 +446,17 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
 
 @register_parser([".msg"])
 def parse_msg(file_path: str) -> dict[str, Any]:
-    """Parse a single Outlook ``.msg`` file via ``extract-msg``.
+    """Parse a single Outlook ``.msg`` file.
 
     .msg is a CFB (Compound File Binary) Outlook envelope. We read the
-    canonical headers + body via ``extract-msg``, then funnel the result
-    through the same dict shape ``parse_eml`` returns so retrieval and
-    downstream chunkers don't need a special case.
+    canonical headers + body via ``app.parsers.msg_reader`` (a small
+    ``olefile``-backed MS-OXMSG reader), then funnel the result through the same
+    dict shape ``parse_eml`` returns so retrieval and downstream chunkers don't
+    need a special case.
+
+    That reader replaced ``extract-msg``, which is GPL and pulled
+    ``RTFDE`` -> ``oletools`` -> ``pcodedmp`` (GPL-3.0) behind it — a chain this
+    product's licensing cannot carry. See ``msg_reader``'s module docstring.
 
     Attachments embedded in the .msg are surfaced as ``AttachmentBlob``
     entries in ``_attachments`` so C2.4's recursive ingestion picks them
@@ -462,77 +467,64 @@ def parse_msg(file_path: str) -> dict[str, Any]:
     ``libpff-python`` (a C extension with system-level libpff) or the
     ``pst-scanpst`` sidecar, both of which fall outside the C2.5 scope.
     """
-    import extract_msg
+    from app.parsers.msg_reader import open_msg
 
     path = Path(file_path)
     try:
-        msg = extract_msg.openMsg(str(path))
+        msg = open_msg(path)
+    except (ValueError, RuntimeError):
+        # ValueError already says what is wrong with the file; RuntimeError means
+        # the environment is broken (see open_msg). Neither should be reworded
+        # into "this may not be a valid .msg file".
+        raise
     except Exception as e:
         raise ValueError(
             f"Failed to parse Outlook message '{path.name}': {e}. "
             f"File may not be a valid .msg file."
         ) from e
 
-    try:
-        headers: dict[str, str] = {}
-        for src_key, dst_key in (
-            ("sender", "From"),
-            ("to", "To"),
-            ("cc", "Cc"),
-            ("subject", "Subject"),
-            ("date", "Date"),
-            ("messageId", "Message-ID"),
-        ):
-            val = getattr(msg, src_key, None)
-            if not val:
-                continue
-            val_str = str(val)
-            headers[dst_key] = (
-                _anonymize_header(val_str) if dst_key in _ANONYMIZE_KEYS else val_str
-            )
+    headers: dict[str, str] = {}
+    for src_key, dst_key in (
+        ("sender", "From"),
+        ("to", "To"),
+        ("cc", "Cc"),
+        ("subject", "Subject"),
+        ("date", "Date"),
+        ("message_id", "Message-ID"),
+    ):
+        val = getattr(msg, src_key, None)
+        if not val:
+            continue
+        val_str = str(val)
+        headers[dst_key] = (
+            _anonymize_header(val_str) if dst_key in _ANONYMIZE_KEYS else val_str
+        )
 
-        body = getattr(msg, "body", None) or ""
-        # Some .msg files only carry HTML — fall back and strip tags.
-        if not body:
-            html_body = getattr(msg, "htmlBody", None)
-            if html_body:
-                if isinstance(html_body, bytes):
-                    html_body = html_body.decode("utf-8", errors="replace")
-                body = _strip_html_tags(html_body)
+    body = msg.body or ""
+    # Some .msg files only carry HTML — fall back and strip tags.
+    if not body and msg.html_body:
+        body = _strip_html_tags(msg.html_body)
 
-        extract_bytes = not _SKIP_NESTED_ATTACHMENTS.get()
-        blobs: list[AttachmentBlob] = []
-        listing: list[str] = []
-        for att in getattr(msg, "attachments", []) or []:
-            payload = getattr(att, "data", None)
-            if not isinstance(payload, bytes) or not payload:
-                continue
-            filename = (
-                getattr(att, "longFilename", None)
-                or getattr(att, "shortFilename", None)
-                or "(unnamed)"
-            )
-            size = len(payload)
-            if size > EMAIL_ATTACHMENT_MAX_SIZE:
-                listing.append(f"{filename} ({size} bytes) [skipped: too large]")
-                continue
-            listing.append(f"{filename} ({size} bytes)")
-            if extract_bytes:
-                blobs.append(
-                    AttachmentBlob(
-                        filename=str(filename),
-                        content_bytes=payload,
-                        content_type="application/octet-stream",
-                        size=size,
-                    )
+    extract_bytes = not _SKIP_NESTED_ATTACHMENTS.get()
+    blobs: list[AttachmentBlob] = []
+    listing: list[str] = []
+    for att in msg.attachments:
+        payload = att.data
+        filename = att.filename
+        size = len(payload)
+        if size > EMAIL_ATTACHMENT_MAX_SIZE:
+            listing.append(f"{filename} ({size} bytes) [skipped: too large]")
+            continue
+        listing.append(f"{filename} ({size} bytes)")
+        if extract_bytes:
+            blobs.append(
+                AttachmentBlob(
+                    filename=str(filename),
+                    content_bytes=payload,
+                    content_type="application/octet-stream",
+                    size=size,
                 )
-    finally:
-        # extract_msg leaves the underlying CFB file open until close().
-        try:
-            msg.close()
-        except Exception as close_exc:  # noqa: BLE001
-            from core.utils.swallowed import log_swallowed_error
-            log_swallowed_error("parsers.msg_close", close_exc)
+            )
 
     header_text = "\n".join(f"{k}: {v}" for k, v in headers.items())
     parts: list[str] = [header_text]

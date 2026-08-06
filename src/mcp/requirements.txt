@@ -43,9 +43,17 @@ python-docx>=1.2.0,<2
 python-pptx>=1.0.2,<2
 openpyxl>=3.1.5,<4
 pandas>=2.0,<3.1
-# .msg (single Outlook message) parser — small pure-Python dep, no system libs.
-# Used by app/parsers/email.py::parse_msg. .pst is deferred (needs libpff).
-extract-msg>=0.55.0,<1
+# CFB/OLE container reader — backs app/parsers/msg_reader.py, our own minimal
+# MS-OXMSG (.msg) decoder. Used by app/parsers/email.py::parse_msg. .pst is
+# deferred (needs libpff).
+#
+# This replaced `extract-msg`, which is GPL and pulled RTFDE (LGPL) ->
+# oletools -> pcodedmp (GPL-3.0) behind it. This product ships FSL-1.1-ALv2 and
+# scripts/lint-license-denylist.py denies the GPL family, so the chain could not
+# stay. olefile is BSD, actively maintained, and was already present transitively
+# (msoffcrypto-tool), so the swap removes four packages and adds none — it is
+# now declared directly because we import it directly.
+olefile>=0.47,<1
 
 # Search
 bm25s>=0.3.6,<1.0

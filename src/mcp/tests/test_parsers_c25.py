@@ -8,7 +8,7 @@ Sub-task 2: ``parse_pptx`` extracts slide text; ``parse_ppt`` raises 422.
 Sub-task 3: ``parse_msg`` is registered + dispatches; basic extraction.
 
 Heavy parsers are mocked when their backing library isn't on the host
-(python-pptx, extract-msg) so the test suite runs even without the
+(python-pptx) so the test suite runs even without the
 optional deps installed. The mocks substitute the modules via
 ``sys.modules`` so the parsers' lazy imports pick them up.
 """
@@ -199,7 +199,7 @@ def test_parse_ppt_registered():
 # ---------------------------------------------------------------------------
 
 
-def _make_extract_msg_module(
+def _fake_msg(
     *,
     sender="alice@example.com",
     to="bob@example.com",
@@ -207,20 +207,27 @@ def _make_extract_msg_module(
     body="Body text from .msg",
     attachments=None,
 ):
-    """Fake ``extract_msg`` module with one openMsg-returned message."""
-    msg_obj = MagicMock()
-    msg_obj.sender = sender
-    msg_obj.to = to
-    msg_obj.cc = None
-    msg_obj.subject = subject
-    msg_obj.date = "Mon, 1 Jan 2026 00:00:00 +0000"
-    msg_obj.messageId = "<msg-1@example.com>"
-    msg_obj.body = body
-    msg_obj.htmlBody = None
-    msg_obj.attachments = attachments or []
-    msg_obj.close = MagicMock()
+    """A decoded MsgMessage, as app.parsers.msg_reader.open_msg would return.
 
-    return SimpleNamespace(openMsg=MagicMock(return_value=msg_obj)), msg_obj
+    These tests cover parse_msg's dict-shaping and anonymisation, so they stub
+    the reader at its boundary. The DECODING is tested for real, against real
+    MS-OXMSG bytes, in test_msg_reader.py — which is what the old
+    `sys.modules["extract_msg"] = MagicMock()` approach never did for the
+    library it replaced.
+    """
+    from app.parsers.msg_reader import MsgMessage
+
+    return MsgMessage(
+        subject=subject,
+        sender=sender,
+        to=to,
+        cc=None,
+        date="Mon, 1 Jan 2026 00:00:00 +0000",
+        message_id="<msg-1@example.com>",
+        body=body,
+        html_body=None,
+        attachments=attachments or [],
+    )
 
 
 def test_parse_msg_extracts_headers_and_body(tmp_path, monkeypatch):
@@ -228,8 +235,7 @@ def test_parse_msg_extracts_headers_and_body(tmp_path, monkeypatch):
     path = tmp_path / "outlook.msg"
     path.write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 64)  # CFB stub
 
-    fake_em, _ = _make_extract_msg_module()
-    monkeypatch.setitem(sys.modules, "extract_msg", fake_em)
+    monkeypatch.setattr("app.parsers.msg_reader.open_msg", lambda _p: _fake_msg())
 
     result = parse_msg(str(path))
     assert result["file_type"] == "msg"
@@ -249,8 +255,7 @@ def test_parse_msg_anonymizes_headers_when_enabled(tmp_path, monkeypatch):
     path = tmp_path / "outlook.msg"
     path.write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 64)
 
-    fake_em, _ = _make_extract_msg_module()
-    monkeypatch.setitem(sys.modules, "extract_msg", fake_em)
+    monkeypatch.setattr("app.parsers.msg_reader.open_msg", lambda _p: _fake_msg())
 
     result = parse_msg(str(path))
     assert "[redacted]@example.com" in result["text"]
@@ -263,13 +268,13 @@ def test_parse_msg_surfaces_attachments(tmp_path, monkeypatch):
     path = tmp_path / "outlook.msg"
     path.write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 64)
 
-    att = MagicMock()
-    att.data = b"PDF-bytes-here"
-    att.longFilename = "report.pdf"
-    att.shortFilename = "report.pdf"
+    from app.parsers.msg_reader import MsgAttachment
 
-    fake_em, _ = _make_extract_msg_module(attachments=[att])
-    monkeypatch.setitem(sys.modules, "extract_msg", fake_em)
+    att = MsgAttachment(filename="report.pdf", data=b"PDF-bytes-here")
+
+    monkeypatch.setattr(
+        "app.parsers.msg_reader.open_msg", lambda _p: _fake_msg(attachments=[att])
+    )
 
     result = parse_msg(str(path))
     assert result["attachment_count"] == 1
@@ -279,14 +284,25 @@ def test_parse_msg_surfaces_attachments(tmp_path, monkeypatch):
     assert blobs[0].content_bytes == b"PDF-bytes-here"
 
 
-def test_parse_msg_corrupted_raises(tmp_path, monkeypatch):
+def test_parse_msg_corrupted_raises(tmp_path):
+    """A CFB signature with no valid directory behind it must fail loudly.
+
+    No mock: this drives the real olefile-backed reader, so it would catch a
+    reader that returned an empty message instead of raising — the failure mode
+    a stubbed library can never surface.
+    """
     path = tmp_path / "bad.msg"
     path.write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 64)
 
-    fake_em = SimpleNamespace(openMsg=MagicMock(side_effect=Exception("not a msg")))
-    monkeypatch.setitem(sys.modules, "extract_msg", fake_em)
+    with pytest.raises(ValueError):
+        parse_msg(str(path))
 
-    with pytest.raises(ValueError, match="Failed to parse Outlook message"):
+
+def test_parse_msg_rejects_a_file_that_is_not_ole_at_all(tmp_path):
+    path = tmp_path / "plain.msg"
+    path.write_bytes(b"just some text, definitely not a compound file")
+
+    with pytest.raises(ValueError, match="not an OLE compound file"):
         parse_msg(str(path))
 
 
@@ -295,8 +311,7 @@ def test_parse_msg_dispatches_through_registry(tmp_path, monkeypatch):
     path = tmp_path / "outlook.msg"
     path.write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 64)
 
-    fake_em, _ = _make_extract_msg_module()
-    monkeypatch.setitem(sys.modules, "extract_msg", fake_em)
+    monkeypatch.setattr("app.parsers.msg_reader.open_msg", lambda _p: _fake_msg())
 
     result = parse_file(str(path))
     assert result["file_type"] == "msg"
