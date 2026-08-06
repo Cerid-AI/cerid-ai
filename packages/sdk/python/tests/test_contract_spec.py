@@ -302,6 +302,58 @@ def test_get_endpoint_matches_spec(
 
 
 # ---------------------------------------------------------------------------
+# SDK-not-stricter-than-spec: the server declares SdkSettingsResponse,
+# SdkTaxonomyResponse, and SdkPluginsResponse with Any-typed fields (the
+# "generated: single-return dict-literal routes" block in app/routers/sdk.py),
+# so the pinned schemas constrain field *presence* but not field *types*.
+# An SDK model stricter than the pin turns a contract-legal 200 into a
+# client-side ValidationError. Each fixture below is first validated against
+# the pinned schema — proving the payload is one the server may legitimately
+# send — and must then be accepted by the SDK model.
+# ---------------------------------------------------------------------------
+LOOSE_CASES: list[tuple[str, str, type, dict[str, Any]]] = [
+    (
+        "settings.untyped-fields",
+        "/sdk/v1/settings",
+        SettingsResponse,
+        {"version": 2, "tier": None, "features": {"private_mode": "beta"}},
+    ),
+    (
+        "taxonomy.untyped-fields",
+        "/sdk/v1/taxonomy",
+        TaxonomyResponse,
+        {"domains": {"general": {}}, "taxonomy": None},
+    ),
+    (
+        "plugins.untyped-items-and-total",
+        "/sdk/v1/plugins",
+        PluginListResponse,
+        {"plugins": ["audio", 3], "total": None},
+    ),
+]
+
+
+@pytest.mark.parametrize("label,path,response_model,payload", LOOSE_CASES, ids=[c[0] for c in LOOSE_CASES])
+def test_response_model_accepts_everything_the_spec_allows(
+    label: str,
+    path: str,
+    response_model: type,
+    payload: dict[str, Any],
+) -> None:
+    schema = _response_schema(path, "get")
+    Draft202012Validator(schema).validate(payload)  # contract-legal by the pin
+    response_model.model_validate(payload)  # must not raise
+
+
+def test_plugins_model_still_requires_a_list() -> None:
+    """The pin does type ``plugins`` as an array — that constraint must hold."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        PluginListResponse.model_validate({"plugins": "not-a-list", "total": 0})
+
+
+# ---------------------------------------------------------------------------
 # Endpoints with no committed schema (docs/openapi-sdk-v1.json declares them
 # with a free-form `{}` schema server-side: /sdk/v1/collections,
 # /sdk/v1/health/detailed, /sdk/v1/ingest, /sdk/v1/ingest/file). There is

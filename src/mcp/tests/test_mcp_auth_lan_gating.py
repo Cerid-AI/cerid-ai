@@ -67,3 +67,52 @@ def test_health_probes_stay_exempt_on_lan(monkeypatch):
     """Docker healthchecks must not need the key, loopback or not."""
     client = _app(monkeypatch, "0.0.0.0")
     assert client.get("/health/ping").status_code == 200
+
+
+def test_compose_forwards_bind_addr_into_the_mcp_container():
+    """The middleware can only gate on a value it actually receives.
+
+    Every test above monkeypatches ``CERID_BIND_ADDR`` straight into the test
+    process, so they passed for a week while the deployed container never saw
+    the variable at all: ``docker-compose.yml`` interpolated it host-side for
+    the port binding, and ``scripts/start-cerid.sh`` exported it into the shell
+    for LAN mode, but it was absent from the service's ``environment:`` block
+    and never written to ``.env``. Inside the container
+    ``os.getenv("CERID_BIND_ADDR", "127.0.0.1")`` therefore returned the
+    default, ``_is_loopback_bind()`` returned True, and the whole LAN gate was
+    inert on exactly the deployment it exists for.
+
+    This asserts the plumbing rather than the logic — it is the half no
+    monkeypatch can stand in for.
+    """
+    import re
+    from pathlib import Path
+
+    compose = Path(__file__).resolve().parents[3] / "docker-compose.yml"
+    text = compose.read_text()
+
+    # Isolate the mcp-server service block (up to the next top-level service).
+    m = re.search(r"^  mcp-server:\n(.*?)(?=^  \S+:\n)", text, re.S | re.M)
+    assert m, "mcp-server service not found in docker-compose.yml"
+    block = m.group(1)
+
+    env_section = block.split("environment:", 1)
+    assert len(env_section) == 2, "mcp-server has no environment: block"
+
+    # Parse actual entries, not substrings. The first draft of this test
+    # asserted `"CERID_BIND_ADDR" in env_section[1]` and passed with the
+    # variable deleted — the explanatory COMMENT beside it satisfied the
+    # check. A gate a comment can satisfy is not a gate.
+    entries = [
+        ln.strip().lstrip("-").strip()
+        for ln in env_section[1].splitlines()
+        if ln.strip().startswith("-")
+    ]
+    names = {e.split("=", 1)[0].split(":", 1)[0].strip() for e in entries}
+
+    assert "CERID_BIND_ADDR" in names, (
+        "docker-compose.yml does not pass CERID_BIND_ADDR into mcp-server as an "
+        "environment entry; the LAN auth gate in app/middleware/auth.py reads it "
+        "from the container's own environment and silently falls back to the "
+        "loopback default. A ports: interpolation does not reach the container."
+    )

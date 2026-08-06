@@ -8,9 +8,20 @@ providing a versioned contract (``/sdk/v1/``) that survives internal
 refactoring of the ``/agent/`` paths.
 
 Consumers should send ``X-Client-ID`` for per-client rate limiting and
-domain access control.  See ``config.settings.CONSUMER_REGISTRY`` for
-the per-consumer configuration and ``docs/INTEGRATION_GUIDE.md`` for
-adding new cerid-series consumers.
+domain scoping.  See ``config.settings.CONSUMER_REGISTRY`` for the
+per-consumer configuration and ``docs/INTEGRATION_GUIDE.md`` for adding
+new cerid-series consumers.
+
+``X-Client-ID`` is SELF-ASSERTED and is not an access-control boundary.
+It is an unauthenticated request header, so a caller can name any consumer
+in the registry and receive that consumer's ``allowed_domains`` and rate
+budget. This is not a privilege escalation in the shipping single-user
+model — every one of these routes already requires the one shared
+``X-API-Key``, so a caller who can reach them can reach all domains
+anyway — but it means the registry's ``strict_domains`` walls scope
+well-behaved consumers rather than contain hostile ones. Read it as
+routing configuration, not authorization. Turning it into a boundary
+needs per-consumer credentials, which is a post-1.0 change.
 """
 from __future__ import annotations
 

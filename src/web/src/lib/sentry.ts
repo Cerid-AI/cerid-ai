@@ -40,7 +40,15 @@ export async function initSentry(): Promise<SentryShape | null> {
   const release = runtimeEnv?.VITE_APP_VERSION || import.meta.env.VITE_APP_VERSION || "dev"
 
   try {
-    const Sentry = (await import(/* @vite-ignore */ "@sentry/react" as string)) as SentryShape
+    // Plain dynamic import so Vite resolves and code-splits it. It carried a
+    // `/* @vite-ignore */` pragma and an `as string` cast, which together told
+    // Vite to leave the specifier alone — so the built bundle asked the browser
+    // to import a bare "@sentry/react", which no browser can resolve without an
+    // import map. Sentry could therefore never initialize in a built app; the
+    // catch below swallowed the failure and returned null, so it looked like
+    // "no DSN configured" rather than a broken import. @sentry/react is a real
+    // dependency (^10.69.0), so nothing needed to be hidden from the bundler.
+    const Sentry = (await import("@sentry/react")) as unknown as SentryShape
     Sentry.init({
       dsn,
       release,

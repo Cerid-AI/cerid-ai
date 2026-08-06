@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -33,6 +34,11 @@ from app.tool_registry import (
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.mcp_tools.graph")
+
+# Neo4j relationship types are identifiers. The only place a caller-supplied
+# string is interpolated into Cypher (pkb_graph_neighbors' variable-length
+# pattern, which has no parameter form) is validated against this.
+_RELATIONSHIP_TYPE_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _parse_period_to_since(period: str) -> str:
@@ -121,6 +127,21 @@ async def pkb_graph_neighbors(
     rel_types = relationship_types or []
 
     # Build relationship filter — empty list = walk anything.
+    #
+    # Cypher has no parameter form for relationship TYPES, so this one fragment
+    # has to be interpolated. It is caller-supplied and reaches us over /mcp/*,
+    # so it is validated against the label grammar first: without this, a value
+    # like `KIN]-()  DETACH DELETE start //` closes the pattern and runs
+    # arbitrary Cypher in the same session — read or destroy, attacker's choice.
+    # Neo4j relationship types are identifiers; anything else is a bug or an
+    # attack, and both deserve the same refusal.
+    for _t in rel_types:
+        if not isinstance(_t, str) or not _RELATIONSHIP_TYPE_RE.fullmatch(_t):
+            raise ValueError(
+                f"invalid relationship type {_t!r}: expected an identifier "
+                f"matching {_RELATIONSHIP_TYPE_RE.pattern}"
+            )
+
     if rel_types:
         rel_pattern = ":" + "|".join(rel_types)
     else:

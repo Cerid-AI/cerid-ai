@@ -37,13 +37,16 @@ _audit_logger = logging.getLogger("ai-companion.mcp_tool_audit")
 # ── MCP Tool Definitions ─────────────────────────────────────────────────────
 #
 # Cerid uses a dual-source tool registry by design:
-#   * The static ``MCP_TOOLS`` list below carries 28 legacy entries that
+#   * The static ``MCP_TOOLS`` list below carries 23 legacy entries that
 #     predate the ``@register_tool`` decorator (v0.95 cerid-kb overhaul).
 #   * ``app/mcp_tools/*.py`` modules use ``@register_tool`` from
 #     ``app.tool_registry`` for 32 newer tools (Phase 1.6+).
 #
-# Both sources are composed by :func:`get_all_tools` (below) which
-# returns the union de-duplicated by name. The dispatch in
+# Both sources are composed by :func:`get_all_tools` (below), which
+# CONCATENATES them — it does NOT de-duplicate, despite what this comment
+# claimed until 2026-08-05. Nothing enforces the no-overlap invariant the
+# two registries rely on; a name added to both would appear twice in the
+# palette. They are disjoint today, and a test now pins that. The dispatch in
 # :func:`execute_tool` checks ``TOOL_REGISTRY`` first, then falls
 # through to the legacy ``if/elif`` branches for static entries.
 #

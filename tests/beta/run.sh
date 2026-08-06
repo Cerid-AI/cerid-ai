@@ -320,6 +320,10 @@ if $RUN_PERFORMANCE; then
   cd "$REPO_ROOT"
   bash "${SCRIPT_DIR}/performance.sh"
   PERF_EXIT=$?
+  # Folded into the overall verdict like INT_EXIT and EVAL_EXIT are. Captured
+  # but never folded, this tier could fail while `run.sh --full` exited 0 —
+  # and the GA checklist gates on exactly that command's exit status.
+  [[ $PERF_EXIT -ne 0 ]] && OVERALL_EXIT=1
 
   report_section "Performance Tests"
   [[ -f "${SCRIPT_DIR}/reports/performance.results" ]] && \
@@ -343,6 +347,8 @@ if $RUN_SECURITY; then
   cd "$REPO_ROOT"
   bash "${SCRIPT_DIR}/security.sh"
   SEC_EXIT=$?
+  # Same: a failing SECURITY tier must not report green. See PERF_EXIT above.
+  [[ $SEC_EXIT -ne 0 ]] && OVERALL_EXIT=1
 
   report_section "Security Tests"
   [[ -f "${SCRIPT_DIR}/reports/security.results" ]] && \

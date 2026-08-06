@@ -2,6 +2,66 @@
 
 All notable changes to cerid-ai are documented here.
 
+## [1.0.0] — 2026-08-05
+
+The 1.0 milestone. Everything below the licensing section that was still
+marked *Unreleased* ships under this version.
+
+### The release gate found four blocking defects, and they are fixed
+
+A seven-surface audit of the shipping tree ran before this tag. It is worth
+naming what it caught, because each had a green signal sitting on top of it:
+
+- **LAN mode never required an API key**, despite the checklist, the LAN
+  documentation and a passing unit test all saying it did. The middleware gates
+  the `/mcp/*` and `/a2a/*` exemption on a loopback bind and reads
+  `CERID_BIND_ADDR` from its own environment — but Compose only used that
+  variable for host-side port interpolation and never passed it into the
+  container. Every MCP tool, deletes and purges included, was reachable
+  unauthenticated on a LAN-exposed port.
+- **The API key was published next to the API it protects.** The web container
+  wrote it into `env-config.js`, which nginx serves to anyone who can reach it.
+  nginx now injects `X-API-Key` at the same-origin proxy and the browser never
+  receives it.
+- **`pkb_graph_neighbors` was injectable.** `relationship_types` was
+  interpolated into a Cypher path pattern with no validation, beside correctly
+  parameterized arguments.
+- **Desktop connectors let the loaded page choose where your mail goes.** The
+  Apple Mail / Notes / Reminders / iMessage ingest handlers took their upload
+  destination from a renderer-supplied payload; in remote mode the renderer is a
+  page served by a remote host. Destinations are now pinned to the configured
+  server.
+
+### Also fixed
+
+- The `to-public` sync walked the filesystem rather than git, so it would have
+  copied a live session cookie into the public repository and 2.8 GB of local
+  databases over the public sandbox's own. It now walks `git ls-files`.
+- Multi-user startup guards raised and were then swallowed by the enclosing
+  handler — both fail-closed checks were decorative.
+- The beta harness discarded its security and performance tier exit codes, so
+  `run.sh --full` could report success with a failing security tier.
+- Web error reporting could never initialize: a `@vite-ignore` pragma left a
+  bare module specifier in the built bundle, and the failure was swallowed as
+  "no DSN configured".
+- The Python SDK's release workflow was classified internal-only while PyPI's
+  trusted publisher was bound to it in the public repository, so the first
+  publish could not have run.
+- Every runtime-path dependency advisory in the desktop app is cleared,
+  including a critical one.
+
+### Known limitations at 1.0
+
+- Ships **single-user**. `CERID_MULTI_USER` remains gated as experimental and
+  now genuinely refuses to boot without an explicit acknowledgement.
+- `X-Client-ID` selects rate budget and domain scoping but is self-asserted; it
+  is routing configuration, not an authorization boundary. Per-consumer
+  credentials are post-1.0.
+- The bundled Electron runtime is behind on security releases; upgrading it is
+  its own release.
+
+---
+
 ## Unreleased — Licensing: Cerid AI moves to FSL-1.1-ALv2
 
 **This release changes the license. Read this section before upgrading.**

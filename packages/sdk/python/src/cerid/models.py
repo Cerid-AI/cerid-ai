@@ -101,19 +101,26 @@ class CollectionsResponse(_SDKBase):
     total: int = Field(default=0)
 
 
+# The server declares the taxonomy/settings/plugins response models with
+# Any-typed fields (app/routers/sdk.py "generated: single-return dict-literal
+# routes"), and docs/openapi-sdk-v1.json pins them that way. These SDK models
+# must not be stricter than that contract, or a legitimate 200 becomes a
+# client-side ValidationError.
+
+
 class TaxonomyResponse(_SDKBase):
     """Response from ``GET /sdk/v1/taxonomy``."""
 
-    domains: List[str] = Field(default_factory=list)
-    taxonomy: Dict[str, Any] = Field(default_factory=dict)
+    domains: Any = Field(default_factory=list)
+    taxonomy: Any = Field(default_factory=dict)
 
 
 class SettingsResponse(_SDKBase):
     """Response from ``GET /sdk/v1/settings``."""
 
-    version: str = Field(default="")
-    tier: str = Field(default="")
-    features: Dict[str, bool] = Field(default_factory=dict)
+    version: Any = Field(default="")
+    tier: Any = Field(default="")
+    features: Any = Field(default_factory=dict)
 
 
 class SearchResponse(_SDKBase):
@@ -127,8 +134,9 @@ class SearchResponse(_SDKBase):
 class PluginListResponse(_SDKBase):
     """Response from ``GET /sdk/v1/plugins``."""
 
-    plugins: List[Dict[str, Any]] = Field(default_factory=list)
-    total: int = Field(default=0)
+    # The pin types ``plugins`` as an array (of anything); ``total`` is untyped.
+    plugins: List[Any] = Field(default_factory=list)
+    total: Any = Field(default=0)
 
 
 # ---------------------------------------------------------------------------

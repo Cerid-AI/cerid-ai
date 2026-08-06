@@ -110,9 +110,11 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	@echo "[drift] env-example"
 	.venv/bin/python scripts/gen_env_example.py --check
 	@echo "[drift] router-registry"
-	@test -f docs/ROUTER_REGISTRY.md \
-	  && .venv/bin/python scripts/gen_router_registry.py --check \
-	  || echo "  (internal-only doc — not present in this checkout, skipped)"
+	@if [ -f docs/ROUTER_REGISTRY.md ]; then \
+	  .venv/bin/python scripts/gen_router_registry.py --check; \
+	else \
+	  echo "  (internal-only doc — not present in this checkout, skipped)"; \
+	fi
 	@echo "[drift] route-response-model"
 	.venv/bin/python scripts/lint-route-response-model.py --check
 	@echo "[drift] retrieval-import-boundary"
@@ -126,21 +128,27 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	@echo "[drift] external-fetch-boundary"
 	.venv/bin/python scripts/lint-external-fetch-boundary.py --check
 	@echo "[drift] gates-parity"
-	@test -f scripts/lint-gates-parity.py \
-	  && .venv/bin/python scripts/lint-gates-parity.py --check \
-	  || echo "  (internal-only gate — not present in this checkout, skipped)"
+	@if [ -f scripts/lint-gates-parity.py ]; then \
+	  .venv/bin/python scripts/lint-gates-parity.py --check; \
+	else \
+	  echo "  (internal-only gate — not present in this checkout, skipped)"; \
+	fi
 	@echo "[drift] model-name-uniqueness"
 	.venv/bin/python scripts/lint-model-name-uniqueness.py --check
 	@echo "[drift] sdk-openapi"
 	.venv/bin/python scripts/gen_sdk_openapi.py --check
 	@echo "[drift] sync-manifest"
-	@test -f scripts/lint-sync-manifest.py \
-	  && .venv/bin/python scripts/lint-sync-manifest.py \
-	  || echo "  (internal-only gate — not present in this checkout, skipped)"
+	@if [ -f scripts/lint-sync-manifest.py ]; then \
+	  .venv/bin/python scripts/lint-sync-manifest.py; \
+	else \
+	  echo "  (internal-only gate — not present in this checkout, skipped)"; \
+	fi
 	@echo "[drift] public-leak-preflight"
-	@test -f scripts/lint-public-leak-preflight.py \
-	  && .venv/bin/python scripts/lint-public-leak-preflight.py \
-	  || echo "  (internal-only gate — not present in this checkout, skipped)"
+	@if [ -f scripts/lint-public-leak-preflight.py ]; then \
+	  .venv/bin/python scripts/lint-public-leak-preflight.py; \
+	else \
+	  echo "  (internal-only gate — not present in this checkout, skipped)"; \
+	fi
 	@echo "[drift] silent-catch"
 	.venv/bin/python scripts/lint-no-silent-catch.py --strict-broad src/mcp/
 	@echo "[drift] no-legacy-neo4j-tree"

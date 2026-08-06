@@ -21,8 +21,14 @@ export class CeridSDKError extends Error {
 }
 
 export class AuthenticationError extends CeridSDKError {
-  constructor(message = "Authentication failed", body?: unknown) {
-    super(message, 401, body);
+  /**
+   * Raised on 401 Unauthorized or 403 Forbidden responses. The real status
+   * is preserved (parity with the Python SDK) so consumers can distinguish
+   * "not authenticated" (401 — retry with credentials) from "authenticated
+   * but not permitted" (403 — do not retry).
+   */
+  constructor(message = "Authentication failed", status = 401, body?: unknown) {
+    super(message, status, body);
     this.name = "AuthenticationError";
   }
 }
@@ -76,7 +82,7 @@ export async function raiseForStatus(response: Response): Promise<void> {
   switch (response.status) {
     case 401:
     case 403:
-      throw new AuthenticationError(detail, body);
+      throw new AuthenticationError(detail, response.status, body);
     case 404:
       throw new NotFoundError(detail, body);
     case 422:

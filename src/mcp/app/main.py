@@ -488,41 +488,55 @@ async def lifespan(app: FastAPI):
         log_swallowed_error('app.main', e)
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
-    # Ensure default tenant exists (for multi-user mode migration safety)
-    try:
-        import config as _cfg
-        if _cfg.CERID_MULTI_USER:
-            # Experimental gate: F2 (localStorage tokens) + F3 (missing
-            # tenant filter on get_artifact Cypher) must close before
-            # multi-user is a supported deploy mode. Operators acknowledging
-            # the risk set CERID_MULTI_USER_EXPERIMENTAL=true.
-            if not _cfg.CERID_MULTI_USER_EXPERIMENTAL:
-                raise RuntimeError(
-                    "CERID_MULTI_USER=true is gated as EXPERIMENTAL through "
-                    "v1.0 GA. Two known security gaps (F2 localStorage "
-                    "tokens, F3 missing tenant_id filter on Neo4j artifact "
-                    "reads — see tasks/2026-05-24-rc1-beta-test-report.md) "
-                    "must close first. To proceed at your own risk in a "
-                    "non-production environment, set "
-                    "CERID_MULTI_USER_EXPERIMENTAL=true alongside "
-                    "CERID_MULTI_USER=true."
-                )
-            logger.warning(
-                "Multi-user mode is EXPERIMENTAL in this release — "
-                "F2 + F3 security gaps remain open. See "
-                "tasks/2026-05-24-rc1-beta-test-report.md."
+    # Multi-user POLICY gates — deliberately OUTSIDE the try below.
+    #
+    # These two `raise`s used to sit inside a `try/except Exception` that logged
+    # a warning and continued, so both fail-closed guards were decorative: a
+    # deployment with CERID_MULTI_USER=true and no experimental acknowledgement,
+    # or with no JWT secret, booted anyway with a line in the log. An `except`
+    # that exists to tolerate infrastructure hiccups must not also swallow the
+    # refusals the code raises on purpose.
+    #
+    # The JWT check now runs BEFORE ensure_default_tenant rather than after, so
+    # a misconfigured boot refuses before it writes anything.
+    import config as _cfg
+    if _cfg.CERID_MULTI_USER:
+        # Experimental gate: F2 (localStorage tokens) + F3 (missing
+        # tenant filter on get_artifact Cypher) must close before
+        # multi-user is a supported deploy mode. Operators acknowledging
+        # the risk set CERID_MULTI_USER_EXPERIMENTAL=true.
+        if not _cfg.CERID_MULTI_USER_EXPERIMENTAL:
+            raise RuntimeError(
+                "CERID_MULTI_USER=true is gated as EXPERIMENTAL through "
+                "v1.0 GA. Two known security gaps (F2 localStorage "
+                "tokens, F3 missing tenant_id filter on Neo4j artifact "
+                "reads — see tasks/2026-05-24-rc1-beta-test-report.md) "
+                "must close first. To proceed at your own risk in a "
+                "non-production environment, set "
+                "CERID_MULTI_USER_EXPERIMENTAL=true alongside "
+                "CERID_MULTI_USER=true."
             )
+        if not _cfg.CERID_JWT_SECRET:
+            raise RuntimeError(
+                "CERID_JWT_SECRET is required when CERID_MULTI_USER=true. "
+                "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+            )
+        logger.warning(
+            "Multi-user mode is EXPERIMENTAL in this release — "
+            "F2 + F3 security gaps remain open. See "
+            "tasks/2026-05-24-rc1-beta-test-report.md."
+        )
+
+    # Ensure default tenant exists (for multi-user mode migration safety).
+    # This one IS best-effort: a Neo4j hiccup here should not stop the boot.
+    try:
+        if _cfg.CERID_MULTI_USER:
             from app.db.neo4j.users import ensure_default_tenant
             ensure_default_tenant(driver, _cfg.DEFAULT_TENANT_ID)
             logger.info("Multi-user mode enabled — default tenant ensured")
-            if not _cfg.CERID_JWT_SECRET:
-                raise RuntimeError(
-                    "CERID_JWT_SECRET is required when CERID_MULTI_USER=true. "
-                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
-                )
     except Exception as e:
         log_swallowed_error('app.main', e)
-        logger.warning(f"Multi-user startup check failed: {e}")
+        logger.warning(f"Default-tenant ensure failed: {e}")
 
     # Auto-import from sync directory if DB is empty
     try:

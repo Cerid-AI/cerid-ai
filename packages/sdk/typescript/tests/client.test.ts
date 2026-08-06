@@ -375,20 +375,36 @@ describe("System resource", () => {
 // ---------------------------------------------------------------------------
 
 describe("Error mapping", () => {
-  it("throws AuthenticationError on 401", async () => {
+  it("throws AuthenticationError with status 401 on 401", async () => {
     const mockFetch = vi.fn().mockResolvedValue(
       jsonResponse({ detail: "Invalid API key" }, 401),
     );
     const client = createClient(mockFetch);
-    await expect(client.system.health()).rejects.toThrow(AuthenticationError);
+
+    try {
+      await client.system.health();
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthenticationError);
+      expect((err as AuthenticationError).status).toBe(401);
+    }
   });
 
-  it("throws AuthenticationError on 403", async () => {
+  it("throws AuthenticationError with status 403 on 403", async () => {
+    // 401 (retry with credentials) and 403 (do not retry — escalate) demand
+    // opposite consumer handling; the status must survive the mapping.
     const mockFetch = vi.fn().mockResolvedValue(
       jsonResponse({ detail: "Forbidden" }, 403),
     );
     const client = createClient(mockFetch);
-    await expect(client.system.health()).rejects.toThrow(AuthenticationError);
+
+    try {
+      await client.system.health();
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthenticationError);
+      expect((err as AuthenticationError).status).toBe(403);
+    }
   });
 
   it("throws ValidationError on 422", async () => {

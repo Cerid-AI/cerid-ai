@@ -19,8 +19,35 @@ API_KEY="${VITE_CERID_API_KEY:-}"
 SENTRY_DSN_WEB="${VITE_SENTRY_DSN_WEB:-}"
 APP_VERSION="${VITE_APP_VERSION:-}"
 
+# The API key is a REUSABLE credential and env-config.js is served to anyone
+# who can reach this container. On a LAN bind that published the key next door
+# to the API it protects, cancelling the /mcp auth gate. So:
+#
+#   * relative MCP_URL (the default, "/api/mcp") — the SPA is same-origin and
+#     nginx adds the header itself; the browser never receives the key.
+#   * absolute MCP_URL — the operator has pointed the SPA straight at the API,
+#     bypassing this proxy, so the browser genuinely needs the key and keeping
+#     it out would just break them. Unchanged, and now a deliberate choice.
+KEY_INC="/etc/nginx/conf.d/cerid-api-key.inc"
+case "$MCP_URL" in
+  /*)
+    BROWSER_API_KEY=""
+    if [ -n "$API_KEY" ]; then
+      printf 'proxy_set_header X-API-Key "%s";\n' "$API_KEY" > "$KEY_INC"
+      echo "[entrypoint] X-API-Key injected at the proxy (not exposed to the browser)"
+    else
+      : > "$KEY_INC"
+    fi
+    ;;
+  *)
+    BROWSER_API_KEY="$API_KEY"
+    : > "$KEY_INC"
+    [ -n "$API_KEY" ] && echo "[entrypoint] WARNING: absolute VITE_MCP_URL — the API key is served to the browser in env-config.js"
+    ;;
+esac
+
 cat > "$ENV_JS" <<EOF
-window.__ENV__ = {VITE_MCP_URL: "${MCP_URL}", VITE_BIFROST_URL: "${BIFROST_URL}", VITE_CERID_API_KEY: "${API_KEY}", VITE_SENTRY_DSN_WEB: "${SENTRY_DSN_WEB}", VITE_APP_VERSION: "${APP_VERSION}"};
+window.__ENV__ = {VITE_MCP_URL: "${MCP_URL}", VITE_BIFROST_URL: "${BIFROST_URL}", VITE_CERID_API_KEY: "${BROWSER_API_KEY}", VITE_SENTRY_DSN_WEB: "${SENTRY_DSN_WEB}", VITE_APP_VERSION: "${APP_VERSION}"};
 EOF
 
 # Write version manifest (used by stale-cache detection)

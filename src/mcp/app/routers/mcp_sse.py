@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from app.tool_registry import ToolError
 from app.tools import execute_tool, get_all_tools
+from core.utils.version import get_version
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -145,7 +146,11 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
             "result": {
                 "protocolVersion": client_version,
                 "capabilities": {"tools": {"listChanged": True}},
-                "serverInfo": {"name": "cerid-ai-companion", "version": "1.0.0"},
+                # Derived, not hardcoded: core/utils/version.py is the single
+                # source of truth (pyproject). The literal "1.0.0" here happened
+                # to be wrong for every release so far — the server reported it
+                # to every MCP client while running 1.0.0rc2.post1.
+                "serverInfo": {"name": "cerid-ai-companion", "version": get_version()},
             },
         }
     elif method == "tools/list":
