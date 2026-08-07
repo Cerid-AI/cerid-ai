@@ -4,8 +4,25 @@
 import "@testing-library/jest-dom/vitest"
 import { afterEach, expect, vi } from "vitest"
 import type { ReactElement, ReactNode, JSXElementConstructor } from "react"
-import { cleanup, type RenderOptions } from "@testing-library/react"
+import { cleanup, configure, type RenderOptions } from "@testing-library/react"
 import { toHaveNoViolations } from "jest-axe"
+
+// Testing Library's default async budget is 1000ms, which several drawer /
+// dialog tests sit just under: `entity-analysis-drawer` resolves its
+// findByTestId in ~745ms on an unloaded machine. That 25% of headroom is not a
+// product requirement, it is a default — and it is not enough. Once a second
+// self-hosted runner let two heavy jobs share one host (2026-08-07), two
+// different tests blew it in consecutive runs, each time with a timing error
+// and never the same test twice.
+//
+// Raised rather than pinned per-test: the marginal ones are marginal because
+// Radix animates, not because of anything specific to those files, so fixing
+// the instances would leave the class. 5s is still tight enough to catch a
+// component that genuinely hangs.
+//
+// This does NOT slow down passing tests — the utilities resolve as soon as the
+// element appears; the timeout only bounds failure.
+configure({ asyncUtilTimeout: 5000 })
 
 // Production App.tsx mounts a single <TooltipProvider> at the root so any
 // component below can use <Tooltip>. Tests render components in isolation
