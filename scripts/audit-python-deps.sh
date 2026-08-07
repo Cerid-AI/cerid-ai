@@ -65,6 +65,12 @@ PIP_AUDIT_VERSION="2.10.0"
 #                     only; we author no malicious entry-point names.  Re-eval 2026-08-31 (pip 26.1.2).
 # CVE-2025-3000       torch.jit.script memory corruption, local-host vector only. Never called
 #                     (grep-verified); no fixed version published.     Re-eval 2026-07-31 (torch cadence).
+# PYSEC-2026-3624     lightning RCE via attacker-crafted checkpoint in load_from_checkpoint.
+#                     Our only path into lightning's checkpoint loader is pyannote's hardcoded
+#                     pyannote/speaker-diarization-3.1 pulled from HF with the operator's token
+#                     (plugins/meeting_capture/diarize.py) — no untrusted checkpoint reaches
+#                     it. Fixed only in an unreleased commit; the latest release (2.6.5) is
+#                     the vulnerable one.                              Re-eval 2026-09-30 (lightning release cadence).
 IGNORES=(
   CVE-2026-26013
   CVE-2025-64439
@@ -78,6 +84,7 @@ IGNORES=(
   CVE-2026-45829
   PYSEC-2026-196
   CVE-2025-3000
+  PYSEC-2026-3624
 )
 
 IGNORE_ARGS=""
