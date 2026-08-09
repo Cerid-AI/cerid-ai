@@ -65,6 +65,15 @@ jobs:
           cache: npm
           cache-dependency-path: packages/sdk/typescript/package-lock.json
 
+      # npm's OIDC trusted publishing exists only in npm >= 11.5.1; Node 22
+      # bundles npm 10, which silently skips the token exchange and publishes
+      # unauthenticated (PUT -> 404 with the registry hiding the package).
+      # Found on the first probe run after the registry-side binding was added.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
       - name: Assert tag matches package.json version (tag-triggered only)
         if: github.event_name == 'push'
         run: |
