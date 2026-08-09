@@ -10,7 +10,7 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 
 - **Never add AI attribution** to commits, PRs, comments, or docs. Commits are authored by the human developer. No `Co-Authored-By: Claude` / `Anthropic` / etc. lines. (Enforced by dotfiles CLAUDE.md; repeated here because it's the most commonly-missed global rule.)
 - **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every development session.
-- **New contributor first steps:** Read this file, then [`docs/ARCHITECTURE.md`](ARCHITECTURE.md). Skip `CLAUDE.md` unless you are an LLM agent — it is written for that audience.
+- **New contributor first steps:** Read this file, then [`docs/ARCHITECTURE.md`](ARCHITECTURE.md), then [`docs/PRESERVATION.md`](PRESERVATION.md). Skip `CLAUDE.md` unless you are an LLM agent — it is written for that audience.
 - **Run ruff from repo root.** `cd <repo-root> && ruff check src/mcp/` is the canonical invocation — matches what CI does. Running `cd src/mcp && ruff check .` resolves config from `src/mcp/pyproject.toml` (if present) instead of the root, producing a different rule set.
 - **Run `make prepush` before every push** (graduated 2026-06-06). It chains `ci-local` (ruff/mypy/import/pytest/frontend/guard) + `drift-check` (the full remote `lint`-job gate set `ci-local` omits: env-example / router-registry / sdk-openapi drift, silent-catch, no-legacy-neo4j, import-star, module-getenv, docker-healthcheck, web-crypto, dts-collision, product-story, mcp-descriptions). `ci-local` ALONE is not enough — it misses the drift + silent-catch gates that then fail at remote-CI time.
 - **`curl the running service before coding field access.**` Production response shapes drift from docs/code-reading (a promotion filter once silently skipped every claim because it checked `verdict`/`confidence`/`type` while prod dicts used `status`/`similarity`/no-type). Use `.get()` with fallback chains for variant field names; never assume a shape from docs alone.
@@ -204,7 +204,7 @@ site.
 
 ## Cross-repo sync
 
-A bidirectional sync workflow maintains the public `cerid-ai` mirror from the canonical development repo. Top three rules to never violate:
+See [`docs/SYNC_PROTOCOL.md`](SYNC_PROTOCOL.md) for the full bidirectional sync workflow between `cerid-ai-internal` and the public `cerid-ai` mirror. Top three rules to never violate:
 
 1. **Always use `scripts/sync-repos.py`**, never `cp` / `rsync` / direct edits.
 2. **Add gitignored data directories to `_SYNC_SKIP_PREFIXES`** — `Path.rglob('*')` doesn't honour `.gitignore`. The skip list is the sync walker's parallel to git's ignore.

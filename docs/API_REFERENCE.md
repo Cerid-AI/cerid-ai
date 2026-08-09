@@ -551,8 +551,9 @@ make deps-check
 - `Makefile` — Convenience targets
 - `scripts/hooks/pre-commit` — Blocks commits when lock files are stale
 - `.github/dependabot.yml` — Weekly grouped PRs for pip, npm, actions, Docker
+- `docs/DEPENDENCY_COUPLING.md` — Cross-service version constraints
 
-**Cross-service version coupling:** ChromaDB client/server, spaCy lib/model, Node version, and Python version must stay in sync across their pinned locations. CI enforces lock file sync via the `lock-sync` job.
+**Cross-service version coupling:** See `docs/DEPENDENCY_COUPLING.md` for constraints (ChromaDB client/server, spaCy lib/model, Node version, Python version). CI enforces lock file sync via `lock-sync` job.
 
 ---
 
@@ -752,7 +753,7 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 
 ### Knowledge Graph (Subjects panes)
 
-Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. Full parameter/response detail is in the OpenAPI spec at `GET /openapi.json`.
+Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. See [`docs/ROUTER_REGISTRY.md`](ROUTER_REGISTRY.md) for the generated parameter/response detail.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

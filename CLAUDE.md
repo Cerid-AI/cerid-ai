@@ -62,6 +62,12 @@ bash scripts/install-sidecar.sh                        # install GPU sidecar
 python scripts/cerid-sidecar.py                        # run sidecar (outside Docker)
 ```
 
+On a Mac with an AMD discrete GPU (where stock Ollama stays CPU-bound), use
+[quenchforge](https://github.com/Cerid-AI/quenchforge) — an Ollama- and
+OpenAI-compatible inference server tuned for exactly that hardware:
+`brew install cerid-ai/tap/quenchforge`. Cerid talks to it on the standard
+`:11434` port with no configuration changes.
+
 ## Dependency Strategy
 
 Direct dependencies are minimal (14 core). See `src/mcp/requirements.txt` for the full list.

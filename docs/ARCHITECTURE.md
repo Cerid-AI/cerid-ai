@@ -8,7 +8,7 @@
 
 Cerid AI is a **self-hosted, privacy-first Personal AI Knowledge Companion.** It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when `CERID_ENCRYPTION_KEY` is set.
 
-A preservation harness of integration invariants guards the core capabilities across every consolidation sprint.
+Core capabilities inventory lives in [`docs/PRESERVATION.md`](PRESERVATION.md) (§ "Invariants"). The preservation harness guards those capabilities across every consolidation sprint.
 
 ## Services
 
@@ -21,7 +21,9 @@ Microservices on a shared `llm-network` Docker bridge network. Services communic
 | Neo4j | 7474, 7687 | Graph DB | `stacks/infrastructure/` |
 | Redis | 6379 | Cache + audit log | `stacks/infrastructure/` |
 | React GUI | 3000 | React 19 + Vite + nginx | `src/web/` |
-| Ollama (optional) | 11434 | Local LLM pipeline tasks | External or Docker |
+| quenchforge (Ollama-compatible, optional) | 11434 | Local LLM pipeline tasks | External or Docker |
+
+(The marketing site is deployed from its own repo (cerid.ai) — `packages/marketing/` no longer exists here.)
 
 ## Data flow
 
@@ -47,8 +49,8 @@ cerid-ai-internal/
 ├── .env.age / .env.example  # Encrypted secrets / template
 ├── Makefile                 # lock-python, install-hooks, deps-check, preservation-check
 ├── scripts/                 # start-cerid.sh, validate-env.sh, sync-repos.py, gen_*
-├── docs/                    # ARCHITECTURE.md (this), API_REFERENCE.md,
-│                            # CONVENTIONS.md, SDK_GUIDE.md, OPERATIONS.md
+├── docs/                    # ARCHITECTURE.md (this), API_REFERENCE.md, SYNC_PROTOCOL.md,
+│                            # PRESERVATION.md, CONVENTIONS.md, ROUTER_REGISTRY.md
 ├── plugins/                 # BUSL-1.1 pro-tier plugins
 ├── plugins-premium/         # proprietary premium tier — NOT distributed;
 │                            # absent from the public repository by design
@@ -60,7 +62,7 @@ cerid-ai-internal/
 │   │   ├── routing/         # Smart router, model providers
 │   │   └── utils/           # Embeddings, circuit breaker, LLM client, temporal, diversity, text, etc.
 │   ├── app/                 # Application layer (concrete implementations)
-│   │   ├── routers/         # 62 FastAPI routers (post-Sprint F consolidation)
+│   │   ├── routers/         # ~68 router modules (count drifts — ls src/mcp/app/routers/)
 │   │   ├── agents/          # Orchestration wrappers: assembler, curator, decomposer, memory,
 │   │   │                    #                        retrieval_orchestrator, templates, triage,
 │   │   │                    #                        hallucination/{confidence, verdict_parsing, ...}
@@ -92,8 +94,7 @@ cerid-ai-internal/
 │   ├── src/contexts/        # Settings, KBInjection, Conversations, Auth
 │   ├── src/lib/             # types.ts, api/, model-router.ts, canonical-claim alignment
 │   └── src/__tests__/       # 2,700+ frontend tests
-├── packages/desktop/        # Desktop app (distributed as signed builds via GitHub
-│                            # Releases; source in the canonical development repo)
+├── packages/desktop/        # Electron desktop app (internal-only)
 ├── stacks/                  # infrastructure/ (Neo4j, ChromaDB, Redis)
 ├── artifacts/ → ~/Dropbox/AI-Artifacts   (symlink)
 └── data/ → src/mcp/data                  (symlink)
@@ -106,7 +107,7 @@ cerid-ai-internal/
 | `src/mcp/services/` | 3 bridge files re-exporting from `app.services` | **deleted** |
 | `src/mcp/agents/` | 14 files: 7 bridges + 5 standalones + 1 adapter + 1 subpackage | **deleted** — standalones moved to `app/agents/` |
 | `src/mcp/utils/` | 56 files (21 bridges + 35 standalones) | 35 standalones only |
-| `src/mcp/routers/` | 43 files: 32 bridge stubs + 11 legacy real + billing | **billing only** (internal-strip target) |
+| `src/mcp/routers/` | 43 files: 32 bridge stubs + 11 legacy real + billing | **billing-only** — the two billing router modules (internal-strip target) |
 | `src/mcp/db/neo4j/` | 8 bridge shims + 2 orphan implementations (`agents.py`, `graph_rag.py`) | **deleted** — canonical at `app/db/neo4j/`; `agents.py` relocated, `graph_rag.py` deleted as dead code (2026-04-21) |
 
 Consumer code imports canonical paths (`core.utils.*`, `app.routers.*`, `app.agents.*`, `app.db.neo4j.*`). No more "which of three paths?" ambiguity. A `lint / no-legacy-neo4j-tree` CI guard prevents resurrection of the old shim tree.
@@ -247,12 +248,15 @@ Served by `/`, `/health`, and `/openapi.json`. Single source of truth: `pyprojec
 |---|---|
 | What does `/agent/query` return? | [`docs/API_REFERENCE.md`](API_REFERENCE.md); preservation I2 |
 | What's the canonical claim shape? | `src/mcp/core/agents/hallucination/models.py` |
-| How do I add a new route? | Write in `src/mcp/app/routers/`; update `docs/API_REFERENCE.md` |
+| How do I add a new route? | Write in `src/mcp/app/routers/`; regenerate `docs/ROUTER_REGISTRY.md` |
 | Where does internal code live? | `*_internal.py` files listed in `.sync-manifest.yaml` |
-| What must not break? | The preservation harness invariants (I1-I8, `src/mcp/tests/integration/`) |
+| How does the sync work? | [`docs/SYNC_PROTOCOL.md`](SYNC_PROTOCOL.md) |
+| What must not break? | [`docs/PRESERVATION.md`](PRESERVATION.md) I1-I8 |
 | What are the project conventions? | [`docs/CONVENTIONS.md`](CONVENTIONS.md) |
-| What's resolved / shipped? | [CHANGELOG.md](../CHANGELOG.md) + [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) |
+| What's resolved / shipped? | [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) |
+| Current sprint work? | `tasks/todo.md` |
 | Sidebar pane shape + redirect map? | [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) |
+| Atlas + Constellation perf budgets? | [`docs/PERF_BUDGETS.md`](PERF_BUDGETS.md) |
 | Visualization endpoints? | `/graph/decomposition`, `/graph/map` (`?layout=`), `/graph/domains`, `/graph/neighborhood`, `/graph/timeline/strata`, `/graph/tour/generate`, `/atlas/views/*` |
 | How are entity domains assigned? | § Domain backbone (below); `DeriveDomainsJob`, `GET /graph/domains` |
 | How do connectors work? | `core/ingest/sources/base.py` + `core/ingest/sources/registry.py`; one connector module per `kind` under `core/ingest/sources/connectors/` |
@@ -419,9 +423,6 @@ the sibling MCP servers (`google_workspace`, `ms365`).
 with Save Page → readability extraction → `POST /sdk/v1/ingest`.
 Works on Chrome + Firefox; Edge + Safari deferred.
 
-`packages/desktop/` is the desktop app; it is distributed as signed
-builds via GitHub Releases, and its source lives in the canonical
-development repo rather than this distribution.
 `packages/desktop/swift/CeridMail/` + `CeridReminders/` are TCC-
 scoped Swift helper binaries. The Python connectors at
 `core/ingest/sources/connectors/apple_mail.py` and `apple_reminders.py`
@@ -469,7 +470,8 @@ from the parent Electron app's signed bundle — load-bearing contract
 documented in `packages/desktop/swift/README.md`.
 
 The three Xcode-required native targets (App Intents, Share
-Extension, Quick Look) are deferred.
+Extension, Quick Look) are deferred — see
+`docs/PHASE_G_DEFERRED.md`.
 
 ### Calendar stitching fallback chain
 
@@ -496,6 +498,9 @@ antonym mutations via the internal LLM, then heuristic entailment
 checks classify it as `ok` / `suspicious` / `likely_hallucinated`.
 Registered via the existing `set_metamorphic_handler` stub
 interface in `app/agents/hallucination/metamorphic.py`.
+
+See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
+Phase D-H cumulative metrics and per-phase shipping log.
 
 ## Knowledge architecture (Cerid v1.0 Phases K1-K6)
 
@@ -614,3 +619,8 @@ contradictions, 24h log activity. Surfaces in Settings →
 Diagnostics → Analytics via `KnowledgePanel`. Preservation
 invariants (`tests/test_knowledge_architecture_invariants.py`)
 gate the wiring against regression.
+
+See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
+Phase K1-K6 cumulative metrics and the
+`tasks/2026-05-22-knowledge-architecture-redesign.md` design doc
+for the strategic rationale.

@@ -308,7 +308,11 @@ preflight_checks() {
         if command -v ss &>/dev/null; then
             ss -tlnp 2>/dev/null | grep -q ":${port} " && return 0
         elif command -v lsof &>/dev/null; then
-            lsof -i ":${port}" -sTCP:LISTEN -t &>/dev/null && return 0
+            # -iTCP, not -i: without the protocol restriction lsof lists UDP
+            # sockets too (-sTCP:LISTEN only filters the TCP ones), and
+            # DogCam's mediamtx holding UDP *:8001 blocked a chroma start on
+            # TCP 8001 (2026-08-08). Same form as the earlier check above.
+            lsof -iTCP:"${port}" -sTCP:LISTEN -t &>/dev/null && return 0
         elif command -v netstat &>/dev/null; then
             netstat -tlnp 2>/dev/null | grep -q ":${port} " && return 0
         fi
@@ -325,7 +329,9 @@ preflight_checks() {
                 return 0  # Our container — not a conflict
             fi
             echo "  ERROR: Port $port ($service) is already in use"
-            echo "    Fix: Stop the process or set CERID_PORT_${service^^} in .env"
+            # tr, not ${service^^}: that's bash-4 syntax and macOS ships 3.2,
+            # so the error path itself died with "bad substitution".
+            echo "    Fix: Stop the process or set CERID_PORT_$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]') in .env"
             fail=1
         fi
     }

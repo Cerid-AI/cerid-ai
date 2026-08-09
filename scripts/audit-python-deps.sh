@@ -69,11 +69,19 @@ PIP_AUDIT_VERSION="2.10.0"
 # CVE-2025-3000       torch.jit.script memory corruption, local-host vector only. Never called
 #                     (grep-verified); no fixed version published.     Re-eval 2026-07-31 (torch cadence).
 # PYSEC-2026-3624     lightning RCE via attacker-crafted checkpoint in load_from_checkpoint.
-#                     Our only path into lightning's checkpoint loader is pyannote's hardcoded
-#                     pyannote/speaker-diarization-3.1 pulled from HF with the operator's token
-#                     (plugins/meeting_capture/diarize.py) — no untrusted checkpoint reaches
-#                     it. Fixed only in an unreleased commit; the latest release (2.6.5) is
-#                     the vulnerable one.                              Re-eval 2026-09-30 (lightning release cadence).
+#                     Our only path into lightning's checkpoint loader is pyannote's
+#                     pyannote/speaker-diarization-3.1, pulled from HF with the operator's token
+#                     (plugins/meeting_capture/diarize.py), on an operator-gated optional plugin.
+#                     The model id is not user-supplied and is now PINNED TO AN IMMUTABLE
+#                     REVISION (84fd259, 2026-08-08) — previously it was a bare name, which
+#                     resolves to whatever upstream's default branch points at, so this
+#                     justification asserted an immutability the code did not enforce.
+#                     tests/test_meeting_capture_diarize_pin.py fails if the pin is removed.
+#                     RESIDUAL, accepted: the pinned config names sub-models (segmentation-3.0)
+#                     that pyannote resolves at their own floating revisions; a compromise of
+#                     THOSE repos is not covered. Fixed only in an unreleased commit — 2.6.5 is
+#                     still the newest release on PyPI (checked 2026-08-08), so there is no
+#                     version to upgrade to.                           Re-eval 2026-09-30 (lightning release cadence).
 IGNORES=(
   CVE-2026-26013
   CVE-2025-64439

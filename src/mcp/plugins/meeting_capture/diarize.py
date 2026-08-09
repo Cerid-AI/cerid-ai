@@ -20,7 +20,32 @@ from typing import Any
 
 logger = logging.getLogger("ai-companion.plugins.meeting_capture.diarize")
 
-_PIPELINE_NAME = "pyannote/speaker-diarization-3.1"
+_PIPELINE_MODEL = "pyannote/speaker-diarization-3.1"
+
+# Pinned to an IMMUTABLE Hugging Face revision, not the repo's default branch.
+#
+# The pip-audit ignore for PYSEC-2026-3624 (lightning RCE via an attacker-crafted
+# checkpoint in load_from_checkpoint — see scripts/audit-python-deps.sh) rests on
+# the claim that no untrusted checkpoint reaches that loader. A hardcoded model
+# NAME does not establish that: the name resolves to whatever the model repo's
+# default branch points at the moment we fetch it, so a compromised or re-pushed
+# upstream would walk straight into the vulnerable path the ignore calls
+# unreachable. A revision is content-addressed and cannot change under us.
+#
+# pyannote 3.4.0 splits "<model>@<revision>" off the checkpoint string and passes
+# the revision to hf_hub_download — verified against the installed library's
+# own source (pyannote/audio/core/pipeline.py::from_pretrained), not assumed.
+#
+# NOT a complete supply-chain pin, and the ignore's wording says so: the pinned
+# config names sub-models that pyannote then resolves at THEIR floating
+# revisions (segmentation-3.0 — which is why settings_secrets.py requires token
+# access to it too). This closes the entry point we control.
+# pragma: allowlist secret — public HF commit sha, not a credential. detect-secrets
+# scores any 40-hex literal as a high-entropy string; this one is published at
+# huggingface.co/pyannote/speaker-diarization-3.1 and is meant to be in the repo.
+_PIPELINE_REVISION = "84fd25912480287da0247647c3d2b4853cb3ee5d"  # pragma: allowlist secret
+_PIPELINE_NAME = f"{_PIPELINE_MODEL}@{_PIPELINE_REVISION}"
+
 _pipeline_cache: Any = None  # lazy-loaded singleton
 
 
