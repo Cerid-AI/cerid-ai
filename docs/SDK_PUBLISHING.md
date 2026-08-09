@@ -46,9 +46,11 @@ environment so a human approves every production publish.
 
 PyPI → log in → manage account or project page → "Publishing".
 
-For the **first** release of a project, register a **pending publisher**
-(no project exists yet on PyPI). Subsequent releases reuse the same
-config:
+The trusted publisher is already configured on PyPI for `cerid-sdk`
+(repo `Cerid-AI/cerid-ai`, workflow `release-sdk-python.yml`,
+environment `pypi`); releases publish tokenlessly. For a **new**
+package, register a **pending publisher** first (no project exists yet
+on PyPI). The binding config:
 
 | Field | Value |
 |---|---|
@@ -90,8 +92,8 @@ Edit
 ```diff
 [project]
  name = "cerid-sdk"
--version = "0.1.0"
-+version = "0.1.1"
+-version = "0.1.1"
++version = "0.1.2"
 ```
 
 If the wire protocol shifted, also bump
@@ -110,10 +112,10 @@ changes; bump only the package version for client-only fixes.
 
 ```bash
 git add packages/sdk/python/pyproject.toml
-git commit -m "cerid-sdk: bump to 0.1.1"
-git tag cerid-sdk-v0.1.1
+git commit -m "cerid-sdk: bump to 0.1.2"
+git tag cerid-sdk-v0.1.2
 git push origin main
-git push origin cerid-sdk-v0.1.1
+git push origin cerid-sdk-v0.1.2
 ```
 
 The tag pattern **must** be `cerid-sdk-v<version>` exactly — the
@@ -169,7 +171,7 @@ broken:
    Releases → Yank. Yanking hides the version from
    `pip install cerid-sdk` (without a version pin) but preserves
    reproducibility for anyone already pinned to it.
-2. Bump the version in `pyproject.toml` to the next patch (`0.1.2`),
+2. Bump the version in `pyproject.toml` to the next patch (`0.1.3`),
    land the fix, tag, push.
 
 Never reuse a yanked version number.
@@ -183,6 +185,7 @@ Never reuse a yanked version number.
 | Workflow fails "Tag version does not match pyproject" | Tag suffix ≠ pyproject version | Re-tag with correct suffix; or bump pyproject and re-tag |
 | Publish step fails "Trusted publisher not configured" | PyPI side missing the trust binding | Repeat one-time setup step 2 — match repo, workflow filename, environment name exactly |
 | Publish step fails "version already exists" | Version already on PyPI (immutable) | Bump the version, re-tag |
+| Test step fails on missing `jsonschema` | SDK's `[test]` extra not installed | Fixed in the workflow — it installs the package with the `[test]` extra; if reproducing locally, `pip install -e "packages/sdk/python[test]"` |
 | `twine check` flags README rendering | Markdown syntax PyPI doesn't render | Validate locally with `twine check dist/*` after `python -m build` |
 
 ---
@@ -236,12 +239,13 @@ GitHub Actions publisher:
 | Environment name | `npm` |
 
 npm's trusted-publisher UI requires the package to already exist for
-most flows; if `@cerid-ai/sdk` has never been published, the very
-first release still needs **one** manual `npm publish --access public`
-from an authenticated maintainer account to create the package, after
-which every subsequent release goes through OIDC. This first manual
-publish is itself operator-only and out of scope for this runbook to
-perform.
+most flows; `@cerid-ai/sdk` was bootstrapped with one manual
+`npm publish --access public` from an authenticated maintainer
+account, and every subsequent release goes through OIDC.
+
+**Requirement:** npm OIDC trusted publishing requires **npm >= 11.5.1**;
+the workflow upgrades npm before publishing. Node 22 bundles npm 10,
+which silently publishes unauthenticated and gets a masked 404.
 
 ### 3. Smoke-test the dry-run path
 
@@ -372,6 +376,7 @@ Never reuse a deprecated or unpublished version number.
 | Workflow fails "Tag version does not match package.json" | Tag suffix ≠ `package.json` version | Re-tag with correct suffix; or bump `package.json` and re-tag |
 | Publish step fails with an OIDC/auth error | npm side missing the trust binding | Repeat one-time setup step 2 — match repo, workflow filename, environment name exactly |
 | Publish step fails "cannot publish over previously published version" | Version already on npm (immutable) | Bump the version, re-tag |
+| Publish "succeeds" but the version never appears, or fails with a masked 404 | npm 10 (bundled with Node 22) doesn't support OIDC trusted publishing and silently publishes unauthenticated | Upgrade npm to >= 11.5.1 before `npm publish` — the workflow does this automatically |
 | `npm pack --dry-run` lists `src/` or `tests/` | `files` field in `package.json` missing or wrong | Confirm `"files": ["dist"]` is present; npm always includes `LICENSE` + `package.json` regardless |
 
 ---

@@ -42,8 +42,8 @@ body:
       placeholder: |
         - OS: macOS 15 / Ubuntu 24.04
         - Docker: 27.x
-        - Python: 3.11
-        - Cerid AI version: 0.82.0
+        - Python: 3.12
+        - Cerid AI version: 1.0.1
     validations:
       required: false
   - type: textarea

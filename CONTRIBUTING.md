@@ -6,7 +6,7 @@ Thanks for your interest — contributions are welcome.
 
 ### Prerequisites
 
-- Python 3.11+ (3.12 recommended; the dev venv is pinned to 3.12)
+- Python 3.12 (the runtime, CI matrix, and dev venv are all pinned to 3.12)
 - Node.js 22+ (for the React GUI and Electron app)
 - Docker + Docker Compose v2+
 
@@ -34,36 +34,36 @@ The whole CI matrix runs as these commands. Run them before you push.
 ruff check src/mcp/                                # lint (pinned 0.15.4)
 cd src/mcp && python -m mypy .                     # typecheck
 cd src/mcp && lint-imports                         # layer contract (core ↛ app)
-PYTHONPATH=src/mcp pytest src/mcp/tests/ -v        # 2,600+ unit tests
+PYTHONPATH=src/mcp pytest src/mcp/tests/ -v        # 4,800+ Python tests
 
 # Frontend
 cd src/web
 npm install
 npm run typecheck                                  # tsc --noEmit
 npx eslint .
-npx vitest run                                     # 750+ tests
+npx vitest run                                     # 2,700+ frontend tests
 
 # Preservation harness (integration; needs a running stack)
-make preservation-check                            # 35 invariants in ~60s
+make preservation-check                            # preservation harness of integration invariants
 ```
 
 ### CI gates
 
-Every PR runs: `lint`, `typecheck`, `test`, `security`, `lock-sync`, `frontend`, `docker`, plus the drift gates (`env-example-drift`, `router-registry-drift`, `sync-manifest-drift`, `sdk-openapi-drift`, `no-legacy-neo4j-tree`, `silent-catch`) and the `preservation` live-stack integration suite. All are blocking.
+CI runs 10 jobs: `changes`, `lint`, `typecheck`, `test`, `security`, `lock-sync`, `frontend`, `license-scan`, `docker`, and `ci-ok`. All are blocking.
 
 The single **required** status check is `ci-ok`, an aggregator that passes when the real jobs succeeded *or* were skipped. Docs-only PRs (changes confined to `docs/**`, `tasks/**`, or `*.md`) skip the code jobs via the `changes` gate, so `ci-ok` goes green without running the full suite — they merge without burning code CI.
 
 ## Project layout
 
 ```
-src/mcp/                       FastAPI backend (Python 3.11+)
+src/mcp/                       FastAPI backend (Python 3.12)
 ├── core/                      Portable orchestrator — never imports app/
 │   ├── agents/                Query, memory, hallucination, self-RAG, …
 │   ├── contracts/             VectorStore, GraphStore, CacheStore, LLMClient ABCs
 │   ├── retrieval/             BM25, reranker, semantic cache, query decomposition
 │   └── utils/                 Embeddings, circuit breaker, LLM client, NLI, …
 ├── app/                       Application layer (imports core + framework code)
-│   ├── routers/               47 FastAPI routers (new endpoints go here)
+│   ├── routers/               62 FastAPI routers (new endpoints go here)
 │   ├── agents/                Orchestration wrappers (assembler, curator, triage, …)
 │   ├── db/neo4j/              The only Neo4j code path (artifacts, memory, schema,
 │   │                          relationships, taxonomy, users, agents, migrations/)
@@ -71,13 +71,13 @@ src/mcp/                       FastAPI backend (Python 3.11+)
 │   ├── parsers/               PDF, office, structured, email, ebook
 │   └── main.py                FastAPI entry + lifespan
 ├── config/                    settings.py, features.py, taxonomy.py, providers.py
-└── tests/                     2,600+ unit tests + integration/ (preservation harness)
+└── tests/                     4,800+ Python tests + integration/ (preservation harness)
 
 src/web/src/                   React 19 + Vite 7 + Tailwind v4 + shadcn/ui
 ├── components/                chat/, kb/, monitoring/, settings/, audit/, memories/
 ├── hooks/                     use-chat, use-verification-orchestrator, use-kb-context
 ├── contexts/                  Settings, KBInjection, Conversations, Auth
-└── __tests__/                 750+ vitest tests
+└── __tests__/                 2,700+ frontend tests
 ```
 
 ### Layer contract (hard rule)
@@ -116,7 +116,7 @@ Minimal skeleton:
 2. Add `plugin.py` exporting a `register()` function that wires into the relevant registry (parser, agent, tool, connector, sync).
 3. Auto-discovered on server startup.
 
-**Tier gating:** set `"tier": "pro"` in the manifest to require `CERID_TIER=pro`. Licensing: plugins ship under BSL-1.1 and convert to Apache-2.0 after three years.
+**Tier gating:** set `"tier": "pro"` in the manifest to require `CERID_TIER=pro`. Licensing: plugins ship under BUSL-1.1 and convert to Apache-2.0 after three years.
 
 ## Pull request process
 
@@ -124,7 +124,7 @@ Minimal skeleton:
 2. Make focused commits. **Never** add `Co-Authored-By: Claude` / `Anthropic` / etc. — commits are authored by the human developer.
 3. Before pushing, run the full local check list in [Running the checks locally](#running-the-checks-locally). If you touched `core/` or `app/`, also run `make preservation-check`.
 4. Update docs in the same commit when you change:
-   - A route or SDK endpoint → update `docs/API_REFERENCE.md` and regenerate `docs/ROUTER_REGISTRY.md` (`python scripts/gen_router_registry.py`).
+   - A route or SDK endpoint → update `docs/API_REFERENCE.md`.
    - A new env var → add it to `src/mcp/config/settings.py`, then `python scripts/gen_env_example.py` to regen `.env.example`.
    - A Python dep → edit `src/mcp/requirements.txt`, then `./scripts/regen-lock.sh` (Docker-wrapped pip-compile).
 5. Open a PR with a clear description of what and why.
@@ -156,7 +156,7 @@ integrations — so depending on them never pulls FSL terms into your own code. 
 those directories carries its own `LICENSE`, and every source file states its license
 in an `SPDX-License-Identifier` header; that header is authoritative for the file.
 
-Releases published before the 2026-08 transition remain Apache-2.0 and stay that way.
+Releases published before the August 2026 license transition were, and remain, Apache-2.0.
 
 ### Contributor license grant
 

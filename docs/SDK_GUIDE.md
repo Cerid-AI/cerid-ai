@@ -2,14 +2,16 @@
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
 survives internal refactoring of core paths. Current wire-protocol version:
-**1.1.0**. Client packages: `cerid-sdk` (Python) **0.1.1**, `@cerid-ai/sdk`
-(TypeScript) **0.1.1** — both updated 2026-05-24 to expose all 15 endpoints.
-Both client packages stay pre-1.0 through the v1.0 RC cycle; they flip to
-1.0.0 when the main product flips to GA (per `docs/SDK_PUBLISHING.md`).
+**1.1.0**. Client packages are published on
+[PyPI (`cerid-sdk`)](https://pypi.org/project/cerid-sdk/) and
+[npm (`@cerid-ai/sdk`)](https://www.npmjs.com/package/@cerid-ai/sdk) —
+both **0.1.1**, targeting the 17-endpoint `/sdk/v1/` surface. The SDK versions independently
+of the product; current release 0.1.x on PyPI/npm (per
+`docs/SDK_PUBLISHING.md`).
 
 ## Overview
 
-The SDK exposes 15 endpoints covering knowledge-base operations, health
+The SDK exposes 17 endpoints covering knowledge-base operations, health
 monitoring, content ingestion (text / file / adapter-shaped), taxonomy,
 search, plugin discovery, smart-routed LLM completion, async memory
 extraction with job polling, and server configuration. All endpoints
@@ -187,6 +189,8 @@ freshly-created client domain.
 | 13 | GET | `/sdk/v1/settings` | Read-only server config: version, tier, feature flags |
 | 14 | POST | `/sdk/v1/search` | Direct vector search without agent orchestration |
 | 15 | GET | `/sdk/v1/plugins` | List loaded plugins with status and tier |
+| 16 | POST | `/sdk/v1/ingest/webhook/{token}` | Token-gated webhook receiver (provider payloads normalized via adapter recipes; returns 202) |
+| 17 | POST | `/sdk/v1/ingest/voice-note` | Voice-note transcribe + ingest |
 
 ### Request/Response Examples
 

@@ -12,11 +12,11 @@
 - `GET /health/live` — Liveness probe (always 200 unless process crashed)
 - `GET /health/ready` — Readiness probe (503 when critical deps unreachable)
 - `GET /health/status` — Detailed degradation report with circuit breaker states, pipeline providers, feature tier, and per-capability flags (`can_retrieve`, `can_verify`, `can_generate`)
-- `GET /health` (extended, v0.93.3) — Additionally surfaces `recommended_features: [{id, label, reason, triggered_at, corpus_size, enable_payload}, ...]` for the adaptive recommendation engine. Polled by the Settings-pane banner every 60 s.
-- `POST /settings/recommendations/{id}/dismiss` — Permanently dismiss a recommendation for the current tenant. 204 on success. (C3.2 / v0.93.3)
-- `DELETE /settings/recommendations/{id}` — Clear a recommendation from the active hash + drop the per-tenant dismissal. Used by the "Enable now" flow so the banner closes immediately. (C3.2 / v0.93.3)
-- `POST /wiki/write_note` — Two-way vault write (RAG C3.3 / v0.93.2). `{vault_id, path, content, frontmatter?, mode?: "create"|"append"|"overwrite", allow_synthesis_input?}` → `{file_path, artifact_id, ingested, frontmatter_written, mode}`. Atomic write via tmp + `os.replace`; reuses `VaultProfile.classify_path` for path safety; re-ingests as Artifact with `source_type="cerid-synthesis"`.
-- `PATCH /settings` (extended, v0.93.3) — Accepts `enable_sparse_retrieval`, `hybrid_fusion_mode` (`"weighted_sum" | "rrf" | "tri_rrf"`), `hybrid_rrf_sparse_weight`. The sparse toggle mutates `os.environ["RETRIEVAL_SPARSE_ENABLED"]` + `core.retrieval.sparse.SPARSE_ENABLED` live; invalid fusion mode returns 400.
+- `GET /health` (extended) — Additionally surfaces `recommended_features: [{id, label, reason, triggered_at, corpus_size, enable_payload}, ...]` for the adaptive recommendation engine. Polled by the Settings-pane banner every 60 s.
+- `POST /settings/recommendations/{id}/dismiss` — Permanently dismiss a recommendation for the current tenant. 204 on success.
+- `DELETE /settings/recommendations/{id}` — Clear a recommendation from the active hash + drop the per-tenant dismissal. Used by the "Enable now" flow so the banner closes immediately.
+- `POST /wiki/write_note` — Two-way vault write. `{vault_id, path, content, frontmatter?, mode?: "create"|"append"|"overwrite", allow_synthesis_input?}` → `{file_path, artifact_id, ingested, frontmatter_written, mode}`. Atomic write via tmp + `os.replace`; reuses `VaultProfile.classify_path` for path safety; re-ingests as Artifact with `source_type="cerid-synthesis"`.
+- `PATCH /settings` (extended) — Accepts `enable_sparse_retrieval`, `hybrid_fusion_mode` (`"weighted_sum" | "rrf" | "tri_rrf"`), `hybrid_rrf_sparse_weight`. The sparse toggle mutates `os.environ["RETRIEVAL_SPARSE_ENABLED"]` + `core.retrieval.sparse.SPARSE_ENABLED` live; invalid fusion mode returns 400.
 - `PATCH /settings` (extended, Slice 7.2) — Accepts `pack_relevance_weight` (float `0.0`–`2.0`, default `0.7`, advanced / SERVER scope). Multiplier applied to knowledge-pack chunks after reranking; below `1.0` makes personal data win ties, `1.0` is neutral. Surfaced live (`config.PACK_RELEVANCE_WEIGHT`); also exposed in `GET /settings`.
 - `GET /collections` — List ChromaDB collections
 - `GET /scheduler` — Scheduled job status
@@ -143,9 +143,9 @@
 - `POST /mcp/sse` — SSE stream (POST variant)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (26 total)
+### MCP Tools (55 total)
 
-**Core tools (21):**
+55 tools ship by default (60 with the optional trading module). The full, always-current list is exposed via the MCP handshake (`tools/list`) — tools register through `@register_tool` in `app/tool_registry.py` — so it is not enumerated exhaustively here. Representative core tools:
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
@@ -169,7 +169,7 @@
 - `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
-Versioned facade for external consumers. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
+Versioned facade for external consumers — 17 endpoints. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring. See [`docs/SDK_GUIDE.md`](SDK_GUIDE.md) for the full endpoint list; highlights:
 
 - `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode` and `source_config`)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
@@ -423,7 +423,7 @@ curl -X POST http://localhost:8888/recategorize \
 - `INTERNAL_LLM_MODEL` — Internal LLM model ID (empty = auto-selected; set during Ollama setup wizard or via `OLLAMA_DEFAULT_MODEL`)
 - `OLLAMA_DEFAULT_MODEL` — Default Ollama model (auto-recommended based on hardware if not set; fallback: `llama3.2:3b`)
 
-**Internal LLM routing + retry (v0.96.1 candidate, post-2026-05-17 ablations):**
+**Internal LLM routing + retry:**
 - `PROVIDER_STAGE_<NORMALIZED_STAGE>` — Per-stage provider override
   (e.g. `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`). Routes that
   specific `call_internal_llm` call site to a different provider than
@@ -434,14 +434,14 @@ curl -X POST http://localhost:8888/recategorize \
 - `INTERNAL_LLM_RETRY_BACKOFF=0.5` — Exponential backoff base
   (seconds) for the retry loop. Doubles per attempt.
 
-**Embedding cache (v0.96.1 candidate):**
+**Embedding cache:**
 - `CERID_EMBED_CACHE_SIZE=50000` — In-memory LRU capacity. `0` disables.
 - `CERID_EMBED_CACHE_PATH` — If set, enables a disk tier
   (`PersistentEmbeddingCache`) at the given SQLite path. Default
   empty = memory-only. Cross-run / cross-process cache; namespace-
   isolated per provider+model so different backends coexist in one DB.
 
-**LongMemEval runtime knobs (v0.96.1 candidate):**
+**LongMemEval runtime knobs:**
 - `LONGMEMEVAL_INGEST_PARALLEL=4` — Parallel-ingest chunk size in
   `runner.run`. Matches quenchforge's `--parallel 4` slot. Set to
   `1` for sequential ingest (debugging).
@@ -551,9 +551,8 @@ make deps-check
 - `Makefile` — Convenience targets
 - `scripts/hooks/pre-commit` — Blocks commits when lock files are stale
 - `.github/dependabot.yml` — Weekly grouped PRs for pip, npm, actions, Docker
-- `docs/DEPENDENCY_COUPLING.md` — Cross-service version constraints
 
-**Cross-service version coupling:** See `docs/DEPENDENCY_COUPLING.md` for constraints (ChromaDB client/server, spaCy lib/model, Node version, Python version). CI enforces lock file sync via `lock-sync` job.
+**Cross-service version coupling:** ChromaDB client/server, spaCy lib/model, Node version, and Python version must stay in sync across their pinned locations. CI enforces lock file sync via the `lock-sync` job.
 
 ---
 
@@ -753,7 +752,7 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 
 ### Knowledge Graph (Subjects panes)
 
-Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. See [`docs/ROUTER_REGISTRY.md`](ROUTER_REGISTRY.md) for the generated parameter/response detail.
+Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. Full parameter/response detail is in the OpenAPI spec at `GET /openapi.json`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

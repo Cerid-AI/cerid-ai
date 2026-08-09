@@ -161,8 +161,6 @@ their candidate task driver until the answers sharpen.
 
 ## See also
 
-- [`tasks/2026-05-10-v0.92-final-plan.md`](../tasks/2026-05-10-v0.92-final-plan.md) — current release driver
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — layered system architecture
-- [`docs/PRESERVATION.md`](PRESERVATION.md) — capability invariants
-- [`docs/EVAL_BASELINES.md`](EVAL_BASELINES.md) — retrieval-quality regression ledger
+- [`docs/EVAL_BASELINES_PUBLIC.md`](EVAL_BASELINES_PUBLIC.md) — retrieval-quality regression ledger
 - [`docs/BACKGROUND_JOBS.md`](BACKGROUND_JOBS.md) — operator guide to the processor

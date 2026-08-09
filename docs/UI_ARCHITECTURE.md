@@ -1,8 +1,7 @@
 # Cerid AI — UI Architecture
 
 > **Last updated:** 2026-06-11 (SEXTANT settings redesign + Subjects eval cycles 1–4)
->
-> **Plan reference:** [`tasks/2026-05-21-cerid-v1-systemic-implementation-plan.md`](../tasks/2026-05-21-cerid-v1-systemic-implementation-plan.md); settings redesign [`tasks/2026-06-10-settings-ia-redesign.md`](../tasks/2026-06-10-settings-ia-redesign.md)
+
 
 ## Sidebar layout
 
@@ -148,4 +147,4 @@ dispatch is type-safe.
 
 ## Performance budgets
 
-See [`PERF_BUDGETS.md`](PERF_BUDGETS.md) for Atlas + Constellation measured budgets. Settings/Sources/Chat are unbounded today — their dominant cost is React reconciliation, not WebGL, and they're nowhere near the budget envelope.
+Atlas + Constellation carry measured performance budgets. Settings/Sources/Chat are unbounded today — their dominant cost is React reconciliation, not WebGL, and they're nowhere near the budget envelope.

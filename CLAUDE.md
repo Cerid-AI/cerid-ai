@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Licensed FSL-1.1-ALv2 (source-available, becomes Apache-2.0 at two years); the SDKs and client integrations are Apache-2.0 and the plugin trees are BUSL-1.1 — see [`CONTRIBUTING.md`](CONTRIBUTING.md#license) for the per-path table.
 
-**Version:** 0.90 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
+**Version:** 1.0.1 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
 
 ## Quick Start
 
@@ -77,13 +77,13 @@ pip install bcrypt PyJWT          # Multi-user JWT auth (CERID_MULTI_USER=true)
 - `pandas` — CSV enrichment with auto-delimiter, encoding fallback, df.describe()
 - `react-syntax-highlighter` — PrismLight with 25 languages (~200KB runtime chunk)
 
-## SDK (12 endpoints at /sdk/v1/)
+## SDK (17 endpoints at /sdk/v1/)
 
-See [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md). Core: query, hallucination, memory/extract, health, ingest, search, collections, taxonomy, settings, plugins, health/detailed, ingest/file.
+See [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md) for the full endpoint table. Core: query, hallucination, memory/extract (+ job polling), llm/complete, health, ingest (text / file / external / webhook / voice-note), search, collections, taxonomy, settings, plugins, health/detailed.
 
-## MCP Tools (21)
+## MCP Tools (55)
 
-19 core + `pkb_web_search` + `pkb_memory_recall`. See [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md).
+55 tools (60 with the optional trading module). Most tools register via `@register_tool` in `app/tool_registry.py` + `app/mcp_tools/`. See [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md).
 
 ## Plugin System (5 types)
 
@@ -93,7 +93,7 @@ See [`docs/PLUGIN_DEVELOPMENT.md`](docs/PLUGIN_DEVELOPMENT.md). Types: `parser`,
 
 ```bash
 # Python (in Docker)
-docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim \
+docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.12-slim \
   bash -c "pip install -q -r requirements.txt -r requirements-dev.txt && python -m pytest tests/ -v"
 
 # Frontend
@@ -105,11 +105,11 @@ cd src/web && npx vitest run
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 **Sync points when making changes:**
-- New MCP tool → `tools.py` + tool count in README
+- New MCP tool → `@register_tool` in `app/tool_registry.py` (implementation under `app/mcp_tools/`) + tool count in README
 - New endpoint → `main.py` + `docs/API_REFERENCE.md`
 - New env var → `settings.py` + `.env.example`
 - Python deps → `requirements.txt` then `make lock-python`
 
-## CI (7 jobs)
+## CI (10 jobs)
 
-lint, typecheck, test (20% floor), security, lock-sync, frontend, docker.
+changes, lint, typecheck, test (20% coverage floor), security, lock-sync, frontend, license-scan, docker, ci-ok.

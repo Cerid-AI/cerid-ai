@@ -4,9 +4,11 @@
 
 A privacy-first, local-first workspace that unifies your code, finance, projects, and personal artifacts into a context-aware LLM interface with RAG-powered retrieval, intelligent agents, and built-in hallucination detection.
 
-[![Status](https://img.shields.io/badge/Status-Active-green)]()
+[![Release](https://img.shields.io/github/v/release/Cerid-AI/cerid-ai)](https://github.com/Cerid-AI/cerid-ai/releases/latest)
 [![License](https://img.shields.io/badge/License-FSL--1.1--ALv2-blue)](LICENSE)
 [![CI](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml)
+
+[Docs](docs/) · [Website](https://cerid.ai) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
 
 ---
 
@@ -26,6 +28,8 @@ Open http://localhost:3000 — the React GUI is ready. Drop files into `~/cerid-
 
 **It's working when** the status bar shows green dots for ChromaDB, Neo4j, and Redis.
 
+Prefer an app? Signed builds for macOS and Windows: [desktop release v1.0.1](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.1-desktop).
+
 ---
 
 ## Why Cerid?
@@ -36,10 +40,10 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 |--------------------------------|-----------------------------------|----------------------|-------------------|------------------|
 | **Hallucination detection**    | ✅ Built-in claim verification + NLI | ❌                    | ❌                 | ❌                |
 | **Memory extraction**          | ✅ Auto-extract facts/decisions from chat | Basic              | Core feature     | ❌                |
-| **9 specialized agents**       | ✅ Query, Triage, Rectify, Audit, Hallucination, Memory, etc. | Limited           | None             | None             |
+| **Specialist agents**          | ✅ Query, Triage, Rectify, Audit, Hallucination, Memory, etc. | Limited           | None             | None             |
 | **Tiered local inference**     | ✅ Ollama + GPU sidecar + auto-fallback | Basic             | None             | Basic            |
 | **Graph + vector + BM25**      | ✅ Full hybrid with Neo4j relationships | Vector only       | Vector only      | Vector only      |
-| **Clean architecture (v0.91)** | ✅ 114 preservation tests + canonical models | Growing           | Growing          | Older            |
+| **Clean architecture (v1.0.1)** | ✅ Preservation harness of integration invariants + canonical models | Growing           | Growing          | Older            |
 | **5-min Docker start**         | ✅ One-command                    | ✅                   | ✅                | ✅                |
 | **Multi-domain KB**            | ✅ coding / finance / projects / personal | ✅                | Limited          | ✅                |
 
@@ -50,12 +54,12 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 ## Key Capabilities
 
 - **React GUI** at :3000 — streaming chat, knowledge browser, monitoring dashboards
-- **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Hallucination Detection, Memory Extraction, Maintenance, Audit, and more
-- **21 MCP Tools** — Full control via MCP protocol (`pkb_*` namespace)
+- **Specialist Agents** — Query (LLM reranking), Triage (LangGraph), Hallucination Detection, Memory Extraction, Maintenance, Audit, and more
+- **55 MCP Tools** (60 with the optional trading module) — Full control via MCP protocol (`pkb_*` namespace)
 - **Hallucination Detection** — Extracts claims from responses and verifies them against your KB using NLI + source attribution
 - **Memory System** — Automatically extracts facts, decisions, and preferences from conversations
 - **Tiered Inference** — Auto-detects Ollama (GPU/CPU), FastEmbed sidecar, or Docker CPU fallback
-- **Quenchforge AMD-GPU Routing** (v0.93.8) — Intel Mac + AMD discrete GPU operators get GPU acceleration for LLM chat, dense embeddings, cross-encoder reranking, AND ingest-time enrichment via per-workload env-driven routing (`INTERNAL_LLM_PROVIDER` / `EMBEDDINGS_PROVIDER` / `RERANK_PROVIDER`). See [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](docs/AMD_GPU_MODEL_RECOMMENDATIONS.md) for vetted GGUF picks by VRAM tier.
+- **Quenchforge AMD-GPU Routing** — Intel Mac + AMD discrete GPU operators get GPU acceleration for LLM chat, dense embeddings, cross-encoder reranking, AND ingest-time enrichment via per-workload env-driven routing (`INTERNAL_LLM_PROVIDER` / `EMBEDDINGS_PROVIDER` / `RERANK_PROVIDER`). See [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](docs/AMD_GPU_MODEL_RECOMMENDATIONS.md) for vetted GGUF picks by VRAM tier.
 - **`/health.inference_routing`** — Five-key introspection of the active inference provider per workload (LLM / embed / rerank / sparse / NLI). Operators verify their env vars actually reached the container.
 - **Hybrid Retrieval** — dense bi-encoder + BM25 + SPLADE-v3 learned-sparse, RRF-fused across all three retrievers
 - **Adaptive Configuration Recommender** — Settings pane surfaces gated retrieval features (sparse, HyPE, parent-child, RRF) once your corpus crosses a feature-specific threshold; three-action dismissal matches GitHub's notification model
@@ -73,12 +77,12 @@ All data stays local. Only LLM API calls leave your machine.
 ```
 User → React GUI (:3000)
          ↓
-MCP Server (:8888) — FastAPI + 9 agents + hybrid retrieval
+MCP Server (:8888) — FastAPI + specialist agents + hybrid retrieval
          ↓
 ChromaDB (vectors) + Neo4j (graph) + Redis (cache + audit)
 ```
 
-Core is cleanly separated from app layer (Phase C architecture). 114 preservation tests across 25 files guard every capability at merge time (push to main + merge queue).
+Core is cleanly separated from app layer (Phase C architecture). A preservation harness of integration invariants guards every capability at merge time (push to main + merge queue).
 
 ---
 
@@ -106,41 +110,31 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 - `POST /agent/hallucination` — Verify any LLM response against your KB
 - `POST /agent/verify-stream` — Same verification, streamed as SSE with auto-persisted reports
 - `POST /agent/memory/extract` — Pull facts from conversation history
-- 21 MCP tools (`pkb_*`) for programmatic access
+- 55 MCP tools (`pkb_*`) for programmatic access
+
+### Install the SDKs
+
+Typed client libraries for the stable `/sdk/v1/` API — [`cerid-sdk` on PyPI](https://pypi.org/project/cerid-sdk/) and [`@cerid-ai/sdk` on npm](https://www.npmjs.com/package/@cerid-ai/sdk):
+
+```bash
+pip install cerid-sdk          # Python
+npm install @cerid-ai/sdk     # TypeScript
+```
+
+See [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md) for quickstarts and the full endpoint reference.
 
 ---
 
-## Recent Highlights (v0.93.x — May 2026)
+## What's new in v1.0
 
-- **v0.93.8 — The GPU release.** End-to-end Quenchforge routing on Intel Mac + AMD discrete GPU. Per-workload env-driven dispatch (`EMBEDDINGS_PROVIDER`, `RERANK_PROVIDER`) + ingest enrichment migration (per-chunk contextual summaries, categorization, curator synopsis) + Settings UI surface + `/health.inference_routing` introspection. AMD GPU model recommendation matrix at [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](docs/AMD_GPU_MODEL_RECOMMENDATIONS.md). 4411 Python + 1116 frontend tests.
-- **v0.93.6 — Quenchforge integration merge.** Hardware-aware backend recommendation (Mac IOKit GPU detection) + Quenchforge as a routable LLM provider + setup-wizard surfaces (BackendRecommendationStep, QuenchforgeInstallStep, TelemetryConsentStep) + cascade rerank + sentence-window chunker + four advanced inference flags.
-- **v0.93.5 — Chat virtualization + L4 backend + Dependabot batch.** `@tanstack/react-virtual` exact-pinned to a pre-supply-chain-attack version, three-tier rendering with shared MessageRow component, recommender surfaces toggle at 200-message conversations. L4 ("Full ephemeral") Private Mode contract closed end-to-end. 11 Dependabot bumps absorbed.
-- **v0.93.3 — SPLADE-v3 sparse retrieval + adaptive recommender.** Third retriever alongside dense + BM25, RRF-fused via `tri_rrf`. General adaptive-recommendation engine surfaces gated features at corpus-size thresholds (sparse / HyPE / parent-child @ 100 docs, RRF @ 500). Pivoted from BGE-M3 per literature evidence (smaller, faster, better quality on BEIR).
-- **v0.93.0–v0.93.2 — RAG Cycle 1-3.** HyPE wiring fixes, Obsidian-style wikilink + frontmatter + vault profile ingestion, bidirectional vault writeback with `cerid-synthesis` loop-breaker.
-- **`benchmark-slo` is a merge-time gate.** Real-OpenRouter latency drift fails CI on push-to-main and in the merge queue (deterministic budget-plumbing tests still run on every PR); a nightly twin of the same job tracks drift between merges.
-- **`/sdk/v1/memory/extract` SLO bounded.** Per-stage `asyncio.wait_for` budgets on the three internal LLM calls + a server-side `MEMORY_QUEUE_MODE=async` path that returns 202 + `Location` header; callers poll `GET /sdk/v1/memory/extract/jobs/{job_id}`. The sync `?wait=true` escape hatch preserves binary compatibility.
-- **Pro-tier Stripe checkout end-to-end.** Hosted Checkout flow shipped; webhook coverage extends to `customer.subscription.updated` (deactivates on `past_due` / `unpaid` / `canceled` / `incomplete_expired`). Billing itself runs on the hosted cerid.ai service — the self-hosted stack ships a graceful billing stub by design (your data plane never depends on our billing plane).
-- **`mode=fast | thorough` on `/agent/hallucination`.** Fast mode skips cross-model NLI entirely, returns claims marked `status='uncertain'` with `nli_skipped=true` — useful for post-fact annotations that don't want to wait 60-100s.
-- **`slo_budget_ms` on `/sdk/v1/llm/complete`.** Smart-router filters tiers by their empirical p95 latency profile; if no tier fits, returns `503` + `Retry-After`. Never silently downgrades.
-- **Schema contracts hardened.** Object envelope on `/agent/memory/recall`; `min_length=1` on required `conversation_id` fields. Drift gate keeps every constraint stable across releases.
-- **Python 3.12 runtime.** Dockerfile `python:3.12.13-slim-trixie`, pyproject `requires-python = ">=3.12"`, full CI matrix on 3.12.
-- **Layout-aware retrieval default ON.** `+0.05 MRR / +0.024 NDCG@10 / faster latency` against the live eval-corpus; nightly `eval-exploratory.yml` workflow + BEIR seed plumbing for ongoing drift detection.
+- **Verified answers by default** — claim extraction + NLI entailment gating verifies LLM responses against your knowledge base, with source attribution and streaming verification reports.
+- **55 MCP tools** (60 with the optional trading module) plus a full MCP server, so Claude and other MCP-native clients drive Cerid directly.
+- **Four retrieval surfaces, one query path** — vector, BM25/sparse hybrid, knowledge graph, and a self-refreshing wiki, routed per query intent.
+- **Signed & notarized desktop apps** — macOS universal DMG and Windows installer on the [v1.0.1 desktop release](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.1-desktop).
+- **Python + TypeScript SDKs live** — [`cerid-sdk` on PyPI](https://pypi.org/project/cerid-sdk/) and [`@cerid-ai/sdk` on npm](https://www.npmjs.com/package/@cerid-ai/sdk) against the stable `/sdk/v1/` contract.
+- **FSL-1.1-ALv2 source-available licensing** — the core converts to Apache-2.0 on each version's second anniversary; SDKs and client integrations stay Apache-2.0.
 
-### Previously (v0.91 — May 2026)
-
-- **`benchmark-slo` is a PR-blocking merge gate.** Real-OpenRouter latency drift fails CI alongside the deterministic budget-plumbing tests.
-- **`/sdk/v1/memory/extract` SLO bounded** via per-stage `asyncio.wait_for` budgets + async queue mode.
-- **Pro-tier Stripe checkout end-to-end.** Hosted Checkout flow shipped; webhook coverage extends to `customer.subscription.updated`.
-- **Layout-aware retrieval default ON.** `+0.05 MRR / +0.024 NDCG@10` against the live eval-corpus.
-- **Python 3.12 runtime.** Dockerfile `python:3.12.13-slim-trixie`.
-
-### Previously (v0.90 — April 2026)
-
-- Nine-sprint consolidation: canonical `ClaimVerification` Pydantic model, bridge modules retired, `src/mcp/services/` + `src/mcp/agents/` directories deleted.
-- 35 preservation invariants as a merge gate; `preservation` + every drift gate are blocking.
-- `/sdk/v1/*` OpenAPI contract baseline + drift check.
-- Silent-catch observability contract enforced.
-- Streaming verification auto-persist.
+Full history: [CHANGELOG.md](CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 
 ---
 
@@ -173,8 +167,8 @@ file lives:
 The SDKs and client integrations stay permissive on purpose: they are the surfaces
 you build against, so depending on them should never pull FSL terms into your code.
 
-**Releases published before the 2026-08 transition remain Apache-2.0 and stay that
-way** — relicensing is version-forward only and cannot be applied retroactively.
+**Releases published before the August 2026 license transition were, and remain,
+Apache-2.0** — relicensing was version-forward only and cannot be applied retroactively.
 
 **Star the repo** if this is useful — it helps more people discover private, trustworthy AI tools.
 
