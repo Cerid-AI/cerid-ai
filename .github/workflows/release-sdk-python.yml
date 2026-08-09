@@ -73,7 +73,11 @@ jobs:
           echo "Releasing cerid-sdk v$pkg_version"
 
       - name: Install package + test deps
-        run: pip install --quiet -e . pytest
+        # The [test] extra, not bare pytest: the contract tests import
+        # jsonschema, and installing around the extra is how this workflow's
+        # first-ever run failed while ci.yml's sdk-contract job (which uses
+        # the extra) stayed green.
+        run: pip install --quiet -e ".[test]"
 
       - name: Run package tests
         run: pytest tests/ -v
