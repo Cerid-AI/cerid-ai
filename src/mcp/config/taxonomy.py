@@ -1,0 +1,225 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: FSL-1.1-ALv2
+
+"""Domain taxonomy, supported extensions, and cross-domain affinity."""
+from __future__ import annotations
+
+import json
+import os
+
+# ---------------------------------------------------------------------------
+# Hierarchical Taxonomy (domains -> sub-categories -> tags)
+# ---------------------------------------------------------------------------
+TAXONOMY = {
+    "coding": {
+        "description": "Source code, scripts, technical documentation",
+        "icon": "code",
+        "sub_categories": ["python", "javascript", "devops", "architecture", "general"],
+    },
+    "finance": {
+        "description": "Financial documents, tax records, budgets",
+        "icon": "dollar-sign",
+        # `trading` (Phase 5.2): trade logs / signals / positions are a finance
+        # sub_category, NOT a new top-level domain — the 22-domain graph
+        # backbone + per-domain Chroma collections assume the existing set.
+        "sub_categories": ["tax", "investments", "budgets", "receipts", "trading", "general"],
+    },
+    "projects": {
+        "description": "Project plans, meeting notes, specifications",
+        "icon": "folder",
+        "sub_categories": ["active", "archived", "proposals", "general"],
+    },
+    "personal": {
+        "description": "Personal notes, journal entries, health records",
+        "icon": "user",
+        # `career` (Phase 5.2): resumes / job notes / reviews are a personal
+        # sub_category, not a top-level domain (see finance.trading note).
+        "sub_categories": ["notes", "health", "travel", "career", "general"],
+    },
+    "general": {
+        "description": "Uncategorized or cross-domain content",
+        "icon": "file",
+        "sub_categories": ["general"],
+    },
+    "conversations": {
+        "description": "Extracted memories from chat sessions",
+        "icon": "message-circle",
+        "sub_categories": ["facts", "decisions", "preferences", "action-items", "general"],
+    },
+    # ── Pro-tier connector domains (Phases D-J) ────────────────────
+    # Each Pro-tier ingest connector writes into its own domain so
+    # retrieval can filter by source and the RAG weights UI can
+    # surface per-domain weights (kb:<domain> keys).
+    "notes": {
+        "description": "Apple Notes (and other note-app content)",
+        "icon": "sticky-note",
+        "sub_categories": ["apple_notes", "general"],
+    },
+    "mail": {
+        "description": "Email messages from Apple Mail / Gmail / Outlook",
+        "icon": "mail",
+        "sub_categories": ["apple_mail", "gmail", "outlook", "general"],
+    },
+    "messages": {
+        "description": "iMessage conversations (privacy-gated; requires private_mode Level 2+)",
+        "icon": "message-square",
+        "sub_categories": ["imessage", "general"],
+    },
+    "meetings": {
+        "description": "Meeting recordings: transcripts + speaker diarization + calendar stitching",
+        "icon": "mic",
+        "sub_categories": ["recorded", "summary", "general"],
+    },
+    "inbox": {
+        "description": "AI-triaged inbox threads (urgent / actionable / personal / newsletter / promo)",
+        "icon": "inbox",
+        "sub_categories": ["urgent", "actionable", "personal", "newsletter", "promo", "general"],
+    },
+    "digests": {
+        "description": "Cerid daily/weekly synthesis digests (Phase K)",
+        "icon": "calendar-days",
+        "sub_categories": ["daily", "weekly", "general"],
+    },
+}
+
+# User-defined custom domains via env var (JSON object with same shape as TAXONOMY entries)
+_custom_domains_raw = os.getenv("CERID_CUSTOM_DOMAINS", "")
+if _custom_domains_raw:
+    try:
+        _custom = json.loads(_custom_domains_raw)
+        if isinstance(_custom, dict):
+            TAXONOMY.update(_custom)
+    except (json.JSONDecodeError, TypeError):
+        pass  # silently ignore malformed custom domains
+
+DOMAINS = list(TAXONOMY.keys())
+DEFAULT_DOMAIN = "general"
+DEFAULT_SUB_CATEGORY = "general"
+INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
+
+
+def collection_name(domain: str, *, namespace: str | None = None) -> str:
+    """ChromaDB collection name for a given domain.
+
+    When ``namespace`` is provided (or ``KB_NAMESPACE`` env var is set to
+    something other than ``"default"``), collections are prefixed for
+    multi-KB isolation: ``kb_{namespace}_{domain}``.
+
+    Backward compatible: default namespace uses legacy ``domain_{slug}`` format.
+    """
+    import os
+
+    ns = namespace or os.getenv("KB_NAMESPACE", "")
+    slug = domain.replace(" ", "_").lower()
+    if ns and ns != "default":
+        return f"kb_{ns}_{slug}"
+    return f"domain_{slug}"
+
+
+# ---------------------------------------------------------------------------
+# Supported file extensions (mapped to parser functions in utils/parsers.py)
+# ---------------------------------------------------------------------------
+SUPPORTED_EXTENSIONS = {
+    # Documents
+    ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv",
+    # E-books & rich text
+    ".epub", ".rtf",
+    # Email
+    ".eml", ".mbox", ".msg",
+    # Text / markup
+    ".txt", ".md", ".rst", ".log",
+    ".html", ".htm", ".xml",
+    # Code
+    ".py", ".js", ".ts", ".jsx", ".tsx",
+    ".java", ".go", ".rs", ".rb", ".cpp", ".c", ".h", ".cs",
+    ".sql", ".r", ".swift", ".kt",
+    ".sh", ".bash",
+    # Config / data
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+}
+
+# ---------------------------------------------------------------------------
+# Cross-Domain Connections
+# ---------------------------------------------------------------------------
+DOMAIN_AFFINITY = {
+    "coding":        {"projects": 0.6},
+    "projects":      {"coding": 0.6, "finance": 0.4},
+    "finance":       {"projects": 0.4},
+    "personal":      {"general": 0.5, "conversations": 0.3},
+    "general":       {"personal": 0.5, "conversations": 0.3},
+    "conversations": {"personal": 0.3, "general": 0.3},
+}
+CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2   # weight for domain pairs not in DOMAIN_AFFINITY
+
+
+# ---------------------------------------------------------------------------
+# Per-Domain Tag Vocabulary (controlled vocabulary for constrained tagging)
+# ---------------------------------------------------------------------------
+# Tags in the vocabulary are preferred during AI categorization and surfaced
+# first in typeahead suggestions.  Free-form tags are still allowed but
+# vocabulary tags are boosted in quality scoring.
+TAG_VOCABULARY: dict[str, list[str]] = {
+    "coding": [
+        "python", "javascript", "typescript", "docker", "api", "cli",
+        "testing", "debugging", "refactoring", "architecture", "database",
+        "security", "performance", "ci-cd", "git", "frontend", "backend",
+        "documentation", "config", "automation", "data-pipeline",
+    ],
+    "finance": [
+        "tax-return", "invoice", "receipt", "budget", "investment",
+        "expense", "income", "bank-statement", "tax-deduction", "payroll",
+        "insurance", "retirement", "mortgage", "credit-card", "report",
+    ],
+    "projects": [
+        "meeting-notes", "specification", "proposal", "roadmap", "design",
+        "requirements", "milestone", "retrospective", "status-update",
+        "architecture", "timeline", "stakeholder", "risk", "deliverable",
+    ],
+    "personal": [
+        "journal", "health", "travel", "recipe", "workout", "meditation",
+        "goal", "habit", "book-notes", "learning", "family", "gratitude",
+        "planning", "reflection", "inspiration",
+    ],
+    "general": [
+        "reference", "tutorial", "how-to", "research", "notes",
+        "bookmark", "template", "cheatsheet", "summary", "faq",
+    ],
+    "conversations": [
+        "fact", "decision", "preference", "action-item", "insight",
+        "question", "recommendation", "follow-up", "context", "memory",
+    ],
+    # Pro-tier connector domains (Phases D–J). Each entry mirrors the
+    # tag bias the AI categorizer should apply when a new artifact
+    # lands in that domain. Vocabularies kept short — connectors carry
+    # their own metadata which dominates the categorizer's choice.
+    "notes": [
+        "note", "idea", "draft", "todo", "list", "quote",
+        "highlight", "fleeting", "snippet", "memo", "outline",
+        "annotation", "bookmark",
+    ],
+    "mail": [
+        "thread", "reply", "newsletter", "receipt", "notification",
+        "calendar-invite", "personal", "work", "promotional",
+        "automated", "transactional", "subscription",
+    ],
+    "messages": [
+        "chat", "thread", "group", "direct-message", "attachment",
+        "voice-note", "reaction", "mention", "link-share",
+        "media-share", "scheduled-message",
+    ],
+    "meetings": [
+        "transcript", "summary", "action-item", "decision",
+        "attendee", "agenda", "recording", "follow-up",
+        "interview", "standup", "review",
+    ],
+    "inbox": [
+        "urgent", "actionable", "personal", "newsletter", "promo",
+        "spam", "follow-up", "triaged", "awaiting-reply",
+        "scheduled", "snoozed",
+    ],
+    "digests": [
+        "daily", "weekly", "summary", "highlights", "trending",
+        "recap", "rollup", "briefing", "newsletter-summary",
+        "activity-report",
+    ],
+}

@@ -1,0 +1,103 @@
+name: Release / cerid-sdk (Python)
+
+# Publish the Python SDK at packages/sdk/python/ to PyPI.
+#
+# Triggers:
+#   * push of a tag matching ``cerid-sdk-v*`` — auto-publishes to PyPI
+#     after asserting the tag matches pyproject.toml's version.
+#   * workflow_dispatch — manual fire with a target chooser
+#     (``testpypi`` for dry runs, ``pypi`` for real release).
+#
+# Auth: PyPI Trusted Publishing (OIDC). No long-lived API token. The
+# project must be configured on PyPI / TestPyPI as a trusted publisher
+# referencing this repo + workflow filename + environment name. See
+# docs/SDK_PUBLISHING.md for the one-time setup runbook.
+
+on:
+  push:
+    tags:
+      - "cerid-sdk-v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Publish target"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+# Rule 1: artifact-publishing workflow — never cancel in-flight runs so a
+# half-published release doesn't ship to PyPI.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # required for PyPI Trusted Publishing OIDC
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: Build + publish cerid-sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The environment block is what PyPI's Trusted Publisher binds to.
+    # PyPI verifies (repo, workflow file, environment) — mismatch = reject.
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' && 'testpypi' || 'pypi' }}
+      url: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' && 'https://test.pypi.org/p/cerid-sdk' || 'https://pypi.org/p/cerid-sdk' }}
+
+    defaults:
+      run:
+        working-directory: packages/sdk/python
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.11" }
+
+      - name: Assert tag matches pyproject version (tag-triggered only)
+        if: github.event_name == 'push'
+        run: |
+          # Tag pattern: cerid-sdk-v0.1.0 → version "0.1.0"
+          tag_version="${GITHUB_REF#refs/tags/cerid-sdk-v}"
+          pkg_version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag version ($tag_version) does not match pyproject.toml version ($pkg_version)"
+            exit 1
+          fi
+          echo "Releasing cerid-sdk v$pkg_version"
+
+      - name: Install package + test deps
+        run: pip install --quiet -e . pytest
+
+      - name: Run package tests
+        run: pytest tests/ -v
+
+      - name: Install build tooling
+        run: pip install --upgrade build twine
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Verify built artifacts (twine check)
+        run: |
+          twine check dist/*
+          ls -la dist/
+
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/sdk/python/dist
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish to PyPI
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/sdk/python/dist

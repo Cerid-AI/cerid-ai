@@ -1,0 +1,69 @@
+# Build context for src/mcp/Dockerfile is the repo root (so we can read
+# pyproject.toml at build time). This image only needs pyproject.toml +
+# src/mcp/ minus tests/cache/VERSION. Everything else inflates context.
+
+# ── Other src/ trees (web image has its own context: src/web/) ──────────
+src/web
+
+# ── Heavy / unrelated repo-root trees ───────────────────────────────────
+backups
+stacks
+data
+packages
+plugins
+docs
+tasks
+tests
+scripts
+
+# ── VCS / tooling / editors ─────────────────────────────────────────────
+.git
+.github
+.claude
+.venv
+.cursor
+.vscode
+.idea
+.husky
+node_modules
+**/node_modules
+
+# ── Python build / cache artifacts ──────────────────────────────────────
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage*
+**/htmlcov
+
+# ── Env / OS noise / logs ───────────────────────────────────────────────
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.log
+**/.DS_Store
+**/Thumbs.db
+*.swp
+*~
+
+# ── Inside src/mcp: drop runtime/data and test trees ────────────────────
+src/mcp/tests
+src/mcp/data
+src/mcp/eval
+
+# ── Never bake a stale host VERSION ─ the Dockerfile generates it from
+#    pyproject.toml inside the build. Excluding here is belt-and-suspenders
+#    so a leftover host file can't shadow the canonical write.
+src/mcp/VERSION
+
+# ── Top-level docs / metadata (image doesn't need them) ─────────────────
+CHANGELOG.md
+CLAUDE.md
+CONTRIBUTING.md
+INSTALL.md
+README.md
+docker-compose*.yml
+Makefile

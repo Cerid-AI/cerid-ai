@@ -1,0 +1,2 @@
+# Per-machine settings (permissions, disabled plugins) — never commit
+settings.local.json

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "types": ["chrome"],
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

@@ -1,0 +1,193 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+import { Sparkles, Cpu, Zap } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import type { RecommendedLocalBackend } from "@/lib/types"
+
+interface HardwareInfo {
+  ram_gb: number
+  cpu: string
+  gpu: string
+  gpu_acceleration: string
+}
+
+const BACKEND_LABELS: Record<RecommendedLocalBackend, string> = {
+  ollama: "Ollama",
+  quenchforge: "Quenchforge",
+  cloud: "Cloud",
+}
+
+/** Recommend a mode based on hardware capabilities. */
+function recommendMode(hw: HardwareInfo | null): {
+  mode: "simple" | "advanced"
+  reason: string
+} {
+  if (!hw || hw.ram_gb === 0) return { mode: "simple", reason: "" }
+
+  // Advanced recommended for capable systems (16GB+ RAM or GPU)
+  if (hw.ram_gb >= 16 || hw.gpu_acceleration !== "none") {
+    return {
+      mode: "advanced",
+      reason: hw.gpu_acceleration !== "none"
+        ? `${hw.ram_gb}GB RAM + ${hw.gpu_acceleration} GPU — your system can run all pipeline features`
+        : `${hw.ram_gb}GB RAM — your system can handle verification, reranking, and smart routing`,
+    }
+  }
+
+  return {
+    mode: "simple",
+    reason: `${hw.ram_gb}GB RAM — Simple mode uses fewer resources for smooth performance`,
+  }
+}
+
+interface ModeSelectionStepProps {
+  selectedMode: "simple" | "advanced"
+  onSelectMode: (mode: "simple" | "advanced") => void
+  configSummary: {
+    providerCount: number
+    providerNames: string[]
+    domainCount: number
+    ollamaEnabled: boolean
+    /**
+     * Chat-model label for the summary line. The wizard owns the
+     * backend-aware selection logic (e.g. `llama3.1-8b` for Quenchforge,
+     * skip for Cloud, the actually-pulled model for Ollama). null hides the
+     * "Local LLM" line entirely instead of mislabelling a reranker as a
+     * chat model.
+     */
+    ollamaModel: string | null
+    documentCount: number
+    /**
+     * Inference backend selected on the Welcome step. Added to the summary
+     * so users see their Step 1 choice reflected here (F-04-05).
+     */
+    inferenceBackend?: RecommendedLocalBackend | null
+  }
+  hardware?: HardwareInfo | null
+}
+
+export function ModeSelectionStep({
+  selectedMode,
+  onSelectMode,
+  configSummary,
+  hardware,
+}: ModeSelectionStepProps) {
+  const providerText = configSummary.providerNames.length > 0
+    ? configSummary.providerNames.join(" + ") + " configured"
+    : "No providers configured"
+
+  const kbText = configSummary.documentCount > 0
+    ? `${configSummary.documentCount} document${configSummary.documentCount !== 1 ? "s" : ""} ingested`
+    : "0 documents"
+
+  // Backend choice from Welcome step (F-04-05). Always show; the inference
+  // backend is the most consequential decision in the wizard so the user
+  // should see it reflected on the Mode summary even when no local model
+  // has been pulled yet.
+  const backendText = configSummary.inferenceBackend
+    ? `Backend: ${BACKEND_LABELS[configSummary.inferenceBackend]}`
+    : null
+
+  // Chat-model line. Hide the line entirely when there's no chat model
+  // (rather than mislabelling the rerank slot as a chat LLM — F-04-08).
+  const ollamaText = configSummary.ollamaEnabled && configSummary.ollamaModel
+    ? `Chat model: ${configSummary.ollamaModel}`
+    : null
+
+  const summaryParts = [providerText, kbText, backendText, ollamaText].filter(
+    (s): s is string => Boolean(s),
+  )
+
+  const recommendation = recommendMode(hardware ?? null)
+
+  return (
+    <>
+      <div className="mb-2 flex items-center justify-center">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10">
+          <Sparkles className="h-5 w-5 text-brand" />
+        </div>
+      </div>
+      <h3 className="mb-2 text-center text-lg font-semibold">Choose Your Mode</h3>
+
+      <div className="mb-4 rounded-lg border bg-card px-3 py-2 text-center text-label-sm text-muted-foreground">
+        {summaryParts.join(" · ")}
+      </div>
+
+      {/* Hardware recommendation */}
+      {hardware && hardware.ram_gb > 0 && (
+        <div className="mb-3 rounded-lg border border-brand/20 bg-brand/5 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Cpu className="h-3.5 w-3.5 text-brand shrink-0" />
+            <p className="text-label-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Recommended: {recommendation.mode === "advanced" ? "Advanced" : "Simple"}</span>
+              {recommendation.reason && ` — ${recommendation.reason}`}
+            </p>
+          </div>
+          {hardware.gpu_acceleration !== "none" && (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <Zap className="h-3 w-3 text-green-500" />
+              <p className="text-label-xs text-green-600 dark:text-green-400">
+                GPU acceleration available ({hardware.gpu_acceleration}) — embeddings and reranking will be faster
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => onSelectMode("simple")}
+          className={cn(
+            "w-full rounded-lg border p-3 text-left transition-colors",
+            selectedMode === "simple"
+              ? "border-brand bg-brand/5"
+              : "border-muted hover:border-muted-foreground/30",
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">Clean & Simple</p>
+            {recommendation.mode === "simple" && hardware && hardware.ram_gb > 0 && (
+              <Badge variant="outline" className="text-label-xxs px-1.5 py-0 border-brand/30 text-brand">
+                Recommended
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            A clean chat focused on your knowledge — no technical controls visible.
+            Perfect for everyday use. You can switch to Advanced anytime in Settings.
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelectMode("advanced")}
+          className={cn(
+            "w-full rounded-lg border p-3 text-left transition-colors",
+            selectedMode === "advanced"
+              ? "border-brand bg-brand/5"
+              : "border-muted hover:border-muted-foreground/30",
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">Advanced</p>
+            {recommendation.mode === "advanced" && hardware && hardware.ram_gb > 0 && (
+              <Badge variant="outline" className="text-label-xxs px-1.5 py-0 border-brand/30 text-brand">
+                Recommended
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Full control — KB panel, verification, smart routing, feedback loop,
+            and all pipeline settings visible.
+          </p>
+        </button>
+      </div>
+
+      <p className="mt-3 text-center text-label-xs text-muted-foreground">
+        You can change this anytime from the sidebar.
+      </p>
+    </>
+  )
+}

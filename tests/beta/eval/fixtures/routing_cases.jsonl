@@ -1,0 +1,8 @@
+{"description": "Simple greeting", "query": "Hello, how are you?", "expected_tier": "free_or_cheap"}
+{"description": "Basic factual question", "query": "What is 2 + 2?", "expected_tier": "free_or_cheap"}
+{"description": "Simple definition", "query": "What is a variable in programming?", "expected_tier": "free_or_cheap"}
+{"description": "Complex analysis request", "query": "Analyze the architectural trade-offs between microservices and monolithic architectures for a high-traffic e-commerce platform, considering scalability, team structure, and operational complexity.", "expected_tier": "capable"}
+{"description": "Code review request", "query": "Review this algorithm for potential race conditions and suggest thread-safe improvements with proper locking strategies.", "expected_tier": "capable"}
+{"description": "Deep reasoning task", "query": "Compare the economic implications of universal basic income versus negative income tax, considering labor market effects, administrative costs, and political feasibility.", "expected_tier": "capable"}
+{"description": "Research with current data", "query": "What are the latest developments in quantum computing from the past month?", "expected_tier": "research_online"}
+{"description": "News lookup", "query": "What happened in the tech industry today?", "expected_tier": "research_online"}

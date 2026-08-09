@@ -1,0 +1,183 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: FSL-1.1-ALv2
+
+"""REST endpoints for managing external MCP server connections.
+
+Allows users to add, remove, and monitor external MCP servers whose
+tools are merged into the agent pipeline alongside ``pkb_*`` tools.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class ListServerToolsResponse(BaseModel):
+    server: Any
+    tools: Any
+    total: Any
+
+
+class RemoveMcpServerResponse(BaseModel):
+    status: str
+    name: Any
+
+
+
+router = APIRouter(prefix="/mcp-servers", tags=["MCP Client"])
+
+
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
+
+
+class MCPServerAddRequest(BaseModel):
+    """Request to add a new external MCP server."""
+
+    name: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{1,30}$", description="Unique server name (lowercase, no spaces)")
+    transport: str = Field(..., pattern=r"^(stdio|sse)$", description="Transport: stdio or sse")
+    command: str = Field("", description="For stdio: executable (e.g. npx, python)")
+    args: list[str] = Field(default_factory=list, description="For stdio: command arguments")
+    env: dict[str, str] = Field(default_factory=dict, description="For stdio: environment variables")
+    url: str = Field("", description="For sse: server URL")
+    headers: dict[str, str] = Field(default_factory=dict, description="For sse: HTTP headers")
+
+
+class MCPServerInfo(BaseModel):
+    """Status info for a configured MCP server."""
+
+    name: str
+    transport: str
+    enabled: bool = True
+    status: str  # connected, disconnected, error
+    error: str | None = None
+    tool_count: int = 0
+    tools: list[str] = Field(default_factory=list)
+
+
+class MCPServerListResponse(BaseModel):
+    """Response listing all configured MCP servers."""
+
+    servers: list[dict[str, Any]] = Field(default_factory=list)
+    total: int = 0
+    total_tools: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("", response_model=MCPServerListResponse, summary="List MCP Servers")
+def list_mcp_servers():
+    """List all configured external MCP servers with their connection status."""
+    from utils.mcp_client import mcp_client_manager
+
+    servers = mcp_client_manager.list_servers()
+    total_tools = sum(s.get("tool_count", 0) for s in servers)
+    return MCPServerListResponse(
+        servers=servers, total=len(servers), total_tools=total_tools,
+    )
+
+
+@router.post("", response_model=MCPServerInfo, summary="Add MCP Server", status_code=201)
+async def add_mcp_server(req: MCPServerAddRequest):
+    """Add and connect to a new external MCP server.
+
+    Connection failure is non-fatal: the server is registered and the
+    response carries ``status="error"`` plus the failure message so the
+    UI can surface it instead of a 500.
+    """
+    import logging
+
+    from utils.mcp_client import MCPServerConfig, mcp_client_manager
+
+    cfg = MCPServerConfig(
+        name=req.name,
+        transport=req.transport,
+        command=req.command,
+        args=req.args,
+        env=req.env,
+        url=req.url,
+        headers=req.headers,
+    )
+    mcp_client_manager.add_server(cfg)
+
+    connect_error: str | None = None
+    try:
+        await mcp_client_manager.connect_all()
+    except BaseException as exc:  # noqa: BLE001 — anyio cleanup raises ExceptionGroup
+        connect_error = str(exc) or exc.__class__.__name__
+        logging.getLogger("ai-companion.mcp_client").warning(
+            "MCP server '%s' connect raised during add: %s", req.name, connect_error,
+        )
+
+    servers = mcp_client_manager.list_servers()
+    info = next((s for s in servers if s["name"] == req.name), {})
+
+    status = info.get("status") or ("error" if connect_error else "disconnected")
+    return MCPServerInfo(
+        name=req.name,
+        transport=req.transport,
+        status=status,
+        error=info.get("error") or connect_error,
+        tool_count=info.get("tool_count", 0),
+        tools=info.get("tools", []),
+    )
+
+
+@router.delete("/{name}", summary="Remove MCP Server", response_model=RemoveMcpServerResponse)
+def remove_mcp_server(name: str):
+    """Remove an external MCP server and disconnect."""
+    from utils.mcp_client import mcp_client_manager
+
+    removed = mcp_client_manager.remove_server(name)
+    if not removed:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Server '{name}' not found")
+    return {"status": "removed", "name": name}
+
+
+@router.post("/{name}/reconnect", response_model=MCPServerInfo, summary="Reconnect MCP Server")
+async def reconnect_mcp_server(name: str):
+    """Reconnect to a specific MCP server."""
+    from utils.mcp_client import mcp_client_manager
+
+    await mcp_client_manager.reconnect(name)
+    servers = mcp_client_manager.list_servers()
+    info = next((s for s in servers if s["name"] == name), None)
+    if not info:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Server '{name}' not found")
+
+    return MCPServerInfo(
+        name=name,
+        transport=info.get("transport", ""),
+        status=info.get("status", "error"),
+        error=info.get("error"),
+        tool_count=info.get("tool_count", 0),
+        tools=info.get("tools", []),
+    )
+
+
+@router.get("/{name}/tools", summary="List Server Tools", response_model=ListServerToolsResponse)
+def list_server_tools(name: str):
+    """List all tools from a specific external MCP server."""
+    from utils.mcp_client import mcp_client_manager
+
+    servers = mcp_client_manager.list_servers()
+    info = next((s for s in servers if s["name"] == name), None)
+    if not info:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Server '{name}' not found")
+
+    # Return full tool definitions, not just names
+    all_tools = mcp_client_manager.list_external_tools()
+    prefix = f"ext_{name}_"
+    server_tools = [t for t in all_tools if t["name"].startswith(prefix)]
+
+    return {"server": name, "tools": server_tools, "total": len(server_tools)}

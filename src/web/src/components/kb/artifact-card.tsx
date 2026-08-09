@@ -1,0 +1,681 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+import { useState, useRef, useEffect } from "react"
+import { Card, CardContent } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { ProgressBar } from "@/components/ui/progress-bar"
+import { MessageSquarePlus, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers, Star, Leaf } from "lucide-react"
+import { DomainBadge } from "@/components/ui/domain-badge"
+import { SourceTypeBadge } from "./source-type-badge"
+import { QualityDot } from "./quality-dot"
+import type { KBQueryResult } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { MCP_BASE, mcpHeaders } from "@/lib/api"
+
+/** Touch device detection — pointer type is static per device, so module-level is fine. */
+const isTouchDevice = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches
+
+/** Strip directory path prefixes from filenames — handles both unix and windows separators. */
+function normalizeFilename(raw: string): string {
+  const parts = raw.replace(/\\/g, "/").split("/")
+  return parts[parts.length - 1] || raw
+}
+
+/** Audit P1.10: strip the repetitive "memory_empirical_…" / "memory_…" prefix
+ * from the displayed filename so the discriminating suffix has room to breathe.
+ * Title attribute on the parent keeps the full filename one hover away. */
+function displayFilename(raw: string): string {
+  const base = normalizeFilename(raw)
+  // Common machine-generated prefix family — strip everything before the
+  // first divergence point. Examples:
+  //   memory_empirical_hard_fad_20260511_… → hard_fad_20260511_…
+  //   memory_decision_audit_tr_…             → audit_tr_…
+  //   memory_temporal_…                      → temporal_…
+  const m = base.match(/^memory_(?:empirical|decision|preference|project|temporal|conversational)_(.*)$/)
+  if (m && m[1]) return m[1]
+  return base
+}
+
+/** True when the filename is an auto-generated chat conversation ID like
+ *  `chat_3e4bd73e_20260526_224339`. These are unhelpful as titles; the
+ *  first message preview is a better primary label (F-02-02). */
+function isAutoChatId(raw: string): boolean {
+  return /^chat_[0-9a-f]{6,}/.test(normalizeFilename(raw))
+}
+
+/** Best effort to derive a human-readable title for a result. Prefers the
+ *  first non-empty content line for system-generated chat IDs; falls back to
+ *  the cleaned filename otherwise. */
+function deriveTitle(filename: string, content: string): string {
+  if (isAutoChatId(filename) && content) {
+    const firstLine = content
+      .split(/\n+/)
+      .map((s) => s.trim())
+      .find((s) => s.length > 0)
+    if (firstLine) {
+      // Trim to a reasonable length — the truncate class still ellipsizes
+      // anything that exceeds the container, but capping here keeps the
+      // tooltip content sane too.
+      return firstLine.length > 120 ? firstLine.slice(0, 120) + "…" : firstLine
+    }
+  }
+  return displayFilename(filename)
+}
+
+/** Returns a human-readable relative time string like "3d ago", "2h ago", "5m ago". */
+function timeAgo(date: string): string {
+  const now = Date.now()
+  const then = new Date(date).getTime()
+  if (isNaN(then)) return ""
+  const diffMs = now - then
+  const seconds = Math.floor(diffMs / 1000)
+  if (seconds < 60) return "just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  const years = Math.floor(months / 12)
+  return `${years}y ago`
+}
+
+interface ArtifactCardProps {
+  result: KBQueryResult
+  isSelected: boolean
+  onSelect: () => void
+  onInject: () => void
+  domains?: string[]
+  onRecategorize?: (artifactId: string, newDomain: string) => Promise<void>
+  onPreview?: (artifactId: string) => void
+  onDelete?: (artifactId: string) => Promise<void>
+  onUpdateTags?: (artifactId: string, tags: string[]) => Promise<void>
+  onReIngest?: (artifactId: string) => Promise<void>
+  onToggleStar?: (artifactId: string) => Promise<void>
+  onToggleEvergreen?: (artifactId: string) => Promise<void>
+  /** When true, show the client_source badge on each card. */
+  showSource?: boolean
+  /** When true, show a compact card with no content preview or action buttons. */
+  compact?: boolean
+}
+
+export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, onToggleStar, onToggleEvergreen, showSource, compact }: ArtifactCardProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [showRecategorize, setShowRecategorize] = useState(false)
+  const [recategorizing, setRecategorizing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editingTags, setEditingTags] = useState(false)
+  const [tagInput, setTagInput] = useState("")
+  const [editedTags, setEditedTags] = useState<string[]>([])
+  const [savingTags, setSavingTags] = useState(false)
+  const [reIngesting, setReIngesting] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleValue, setTitleValue] = useState("")
+  const [regeneratingSynopsis, setRegeneratingSynopsis] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  // Scroll card into view when expanded. Gated by useEffect so React Compiler
+  // doesn't see a render-phase ref write (prior code updated prevExpanded in
+  // the render body), and the RAF is cancelled on unmount or rapid re-expand
+  // so two quick toggles don't queue two scroll animations. Compact cards
+  // never expand in place (click opens the preview instead), so the scroll
+  // is suppressed there.
+  useEffect(() => {
+    if (!expanded || compact) return
+    const rafId = requestAnimationFrame(() => {
+      cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    })
+    return () => cancelAnimationFrame(rafId)
+  }, [expanded, compact])
+  const relevancePct = Math.round(result.relevance * 100)
+  const showRelevance = result.relevance > 0
+  const isBrowseMode = result.relevance === 0
+  // Clean up garbled OCR/form text: collapse whitespace, strip control chars, trim trailing truncation
+  const cleanContent = result.content
+    // eslint-disable-next-line no-control-regex -- intentional: strip control chars from OCR/form text
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[|]{2,}/g, "")
+    .trim()
+    .replace(/[-–]\s*$/, "...")
+
+  // Metadata from result — chunk_count comes through when using artifactToResult
+  const metadata = (result as unknown as Record<string, unknown>)
+  const chunkCount = typeof metadata.chunk_count === "number" ? metadata.chunk_count : undefined
+  const clientSource = typeof metadata.client_source === "string" ? metadata.client_source : undefined
+  const sourceType = typeof metadata.source_type === "string" ? metadata.source_type : undefined
+
+  return (
+    <Card
+      ref={cardRef}
+      className={cn(
+        "w-full min-w-0 max-w-full cursor-pointer overflow-hidden transition-colors py-2 gap-1",
+        isSelected && "ring-2 ring-primary",
+      )}
+      role="button"
+      tabIndex={0}
+      aria-label={`${result.filename} - ${result.domain}`}
+      draggable={!isTouchDevice}
+      onDragStart={isTouchDevice ? undefined : (e) => {
+        e.dataTransfer.setData("application/cerid-artifact", JSON.stringify({
+          artifact_id: result.artifact_id,
+          filename: result.filename,
+          domain: result.domain,
+          content: result.content,
+          relevance: result.relevance,
+          sub_category: result.sub_category,
+          tags: result.tags,
+          quality_score: result.quality_score,
+          chunk_index: result.chunk_index,
+        }))
+        e.dataTransfer.effectAllowed = "copy"
+      }}
+      onClick={() => {
+        // Compact cards have no in-card expansion (all expandable regions are
+        // gated !compact) — open the artifact preview instead so the Library
+        // grid's cards aren't inert.
+        if (compact && onPreview) {
+          onPreview(result.artifact_id)
+          return
+        }
+        setExpanded((prev) => !prev)
+        onSelect()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          if (compact && onPreview) onPreview(result.artifact_id)
+          else onSelect()
+        }
+      }}
+    >
+      <CardContent className={cn("min-w-0 overflow-hidden", compact ? "px-2 py-1.5" : "px-3 py-2")}>
+        {/* Header row */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              {editingTitle ? (
+                <input
+                  // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline title edit; mount means edit was explicitly invoked
+                  autoFocus
+                  className="min-w-0 w-full bg-transparent text-sm font-medium outline-none border-b border-brand"
+                  value={titleValue}
+                  onChange={(e) => setTitleValue(e.target.value)}
+                  onBlur={async () => {
+                    const trimmed = titleValue.trim()
+                    if (trimmed && trimmed !== result.filename) {
+                      await fetch(`${MCP_BASE}/artifacts/${result.artifact_id}`, {
+                        method: "PATCH",
+                        headers: mcpHeaders({ "Content-Type": "application/json" }),
+                        body: JSON.stringify({ title: trimmed }),
+                      }).catch(() => {})
+                    }
+                    setEditingTitle(false)
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditingTitle(false) }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p
+                      className="min-w-0 truncate text-sm font-medium cursor-text"
+                      onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
+                    >{deriveTitle(result.filename, result.content)}</p>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6} className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps long titles from sprawling */}
+                    {deriveTitle(result.filename, result.content)}
+                    {isAutoChatId(result.filename) ? (
+                      <div className="mt-1 text-label-xs opacity-70">
+                        {normalizeFilename(result.filename)}
+                      </div>
+                    ) : null}
+                    <div className="mt-1 text-label-xs opacity-70">Double-click to rename</div>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {chunkCount != null && (
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge variant="outline" className="shrink-0 gap-0.5 text-label-xxs px-1.5 py-0">
+                        <Layers className="h-2.5 w-2.5" />
+                        {chunkCount}
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[200px] text-xs"> {/* drift-allowed: TooltipContent max-width cap keeps chunk-count explanation from sprawling */}
+                      {chunkCount} searchable segment{chunkCount !== 1 ? "s" : ""}. Documents are split into chunks for more precise retrieval.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <DomainBadge domain={result.domain} />
+              {result.ingested_at && (
+                <span className="text-label-xs text-muted-foreground" title={new Date(result.ingested_at).toLocaleString()}>
+                  {timeAgo(result.ingested_at)}
+                </span>
+              )}
+              {result.graph_source && (
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <GitBranch className="h-3 w-3" />
+                  graph
+                </Badge>
+              )}
+              {result.cross_domain && (
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <Globe className="h-3 w-3" />
+                  cross
+                </Badge>
+              )}
+              {result.sub_category && result.sub_category !== "general" && (
+                <Badge variant="secondary" className="text-label-xs">
+                  {result.sub_category}
+                </Badge>
+              )}
+              {/* Source type badge — shows how the artifact was ingested */}
+              {sourceType && sourceType !== "upload" && (
+                <SourceTypeBadge sourceType={sourceType} />
+              )}
+              {/* Client source badge — shown when showSource is true and source is non-gui */}
+              {showSource && clientSource && clientSource !== "gui" && (
+                <Badge variant="outline" className="text-label-xxs px-1.5 py-0 border-teal-500/40 text-teal-600 dark:text-teal-400">
+                  {clientSource}
+                </Badge>
+              )}
+            </div>
+            {result.tags && result.tags.length > 0 && (
+              <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+                {result.tags.slice(0, 4).map((tag) => {
+                  const isAuto = tag.startsWith("~")
+                  const label = isAuto ? tag.slice(1) : tag
+                  return (
+                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-label-xs ${isAuto ? "bg-muted/50 italic text-muted-foreground/80" : "bg-muted text-muted-foreground"}`}> {/* drift-allowed: truncated tag width pin */}
+                      {label}
+                    </span>
+                  )
+                })}
+                {result.tags.length > 4 && (
+                  <span className="text-label-xs text-muted-foreground">+{result.tags.length - 4}</span>
+                )}
+              </div>
+            )}
+          </div>
+          <TooltipProvider delayDuration={0}>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              {showRelevance && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="text-xs font-medium tabular-nums">{relevancePct}%</span>
+                      <ProgressBar pct={relevancePct} className="w-12" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Relevance: {relevancePct}% match to query</TooltipContent>
+                </Tooltip>
+              )}
+              {result.quality_score != null && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="flex items-center gap-1">
+                      <QualityDot score={result.quality_score} />
+                      <QualityBadge score={result.quality_score} />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Quality: Q{Math.round(result.quality_score * 100)} — higher is better</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </TooltipProvider>
+        </div>
+
+        {/* Compact content preview — outside header flex to avoid layout interference */}
+        {compact && result.content && (() => {
+          const previewText = result.content.replace(/[#*_[\]|>]/g, "").replace(/\s+/g, " ").trim()
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <p className="mt-0.5 truncate text-label-sm leading-tight text-muted-foreground">
+                  {previewText.slice(0, 80)}
+                </p>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6} className="max-w-[360px] break-words"> {/* drift-allowed: TooltipContent max-width cap keeps content preview from sprawling */}
+                {previewText.slice(0, 320)}{previewText.length > 320 ? "…" : ""}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })()}
+
+        {/* Content */}
+        {!compact && (cleanContent.length > 10 ? (
+          <p className={cn(
+            "mt-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]",
+            !expanded && "line-clamp-2",
+          )}>
+            {expanded ? result.content : (result.summary || cleanContent)}
+          </p>
+        ) : result.summary ? (
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground line-clamp-2 [overflow-wrap:anywhere]">
+            {result.summary}
+          </p>
+        ) : isBrowseMode ? (
+          <p className="mt-2 text-xs italic text-muted-foreground">
+            No summary available
+          </p>
+        ) : null)}
+
+        {/* Expanded view: metadata, keywords, quality breakdown */}
+        {!compact && expanded && (
+          <div className="mt-3 space-y-2 border-t pt-3 transition-all duration-200">
+            {/* Keyword tags */}
+            {result.keywords && result.keywords.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {result.keywords.map((k: string) => (
+                  <Badge key={k} variant="secondary" className="text-label-xs">{k}</Badge>
+                ))}
+              </div>
+            )}
+            {/* Metadata row */}
+            <div className="flex flex-wrap gap-3 text-label-xs text-muted-foreground">
+              {result.source_type && <span>Source: {result.source_type}</span>}
+              {result.chunk_count != null && <span>Chunks: {result.chunk_count}</span>}
+              {result.ingested_at && <span>Ingested: {new Date(result.ingested_at).toLocaleDateString()}</span>}
+              {result.retrieval_count != null && <span>Retrievals: {result.retrieval_count}</span>}
+            </div>
+            {/* Quality score */}
+            {result.quality_score != null && (
+              <div className="flex items-center gap-2 text-label-xs">
+                <span className="text-muted-foreground">Quality:</span>
+                <ProgressBar
+                  pct={Math.round(result.quality_score * 100)}
+                  variant="success"
+                  className="w-20"
+                />
+                <span className="text-muted-foreground">{Math.round(result.quality_score * 100)}%</span>
+              </div>
+            )}
+            {/* Re-generate synopsis action */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-2 text-label-xs"
+              disabled={regeneratingSynopsis}
+              onClick={async (e) => {
+                e.stopPropagation()
+                setRegeneratingSynopsis(true)
+                await fetch(`${MCP_BASE}/artifacts/${result.artifact_id}/regenerate-synopsis`, {
+                  method: "POST",
+                  headers: mcpHeaders(),
+                }).catch(() => {})
+                setRegeneratingSynopsis(false)
+              }}
+            >
+              {regeneratingSynopsis ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
+              Re-generate synopsis
+            </Button>
+          </div>
+        )}
+
+        {/* Recategorize inline picker */}
+        {!compact && showRecategorize && domains && onRecategorize && (
+          <div className="mt-2 flex flex-wrap items-center gap-1 rounded border bg-muted/30 p-2">
+            <span className="text-label-xs text-muted-foreground">Move to:</span>
+            {domains.filter((d) => d !== result.domain).map((d) => (
+              <Button
+                key={d}
+                variant="outline"
+                size="xs"
+                className="h-5 text-label-xs capitalize"
+                disabled={recategorizing}
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  setRecategorizing(true)
+                  try {
+                    await onRecategorize(result.artifact_id, d)
+                    setShowRecategorize(false)
+                  } finally {
+                    setRecategorizing(false)
+                  }
+                }}
+              >
+                {d}
+              </Button>
+            ))}
+            {recategorizing && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+            <Button variant="ghost" size="xs" className="ml-auto h-5 w-5 p-0" onClick={(e) => { e.stopPropagation(); setShowRecategorize(false) }}>
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+
+        {/* Inline tag editing */}
+        {!compact && editingTags && onUpdateTags && (
+          // role="presentation" + onKeyDown stopPropagation keep this
+          // container from being treated as interactive by a11y tooling
+          // while preserving the click/key isolation from the parent
+          // card's onClick/onKeyDown handlers.
+          <div role="presentation" className="mt-2 rounded border bg-muted/30 p-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <div className="flex flex-wrap gap-1 mb-1.5">
+              {editedTags.map((tag) => (
+                <span key={tag} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-label-xs text-primary">
+                  {tag}
+                  <button className="hover:text-destructive" onClick={() => setEditedTags((t) => t.filter((x) => x !== tag))}>
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                className="h-6 flex-1 rounded border bg-background px-1.5 text-label-sm outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Add tag..."
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && tagInput.trim()) {
+                    e.preventDefault()
+                    const newTag = tagInput.trim().toLowerCase()
+                    if (!editedTags.includes(newTag)) setEditedTags((t) => [...t, newTag])
+                    setTagInput("")
+                  }
+                }}
+              />
+              <Button
+                variant="ghost"
+                size="xs"
+                className="h-6 text-label-xs text-primary"
+                disabled={savingTags}
+                onClick={async () => {
+                  setSavingTags(true)
+                  try {
+                    await onUpdateTags(result.artifact_id, editedTags)
+                    setEditingTags(false)
+                  } finally {
+                    setSavingTags(false)
+                  }
+                }}
+              >
+                {savingTags ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                Save
+              </Button>
+              <Button variant="ghost" size="xs" className="h-6 text-label-xs" onClick={() => setEditingTags(false)}>
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Delete confirmation — rendered in compact mode too: the delete
+            button below is always visible, so gating the confirmation on
+            !compact made delete a silent no-op in the default grid view. */}
+        {confirmDelete && onDelete && (
+          <div role="presentation" className="mt-2 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 p-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <span className="text-label-sm text-destructive">Delete this artifact?</span>
+            <div className="flex-1" />
+            <Button
+              variant="destructive"
+              size="xs"
+              className="h-5 text-label-xs"
+              disabled={deleting}
+              onClick={async () => {
+                setDeleting(true)
+                try { await onDelete(result.artifact_id) } finally { setDeleting(false); setConfirmDelete(false) }
+              }}
+            >
+              {deleting ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+              Delete
+            </Button>
+            <Button variant="ghost" size="xs" className="h-5 text-label-xs" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
+        {/* Actions — always visible; compact mode uses smaller icons in a single row */}
+        <div className={cn("flex items-center gap-0.5", compact ? "mt-1" : "mt-2")}>
+          {domains && onRecategorize && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("artifact-action-btn", compact ? "h-5 w-5" : "h-6 w-6")}
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowRecategorize(!showRecategorize)
+              }}
+              title="Move to another domain"
+            >
+              <ArrowRightLeft className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+            </Button>
+          )}
+          {onPreview && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("artifact-action-btn", compact ? "h-5 w-5" : "h-6 w-6")}
+              onClick={(e) => {
+                e.stopPropagation()
+                onPreview(result.artifact_id)
+              }}
+              title="Preview content"
+            >
+              <Eye className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+            </Button>
+          )}
+          {!compact && onToggleStar && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="artifact-action-btn h-6 w-6"
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleStar(result.artifact_id)
+              }}
+              title={result.starred ? "Unstar" : "Star"}
+            >
+              <Star className={cn("h-3 w-3", result.starred && "fill-yellow-400 text-yellow-400")} />
+            </Button>
+          )}
+          {!compact && onToggleEvergreen && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="artifact-action-btn h-6 w-6"
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleEvergreen(result.artifact_id)
+              }}
+              title={result.evergreen ? "Remove evergreen" : "Mark evergreen"}
+            >
+              <Leaf className={cn("h-3 w-3", result.evergreen && "fill-green-400 text-green-400")} />
+            </Button>
+          )}
+          {!compact && onUpdateTags && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="artifact-action-btn h-6 w-6"
+              onClick={(e) => {
+                e.stopPropagation()
+                setEditedTags(result.tags ?? [])
+                setTagInput("")
+                setEditingTags(!editingTags)
+              }}
+              title="Edit tags"
+            >
+              <Tags className="h-3 w-3" />
+            </Button>
+          )}
+          {!compact && onReIngest && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="artifact-action-btn h-6 w-6"
+              disabled={reIngesting}
+              onClick={async (e) => {
+                e.stopPropagation()
+                setReIngesting(true)
+                try {
+                  await onReIngest(result.artifact_id)
+                } finally {
+                  setReIngesting(false)
+                }
+              }}
+              title="Re-ingest artifact"
+            >
+              {reIngesting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("artifact-action-btn hover:text-destructive", compact ? "h-5 w-5" : "h-6 w-6")}
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmDelete(!confirmDelete)
+              }}
+              title="Delete artifact"
+            >
+              <Trash2 className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+            </Button>
+          )}
+          <div className="flex-1" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("artifact-action-btn text-primary", compact ? "h-5 w-5" : "h-6 w-6")}
+            onClick={(e) => {
+              e.stopPropagation()
+              onInject()
+            }}
+            title="Add this document's content to the current conversation context"
+          >
+            <MessageSquarePlus className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function QualityBadge({ score }: { score: number }) {
+  const pct = Math.round(score * 100)
+  const tier =
+    score >= 0.8 ? { label: "excellent", color: "border-green-500/50 text-green-700 dark:text-green-400" } :
+    score >= 0.6 ? { label: "good", color: "border-blue-500/50 text-blue-700 dark:text-blue-400" } :
+    score >= 0.4 ? { label: "fair", color: "border-yellow-500/50 text-yellow-700 dark:text-yellow-400" } :
+                   { label: "poor", color: "border-red-500/50 text-red-700 dark:text-red-400" }
+
+  return (
+    <Badge variant="outline" className={cn("text-label-xxs px-1.5 py-0", tier.color)}>
+      Q{pct}
+    </Badge>
+  )
+}

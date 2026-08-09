@@ -1,0 +1,778 @@
+# Cerid AI — API & Operations Reference
+
+> **Extracted from CLAUDE.md** to keep the main developer guide concise.
+> For project overview, architecture, and conventions, see [CLAUDE.md](../CLAUDE.md).
+
+---
+
+## MCP Server API (src/mcp/main.py)
+
+**Core endpoints:**
+- `GET /health` — Full health check with circuit breaker states (cached 10s). `invariants.collections_empty` is scoped to built-in domains; `invariants.custom_collections` lists client-created collections so operators can see external-client activity without false empty-collection alerts.
+- `GET /health/live` — Liveness probe (always 200 unless process crashed)
+- `GET /health/ready` — Readiness probe (503 when critical deps unreachable)
+- `GET /health/status` — Detailed degradation report with circuit breaker states, pipeline providers, feature tier, and per-capability flags (`can_retrieve`, `can_verify`, `can_generate`)
+- `GET /health` (extended, v0.93.3) — Additionally surfaces `recommended_features: [{id, label, reason, triggered_at, corpus_size, enable_payload}, ...]` for the adaptive recommendation engine. Polled by the Settings-pane banner every 60 s.
+- `POST /settings/recommendations/{id}/dismiss` — Permanently dismiss a recommendation for the current tenant. 204 on success. (C3.2 / v0.93.3)
+- `DELETE /settings/recommendations/{id}` — Clear a recommendation from the active hash + drop the per-tenant dismissal. Used by the "Enable now" flow so the banner closes immediately. (C3.2 / v0.93.3)
+- `POST /wiki/write_note` — Two-way vault write (RAG C3.3 / v0.93.2). `{vault_id, path, content, frontmatter?, mode?: "create"|"append"|"overwrite", allow_synthesis_input?}` → `{file_path, artifact_id, ingested, frontmatter_written, mode}`. Atomic write via tmp + `os.replace`; reuses `VaultProfile.classify_path` for path safety; re-ingests as Artifact with `source_type="cerid-synthesis"`.
+- `PATCH /settings` (extended, v0.93.3) — Accepts `enable_sparse_retrieval`, `hybrid_fusion_mode` (`"weighted_sum" | "rrf" | "tri_rrf"`), `hybrid_rrf_sparse_weight`. The sparse toggle mutates `os.environ["RETRIEVAL_SPARSE_ENABLED"]` + `core.retrieval.sparse.SPARSE_ENABLED` live; invalid fusion mode returns 400.
+- `PATCH /settings` (extended, Slice 7.2) — Accepts `pack_relevance_weight` (float `0.0`–`2.0`, default `0.7`, advanced / SERVER scope). Multiplier applied to knowledge-pack chunks after reranking; below `1.0` makes personal data win ties, `1.0` is neutral. Surfaced live (`config.PACK_RELEVANCE_WEIGHT`); also exposed in `GET /settings`.
+- `GET /collections` — List ChromaDB collections
+- `GET /scheduler` — Scheduled job status
+- `POST /query` — Query knowledge base (domain, top_k)
+- `POST /ingest` — Ingest text content
+
+**Ingestion endpoints:**
+- `POST /ingest_file` — Ingest a file with parsing, metadata, optional AI categorization
+- `POST /ingest_batch` — Batch ingest multiple text items
+- `POST /ingest/feedback` — Submit ingestion quality feedback
+- `GET /ingestion/progress` — Live ingestion pipeline state (active/completed/errored files)
+- `POST /recategorize` — Move artifact between domains (moves chunks between collections)
+- `GET /artifacts` — List ingested artifacts (filter by domain)
+- `GET /artifacts/{artifact_id}` — Full artifact detail (Neo4j metadata + reassembled ChromaDB chunks)
+- `GET /artifacts/{artifact_id}/related` — Related artifacts via graph expansion
+- `POST /artifacts/{artifact_id}/feedback` — Submit quality feedback (inject/dismiss signals)
+- `GET /ingest_log` — View audit trail from Redis
+- `GET /digest` — Summary of recent KB activity, connections, and health status
+
+**Agent endpoints:**
+- `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, optional Self-RAG validation, and unified RAG modes (manual/smart/custom_smart)
+- `POST /agent/memory/recall` — Direct memory recall endpoint for manual mode browsing
+- `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
+- `POST /agent/triage/batch` — Batch triage with per-file error recovery
+- `POST /agent/rectify` — Knowledge base health checks (duplicates, stale, orphans, distribution)
+- `POST /agent/audit` — Audit reports (activity, ingestion stats, costs, query patterns, conversations)
+- `POST /agent/maintain` — Maintenance routines (health, stale detection, collection analysis, orphan cleanup)
+
+**Verification & hallucination endpoints:**
+- `POST /agent/hallucination` — Check LLM response for hallucinations against KB with 4-level verification fallback (KB-only → external cross-model/web-search for unverified/uncertain claims)
+- `GET /agent/hallucination/{conversation_id}` — Retrieve stored hallucination report
+- `POST /agent/hallucination/feedback` — Record user feedback on a verification claim (correct/incorrect)
+- `POST /agent/verify-stream` — SSE streaming truth verification with keepalive heartbeats, supports expert mode (Grok 4) and anti-circularity via `source_artifact_ids`
+- `POST /verification/save` — Persist verification report to Neo4j
+- `GET /verification/{conversation_id}` — Retrieve saved verification report
+- `POST /agent/memory/extract` — Extract and store memories from conversation
+- `POST /agent/memory/archive` — Archive old conversation memories
+- `POST /agent/curate` — Score artifact quality across the KB- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
+
+**Auth endpoints (conditional on `CERID_MULTI_USER=true`):**
+- `POST /auth/register` — Create new user account (returns JWT tokens)
+- `POST /auth/login` — Authenticate with email/password (returns JWT tokens)
+- `POST /auth/refresh` — Refresh access token using refresh token
+- `POST /auth/logout` — Revoke refresh token (Redis blacklist)
+- `GET /auth/me` — Get current user profile (requires Bearer token)
+- `PUT /auth/me/api-key` — Generate per-user API key (Fernet-encrypted in Neo4j)
+- `DELETE /auth/me/api-key` — Revoke per-user API key
+- `GET /auth/me/api-key/status` — Check if user has an active API key
+- `GET /auth/me/usage` — Get per-user usage metrics from Redis
+
+**Chat endpoints:**
+- `POST /chat/stream` — Stream chat completion directly via OpenRouter proxy (SSE)
+- `POST /chat/compress` — Compress conversation history to fit target token budget
+
+**Sync endpoints:**
+- `POST /sync/export` — Trigger incremental or full export to sync directory
+- `POST /sync/import` — Trigger merge import from sync directory
+- `GET /sync/status` — Compare local DB counts against sync directory manifest
+
+**Settings & memories:**
+- `GET /settings` — Server configuration and feature flags (includes `enable_self_rag`)
+- `PATCH /settings` — Partial settings update (supports `enable_self_rag`)
+- `GET /memories` — List/filter memories (type, conversation_id, limit, offset)
+- `POST /memories/extract` — Extract memories from text (standalone endpoint)
+- `PATCH /memories/{id}` — Update memory summary
+- `DELETE /memories/{id}` — Delete a memory
+
+**File upload:**
+- `POST /upload` — Upload file with optional domain, sub_category, tags, categorize_mode (50MB max)
+- `GET /upload/supported` — List supported file extensions
+- `GET /archive/files` — List files in the archive directory
+
+**Taxonomy & tags:**
+- `GET /taxonomy` — Get full taxonomy tree
+- `POST /taxonomy/domain` — Add a new domain
+- `POST /taxonomy/subcategory` — Add a new sub-category
+- `POST /taxonomy/artifact` — Assign taxonomy to an artifact
+- `GET /tags` — List all tags
+- `GET /tags/suggest` — Tag suggestions for typeahead
+- `POST /tags/merge` — Merge duplicate tags
+
+**User state:**
+- `GET /user-state` — Current user state
+- `GET /user-state/conversations` — List conversations
+- `GET /user-state/conversations/{conv_id}` — Get single conversation
+- `POST /user-state/conversations` — Save conversation
+- `POST /user-state/conversations/bulk` — Bulk save conversations
+- `DELETE /user-state/conversations/{conv_id}` — Delete conversation
+- `PATCH /user-state/preferences` — Update user preferences
+
+**KB admin:**
+- `GET /admin/kb/capabilities` — Parser capabilities report
+- `GET /admin/kb/stats` — KB statistics (artifact counts, chunk counts, domain distribution)
+- `POST /admin/artifacts/{artifact_id}/reingest` — Re-ingest an existing artifact
+- `POST /admin/kb/rebuild-index` — Rebuild search index
+- `POST /admin/kb/rescore` — Rescore artifact quality
+- `POST /admin/kb/regenerate-summaries` — Regenerate artifact summaries
+- `POST /admin/kb/clear-domain/{domain}` — Clear all artifacts in a domain
+- `DELETE /admin/artifacts/{artifact_id}` — Delete a specific artifact
+
+**Scanner (folder watcher):**
+- `POST /admin/scan` — Start async folder scan (returns scan_id)
+- `GET /admin/scan/state` — Persistent scan state from Redis
+- `GET /admin/scan/preview` — Preview files that would be scanned (GET with query params)
+- `POST /admin/scan/preview` — Preview files (POST with JSON body, enhanced: skipped breakdown, storage estimate)
+- `GET /admin/scan/{scan_id}` — Get scan progress/result
+- `GET /admin/scan/{scan_id}/stream` — SSE stream of real-time scan progress with ETA
+- `POST /admin/scan/{scan_id}/pause` — Pause an active scan
+- `POST /admin/scan/{scan_id}/resume` — Resume a paused scan
+- `POST /admin/scan/{scan_id}/cancel` — Cancel an active scan
+- `POST /admin/scan/reset` — Clear all persistent scan state
+
+**Settings management:**
+- `GET /settings` — Current server settings
+- `PATCH /settings` — Update runtime settings (auto_inject_threshold range: 0.0–1.0)
+- `POST /settings/tier` — Runtime tier override (community/pro/enterprise, recomputes feature flags)
+
+**Eval (retrieval evaluation):**
+- `POST /api/eval/run` — Run evaluation benchmark
+- `GET /api/eval/benchmarks` — List benchmark files
+
+**MCP protocol:**
+- `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
+- `POST /mcp/sse` — SSE stream (POST variant)
+- `POST /mcp/messages?sessionId=X` — JSON-RPC handler
+
+### MCP Tools (26 total)
+
+**Core tools (21):**
+- `pkb_query` — Single-domain query
+- `pkb_ingest` — Ingest raw text
+- `pkb_ingest_file` — Ingest a file with parsing and metadata
+- `pkb_health` — Service health check
+- `pkb_collections` — List ChromaDB collections
+- `pkb_agent_query` — Multi-domain query with LLM reranking and RAG modes (manual/smart/custom_smart)
+- `pkb_artifacts` — List/filter ingested artifacts
+- `pkb_recategorize` — Move artifact between domains
+- `pkb_triage` — LangGraph-powered file triage
+- `pkb_rectify` — Knowledge base health checks and auto-fix
+- `pkb_audit` — Audit reports (activity, ingestion, costs, queries, conversations)
+- `pkb_maintain` — Maintenance routines (health, stale, collections, orphans)
+- `pkb_curate` — Score artifact quality across the knowledge base
+- `pkb_digest` — Summary of recent KB activity, connections, and health status
+- `pkb_scheduler_status` — Get status of scheduled maintenance jobs
+- `pkb_check_hallucinations` — Verify LLM claims against KB
+- `pkb_memory_extract` — Extract memories from conversations
+- `pkb_memory_archive` — Archive old conversation memories
+- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
+- `pkb_web_search` — Agentic web search with verification
+- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
+### SDK Router (`/sdk/v1/`) — Stable External API
+
+Versioned facade for external consumers. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
+
+- `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode` and `source_config`)
+- `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
+- `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
+- `GET /sdk/v1/health` — Health check with `version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model)
+
+**External-client backend support.** `/sdk/v1/ingest` and `/sdk/v1/query` accept **arbitrary client-defined domains** (no pre-registration — unknown domains degrade to empty results, never a 400). `/sdk/v1/ingest` accepts a `metadata` object (arbitrary provenance, stored + retrievable; `tags` preserved alongside). `/sdk/v1/llm/complete` accepts custom `task_type` values (unknown → safe internal routing). See [`SDK_GUIDE.md` § Using Cerid as a backend](SDK_GUIDE.md).
+
+**Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
+
+| Client ID | `/agent/` & `/sdk/` | `/ingest` | `/recategorize` |
+|-----------|---------------------|-----------|-----------------|
+| `gui` (default) | 120 req/min | 10 req/min | 10 req/min |
+| `cli-ingest` | — | 60 req/min | 30 req/min |
+| `_default` (unknown) | 120 req/min | 10 req/min | 10 req/min |
+
+Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry. Buckets are keyed on client ID + IP + path prefix; GET requests are exempt except on the `/admin/*` and `/observability/*` polling surfaces.
+
+---
+
+## Ingestion Pipeline
+
+**File ingestion flow:** Parse file → Dedup check (SHA-256) → Extract metadata → AI categorize (optional) → Chunk → Batch store in ChromaDB + Neo4j + Redis
+
+### Categorization Tiers
+
+- `manual` — Domain from folder name only, no AI
+- `smart` — Free model (Llama 3.3 70B Instruct via OpenRouter) for classification
+- `pro` — Premium model (Claude Sonnet 4.6 via OpenRouter)
+
+AI calls are token-efficient: only first ~1500 chars sent for classification. Response format enforced as JSON.
+
+### Supported File Types
+
+PDF (structure-aware via pdfplumber — tables extracted as Markdown), DOCX (with tables), XLSX, CSV, HTML (tag-stripped), 30+ text/code/config formats. Binary files auto-detected and rejected.
+
+### Watcher (host process)
+
+```bash
+python src/mcp/scripts/watch_ingest.py [--mode smart|pro|manual]
+```
+
+### CLI Batch Ingest (concurrent)
+
+```bash
+python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--workers 4]
+```
+
+### Obsidian Vault Watcher (host process)
+
+```bash
+python src/mcp/scripts/watch_obsidian.py --vault ~/Obsidian/MyVault [--domain personal] [--mode smart]
+```
+
+Monitors `.md` files only. Uses `/ingest` (text endpoint) since the vault isn't Docker-mounted. Higher debounce (5s) for Obsidian auto-save. Skips `.obsidian/`, `.trash/`, and files <10 bytes.
+
+### Archive Folder Structure
+
+```
+~/cerid-archive/
+├── coding/      → domain="coding" (manual)
+├── finance/     → domain="finance" (manual)
+├── projects/    → domain="projects" (manual)
+├── personal/    → domain="personal" (manual)
+├── general/     → domain="general" (manual)
+├── conversations/ → domain="conversations" (feedback loop output)
+└── inbox/       → AI categorization triggered
+```
+
+---
+
+## Agent Workflows
+
+### Query Agent (`agents/query_agent.py`)
+
+Multi-domain search with LLM-powered reranking and intelligent context assembly.
+
+**Features:**
+- Parallel retrieval across all configured ChromaDB collections
+- Deduplication by (artifact_id + chunk_index), keeping highest relevance
+- Cross-encoder reranking (ONNX) — blends 60% reranker score + 40% embedding score
+- Token budget enforcement (14k character limit)
+- Source attribution with confidence scoring
+
+**Usage:**
+```bash
+curl -X POST http://localhost:8888/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "tax deductions", "domains": ["finance", "general"], "top_k": 5}'
+
+# With Self-RAG validation (requires response_text):
+curl -X POST http://localhost:8888/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "tax deductions", "response_text": "LLM response to validate...", "enable_self_rag": true}'
+```
+
+**Self-RAG fields (optional):**
+- `response_text` — LLM response text to validate against KB (triggers Self-RAG when provided)
+- `model` — Generating model name (for metadata tracking)
+- `enable_self_rag` — Override server-side `ENABLE_SELF_RAG` toggle (null = use server config)
+
+**RAG mode fields (optional):**
+- `rag_mode` — `"manual"` (KB only, default), `"smart"` (KB + memory + external in parallel), or `"custom_smart"` (Pro tier, configurable weights/toggles)
+- `source_config` — Custom Smart weights/toggles (Pro tier only). Keys: `kb_enabled`, `memory_enabled`, `external_enabled`, `kb_weight`, `memory_weight`, `external_weight`, `memory_types`
+- `exclude_packs` (bool, default `false`, Slice 7.3) — when `true`, drops every knowledge-pack chunk (those carrying a `pack_id`) before rerank/synthesis (personal-first: answer from your own data only). Memory/wiki/external sources are unaffected.
+
+When `rag_mode` is `"smart"` or `"custom_smart"`, the response includes:
+- `source_breakdown` — `{kb: [...], memory: [...], external: [...]}` with per-source results
+- `rag_mode` — The active mode used for the query
+- Memory results are appended to `context` under a `[Memory Context]` header
+
+**Key Functions:**
+- `multi_domain_query()` — Parallel ChromaDB queries across domains
+- `deduplicate_results()` — Remove duplicate chunks
+- `rerank_results()` — Cross-encoder (ONNX) relevance reranking (falls back to embedding sort)
+- `assemble_context()` — Build context within token budget
+- `agent_query()` — Main orchestration function
+- `orchestrated_query()` — Unified orchestrator wrapping agent_query + memory recall + external separation (in `agents/retrieval_orchestrator.py`)
+- `self_rag_enhance()` — Iterative claim verification and targeted retrieval refinement (in `agents/self_rag.py`)
+
+### Triage Agent (`agents/triage.py`)
+
+LangGraph-orchestrated file ingestion pipeline with conditional routing.
+
+**Graph flow:** validate → parse → route_categorization → [categorize?] → extract_metadata → chunk → END
+
+**Features:**
+- Conditional AI categorization (skips for known domains, triggers for inbox)
+- Structured data detection (PDFs with tables, XLSX, CSV flagged as `is_structured`)
+- Per-node error handling — failures route to `error_end` without crashing the pipeline
+- Batch processing via `triage_batch()` — one failure doesn't stop the batch
+
+**Usage:**
+```bash
+# Single file triage
+curl -X POST http://localhost:8888/agent/triage \
+  -H "Content-Type: application/json" \
+  -d '{"file_path": "/archive/inbox/report.pdf"}'
+
+# Batch triage
+curl -X POST http://localhost:8888/agent/triage/batch \
+  -H "Content-Type: application/json" \
+  -d '{"files": [{"file_path": "/archive/inbox/a.pdf"}, {"file_path": "/archive/coding/b.py"}]}'
+```
+
+### Rectification Agent (`agents/rectify.py`)
+
+Knowledge base health monitoring and conflict resolution.
+
+**Checks:**
+- **duplicates** — Artifacts sharing the same content_hash across domains
+- **stale** — Artifacts not updated in N days (default: 90)
+- **orphans** — ChromaDB chunks without matching Neo4j artifact records
+- **distribution** — Per-domain artifact/chunk counts and imbalance detection
+
+**Auto-fix capabilities:**
+- Resolve duplicates (keep oldest, remove rest + clean ChromaDB chunks)
+- Clean orphaned chunks from ChromaDB
+
+**Usage:**
+```bash
+# Run all checks (read-only)
+curl -X POST http://localhost:8888/agent/rectify \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Auto-fix duplicates and orphans
+curl -X POST http://localhost:8888/agent/rectify \
+  -H "Content-Type: application/json" \
+  -d '{"auto_fix": true, "stale_days": 60}'
+```
+
+### Audit Agent (`agents/audit.py`)
+
+Operation tracking, cost estimation, and usage analytics from the Redis audit trail.
+
+**Reports:**
+- **activity** — Event counts, domain breakdown, hourly timeline, recent failures
+- **ingestion** — File type distribution, duplicate rate, avg chunks per file
+- **costs** — Token usage estimates by tier (smart/pro/rerank), USD cost projections
+- **queries** — Most-queried domains, average results per query
+
+**Usage:**
+```bash
+curl -X POST http://localhost:8888/agent/audit \
+  -H "Content-Type: application/json" \
+  -d '{"reports": ["activity", "costs"], "hours": 48}'
+```
+
+### Maintenance Agent (`agents/maintenance.py`)
+
+Comprehensive system health checks and automated cleanup.
+
+**Actions:**
+- **health** — Full connectivity check (ChromaDB, Neo4j, Redis, OpenRouter) + data counts
+- **stale** — Detect artifacts older than N days with optional auto-purge
+- **collections** — Collection size analysis, missing/extra collection detection
+- **orphans** — Find and optionally clean orphaned ChromaDB chunks
+
+**Usage:**
+```bash
+# Read-only health check
+curl -X POST http://localhost:8888/agent/maintain \
+  -H "Content-Type: application/json" \
+  -d '{"actions": ["health", "collections"]}'
+
+# Auto-purge stale + orphans
+curl -X POST http://localhost:8888/agent/maintain \
+  -H "Content-Type: application/json" \
+  -d '{"auto_purge": true, "stale_days": 60}'
+```
+
+### Agent Dependencies
+
+LangGraph >=0.3.0 (pulls langchain-core transitively)
+
+---
+
+## Adding a New Domain
+
+1. Edit `src/mcp/config/settings.py` → add to `DOMAINS` list
+2. Create folder: `mkdir ~/cerid-archive/<new_domain>`
+3. Rebuild: `cd src/mcp && docker compose up -d --build`
+
+---
+
+## Recategorizing Artifacts
+
+```bash
+# List artifacts in a domain
+curl http://localhost:8888/artifacts?domain=coding
+
+# Move to another domain
+curl -X POST http://localhost:8888/recategorize \
+  -H "Content-Type: application/json" \
+  -d '{"artifact_id": "...", "new_domain": "projects"}'
+```
+
+---
+
+## Configuration
+
+- `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
+- `src/mcp/config/settings.py` — Domains, extensions, categorization tiers, DB URLs
+
+**Key env vars (docker-compose.yml):**
+- `CATEGORIZE_MODE=smart` — Default tier (manual/smart/pro)
+- `OPENROUTER_API_KEY` — API key for OpenRouter (required)
+- `ARCHIVE_PATH=/archive` — Container-side mount point
+- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama`, `quenchforge`, or `openrouter`, default: `openrouter`)
+- `INTERNAL_LLM_MODEL` — Internal LLM model ID (empty = auto-selected; set during Ollama setup wizard or via `OLLAMA_DEFAULT_MODEL`)
+- `OLLAMA_DEFAULT_MODEL` — Default Ollama model (auto-recommended based on hardware if not set; fallback: `llama3.2:3b`)
+
+**Internal LLM routing + retry (v0.96.1 candidate, post-2026-05-17 ablations):**
+- `PROVIDER_STAGE_<NORMALIZED_STAGE>` — Per-stage provider override
+  (e.g. `PROVIDER_STAGE_LONGMEMEVAL_SCORE=openrouter`). Routes that
+  specific `call_internal_llm` call site to a different provider than
+  the global default. Stage names normalize via uppercase + `/` → `_`
+  + `-` → `_`. See `core.utils.internal_llm._resolve_stage_provider`.
+- `INTERNAL_LLM_MAX_RETRIES=3` — Cap on transient-failure retry
+  attempts inside `_call_ollama` (5xx / 429 / timeout / ConnectError).
+- `INTERNAL_LLM_RETRY_BACKOFF=0.5` — Exponential backoff base
+  (seconds) for the retry loop. Doubles per attempt.
+
+**Embedding cache (v0.96.1 candidate):**
+- `CERID_EMBED_CACHE_SIZE=50000` — In-memory LRU capacity. `0` disables.
+- `CERID_EMBED_CACHE_PATH` — If set, enables a disk tier
+  (`PersistentEmbeddingCache`) at the given SQLite path. Default
+  empty = memory-only. Cross-run / cross-process cache; namespace-
+  isolated per provider+model so different backends coexist in one DB.
+
+**LongMemEval runtime knobs (v0.96.1 candidate):**
+- `LONGMEMEVAL_INGEST_PARALLEL=4` — Parallel-ingest chunk size in
+  `runner.run`. Matches quenchforge's `--parallel 4` slot. Set to
+  `1` for sequential ingest (debugging).
+- `LONGMEMEVAL_SCORER=llm` — Scorer mode. Values: `llm` (default,
+  LongMemEvalScorer with stage=longmemeval/score), `substring`
+  (smoke mode), `two-pass` (substring shortcut → LLM fallback).
+- `LONGMEMEVAL_ENABLE_QUENCHFORGE=1` — Opt in to quenchforge GPU
+  routing for embed + rerank during ablation runs. Auto-configures
+  `EMBEDDINGS_PROVIDER`, `RERANK_PROVIDER`, and the internal LLM
+  provider for the LLM-judge scorer.
+- `LONGMEMEVAL_CHUNK_MAX_CHARS` — Override chunking size. Default is
+  unset (no chunking on minimum-viable, 1500 on production-stack).
+
+---
+
+## Verification
+
+```bash
+curl http://localhost:8888/health              # full health check (cached 10s)
+curl http://localhost:8888/health/live          # liveness probe (always 200)
+curl http://localhost:8888/health/ready         # readiness probe (503 if deps down)
+curl http://localhost:8888/health/status        # degradation report + pipeline providers
+curl http://localhost:8888/collections
+curl http://localhost:8888/artifacts
+curl http://localhost:8888/ingest_log?limit=10
+
+# With API key auth enabled (set CERID_API_KEY env var):
+curl http://localhost:8888/artifacts \
+  -H "X-API-Key: $CERID_API_KEY"
+# Exempt from auth: /health, /health/*, /, /docs, /openapi.json, /redoc, /mcp/*
+```
+
+---
+
+## Knowledge Base Sync
+
+Multi-machine sync via Dropbox using JSONL exports. Raw files live at `~/cerid-archive/` (symlinked to `~/Dropbox/cerid-archive`). Database snapshots sync via `~/Dropbox/cerid-sync/`.
+
+```bash
+# Export local KB to sync directory
+python3 scripts/cerid-sync.py export
+
+# Import from sync directory (non-destructive merge)
+python3 scripts/cerid-sync.py import
+
+# Force-overwrite local data from sync
+python3 scripts/cerid-sync.py import --force
+
+# Compare local vs sync snapshot
+python3 scripts/cerid-sync.py status
+```
+
+**Auto-import on startup:** When MCP starts with an empty Neo4j database and a valid `manifest.json` in the sync directory, it automatically imports all data. This enables zero-config bootstrap on a new machine.
+
+**REST API:**
+```bash
+# Trigger incremental export (auto-reads last_exported_at from manifest)
+curl -X POST http://localhost:8888/sync/export \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Export specific domains since a timestamp
+curl -X POST http://localhost:8888/sync/export \
+  -H "Content-Type: application/json" \
+  -d '{"since": "2026-03-01T00:00:00Z", "domains": ["coding", "finance"]}'
+
+# Import with conflict strategy
+curl -X POST http://localhost:8888/sync/import \
+  -H "Content-Type: application/json" \
+  -d '{"conflict_strategy": "remote_wins"}'
+
+# Check sync status
+curl http://localhost:8888/sync/status
+```
+
+**Sync directory structure:**
+```
+~/Dropbox/cerid-sync/
+├── manifest.json           # Timestamps, counts, checksums
+├── neo4j/                  # artifacts.jsonl, domains.jsonl, relationships.jsonl
+├── chroma/                 # domain_*.jsonl (with embeddings)
+├── bm25/                   # BM25 corpus files
+└── redis/                  # audit_log.jsonl
+```
+
+---
+
+## Dependency Management
+
+Python uses `pip-compile` for reproducible builds with hash verification. NPM uses `package-lock.json`.
+
+```bash
+# Regenerate Python lock files after editing requirements.txt
+make lock-python
+
+# Install git pre-commit hook (checks lock files are in sync)
+make install-hooks
+
+# Verify all lock files are current
+make deps-check
+```
+
+**Key files:**
+- `src/mcp/requirements.txt` — Human-editable ranges (source of truth)
+- `src/mcp/requirements.lock` — Generated by `pip-compile --generate-hashes`
+- `src/mcp/requirements-dev.txt` — Test/dev deps only
+- `Makefile` — Convenience targets
+- `scripts/hooks/pre-commit` — Blocks commits when lock files are stale
+- `.github/dependabot.yml` — Weekly grouped PRs for pip, npm, actions, Docker
+- `docs/DEPENDENCY_COUPLING.md` — Cross-service version constraints
+
+**Cross-service version coupling:** See `docs/DEPENDENCY_COUPLING.md` for constraints (ChromaDB client/server, spaCy lib/model, Node version, Python version). CI enforces lock file sync via `lock-sync` job.
+
+---
+
+## Extensibility
+
+- **Parsers:** Registry pattern in `utils/parsers.py`. PDF uses pdfplumber (structure-aware). Add Docling later for OCR via `@register_parser`.
+- **Domains:** Add to `config.DOMAINS` list. Neo4j nodes auto-created.
+- **File types:** Add to `config.SUPPORTED_EXTENSIONS` + register parser.
+
+---
+
+## Additional Endpoints
+
+### Setup & Configuration
+- `GET /setup/status` — Check if system is configured
+- `GET /setup/system-check` — Auto-detect system capabilities (RAM, Docker, .env keys, Ollama, archive path)
+- `POST /setup/validate-key` — Test an API key
+- `POST /setup/configure` — Apply initial configuration (API keys + KB config + Ollama settings)
+- `GET /setup/health` — Service health dashboard
+
+### Providers (BYOK)
+- `GET /providers` — List configured LLM providers
+- `GET /providers/configured` — List providers with active API keys
+- `GET /providers/internal` — Current internal LLM provider
+- `PUT /providers/internal` — Update internal LLM provider at runtime
+- `GET /providers/credits` — OpenRouter credit balance
+- `GET /providers/routing` — Current model routing configuration
+- `GET /providers/config` — Provider configuration
+- `PUT /providers/config` — Update provider configuration
+- `GET /providers/{name}` — Get specific provider details
+- `POST /providers/{name}/validate` — Validate provider API key
+
+### Model Assignments
+- `GET /models/assignments` — Current model assignments per task
+- `PUT /models/assignments` — Update model assignments
+- `GET /models/available` — Available models from configured providers
+
+### Automations
+- `GET /automations` — List user automations
+- `POST /automations` — Create automation
+- `GET /automations/presets` — List automation presets
+- `GET /automations/{id}` — Get automation details
+- `PUT /automations/{id}` — Update automation
+- `DELETE /automations/{id}` — Delete automation
+- `POST /automations/{id}/enable` — Enable automation
+- `POST /automations/{id}/disable` — Disable automation
+- `POST /automations/{id}/run` — Manual run
+- `GET /automations/{id}/history` — Run history
+
+### A2A Protocol
+- `GET /.well-known/agent.json` — Agent Card
+- `POST /a2a/tasks` — Create task
+- `GET /a2a/tasks/{id}` — Task status
+- `POST /a2a/tasks/{id}/cancel` — Cancel a running task
+- `GET /a2a/tasks/{id}/history` — Task execution history
+
+### Observability
+- `GET /observability/metrics` — Aggregated metrics
+- `GET /observability/metrics/{name}` — Time-series data for a specific metric
+- `GET /observability/health-score` — Composite health score (0-100)
+- `GET /observability/cost` — LLM cost breakdown
+- `GET /observability/quality` — Retrieval quality metrics
+
+### Plugins
+- `GET /plugins` — List plugins with status
+- `GET /plugins/{name}` — Get plugin details
+- `POST /plugins/{name}/enable` — Enable plugin
+- `POST /plugins/{name}/disable` — Disable plugin
+- `GET /plugins/{name}/config` — Get plugin configuration
+- `PUT /plugins/{name}/config` — Update plugin configuration
+- `POST /plugins/scan` — Scan for new plugins
+
+### Custom Agents
+
+User-defined custom agents with CRUD operations and template support.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/custom-agents/templates` | List built-in agent templates |
+| `POST` | `/custom-agents/from-template/{template_id}` | Create agent from template with optional overrides |
+| `GET` | `/custom-agents` | List custom agents (pagination: `offset`, `limit`) |
+| `POST` | `/custom-agents` | Create a new custom agent |
+| `GET` | `/custom-agents/{agent_id}` | Get agent details |
+| `PATCH` | `/custom-agents/{agent_id}` | Partially update an agent |
+| `DELETE` | `/custom-agents/{agent_id}` | Delete an agent |
+| `POST` | `/custom-agents/{agent_id}/query` | Execute query using agent's config (domains, model, returns `agent_config` with system_prompt, temperature) |
+
+### Plugin Registry (Community)
+
+Browse and search community plugins from the external registry.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/plugin-registry` | Search/list community plugins (query: `q`, `type`) |
+| `GET` | `/plugin-registry/{name}` | Get community plugin details by name |
+
+### System Monitor
+
+Storage metrics and ingestion history.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/system/storage` | Aggregated storage metrics across ChromaDB, Neo4j, Redis, BM25 (cached 60s). Returns status: healthy/warning/critical |
+| `GET` | `/admin/ingest-history` | Recent ingestion events from Redis stream (pagination: `limit`, `offset` as stream cursor) |
+
+### Webhook Subscriptions
+
+Subscribe to events and receive webhook notifications.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/webhooks` | List all webhook subscriptions |
+| `POST` | `/webhooks` | Create a webhook subscription |
+| `GET` | `/webhooks/{sub_id}` | Get subscription details |
+| `PATCH` | `/webhooks/{sub_id}` | Update a subscription |
+| `DELETE` | `/webhooks/{sub_id}` | Delete a subscription |
+| `GET` | `/webhooks/{sub_id}/deliveries` | List delivery history for a subscription |
+
+### Workflows
+- `GET /workflows` — List workflows
+- `POST /workflows` — Create workflow
+- `GET /workflows/templates` — Predefined templates
+- `GET /workflows/{id}` — Get workflow details
+- `PUT /workflows/{id}` — Update workflow
+- `DELETE /workflows/{id}` — Delete workflow
+- `POST /workflows/{id}/run` — Execute workflow
+- `GET /workflows/{id}/runs` — List workflow runs
+
+### Data Sources (External Knowledge)
+- `GET /data-sources` — List registered external data sources with enabled status
+- `POST /data-sources/{name}/enable` — Enable an external data source
+- `POST /data-sources/{name}/disable` — Disable an external data source
+
+### Model Registry Validation
+- `GET /providers/models/validate` — Validate model registry against OpenRouter (checks availability of all 20+ registered models)
+
+### Ollama (Local LLM Add-On)
+
+**Proxy endpoints** (require `OLLAMA_ENABLED=true`):
+- `GET /ollama/models` — List installed Ollama models
+- `POST /ollama/chat` — Chat with local model (streaming + non-streaming)
+- `POST /ollama/pull` — Pull/download a model (streaming progress via NDJSON)
+
+**Configuration & management (under `/providers/` router):**
+- `GET /providers/ollama/status` — Ollama status: `{ enabled, url, reachable, models[], default_model, default_model_installed }`
+- `GET /providers/ollama/recommendations` — Hardware-aware model recommendations: `{ hardware: { ram_gb, cpu, gpu, platform }, models: [{ id, name, size_gb, min_ram_gb, description, strengths, tier, compatible, recommended }], recommended }`
+- `POST /providers/ollama/enable` — Enable Ollama as internal LLM provider. Optional body: `{ "model": "llama3.1:8b" }` to override the default model. Checks connectivity, updates runtime config.
+- `POST /providers/ollama/disable` — Disable Ollama, fall back to OpenRouter
+
+**Model selection:** Configurable via `OLLAMA_DEFAULT_MODEL` env var or the setup wizard UI. The setup wizard detects system RAM/CPU/GPU and recommends from 3 tiers:
+
+| Tier | Model | Size | Min RAM |
+|------|-------|------|---------|
+| Lightweight | Llama 3.2 3B | 2.0GB | 8GB |
+| Balanced | Llama 3.1 8B | 4.7GB | 16GB |
+| Performance | Phi-4 14B | 9.1GB | 32GB |
+
+Model can be changed post-setup via Settings UI → Ollama → Change button.
+
+**Pipeline tasks routed to internal LLM:**
+- Claim extraction (verification)
+- Query decomposition (multi-part queries)
+- Memory conflict resolution (ADD/UPDATE/NOOP classification)
+- Response topic extraction (disambiguation context)
+- Reranking (cross-encoder ONNX default, LLM reranking fallback)
+
+**Limitations:** The local model handles classification, extraction, and routing. It does NOT handle: user-facing chat, verification fact-checking, synopsis generation, or web search — those always use OpenRouter.
+
+**Hardware detection:** `scripts/detect-gpu.sh` auto-detects NVIDIA GPU, AMD ROCm, macOS Metal, or CPU fallback. The `/providers/ollama/recommendations` endpoint detects RAM, CPU, and GPU at runtime for model recommendations. Docker Compose profile `ollama` starts the container with GPU passthrough when available. macOS Apple Silicon: runs natively for Metal acceleration.
+
+**Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
+
+### Model Updates
+- `GET /models/updates` — Latest in-family model updates available per role (live OpenRouter catalog check)
+- `POST /models/updates/check` — Dry-run: diff each role's pinned model against the newest in-family version in the OpenRouter catalog (no changes applied)
+- `POST /models/updates/apply` — Adopt the latest in-family model for every role and regenerate the Bifrost config. Also runs weekly via the `model_auto_update` scheduler job (gated by `MODEL_AUTO_UPDATE_ENABLED`)
+
+### Agent Activity
+- `GET /agents/activity/stream` — SSE stream of real-time agent activity events (exempted from API key auth)
+
+### Private Mode
+- `POST /settings/private-mode` — Enable private mode with security level (1-4)
+- `DELETE /settings/private-mode` — Disable private mode, optionally clear Redis cache
+- `GET /settings/private-mode` — Get current private mode status
+
+### Watched Folders
+- `POST /watched-folders` — Create watched folder config
+- `GET /watched-folders` — List watched folders
+- `PATCH /watched-folders/{id}` — Update folder config
+- `DELETE /watched-folders/{id}` — Remove watched folder
+
+### Web Search
+- Tool: `pkb_web_search` — Search web with verification
+
+### Memory Recall
+- Tool: `pkb_memory_recall` — Context-aware memory retrieval with salience-aware decay scoring (6 memory types: empirical, decision, preference, project_context, temporal, conversational)
+
+### Knowledge Graph (Subjects panes)
+
+Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. See [`docs/ROUTER_REGISTRY.md`](ROUTER_REGISTRY.md) for the generated parameter/response detail.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/graph/map` | Cartographic map payload for Constellation (2D-projected positions, CO_MENTIONED links, community hulls). `?layout=force\|wells\|domain` — omitting is byte-identical to `force`; unknown value → 422. Per-layout Redis cache keys `cerid:graph:emb3d:v5:map:{layout}`; `layout_fallback: true` when a non-default layout artifact is missing (falls back to force). Communities degrade to `[]` until the nightly `compute_umap_3d` job writes them. |
+| `GET` | `/graph/domains` | Per-domain entity/artifact counts — the taxonomy-aware spine for the Domain lens. Each domain carries `salience` (float, corpus-level salience mass, Slice 6.2) and the response is **sorted by salience desc** (falls back to `entity_count` ordering pre-derivation, when salience is 0). `derived_at: null` signals the `DeriveDomainsJob` has never run (frontends render a degraded state, not an error). No cache in v1. |
+| `GET` | `/graph/decomposition` | STRATA Atlas icicle source. Without `?community=`: the full tier tree (domains → L1 → L0 communities as a flat `communities` list per domain, with sizes/labels/purity, L0→L1 parent map, per-domain unclustered counts, size<4 rollup buckets, `no_communities_computed` flag). (The intermediate subcategory-group tier was removed 2026-07-02 — it duplicated communities under every subcategory.) With `?community=<id>`: entity leaves for that L0 community, each carrying `path:[domain, sub?, l1, l0]`. Redis 24h cache under the `cerid:graph:emb3d:*` bust pattern. `no_communities_computed: true` ⇒ Leiden never ran; client degrades to a Domain→Entity two-tier. |
+| `GET` | `/graph/timeline` | Aggregated entity-activity timeline (legacy summary shape). |
+| `GET` | `/graph/timeline/strata` | Tephra Cycle-2 stratigraphic timeline payload. Additive optional fields over the base shape: `lanes[]` (lane meta), `events[]` (event-horizon items), `verification_aggs[]` (sparse-suppressed when <3), `top_entities` (per `{lane}:{bucket}`, ≤3), `data_extent_from` (earliest data ts, for 180d-window clamping), `ledger_start_date` (earliest KnowledgeLog ts — drives the pre-ledger hairline). All optional so old cached payloads still parse. |
+| `GET` | `/graph/timeline/track/{canonical_id}` | Lazy zoom-triggered event detail for one entity track (≤500 mention events, co-mentions cap 20). `?from`/`?to` ISO bounds; `?bucket=` scopes to a single bucket and adds `knowledge_events`, `new_entities`, `verification`, `community_summary`. Redis 60s cache. |
+
+### Wiki (Knowledge Pages)
+
+Karpathy LLM-Wiki surface. All under the `/wiki` prefix.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/wiki/entities` | List entity wiki pages (`limit` 1–200, default 30). `?q=` searches name/canonical_id server-side before the limit (spans the whole set). When `q` is supplied, results carry a `match_rank` ordering (exact > prefix > substring); the no-`q` path is byte-identical to before. Each row carries `top_tags` (Slice 6.3, salience-ranked vocabulary tags) for the entity-list tag filter. |
+| `GET` | `/wiki/entities/{slug}` | Full entity page (summary, related entities, source-artifact citations, contradictions, confidence band). Carries `domain_salience` (salience-ordered domain map, Slice 6.1) + `top_tags` (Slice 6.3) for the infobox salience-mix footer + chip row. Related entities carry `has_summary` + `one_liner` (drives three-state wikilinks + hovercards). 404 if absent. |
+| `GET` | `/wiki/concepts/{community_id}` | Concept (Leiden community) page: prose summary + member list. Accepts `concept:{level}:{native_id}` and bare `{level}:{native_id}`. `confidence_band` is intentionally omitted — CONCEPT pages have no claim-based confidence; absence means not-applicable (a phantom `unknown` band was removed). |
+| `GET` | `/wiki/log` | Karpathy-style chronological ledger of wiki refreshes/enrichments/contradiction updates. Filter by `entity_slug`, `since`; paginated newest-first (`limit` default 50). Backs the page-history view. |
+| `GET` | `/wiki/index` | LLM-readable catalog (one row per entity: slug, name, one-liner, last-updated, activity score, `has_summary`). `?q=` filters server-side pre-limit; `?order=name` sorts A-Z (default: activity desc). |
+| `POST` | `/wiki/write_note` | Two-way vault write (see SDK section above). |

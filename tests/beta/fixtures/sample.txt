@@ -1,0 +1,23 @@
+Cerid AI Beta Test Document
+
+This document is used for automated beta testing of the Cerid AI knowledge base ingestion pipeline.
+It contains enough text to exercise the chunking, embedding, and deduplication systems.
+
+Section 1: Knowledge Management
+The Cerid AI system provides a unified interface for managing multi-domain knowledge bases.
+It supports ingestion from various file formats including PDF, DOCX, XLSX, and plain text.
+Each ingested document is parsed, chunked into semantic units, and stored in both a vector
+database (ChromaDB) for semantic search and a graph database (Neo4j) for relationship tracking.
+
+Section 2: Retrieval Pipeline
+When a user queries the knowledge base, the system performs hybrid search combining BM25 keyword
+matching with vector similarity search. Results are reranked using a cross-encoder model to
+improve relevance. The query decomposition module can break complex queries into sub-retrievals
+for more comprehensive coverage.
+
+Section 3: Verification System
+All AI-generated responses undergo verification through a 4-claim-type detection system that
+checks for evasion, citation errors, recency issues, and ignorance patterns. This helps ensure
+the quality and reliability of information provided to users.
+
+Beta test unique identifier: CERID-BETA-TEST-SAMPLE-001

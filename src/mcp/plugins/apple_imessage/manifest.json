@@ -1,0 +1,16 @@
+{
+  "name": "apple_imessage",
+  "version": "0.1.0",
+  "type": "connector",
+  "tier": "pro",
+  "license": "BUSL-1.1",
+  "description": "Apple iMessage (chat.db) via signed Swift helper; private_mode L2+",
+  "feature_flags": ["imessage_reader"],
+  "requires": {
+    "platform": "darwin",
+    "macos_min": "14.0",
+    "swift_helpers": ["ceridimessage"],
+    "tcc_grants": ["full_disk_access"],
+    "private_mode_min": 2
+  }
+}

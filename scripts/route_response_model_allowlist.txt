@@ -1,0 +1,5 @@
+# Grandfather allowlist: JSON @router routes that lack a response_model TODAY.
+# Enforced by scripts/lint-route-response-model.py --check.
+# This list may ONLY SHRINK. Adding a response_model removes the entry;
+# the gate fails on any new untyped route or any stale (now-typed) entry.
+# Burn this to zero by 1.0 (tasks/2026-06-29-rag-api-systemic-audit.md, Phase 5).

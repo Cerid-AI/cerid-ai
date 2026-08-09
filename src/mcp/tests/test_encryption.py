@@ -1,0 +1,267 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: FSL-1.1-ALv2
+
+"""Tests for encryption."""
+from __future__ import annotations
+
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# Dependency stubs are handled by conftest.py pytest_configure()
+
+# ---------------------------------------------------------------------------
+# Check if cryptography is available (tests require it)
+# ---------------------------------------------------------------------------
+
+try:
+    from cryptography.fernet import Fernet
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
+
+
+# ---------------------------------------------------------------------------
+# Tests for FieldEncryptor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_CRYPTOGRAPHY, reason="cryptography not installed")
+class TestFieldEncryptor:
+    """Test the FieldEncryptor class."""
+
+    def _make_encryptor(self):
+        from utils.encryption import FieldEncryptor
+        key = Fernet.generate_key().decode()
+        return FieldEncryptor(key), key
+
+    def test_encrypt_decrypt_roundtrip(self):
+        """Encrypting then decrypting returns original text."""
+        enc, _ = self._make_encryptor()
+        original = "Hello, World! This is sensitive data."
+        encrypted = enc.encrypt(original)
+        decrypted = enc.decrypt(encrypted)
+        assert decrypted == original
+
+    def test_encrypted_has_prefix(self):
+        """Encrypted values start with the encryption prefix."""
+        from utils.encryption import ENCRYPTED_PREFIX
+
+        enc, _ = self._make_encryptor()
+        encrypted = enc.encrypt("secret")
+        assert encrypted.startswith(ENCRYPTED_PREFIX)
+
+    def test_no_double_encryption(self):
+        """Encrypting an already-encrypted value returns it unchanged."""
+        enc, _ = self._make_encryptor()
+        encrypted_once = enc.encrypt("secret")
+        encrypted_twice = enc.encrypt(encrypted_once)
+        assert encrypted_once == encrypted_twice
+
+    def test_empty_string_passthrough(self):
+        """Empty strings are not encrypted."""
+        enc, _ = self._make_encryptor()
+        assert enc.encrypt("") == ""
+        assert enc.decrypt("") == ""
+
+    def test_unencrypted_passthrough(self):
+        """Decrypting a non-encrypted value returns it as-is."""
+        enc, _ = self._make_encryptor()
+        plain = "not encrypted at all"
+        assert enc.decrypt(plain) == plain
+
+    def test_different_keys_cannot_decrypt(self):
+        """Different keys cannot decrypt each other's ciphertext.
+
+        decrypt() fails open on InvalidToken (rotated/foreign-key ciphertext)
+        — this is exactly the shape of ciphertext the recovery/repair call
+        sites encounter after a key rotation, so it must degrade to
+        "return unchanged" rather than raise.
+        """
+        enc1, _ = self._make_encryptor()
+        enc2, _ = self._make_encryptor()
+
+        encrypted = enc1.encrypt("secret data")
+        result = enc2.decrypt(encrypted)
+        assert result == encrypted
+
+    def test_key_hash_is_stable(self):
+        """Same key produces same hash."""
+        from utils.encryption import FieldEncryptor
+
+        key = Fernet.generate_key().decode()
+        enc1 = FieldEncryptor(key)
+        enc2 = FieldEncryptor(key)
+        assert enc1.key_hash == enc2.key_hash
+
+    def test_encrypt_dict(self):
+        """encrypt_dict encrypts specified fields."""
+        enc, _ = self._make_encryptor()
+        data = {"filename": "secret.pdf", "domain": "finance", "count": "42"}
+        encrypted = enc.encrypt_dict(data, ["filename"])
+        assert encrypted["filename"].startswith("enc:v1:")
+        assert encrypted["domain"] == "finance"  # unchanged
+        assert encrypted["count"] == "42"  # unchanged
+
+    def test_decrypt_dict(self):
+        """decrypt_dict decrypts specified fields."""
+        enc, _ = self._make_encryptor()
+        data = {"filename": "secret.pdf", "domain": "finance"}
+        encrypted = enc.encrypt_dict(data, ["filename"])
+        decrypted = enc.decrypt_dict(encrypted, ["filename"])
+        assert decrypted["filename"] == "secret.pdf"
+        assert decrypted["domain"] == "finance"
+
+    def test_unicode_support(self):
+        """Encryption handles Unicode text correctly."""
+        enc, _ = self._make_encryptor()
+        original = "日本語テスト — émojis 🎉 and accénts"
+        encrypted = enc.encrypt(original)
+        decrypted = enc.decrypt(encrypted)
+        assert decrypted == original
+
+    def test_invalid_key_raises(self):
+        """Invalid encryption key raises ValueError."""
+        from utils.encryption import FieldEncryptor
+
+        with pytest.raises(ValueError, match="Invalid encryption key"):
+            FieldEncryptor("not-a-valid-fernet-key")
+
+
+@pytest.mark.skipif(not HAS_CRYPTOGRAPHY, reason="cryptography not installed")
+class TestEncryptionModule:
+    """Test module-level encryption functions."""
+
+    def setup_method(self):
+        """Reset encryptor singleton before each test."""
+        from utils.encryption import reset_encryptor
+        reset_encryptor()
+
+    def test_is_encryption_enabled_without_key(self):
+        """Encryption disabled when CERID_ENCRYPTION_KEY not set."""
+        from utils.encryption import is_encryption_enabled
+
+        with patch.dict(os.environ, {}, clear=False):
+            # Remove key if present
+            os.environ.pop("CERID_ENCRYPTION_KEY", None)
+            assert is_encryption_enabled() is False
+
+    def test_is_encryption_enabled_with_key(self):
+        """Encryption enabled when CERID_ENCRYPTION_KEY is set."""
+        from utils.encryption import is_encryption_enabled
+
+        key = Fernet.generate_key().decode()
+        with patch.dict(os.environ, {"CERID_ENCRYPTION_KEY": key}):
+            assert is_encryption_enabled() is True
+
+    def test_get_encryptor_returns_none_without_key(self):
+        """get_encryptor returns None when no key is configured."""
+        from utils.encryption import get_encryptor, reset_encryptor
+        reset_encryptor()
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CERID_ENCRYPTION_KEY", None)
+            result = get_encryptor()
+            assert result is None
+
+    def test_get_encryptor_returns_instance_with_key(self):
+        """get_encryptor returns FieldEncryptor when key is configured."""
+        from utils.encryption import FieldEncryptor, get_encryptor, reset_encryptor
+        reset_encryptor()
+
+        key = Fernet.generate_key().decode()
+        with patch.dict(os.environ, {"CERID_ENCRYPTION_KEY": key}):
+            result = get_encryptor()
+            assert isinstance(result, FieldEncryptor)
+
+    def test_encrypt_field_passthrough_when_disabled(self):
+        """encrypt_field returns value unchanged when encryption disabled."""
+        from utils.encryption import encrypt_field, reset_encryptor
+        reset_encryptor()
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CERID_ENCRYPTION_KEY", None)
+            assert encrypt_field("hello") == "hello"
+
+    def test_decrypt_field_passthrough_when_disabled(self):
+        """decrypt_field returns value unchanged when encryption disabled."""
+        from utils.encryption import decrypt_field, reset_encryptor
+        reset_encryptor()
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CERID_ENCRYPTION_KEY", None)
+            assert decrypt_field("hello") == "hello"
+
+
+# ---------------------------------------------------------------------------
+# Tests for config
+# ---------------------------------------------------------------------------
+
+
+class TestEncryptionConfig:
+    """Test encryption-related configuration."""
+
+    def test_enable_encryption_default(self):
+        """ENABLE_ENCRYPTION defaults to False."""
+        import config
+        # Default is false (unless env var is set in test runner)
+        assert isinstance(config.ENABLE_ENCRYPTION, bool)
+
+    def test_sync_backend_default(self):
+        """SYNC_BACKEND defaults to 'local'."""
+        import config
+        assert config.SYNC_BACKEND == "local"
+
+
+# ---------------------------------------------------------------------------
+# Observability: Sentry capture tests (R1-3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_CRYPTOGRAPHY, reason="cryptography not installed")
+class TestEncryptionSentryCapture:
+    """Assert Sentry.capture_exception fires at every silent-catch site."""
+
+    def _make_encryptor(self):
+        from utils.encryption import FieldEncryptor
+        key = Fernet.generate_key().decode()
+        return FieldEncryptor(key)
+
+    def test_decrypt_failed_captured_returns_ciphertext(self):
+        """decrypt() reports to Sentry and returns raw ciphertext on failure."""
+        from unittest.mock import patch
+
+        enc = self._make_encryptor()
+        # Patch the internal fernet to raise on decrypt
+        enc._fernet.decrypt = MagicMock(side_effect=ValueError("bad token"))
+
+        fake_ciphertext = "enc:v1:AAAABADBAD=="
+        with patch("sentry_sdk.capture_exception") as mock_capture:
+            result = enc.decrypt(fake_ciphertext)
+
+        # Fallback: must return raw ciphertext, not raise
+        assert result == fake_ciphertext
+        mock_capture.assert_called_once()
+
+    def test_init_failed_captured_returns_none(self):
+        """get_encryptor() reports to Sentry and returns None when init fails."""
+        from unittest.mock import patch
+
+        import utils.encryption as enc_mod
+
+        # Reset singleton so get_encryptor() re-runs the init path
+        enc_mod._encryptor = None
+        enc_mod._initialized = False
+
+        with patch.dict("os.environ", {"CERID_ENCRYPTION_KEY": "bad-key-not-base64"}), \
+             patch("sentry_sdk.capture_exception") as mock_capture:
+            result = enc_mod.get_encryptor()
+
+        # Encryptor should be None on bad key
+        assert result is None
+        mock_capture.assert_called_once()
+
+        # Restore for other tests
+        enc_mod._encryptor = None
+        enc_mod._initialized = False

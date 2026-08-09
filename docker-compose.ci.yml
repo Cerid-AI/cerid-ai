@@ -1,0 +1,111 @@
+# Copyright 2024-2026 Cerid AI — Licensed under the Functional Source License 1.1
+# with an Apache-2.0 future license (FSL-1.1-ALv2). See LICENSE.
+#
+# CI-only overrides for docker-compose.yml. Two purposes:
+#
+# 1. RESOURCE FIT — GitHub Actions ubuntu runners have 2 CPUs; the root
+#    compose's neo4j cpus: '4.0' (and heap+pagecache) hard-fail there with
+#    "range of CPUs is from 0.01 to 2.00". Shrink to fit the runner.
+#
+# 2. ISOLATION — the live-stack CI jobs (preservation, benchmark-slo) run on a
+#    SELF-HOSTED Mac Pro runner SHARED with a developer's dev stack. The root
+#    compose hardcodes container_name: ai-companion-* and joins the shared
+#    external `llm-network`, so a CI `docker compose up`/`down -v` would clobber
+#    the dev stack's containers (the 2026-06-07 incident). This overlay suffixes
+#    every container with -ci and runs on its own bridge (with aliases so the
+#    canonical hostnames still resolve INSIDE the CI stack). The jobs also offset
+#    published ports via CERID_PORT_* and set COMPOSE_PROJECT_NAME=cerid-ci, so
+#    the CI stack and a dev stack coexist on one host without touching each other.
+#
+# Layered via: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
+
+services:
+  neo4j:
+    container_name: ai-companion-neo4j-ci
+    networks:
+      llm-network:
+        aliases:
+          - ai-companion-neo4j
+    # Ephemeral, project-scoped store (NOT the host bind-mount). The root
+    # compose binds ./stacks/.../data/neo4j, which on a dev machine is the
+    # SAME dir the dev neo4j holds — two neo4j on one store => the CI one is
+    # unhealthy and the boot fails. Named volumes are isolated per project and
+    # `down -v` wipes them, so every CI run starts from a clean store.
+    volumes:
+      - ci-neo4j-data:/data
+      - ci-neo4j-logs:/logs
+    environment:
+      # Root compose sets heap=1G + pagecache=2G = 3G, which exceeds the
+      # 2G cgroup limit we apply below — neo4j reads cgroup-aware memory
+      # and refuses to start with "Invalid memory configuration - exceeds
+      # physical memory". Shrink both knobs to fit a preservation-only
+      # workload inside the runner's tighter budget.
+      - NEO4J_server_memory_heap_max__size=512m
+      - NEO4J_server_memory_pagecache_size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  chromadb:
+    container_name: ai-companion-chroma-ci
+    networks:
+      llm-network:
+        aliases:
+          - ai-companion-chroma
+    # Ephemeral store (see neo4j note) — Chroma's SQLite also can't share a dir.
+    volumes:
+      - ci-chroma-data:/data
+
+  redis:
+    container_name: ai-companion-redis-ci
+    networks:
+      llm-network:
+        aliases:
+          - ai-companion-redis
+    # Ephemeral store (see neo4j note) — two redis on one AOF dir corrupt it.
+    volumes:
+      - ci-redis-data:/data
+
+  mcp-server:
+    container_name: ai-companion-mcp-ci
+    networks:
+      llm-network:
+        aliases:
+          - ai-companion-mcp
+
+  cerid-web:
+    container_name: cerid-web-ci
+    networks:
+      llm-network:
+        aliases:
+          - cerid-web
+
+  # Added with the service itself (2026-07-30). Any non-profile-gated service in
+  # the base compose that pins container_name needs an entry here, or `up`
+  # collides with the dev stack's container on this shared daemon and the whole
+  # CI stack fails to boot — which is how this job reported "Stack did not reach
+  # /health/ping within 180s" with no test ever running.
+  # Enforced by scripts/lint-ci-compose-namespacing.py.
+  memory-worker:
+    container_name: ai-companion-memory-worker-ci
+    networks:
+      llm-network:
+        aliases:
+          - ai-companion-memory-worker
+
+networks:
+  # Own bridge so the CI stack never shares the dev stack's external
+  # llm-network. Name pinned so repeated up/down cycles don't churn it.
+  llm-network:
+    name: cerid-ci-llm-network
+    external: false
+
+volumes:
+  # Project-scoped, ephemeral CI stores — isolated from the dev stack's host
+  # bind-mounts and wiped by `down -v` so each run starts clean.
+  ci-neo4j-data:
+  ci-neo4j-logs:
+  ci-chroma-data:
+  ci-redis-data:

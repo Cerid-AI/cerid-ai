@@ -1,0 +1,176 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
+import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
+import * as settingsApi from "@/lib/api/settings"
+import type { SystemCheckResponse } from "@/lib/types"
+
+// The step now embeds <ModelCompatStatus> (useQuery → /models/doctor), so each
+// render needs a QueryClient. Wrap render and stub the doctor call.
+function render(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+}
+
+function sys(overrides: Partial<SystemCheckResponse> = {}): SystemCheckResponse {
+  return {
+    ram_gb: 32,
+    docker_running: true,
+    env_exists: true,
+    env_keys_present: [],
+    ollama_detected: false,
+    ollama_url: null,
+    ollama_models: [],
+    lightweight_recommended: false,
+    archive_path_exists: true,
+    default_archive_path: "~/cerid-archive",
+    os: "macOS 14.5",
+    cpu: "Intel Xeon W",
+    cpu_cores: 8,
+    gpu: "AMD Radeon Pro Vega II",
+    gpu_acceleration: "metal",
+    ...overrides,
+  }
+}
+
+const onSelect = vi.fn<(b: "ollama" | "quenchforge" | "cloud") => void>()
+
+beforeEach(() => {
+  onSelect.mockClear()
+  vi.spyOn(settingsApi, "fetchModelDoctor").mockResolvedValue({
+    hardware_profile: "amd-mac",
+    ok: true,
+    findings: [],
+    known_good_local: { chat: "llama3.1-8b" },
+    candidate_upgrades: { chat: [], embed: [], rerank: [] },
+    catalog_size: 0,
+  })
+})
+
+describe("BackendRecommendationStep", () => {
+  it("renders all three backend options", () => {
+    render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    expect(screen.getByText(/Ollama \(Local\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/Quenchforge \(Local, Mac \+ AMD\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/Cloud \(OpenRouter\)/i)).toBeInTheDocument()
+  })
+
+  it("badges quenchforge as Recommended on Intel Mac + AMD", () => {
+    render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    // The recommended option is also marked aria-pressed when selected matches it
+    const quenchforgeBtn = screen.getByText(/Quenchforge/i).closest("button")
+    expect(quenchforgeBtn).not.toBeNull()
+    expect(quenchforgeBtn?.getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("calls onSelect with the clicked backend id", () => {
+    render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    fireEvent.click(screen.getByText(/Cloud \(OpenRouter\)/i).closest("button")!)
+    expect(onSelect).toHaveBeenCalledWith("cloud")
+  })
+
+  it("reflects user override when 'selected' differs from recommendation", () => {
+    render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected="cloud"
+        onSelect={onSelect}
+      />,
+    )
+    const cloudBtn = screen.getByText(/Cloud \(OpenRouter\)/i).closest("button")
+    const quenchforgeBtn = screen.getByText(/Quenchforge/i).closest("button")
+    expect(cloudBtn?.getAttribute("aria-pressed")).toBe("true")
+    expect(quenchforgeBtn?.getAttribute("aria-pressed")).toBe("false")
+  })
+
+  it("renders the detected hardware summary", () => {
+    render(
+      <BackendRecommendationStep
+        systemCheck={sys({
+          os: "macOS 14.5",
+          cpu: "Intel Xeon W",
+          gpu: "AMD Radeon Pro Vega II",
+          gpu_type: "amd-mac",
+        })}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    expect(screen.getByText(/Detected:/i)).toBeInTheDocument()
+    expect(screen.getByText(/macOS 14\.5/)).toBeInTheDocument()
+  })
+
+  it("handles null systemCheck without crashing", () => {
+    render(
+      <BackendRecommendationStep
+        systemCheck={null}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    // With no system check, cloud is the default. All three options render.
+    expect(screen.getByText(/Ollama \(Local\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/Quenchforge \(Local, Mac \+ AMD\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/Cloud \(OpenRouter\)/i)).toBeInTheDocument()
+  })
+})
+
+describe("BackendRecommendationStep — axe-clean", () => {
+  it("is axe-clean with no selection (recommendation active)", async () => {
+    const { container } = render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    await screen.findByTestId("model-compat-compact")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with a user override selected", async () => {
+    const { container } = render(
+      <BackendRecommendationStep
+        systemCheck={sys({ gpu_type: "amd-mac" })}
+        selected="cloud"
+        onSelect={onSelect}
+      />,
+    )
+    await screen.findByTestId("model-compat-compact")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with null systemCheck", async () => {
+    const { container } = render(
+      <BackendRecommendationStep
+        systemCheck={null}
+        selected={null}
+        onSelect={onSelect}
+      />,
+    )
+    await screen.findByTestId("model-compat-compact")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})

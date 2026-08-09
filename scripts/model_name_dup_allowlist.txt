@@ -1,0 +1,4 @@
+# Grandfather allowlist: Pydantic model class names defined in >1 module TODAY.
+# Enforced by scripts/lint-model-name-uniqueness.py --check.
+# May ONLY SHRINK: a new collision fails CI; a resolved one must be removed
+# via --update. Rename the duplicates to distinct names to burn down (Phase 5).

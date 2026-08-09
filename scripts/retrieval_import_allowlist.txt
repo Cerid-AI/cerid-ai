@@ -1,0 +1,6 @@
+# Grandfather allowlist: modules importing a retrieval primitive
+# (agent_query / multi_domain_query / query_knowledge) TODAY.
+# Enforced by scripts/lint-retrieval-import-boundary.py --check.
+# This list may ONLY SHRINK. A new importer fails CI; a migrated
+# (now-stale) importer must be removed via --update. Phase 1 collapses
+# these onto one canonical agent_query_full (audit 2026-06-29, cluster #1).

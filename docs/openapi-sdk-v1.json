@@ -1,0 +1,1773 @@
+{
+  "components": {
+    "schemas": {
+      "AgentQueryRequest": {
+        "properties": {
+          "budget_seconds": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-request retrieval wall-clock budget override (seconds). None = the server's interactive default (AGENT_QUERY_BUDGET_SECONDS, 20s). For offline/batch callers \u2014 eval harnesses, SDK batch jobs \u2014 that prefer completeness over latency.",
+            "title": "Budget Seconds"
+          },
+          "context_sources": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source gates: {kb: bool, memory: bool, external: bool}. None = all enabled. Disabled sources skip retrieval entirely.",
+            "title": "Context Sources"
+          },
+          "conversation_messages": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Messages"
+          },
+          "cost_sensitivity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cost preference: 'low' | 'medium' | 'high'. When None it is resolved via the request -> consumer-registry -> persisted COST_SENSITIVITY chain (app.services.request_policy.resolve_cost_sensitivity, E1 CR-028). Retrieval ranking itself is not cost-routed; the resolved value steers LLM model selection on the chat/generation paths.",
+            "title": "Cost Sensitivity"
+          },
+          "domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domains"
+          },
+          "enable_self_rag": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override Self-RAG toggle (None = use server config)",
+            "title": "Enable Self Rag"
+          },
+          "exclude_packs": {
+            "default": false,
+            "description": "When True, drop knowledge-pack chunks from retrieval (personal-first: answer from your own data only). Slice 7.3.",
+            "title": "Exclude Packs",
+            "type": "boolean"
+          },
+          "metadata_filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ChromaDB where-clause for metadata filtering (e.g. {\"filename\": \"report.pdf\"})",
+            "title": "Metadata Filter"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Generating model (for Self-RAG metadata)",
+            "title": "Model"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "query_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Query scope: document | domain | kb (None = kb)",
+            "title": "Query Scope"
+          },
+          "rag_mode": {
+            "default": "manual",
+            "description": "Retrieval mode: manual | smart | custom_smart",
+            "title": "Rag Mode",
+            "type": "string"
+          },
+          "response_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM response text for Self-RAG validation",
+            "title": "Response Text"
+          },
+          "scope_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scope reference \u2014 filename for 'document' scope",
+            "title": "Scope Ref"
+          },
+          "skip_cache": {
+            "default": false,
+            "description": "Bypass semantic cache and query cache (for fresh-data scenarios like setup wizard)",
+            "title": "Skip Cache",
+            "type": "boolean"
+          },
+          "source_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source weights/toggles for custom_smart mode",
+            "title": "Source Config"
+          },
+          "strict_domains": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When True, disables cross-domain affinity bleed. None = use consumer default.",
+            "title": "Strict Domains"
+          },
+          "top_k": {
+            "default": 10,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          },
+          "use_reranking": {
+            "default": true,
+            "title": "Use Reranking",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "AgentQueryRequest",
+        "type": "object"
+      },
+      "ExternalIngestRequest": {
+        "description": "Request body for ``POST /sdk/v1/ingest/external``.",
+        "properties": {
+          "field_mappings": {
+            "$ref": "#/components/schemas/FieldMappings",
+            "description": "Mapping config that declares how to extract canonical fields from ``payload``."
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "Raw JSON payload from the external service.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "source_type": {
+            "description": "Free-form label for the originating service (e.g. ``readwise``, ``pocket``, ``telegram-bot``).  Stored as provenance metadata; never branched on in code.",
+            "examples": [
+              "readwise",
+              "pocket",
+              "telegram-bot",
+              "raindrop"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_type",
+          "payload",
+          "field_mappings"
+        ],
+        "title": "ExternalIngestRequest",
+        "type": "object"
+      },
+      "FieldMappings": {
+        "description": "Declares how to extract canonical fields from an arbitrary payload dict.\n\nEach value is a dotted-path string (optionally with ``[]`` for array\nfan-out) into the incoming ``payload``.  Only ``content`` and\n``source_uri`` are required; the others default gracefully.",
+        "properties": {
+          "content": {
+            "description": "Dotted path to the main text content.  Use ``highlights[].text`` to fan-out one item per array element.",
+            "examples": [
+              "text",
+              "highlights[].text",
+              "body.content"
+            ],
+            "title": "Content",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to an external ID.  When absent, the ID is derived from ``source_uri``.",
+            "examples": [
+              "id",
+              "highlight_id",
+              "guid"
+            ],
+            "title": "Id"
+          },
+          "source_uri": {
+            "description": "Dotted path to the canonical URI / URL for this item.",
+            "examples": [
+              "url",
+              "source.url",
+              "highlights[].url"
+            ],
+            "title": "Source Uri",
+            "type": "string"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to a list[str] of tags.  Resolved value must be a Python list; absent path \u2192 empty list.",
+            "examples": [
+              "tags",
+              "highlights[].tags",
+              "meta.labels"
+            ],
+            "title": "Tags"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to a human-readable title string.",
+            "examples": [
+              "title",
+              "book_title",
+              "subject"
+            ],
+            "title": "Title"
+          },
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to an ISO-8601 timestamp.  Defaults to current UTC time when absent or unresolvable.",
+            "examples": [
+              "highlighted_at",
+              "created_at",
+              "meta.ts"
+            ],
+            "title": "Ts"
+          }
+        },
+        "required": [
+          "content",
+          "source_uri"
+        ],
+        "title": "FieldMappings",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HallucinationCheckRequest": {
+        "properties": {
+          "conversation_id": {
+            "description": "Required conversation identifier",
+            "minLength": 1,
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "expert_mode": {
+            "default": false,
+            "title": "Expert Mode",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/HallucinationMode",
+            "default": "thorough",
+            "description": "Verification depth. ``fast`` extracts claims and returns them marked ``status='uncertain'`` with ``verification_skipped=True`` \u2014 ~ms latency, no NLI calls, useful for post-fact annotations. ``thorough`` (default) runs the full cross-model NLI pipeline."
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "persist": {
+            "default": true,
+            "title": "Persist",
+            "type": "boolean"
+          },
+          "response_text": {
+            "title": "Response Text",
+            "type": "string"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          },
+          "user_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Query"
+          }
+        },
+        "required": [
+          "response_text",
+          "conversation_id"
+        ],
+        "title": "HallucinationCheckRequest",
+        "type": "object"
+      },
+      "HallucinationMode": {
+        "description": "Verification depth for ``/agent/hallucination``.\n\nClass invariant: post-fact annotation handlers shouldn't make every\ncaller pay full NLI cost. Each mode is a distinct point on the\ncost/quality curve, exposed explicitly so callers don't burn 60-100s\nwaiting on cross-model verification when a 2s heuristic is enough.",
+        "enum": [
+          "fast",
+          "thorough"
+        ],
+        "title": "HallucinationMode",
+        "type": "string"
+      },
+      "IngestResult": {
+        "description": "Per-batch result counts returned by ``ingest_external``.",
+        "properties": {
+          "accepted": {
+            "default": 0,
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "source_type": {
+            "default": "unknown",
+            "title": "Source Type",
+            "type": "string"
+          }
+        },
+        "title": "IngestResult",
+        "type": "object"
+      },
+      "MemoryExtractionRequest": {
+        "properties": {
+          "conversation_id": {
+            "description": "Required conversation identifier",
+            "minLength": 1,
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "response_text": {
+            "title": "Response Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "response_text",
+          "conversation_id"
+        ],
+        "title": "MemoryExtractionRequest",
+        "type": "object"
+      },
+      "SDKHallucinationResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/hallucination`` \u2014 claim verification.",
+        "properties": {
+          "claims": {
+            "description": "Verified claims with status, confidence, and source info",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "conversation_id": {
+            "default": "",
+            "description": "Conversation identifier",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "mode": {
+            "default": "thorough",
+            "description": "Verification depth that was actually applied. ``fast`` returns extracted claims with status='uncertain' and ``nli_skipped=true`` without paying NLI cost; ``thorough`` runs the full cross-model pipeline. Set on the request via ``HallucinationCheckRequest.mode``.",
+            "title": "Mode",
+            "type": "string"
+          },
+          "nli_skipped": {
+            "default": false,
+            "description": "True when cross-model NLI verification was skipped (fast mode). Consumers can use this to decide whether to display a hedged warning vs. an authoritative verdict.",
+            "title": "Nli Skipped",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reason verification was skipped, if applicable",
+            "title": "Reason"
+          },
+          "skipped": {
+            "default": false,
+            "description": "True if verification was skipped (response too short or no claims)",
+            "title": "Skipped",
+            "type": "boolean"
+          },
+          "summary": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "description": "Verification summary: per-status counts plus assessed count and the float overall_confidence.",
+            "title": "Summary",
+            "type": "object"
+          },
+          "timestamp": {
+            "default": "",
+            "description": "ISO 8601 verification timestamp",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "title": "SDKHallucinationResponse",
+        "type": "object"
+      },
+      "SDKHealthResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``GET /sdk/v1/health`` \u2014 service health with feature flags.",
+        "properties": {
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Consumer-relevant feature toggles",
+            "title": "Features",
+            "type": "object"
+          },
+          "services": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Per-service connectivity status",
+            "title": "Services",
+            "type": "object"
+          },
+          "status": {
+            "description": "Overall status: 'healthy' or 'degraded'",
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "description": "API version string",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "services"
+        ],
+        "title": "SDKHealthResponse",
+        "type": "object"
+      },
+      "SDKLLMCompleteRequest": {
+        "description": "Request for ``POST /sdk/v1/llm/complete`` \u2014 smart-routed LLM completion.\n\nConsumers describe the task; the smart_router selects the appropriate\nmodel tier (FREE / CHEAP / CAPABLE / RESEARCH / EXPERT) based on\ntask_type, complexity, and cost_sensitivity. Falls back to Ollama\nwhen available and suitable.",
+        "properties": {
+          "cost_sensitivity": {
+            "default": "medium",
+            "description": "Cost preference: low (cheapest) | medium | high (best quality)",
+            "title": "Cost Sensitivity",
+            "type": "string"
+          },
+          "max_tokens": {
+            "default": 500,
+            "maximum": 8000.0,
+            "minimum": 1.0,
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "messages": {
+            "description": "OpenAI-format messages: [{role, content}, ...]",
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "query": {
+            "default": "",
+            "description": "Optional query summary for the router's complexity classifier",
+            "title": "Query",
+            "type": "string"
+          },
+          "response_format": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OpenAI-compatible response format spec (e.g., {'type': 'json_object'})",
+            "title": "Response Format"
+          },
+          "slo_budget_ms": {
+            "anyOf": [
+              {
+                "maximum": 600000.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional wall-clock budget in milliseconds. The smart_router filters tiers by their empirical p95 latency profile; if no tier fits the budget the response is HTTP 503 with a Retry-After header carrying the floor p95. Lets fast-path consumers (e.g. trading-agent) fail-fast and route to direct providers instead of waiting on a slow tier.",
+            "title": "Slo Budget Ms"
+          },
+          "task_type": {
+            "default": "internal",
+            "description": "Task category: chat | internal | verification | classification | research. Clients may also pass custom values (e.g. 'gtm_creative', 'agent_phase_2'); unknown values map to safe internal routing.",
+            "title": "Task Type",
+            "type": "string"
+          },
+          "temperature": {
+            "default": 0.1,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "SDKLLMCompleteRequest",
+        "type": "object"
+      },
+      "SDKLLMCompleteResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/llm/complete``.",
+        "properties": {
+          "content": {
+            "description": "LLM-generated text content",
+            "title": "Content",
+            "type": "string"
+          },
+          "estimated_cost_per_1k": {
+            "default": 0.0,
+            "description": "Estimated cost in USD per 1K tokens (0 for free / Ollama)",
+            "minimum": 0.0,
+            "title": "Estimated Cost Per 1K",
+            "type": "number"
+          },
+          "model": {
+            "description": "Model ID actually used (after smart-routing)",
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Routing provider label: ollama | quenchforge | openrouter_paid (legacy openrouter_free stamp removed by CR-027 cost honesty)",
+            "title": "Provider",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "description": "Why this model was selected",
+            "title": "Reason",
+            "type": "string"
+          },
+          "tier_p95_ms": {
+            "default": 0,
+            "description": "Empirical p95 wall-clock for the tier this call was routed to. 0 when the tier has no measured profile yet. Useful for client-side adaptive timeout tuning.",
+            "minimum": 0.0,
+            "title": "Tier P95 Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content",
+          "model",
+          "provider"
+        ],
+        "title": "SDKLLMCompleteResponse",
+        "type": "object"
+      },
+      "SDKMemoryExtractAcceptedResponse": {
+        "additionalProperties": true,
+        "description": "202 Accepted envelope when ``MEMORY_QUEUE_MODE=async``.\n\nReturned from ``POST /sdk/v1/memory/extract`` when the request was\nenqueued for background processing. Callers poll\n``GET /sdk/v1/memory/extract/jobs/{job_id}`` to retrieve the\ncompletion result. Falls back to the synchronous\n``SDKMemoryExtractResponse`` when ``?wait=true`` is set or the\nqueue isn't enabled.",
+        "properties": {
+          "conversation_id": {
+            "default": "",
+            "description": "Mirrors the request field for client-side correlation",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "job_id": {
+            "description": "RQ job identifier \u2014 opaque to callers, use as-is in the status URL",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "status": {
+            "default": "queued",
+            "description": "Initial job status \u2014 always 'queued' on accept",
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "description": "Path to GET for the job result. Relative to the SDK base URL.",
+            "title": "Status Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status_url"
+        ],
+        "title": "SDKMemoryExtractAcceptedResponse",
+        "type": "object"
+      },
+      "SDKMemoryExtractJobStatus": {
+        "additionalProperties": true,
+        "description": "Status envelope for ``GET /sdk/v1/memory/extract/jobs/{job_id}``.\n\n``status`` transitions: ``queued \u2192 started \u2192 finished`` (success) or\n``queued \u2192 started \u2192 failed`` (worker error). ``result`` is populated\nonly when ``status='finished'``; ``error`` is populated only when\n``status='failed'``.",
+        "properties": {
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 timestamp on completion (success or failure)",
+            "title": "Ended At"
+          },
+          "enqueued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 timestamp when the job was accepted",
+            "title": "Enqueued At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worker exception summary \u2014 populated only when status='failed'",
+            "title": "Error"
+          },
+          "job_id": {
+            "description": "RQ job identifier",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SDKMemoryExtractResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worker output \u2014 populated only when status='finished'"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 timestamp when the worker began processing",
+            "title": "Started At"
+          },
+          "status": {
+            "description": "Job lifecycle state \u2014 one of: queued | started | finished | failed | deferred | scheduled | canceled | unknown",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status"
+        ],
+        "title": "SDKMemoryExtractJobStatus",
+        "type": "object"
+      },
+      "SDKMemoryExtractResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/memory/extract`` \u2014 memory extraction and storage.",
+        "properties": {
+          "conversation_id": {
+            "default": "",
+            "description": "Conversation identifier",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "memories_extracted": {
+            "default": 0,
+            "description": "Number of memories extracted from text",
+            "minimum": 0.0,
+            "title": "Memories Extracted",
+            "type": "integer"
+          },
+          "memories_stored": {
+            "default": 0,
+            "description": "Number successfully stored in KB",
+            "minimum": 0.0,
+            "title": "Memories Stored",
+            "type": "integer"
+          },
+          "results": {
+            "description": "Per-memory outcome (status, type, summary)",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "skipped_duplicates": {
+            "default": 0,
+            "description": "Memories skipped due to deduplication",
+            "minimum": 0.0,
+            "title": "Skipped Duplicates",
+            "type": "integer"
+          },
+          "timestamp": {
+            "default": "",
+            "description": "ISO 8601 extraction timestamp",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "title": "SDKMemoryExtractResponse",
+        "type": "object"
+      },
+      "SDKQueryResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/query`` \u2014 multi-domain KB search.",
+        "properties": {
+          "confidence": {
+            "default": 0.0,
+            "description": "Average relevance of returned sources",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "context": {
+            "default": "",
+            "description": "Assembled context string from matching chunks",
+            "title": "Context",
+            "type": "string"
+          },
+          "domains_searched": {
+            "description": "Domains that were actually searched",
+            "items": {
+              "type": "string"
+            },
+            "title": "Domains Searched",
+            "type": "array"
+          },
+          "graph_results": {
+            "default": 0,
+            "description": "Results contributed by graph expansion",
+            "minimum": 0.0,
+            "title": "Graph Results",
+            "type": "integer"
+          },
+          "results": {
+            "description": "All results with full metadata",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "sources": {
+            "description": "Result chunks with relevance scores and metadata",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "token_budget_used": {
+            "default": 0,
+            "description": "Character count of assembled context",
+            "minimum": 0.0,
+            "title": "Token Budget Used",
+            "type": "integer"
+          },
+          "total_results": {
+            "default": 0,
+            "description": "Total results after dedup and filtering",
+            "minimum": 0.0,
+            "title": "Total Results",
+            "type": "integer"
+          }
+        },
+        "title": "SDKQueryResponse",
+        "type": "object"
+      },
+      "SDKSearchRequest": {
+        "description": "Request body for ``POST /sdk/v1/search`` \u2014 single-domain KB search.",
+        "properties": {
+          "domain": {
+            "default": "general",
+            "description": "KB domain/collection to search",
+            "title": "Domain",
+            "type": "string"
+          },
+          "exclude_packs": {
+            "default": false,
+            "description": "Drop knowledge-pack chunks from retrieval (personal-first KB search).",
+            "title": "Exclude Packs",
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Search query text",
+            "title": "Query",
+            "type": "string"
+          },
+          "top_k": {
+            "default": 3,
+            "description": "Maximum results to return",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SDKSearchRequest",
+        "type": "object"
+      },
+      "SDKSearchResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/search`` \u2014 canonical KB search projection.",
+        "properties": {
+          "confidence": {
+            "default": 0.0,
+            "description": "Average relevance of returned results",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "results": {
+            "description": "Result chunks with relevance + metadata",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "total_results": {
+            "default": 0,
+            "description": "Number of results returned",
+            "minimum": 0.0,
+            "title": "Total Results",
+            "type": "integer"
+          }
+        },
+        "title": "SDKSearchResponse",
+        "type": "object"
+      },
+      "SdkIngestVoiceNoteResponse": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "transcribe_ms": {
+            "title": "Transcribe Ms"
+          },
+          "transcript": {
+            "title": "Transcript"
+          },
+          "word_count": {
+            "title": "Word Count"
+          }
+        },
+        "required": [
+          "status",
+          "artifact_id",
+          "transcript",
+          "transcribe_ms",
+          "word_count"
+        ],
+        "title": "SdkIngestVoiceNoteResponse",
+        "type": "object"
+      },
+      "SdkIngestWebhookResponse": {
+        "properties": {
+          "normalized_count": {
+            "title": "Normalized Count"
+          },
+          "source_id": {
+            "title": "Source Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "source_id",
+          "normalized_count"
+        ],
+        "title": "SdkIngestWebhookResponse",
+        "type": "object"
+      },
+      "SdkPluginsResponse": {
+        "properties": {
+          "plugins": {
+            "items": {},
+            "title": "Plugins",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total"
+          }
+        },
+        "required": [
+          "plugins",
+          "total"
+        ],
+        "title": "SdkPluginsResponse",
+        "type": "object"
+      },
+      "SdkSettingsResponse": {
+        "properties": {
+          "features": {
+            "title": "Features"
+          },
+          "tier": {
+            "title": "Tier"
+          },
+          "version": {
+            "title": "Version"
+          }
+        },
+        "required": [
+          "version",
+          "tier",
+          "features"
+        ],
+        "title": "SdkSettingsResponse",
+        "type": "object"
+      },
+      "SdkTaxonomyResponse": {
+        "properties": {
+          "domains": {
+            "title": "Domains"
+          },
+          "taxonomy": {
+            "title": "Taxonomy"
+          }
+        },
+        "required": [
+          "domains",
+          "taxonomy"
+        ],
+        "title": "SdkTaxonomyResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "Cerid AI",
+      "url": "https://github.com/Cerid-AI/cerid-ai"
+    },
+    "description": "Stable versioned API for Cerid AI consumers.  Send X-Client-ID for per-client rate limiting and domain scoping.",
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    "title": "Cerid AI SDK",
+    "version": "1.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/sdk/v1/collections": {
+      "get": {
+        "operationId": "sdk_collections_sdk_v1_collections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Collections",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/hallucination": {
+      "post": {
+        "description": "Verify factual claims in a response against the KB. Returns per-claim status (verified/unverified/uncertain) with sources and confidence scores.",
+        "operationId": "sdk_hallucination_sdk_v1_hallucination_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HallucinationCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKHallucinationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Hallucination Detection",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/health": {
+      "get": {
+        "description": "Service connectivity and consumer-relevant feature flags. Returns 'healthy' when all services are connected, 'degraded' otherwise.",
+        "operationId": "sdk_health_sdk_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/health/detailed": {
+      "get": {
+        "operationId": "sdk_health_detailed_sdk_v1_health_detailed_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Detailed Health",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest": {
+      "post": {
+        "operationId": "sdk_ingest_sdk_v1_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Ingest Text",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest/external": {
+      "post": {
+        "description": "Accept an arbitrary JSON payload from any external service and ingest its content into the Cerid knowledge base.  The caller supplies a ``field_mappings`` config that declares how to extract canonical fields (content, source URI, timestamp, tags, title, external ID) from the raw ``payload``.  A single payload can map to N ingest items via array fan-out (e.g. ``highlights[].text``).  The ``source_type`` label is stored as provenance metadata and is never branched on in code \u2014 this endpoint is generic and not special-cased for any particular service.  See ``docs/INTEGRATION_GUIDE.md`` for per-service mapping examples (Readwise, Pocket, Instapaper, Raindrop, Telegram-bot).",
+        "operationId": "sdk_ingest_external_sdk_v1_ingest_external_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Generic external ingest",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest/file": {
+      "post": {
+        "operationId": "sdk_ingest_file_sdk_v1_ingest_file_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Ingest File",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest/voice-note": {
+      "post": {
+        "description": "Accepts a short audio clip (WAV / WebM / M4A \u2014 anything ffmpeg can decode), transcribes it with the bundled whisper.cpp pipeline, and ingests the transcript as an artifact linked to a voice_note Source.\n\nRecommended clip length: 30 s \u2013 5 min. Larger clips should route through the Meeting Capture pipeline (``/meetings``) instead.",
+        "operationId": "sdk_ingest_voice_note_sdk_v1_ingest_voice_note_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdkIngestVoiceNoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid audio payload"
+          },
+          "500": {
+            "description": "Transcription pipeline failure"
+          },
+          "501": {
+            "description": "Whisper runtime deps not installed"
+          }
+        },
+        "summary": "Voice-note transcribe + ingest",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest/webhook/{token}": {
+      "post": {
+        "description": "Generic inbound endpoint for any external service. The ``{token}`` path segment identifies a previously-created webhook-kind Source record whose ``config`` carries the matching token + optional HMAC secret. Returns ``202 Accepted`` immediately and queues the payload for async processing.\n\n**Authentication:** the token itself is the credential. For higher assurance, configure an HMAC secret on the source and require ``X-Cerid-Signature: sha256=<hex>`` on every request; mismatched signatures return 401.\n\n**Adapter routing:** payloads can carry the canonical fields directly OR the source's config can declare per-source ``field_mappings`` (Readwise / Pocket / Slack / GitHub-events / etc.) that extract them from a third-party-shaped payload.",
+        "operationId": "sdk_ingest_webhook_sdk_v1_ingest_webhook__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdkIngestWebhookResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "HMAC signature missing or invalid"
+          },
+          "404": {
+            "description": "Unknown webhook token"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Token-gated webhook receiver",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/llm/complete": {
+      "post": {
+        "description": "Tier-aware LLM completion. Consumers describe the task (`task_type`, `cost_sensitivity`); the smart_router selects the best model from FREE / CHEAP / CAPABLE / RESEARCH / EXPERT tiers, preferring Ollama when available. Returns content plus the model actually used and an estimated cost-per-1K-tokens for budget tracking.",
+        "operationId": "sdk_llm_complete_sdk_v1_llm_complete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SDKLLMCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKLLMCompleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Smart-routed LLM completion",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/memory/extract": {
+      "post": {
+        "description": "Extract facts, decisions, and preferences from conversation text and store as KB artifacts. Deduplicates against existing memories.\n\nWhen ``MEMORY_QUEUE_MODE=async`` is set on the server (and a worker is running), the default behaviour is **fire-and-forget**: returns ``202 Accepted`` immediately with a ``job_id`` and a ``status_url``. Poll ``GET /sdk/v1/memory/extract/jobs/{job_id}`` for the result.\n\nPass ``?wait=true`` to force the synchronous path (waits for the full extract \u2192 consolidate \u2192 store pipeline before responding) \u2014 use for callers that need the result envelope inline.",
+        "operationId": "sdk_memory_extract_sdk_v1_memory_extract_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Wait",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryExtractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKMemoryExtractResponse"
+                }
+              }
+            },
+            "description": "Sync result (wait=true or queue disabled)"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKMemoryExtractAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted for async processing"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Memory Extraction",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/memory/extract/jobs/{job_id}": {
+      "get": {
+        "description": "Poll for the result of an async memory_extract job. Status transitions: ``queued \u2192 started \u2192 finished`` (success) or ``queued \u2192 started \u2192 failed`` (worker error). The ``result`` field is populated only when ``status='finished'``; ``error`` is populated only when ``status='failed'``.",
+        "operationId": "sdk_memory_extract_job_status_sdk_v1_memory_extract_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKMemoryExtractJobStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown job_id"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Memory Extract Job Status",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/plugins": {
+      "get": {
+        "operationId": "sdk_plugins_sdk_v1_plugins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdkPluginsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Plugins",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/query": {
+      "post": {
+        "description": "Multi-domain knowledge base search with hybrid BM25+vector retrieval and optional LLM reranking. Results are scoped by the consumer's allowed_domains in CONSUMER_REGISTRY.",
+        "operationId": "sdk_query_sdk_v1_query_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKQueryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "KB Query",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/search": {
+      "post": {
+        "operationId": "sdk_search_sdk_v1_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SDKSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "KB Search",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/settings": {
+      "get": {
+        "operationId": "sdk_settings_sdk_v1_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdkSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "SDK Settings",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/taxonomy": {
+      "get": {
+        "operationId": "sdk_taxonomy_sdk_v1_taxonomy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdkTaxonomyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Domain Taxonomy",
+        "tags": [
+          "SDK"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,150 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: FSL-1.1-ALv2
+"""Centralized constants — THE source of truth for all magic numbers.
+
+AI agents: import from here. Never hardcode numeric literals in business logic.
+Dependencies: none (pure values module).
+"""
+from __future__ import annotations
+
+# ── Artifact limits ──────────────────────────────────────────────────
+MAX_ARTIFACT_LIST = 10_000
+MAX_ARTIFACTS_PER_DOMAIN = 200
+MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+# ── Timeouts (seconds) ──────────────────────────────────────────────
+HEALTH_CACHE_TTL = 10.0
+A2A_TASK_TTL = 3600
+OLLAMA_READ_TIMEOUT = 120.0
+OLLAMA_CONNECT_TIMEOUT = 10.0
+VERIFICATION_TIMEOUT = 30.0
+QUERY_CACHE_TTL = 300  # 5 minutes
+# Per-call store timeouts. Trip raises core.utils.timeouts.StoreTimeoutError so
+# the request surfaces a degraded result instead of hanging the event loop.
+CHROMA_QUERY_TIMEOUT = 10.0
+NEO4J_QUERY_TIMEOUT = 15.0
+# Per-source budget for external data sources inside the synchronous
+# /agent/query path. Must stay under the 3 s cold-query SLO (R5-1) with
+# headroom — a hung source (e.g. DuckDuckGo) otherwise serializes its
+# full timeout into first-touch responses until the circuit opens.
+EXTERNAL_SOURCE_QUERY_TIMEOUT = 2.0
+# Longer per-source budget for the async /query orchestrator path, which is
+# off the synchronous 3 s cold-query SLO and can afford more headroom.
+EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT = 5.0
+# Per-source budget for authoritative claim verification (hallucination gate).
+# Each of these paths applies an outer guard of (inner + 1.0 s).
+AUTHORITATIVE_VERIFY_QUERY_TIMEOUT = 4.0
+
+# ── Budget & rate limits ────────────────────────────────────────────
+MONTHLY_BUDGET_USD = 20.0
+RATE_LIMIT_WINDOW_SECONDS = 60
+
+# ── Retrieval tuning ────────────────────────────────────────────────
+DEFAULT_TOP_K = 10
+RETRIEVAL_CACHE_TTL = 1800  # 30 minutes
+SEMANTIC_CACHE_SIMILARITY_THRESHOLD = 0.92
+# External sources carry hardcoded confidence (not semantic similarity), so
+# their relevance is discounted before merging with KB results — prevents e.g.
+# book-metadata noise from outranking real KB hits. One value, two consumers
+# (crag gate + retrieval orchestrator).
+EXTERNAL_SOURCE_RELEVANCE_DISCOUNT = 0.6
+HYDE_TRIGGER_THRESHOLD = 0.4
+CHUNK_MAX_TOKENS = 512
+CHUNK_OVERLAP_RATIO = 0.2
+PARENT_CHILD_RATIO_MIN = 4  # min child:parent token ratio
+PARENT_CHILD_RATIO_MAX = 8
+
+# ── Quality scoring v2 ─────────────────────────────────────────────
+QUALITY_TIER_EXCELLENT = 0.8
+QUALITY_TIER_GOOD = 0.6
+QUALITY_TIER_FAIR = 0.4
+MIN_QUALITY_SCORE = 0.4
+QUALITY_WEIGHT_RICHNESS = 0.25
+QUALITY_WEIGHT_METADATA = 0.20
+QUALITY_WEIGHT_FRESHNESS = 0.15
+QUALITY_WEIGHT_AUTHORITY = 0.15
+QUALITY_WEIGHT_UTILITY = 0.15
+QUALITY_WEIGHT_COHERENCE = 0.10
+QUALITY_MIN_FLOOR = 0.35
+QUALITY_EVERGREEN_DOMAINS = ["coding", "personal", "projects"]
+QUALITY_TEMPORAL_HALF_LIFE_DAYS = 7
+QUALITY_EVERGREEN_HALF_LIFE_DAYS = 365
+
+# ── Memory ─────────────────────────────────────────────────────────
+MEMORY_HALF_LIFE_DAYS = 30.0
+
+# ── Retry / backoff ───────────────────────────────────────────────
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1.0
+RETRY_MAX_DELAY = 30.0
+
+# ── LLM defaults ──────────────────────────────────────────────────
+DEFAULT_LLM_TEMPERATURE = 0.3
+
+# ── Verification ────────────────────────────────────────────────────
+MAX_CLAIMS_PER_RESPONSE = 20
+CONFIDENCE_FLOOR = 0.3
+CONFIDENCE_CEILING = 0.95
+NUMERIC_MATCH_RATIO_THRESHOLD = 0.2
+
+# ── Observability ───────────────────────────────────────────────────
+OBSERVABILITY_RETENTION_SECONDS = 10_000
+METRICS_HISTORY_LENGTH = 100
+
+# ── Ingestion ───────────────────────────────────────────────────────
+AI_SNIPPET_MAX_CHARS = 1500
+PDF_DEFAULT_MAX_PAGES = 200
+PDF_DEFAULT_MEMORY_LIMIT_MB = 1024
+DEDUP_BATCH_SIZE = 100
+CHROMA_MAX_BATCH_SIZE = 5000  # max chunks per ChromaDB add() call for large ingestions
+BM25_MAX_LOADED_DOMAINS = 8   # LRU eviction threshold for in-memory BM25 indexes
+# Debounce window for the deferred BM25 rebuild. add_documents/remove_documents
+# no longer re-tokenize the whole domain corpus inline; they mark the index
+# dirty and the next eligible search rebuilds. A committed chunk is therefore
+# searchable within at most this many seconds of being ingested (exposed at the
+# first query after the cooldown). Coalesces an ingest burst into ~one rebuild
+# per window instead of one whole-corpus rebuild per document.
+BM25_REBUILD_DEBOUNCE_SECONDS = 2.0
+
+__all__ = [
+    "MAX_ARTIFACT_LIST",
+    "MAX_ARTIFACTS_PER_DOMAIN",
+    "MAX_UPLOAD_SIZE_BYTES",
+    "HEALTH_CACHE_TTL",
+    "A2A_TASK_TTL",
+    "OLLAMA_READ_TIMEOUT",
+    "OLLAMA_CONNECT_TIMEOUT",
+    "VERIFICATION_TIMEOUT",
+    "QUERY_CACHE_TTL",
+    "CHROMA_QUERY_TIMEOUT",
+    "NEO4J_QUERY_TIMEOUT",
+    "MONTHLY_BUDGET_USD",
+    "RATE_LIMIT_WINDOW_SECONDS",
+    "DEFAULT_TOP_K",
+    "RETRIEVAL_CACHE_TTL",
+    "SEMANTIC_CACHE_SIMILARITY_THRESHOLD",
+    "HYDE_TRIGGER_THRESHOLD",
+    "CHUNK_MAX_TOKENS",
+    "CHUNK_OVERLAP_RATIO",
+    "PARENT_CHILD_RATIO_MIN",
+    "PARENT_CHILD_RATIO_MAX",
+    "QUALITY_TIER_EXCELLENT",
+    "QUALITY_TIER_GOOD",
+    "QUALITY_TIER_FAIR",
+    "MIN_QUALITY_SCORE",
+    "MEMORY_HALF_LIFE_DAYS",
+    "MAX_RETRIES",
+    "RETRY_BASE_DELAY",
+    "RETRY_MAX_DELAY",
+    "DEFAULT_LLM_TEMPERATURE",
+    "MAX_CLAIMS_PER_RESPONSE",
+    "CONFIDENCE_FLOOR",
+    "CONFIDENCE_CEILING",
+    "NUMERIC_MATCH_RATIO_THRESHOLD",
+    "OBSERVABILITY_RETENTION_SECONDS",
+    "METRICS_HISTORY_LENGTH",
+    "AI_SNIPPET_MAX_CHARS",
+    "PDF_DEFAULT_MAX_PAGES",
+    "PDF_DEFAULT_MEMORY_LIMIT_MB",
+    "DEDUP_BATCH_SIZE",
+]

@@ -1,0 +1,227 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: FSL-1.1-ALv2
+
+"""Cross-encoder reranker using ONNX Runtime.
+
+Downloads and caches ms-marco-MiniLM-L-6-v2 (or configured model) from
+HuggingFace on first use.  All runtime dependencies (onnxruntime, tokenizers,
+numpy, huggingface-hub) are already present via chromadb — no extra pip
+packages required.
+"""
+
+import logging
+import os
+import threading
+from typing import Any
+
+import numpy as np
+import onnxruntime as ort
+from huggingface_hub import hf_hub_download
+from tokenizers import Tokenizer
+
+import config
+from core.utils.onnx_providers import resolve_providers
+
+logger = logging.getLogger("ai-companion.reranker")
+
+# ---------------------------------------------------------------------------
+# Singleton model loader
+# ---------------------------------------------------------------------------
+
+_session: ort.InferenceSession | None = None
+_tokenizer: Tokenizer | None = None
+_lock = threading.Lock()
+
+
+def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
+    """Download (once) and return the cross-encoder ONNX session + tokenizer."""
+    global _session, _tokenizer
+    if _session is not None and _tokenizer is not None:
+        return _session, _tokenizer
+
+    with _lock:
+        if _session is not None and _tokenizer is not None:
+            return _session, _tokenizer
+
+        repo = config.RERANK_CROSS_ENCODER_MODEL
+        onnx_file = config.RERANK_ONNX_FILENAME
+        cache = config.RERANK_MODEL_CACHE_DIR or None  # empty → huggingface default
+
+        logger.info("Downloading cross-encoder model: %s/%s", repo, onnx_file)
+        model_path = hf_hub_download(repo_id=repo, filename=onnx_file, cache_dir=cache)
+        tok_path = hf_hub_download(repo_id=repo, filename="tokenizer.json", cache_dir=cache)
+
+        sess_opts = ort.SessionOptions()
+        sess_opts.inter_op_num_threads = 1
+        sess_opts.intra_op_num_threads = min(4, os.cpu_count() or 1)
+
+        _session = ort.InferenceSession(
+            model_path,
+            sess_options=sess_opts,
+            providers=resolve_providers(config.ONNX_EXECUTION_PROVIDERS),
+        )
+        _tokenizer = Tokenizer.from_file(tok_path)
+        # RERANK_MAX_LENGTH governs ONLY this in-process ONNX tokenizer — it
+        # has no effect on the RERANK_PROVIDER=quenchforge HTTP path (see the
+        # RERANK_MAX_LENGTH comment in settings.py for the full explanation).
+        # Coupled to the configured model's positional limit: ms-marco-MiniLM
+        # (the default) caps at 512, so a parent chunk larger than the budget
+        # silently loses its tail (see the truncation-detection log in
+        # _score_pairs). Raising this past a model's real limit makes ONNX
+        # inference fail on out-of-range position ids, not truncate further.
+        _tokenizer.enable_truncation(max_length=config.RERANK_MAX_LENGTH)
+        _tokenizer.enable_padding()
+
+        logger.info("Cross-encoder model ready (%s)", repo)
+        return _session, _tokenizer
+
+
+# ---------------------------------------------------------------------------
+# Scoring
+# ---------------------------------------------------------------------------
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -20, 20)))
+
+
+def _score_pairs(query: str, documents: list[str]) -> list[float]:
+    """Score (query, document) pairs via the cross-encoder.
+
+    Returns a list of float scores in [0, 1] (sigmoid-normalised).
+    """
+    session, tokenizer = _load_model()
+
+    encodings = tokenizer.encode_batch([(query, doc) for doc in documents])
+
+    # ``enable_truncation`` (in _load_model) always populates ``.overflowing``
+    # with the dropped tail when a pair exceeds RERANK_MAX_LENGTH — reading it
+    # here costs nothing extra (the tokenizer already computed it) and turns
+    # what would otherwise be silent parent-chunk data loss into at least a
+    # debug-level signal.
+    truncated_count = sum(1 for e in encodings if e.overflowing)
+    if truncated_count:
+        logger.debug(
+            "Reranker: %d/%d (query, chunk) pair(s) exceeded "
+            "RERANK_MAX_LENGTH=%d tokens — chunk tail truncated before "
+            "cross-encoder scoring",
+            truncated_count, len(encodings), config.RERANK_MAX_LENGTH,
+        )
+
+    input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
+    attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
+    token_type_ids = np.array([e.type_ids for e in encodings], dtype=np.int64)
+
+    # Only pass inputs the model actually expects
+    expected = {inp.name for inp in session.get_inputs()}
+    feeds: dict[str, np.ndarray] = {}
+    if "input_ids" in expected:
+        feeds["input_ids"] = input_ids
+    if "attention_mask" in expected:
+        feeds["attention_mask"] = attention_mask
+    if "token_type_ids" in expected:
+        feeds["token_type_ids"] = token_type_ids
+
+    logits = session.run(None, feeds)[0]  # (N, num_labels) or (N,)
+
+    if logits.ndim == 2 and logits.shape[1] >= 2:
+        scores = _sigmoid(logits[:, 1])  # positive-class logit
+    elif logits.ndim == 2:
+        scores = _sigmoid(logits[:, 0])
+    else:
+        scores = _sigmoid(logits)
+
+    return scores.tolist()
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def warmup() -> None:
+    """Pre-load the reranker model so first query isn't slow.
+
+    Called during server startup.  Swallows all exceptions so a download
+    failure never prevents the server from starting.
+    """
+    global _session
+    if _session is not None:
+        return
+    try:
+        _load_model()
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('core.retrieval.reranker', exc)
+        logger.warning("Reranker warmup failed — model will be loaded on first query")
+
+
+def is_loading() -> bool:
+    """True when ``_load_model()`` is currently in flight on another thread.
+
+    Workstream E Phase E.6.6 — surfaces "model is downloading right now"
+    state to the GUI so users on lean Docker images get a "first-query
+    download is in progress (one-time setup)" notification instead of a
+    silent stall. A locked mutex with no session yet means a worker is
+    inside the download + ONNX init block.
+    """
+    return _lock.locked() and _session is None
+
+
+def rerank(
+    query: str,
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Rerank retrieval results using cross-encoder scores.
+
+    Takes the top ``QUERY_RERANK_CANDIDATES`` results, scores each
+    (query, chunk) pair through the cross-encoder, blends with the
+    original hybrid-search relevance, and returns the full list
+    re-sorted by the blended score.
+
+    Cascade pre-filter (``ENABLE_CASCADE_RERANK``):
+        When enabled, candidates whose original hybrid-search relevance is
+        below ``CASCADE_RERANK_PRE_THRESHOLD`` are appended at the end
+        without running the (expensive) cross-encoder. Saves CE calls when
+        the hybrid-search distribution is long-tailed. Off by default.
+    """
+    if len(results) <= 1:
+        return results
+
+    candidates = results[: config.QUERY_RERANK_CANDIDATES]
+    remainder = results[config.QUERY_RERANK_CANDIDATES :]
+
+    if len(candidates) <= 1:
+        return results
+
+    low_signal: list[dict[str, Any]] = []
+    if getattr(config, "ENABLE_CASCADE_RERANK", False):
+        threshold = float(getattr(config, "CASCADE_RERANK_PRE_THRESHOLD", 0.3))
+        high_signal = [r for r in candidates if r["relevance"] >= threshold]
+        low_signal = [r for r in candidates if r["relevance"] < threshold]
+        # If pre-filter drops the candidate pool to one (or zero) high-signal
+        # hits, skip the cross-encoder — the original ordering is already the
+        # only signal we have.
+        if len(high_signal) <= 1:
+            return candidates + remainder
+        candidates = high_signal
+
+    documents = [r["content"] for r in candidates]
+    ce_scores = _score_pairs(query, documents)
+
+    for result, ce_score in zip(candidates, ce_scores):
+        original = result["relevance"]
+        blended = (
+            config.RERANK_CE_WEIGHT * ce_score
+            + config.RERANK_ORIGINAL_WEIGHT * original
+        )
+        # Personal-first policy (Slice 7.2): down-weight knowledge-pack chunks
+        # AFTER the blend so the multiplier is a stable knob, not entangled with
+        # model scores. pack_id is "" for personal/KB chunks (no effect).
+        if result.get("pack_id"):
+            blended *= config.PACK_RELEVANCE_WEIGHT
+        result["relevance"] = round(blended, 4)
+
+    candidates.sort(key=lambda x: x["relevance"], reverse=True)
+    # Append cascade-dropped candidates after the cross-encoded survivors so
+    # they remain visible to downstream consumers (preserves recall) but
+    # land below anything that earned a cross-encoder score.
+    return candidates + low_signal + remainder

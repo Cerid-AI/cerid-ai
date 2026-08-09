@@ -1,0 +1,132 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, screen } from "@testing-library/react"
+import { axe } from "jest-axe"
+import { KBConfigStep } from "@/components/setup/kb-config-step"
+
+const DEFAULT_CONFIG = {
+  archivePath: "~/cerid-archive",
+  domains: ["general"],
+  lightweightMode: false,
+  watchFolder: false,
+}
+
+interface KBConfigState {
+  archivePath: string
+  domains: string[]
+  lightweightMode: boolean
+  watchFolder: boolean
+}
+
+const onChange = vi.fn<(config: KBConfigState) => void>()
+
+beforeEach(() => {
+  onChange.mockClear()
+})
+
+describe("KBConfigStep", () => {
+  it("renders 'Storage & Archive' heading", () => {
+    render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    expect(screen.getByText("Storage & Archive")).toBeInTheDocument()
+  })
+
+  it("shows archive path input with current value", () => {
+    render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    const input = screen.getByDisplayValue("~/cerid-archive")
+    expect(input).toBeInTheDocument()
+  })
+
+  it("shows the auto-ingest opt-in toggle", () => {
+    render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    // Renamed from "Watch for new files" → "Auto-ingest new files" when
+    // the toggle was flipped to opt-in (default off). The toggle is
+    // unchecked by default per DEFAULT_CONFIG.watchFolder = false.
+    expect(screen.getByText("Auto-ingest new files")).toBeInTheDocument()
+  })
+
+  it("shows lightweight mode warning when lightweightRecommended is true", () => {
+    render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={true}
+        ramGb={8}
+      />,
+    )
+    expect(screen.getByText("8 GB RAM detected")).toBeInTheDocument()
+    expect(screen.getByText("Enable lightweight mode")).toBeInTheDocument()
+  })
+
+  it("hides lightweight mode warning when lightweightRecommended is false", () => {
+    render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    expect(screen.queryByText("Enable lightweight mode")).not.toBeInTheDocument()
+  })
+})
+
+describe("KBConfigStep — axe-clean", () => {
+  it("is axe-clean in the default (no lightweight warning) state", async () => {
+    const { container } = render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with the lightweight mode warning shown", async () => {
+    const { container } = render(
+      <KBConfigStep
+        config={DEFAULT_CONFIG}
+        onChange={onChange}
+        lightweightRecommended={true}
+        ramGb={8}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean with auto-ingest enabled", async () => {
+    const { container } = render(
+      <KBConfigStep
+        config={{ ...DEFAULT_CONFIG, watchFolder: true }}
+        onChange={onChange}
+        lightweightRecommended={false}
+        ramGb={16}
+      />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})

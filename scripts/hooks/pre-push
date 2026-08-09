@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Pre-push hook: run local validation before allowing a push, so GitHub Action
+# minutes are only spent at merge time (merge queue), not on broken pushes.
+#
+# Install: git config core.hooksPath scripts/hooks   (or: make install-hooks)
+# Preferred entry point: `make push` (= scripts/safe-push.sh) — see why below.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS HOOK IS SHAPED THIS WAY — the recurring "connection closed" failure
+# ---------------------------------------------------------------------------
+# `git push` opens the SSH connection to the remote BEFORE running this hook,
+# because it needs the remote refs to feed the hook's stdin. Every second this
+# hook spends validating is a second that connection sits idle, and GitHub
+# closes idle SSH connections. The gate passes, git prints "pushing", and the
+# transfer dies with:
+#
+#     Connection to github.com closed by remote host.
+#
+# Seen twice on 2026-08-04 (this repo) and three more times on 2026-08-05
+# (this repo, the public mirror, cerid-trading-agent). None of those pushes
+# landed. Trimming what the hook runs only moves the threshold — the ORDERING
+# is the defect, not the duration, which is why the earlier fix of dropping
+# from `prepush` to `ci-local + drift-check` did not hold.
+#
+# The escape everyone reaches for is `git push --no-verify`, and it is worse
+# than it looks: the supply-chain guard (no AI-authored / attributed /
+# backdated commits, IronWorm IOC) runs INSIDE `make ci-local`, so bypassing a
+# TRANSPORT problem silently bypasses a SECURITY check. Re-running the guard by
+# hand afterwards is honour-system — the exact class tasks/lessons.md indicts.
+#
+# So the order is inverted instead. `scripts/safe-push.sh` runs the validation
+# FIRST, while no connection is open, records that this exact commit passed,
+# and only then calls `git push`. This hook finds that record and returns in
+# seconds, so the connection never idles.
+#
+# Two invariants keep that honest:
+#   1. The supply-chain guard ALWAYS runs here, BEFORE the record is consulted.
+#      It is fast and it is the security-critical half, so no fast path — and
+#      no stale or hand-written record — can skip it.
+#   2. The record is keyed to the exact commit being pushed and is only written
+#      from a clean tree, so it can never vouch for a tree that is not what
+#      ships. Any mismatch falls through to the full validation below.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+VALIDATE_ONLY=false
+[ "${1:-}" = "--validate-only" ] && VALIDATE_ONLY=true
+
+cd "$(git rev-parse --show-toplevel)"
+
+# git EXPORTS its repository pointers to hooks, and this hook runs the repo's test suite. Any test
+# that shells out to `git` inherits them, and `cwd` does not decide which repository git writes to —
+# an ambient GIT_DIR outranks it. On 2026-08-05 that combination wrote `core.bare = true` and a
+# fixture identity into the operator's own .git/config, from a hook exactly like this one.
+# Cleared AFTER the `cd` above, so the hook still resolves its own repo the way git intended and
+# only what it spawns is scrubbed.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX GIT_QUARANTINE_PATH
+
+PUSHING_SHA=""
+if ! $VALIDATE_ONLY; then
+  # Skip when the push only deletes refs (local sha is all-zeros for every ref).
+  ZERO=0000000000000000000000000000000000000000
+  deleting_only=true
+  while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    if [ "$local_sha" != "$ZERO" ]; then
+      deleting_only=false
+      PUSHING_SHA="$local_sha"
+    fi
+  done
+  $deleting_only && exit 0
+fi
+
+fail() {
+  echo "── pre-push: ✗ $1 — push blocked ──"
+  echo "   Fix the failures above, then run: make push"
+  exit 1
+}
+
+# -- 1. Supply-chain guard: ALWAYS, and before any record is consulted. --------
+if [ -f scripts/guard-no-ai-commits.sh ]; then
+  echo "[pre-push] supply-chain guard"
+  bash scripts/guard-no-ai-commits.sh || fail "supply-chain guard"
+fi
+
+# -- 2. Did safe-push already validate this exact commit? ---------------------
+STAMP=".git/prepush-validated"
+if ! $VALIDATE_ONLY && [ -n "$PUSHING_SHA" ] && [ -f "$STAMP" ] \
+   && [ "$(cat "$STAMP" 2>/dev/null)" = "$PUSHING_SHA" ]; then
+  echo "── pre-push: ✓ $(printf '%.12s' "$PUSHING_SHA") already validated by safe-push — pushing ──"
+  exit 0
+fi
+
+# -- 3. Otherwise validate here: correct, but this is the path that times out --
+if ! $VALIDATE_ONLY; then
+  echo "   NOTE: validating inside the hook holds the remote connection open and can"
+  echo "         fail with 'Connection to github.com closed by remote host'."
+  echo "         Prefer: make push"
+fi
+echo "── pre-push: running local validation (ci-local + drift-check) ──"
+echo "   full parity is 'make prepush'"
+make ci-local || fail "ci-local"
+make drift-check || fail "drift-check"
+echo "── pre-push: ✓ local validation passed ──"

@@ -1,0 +1,13 @@
+{
+  "name": "outlook_calendar",
+  "version": "0.1.0",
+  "type": "connector",
+  "tier": "pro",
+  "license": "BUSL-1.1",
+  "description": "Outlook Calendar via sibling ms365-mcp container",
+  "feature_flags": ["outlook_calendar_sync"],
+  "requires": {
+    "env": ["CERID_CONNECTORS_BEARER"],
+    "sibling_services": ["ms365-mcp"]
+  }
+}

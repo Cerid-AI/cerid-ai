@@ -1,0 +1,101 @@
+name: Release / cerid-sdk (TypeScript)
+
+# Publish the TypeScript SDK at packages/sdk/typescript/ to npm.
+#
+# Triggers:
+#   * push of a tag matching ``cerid-sdk-ts-v*`` — auto-publishes to npm
+#     after asserting the tag matches package.json's version.
+#   * workflow_dispatch — manual fire with a target chooser
+#     (``dry-run`` for a local `npm pack` sanity check, ``npm`` for the
+#     real release).
+#
+# Auth: npm Trusted Publishing (OIDC). No long-lived NPM_TOKEN. The
+# package must be configured on npmjs.com as a trusted publisher
+# referencing this repo + workflow filename + environment name. See
+# docs/SDK_PUBLISHING.md for the one-time setup runbook.
+
+on:
+  push:
+    tags:
+      - "cerid-sdk-ts-v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Publish target"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - dry-run
+          - npm
+
+# Rule 1: artifact-publishing workflow — never cancel in-flight runs so a
+# half-published release doesn't ship to npm.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # required for npm Trusted Publishing OIDC
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: Build + publish @cerid-ai/sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The environment block is what npm's Trusted Publisher binds to.
+    # npm verifies (repo, workflow file, environment) — mismatch = reject.
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@cerid-ai/sdk
+
+    defaults:
+      run:
+        working-directory: packages/sdk/typescript
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: src/web/.nvmrc
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: packages/sdk/typescript/package-lock.json
+
+      - name: Assert tag matches package.json version (tag-triggered only)
+        if: github.event_name == 'push'
+        run: |
+          # Tag pattern: cerid-sdk-ts-v0.1.1 → version "0.1.1"
+          tag_version="${GITHUB_REF#refs/tags/cerid-sdk-ts-v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag version ($tag_version) does not match package.json version ($pkg_version)"
+            exit 1
+          fi
+          echo "Releasing @cerid-ai/sdk v$pkg_version"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run package tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify packed artifact (npm pack --dry-run)
+        run: npm pack --dry-run
+
+      - name: Publish to npm (dry run)
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'dry-run'
+        run: npm pack
+
+      - name: Publish to npm
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'npm')
+        run: npm publish --provenance --access public

@@ -1,0 +1,120 @@
+# Cerid AI — Pro-tier cloud connector stack.
+#
+# Sibling MCP servers run in their own containers and the Cerid MCP server
+# fans queries across them via MCPClientPool over streamable-HTTP. Each
+# upstream repo provides its own Dockerfile; we pin by git commit SHA to
+# avoid surprise upgrades — especially softeria, which ships 200+ releases
+# (one per day on its peak weeks).
+#
+# Bring this stack up explicitly:
+#   docker compose -f docker-compose.yml -f stacks/connectors/docker-compose.yml \
+#     --profile pro up -d
+#
+# Or via scripts/start-cerid.sh --with-connectors (added in Phase F Day 7).
+#
+# OAuth credentials persist in named volumes keyed per connector so a
+# `docker compose down` (without -v) preserves refresh tokens.
+
+services:
+  # ── Google Workspace MCP — Gmail + Google Calendar ─────────────────────
+  # Upstream: github.com/taylorwilsdon/google_workspace_mcp (v1.21.0)
+  # Tools surfaced to Cerid: search_gmail_messages, get_gmail_message_content,
+  # list_calendars, get_events. Single-user OAuth mode keeps the credential
+  # path simple — one Google Cloud "Desktop app" client per Cerid install.
+  google-workspace-mcp:
+    container_name: cerid-google-workspace-mcp
+    profiles: ["pro"]
+    build:
+      # Pinned to v1.21.0 commit so we don't pick up breaking changes
+      # silently. Bump deliberately + smoke-test the tools/list shape.
+      context: https://github.com/taylorwilsdon/google_workspace_mcp.git#v1.21.0
+    command:
+      - "--transport=streamable-http"
+      - "--single-user"
+      - "--host=0.0.0.0"
+      - "--port=8000"
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GOOGLE_MCP:-8810}:8000"
+    environment:
+      # Operator provides these in .env from a Google Cloud Console
+      # "Desktop app" OAuth client. The sibling-MCP server owns the OAuth
+      # flow + refresh-token rotation; Cerid backend never touches them.
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      # Bearer token Cerid backend uses to authenticate to this MCP server.
+      # Same value plumbed into MCPClientPool's outbound Authorization header.
+      - WORKSPACE_MCP_AUTH_TOKEN=${CERID_CONNECTORS_BEARER:-}
+      # Restrict scopes to read-only Gmail + read-only Calendar by default.
+      # Operator can broaden via env override.
+      - WORKSPACE_MCP_ALLOWED_SCOPES=${GOOGLE_MCP_SCOPES:-gmail.readonly,calendar.readonly}
+    volumes:
+      - google-workspace-mcp-credentials:/root/.google_workspace_mcp
+    networks:
+      - llm-network
+    restart: unless-stopped
+    healthcheck:
+      # The streamable-HTTP endpoint accepts an unauthenticated GET on /mcp
+      # for liveness probing (returns 405/406 for non-JSON-RPC requests; any
+      # response means the process is alive). curl -sf treats 4xx as success
+      # via --fail-with-body so we accept any byte-back.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/mcp | grep -qE '^(2|4)' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # ── Microsoft 365 MCP — Outlook Mail + Outlook Calendar ─────────────────
+  # Upstream: github.com/Softeria/ms-365-mcp-server (v0.111.0)
+  # MSAL device-code OAuth — the user pastes a code at microsoft.com/devicelogin.
+  # Tools scope-restricted to Mail.Read + Calendars.Read for v1.
+  ms365-mcp:
+    container_name: cerid-ms365-mcp
+    profiles: ["pro"]
+    build:
+      # Pinned to v0.111.0 commit. Softeria ships ~1 release/day — every
+      # bump must pass the smoke test before we move the pin.
+      context: https://github.com/softeria/ms-365-mcp-server.git#v0.111.0
+    command:
+      - "--http=3000"
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MS365_MCP:-8811}:3000"
+    environment:
+      # Static bearer for client→server auth (same value as the Google MCP).
+      # MSAL OAuth credentials are owned by the server, persisted to the
+      # bind-mounted token cache.
+      - MS365_MCP_AUTH_TOKEN=${CERID_CONNECTORS_BEARER:-}
+      # File-based token cache because keytar isn't available in containers.
+      - MS365_MCP_TOKEN_CACHE_PATH=/data/token-cache.json
+      # Scope restriction for v1 — read-only Mail + Calendar.
+      - MS365_MCP_ALLOWED_SCOPES=${MS365_MCP_SCOPES:-Mail.Read,Calendars.Read}
+      # Personal mode (default; not org-wide).
+      - MS365_MCP_MODE=${MS365_MCP_MODE:-personal}
+    volumes:
+      - ms365-mcp-data:/data
+    networks:
+      - llm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/mcp | grep -qE '^(2|4)' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+networks:
+  llm-network:
+    external: true
+
+volumes:
+  google-workspace-mcp-credentials:
+  ms365-mcp-data:

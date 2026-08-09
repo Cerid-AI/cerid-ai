@@ -1,0 +1,10 @@
+{
+  "name": "{name}",
+  "version": "0.1.0",
+  "type": "{type}",
+  "description": "A custom {type} plugin for Cerid AI",
+  "tier": "community",
+  "author": "",
+  "license": "Apache-2.0",
+  "requires": []
+}

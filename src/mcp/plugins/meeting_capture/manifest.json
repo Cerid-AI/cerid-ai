@@ -1,0 +1,62 @@
+{
+    "name": "meeting_capture",
+    "version": "0.1.0",
+    "type": "parser",
+    "tier": "pro",
+    "license": "BUSL-1.1",
+    "description": "Pro-tier meeting capture: speaker diarization + calendar-aware stitching + LLM meeting summary. Plain (community) audio transcription lives in plugins/voice_memos.",
+    "requires": ["pywhispercpp", "pyannote.audio>=3.3"],
+    "feature_flags": [
+        "meeting_diarization",
+        "calendar_stitching",
+        "meeting_summary"
+    ],
+    "file_types": [
+        ".m4a",
+        ".mp3",
+        ".wav",
+        ".flac",
+        ".ogg",
+        ".webm",
+        ".mp4"
+    ],
+    "config": {
+        "WHISPER_MODEL": {
+            "description": "Whisper model size: tiny|base|small|medium|large-v3 (default medium for quality/speed balance)",
+            "default": "medium-q5_0"
+        },
+        "WHISPER_LANGUAGE": {
+            "description": "Force a specific language ISO code, or 'auto' for detection",
+            "default": "auto"
+        },
+        "DIARIZATION_MIN_SPEAKERS": {
+            "description": "Lower bound for pyannote speaker count detection. Tighter bound improves accuracy.",
+            "default": 2
+        },
+        "DIARIZATION_MAX_SPEAKERS": {
+            "description": "Upper bound. When calendar attendee count is known via calendar_stitching, this is overridden per-meeting.",
+            "default": 10
+        },
+        "HF_TOKEN_REQUIRED": {
+            "description": "Hugging Face access token required for pyannote model weights. Set via Cerid TCC wizard → onboarding step.",
+            "default": true
+        },
+        "CALENDAR_STITCH_WINDOW_SECONDS": {
+            "description": "How much overlap between recording timestamp and calendar event window counts as a match.",
+            "default": 300
+        }
+    },
+    "models": {
+        "whisper": {
+            "default_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
+            "cache_dir": "~/.cerid/models/whisper/",
+            "size_mb": 539
+        },
+        "diarization": {
+            "pyannote_pipeline": "pyannote/speaker-diarization-3.1",
+            "segmentation_model": "pyannote/segmentation-3.0",
+            "cache_dir": "~/.cerid/models/pyannote/",
+            "requires_hf_terms_accepted": true
+        }
+    }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "apple_photos",
+  "version": "0.1.0",
+  "type": "connector",
+  "tier": "pro",
+  "license": "BUSL-1.1",
+  "description": "Apple Photos metadata via signed Swift helper",
+  "feature_flags": ["apple_photos_reader"],
+  "requires": {
+    "platform": "darwin",
+    "macos_min": "14.0",
+    "swift_helpers": ["ceridphotos"],
+    "tcc_grants": ["NSPhotoLibraryUsageDescription"]
+  }
+}

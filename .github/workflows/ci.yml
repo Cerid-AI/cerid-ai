@@ -1,0 +1,609 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # No paths-ignore here: the workflow must run on EVERY PR so the `ci-ok`
+    # aggregator (the single required status check) always reports. A
+    # workflow-level paths-ignore skips the whole workflow on docs-only PRs,
+    # which leaves required checks "expected, never reported" → PR blocked
+    # forever. The `changes` job below skips the real work on docs-only PRs, so
+    # cost is preserved without the deadlock.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Detect whether any non-docs path changed. FAIL-SAFE: any error/empty diff
+  # yields code=true (run CI), so a detector bug can never skip required CI on a
+  # real code change — worst case it runs cheap CI on a docs PR.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: detect
+        run: |
+          code=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=200 origin "${{ github.base_ref }}" >/dev/null 2>&1 || true
+            files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>/dev/null || true)
+          else
+            files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null || true)
+          fi
+          # code=false ONLY when we got a non-empty list AND every file is docs.
+          if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/|tasks/|[^/]*\.md$)'; then
+            code=false
+          fi
+          echo "changed files:"; printf '%s\n' "$files"
+          echo "code=$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  # Python backend
+  lint:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install ruff==0.15.4
+      - run: ruff check src/mcp/
+      - run: pip install import-linter
+      - name: Import boundary check
+        run: cd src/mcp && lint-imports
+      - name: lint / ci-required-gates
+        # Every job in this workflow must be aggregated by `ci-ok`, or a
+        # skipped gate reads as a passing one. Static half; the runtime half
+        # runs in `ci-ok` itself.
+        run: python scripts/lint-ci-required-gates.py --workflow .github/workflows/ci.yml
+
+  typecheck:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r src/mcp/requirements.txt -r src/mcp/requirements-dev.txt
+      - run: cd src/mcp && python -m mypy . --config-file ../../pyproject.toml
+
+  test:
+    needs: [changes, lint, typecheck]
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/mcp/requirements.lock
+      - run: pip install -r src/mcp/requirements.txt
+      - run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
+      - name: Run tests with coverage
+        # `not integration` deselects tests that require live external services
+        # (Redis, MCP HTTP server). Those tests run under the preservation gate
+        # which boots the full stack; running them here would fail with
+        # connection-refused on the bare ubuntu runner.
+        run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo and not integration" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
+      - name: Gate probes (scripts/tests)
+        # These prove the drift/lint gates can actually fail. Nothing ran them
+        # until 2026-08-04.
+        run: python -m pytest scripts/tests/ -q
+      - name: Upload coverage to Codecov
+        if: success()
+        uses: codecov/codecov-action@v7
+        with:
+          files: src/mcp/coverage.xml
+          fail_ci_if_error: false
+
+  security:
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    needs: [changes, lint, typecheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Full history for secret scanning
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Secret detection (detect-secrets)
+        run: |
+          pip install detect-secrets==1.5.0
+          TMPFILE=$(mktemp)
+          export TMPFILE
+          # Scan only git-tracked files (--all-files walks filesystem and enters .git/)
+          git ls-files -z | xargs -0 detect-secrets scan \
+            --exclude-files '\.env\.age$' \
+            --exclude-files '\.lock$' \
+            --exclude-files 'package-lock\.json$' \
+            --exclude-files '\.github/workflows/' \
+            --exclude-files 'src/mcp/docs/inventory/' \
+            --exclude-files 'scripts/env-lock\.sh$' \
+            --exclude-files 'docs/CERID_AI_PROJECT_REFERENCE\.md$' \
+            --exclude-files 'docs/OPERATIONS\.md$' \
+            --exclude-files 'src/mcp/tests/test_middleware_auth\.py$' \
+            --exclude-files 'src/mcp/tests/test_auth\.py$' \
+            --exclude-files 'src/mcp/tests/test_web_search\.py$' \
+            --exclude-files 'docs/plans/' \
+            --exclude-files 'src/mcp/routers/setup\.py$' \
+            --exclude-files 'src/mcp/app/routers/setup\.py$' \
+            --exclude-files 'src/mcp/config/knowledge_packs\.json$' \
+            > "$TMPFILE"
+          # Fail if any secrets found
+          python -c "
+          import json, sys, os
+          with open(os.environ['TMPFILE']) as f:
+              results = json.load(f)
+          secrets = {k: v for k, v in results.get('results', {}).items() if v}
+          if secrets:
+              print('::error::Potential secrets detected in:')
+              for fname, findings in secrets.items():
+                  for finding in findings:
+                      print(f'  {fname}:{finding[\"line_number\"]} - {finding[\"type\"]}')
+              sys.exit(1)
+          print('No secrets detected.')
+          "
+          rm -f "$TMPFILE"
+      - name: Python security scan (bandit)
+        run: pip install bandit==1.9.4 && bandit -r src/mcp/ -ll --skip B101,B615 -x src/mcp/tests
+      - name: Python dependency audit (including transitive deps)
+        run: |
+          pip install pip-audit==2.10.0
+          pip install -r src/mcp/requirements.txt
+          # The audit venv's BOOTSTRAP setuptools (runner-preinstalled) trips
+          # PYSEC-2026-3447 (MANIFEST.in exclusion bypass when BUILDING sdists
+          # on mac filesystems — never reachable at runtime). Upgrade it past
+          # the fix instead of growing the ignore list; same runner-tooling
+          # class as the pip CVEs below.
+          pip install --upgrade 'setuptools>=83.0.0'
+          # Ignore 3 CVEs requiring major version migration (langchain-core 0.3→1.2, langgraph-checkpoint 2→4)
+          # CVE-2026-26013: SSRF in ChatOpenAI image token counting — we use Bifrost proxy, not ChatOpenAI
+          # CVE-2025-64439: RCE in JsonPlusSerializer — we control all LangGraph inputs, no untrusted data
+          # CVE-2026-27794: RCE via pickle fallback — internal caching only, no untrusted pickle
+          # CVE-2026-28277: msgpack deserialization in LangGraph checkpointer — we don't use persistent checkpointers
+          # CVE-2026-4539: ReDoS in pygments AdlLexer — local-only, we don't use ADL lexer
+          # CVE-2026-3219: pip concatenated tar+ZIP confusion — no upstream fix released; every install path
+          #                uses requirements.lock with --generate-hashes so an attacker can't smuggle a poly-glot
+          #                archive. Affects the pre-installed pip on the CI runner only. Re-eval 2026-09-30.
+          # GHSA-fv5p-p927-qmxr: SSRF via redirect bypass in langchain-text-splitters
+          #                      HTMLHeaderTextSplitter.split_text_from_url(). We only call
+          #                      MarkdownHeaderTextSplitter.split_text(text) — no URL fetching, no HTML
+          #                      splitter usage anywhere in the codebase. Fix in 1.1.2+ requires
+          #                      langchain-core 1.x. Re-eval 2026-06-30 (Phase 11 langchain-core 0.3→1.2).
+          # CVE-2026-6357: pip self-update check ran AFTER installing wheels, letting a newly-installed
+          #                wheel's code import during the self-update path. Fixed in pip 26.1. Not
+          #                reachable here — installs use --require-hashes against requirements.lock
+          #                and self-update is disabled in the container. Affects only the pre-installed
+          #                pip on the CI runner. Re-eval 2026-08-31 (after pip 26.1 lands on hosted runners).
+          # PYSEC-2025-183: pyjwt weak-encryption advisory — disputed by upstream (WONTFIX). Requires the
+          #                consumer to pass a short HMAC key; pyjwt is used only by the JWT auth path, gated
+          #                by CERID_MULTI_USER=true with an operator-supplied 256-bit secret. Default
+          #                community deployment never executes it. Re-eval 2026-08-31.
+          # CVE-2026-45829: pre-auth code injection in chromadb >=1.0.0 via trust_remote_code=true on the
+          #                collections endpoint. Not reachable — trust_remote_code is never set anywhere in
+          #                the codebase (grep-verified) and Chroma binds loopback-only. Re-eval 2026-09-30.
+          # PYSEC-2026-196: pip treats console_scripts/gui_scripts as paths (not file names) without sanitizing
+          #                the resolved install dir; fixed in pip 26.1.2. Same class as CVE-2026-6357/3219 —
+          #                affects only the runner's pre-installed pip; installs use --require-hashes against
+          #                requirements.lock with self-update disabled. Re-eval 2026-08-31.
+          # CVE-2025-3000: torch.jit.script memory corruption, local-host attack vector only. torch is a
+          #                transitive inference dep; the codebase never calls torch.jit.script (grep-verified)
+          #                and never compiles untrusted TorchScript. No fixed version. Re-eval 2026-07-31.
+          # PYSEC-2026-3624: lightning RCE via attacker-crafted checkpoint in load_from_checkpoint. The only
+          #                path into lightning's checkpoint loader is pyannote's hardcoded
+          #                pyannote/speaker-diarization-3.1 pulled from HF with the operator's token — no
+          #                untrusted checkpoint reaches it. Fixed only in an unreleased commit; the latest
+          #                release (2.6.5) is the vulnerable one. Re-eval 2026-09-30 (lightning release cadence).
+          # Migration planned for Phase 11
+          pip-audit --desc \
+            --ignore-vuln CVE-2026-26013 \
+            --ignore-vuln CVE-2025-64439 \
+            --ignore-vuln CVE-2026-27794 \
+            --ignore-vuln CVE-2026-28277 \
+            --ignore-vuln CVE-2026-4539 \
+            --ignore-vuln CVE-2026-3219 \
+            --ignore-vuln GHSA-fv5p-p927-qmxr \
+            --ignore-vuln CVE-2026-6357 \
+            --ignore-vuln PYSEC-2025-183 \
+            --ignore-vuln CVE-2026-45829 \
+            --ignore-vuln PYSEC-2026-196 \
+            --ignore-vuln CVE-2025-3000 \
+            --ignore-vuln PYSEC-2026-3624
+      - name: ReDoS regex audit (dlint)
+        run: |
+          pip install dlint flake8
+          python -m flake8 --select=DUO138 src/mcp/
+
+  lock-sync:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Use same Python image as Dockerfile to ensure identical pip-compile output
+    # (Dockerfile is on python:3.12; sync-repos.py regenerates the lock in
+    # python:3.12-slim — a 3.11 resolver here picks different transitives,
+    # e.g. scipy 1.17 vs 1.18).
+    container: python:3.12-slim
+    steps:
+      - uses: actions/checkout@v6
+      - run: pip install pip-tools==7.5.3
+      - name: Check Python lock file is up to date
+        run: |
+          cd src/mcp
+          # Seed the output path with the committed lock so pip-compile preserves
+          # existing pins (treats them as constraints) and only changes the lock
+          # when requirements.txt itself changes — NOT whenever a new in-range
+          # transitive version publishes on PyPI. Stops the daily latest-resolve
+          # drift; intentional bumps stay a deliberate pip-compile re-run.
+          cp requirements.lock /tmp/requirements.lock
+          pip-compile requirements.txt -o /tmp/requirements.lock --generate-hashes --no-header --allow-unsafe
+          diff requirements.lock /tmp/requirements.lock || (echo "::error::requirements.lock is out of date vs requirements.txt. Run: cd src/mcp && pip-compile requirements.txt -o requirements.lock --generate-hashes --no-header --allow-unsafe" && exit 1)
+
+  # Frontend
+  frontend:
+    needs: [changes, lint, typecheck]
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: src/web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: src/web/.nvmrc
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+      - run: npm ci
+      - name: TypeScript type check
+        run: npx tsc -b
+      - name: ESLint
+        run: npm run lint
+      - name: Vitest
+        run: npm test
+      - name: Vite build
+        run: npx vite build
+      - name: Check bundle size (fail if any chunk exceeds caps)
+        # 800KB main cap protects the initial-load surface. Constellation's
+        # lazy 3D stack (three + R3F + drei + postprocessing incl. N8AO ambient
+        # occlusion) needs ~1.2MB minified on its own chunk — that's the cost of
+        # a WebGL2 3D engine + effects and is fine because it only loads when the
+        # user picks Constellation mode (lazy import). The cosmos.gl "Live" scene
+        # (vendor-cosmos, ~733KB) is likewise lazy — only loaded in Live mode.
+        # Allowlist any chunk whose name starts with the known-large lazy entry
+        # markers up to 1.3MB.
+        run: |
+          main_max=$((800 * 1024))
+          lazy3d_max=$((1300 * 1024))
+          fail=0
+          for file in dist/assets/*.js; do
+            size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+            size_kb=$((size / 1024))
+            base=$(basename "$file")
+            echo "$file: ${size_kb}KB"
+            cap=$main_max
+            cap_name="800KB"
+            if [[ "$base" == vendor-r3f-* || "$base" == vendor-three-* || "$base" == Constellation-* || "$base" == vendor-cosmos-* ]]; then
+              cap=$lazy3d_max
+              cap_name="1.3MB (lazy 3D)"
+            fi
+            if [ "$size" -gt "$cap" ]; then
+              echo "::error::Bundle chunk $file exceeds $cap_name limit: ${size_kb}KB"
+              fail=1
+            fi
+          done
+          if [ "$fail" -eq 1 ]; then exit 1; fi
+      # Blocking gate covers what actually ships to users. The dev toolchain is
+      # audited too, but advisory-only: since 2026-07 the eslint 9.x tree pulls
+      # minimatch@3 -> brace-expansion@1 (GHSA-mh99-v99m-4gvg), whose sole fix is
+      # brace-expansion@5 — an ESM-first package whose CJS build exports an
+      # object, so an override breaks every v3-era `require()` consumer. npm's
+      # own remediation is `eslint@10`, a breaking major. Blocking on an
+      # unreachable DoS in the linter (it would require attacker control of our
+      # eslint config) bought nothing and hid the production result.
+      # Revisit when the repo moves to eslint 10 — then drop the split.
+      # Mirrors the same split in cerid-ai-internal; this workflow is
+      # hand-maintained, so sync-repos.py cannot propagate it.
+      - name: NPM dependency audit (production — blocking)
+        run: npm audit --audit-level=high --omit=dev
+      - name: NPM dependency audit (dev toolchain — advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  # ---------------------------------------------------------------------------
+  # License denylist. Replaces the two inline `--fail-on` / `--failOn` audits
+  # that used to live in `test` and `frontend`.
+  #
+  # Those flags do an EXACT-STRING match against SPDX ids, and most packages
+  # report Trove-classifier prose instead — "GNU General Public License v3
+  # (GPLv3)" never matches "GPL-3.0-only". On 2026-08-05 that let a GPL-3.0
+  # package (pcodedmp, pulled transitively by extract-msg) pass this repo's
+  # gate green on a release commit, while the canonical repo's scanner caught
+  # it. scripts/lint-license-denylist.py matches both string shapes and handles
+  # compound "A; B" / "A OR B" licenses instead of substring-matching them.
+  #
+  # The scanner and its allowlist were already committed here; nothing invoked
+  # them. Now something does.
+  #
+  # No paths-filter: requirements.txt pins RANGES, so a new transitive
+  # dependency can arrive with no manifest change at all.
+  # ---------------------------------------------------------------------------
+  license-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"  # public pins 3.11 (see .sync-manifest.yaml); canonical is 3.12
+          cache: pip
+      - name: Python license scan (pip-licenses)
+        # Resolves licences from the LOCK via PyPI metadata rather than
+        # installing the tree (which pulls torch just to read metadata), and
+        # scans what actually ships rather than what resolves on the runner.
+        run: |
+          pip install -q pyyaml
+          python scripts/collect-lock-licenses.py --lock src/mcp/requirements.lock --output /tmp/pip-licenses.json
+          python scripts/lint-license-denylist.py --tool pip-licenses --input /tmp/pip-licenses.json --label python
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: src/web/.nvmrc
+          cache: npm
+          # REQUIRED: `cache: npm` resolves lockfiles from the REPO ROOT, and
+          # this repo has none — they all live under package dirs. Without this
+          # the step fails "Dependencies lock file is not found" and takes the
+          # Node scan with it. Caught on the canonical repo the first time this
+          # job was allowed to reach the step at all.
+          cache-dependency-path: |
+            src/web/package-lock.json
+            packages/widget/package-lock.json
+            packages/sdk/typescript/package-lock.json
+      - name: Node license scan (license-checker)
+        # The npm roots that ship an artifact in THIS repo: the web bundle, the
+        # embeddable widget, and the published SDK. packages/desktop is
+        # internal-only and absent here.
+        run: |
+          set -e
+          pip install -q pyyaml
+          for pkg in src/web packages/widget packages/sdk/typescript; do
+            label=$(basename "$pkg")
+            echo "::group::license-checker: $pkg"
+            (cd "$pkg" && npm ci --no-audit --no-fund)
+            (cd "$pkg" && npx --yes license-checker@25.0.1 --production --json) > "/tmp/lc-$label.json"
+            python3 scripts/lint-license-denylist.py --tool license-checker --input "/tmp/lc-$label.json" --label "$label"
+            echo "::endgroup::"
+          done
+
+  # Docker
+  docker:
+    runs-on: ubuntu-latest
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan]
+    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    timeout-minutes: 45
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint Dockerfiles (hadolint)
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: src/mcp/Dockerfile
+          ignore: DL3008,DL3013,DL3045,DL3059
+      - name: Lint Web Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: src/web/Dockerfile
+          ignore: DL3008,DL3018,DL3059
+      - run: docker build -t cerid-mcp-test -f src/mcp/Dockerfile .
+      - run: docker build -t cerid-web-test src/web/
+      - name: Create Trivy ignore file
+        run: |
+          cat > .trivyignore <<'EOF'
+          # LangChain/LangGraph CVEs requiring major version migration (Phase 11)
+          CVE-2026-26013
+          CVE-2025-64439
+          CVE-2026-27794
+          # glibc heap corruption — no fix available in Debian 13 yet
+          CVE-2026-0861
+          # wheel privilege escalation — build-time only, not exploitable at runtime
+          CVE-2026-24049
+          # systemd CVE in Debian 13 base — D-Bus RegisterMachine not reachable in container
+          CVE-2026-4105
+          # libxml2 CVEs in Alpine base — nginx serves static files only, no XML parsing
+          CVE-2025-32414
+          CVE-2025-32415
+          CVE-2025-49794
+          CVE-2025-49795
+          CVE-2025-49796
+          CVE-2025-6021
+          # jaraco.context path traversal via tar — build-time pip dependency, not runtime-exploitable
+          CVE-2026-23949
+          # ncurses buffer overflow — no fix in Debian 13, container has no interactive terminals
+          CVE-2025-69720
+          # nghttp2 DoS via malformed HTTP/2 — internal container traffic only, no external exposure
+          CVE-2026-27135
+          # systemd arbitrary code execution — D-Bus not reachable in container context
+          CVE-2026-29111
+          # openssl DoS via NULL pointer — Debian base image, pending 3.5.5-1 patch
+          CVE-2026-28390
+          # libcap TOCTOU privilege escalation in cap_set_file — container is single-user,
+          # no other process calls cap_set_file, race not reachable. No upstream fix yet;
+          # re-eval 2026-06-30.
+          CVE-2026-4878
+          # GnuTLS DTLS zero-length fragment DoS — we use TLS only via httpx/AsyncHTTPClient,
+          # never DTLS. No code path reaches the affected handler. No upstream fix yet in
+          # Debian 13; re-eval 2026-06-30.
+          CVE-2026-33845
+          # GnuTLS DTLS handshake heap overflow — same DTLS surface as CVE-2026-33845;
+          # we never initiate or accept DTLS. No upstream fix; re-eval 2026-06-30.
+          CVE-2026-33846
+          # GnuTLS nameConstraints case-sensitive policy bypass — we use httpx default cert
+          # verification against well-known CAs, no custom nameConstraints. No upstream fix;
+          # re-eval 2026-06-30.
+          CVE-2026-3833
+          # GnuTLS authentication bypass via NUL character — we don't perform certificate
+          # subject-name matching against attacker-controlled input. No upstream fix;
+          # re-eval 2026-06-30.
+          CVE-2026-42010
+          # GnuTLS security bypass via incorrect name handling — same surface as CVE-2026-42010;
+          # we don't process attacker-controlled cert names. No upstream fix; re-eval 2026-06-30.
+          CVE-2026-42011
+          # libssh2 vuln — pulled in transitively by base image; no SSH client ever invoked
+          # from application code. No upstream fix; re-eval 2026-06-30.
+          CVE-2026-7598
+          # libssh2 out-of-bounds write via unchecked length (libssh2-1t64 1.11.1-1) —
+          # same unused-SSH-surface rationale as CVE-2026-7598; no SSH from application
+          # code. No upstream fix in Debian 13; re-eval 2026-06-30.
+          CVE-2026-55200
+          # libcurl wrong file transfer via incorrect SMB handling — application code
+          # uses httpx for all HTTP I/O; the SMB protocol is never invoked. libcurl is
+          # pulled in transitively by the Debian 13 base. No upstream Debian fix yet;
+          # re-eval 2026-06-30.
+          CVE-2026-5773
+          # libcurl cookie-leak information disclosure — same surface as CVE-2026-5773;
+          # we never invoke libcurl directly. Cookies in our HTTP path are managed by
+          # httpx's Cookies API, not by libcurl's. No upstream Debian fix yet;
+          # re-eval 2026-06-30.
+          CVE-2026-6276
+          # perl-base Archive::Tar symlink — pulled into Debian base layer.
+          # We never invoke perl from application code (no Archive::Tar calls,
+          # no perl scripts in container). Trivy flags it transitively. No
+          # upstream fix in Debian 13 yet. Re-eval 2026-07-31.
+          CVE-2026-42496
+          # perl-base heap buffer overflow during compilation — same surface
+          # as CVE-2026-42496; perl interpreter never executes in container.
+          # No upstream fix; re-eval 2026-07-31.
+          CVE-2026-8376
+          # perl-base Archive::Tar memory exhaustion (HIGH) — same surface;
+          # no Archive::Tar usage from application code. No upstream fix;
+          # re-eval 2026-07-31.
+          CVE-2026-9538
+          # MIT Kerberos 5 DoS via integer underflow — affects libgssapi-krb5-2,
+          # libk5crypto3, libkrb5-3, libkrb5support0. Container never initiates
+          # GSSAPI/Kerberos handshakes (httpx-only HTTP/HTTPS). No upstream fix in
+          # Debian 13. Re-eval 2026-07-31.
+          CVE-2026-40356
+          # perl-base Archive::Tar hardlink — companion to CVE-2026-42496 (the
+          # symlink variant). Same rationale; no Archive::Tar usage from
+          # application code. No upstream fix; re-eval 2026-07-31.
+          CVE-2026-42497
+          # perl-base perl-IO-Compress arbitrary code execution (HIGH) — same
+          # perl-base surface; the perl interpreter never executes in the
+          # container. No upstream fix in Debian 13 yet. Re-eval 2026-07-31.
+          CVE-2026-48962
+          # OpenSSL heap use-after-free in PKCS7_verify() (libssl3t64/openssl/
+          # openssl-provider-legacy). Application code never verifies
+          # PKCS7/S-MIME signatures — openssl is only exercised for TLS via
+          # httpx. No fixed version in Debian 13 as of 2026-06-10.
+          # Re-eval 2026-06-30.
+          CVE-2026-45447
+          # perl-base IO::Uncompress::Unzip CPU exhaustion on crafted zip —
+          # same never-executes-perl surface as the entries above. No upstream
+          # fix in Debian 13 as of 2026-06-10. Re-eval 2026-06-30.
+          CVE-2026-48959
+          # chromadb 1.5.9 pre-auth code injection via trust_remote_code=true on
+          # the collections endpoint. Not reachable — trust_remote_code is set
+          # nowhere in the codebase (grep-verified) and the Chroma server binds
+          # loopback-only. Mirrors the pip-audit ignore in the security job.
+          # Re-eval 2026-09-30 (chromadb patch cadence).
+          CVE-2026-45829
+          # libsqlite3-0 memory corruption / heap overflow (SQLite before
+          # 3.53.2). Exploitation requires parsing an attacker-controlled
+          # SQLite database or crafted SQL; the container never opens untrusted
+          # .sqlite files (Chroma/Neo4j/Redis are the datastores, sqlite3 is a
+          # transitive OS/stdlib dep). No Debian 13 fix as of 2026-06-21.
+          # Re-eval 2026-07-31.
+          CVE-2026-11822
+          CVE-2026-11824
+          EOF
+      - name: Scan MCP Docker image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: cerid-mcp-test
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          # Only fail on vulnerabilities that have an available fix. Unfixed
+          # base-image CVEs (perl/gnutls/curl/etc.) are unactionable and were the
+          # source of recurring ignore-list churn; fixed CVEs still fail (those
+          # are actionable — bump the dep/base image).
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          version: v0.69.3
+      - name: Scan Web Docker image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: cerid-web-test
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          # Only fail on vulnerabilities that have an available fix. Unfixed
+          # base-image CVEs (perl/gnutls/curl/etc.) are unactionable and were the
+          # source of recurring ignore-list churn; fixed CVEs still fail (those
+          # are actionable — bump the dep/base image).
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          version: v0.69.3
+
+  # frontend-marketing: removed — marketing site separated to Cerid-AI/cerid-ai-marketing repo
+  # frontend-desktop: removed — desktop (Electron) build lives in internal repo only
+
+  # ── Single required status check ──────────────────────────────────────────
+  # Branch protection requires THIS job, not the individual jobs. It always
+  # runs (if: always()) and aggregates the real jobs.
+  #
+  # A skip is tolerated in general — a docs-only PR skips every job above via
+  # the `changes` gate and must still get a green required check (otherwise the
+  # required check never reports and the PR is blocked forever).
+  #
+  # But on a CODE push to main, a skip means a dependency failed and the gate
+  # behind it never executed — and GitHub renders that as a grey check, not a
+  # red one. `docker` sat skipped for eight consecutive main runs on
+  # 2026-08-03 behind a failing `security` job, accumulating Trivy drift with
+  # no red signal. So `--enforce-ran` is passed for exactly that case:
+  # push + main + changes.code == 'true'.
+  #
+  # The old inline form collapsed results with join(needs.*.result), which lost
+  # the job NAMES — its error read "a required CI job failed", with no way to
+  # tell which. The script names every offender.
+  ci-ok:
+    name: ci / all-required-gates-ran
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Every required gate ran and passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python scripts/lint-ci-required-gates.py \
+            --needs "$NEEDS_JSON" \
+            ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}

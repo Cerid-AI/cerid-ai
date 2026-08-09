@@ -1,0 +1,772 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+/**
+ * Tests for useVerificationStream — the SSE-based verification streaming hook.
+ *
+ * Covers:
+ * 1. Idle when preconditions not met (triggerKey=0, disabled, no text)
+ * 2. Happy path: extracting → verifying → done
+ * 3. Error on stream without summary
+ * 4. Error on fetch failure
+ * 5. Error on backend error event
+ * 6. responseText changes don't restart stream (ref-based)
+ * 7. triggerKey changes restart stream
+ * 8. Abort on unmount
+ * 9. Claim counts tracked
+ * 10. Conversation switch resets state
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
+import { renderHook, waitFor, act } from "@testing-library/react"
+import {
+  useVerificationStream,
+  VERIFICATION_IDLE_TIMEOUT_MS,
+  VERIFICATION_MAX_DURATION_MS,
+} from "@/hooks/use-verification-stream"
+
+// ---------------------------------------------------------------------------
+// Mock streamVerification
+// ---------------------------------------------------------------------------
+
+type SSEEvent = Record<string, unknown>
+
+function makeSSEStream(events: SSEEvent[]) {
+  let aborted = false
+  const abort = vi.fn(() => { aborted = true })
+
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      for (const event of events) {
+        if (aborted) break
+        const line = `data: ${JSON.stringify(event)}\n\n`
+        controller.enqueue(new TextEncoder().encode(line))
+      }
+      controller.close()
+    },
+  })
+
+  const response = Promise.resolve({
+    ok: true,
+    status: 200,
+    body,
+  } as unknown as Response)
+
+  return { response, abort }
+}
+
+let mockStreamFn: Mock
+
+vi.mock("@/lib/api", () => ({
+  streamVerification: (...args: unknown[]) => mockStreamFn(...args),
+}))
+
+const HAPPY_EVENTS: SSEEvent[] = [
+  { type: "extraction_complete", method: "llm", count: 2 },
+  { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+  { type: "claim_extracted", claim: "Claim B", index: 1, claim_type: "factual" },
+  { type: "claim_verified", index: 0, claim: "Claim A", claim_type: "factual", status: "verified", confidence: 0.95, source: "", reason: "OK", verification_method: "cross_model" },
+  { type: "claim_verified", index: 1, claim: "Claim B", claim_type: "factual", status: "unverified", confidence: 0.3, source: "", reason: "Nope", verification_method: "kb" },
+  { type: "summary", verified: 1, unverified: 1, uncertain: 0, total: 2, overall_confidence: 0.625, extraction_method: "llm" },
+]
+
+beforeEach(() => {
+  mockStreamFn = vi.fn()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe("useVerificationStream", () => {
+  // --- Precondition guards ---
+
+  it("stays idle when triggerKey is 0", () => {
+    const { result } = renderHook(() =>
+      useVerificationStream("Some response", "conv-1", true, 0),
+    )
+    expect(result.current.phase).toBe("idle")
+    expect(result.current.loading).toBe(false)
+    expect(mockStreamFn).not.toHaveBeenCalled()
+  })
+
+  it("stays idle when disabled", () => {
+    const { result } = renderHook(() =>
+      useVerificationStream("Some response", "conv-1", false, 1),
+    )
+    expect(result.current.phase).toBe("idle")
+    expect(mockStreamFn).not.toHaveBeenCalled()
+  })
+
+  it("stays idle when responseText is null", () => {
+    const { result } = renderHook(() =>
+      useVerificationStream(null, "conv-1", true, 1),
+    )
+    expect(result.current.phase).toBe("idle")
+    expect(mockStreamFn).not.toHaveBeenCalled()
+  })
+
+  // --- Happy path ---
+
+  it("completes happy path: extracting → verifying → done", async () => {
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response text", "conv-1", true, 1),
+    )
+
+    // Should immediately start extracting
+    expect(result.current.phase).toBe("extracting")
+    expect(result.current.loading).toBe(true)
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("done")
+    })
+
+    expect(result.current.loading).toBe(false)
+    expect(result.current.claims).toHaveLength(2)
+    expect(result.current.summary?.verified).toBe(1)
+    expect(result.current.summary?.unverified).toBe(1)
+    expect(result.current.report).not.toBeNull()
+    expect(result.current.report?.summary.total).toBe(2)
+    expect(result.current.sessionClaimsChecked).toBe(2)
+    // CR-078: the "Extracted N claims" log reads the real count from
+    // extraction_complete (which fires before any claim_extracted), not the
+    // still-zero local counter.
+    expect(
+      result.current.activityLog.some((e) => e.message === "Extracted 2 claims (llm)"),
+    ).toBe(true)
+  })
+
+  // --- Error scenarios ---
+
+  it("transitions to error when stream ends without summary", async () => {
+    const eventsNoSummary = HAPPY_EVENTS.slice(0, 5) // no summary event
+    mockStreamFn.mockReturnValue(makeSSEStream(eventsNoSummary))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+
+    expect(result.current.loading).toBe(false)
+    expect(result.current.report).toBeNull()
+  })
+
+  it("transitions to error when fetch response is not ok", async () => {
+    mockStreamFn.mockReturnValue({
+      response: Promise.resolve({ ok: false, status: 500, body: null } as unknown as Response),
+      abort: vi.fn(),
+    })
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+    expect(result.current.loading).toBe(false)
+  })
+
+  it("transitions to error on backend error event", async () => {
+    const events: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 1 },
+      { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+      { type: "error", message: "Internal server error" },
+    ]
+    mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+  })
+
+  // --- Stability: ref-based dependencies ---
+
+  it("does NOT restart stream when responseText changes (uses ref)", async () => {
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+
+    const { rerender } = renderHook(
+      ({ text }) => useVerificationStream(text, "conv-1", true, 1),
+      { initialProps: { text: "Original response" } },
+    )
+
+    expect(mockStreamFn).toHaveBeenCalledTimes(1)
+
+    // Simulate responseText changing (e.g., debounced save)
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+    rerender({ text: "Original response with minor update" })
+
+    // Should NOT have re-triggered — still only 1 call
+    expect(mockStreamFn).toHaveBeenCalledTimes(1)
+  })
+
+  it("restarts stream when triggerKey changes", () => {
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+
+    const { rerender } = renderHook(
+      ({ key }) => useVerificationStream("Some text", "conv-1", true, key),
+      { initialProps: { key: 1 } },
+    )
+
+    expect(mockStreamFn).toHaveBeenCalledTimes(1)
+
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+    rerender({ key: 2 })
+
+    expect(mockStreamFn).toHaveBeenCalledTimes(2)
+  })
+
+  // --- Cleanup ---
+
+  it("aborts stream on unmount before events received", () => {
+    const abortFn = vi.fn()
+    const body = new ReadableStream<Uint8Array>({
+      start() {
+        // Never enqueue anything — simulates slow backend
+      },
+    })
+    mockStreamFn.mockReturnValue({
+      response: Promise.resolve({ ok: true, status: 200, body } as unknown as Response),
+      abort: abortFn,
+    })
+
+    const { unmount } = renderHook(() =>
+      useVerificationStream("text", "conv-abort-1", true, 1),
+    )
+
+    unmount()
+    expect(abortFn).toHaveBeenCalled()
+  })
+
+  // --- Conversation switch ---
+
+  it("resets claims when conversationId changes", async () => {
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+
+    const { result, rerender } = renderHook(
+      ({ convId }) => useVerificationStream("text", convId, true, 1),
+      { initialProps: { convId: "conv-1" } },
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("done")
+    })
+    expect(result.current.claims).toHaveLength(2)
+
+    // Switch conversation — claims should reset
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+    rerender({ convId: "conv-2" })
+
+    // The conversationId reset effect clears claims synchronously
+    // Then a new stream starts for the new conversation
+    await waitFor(() => {
+      expect(result.current.phase).toBe("done")
+    })
+    // Claims should be from the new stream (2 claims again, not accumulated)
+    expect(result.current.claims).toHaveLength(2)
+  })
+
+  // --- Claim tracking ---
+
+  it("tracks verified and total claim counts", async () => {
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("text", "conv-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("done")
+    })
+
+    expect(result.current.verifiedCount).toBe(2) // both claims have non-pending status
+    expect(result.current.totalClaims).toBe(2)
+  })
+
+  it("builds report with correct structure on completion", async () => {
+    mockStreamFn.mockReturnValue(makeSSEStream(HAPPY_EVENTS))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("text", "conv-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.report).not.toBeNull()
+    })
+
+    const report = result.current.report!
+    expect(report.conversation_id).toBe("conv-1")
+    expect(report.skipped).toBe(false)
+    expect(report.claims).toHaveLength(2)
+    expect(report.claims[0].status).toBe("verified")
+    expect(report.claims[1].status).toBe("unverified")
+    expect(report.summary.total).toBe(2)
+    expect(report.summary.verified).toBe(1)
+    expect(report.summary.unverified).toBe(1)
+  })
+
+  // --- Cancellation resilience ---
+
+  it("aborts stream on unmount even when verification is in progress (prevents memory leak)", async () => {
+    let resolveStream: () => void
+    const streamComplete = new Promise<void>((resolve) => { resolveStream = resolve })
+    const abortFn = vi.fn()
+
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const events = [
+          { type: "extraction_complete", method: "llm", count: 1 },
+          { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+        ]
+        for (const event of events) {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))
+        }
+        await streamComplete
+        const remaining = [
+          { type: "claim_verified", index: 0, claim: "Claim A", claim_type: "factual", status: "verified", confidence: 0.9, source: "", reason: "OK", verification_method: "cross_model" },
+          { type: "summary", verified: 1, unverified: 0, uncertain: 0, total: 1, overall_confidence: 0.9, extraction_method: "llm" },
+        ]
+        for (const event of remaining) {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))
+        }
+        controller.close()
+      },
+    })
+
+    mockStreamFn.mockReturnValue({
+      response: Promise.resolve({ ok: true, status: 200, body } as unknown as Response),
+      abort: abortFn,
+    })
+
+    const { result, unmount } = renderHook(() =>
+      useVerificationStream("text", "conv-cancel-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("verifying")
+    })
+
+    unmount()
+    expect(abortFn).toHaveBeenCalled()
+
+    resolveStream!()
+  })
+
+  // --- Abort finalizer (Task 13) ---
+  //
+  // Regression: when the stream ends without per-claim verdicts (natural
+  // close-without-summary, backend error event, or non-OK response),
+  // previously-pending claim cards kept their "pending" status and
+  // ClaimOverlay rendered a spinner forever.  The hook must flip every
+  // lingering pending claim to "uncertain" so the UI settles.
+
+  it("flips pending claims to 'uncertain' when stream closes without a summary", async () => {
+    // Two claims extracted, zero verified — stream closes cleanly with no summary event.
+    const events: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 2 },
+      { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+      { type: "claim_extracted", claim: "Claim B", index: 1, claim_type: "factual" },
+    ]
+    mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-finalizer-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+
+    expect(result.current.claims).toHaveLength(2)
+    // No claim should be left in the "pending" state.
+    for (const c of result.current.claims) {
+      expect(c.status).not.toBe("pending")
+      expect(c.status).toBe("uncertain")
+      // A human-readable reason is attached so the popover explains itself.
+      expect(typeof c.reason).toBe("string")
+      expect(c.reason?.length ?? 0).toBeGreaterThan(0)
+    }
+  })
+
+  it("flips pending claims to 'uncertain' on backend error event mid-stream", async () => {
+    const events: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 2 },
+      { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+      { type: "claim_extracted", claim: "Claim B", index: 1, claim_type: "factual" },
+      { type: "error", message: "backend exploded" },
+    ]
+    mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-finalizer-2", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+
+    expect(result.current.claims).toHaveLength(2)
+    for (const c of result.current.claims) {
+      expect(c.status).toBe("uncertain")
+    }
+  })
+
+  it("flips pending claims to 'uncertain' when response fails to open", async () => {
+    // Seed claims by hand would require a first successful stream; instead
+    // simulate: first event extracts claims, but then response.ok is false
+    // is not a valid sequence.  Use the "no summary" path via closed body.
+    const events: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 1 },
+      { type: "claim_extracted", claim: "Lone claim", index: 0, claim_type: "factual" },
+      // one verdict arrives for claim 0, but a second claim_extracted shows up
+      // AFTER extraction_complete (backend quirk), leaving #1 pending when stream closes
+      { type: "claim_extracted", claim: "Late claim", index: 1, claim_type: "factual" },
+      { type: "claim_verified", index: 0, claim: "Lone claim", claim_type: "factual", status: "verified", confidence: 0.9, source: "", reason: "OK", verification_method: "cross_model" },
+    ]
+    mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-finalizer-3", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+
+    expect(result.current.claims).toHaveLength(2)
+    // Claim 0 keeps its real verdict; claim 1's pending is finalized.
+    const verdicts = result.current.claims.map((c) => c.status)
+    expect(verdicts).toContain("verified")
+    expect(verdicts).toContain("uncertain")
+    expect(verdicts).not.toContain("pending")
+  })
+
+  // --- Post-summary retry sweep (round 2) + verdict.* fallbacks ---
+  //
+  // The backend re-emits `claim_verified` events for claims resolved by its
+  // round-2 retry sweep AFTER the first `summary`, then sends a final
+  // `summary_update` with refreshed totals before `persisted`. The hook must
+  // apply those in place with phase staying "done". Timeout verdicts nest
+  // status/confidence/reason under `verdict` — the reason fallback was the
+  // missing piece (BUG 1).
+
+  describe("post-summary retry sweep", () => {
+    const ROUND1: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 2 },
+      { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+      { type: "claim_extracted", claim: "Claim B", index: 1, claim_type: "factual" },
+      { type: "claim_verified", index: 0, claim: "Claim A", claim_type: "factual", status: "verified", confidence: 0.95, verification_method: "cross_model" },
+      { type: "claim_verified", index: 1, claim: "Claim B", claim_type: "factual", verdict: { status: "uncertain", confidence: 0.2, reason: "KB-only verdict (verification timeout)" }, verification_method: "kb_only_timeout" },
+      { type: "summary", verified: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55, extraction_method: "llm" },
+    ]
+
+    it("falls back to verdict.reason for timeout verdicts", async () => {
+      mockStreamFn.mockReturnValue(makeSSEStream(ROUND1))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-verdict-reason", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      const timedOut = result.current.claims.find((c) => c.index === 1)!
+      expect(timedOut.status).toBe("uncertain")
+      expect(timedOut.reason).toBe("KB-only verdict (verification timeout)")
+      expect(timedOut.similarity).toBe(0.2)
+      // The reason must also flow into the derived report for the status bar.
+      expect(result.current.report?.claims[1].reason).toBe("KB-only verdict (verification timeout)")
+    })
+
+    it("applies claim_verified after the summary and summary_update refreshes counts while phase stays done", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1,
+        // Round-2 sweep resolves the timed-out claim, then refreshes totals.
+        { type: "claim_verified", index: 1, claim: "Claim B", claim_type: "factual", status: "verified", confidence: 0.9, verification_method: "web_search" },
+        { type: "summary_update", verified: 2, unverified: 0, uncertain: 0, total: 2, overall_confidence: 0.92 },
+        { type: "persisted" },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-round2", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.summary?.uncertain).toBe(0)
+      })
+
+      expect(result.current.phase).toBe("done")
+      const swept = result.current.claims.find((c) => c.index === 1)!
+      expect(swept.status).toBe("verified")
+      expect(swept.verification_method).toBe("web_search")
+      expect(result.current.summary?.verified).toBe(2)
+      expect(result.current.summary?.overallConfidence).toBe(0.92)
+      // The derived report rebuilds with the refreshed counts + verdicts.
+      expect(result.current.report?.summary.verified).toBe(2)
+      expect(result.current.report?.summary.uncertain).toBe(0)
+      expect(result.current.report?.claims[1].status).toBe("verified")
+    })
+
+    it("CR-065: surfaces a report-persistence failure in the activity log", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1,
+        { type: "summary_update", verified: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55 },
+        { type: "persisted", success: false },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-persist-fail", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      // A failed durable persist must be visible, not silently dropped.
+      expect(
+        result.current.activityLog.some(
+          (e) => e.type === "error" && /not saved|persistence failed/i.test(e.message),
+        ),
+      ).toBe(true)
+    })
+
+    it("ignores post-summary claim_verified events for unknown indices", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1,
+        { type: "claim_verified", index: 99, claim: "Ghost claim", status: "verified", confidence: 0.9 },
+        { type: "summary_update", verified: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55 },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-ghost", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      expect(result.current.claims).toHaveLength(2)
+      expect(result.current.claims.map((c) => c.claim)).not.toContain("Ghost claim")
+    })
+  })
+
+  // --- SSE keepalive comment handling ---
+
+  it("ignores SSE keepalive comments interleaved with data events", async () => {
+    // Simulate a stream with keepalive comments (: keepalive) mixed in
+    let aborted = false
+    const abort = vi.fn(() => { aborted = true })
+
+    const lines = [
+      ": keepalive\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[0])}\n`,
+      "\n",
+      ": keepalive\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[1])}\n`,
+      "\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[2])}\n`,
+      "\n",
+      ": keepalive\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[3])}\n`,
+      "\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[4])}\n`,
+      "\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[5])}\n`,
+      "\n",
+    ]
+
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const line of lines) {
+          if (aborted) break
+          controller.enqueue(new TextEncoder().encode(line))
+        }
+        controller.close()
+      },
+    })
+
+    const response = Promise.resolve({
+      ok: true,
+      status: 200,
+      body,
+    } as unknown as Response)
+
+    mockStreamFn.mockReturnValue({ response, abort })
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response with keepalives", "conv-ka-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("done")
+    })
+
+    // Should complete successfully despite keepalive comments
+    expect(result.current.claims).toHaveLength(2)
+    expect(result.current.summary?.verified).toBe(1)
+    expect(result.current.summary?.total).toBe(2)
+  })
+
+  // --- Idle-based timeout (P0-B beta triage) ---
+  //
+  // Regression: a fixed 60s AbortController armed at stream start killed
+  // healthy slow-but-alive streams — the backend sends keepalive comments
+  // every ~15s under load, and the premature client abort surfaced live as
+  // nginx 499 + backend CancelledError. The timeout must be IDLE-based
+  // (re-armed by every received chunk, keepalives included) with a large
+  // absolute ceiling, and must degrade (partial results + retry) instead of
+  // hard-erroring.
+
+  describe("idle-based timeout", () => {
+    function makeControlledStream() {
+      const abort = vi.fn()
+      let controller!: ReadableStreamDefaultController<Uint8Array>
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c
+        },
+      })
+      const response = Promise.resolve({ ok: true, status: 200, body } as unknown as Response)
+      return {
+        response,
+        abort,
+        enqueue: (s: string) => controller.enqueue(new TextEncoder().encode(s)),
+      }
+    }
+
+    const flush = async (ms = 0) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+      })
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it("keepalive-only chunks keep the stream alive past the old 60s deadline", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-alive", true, 1),
+      )
+
+      await flush()
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[0])}\n\n`)
+      await flush()
+      expect(result.current.phase).toBe("verifying")
+
+      // 90s of keepalive-only traffic arriving every 30s — inside the idle
+      // budget, but well past the old fixed 60s wall-clock deadline.
+      for (let i = 0; i < 3; i++) {
+        await flush(30_000)
+        stream.enqueue(": keepalive\n\n")
+        await flush()
+      }
+
+      expect(stream.abort).not.toHaveBeenCalled()
+      expect(result.current.phase).toBe("verifying")
+    })
+
+    it("degrades with partial results and settled claims when the stream goes silent past the idle budget", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-dead", true, 1),
+      )
+
+      await flush()
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[0])}\n\n`)
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[1])}\n\n`)
+      await flush()
+      expect(result.current.phase).toBe("verifying")
+
+      // True silence — no data, no keepalives — past the idle budget.
+      await flush(VERIFICATION_IDLE_TIMEOUT_MS + 1_000)
+
+      expect(stream.abort).toHaveBeenCalled()
+      expect(result.current.phase).toBe("degraded")
+      expect(result.current.loading).toBe(false)
+      // Partial results retained; pending claims settled (no infinite spinner)
+      expect(result.current.claims).toHaveLength(1)
+      expect(result.current.claims[0].status).toBe("uncertain")
+      expect(typeof result.current.claims[0].reason).toBe("string")
+      // Degraded phase must expose a partial report so the status bar +
+      // per-message badge can render what settled instead of hiding it.
+      const partial = result.current.report
+      expect(partial).not.toBeNull()
+      expect(partial!.skipped).toBe(false)
+      expect(partial!.summary.total).toBe(1)
+      expect(partial!.summary.uncertain).toBe(1)
+      expect(partial!.summary.verified).toBe(0)
+    })
+
+    it("keeps phase 'done' when the stream idles out after the summary (post-summary sweep guard)", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-post-summary", true, 1),
+      )
+
+      await flush()
+      for (const ev of HAPPY_EVENTS) {
+        stream.enqueue(`data: ${JSON.stringify(ev)}\n\n`)
+      }
+      await flush()
+      expect(result.current.phase).toBe("done")
+
+      // Backend holds the stream open for the round-2 sweep, then goes silent.
+      await flush(VERIFICATION_IDLE_TIMEOUT_MS + 1_000)
+
+      expect(stream.abort).toHaveBeenCalled()
+      // The complete round-1 report must not be demoted to "degraded".
+      expect(result.current.phase).toBe("done")
+      expect(result.current.report?.summary.verified).toBe(1)
+    })
+
+    it("caps even a keepalive-active stream at the absolute ceiling with the degraded state", async () => {
+      const stream = makeControlledStream()
+      mockStreamFn.mockReturnValue({ response: stream.response, abort: stream.abort })
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-idle-cap", true, 1),
+      )
+
+      await flush()
+      stream.enqueue(`data: ${JSON.stringify(HAPPY_EVENTS[0])}\n\n`)
+      await flush()
+      expect(result.current.phase).toBe("verifying")
+
+      // Keepalives every 30s forever — the absolute cap must still end the run.
+      const iterations = VERIFICATION_MAX_DURATION_MS / 30_000 + 1
+      for (let i = 0; i < iterations; i++) {
+        await flush(30_000)
+        stream.enqueue(": keepalive\n\n")
+        await flush()
+      }
+
+      expect(stream.abort).toHaveBeenCalled()
+      expect(result.current.phase).toBe("degraded")
+    })
+  })
+})

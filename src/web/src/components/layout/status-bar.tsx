@@ -1,0 +1,324 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+import { useQuery } from "@tanstack/react-query"
+import { Terminal, Zap } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
+import { isLocalProvider } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { TrustScoreChip } from "@/components/trust-score"
+import { BackendStatusPill } from "@/components/layout/backend-status-pill"
+
+const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
+  chromadb: { purpose: "Vector embeddings & semantic search", tech: "ChromaDB" },
+  redis: { purpose: "Cache, session state, pub/sub", tech: "Redis" },
+  neo4j: { purpose: "Knowledge graph & relationships", tech: "Neo4j" },
+}
+
+interface StatusBarProps {
+  consoleOpen?: boolean
+  onToggleConsole?: () => void
+  consoleUnreadCount?: number
+  /** Feature tier — controls whether the gold divider is shown. Only Pro+
+   * surfaces gold trim; community/default tier uses a neutral border. */
+  featureTier?: string
+}
+
+export function StatusBar({
+  consoleOpen,
+  onToggleConsole,
+  consoleUnreadCount = 0,
+  featureTier = "community",
+}: StatusBarProps) {
+  // Audit P1.9: gold top border was always-on, competing with the teal
+  // accent for users on the default tier. Gate to Pro+ tiers only.
+  const tierGold = featureTier === "pro" || featureTier === "enterprise"
+  const { data: health, isError, isLoading, dataUpdatedAt } = useQuery({
+    queryKey: ["health"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 15_000,
+    retry: 1,
+  })
+
+  const { data: credits } = useQuery({
+    queryKey: ["provider-credits"],
+    queryFn: fetchProviderCredits,
+    // CH-CREDITS: keep this responsive so a recovered backend status
+    // ("ok") clears a previously-cached "exhausted" footer promptly.
+    // Short stale window + frequent refetch + refetch on focus/reconnect;
+    // a successful fetch replaces the cached value (no placeholderData),
+    // so the indicator never sticks on a stale "exhausted" state.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 1,
+    staleTime: 5_000,
+  })
+
+  const status = isLoading ? "loading" : isError ? "error" : health?.status ?? "unknown"
+  const lastChecked = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "—"
+
+  const services = health?.services
+  const connectedCount = services
+    ? Object.values(services).filter((s) => s === "connected").length
+    : 0
+  const totalCount = services ? Object.keys(services).length : 0
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <div
+        className={cn(
+          // Task 3.7 — hidden <md so it doesn't collide with the fixed
+          // bottom tab bar, which occupies the same screen position.
+          "hidden h-8 items-center gap-4 border-t bg-muted/40 px-4 text-xs text-muted-foreground md:flex",
+          tierGold ? "border-[rgba(212,175,55,0.22)]" : "border-border",
+        )}
+      >
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex cursor-default items-center gap-1.5">
+              <div
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  status === "healthy" && "bg-green-500 glow-teal",
+                  status === "degraded" && "bg-yellow-500",
+                  status === "loading" && "bg-muted-foreground/50",
+                  (status === "error" || status === "unknown") && "bg-red-500"
+                )}
+                aria-hidden="true"
+              />
+              <span>
+                {status === "healthy" && "All systems operational"}
+                {status === "degraded" && "Some services degraded"}
+                {status === "error" && "Connection error"}
+                {status === "loading" && "Checking..."}
+                {status === "unknown" && "Unknown status"}
+              </span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="space-y-1">
+            <p className="font-medium">System Status: {status}</p>
+            {services && (
+              <p className="text-muted-foreground">
+                {connectedCount}/{totalCount} services connected
+              </p>
+            )}
+            <p className="text-muted-foreground">Last checked: {lastChecked}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        {health?.degradation_tier && health.degradation_tier !== "full" && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className={cn(
+                "rounded px-1.5 py-0.5 text-label-xs font-semibold uppercase tracking-wider",
+                health.degradation_tier === "lite" && "bg-yellow-500/20 text-yellow-400",
+                health.degradation_tier === "direct" && "bg-orange-500/20 text-orange-400",
+                health.degradation_tier === "cached" && "bg-red-500/20 text-red-400",
+                health.degradation_tier === "offline" && "bg-red-500/30 text-red-300 animate-pulse",
+              )}>
+                {health.degradation_tier}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs">
+              <p className="font-medium">Degraded: {health.degradation_tier} tier</p>
+              <div className="mt-1 space-y-0.5 text-xs">
+                <p>Retrieve: {health.can_retrieve ? "\u2713" : "\u2717"}</p>
+                <p>Verify: {health.can_verify ? "\u2713" : "\u2717"}</p>
+                <p>Generate: {health.can_generate ? "\u2713" : "\u2717"}</p>
+              </div>
+              {health.pipeline_providers && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {Object.values(health.pipeline_providers).filter(isLocalProvider).length}/
+                  {Object.values(health.pipeline_providers).length} stages local
+                </p>
+              )}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {services && (
+          <div className="flex items-center gap-3">
+            {Object.entries(services).map(([name, state]) => {
+              const info = SERVICE_INFO[name]
+              const connected = state === "connected"
+              return (
+                <Tooltip key={name}>
+                  <TooltipTrigger asChild>
+                    <span className={cn("cursor-default", !connected && "text-destructive")}>
+                      {name}: {state}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="space-y-1">
+                    <p className="font-medium">{info?.tech ?? name}</p>
+                    {info && <p className="text-muted-foreground">{info.purpose}</p>}
+                    <p className={cn(connected ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>
+                      Status: {connected ? "Connected \u2713" : "Disconnected \u2717"}
+                    </p>
+                    <p className="text-muted-foreground">Last checked: {lastChecked}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )
+            })}
+          </div>
+        )}
+
+        {/* OpenRouter status indicator */}
+        {health?.openrouter_auth_ok === false && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center gap-1 rounded bg-red-500/20 px-1.5 py-0.5 text-label-xs font-semibold text-red-400 animate-pulse">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                OpenRouter: Auth Error
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="space-y-1">
+              <p className="font-medium text-red-400">OpenRouter Authentication Failed</p>
+              <p className="text-muted-foreground">API key may be invalid or expired. Verification and external LLM calls will fail until it is restored — there is no fallback gateway. Local Ollama-served stages are unaffected.</p>
+              <p className="text-muted-foreground">Check your OPENROUTER_API_KEY in .env</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {health?.circuit_breakers?.openrouter === "open" && health?.openrouter_auth_ok !== false && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center gap-1 rounded bg-orange-500/20 px-1.5 py-0.5 text-label-xs font-semibold text-orange-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                OpenRouter: Circuit Open
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="space-y-1">
+              <p className="font-medium text-orange-400">OpenRouter Circuit Breaker Open</p>
+              <p className="text-muted-foreground">Too many consecutive failures. OpenRouter calls are paused until the circuit resets; stages routed to local Ollama continue unaffected.</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {/* Local pipeline indicator (ollama | quenchforge — E1 R5 / CR-024) */}
+        {health?.pipeline_providers && (() => {
+          const localCount = Object.values(health.pipeline_providers).filter(isLocalProvider).length
+          const totalStages = Object.values(health.pipeline_providers).length
+          const localLabel = health.internal_llm_provider === "quenchforge" ? "Quenchforge" : "Ollama"
+          if (localCount > 0) {
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex items-center gap-1 text-label-xs text-green-600 dark:text-green-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                    {localLabel}: {health.internal_llm_model || "active"} ({localCount}/{totalStages} local)
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="space-y-1">
+                  <p className="font-medium">{localLabel} — Local LLM</p>
+                  <p className="text-muted-foreground">{localCount} of {totalStages} pipeline stages running locally ($0)</p>
+                  <p className="text-muted-foreground">Model: {health.internal_llm_model || "configured"}</p>
+                  {health.inference_routing != null && (
+                    <p className="text-muted-foreground">Routing snapshot available</p>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            )
+          }
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1 text-label-xs text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">
+                  <Zap className="size-3" aria-hidden="true" />
+                  0 local
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>All pipeline stages use cloud APIs. Enable Ollama for faster local processing.</p>
+              </TooltipContent>
+            </Tooltip>
+          )
+        })()}
+
+        {/* Backend status pill — shows the active inference backend
+            (ollama / quenchforge / cloud) at a glance. Reads /system-check;
+            no wire-up to the canonical INTERNAL_LLM_PROVIDER value yet. */}
+        <BackendStatusPill />
+
+        {/* TrustScore chip — pure presentation, no effect on retrieval/generation */}
+        <TrustScoreChip />
+
+        {/* Agent Console toggle */}
+        {onToggleConsole && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onToggleConsole}
+                className={cn(
+                  "relative flex items-center gap-1 rounded px-1.5 py-0.5 text-label-xs transition-colors",
+                  consoleOpen
+                    ? "bg-teal-500/20 text-teal-400"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Terminal className="h-3 w-3" />
+                <span className="hidden sm:inline">Console</span>
+                {!consoleOpen && consoleUnreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] animate-pulse items-center justify-center rounded-full bg-teal-500 px-1 text-label-xxs font-bold text-white"> {/* drift-allowed: notification-badge minimum width keeps single/double-digit counts centered */}
+                    {consoleUnreadCount > 99 ? "99+" : consoleUnreadCount}
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {consoleOpen ? "Close agent console" : "Open agent console"}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {/* Credits indicator — pushed to the right */}
+        {credits?.configured && (
+          <div className="ml-auto">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={credits.top_up_url ?? "https://openrouter.ai/settings/credits"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    "cursor-pointer font-medium tabular-nums transition-colors hover:underline",
+                    credits.status === "ok" && "text-green-600 dark:text-green-400",
+                    credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
+                    credits.status === "exhausted" && "text-red-600 dark:text-red-400",
+                    (credits.status === "error" || credits.balance == null) && "text-muted-foreground",
+                  )}
+                >
+                  {credits.status === "exhausted" ? (
+                    "Credits exhausted"
+                  ) : credits.balance != null ? (
+                    `$${credits.balance.toFixed(2)}`
+                  ) : (
+                    "Credits: —"
+                  )}
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="space-y-1">
+                <p className="font-medium">OpenRouter Credits</p>
+                <p className="text-muted-foreground">Balance: ${credits.balance?.toFixed(2)}</p>
+                {credits.usage_daily != null && (
+                  <p className="text-muted-foreground">Today: ${credits.usage_daily.toFixed(4)}</p>
+                )}
+                {credits.usage_weekly != null && (
+                  <p className="text-muted-foreground">This week: ${credits.usage_weekly.toFixed(2)}</p>
+                )}
+                {credits.usage_monthly != null && (
+                  <p className="text-muted-foreground">This month: ${credits.usage_monthly.toFixed(2)}</p>
+                )}
+                {credits.warning && (
+                  <p className="font-medium text-amber-600 dark:text-yellow-400">{credits.warning}</p>
+                )}
+                <p className="text-muted-foreground">Click to add credits</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
+  )
+}

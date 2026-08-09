@@ -1,0 +1,23 @@
+# Minimal SearXNG settings overlay for the optional `searxng` compose
+# service (docker-compose.yml, profile "searxng").
+#
+# `use_default_settings: true` inherits every other key (engines, UI,
+# outgoing request config, etc.) from the image's built-in defaults —
+# this file only overrides what verification evidence sourcing needs:
+# the JSON output format (disabled by default) that
+# utils/web_search.py::SearxngProvider queries via `?format=json`.
+#
+# The server secret is deliberately NOT set here — a committed secret
+# fails the detect-secrets gate and rots into a shared default. The
+# compose service injects it via the SEARXNG_SECRET environment variable
+# (the image maps it onto server.secret_key); generate one into .env
+# when enabling the profile:  openssl rand -hex 32
+use_default_settings: true
+
+server:
+  limiter: false
+
+search:
+  formats:
+    - html
+    - json

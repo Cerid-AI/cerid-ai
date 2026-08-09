@@ -1,0 +1,1012 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: FSL-1.1-ALv2
+
+"""First-run configuration wizard endpoints.
+
+When cerid-ai starts without required API keys the MCP server enters
+"setup mode" and serves these endpoints so the React GUI can walk the
+user through initial configuration.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import re
+import secrets
+from http import HTTPStatus
+from pathlib import Path
+from typing import Any
+
+import httpx
+from fastapi import APIRouter, HTTPException, Response
+from pydantic import BaseModel, Field
+
+from core.utils.swallowed import log_swallowed_error
+
+
+# --- Response models (generated: single-return dict-literal routes) ---
+class RetestServicesResponse(BaseModel):
+    status: str
+    results: Any
+
+
+class ModelsStatusResponse(BaseModel):
+    reranker: Any
+    embedder: Any
+
+
+class SetupHealthResponse(BaseModel):
+    services: Any
+    all_healthy: Any
+    docker: dict
+
+
+
+_logger = logging.getLogger("ai-companion.setup")
+
+router = APIRouter(prefix="/setup", tags=["setup"])
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
+
+_REQUIRED_KEYS = ["OPENROUTER_API_KEY"]
+# HF_TOKEN is Pro-tier optional: only needed for meeting_capture diarization
+# (pyannote gated models). Surfaced in wizard but doesn't block setup.
+_OPTIONAL_KEYS = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY", "HF_TOKEN"]
+
+# .env location: use CERID_ENV_FILE if set, otherwise find repo root by walking
+# up until we find .env or docker-compose.yml. In Docker the .env is loaded via
+# env_file directive so the configure endpoint is primarily for host-side setup.
+def _find_env_file() -> Path:
+    if env_override := os.getenv("CERID_ENV_FILE"):
+        return Path(env_override)
+    # Walk up from this file's directory looking for .env
+    p = Path(__file__).resolve().parent
+    for _ in range(6):
+        candidate = p / ".env"
+        if candidate.exists() or (p / "docker-compose.yml").exists():
+            return p / ".env"
+        if p.parent == p:
+            break
+        p = p.parent
+    return Path("/app/.env")  # Docker fallback
+
+
+_ENV_FILE = _find_env_file()
+
+
+class ServiceHealth(BaseModel):
+    name: str
+    status: str
+    port: int
+    url: str | None = None
+    error: str | None = None
+
+
+class SetupStatus(BaseModel):
+    configured: bool
+    setup_required: bool
+    missing_keys: list[str]
+    optional_keys: list[str]
+    services: dict[str, str]
+    configured_providers: list[str] = Field(default_factory=list)
+    # Server-side first-run flag — the GUI previously gated the wizard on
+    # localStorage alone, so every fresh browser re-entered it on a
+    # configured instance (beta triage 2026-07-12 P0-B4).
+    onboarding_complete: bool = False
+
+
+class KeyValidationRequest(BaseModel):
+    provider: str
+    api_key: str = Field(..., min_length=1)
+
+
+class KeyValidationResponse(BaseModel):
+    valid: bool
+    error: str | None = None
+    models_available: int | None = None
+
+
+class ConfigureRequest(BaseModel):
+    openrouter_api_key: str | None = None
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    xai_api_key: str | None = None
+    neo4j_password: str | None = None
+    # KB / environment fields sent by the setup wizard
+    archive_path: str | None = None
+    lightweight_mode: bool | None = None
+    watch_folder: bool | None = None
+    ollama_enabled: bool | None = None
+    ollama_model: str | None = None
+    # Explicit consent to overwrite an already-configured instance. Without
+    # it, /setup/configure on a configured install responds 409 (beta triage
+    # 2026-07-12 P0-B4: a re-run wizard silently rewrote ARCHIVE_PATH /
+    # CERID_LIGHTWEIGHT / WATCH_FOLDER / OLLAMA_* on a live install).
+    force: bool = False
+
+
+class ConfigureResponse(BaseModel):
+    success: bool
+    restart_required: bool = False
+    error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_configured() -> bool:
+    """Return True when all required API keys are present and non-empty."""
+    return all(os.environ.get(k, "").strip() for k in _REQUIRED_KEYS)
+
+
+def _missing_keys() -> list[str]:
+    return [k for k in _REQUIRED_KEYS if not os.environ.get(k, "").strip()]
+
+
+def _onboarding_complete() -> bool:
+    """Whether first-run onboarding was completed on this instance.
+
+    Persisted in the .env file (same writer as the rest of the setup
+    state, honouring ``CERID_ENV_FILE``) and mirrored into the process
+    environment so it takes effect without a restart.
+    """
+    return os.environ.get("CERID_ONBOARDING_COMPLETE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
+    """Probe a service URL and return a status string."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+            if resp.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
+                return "healthy"
+            return "unhealthy"
+    except (httpx.ConnectError, httpx.TimeoutException, OSError):
+        return "unavailable"
+
+
+async def _service_statuses() -> dict[str, str]:
+    """Check health of all core services and return a name->status map."""
+    neo4j_status = "unknown"
+    try:
+        from app.deps import get_neo4j
+
+        driver = get_neo4j()
+        with driver.session() as session:
+            session.run("RETURN 1").consume()
+        neo4j_status = "healthy"
+    except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
+        neo4j_status = "unavailable"
+
+    redis_status = "unknown"
+    try:
+        from app.deps import get_redis
+
+        get_redis()
+        redis_status = "healthy"
+    except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
+        redis_status = "unavailable"
+
+    chroma_status = await _check_service(
+        "chromadb",
+        os.environ.get("CHROMA_URL", "http://ai-companion-chroma:8000") + "/api/v2/heartbeat",
+    )
+
+    mcp_status = "setup_mode" if not _is_configured() else "healthy"
+
+    return {
+        "neo4j": neo4j_status,
+        "chromadb": chroma_status,
+        "redis": redis_status,
+        "mcp": mcp_status,
+    }
+
+
+def _read_env_file() -> str:
+    """Read the .env file contents, returning empty string if missing."""
+    if _ENV_FILE.exists():
+        return _ENV_FILE.read_text(encoding="utf-8")
+    return ""
+
+
+def _sanitize_archive_path(raw: str) -> str:
+    """Validate and normalise an archive path before writing to .env.
+
+    Raises ``ValueError`` for clearly invalid input:
+    - contains newlines or null bytes (would corrupt the .env file)
+    - empty after stripping whitespace
+
+    Normalisation:
+    - strips whitespace
+    - expands ``~`` to the real home directory
+    - resolves ``..`` so the canonical path is stored
+    """
+    path = raw.strip()
+    if not path:
+        raise ValueError("Archive path must not be empty")
+
+    # Characters that would corrupt a .env file or enable injection
+    if "\n" in path or "\r" in path or "\0" in path:
+        raise ValueError("Archive path contains invalid characters")
+
+    # Expand ~ and resolve to canonical absolute path
+    path = os.path.expanduser(path)
+    path = os.path.realpath(path)
+
+    return path
+
+
+def _update_env_file(updates: dict[str, str]) -> None:
+    """Update or add keys in the .env file, preserving comments and order.
+
+    Only the keys present in *updates* are touched; everything else is kept
+    verbatim (including blank lines and comments).
+    """
+    content = _read_env_file()
+    lines = content.splitlines(keepends=True) if content else []
+
+    remaining = dict(updates)  # keys still to write
+    new_lines: list[str] = []
+
+    for line in lines:
+        matched = False
+        for key in list(remaining):
+            # Match KEY=... at start of line (ignoring leading whitespace)
+            pattern = rf"^(\s*){re.escape(key)}\s*="
+            if re.match(pattern, line):
+                indent = re.match(pattern, line).group(1)  # type: ignore[union-attr]
+                new_lines.append(f"{indent}{key}={remaining.pop(key)}\n")
+                matched = True
+                break
+        if not matched:
+            new_lines.append(line)
+
+    # Append any keys that were not already present
+    if remaining:
+        # Ensure trailing newline before appending
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        for key, value in remaining.items():
+            new_lines.append(f"{key}={value}\n")
+
+    _ENV_FILE.write_text("".join(new_lines), encoding="utf-8")
+    _logger.info("Updated .env file with %d key(s)", len(updates))
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/status", response_model=SetupStatus)
+async def setup_status() -> SetupStatus:
+    """Return the current first-run setup state."""
+    services = await _service_statuses()
+    from config.providers import get_configured_providers
+    providers = get_configured_providers()
+    provider_names = [p["name"] for p in providers if p.get("key_set")]
+    return SetupStatus(
+        configured=_is_configured(),
+        setup_required=not _is_configured(),
+        missing_keys=_missing_keys(),
+        optional_keys=_OPTIONAL_KEYS,
+        services=services,
+        configured_providers=provider_names,
+        onboarding_complete=_onboarding_complete(),
+    )
+
+
+@router.get("/health", response_model=SetupHealthResponse)
+async def setup_health() -> dict:
+    """Detailed health dashboard for all services."""
+    neo4j_url = os.environ.get("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
+    chroma_url = os.environ.get("CHROMA_URL", "http://ai-companion-chroma:8000")
+
+    statuses = await _service_statuses()
+
+    services: list[dict] = [
+        {
+            "name": "neo4j",
+            "status": statuses["neo4j"],
+            "port": 7474,
+            "url": neo4j_url,
+        },
+        {
+            "name": "chromadb",
+            "status": statuses["chromadb"],
+            "port": 8001,
+            "url": chroma_url,
+        },
+        {
+            "name": "redis",
+            "status": statuses["redis"],
+            "port": 6379,
+        },
+        {
+            "name": "mcp",
+            "status": statuses["mcp"],
+            "port": 8888,
+        },
+    ]
+
+    # Required services must all be healthy
+    _OPTIONAL = {"verification_pipeline"}
+    required_healthy = all(
+        s["status"] in ("healthy", "connected")
+        for s in services
+        if s["name"] not in _OPTIONAL
+    )
+
+    return {
+        "services": services,
+        "all_healthy": required_healthy,
+        "docker": {
+            "compose_version": "v2.x.x",
+            "network": "llm-network",
+        },
+    }
+
+
+@router.post("/validate-key", response_model=KeyValidationResponse)
+async def validate_key(req: KeyValidationRequest) -> KeyValidationResponse:
+    """Validate an API key for a specific LLM provider."""
+    try:
+        from config.providers import validate_provider_key
+
+        # Resolve env-configured key when frontend sends "__env__" sentinel
+        api_key = req.api_key
+        if api_key == "__env__":
+            env_map = {
+                "openrouter": "OPENROUTER_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "xai": "XAI_API_KEY",
+                "google": "GOOGLE_API_KEY",  # E1 CR-108
+            }
+            env_var = env_map.get(req.provider.lower(), "")
+            api_key = os.getenv(env_var, "")
+            if not api_key:
+                return KeyValidationResponse(
+                    valid=False, error=f"No {env_var} found in environment"
+                )
+
+        valid, message = await validate_provider_key(req.provider, api_key)
+        return KeyValidationResponse(valid=valid, error=message if not valid else None)
+    except ImportError:
+        _logger.warning("config.providers not available, falling back to basic validation")
+        return await _fallback_validate(req.provider, req.api_key)
+    except (httpx.HTTPError, OSError) as exc:
+        _logger.exception("Key validation failed for provider=%s", req.provider)
+        return KeyValidationResponse(valid=False, error=str(exc))
+
+
+async def _fallback_validate(provider: str, api_key: str) -> KeyValidationResponse:
+    """Basic key validation when config.providers is not available."""
+    provider = provider.lower()
+    url_map: dict[str, str] = {
+        "openrouter": "https://openrouter.ai/api/v1/models",
+        "openai": "https://api.openai.com/v1/models",
+        "anthropic": "https://api.anthropic.com/v1/models",
+        "xai": "https://api.x.ai/v1/models",
+        "google": "https://generativelanguage.googleapis.com/v1beta/models",  # E1 CR-108
+    }
+
+    if provider not in url_map:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
+    url = url_map[provider]
+    headers: dict[str, str] = {}
+    if provider == "anthropic":
+        headers["x-api-key"] = api_key
+        headers["anthropic-version"] = "2023-06-01"
+    elif provider == "google":
+        headers["x-goog-api-key"] = api_key  # E1 CR-108: Gemini auth header
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers)
+
+        if resp.status_code == HTTPStatus.OK:
+            data = resp.json()
+            model_count = len(data.get("data", []))
+            return KeyValidationResponse(valid=True, models_available=model_count)
+
+        return KeyValidationResponse(
+            valid=False,
+            error=f"Provider returned HTTP {resp.status_code}",
+        )
+    except httpx.TimeoutException:
+        return KeyValidationResponse(valid=False, error="Request timed out")
+    except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
+        return KeyValidationResponse(valid=False, error=str(exc))
+
+
+# Display-only sentinels the frontend round-trips when the user never
+# typed a real key (the field shows e.g. "(from .env)" as a masked
+# placeholder). Persisting these would clobber the real env value with
+# the literal placeholder string and brick auth on the next restart.
+_KEY_PLACEHOLDERS = {"(from .env)", "(configured)", "__env__"}
+
+
+def _accept_key(value: str | None) -> bool:
+    if not value:
+        return False
+    return value.strip() not in _KEY_PLACEHOLDERS
+
+
+@router.post("/configure", response_model=ConfigureResponse)
+async def configure(req: ConfigureRequest) -> ConfigureResponse:
+    """Apply configuration by writing API keys to the .env file."""
+
+    # Already-configured guard: the API keys have a placeholder-sentinel
+    # guard, but ARCHIVE_PATH / CERID_LIGHTWEIGHT / WATCH_FOLDER / OLLAMA_*
+    # used to be written unconditionally whenever non-None — a re-run wizard
+    # silently rewrote live env config (beta triage 2026-07-12 P0-B4).
+    # Reconfiguring a configured instance now requires explicit force=true.
+    if _is_configured() and not req.force:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cerid is already configured — pass force=true to "
+                "reconfigure and overwrite the existing settings."
+            ),
+        )
+
+    try:
+        updates: dict[str, str] = {}
+
+        if _accept_key(req.openrouter_api_key):
+            updates["OPENROUTER_API_KEY"] = req.openrouter_api_key  # type: ignore[assignment]
+        if _accept_key(req.openai_api_key):
+            updates["OPENAI_API_KEY"] = req.openai_api_key  # type: ignore[assignment]
+        if _accept_key(req.anthropic_api_key):
+            updates["ANTHROPIC_API_KEY"] = req.anthropic_api_key  # type: ignore[assignment]
+        if _accept_key(req.xai_api_key):
+            updates["XAI_API_KEY"] = req.xai_api_key  # type: ignore[assignment]
+
+        if req.neo4j_password:
+            if req.neo4j_password == "auto":  # pragma: allowlist secret
+                updates["NEO4J_PASSWORD"] = secrets.token_hex(16)  # pragma: allowlist secret
+            else:
+                updates["NEO4J_PASSWORD"] = req.neo4j_password
+
+        # KB / environment fields from the setup wizard
+        if req.archive_path is not None:
+            updates["ARCHIVE_PATH"] = _sanitize_archive_path(req.archive_path)
+        if req.lightweight_mode is not None:
+            updates["CERID_LIGHTWEIGHT"] = "true" if req.lightweight_mode else ""
+        if req.watch_folder is not None:
+            updates["WATCH_FOLDER"] = "true" if req.watch_folder else ""
+        if req.ollama_enabled is not None:
+            updates["OLLAMA_ENABLED"] = "true" if req.ollama_enabled else "false"
+        if req.ollama_model is not None:
+            updates["OLLAMA_DEFAULT_MODEL"] = req.ollama_model
+
+        if not updates:
+            return ConfigureResponse(success=False, error="No configuration provided")
+
+        _update_env_file(updates)
+
+        # Also inject into the current process environment so subsequent
+        # health checks pick up the change without a restart.
+        for key, value in updates.items():
+            os.environ[key] = value
+
+        _logger.info(
+            "First-run configuration applied: %s",
+            ", ".join(updates.keys()),
+        )
+
+        # Re-run pre-warms now that API keys are available
+        import asyncio
+        asyncio.ensure_future(_post_configure_warmup())
+
+        return ConfigureResponse(success=True, restart_required=False)
+
+    except (OSError, ValueError) as exc:
+        _logger.exception("Failed to apply configuration")
+        return ConfigureResponse(success=False, error=str(exc))
+
+
+async def _post_configure_warmup() -> None:
+    """Re-warm connections and models after Apply Configuration."""
+    _logger.info("Post-configure warmup starting...")
+    try:
+        from core.utils.llm_client import _get_client
+        await _get_client()
+        _logger.info("Post-configure: OpenRouter client pre-warmed")
+    except Exception as exc:
+        log_swallowed_error("app.routers.setup.post_configure_openrouter_warmup", exc)
+    try:
+        from core.utils.internal_llm import _get_ollama_client
+        await _get_ollama_client()
+        _logger.info("Post-configure: Ollama client pre-warmed")
+    except Exception as exc:
+        log_swallowed_error("app.routers.setup.post_configure_ollama_warmup", exc)
+    try:
+        from core.retrieval.reranker import warmup as reranker_warmup
+        reranker_warmup()
+        _logger.info("Post-configure: Reranker pre-warmed")
+    except Exception as exc:
+        log_swallowed_error("app.routers.setup.post_configure_reranker_warmup", exc)
+    try:
+        from core.utils.embeddings import get_embedding_function
+        ef = get_embedding_function()
+        if ef:
+            ef(["warmup"])
+            _logger.info("Post-configure: Embedding model pre-warmed")
+    except Exception as exc:
+        log_swallowed_error("app.routers.setup.post_configure_embeddings_warmup", exc)
+
+    # Re-run the verification self-test now that API keys are live. Without
+    # this, a user who completes setup with a valid key still sees the old
+    # startup-time "fail" result (cached up to 1h) in the health panel, and
+    # has no in-product way to know the system is actually healthy.
+    try:
+        from app.agents.hallucination.startup_self_test import run_verification_self_test
+        from app.deps import get_redis
+        result = await run_verification_self_test(get_redis())
+        _logger.info(
+            "Post-configure verification self-test: status=%s method=%s claims=%d",
+            result.get("status"), result.get("extraction_method"), result.get("claims_found"),
+        )
+    except Exception as exc:
+        log_swallowed_error("app.routers.setup.post_configure_self_test", exc)
+    _logger.info("Post-configure warmup complete")
+
+
+class OnboardingCompleteResponse(BaseModel):
+    onboarding_complete: bool
+
+
+@router.post("/onboarding-complete", response_model=OnboardingCompleteResponse)
+async def mark_onboarding_complete() -> dict:
+    """Persist the server-side first-run-onboarding flag.
+
+    Called by the GUI when the setup wizard finishes or the user chooses
+    "Skip setup". Stored in the .env file so it survives restarts and is
+    shared by every browser — localStorage remains a client-side cache only
+    (beta triage 2026-07-12 P0-B4).
+    """
+    try:
+        _update_env_file({"CERID_ONBOARDING_COMPLETE": "true"})
+    except OSError as exc:
+        _logger.exception("Failed to persist onboarding-complete flag")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not persist onboarding flag: {exc}",
+        ) from exc
+    os.environ["CERID_ONBOARDING_COMPLETE"] = "true"
+    return {"onboarding_complete": True}
+
+
+# ---------------------------------------------------------------------------
+# Pool reset — recovers from transient startup failures without a restart
+# ---------------------------------------------------------------------------
+
+
+@router.post("/retest-verification", response_model=dict[str, Any])
+async def retest_verification() -> dict:
+    """Re-run the verification pipeline self-test and overwrite cached status.
+
+    The frontend Health panel exposes this as a "Re-check" button so a user
+    who fixes a bad API key doesn't have to wait for the 1h self-test TTL
+    or restart the container to see verification flip from "offline" to
+    "healthy".
+    """
+    try:
+        from app.agents.hallucination.startup_self_test import run_verification_self_test
+        from app.deps import get_redis
+        result = await run_verification_self_test(get_redis())
+        return {"ok": True, "result": result}
+    except Exception as exc:
+        _logger.exception("retest-verification failed")
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/retest-services", response_model=RetestServicesResponse)
+async def retest_services() -> dict:
+    """Reset the LLM connection pool and circuit breakers, then re-probe all providers.
+
+    The frontend calls this to recover from startup transients (e.g. 401 before
+    DNS/auth stabilised, Bifrost not yet running) without requiring a container
+    restart.
+    """
+    results: dict[str, object] = {}
+
+    # Recycle the OpenRouter httpx singleton pool
+    try:
+        from core.utils.llm_client import recycle_client
+        await recycle_client()
+        results["llm_pool"] = "recycled"
+    except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
+        results["llm_pool"] = f"error: {exc}"
+
+    # Reset LLM + bifrost circuit breakers so they start fresh
+    _CB_NAMES = [
+        "openrouter",
+        "bifrost-rerank", "bifrost-claims", "bifrost-verify",
+        "bifrost-synopsis", "bifrost-memory", "bifrost-compress",
+        "bifrost-decompose",
+    ]
+    try:
+        from core.utils.circuit_breaker import get_breaker
+        for name in _CB_NAMES:
+            get_breaker(name).reset()
+        results["circuit_breakers"] = "reset"
+    except Exception as exc:
+        log_swallowed_error('app.routers.setup', exc)
+        results["circuit_breakers"] = f"error: {exc}"
+
+    # Re-probe OpenRouter auth with the configured key
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if api_key:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as probe_client:
+                resp = await probe_client.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            if resp.status_code == HTTPStatus.OK:
+                results["openrouter_auth"] = "ok"
+            else:
+                results["openrouter_auth"] = f"failed (HTTP {resp.status_code})"
+        except Exception as exc:
+            log_swallowed_error('app.routers.setup', exc)
+            results["openrouter_auth"] = f"error: {exc}"
+    else:
+        results["openrouter_auth"] = "no_key_configured"
+
+    # Re-probe all service statuses
+    results["services"] = await _service_statuses()
+
+    return {"status": "ok", "results": results}
+
+
+# ---------------------------------------------------------------------------
+# System check — environment detection for the setup wizard
+# ---------------------------------------------------------------------------
+
+
+# GGUF quant suffix, case-insensitive: ".Q8_0", "-q4_K_M", "_Q5_0", etc.
+# The possessive `*+` makes the repetition non-backtracking, so this is
+# ReDoS-safe (the underscore-delimited groups can't backtrack ambiguously and
+# the suffix is `$`-anchored). dlint's DUO138 heuristic doesn't recognise
+# possessive quantifiers, so suppress it here — the construct is provably linear.
+_QUANT_SUFFIX_RE = re.compile(r"[._-]q\d+(?:_[a-z0-9]+)*+$", re.IGNORECASE)  # noqa: DUO138
+
+
+def _strip_quant_suffix(name: str) -> str:
+    """Strip a trailing GGUF quant tag so quant variants collapse onto the
+    real model name (``nomic-embed-text-v1.5.Q8_0`` -> ``nomic-embed-text-v1.5``)."""
+    return _QUANT_SUFFIX_RE.sub("", name)
+
+
+def _clean_ollama_models(raw_names: list[str]) -> list[str]:
+    """Reduce a raw ``/api/tags`` name list to real, de-duplicated models.
+
+    Drops ``sha256-...`` blob digests (internal content-addressed layers)
+    and collapses GGUF quant-variant duplicates (``*.Q8_0``, ``*-q4_K_M``)
+    onto their base model name. Order of first appearance is preserved.
+    """
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for name in raw_names:
+        if not name or name.startswith("sha256-"):
+            continue
+        base = _strip_quant_suffix(name)
+        if base in seen:
+            continue
+        seen.add(base)
+        cleaned.append(base)
+    return cleaned
+
+
+def _recommend_backend_from_hw(hw: "object") -> str:
+    """Pick a sensible local-inference backend when start-cerid.sh did not
+    propagate ``HOST_RECOMMENDED_LOCAL_BACKEND`` (e.g. dev-mode container
+    started via ``docker compose up`` directly).
+
+    Truth table (mirrors scripts/detect-gpu.sh):
+      - macOS + AMD/Radeon/Vega in GPU name (Intel Mac + AMD)  → quenchforge
+      - macOS + Apple-Silicon GPU                              → ollama
+      - macOS + any other discrete GPU                         → ollama
+      - Linux/Windows + CUDA/ROCm/Metal acceleration           → ollama
+      - Anything else                                          → cloud
+    """
+    os_lower = (getattr(hw, "os", "") or "").lower()
+    gpu_lower = (getattr(hw, "gpu", "") or "").lower()
+    gpu_type_lower = (getattr(hw, "gpu_type", "") or "").lower()
+    accel_lower = (getattr(hw, "gpu_acceleration", "") or "").lower()
+
+    if gpu_type_lower == "amd-mac":
+        return "quenchforge"
+
+    is_mac = "darwin" in os_lower or "macos" in os_lower or "mac os" in os_lower
+    has_amd_marker = any(token in gpu_lower for token in ("amd", "radeon", "vega"))
+    has_apple_marker = "apple" in gpu_lower
+    if is_mac and has_amd_marker and not has_apple_marker:
+        return "quenchforge"
+
+    if accel_lower in ("cuda", "rocm", "metal"):
+        return "ollama"
+    return "cloud"
+
+
+@router.get("/system-check")
+async def system_check(response: Response) -> dict:
+    """Detect system environment for the setup wizard."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    import shutil
+
+    from utils.host_info import get_host_hardware
+
+    hw = get_host_hardware()
+
+    # Docker — if we're running inside a container, Docker is clearly available
+    docker_running = (
+        shutil.which("docker") is not None
+        or Path("/.dockerenv").exists()
+        or os.getenv("container") is not None
+    )
+
+    # Env keys — check OS environment for known Cerid config keys (works inside Docker
+    # where env_file passes host .env values as env vars)
+    _KNOWN_KEYS = [
+        "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY",
+        "NEO4J_PASSWORD", "REDIS_PASSWORD", "OLLAMA_ENABLED", "CERID_API_KEY",
+        "CERID_MULTI_USER", "CERID_JWT_SECRET", "CERID_TIER", "TAVILY_API_KEY",
+        "SENTRY_DSN_MCP",
+    ]
+    env_keys: list[str] = [k for k in _KNOWN_KEYS if os.getenv(k)]
+    env_exists = len(env_keys) > 0
+
+    # Ollama
+    ollama_detected = False
+    ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+    ollama_models: list[str] = []
+    for _attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{ollama_url}/api/tags")
+                if resp.status_code == HTTPStatus.OK:
+                    data = resp.json()
+                    raw_names = [m.get("name", "") for m in data.get("models", [])]
+                    ollama_models = _clean_ollama_models(raw_names)
+                    ollama_detected = len(ollama_models) > 0
+                break
+        except Exception as exc:
+            log_swallowed_error('app.routers.setup', exc)
+            if _attempt == 0:
+                continue
+            break
+
+    # Archive path
+    archive_path = os.getenv("ARCHIVE_PATH", "/archive")
+    default_archive = archive_path
+
+    # Lightweight recommendation
+    lightweight_recommended = hw.ram_gb < 8
+
+    # Hardware-aware backend recommendation. Populated by start-cerid.sh
+    # sourcing scripts/detect-gpu.sh and persisting HOST_* env vars.
+    # Falls back to a string heuristic when not populated (developer mode
+    # running the container without start-cerid.sh).
+    recommended_local_backend = hw.recommended_local_backend
+    if not recommended_local_backend:
+        recommended_local_backend = _recommend_backend_from_hw(hw)
+
+    return {
+        "ram_gb": hw.ram_gb,
+        "os": hw.os,
+        "cpu": hw.cpu,
+        "cpu_cores": hw.cpu_cores,
+        "gpu": hw.gpu,
+        "gpu_acceleration": hw.gpu_acceleration,
+        "gpu_type": hw.gpu_type,
+        "recommended_local_backend": recommended_local_backend,
+        "docker_running": docker_running,
+        "env_exists": env_exists,
+        "env_keys_present": env_keys,
+        "ollama_detected": ollama_detected,
+        "ollama_url": ollama_url if ollama_detected else None,
+        "ollama_models": ollama_models,
+        "lightweight_recommended": lightweight_recommended,
+        "archive_path_exists": Path(archive_path).exists(),
+        "default_archive_path": default_archive,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Model preload — Workstream E Phase E.6.2
+#
+# When CERID_PRELOAD_MODELS=false (lean Docker image, ~3GB lighter),
+# the reranker and embedder ONNX models download from HuggingFace on
+# the first inference call (5-15s blocking stall, no UX feedback).
+# These endpoints surface the option in the setup wizard so operators
+# can warm the cache explicitly instead of paying the cost on a real
+# user query. The React Settings panel (Phase E.6.3) consumes them.
+# ---------------------------------------------------------------------------
+
+
+_RERANKER_FILES = ("onnx/model.onnx", "tokenizer.json")
+_EMBEDDER_FILES = ("onnx/model.onnx", "tokenizer.json")
+
+
+def _model_cache_status(
+    repo_id: str,
+    filenames: tuple[str, ...],
+    cache_dir: str | None,
+    provider: str = "local",
+) -> dict:
+    """Probe whether a HuggingFace model is cached locally.
+
+    When provider is non-local (quenchforge/cloud), the model is served
+    remotely and there's nothing to cache locally. Returns ``needs_local_cache=False``
+    so the GUI knows to hide the download-banner UI.
+
+    Uses ``try_to_load_from_cache`` which is read-only and never
+    triggers a download. Returns a dict with the per-file cache
+    paths (None when not cached) plus a roll-up ``cached`` boolean.
+    """
+    from huggingface_hub import try_to_load_from_cache
+
+    needs_local_cache = provider == "local"
+    files: dict[str, str | None] = {}
+    if needs_local_cache:
+        for filename in filenames:
+            try:
+                path = try_to_load_from_cache(
+                    repo_id=repo_id, filename=filename, cache_dir=cache_dir,
+                )
+            except Exception as exc:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "app.routers.setup.model_cache_probe",
+                    exc,
+                )
+                path = None
+            files[filename] = str(path) if path else None
+    return {
+        "repo": repo_id,
+        "provider": provider,
+        "needs_local_cache": needs_local_cache,
+        "cached": not needs_local_cache or all(p is not None for p in files.values()),
+        "files": files,
+    }
+
+
+def _is_loading(module_path: str) -> bool:
+    """Probe a model module's ``is_loading()`` helper without raising.
+
+    Workstream E Phase E.6.6 — surfaces in-flight download state to the
+    GUI's first-query notification banner. Returns ``False`` when the
+    helper isn't reachable (import error, attribute missing) — the GUI
+    treats absence as "not loading" and falls back to the cached/not-cached
+    signal alone.
+    """
+    try:
+        if module_path == "reranker":
+            from core.retrieval.reranker import is_loading
+        else:
+            from core.utils.embeddings import is_loading
+        return bool(is_loading())
+    except Exception:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.setup.is_loading_probe",
+            Exception(f"is_loading probe failed for {module_path}"),
+        )
+        return False
+
+
+@router.get("/models/status", response_model=ModelsStatusResponse)
+async def models_status() -> dict:
+    """Report whether the reranker + embedder ONNX models are cached.
+
+    Non-blocking — never triggers a download. The React Settings
+    panel polls this to decide whether to show "Models cached" or
+    "Download models (38MB)" in the Models card. The ``loading``
+    field (Workstream E Phase E.6.6) is true when a worker is
+    currently inside ``_load_model()`` — drives the first-query
+    notification banner so users know a stall is a one-time setup
+    cost rather than a hung query.
+    """
+    import config
+
+    rerank_cache = config.RERANK_MODEL_CACHE_DIR or None
+    embed_cache = config.EMBEDDING_MODEL_CACHE_DIR or None
+    rerank_provider = (os.getenv("RERANK_PROVIDER") or "local").lower()
+    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "local").lower()
+    reranker = _model_cache_status(
+        config.RERANK_CROSS_ENCODER_MODEL, _RERANKER_FILES, rerank_cache,
+        provider=rerank_provider,
+    )
+    embedder = _model_cache_status(
+        config.EMBEDDING_MODEL, _EMBEDDER_FILES, embed_cache,
+        provider=embed_provider,
+    )
+    reranker["loading"] = _is_loading("reranker")
+    embedder["loading"] = _is_loading("embedder")
+    return {"reranker": reranker, "embedder": embedder}
+
+
+@router.post("/models/preload", response_model=dict[str, Any])
+async def models_preload() -> dict:
+    """Eagerly load the reranker + embedder, downloading from HuggingFace
+    if not yet cached.
+
+    Runs the same code paths the lazy first-call would trigger — this
+    endpoint just makes the cost explicit rather than charging it to
+    the next user query. Blocks until both models are loaded; on
+    typical broadband: ~10-15s for ~38MB.
+
+    Returns per-model timing so the GUI can render a meaningful
+    progress / completion message.
+    """
+    import asyncio
+    import time
+
+    started = time.perf_counter()
+    result: dict = {"status": "ok"}
+    rerank_provider = (os.getenv("RERANK_PROVIDER") or "local").lower()
+    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "local").lower()
+
+    # Reranker
+    if rerank_provider != "local":
+        result["reranker_status"] = "remote_provider"
+        result["reranker_provider"] = rerank_provider
+        result["reranker_ms"] = 0.0
+    else:
+        try:
+            from core.retrieval.reranker import _load_model as _load_reranker
+
+            rt0 = time.perf_counter()
+            await asyncio.to_thread(_load_reranker)
+            result["reranker_ms"] = round((time.perf_counter() - rt0) * 1000, 1)
+            result["reranker_status"] = "loaded"
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error("app.routers.setup.preload_reranker", exc)
+            result["reranker_status"] = "failed"
+            result["reranker_error"] = str(exc)
+            result["status"] = "partial"
+
+    # Embedder — only when EMBEDDING_MODEL is a HuggingFace ONNX model
+    # (when it equals the ChromaDB server default the embedding happens
+    # server-side and there's nothing to preload here).
+    if embed_provider != "local":
+        result["embedder_status"] = "remote_provider"
+        result["embedder_provider"] = embed_provider
+        result["embedder_ms"] = 0.0
+    else:
+        try:
+            from core.utils.embeddings import get_embedding_function
+
+            ef = await asyncio.to_thread(get_embedding_function)
+            if ef is None:
+                result["embedder_status"] = "skipped_server_side"
+                result["embedder_ms"] = 0.0
+            else:
+                et0 = time.perf_counter()
+                await asyncio.to_thread(ef._load)
+                result["embedder_ms"] = round((time.perf_counter() - et0) * 1000, 1)
+                result["embedder_status"] = "loaded"
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error("app.routers.setup.preload_embedder", exc)
+            result["embedder_status"] = "failed"
+            result["embedder_error"] = str(exc)
+            result["status"] = "partial"
+
+    result["total_ms"] = round((time.perf_counter() - started) * 1000, 1)
+    return result

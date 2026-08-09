@@ -1,0 +1,27 @@
+pytest
+pytest-asyncio
+httpx
+pytest-cov
+respx
+mypy>=1.10
+types-redis
+import-linter
+pytest-benchmark>=5.2.3,<6
+# Workstream E Phase 2b.5 — generates synthetic PDFs in test fixtures
+# (the runtime PDF parser is pdfplumber, already in requirements.txt;
+# reportlab only writes test files and never ships in production).
+reportlab>=4.5.1,<5
+# Phase 3a — in-process Redis fake for processor queue tests
+fakeredis>=2.36.2,<3
+# ReDoS audit (DUO138). The CI `security` job runs this, but nothing local did,
+# so a catastrophic-backtracking regex could only fail AFTER a push — and it sat
+# invisible behind an earlier failing step in the same job (2026-08-04,
+# ragas_metrics.py:117). Pinned here so `make ci-local` can run the same check.
+dlint>=0.16,<1
+flake8>=7.3,<8
+# Static security scan, also from the CI `security` job. Same reasoning as
+# dlint: `make security-local` cannot run the gate if the tool is only ever
+# pip-installed inside CI. (pip-audit is deliberately NOT here —
+# scripts/audit-python-deps.sh resolves it inside python:3.12-slim so the
+# result does not depend on the local environment.)
+bandit>=1.9.4,<2

@@ -1,0 +1,419 @@
+{
+  "version": "1.0.0",
+  "description": "Synthetic test fixtures for KB injection testing — RAG retrieval accuracy, numerical claim extraction, domain-specific retrieval, and hallucination detection.",
+  "created": "2026-04-01",
+  "files": {
+    "quantum_computing_overview.md": {
+      "domain": "science/quantum-computing",
+      "word_count_approx": 550,
+      "purpose": "Test RAG retrieval accuracy and hallucination verification for scientific/technical content",
+      "key_facts": [
+        {
+          "id": "qc-1",
+          "claim": "A qubit state is described as alpha|0> + beta|1> where |alpha|^2 + |beta|^2 = 1",
+          "category": "definition"
+        },
+        {
+          "id": "qc-2",
+          "claim": "Hadamard gate creates equal superposition: H|0> = (|0> + |1>)/sqrt(2)",
+          "category": "gate-operation"
+        },
+        {
+          "id": "qc-3",
+          "claim": "Shor's algorithm factors large integers in polynomial time O((log N)^2 * (log log N) * (log log log N))",
+          "category": "algorithm"
+        },
+        {
+          "id": "qc-4",
+          "claim": "Shor's algorithm was developed by Peter Shor in 1994",
+          "category": "algorithm"
+        },
+        {
+          "id": "qc-5",
+          "claim": "Grover's algorithm finds a target in O(sqrt(N)) evaluations, published by Lov Grover in 1996",
+          "category": "algorithm"
+        },
+        {
+          "id": "qc-6",
+          "claim": "BQP is the class of decision problems solvable by a quantum computer in polynomial time with error probability at most 1/3",
+          "category": "complexity-class"
+        },
+        {
+          "id": "qc-7",
+          "claim": "QMA is the quantum analogue of NP",
+          "category": "complexity-class"
+        },
+        {
+          "id": "qc-8",
+          "claim": "CNOT gate combined with single-qubit rotations forms a universal gate set",
+          "category": "gate-operation"
+        },
+        {
+          "id": "qc-9",
+          "claim": "Bell state: |Phi+> = (|00> + |11>)/sqrt(2)",
+          "category": "entanglement"
+        }
+      ],
+      "incorrect_claims": []
+    },
+
+    "financial_report_q3_2025.md": {
+      "domain": "finance/earnings",
+      "word_count_approx": 400,
+      "purpose": "Test numerical claim extraction and verification for financial data",
+      "key_facts": [
+        {
+          "id": "fin-1",
+          "claim": "Meridian Technologies Q3 2025 total revenue was $847.3M",
+          "category": "revenue",
+          "value": 847.3,
+          "unit": "million_usd"
+        },
+        {
+          "id": "fin-2",
+          "claim": "Revenue increased 12.4% year-over-year",
+          "category": "growth",
+          "value": 12.4,
+          "unit": "percent"
+        },
+        {
+          "id": "fin-3",
+          "claim": "Net income was $127.6M",
+          "category": "income",
+          "value": 127.6,
+          "unit": "million_usd"
+        },
+        {
+          "id": "fin-4",
+          "claim": "Total employees: 4,200",
+          "category": "headcount",
+          "value": 4200,
+          "unit": "people"
+        },
+        {
+          "id": "fin-5",
+          "claim": "Headquartered in Austin, Texas",
+          "category": "location"
+        },
+        {
+          "id": "fin-6",
+          "claim": "Diluted EPS was $2.84",
+          "category": "earnings",
+          "value": 2.84,
+          "unit": "usd"
+        },
+        {
+          "id": "fin-7",
+          "claim": "Cloud Platform Services revenue was $512.8M (60.5% of total)",
+          "category": "segment",
+          "value": 512.8,
+          "unit": "million_usd"
+        },
+        {
+          "id": "fin-8",
+          "claim": "Annual Recurring Revenue was $3.24B",
+          "category": "arr",
+          "value": 3240,
+          "unit": "million_usd"
+        },
+        {
+          "id": "fin-9",
+          "claim": "Net Revenue Retention Rate was 118%",
+          "category": "retention",
+          "value": 118,
+          "unit": "percent"
+        },
+        {
+          "id": "fin-10",
+          "claim": "Free Cash Flow was $198.2M",
+          "category": "cash-flow",
+          "value": 198.2,
+          "unit": "million_usd"
+        }
+      ],
+      "incorrect_claims": []
+    },
+
+    "api_documentation.md": {
+      "domain": "technology/api-documentation",
+      "word_count_approx": 600,
+      "purpose": "Test code/technical domain retrieval for API documentation",
+      "key_facts": [
+        {
+          "id": "api-1",
+          "claim": "API base URL is https://api.datastream.io/api/v2/",
+          "category": "endpoint"
+        },
+        {
+          "id": "api-2",
+          "claim": "GET /api/v2/streams lists all streams",
+          "category": "endpoint"
+        },
+        {
+          "id": "api-3",
+          "claim": "POST /api/v2/ingest publishes events to a stream, max 1000 events per request",
+          "category": "endpoint",
+          "value": 1000,
+          "unit": "events"
+        },
+        {
+          "id": "api-4",
+          "claim": "POST /api/v2/query executes analytical queries using DSQL",
+          "category": "endpoint"
+        },
+        {
+          "id": "api-5",
+          "claim": "Professional tier rate limit is 1,000 requests per minute",
+          "category": "rate-limit",
+          "value": 1000,
+          "unit": "req_per_min"
+        },
+        {
+          "id": "api-6",
+          "claim": "Authentication requires both Bearer token and API key (X-API-Key header)",
+          "category": "authentication"
+        },
+        {
+          "id": "api-7",
+          "claim": "Bearer tokens expire after 3600 seconds (1 hour)",
+          "category": "authentication",
+          "value": 3600,
+          "unit": "seconds"
+        },
+        {
+          "id": "api-8",
+          "claim": "Maximum ingest request body size is 5 MB",
+          "category": "limit",
+          "value": 5,
+          "unit": "megabytes"
+        },
+        {
+          "id": "api-9",
+          "claim": "Supported output formats: json, csv, parquet, arrow",
+          "category": "format"
+        },
+        {
+          "id": "api-10",
+          "claim": "Version v1.x is deprecated and will be sunset on March 1, 2026",
+          "category": "versioning"
+        },
+        {
+          "id": "api-11",
+          "claim": "Each organization can have up to 25 active API keys",
+          "category": "limit",
+          "value": 25,
+          "unit": "keys"
+        },
+        {
+          "id": "api-12",
+          "claim": "Webhook payloads are signed with HMAC-SHA256",
+          "category": "security"
+        }
+      ],
+      "incorrect_claims": []
+    },
+
+    "medical_research_summary.md": {
+      "domain": "medical/clinical-research",
+      "word_count_approx": 450,
+      "purpose": "Test domain-specific retrieval and numerical verification for clinical/medical content",
+      "key_facts": [
+        {
+          "id": "med-1",
+          "claim": "CLARITY-7 was a Phase III clinical trial",
+          "category": "trial-design"
+        },
+        {
+          "id": "med-2",
+          "claim": "The drug studied is Nexoril (compound NXR-4821)",
+          "category": "drug"
+        },
+        {
+          "id": "med-3",
+          "claim": "Total enrollment was 1,247 participants randomized 1:1",
+          "category": "enrollment",
+          "value": 1247,
+          "unit": "participants"
+        },
+        {
+          "id": "med-4",
+          "claim": "Responder rate: 62% Nexoril vs 34% placebo",
+          "category": "primary-endpoint",
+          "values": { "treatment": 62, "placebo": 34 },
+          "unit": "percent"
+        },
+        {
+          "id": "med-5",
+          "claim": "Statistical significance: p < 0.001",
+          "category": "statistics"
+        },
+        {
+          "id": "med-6",
+          "claim": "Trial completed March 2025",
+          "category": "timeline"
+        },
+        {
+          "id": "med-7",
+          "claim": "Conducted across 43 clinical sites in US, UK, Germany, and Australia",
+          "category": "trial-design",
+          "value": 43,
+          "unit": "sites"
+        },
+        {
+          "id": "med-8",
+          "claim": "Treatment duration was 24 weeks with 12-week follow-up",
+          "category": "trial-design"
+        },
+        {
+          "id": "med-9",
+          "claim": "Nexoril is a selective modulator of the JAK1/TYK2 signaling pathway",
+          "category": "mechanism"
+        },
+        {
+          "id": "med-10",
+          "claim": "NDA submitted to FDA August 2025, PDUFA date April 2026",
+          "category": "regulatory"
+        },
+        {
+          "id": "med-11",
+          "claim": "Number needed to treat (NNT) was 3.6",
+          "category": "statistics",
+          "value": 3.6,
+          "unit": "nnt"
+        }
+      ],
+      "incorrect_claims": []
+    },
+
+    "project_management_notes.md": {
+      "domain": "project-management/internal",
+      "word_count_approx": 350,
+      "purpose": "Test personal/project domain retrieval for internal organizational content",
+      "key_facts": [
+        {
+          "id": "pm-1",
+          "claim": "Sprint 14 ends April 15, 2026",
+          "category": "timeline"
+        },
+        {
+          "id": "pm-2",
+          "claim": "Backend migration is 78% complete",
+          "category": "progress",
+          "value": 78,
+          "unit": "percent"
+        },
+        {
+          "id": "pm-3",
+          "claim": "Sarah Kim leads frontend (4 engineers)",
+          "category": "team"
+        },
+        {
+          "id": "pm-4",
+          "claim": "Marcus Johnson leads infrastructure (3 engineers)",
+          "category": "team"
+        },
+        {
+          "id": "pm-5",
+          "claim": "Raj Patel leads backend/API (5 engineers)",
+          "category": "team"
+        },
+        {
+          "id": "pm-6",
+          "claim": "Frontend migration is 64% complete",
+          "category": "progress",
+          "value": 64,
+          "unit": "percent"
+        },
+        {
+          "id": "pm-7",
+          "claim": "Infrastructure is 51% complete",
+          "category": "progress",
+          "value": 51,
+          "unit": "percent"
+        },
+        {
+          "id": "pm-8",
+          "claim": "Target production launch is June 3, 2026",
+          "category": "timeline"
+        },
+        {
+          "id": "pm-9",
+          "claim": "ShipCalc v1 API sunsets May 1, 2026",
+          "category": "risk"
+        },
+        {
+          "id": "pm-10",
+          "claim": "PCI compliance review scheduled for April 10",
+          "category": "blocker"
+        }
+      ],
+      "incorrect_claims": []
+    },
+
+    "mixed_claims_document.md": {
+      "domain": "general/mixed-reference",
+      "word_count_approx": 500,
+      "purpose": "Test hallucination detection — document contains 10 specific claims, 7 correct and 3 intentionally wrong",
+      "key_facts": [
+        {
+          "id": "mix-1",
+          "claim": "Python was created by Guido van Rossum and first released in 1991",
+          "status": "correct"
+        },
+        {
+          "id": "mix-2",
+          "claim": "JavaScript was created by Brendan Eich in 1995 at Netscape",
+          "status": "correct"
+        },
+        {
+          "id": "mix-3",
+          "claim": "HTTP/2 was standardized in 2012 as RFC 7540",
+          "status": "incorrect",
+          "actual_fact": "HTTP/2 was standardized in May 2015 (RFC 7540). The year 2012 is wrong.",
+          "error_type": "wrong_date"
+        },
+        {
+          "id": "mix-4",
+          "claim": "TCP/IP was formally adopted by ARPANET on January 1, 1983",
+          "status": "correct"
+        },
+        {
+          "id": "mix-5",
+          "claim": "TLS 1.3 was published in August 2018 as RFC 8446",
+          "status": "correct"
+        },
+        {
+          "id": "mix-6",
+          "claim": "Hubble Space Telescope was launched on April 24, 1990 aboard Discovery",
+          "status": "correct"
+        },
+        {
+          "id": "mix-7",
+          "claim": "JWST primary mirror is 8.2 meters in diameter",
+          "status": "incorrect",
+          "actual_fact": "JWST's primary mirror is 6.5 meters in diameter, not 8.2 meters.",
+          "error_type": "wrong_number"
+        },
+        {
+          "id": "mix-8",
+          "claim": "Alan Turing published 'On Computable Numbers' in 1936",
+          "status": "correct"
+        },
+        {
+          "id": "mix-9",
+          "claim": "FFT was published by Cooley and Tukey in 1965",
+          "status": "correct"
+        },
+        {
+          "id": "mix-10",
+          "claim": "Human Genome Project was declared complete in June 2000",
+          "status": "incorrect",
+          "actual_fact": "A draft sequence was announced in June 2000, but the project was declared complete in April 2003.",
+          "error_type": "conflated_event"
+        }
+      ],
+      "incorrect_claims": ["mix-3", "mix-7", "mix-10"],
+      "correct_claims": ["mix-1", "mix-2", "mix-4", "mix-5", "mix-6", "mix-8", "mix-9"]
+    }
+  }
+}

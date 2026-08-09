@@ -1,0 +1,19 @@
+{
+  "description": "Chat-path faithfulness items (Phase 0.3). Each item retrieves live contexts via /query, assembles an FE-parity RAG prompt, calls /chat/stream, and scores the streamed answer's faithfulness to the provided contexts. 'kind' = grounded (answer IS in the corpus) or thin (deliberately NOT in the corpus — faithful behaviour is to decline rather than fabricate). 'grounded' items reuse a subset of the 0.1 golden queries. Seeds the SAME eval-fixture corpus as the retrieval harness.",
+  "items": [
+    {"id": "cf01", "query": "What refill rate does the Zephyr rate limiter use?", "search_domains": ["coding"], "kind": "grounded"},
+    {"id": "cf02", "query": "What is the total budget for Project Orion?", "search_domains": ["projects"], "kind": "grounded"},
+    {"id": "cf03", "query": "What water temperature does the pour-over coffee recipe use?", "search_domains": ["notes"], "kind": "grounded"},
+    {"id": "cf04", "query": "Which index did we choose for the events jsonb column?", "search_domains": ["coding"], "kind": "grounded"},
+    {"id": "cf05", "query": "When did Project Vega reach general availability?", "search_domains": ["projects"], "kind": "grounded"},
+    {"id": "cf06", "query": "What data store backs the Nimbus accounting service?", "search_domains": ["projects"], "kind": "grounded"},
+    {"id": "cf07", "query": "Which power adapter type do I need for Iceland?", "search_domains": ["notes"], "kind": "grounded"},
+    {"id": "cf08", "query": "What is the retry backoff base delay for the Zephyr client?", "search_domains": ["coding"], "kind": "grounded"},
+
+    {"id": "cf_thin01", "query": "According to my notes, what is the boiling point of liquid nitrogen?", "search_domains": ["notes"], "kind": "thin"},
+    {"id": "cf_thin02", "query": "What is the configured gRPC max message size for the Helios service?", "search_domains": ["coding"], "kind": "thin"},
+    {"id": "cf_thin03", "query": "What is the 2027 headcount plan for Project Kepler?", "search_domains": ["projects"], "kind": "thin"},
+    {"id": "cf_thin04", "query": "What time is my dentist appointment next week?", "search_domains": ["notes"], "kind": "thin"},
+    {"id": "cf_thin05", "query": "Which cloud region hosts the primary Postgres replica for the ledger?", "search_domains": ["projects"], "kind": "thin"}
+  ]
+}

@@ -1,0 +1,212 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: FSL-1.1-ALv2
+
+"""Settings router PATCH/GET coverage for C3.2 sparse + fusion fields."""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.routers.settings import router
+
+_LEAKABLE_ENV_VARS = (
+    "RETRIEVAL_SPARSE_ENABLED",
+    "EMBEDDINGS_PROVIDER",
+    "RERANK_PROVIDER",
+    "QUENCHFORGE_EMBED_MODEL",
+    "QUENCHFORGE_RERANK_MODEL",
+    "RETRIEVAL_HYPE_ENABLED",
+    "PARENT_CHILD_ENABLED",
+)
+
+
+@pytest.fixture
+def client(monkeypatch):
+    """Build a TestClient with isolated env + config state.
+
+    The settings PATCH handler mutates `os.environ` directly so changes
+    take effect in-process without a worker restart. Pytest's
+    monkeypatch only undoes mutations made via `monkeypatch.setenv` /
+    `delenv`, not direct os.environ writes, so a PATCH test that
+    leaves the process with `EMBEDDINGS_PROVIDER=quenchforge` will
+    poison every downstream test that branches on that env (notably
+    test_embeddings.py's mocked ONNX session and test_sidecar_routing's
+    cross-encoder local-fallback expectations).
+
+    Snapshot the affected env vars at fixture setup and restore at
+    teardown so the file is well-behaved when interleaved with the
+    rest of the suite.
+    """
+    import config
+
+    monkeypatch.setattr(config, "SYNC_DIR", "")
+    monkeypatch.setattr(config, "HYBRID_FUSION_MODE", "weighted_sum", raising=False)
+    monkeypatch.setattr(config, "HYBRID_RRF_SPARSE_WEIGHT", 1.0, raising=False)
+    saved = {k: os.environ.get(k) for k in _LEAKABLE_ENV_VARS}
+    for k in _LEAKABLE_ENV_VARS:
+        os.environ.pop(k, None)
+
+    app = FastAPI()
+    app.include_router(router)
+    yield TestClient(app)
+
+    # Restore any pre-existing values the PATCH handler may have
+    # clobbered. None ↔ unset round-trip preserves both states.
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+def test_get_settings_includes_sparse_fields(client):
+    r = client.get("/settings")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enable_sparse_retrieval"] is False
+    assert body["hybrid_fusion_mode"] == "weighted_sum"
+    assert body["hybrid_rrf_sparse_weight"] == 1.0
+
+
+def test_patch_enables_sparse_retrieval(client):
+    r = client.patch("/settings", json={"enable_sparse_retrieval": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated"] == {"enable_sparse_retrieval": True}
+    assert os.environ.get("RETRIEVAL_SPARSE_ENABLED", "").lower() in {"true", "1"}
+
+
+def test_patch_accepts_tri_rrf_mode(client):
+    r = client.patch("/settings", json={"hybrid_fusion_mode": "tri_rrf"})
+    assert r.status_code == 200
+    import config
+    assert config.HYBRID_FUSION_MODE == "tri_rrf"
+
+
+def test_patch_rejects_invalid_fusion_mode(client):
+    r = client.patch("/settings", json={"hybrid_fusion_mode": "magic_sum"})
+    assert r.status_code == 400
+
+
+def test_patch_accepts_sparse_weight(client):
+    r = client.patch("/settings", json={"hybrid_rrf_sparse_weight": 2.5})
+    assert r.status_code == 200
+    import config
+    assert config.HYBRID_RRF_SPARSE_WEIGHT == 2.5
+
+
+def test_patch_rejects_out_of_range_weight(client):
+    r = client.patch("/settings", json={"hybrid_rrf_sparse_weight": 100.0})
+    # Pydantic rejects out-of-range field; FastAPI surfaces it as 422.
+    assert r.status_code == 422
+
+
+def test_patch_combo_enable_and_mode(client):
+    r = client.patch("/settings", json={
+        "enable_sparse_retrieval": True,
+        "hybrid_fusion_mode": "tri_rrf",
+        "hybrid_rrf_sparse_weight": 1.5,
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body["updated"].keys()) == {
+        "enable_sparse_retrieval",
+        "hybrid_fusion_mode",
+        "hybrid_rrf_sparse_weight",
+    }
+
+
+# ---------------------------------------------------------------------------
+# v0.93.8 — per-workload GPU routing fields
+# ---------------------------------------------------------------------------
+
+def test_patch_embeddings_provider_quenchforge(client, monkeypatch):
+    import os
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    r = client.patch("/settings", json={"embeddings_provider": "quenchforge"})
+    assert r.status_code == 200
+    assert r.json()["updated"]["embeddings_provider"] == "quenchforge"
+    assert os.environ["EMBEDDINGS_PROVIDER"] == "quenchforge"
+
+
+def test_patch_rerank_provider_quenchforge(client, monkeypatch):
+    import os
+    monkeypatch.delenv("RERANK_PROVIDER", raising=False)
+    r = client.patch("/settings", json={"rerank_provider": "quenchforge"})
+    assert r.status_code == 200
+    assert os.environ["RERANK_PROVIDER"] == "quenchforge"
+
+
+def test_patch_rejects_invalid_provider(client):
+    r = client.patch("/settings", json={"embeddings_provider": "fake_gpu"})
+    assert r.status_code == 400
+
+
+def test_patch_quenchforge_models(client, monkeypatch):
+    import os
+    monkeypatch.delenv("QUENCHFORGE_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("QUENCHFORGE_RERANK_MODEL", raising=False)
+    r = client.patch("/settings", json={
+        "quenchforge_embed_model": "nomic-embed-text-v1.5",
+        "quenchforge_rerank_model": "bge-reranker-v2-m3",
+    })
+    assert r.status_code == 200
+    assert os.environ["QUENCHFORGE_EMBED_MODEL"] == "nomic-embed-text-v1.5"
+    assert os.environ["QUENCHFORGE_RERANK_MODEL"] == "bge-reranker-v2-m3"
+
+
+def test_get_surfaces_gpu_routing_fields(client):
+    r = client.get("/settings")
+    body = r.json()
+    assert "embeddings_provider" in body
+    assert "rerank_provider" in body
+    assert "quenchforge_embed_model" in body
+    assert "quenchforge_rerank_model" in body
+
+
+def test_patch_all_three_gpu_flags_together(client, monkeypatch):
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    monkeypatch.delenv("RERANK_PROVIDER", raising=False)
+    monkeypatch.delenv("QUENCHFORGE_EMBED_MODEL", raising=False)
+    r = client.patch("/settings", json={
+        "embeddings_provider": "quenchforge",
+        "rerank_provider": "quenchforge",
+        "quenchforge_embed_model": "nomic-embed-text-v1.5",
+    })
+    assert r.status_code == 200
+    assert set(r.json()["updated"]) >= {
+        "embeddings_provider", "rerank_provider", "quenchforge_embed_model",
+    }
+
+
+# ---------------------------------------------------------------------------
+# ST3 — recommendation "Enable" payloads: enable_hype + parent_child.
+# The recommender (core/config/recommendations.py) emits these keys; the
+# PATCH handler must accept them so clicking "Enable" doesn't 400.
+# ---------------------------------------------------------------------------
+
+def test_patch_enable_hype(client):
+    r = client.patch("/settings", json={"enable_hype": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated"]["enable_hype"] is True
+    assert os.environ.get("RETRIEVAL_HYPE_ENABLED", "").lower() in {"true", "1"}
+
+
+def test_patch_disable_hype(client):
+    r = client.patch("/settings", json={"enable_hype": False})
+    assert r.status_code == 200
+    assert r.json()["updated"]["enable_hype"] is False
+    assert os.environ.get("RETRIEVAL_HYPE_ENABLED", "").lower() == "false"
+
+
+def test_patch_enable_parent_child_retrieval(client):
+    r = client.patch("/settings", json={"enable_parent_child_retrieval": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated"]["enable_parent_child_retrieval"] is True
+    assert os.environ.get("PARENT_CHILD_ENABLED", "").lower() in {"true", "1"}

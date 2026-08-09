@@ -1,0 +1,363 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation [ref=e3]:
+      - link "Cerid CERID" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img "Cerid" [ref=e5]
+        - generic [ref=e7]: CERID
+      - button "Toggle menu" [ref=e8]:
+        - img [ref=e9]
+  - main [ref=e10]:
+    - paragraph [ref=e13]: Your knowledge is scattered across hundreds of files. Cloud AI won't read them privately. And it never shows you where the answer came from.
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - generic [ref=e18]:
+            - img [ref=e19]
+            - text: Open source · Self-hosted · Privacy-first
+          - heading "Your Private AI Knowledge Companion" [level=1] [ref=e22]:
+            - text: Your Private AI
+            - text: Knowledge Companion
+          - paragraph [ref=e23]: Ask questions about your documents. See exactly where every answer comes from. Nothing ever leaves your machine.
+          - generic [ref=e24]:
+            - link "Get Started Free" [ref=e25] [cursor=pointer]:
+              - /url: https://github.com/Cerid-AI/cerid-ai
+              - text: Get Started Free
+              - img [ref=e26]
+            - link "Explore Features" [ref=e28] [cursor=pointer]:
+              - /url: /features
+          - generic [ref=e29]:
+            - generic [ref=e30]: Core — Free
+            - generic [ref=e31]: Pro
+            - generic [ref=e32]: Vault — Enterprise
+        - img "Cerid — gold shield with glowing teal C" [ref=e35]
+      - generic [ref=e38]:
+        - generic [ref=e39]:
+          - paragraph [ref=e40]: 100%
+          - paragraph [ref=e41]: Private
+        - generic [ref=e42]:
+          - paragraph [ref=e43]: 30+
+          - paragraph [ref=e44]: File Types
+        - generic [ref=e45]:
+          - paragraph [ref=e46]: 1-cmd
+          - paragraph [ref=e47]: Setup
+        - generic [ref=e48]:
+          - paragraph [ref=e49]: Apache-2.0
+          - paragraph [ref=e50]: Open Source
+    - generic [ref=e52]:
+      - generic [ref=e53]:
+        - heading "How it works" [level=2] [ref=e55]
+        - paragraph [ref=e56]: One command to start. Ask a question. Get a verified answer.
+      - generic [ref=e57]:
+        - generic [ref=e58]:
+          - generic [ref=e59]:
+            - generic [ref=e60]: "1"
+            - img [ref=e61]
+          - heading "Import your files" [level=3] [ref=e63]
+          - paragraph [ref=e64]: Drop a folder or upload files. Cerid parses PDFs, docs, code, emails, and archives automatically.
+        - generic [ref=e65]:
+          - generic [ref=e66]:
+            - generic [ref=e67]: "2"
+            - img [ref=e68]
+          - heading "Ask anything" [level=3] [ref=e71]
+          - paragraph [ref=e72]: Natural language queries search all your knowledge. Adaptive retrieval matches the right strategy.
+        - generic [ref=e73]:
+          - generic [ref=e74]:
+            - generic [ref=e75]: "3"
+            - img [ref=e76]
+          - heading "See which documents answered your question" [level=3] [ref=e79]
+          - paragraph [ref=e80]: Inline verification badges on every claim. Click any footnote to see the source and reasoning.
+        - generic [ref=e81]:
+          - generic [ref=e82]:
+            - generic [ref=e83]: "4"
+            - img [ref=e84]
+          - heading "Gets smarter over time" [level=3] [ref=e92]
+          - paragraph [ref=e93]: Facts, decisions, and preferences are remembered. Each conversation makes the system smarter.
+    - generic [ref=e95]:
+      - generic [ref=e96]:
+        - heading "Connect every source of knowledge" [level=2] [ref=e98]
+        - paragraph [ref=e99]: 22 source connectors out of the box. Webhook receiver, browser extension, voice notes, and first-class Apple Mail + Reminders. Everything streams into the same verified pipeline.
+      - generic [ref=e100]:
+        - generic [ref=e101]:
+          - img [ref=e102]
+          - generic [ref=e106]: RSS & Atom
+        - generic [ref=e107]:
+          - img [ref=e108]
+          - generic [ref=e111]: URL watch
+        - generic [ref=e112]:
+          - img [ref=e113]
+          - generic [ref=e115]: Bookmarks
+        - generic [ref=e116]:
+          - img [ref=e117]
+          - generic [ref=e119]: Browser extension
+        - generic [ref=e120]:
+          - img [ref=e121]
+          - generic [ref=e124]: Voice notes
+        - generic [ref=e125]:
+          - img [ref=e126]
+          - generic [ref=e128]: Clipboard
+        - generic [ref=e129]:
+          - img [ref=e130]
+          - generic [ref=e133]: Apple Mail
+        - generic [ref=e134]:
+          - img [ref=e135]
+          - generic [ref=e138]: Reminders
+        - generic [ref=e139]:
+          - img [ref=e140]
+          - generic [ref=e142]: Slack / Discord
+        - generic [ref=e143]:
+          - img [ref=e144]
+          - generic [ref=e148]: GitHub / Linear
+        - generic [ref=e149]:
+          - img [ref=e150]
+          - generic [ref=e153]: Sentry / Stripe
+        - generic [ref=e154]:
+          - img [ref=e155]
+          - generic [ref=e157]: Readwise / Pocket
+        - generic [ref=e158]:
+          - img [ref=e159]
+          - generic [ref=e162]: Gmail / Outlook
+        - generic [ref=e163]:
+          - img [ref=e164]
+          - generic [ref=e168]: Custom webhook
+        - generic [ref=e169]:
+          - img [ref=e170]
+          - generic [ref=e173]: + extensible
+      - generic [ref=e174]:
+        - generic [ref=e175]:
+          - img [ref=e177]
+          - heading "Webhooks with HMAC" [level=3] [ref=e181]
+          - paragraph [ref=e182]: Stream into Cerid from any service that fires a webhook. Constant-time signature compare, per-source tokens, rotation built in.
+        - generic [ref=e183]:
+          - img [ref=e185]
+          - heading "Browser extension" [level=3] [ref=e187]
+          - paragraph [ref=e188]: Save the page you're reading — and the passage you highlighted — to your private KB in one click. Chrome + Firefox.
+        - generic [ref=e189]:
+          - img [ref=e191]
+          - heading "Voice notes" [level=3] [ref=e194]
+          - paragraph [ref=e195]: Record a quick thought, drop it in, and it transcribes + indexes alongside everything else. ⌘⇧V opens the overlay.
+      - link "See every connector and how it auths" [ref=e197] [cursor=pointer]:
+        - /url: /features#sources
+        - text: See every connector and how it auths
+        - img [ref=e198]
+    - generic [ref=e201]:
+      - generic [ref=e202]:
+        - heading "Built for you" [level=2] [ref=e204]
+        - paragraph [ref=e205]: Whatever your field, Cerid adapts to how you work.
+      - generic [ref=e206]:
+        - generic [ref=e207]:
+          - img [ref=e209]
+          - heading "For people who need to cite sources" [level=3] [ref=e214]
+          - paragraph [ref=e215]: See which documents back up every answer — with page-level citations you can verify in seconds.
+          - list [ref=e216]:
+            - listitem [ref=e217]:
+              - img [ref=e218]
+              - text: Researchers, journalists, and lawyers who can't afford unsourced claims
+            - listitem [ref=e221]:
+              - img [ref=e222]
+              - text: Inline footnotes link every statement to the original passage
+            - listitem [ref=e225]:
+              - img [ref=e226]
+              - text: Cross-reference findings across thousands of files instantly
+        - generic [ref=e229]:
+          - img [ref=e231]
+          - heading "For teams that can't risk data leaving" [level=3] [ref=e236]
+          - paragraph [ref=e237]: Healthcare, legal, and finance teams get AI answers without uploading a single file to the cloud.
+          - list [ref=e238]:
+            - listitem [ref=e239]:
+              - img [ref=e240]
+              - text: Everything runs on your machine — documents never leave your network
+            - listitem [ref=e243]:
+              - img [ref=e244]
+              - text: No telemetry by default, no cloud dependency
+            - listitem [ref=e247]:
+              - img [ref=e248]
+              - text: Fernet-encrypted credentials and full audit logging
+        - generic [ref=e251]:
+          - img [ref=e253]
+          - heading "For builders who want full control" [level=3] [ref=e255]
+          - paragraph [ref=e256]: Self-host with Docker. 60 MCP tools + any external MCP server. 12 specialist agents + a custom-agents builder. 22 source connectors. Bring your own model or run Ollama free.
+          - list [ref=e257]:
+            - listitem [ref=e258]:
+              - img [ref=e259]
+              - text: Full REST API with versioned /sdk/v1/ surface + Python SDK
+            - listitem [ref=e262]:
+              - img [ref=e263]
+              - text: Governed external MCP client — allowlist + per-call audit + kill switch
+            - listitem [ref=e266]:
+              - img [ref=e267]
+              - text: Apache-2.0 licensed — fork it, extend it, ship it
+    - generic [ref=e271]:
+      - generic [ref=e272]:
+        - heading "Everything you need" [level=2] [ref=e274]
+        - paragraph [ref=e275]: Tap any card to learn more. Powerful enough for regulated-deployment intelligence. Simple enough to clone, run, and use.
+      - generic [ref=e276]:
+        - generic [ref=e280] [cursor=pointer]:
+          - generic [ref=e281]:
+            - generic [ref=e282]:
+              - img [ref=e284]
+              - generic [ref=e287]: Know where answers come from
+            - img [ref=e288]
+          - paragraph [ref=e290]: Every answer includes inline citations so you can see exactly which document — and which passage — backs up each claim.
+          - generic:
+            - generic:
+              - paragraph [ref=e291]: Streaming claim verification with inline source attribution. 4-type claim detection (factual, recency, evasion, citation). Click any footnote to see source, confidence, and reasoning. Expert mode uses frontier models for re-verification.
+              - link "See verification flow→" [ref=e292]:
+                - /url: /features#verification
+        - generic [ref=e296] [cursor=pointer]:
+          - generic [ref=e297]:
+            - generic [ref=e298]:
+              - img [ref=e300]
+              - generic [ref=e304]: Finds the right part of your documents
+            - img [ref=e305]
+          - paragraph [ref=e307]: Ask a question and Cerid pinpoints the most relevant sections across all your files — even when the answer spans multiple documents.
+          - generic:
+            - generic:
+              - paragraph [ref=e308]: Three RAG modes (Manual, Smart, Custom Smart) with per-chunk retrieval profiles. Hybrid BM25 + vector search. Cross-encoder reranking. Adaptive pipeline adjusts search depth based on question complexity.
+              - link "See pipeline details→" [ref=e309]:
+                - /url: /features#retrieval
+        - generic [ref=e313] [cursor=pointer]:
+          - generic [ref=e314]:
+            - generic [ref=e315]:
+              - img [ref=e317]
+              - generic [ref=e320]: Works with the AI you choose
+            - img [ref=e321]
+          - paragraph [ref=e323]: Use Claude, GPT, Gemini, Llama, or run a completely free local model with Ollama. Switch anytime — no lock-in.
+          - generic:
+            - generic:
+              - paragraph [ref=e324]: Smart capability-based routing across OpenRouter providers. Guided Ollama install wizard. 6 of 8 pipeline tasks run locally at $0. Proactive model switching on ignorance detection.
+              - link "See model routing→" [ref=e325]:
+                - /url: /features#models
+        - generic [ref=e329] [cursor=pointer]:
+          - generic [ref=e330]:
+            - generic [ref=e331]:
+              - img [ref=e333]
+              - generic [ref=e341]: Gets smarter the more you use it
+            - img [ref=e342]
+          - paragraph [ref=e344]: Cerid remembers your preferences, past decisions, and key facts — so follow-up questions get better answers without repeating yourself.
+          - paragraph [ref=e345]: "6-type memory salience scoring: empirical facts, decisions, preferences, project context, temporal events, conversational insights. Memory recall auto-injects alongside KB context."
+        - generic [ref=e349] [cursor=pointer]:
+          - generic [ref=e350]:
+            - generic [ref=e351]:
+              - img [ref=e353]
+              - generic [ref=e356]: Your data never leaves your device
+            - img [ref=e357]
+          - paragraph [ref=e359]: Everything runs on your machine. No cloud uploads, no telemetry by default. Only the query context you choose is sent to the AI model.
+          - paragraph [ref=e360]: Self-hosted Docker stack with ChromaDB, Neo4j, Redis — all on your machine. Optional Fernet encryption at rest. Open source Apache-2.0.
+        - generic [ref=e364] [cursor=pointer]:
+          - generic [ref=e365]:
+            - generic [ref=e366]:
+              - img [ref=e368]
+              - generic [ref=e370]: Works with files you already have
+            - img [ref=e371]
+          - paragraph [ref=e373]: Point at a folder and Cerid indexes everything — PDFs, Word docs, spreadsheets, code, emails, even zip archives. Over 30 file types supported.
+          - paragraph [ref=e374]: Bulk folder scan with estimation preview. Archive extraction (zip/tar). Automatic junk filtering. SSE progress streaming with pause/resume controls. 30+ file types supported.
+        - generic [ref=e378] [cursor=pointer]:
+          - generic [ref=e379]:
+            - generic [ref=e380]:
+              - img [ref=e382]
+              - generic [ref=e386]: Connect anything that produces knowledge
+            - img [ref=e387]
+          - paragraph [ref=e389]: 22 source connectors out of the box — RSS feeds, web pages, bookmarks, browser extension, voice notes, Apple Mail, Reminders, Slack, GitHub, and more.
+          - generic:
+            - generic:
+              - paragraph [ref=e390]: "22 source kinds across 9 families: web (RSS, URL-watch, bookmarks, browser extension), capture (voice notes, clipboard), Apple ecosystem (Mail, Reminders), chat (Slack, Discord, Teams, Matrix), dev events (GitHub, Linear, Sentry, Stripe), reader apps (Readwise, Pocket, Instapaper, Raindrop), email (Gmail, Outlook). Webhook receiver with HMAC + token auth; OAuth scaffold for Google + Microsoft. Per-source retention + quality floors."
+              - link "See every source→" [ref=e391]:
+                - /url: /features#sources
+      - link "View all features with technical details" [ref=e393] [cursor=pointer]:
+        - /url: /features
+        - text: View all features with technical details
+        - img [ref=e394]
+    - generic [ref=e398]:
+      - generic [ref=e399]:
+        - heading "Privacy by design" [level=2] [ref=e401]
+        - paragraph [ref=e402]: Your knowledge base stays on your machine. Telemetry is opt-in and disabled by default.
+        - list [ref=e403]:
+          - listitem [ref=e404]:
+            - img [ref=e406]
+            - generic [ref=e409]: All data stored locally — nothing leaves your machine
+          - listitem [ref=e410]:
+            - img [ref=e412]
+            - generic [ref=e415]: Encrypted at rest for sensitive knowledge bases
+          - listitem [ref=e416]:
+            - img [ref=e418]
+            - generic [ref=e421]: Free local AI option — no API costs required
+          - listitem [ref=e422]:
+            - img [ref=e424]
+            - generic [ref=e427]: Open source — audit every line of code
+          - listitem [ref=e428]:
+            - img [ref=e430]
+            - generic [ref=e432]: Smart model routing — always the right model for the task
+      - img "Privacy-First" [ref=e434]
+    - generic [ref=e436]:
+      - generic [ref=e437]:
+        - generic [ref=e438]:
+          - img [ref=e440]
+          - heading "Stored locally" [level=3] [ref=e442]
+          - paragraph [ref=e443]: Your documents, embeddings, and metadata stay on your machine.
+        - generic [ref=e444]:
+          - img [ref=e446]
+          - heading "Encrypted at rest" [level=3] [ref=e449]
+          - paragraph [ref=e450]: API keys and credentials protected with Fernet encryption.
+        - generic [ref=e451]:
+          - img [ref=e453]
+          - heading "Open source" [level=3] [ref=e456]
+          - paragraph [ref=e457]: Apache-2.0 licensed. Audit every line of code.
+      - link "Full security details" [ref=e459] [cursor=pointer]:
+        - /url: /security
+        - text: Full security details
+        - img [ref=e460]
+    - generic [ref=e463]:
+      - img [ref=e464]:
+        - generic [ref=e467]: C
+      - heading "Start with one command" [level=2] [ref=e469]
+      - paragraph [ref=e470]: Clone the repo, run the setup script, and your private AI companion is ready.
+      - link "Get Started Free" [ref=e472] [cursor=pointer]:
+        - /url: https://github.com/Cerid-AI/cerid-ai
+        - text: Get Started Free
+        - img [ref=e473]
+      - generic [ref=e475]:
+        - generic [ref=e480]: Terminal
+        - generic [ref=e481]:
+          - text: $ git clone https://github.com/Cerid-AI/cerid-ai.git
+          - text: $ cd cerid-ai && ./scripts/start-cerid.sh
+      - generic [ref=e482]:
+        - link "View on GitHub" [ref=e483] [cursor=pointer]:
+          - /url: https://github.com/Cerid-AI/cerid-ai
+          - text: View on GitHub
+          - img [ref=e484]
+        - link "Compare Plans" [ref=e486] [cursor=pointer]:
+          - /url: /pricing
+  - contentinfo [ref=e487]:
+    - generic [ref=e488]:
+      - generic [ref=e489]:
+        - generic [ref=e490]:
+          - paragraph [ref=e491]:
+            - generic [ref=e492]: CERID
+          - paragraph [ref=e493]: Privacy-first AI knowledge companion. Your data stays yours.
+        - generic [ref=e494]:
+          - heading "Product" [level=3] [ref=e495]
+          - list [ref=e496]:
+            - listitem [ref=e497]:
+              - link "Features" [ref=e498] [cursor=pointer]:
+                - /url: /features
+            - listitem [ref=e499]:
+              - link "Pricing" [ref=e500] [cursor=pointer]:
+                - /url: /pricing
+            - listitem [ref=e501]:
+              - link "Security" [ref=e502] [cursor=pointer]:
+                - /url: /security
+            - listitem [ref=e503]:
+              - link "Changelog" [ref=e504] [cursor=pointer]:
+                - /url: /changelog
+        - generic [ref=e505]:
+          - heading "Resources" [level=3] [ref=e506]
+          - list [ref=e507]:
+            - listitem [ref=e508]:
+              - link "GitHub" [ref=e509] [cursor=pointer]:
+                - /url: https://github.com/Cerid-AI/cerid-ai
+            - listitem [ref=e510]:
+              - link "API Docs" [ref=e511] [cursor=pointer]:
+                - /url: https://github.com/Cerid-AI/cerid-ai/blob/main/docs/API_REFERENCE.md
+      - generic [ref=e512]: © 2026 Cerid AI. All rights reserved.
+  - alert [ref=e513]

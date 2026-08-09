@@ -1,0 +1,113 @@
+# Design-drift allowlist (path:lineno, one per line)
+#
+# These are legitimate runtime-geometry / runtime-color / design-system-pinned
+# exceptions that the static drift linter cannot otherwise distinguish from
+# accidental drift. Every entry must have a reviewer-justified reason in the
+# preceding `# Section:` header and is reviewable on PR.
+#
+# To remove an entry: replace the inline style / arbitrary class with a token
+# in src/web/src/index.css or a named primitive in components/ui/.
+#
+# Prefer an inline `// drift-allowed: <reason>` comment at the violation site
+# over a new entry here — line-pinned entries rot whenever the file above the
+# pinned line grows or shrinks. This file is being wound down in favor of
+# inline annotations; only file-wide runtime-geometry patterns that recur
+# across many call sites still warrant a section here.
+#
+# Generated and re-validated by `scripts/lint-no-design-drift.py --root src/web/src --allow-file <this file>`.
+
+# --- Section: Runtime-derived inline styles ---------------------------------
+# These styles take values from data/props/refs and have no static-CSS equivalent.
+
+# Runtime colour from event-type lookup
+src/web/src/components/audit/activity-chart.tsx:88
+
+# Popover absolute positioning derived from anchor DOM measurements
+# Hover tooltip stays raw-fixed (cheap, no flip needed); Radix popover virtual
+# anchor positions itself at the click rect.  Width pin (`w-[300px]`) matches
+# the prior hand-rolled popover width and keeps the layout stable across all
+# expanded states.  Bumped after Phase 4 (V-P0.2 Radix migration).
+src/web/src/components/chat/claim-overlay.tsx:152
+src/web/src/components/chat/claim-overlay.tsx:342
+src/web/src/components/chat/claim-overlay.tsx:359
+
+# Animation stagger delays (typing-indicator dots). Heading-level indent depth
+# and the message-bubble.tsx:131/609 stagger entries migrated to inline
+# `// drift-allowed:` annotations at their real lines (Task 3.5b).
+src/web/src/components/chat/message-bubble.tsx:610
+src/web/src/components/chat/message-bubble.tsx:611
+
+# Console / activity feed scroll heights from container measurements
+src/web/src/components/console/AgentConsole.tsx:282
+
+# Recharts tooltip API requires inline object styles
+src/web/src/components/monitoring/collection-chart.tsx:37
+src/web/src/components/monitoring/collection-chart.tsx:46
+src/web/src/components/monitoring/collection-chart.tsx:48
+
+# Workflow canvas geometry pinned to viewBox / NODE_W / NODE_H constants
+src/web/src/components/workflows/workflow-canvas.tsx:178
+
+# --- Section: TooltipContent max-width caps ---------------------------------
+# Pinned widths keep long invariant / claim / metadata strings from sprawling.
+
+src/web/src/components/kb/kb-context-panel.tsx:500
+
+# --- Section: SelectTrigger / SelectContent pinned widths -------------------
+# Filter chips and model-select dropdowns lock width to align with siblings.
+
+src/web/src/components/chat/model-select.tsx:77
+
+# --- Section: ScrollArea height caps ----------------------------------------
+# List / tree / library panels lock max-height to gate overflow scroll.
+
+src/web/src/components/kb/tag-filter.tsx:128
+
+# --- Section: Truncated tag / metadata widths --------------------------------
+
+src/web/src/components/chat/web-search-indicator.tsx:55
+
+# --- Section: Responsive-breakpoint helpers ----------------------------------
+# `min-[320px]:` arbitrary breakpoint hides labels on the narrow KB header.
+
+src/web/src/components/kb/kb-context-panel.tsx:467
+src/web/src/components/kb/kb-context-panel.tsx:472
+src/web/src/components/kb/kb-context-panel.tsx:477
+
+# --- Section: Cycle 4 Atlas decomposition icicle (Agent B) ------------------
+# shadcn focus-ring convention (focus-visible:ring-ring/50 focus-visible:ring-[3px])
+# applied to interactive tier rows, filter inputs, and breadcrumb buttons.
+# Design context specifies this as the canonical shadcn focus pattern.
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:203
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:222
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:288
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:335
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:731
+
+# --- Section: Workflow editor + canvas chrome --------------------------------
+# Dropdown widths and SVG geometry tuned to fit agent/node names exactly.
+# workflow-editor.tsx's four pinned-width entries migrated to inline
+# annotations (Task 3.5b); workflow-canvas.tsx's stay here.
+
+src/web/src/components/workflows/workflow-canvas.tsx:182
+src/web/src/components/workflows/workflow-canvas.tsx:277
+src/web/src/components/workflows/workflow-canvas.tsx:301
+
+# --- Section: entity-hover-card test stubs (Task 4.3) -----------------------
+# Hex values are required to satisfy the MapTokens interface in test stubs;
+# no design tokens exist for neutral placeholder colors in jsdom-rendered tests.
+src/web/src/__tests__/entity-hover-card.test.tsx:150
+src/web/src/__tests__/entity-hover-card.test.tsx:151
+src/web/src/__tests__/entity-hover-card.test.tsx:158
+src/web/src/__tests__/entity-hover-card.test.tsx:159
+src/web/src/__tests__/entity-hover-card.test.tsx:160
+src/web/src/__tests__/entity-hover-card.test.tsx:161
+src/web/src/__tests__/entity-hover-card.test.tsx:162
+src/web/src/__tests__/entity-hover-card.test.tsx:163
+src/web/src/__tests__/entity-hover-card.test.tsx:164
+src/web/src/__tests__/entity-hover-card.test.tsx:165
+src/web/src/__tests__/entity-hover-card.test.tsx:166
+src/web/src/__tests__/entity-hover-card.test.tsx:167
+src/web/src/__tests__/entity-hover-card.test.tsx:168
+src/web/src/__tests__/entity-hover-card.test.tsx:169
+src/web/src/__tests__/entity-hover-card.test.tsx:170

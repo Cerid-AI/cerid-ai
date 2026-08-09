@@ -1,0 +1,490 @@
+# Copyright 2024-2026 Cerid AI — Licensed under the Functional Source License 1.1
+# with an Apache-2.0 future license (FSL-1.1-ALv2).
+# See LICENSE file for full license text.
+#
+# Unified Docker Compose for Cerid AI
+#
+# Startup order (enforced via depends_on healthcheck conditions):
+#
+#   1. Infrastructure: neo4j, chromadb, redis  (no dependencies, start in parallel)
+#   2. MCP Server:     core API                (waits for neo4j, chromadb, redis)
+#   3. Cerid Web:      React frontend          (waits for mcp-server)
+#
+# Bifrost was retired 2026-04-17 (audit C-4). Chat + smart-router route
+# direct to OpenRouter via llm_client.py.
+#
+# Usage:
+#   docker compose up -d          # start all services
+#   docker compose up -d --build  # rebuild MCP + Web images
+#   docker compose logs -f        # tail all logs
+
+# NO pinned `name:` here — deliberately. This file syncs VERBATIM to the public
+# mirror, so a hardcoded name would be wrong in one repo: a pinned
+# `cerid-ai-internal` shipped to the public dir is exactly what let a run there
+# masquerade as the personal stack and collide on its data dirs (the 2026-06-07
+# cross-wiring). Compose's default project name is the basename of the compose
+# file's directory, which is correct per-repo (`cerid-ai-internal` here,
+# `cerid-ai` in the mirror) and structurally cannot cross-wire — the project
+# follows the directory you invoke from. The launcher (start-cerid.sh) asserts
+# COMPOSE_PROJECT_NAME, if set, matches that basename. Sandbox overlays pin their
+# own `-p`.
+
+services:
+  # ──────────────────────────────────────────────
+  # Layer 1: Infrastructure (no dependencies)
+  # ──────────────────────────────────────────────
+
+  neo4j:
+    container_name: ai-companion-neo4j
+    # Calver release line — Neo4j skipped semver after 5.26 LTS.
+    # Direct upgrade from 5.26 is supported (no intermediate version, no
+    # store-format change between 4.4 and 2026.x; existing databases
+    # default to Cypher 5 on first 2026.x boot — backward compatible).
+    image: neo4j:2026.04.0-community
+    ports:
+      - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
+      - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
+    volumes:
+      - ./stacks/infrastructure/data/neo4j:/data
+      - ./stacks/infrastructure/data/neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      # Plugin name is the FULL form on calver — `gds` short form was
+      # accepted on 5.x but rejected on 2026.x ("not a known plugin";
+      # accepted options: apoc, apoc-extended, bloom, fleet-management,
+      # genai, graph-data-science). Verified empirically against
+      # neo4j:2026.04.0-community.
+      - NEO4J_PLUGINS=["apoc","graph-data-science"]
+      # Heap bumped 1G -> 4G for GDS in-memory graph projections (Leiden
+      # community detection planned for E.4b; loads the entire graph into
+      # RAM during algorithm execution). Pagecache stays at 2G — covers
+      # the on-disk dataset hot pages.
+      - NEO4J_server_memory_heap_max__size=4G
+      - NEO4J_server_memory_pagecache_size=2G
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          # 4G heap + 2G pagecache + ~512M JVM overhead + ~256M OS = ~6.8G
+          # working set; 8G container limit gives the JVM headroom under
+          # GDS Leiden peak before the OOM-killer fires.
+          memory: 8G
+    healthcheck:
+      # wget IS present in neo4j:2026.04.0-community (verified). Bumped
+      # start_period 30s -> 60s — calver+APOC+GDS init takes longer than
+      # 5.26+APOC alone (GDS catalog registration adds 5-8s on cold boot).
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  chromadb:
+    container_name: ai-companion-chroma
+    image: chromadb/chroma:1.5.9
+    ports:
+      - "127.0.0.1:${CERID_PORT_CHROMA:-8001}:8000"
+    volumes:
+      # 1.x persistence path is /data (was /chroma/chroma in 0.5).
+      # First boot against an existing host dir auto-migrates the 0.5
+      # sqlite+segments in place — ONE-WAY. Operators MUST snapshot via
+      # `scripts/snapshot-chroma-volume.sh` before `docker compose pull
+      # chromadb && docker compose up -d chromadb`. See
+      # docs/DEPENDENCY_UPGRADES.md § ChromaDB Phase 3.
+      - ./stacks/infrastructure/data/chroma:/data
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+      - CHROMA_ANONYMIZED_TELEMETRY=false
+      - ALLOW_RESET=false
+      - IS_PERSISTENT=true
+      - LOG_LEVEL=WARNING
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    healthcheck:
+      # chromadb 1.x ships a near-distroless image (no curl, wget, python,
+      # nc). Only bash is available, so we issue HTTP/1.0 manually via
+      # /dev/tcp and grep the status line for "200". Verified empirically
+      # against chromadb/chroma:1.5.9 — works the moment the Rust server
+      # binds port 8000 and starts answering /api/v2/heartbeat.
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - "exec 3<>/dev/tcp/127.0.0.1/8000 && printf 'GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200' <&3"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    container_name: ai-companion-redis
+    image: redis:7.4.8-alpine
+    ports:
+      - "127.0.0.1:${CERID_PORT_REDIS:-6379}:6379"
+    volumes:
+      - ./stacks/infrastructure/data/redis:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env} --maxmemory 1gb --maxmemory-policy allkeys-lru
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────────────────────────────────────
+  # Layer 2: Core API
+  # ──────────────────────────────────────────────
+
+  mcp-server:
+    container_name: ai-companion-mcp
+    build:
+      # Repo root, so the Dockerfile can read pyproject.toml and bake the
+      # canonical version into /app/VERSION at build time. The .dockerignore
+      # at repo root scopes the build context tightly to pyproject.toml +
+      # src/mcp/ so the larger context doesn't slow builds.
+      context: .
+      dockerfile: src/mcp/Dockerfile
+      args:
+        # Workstream E Phase E.6.5: default flipped to false (~3 GB
+        # lighter image). The reranker + embedder ONNX models download
+        # lazily on first inference (5-15s stall), or operators warm
+        # the cache from Settings → Inference Models in the GUI, the
+        # setup wizard, or `curl -X POST /setup/models/preload`.
+        # GPU-equipped hosts get the speedup via the sidecar fast-path
+        # wired in Phase E.6.4 (no per-query latency).
+        # Flip back to true for offline / air-gapped / CI builds:
+        #   CERID_PRELOAD_MODELS=true
+        # See docs/MODEL_PRELOAD.md for the full trade-off.
+        CERID_PRELOAD_MODELS: ${CERID_PRELOAD_MODELS:-false}
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MCP:-8888}:8888"
+    volumes:
+      - ./src/mcp:/app
+      # Bind-mount the host repo-root .env to a dedicated mountpoint (not
+      # nested under /app — macOS/virtiofs rejects nested bind mounts). The
+      # setup wizard reads CERID_ENV_FILE below and writes here, so changes
+      # actually land in the real .env that compose reads on boot. Without
+      # this, the setup wizard silently wrote to /app/.env inside the
+      # src/mcp:/app bind-mount (i.e. src/mcp/.env on host) — a file nothing
+      # loads — and the user's key vanished on the next container rebuild.
+      - ./.env:/host-env/.env
+      - ${HOME}/cerid-archive:/archive:cached
+      # Host-side mount source for the KB sync directory.
+      # CERID_SYNC_DIR_HOST is the canonical name (host path).
+      # CERID_SYNC_DIR is retained as a fallback for backward-compat, but note
+      # that inside the MCP container CERID_SYNC_DIR is ALWAYS /sync — if a user
+      # sets CERID_SYNC_DIR=/sync in .env (thinking container-side), the fallback
+      # would try to bind-mount /sync on the host. Prefer CERID_SYNC_DIR_HOST.
+      - ${CERID_SYNC_DIR_HOST:-${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}}:/sync
+      # Workstream E Phase 1.2: read-only mount for the eval corpus.
+      # The corpus lives at the repo root in data/eval-corpus/ (committed),
+      # but the src/mcp:/app bind-mount only exposes src/mcp/. Adding the
+      # corpus as a separate :ro mount lets scripts/seed-eval-corpus.sh
+      # POST container-visible file paths to /ingest_file without polluting
+      # the user's ${HOME}/cerid-archive KB.
+      - ./data/eval-corpus:/eval-corpus:ro
+    env_file:
+      - .env
+    environment:
+      # Pin the setup wizard's .env writer to the host-mounted file so keys
+      # persist across container rebuilds. See the /host-env bind mount above.
+      - CERID_ENV_FILE=/host-env/.env
+      # The SAME value the port binding above interpolates, forwarded INTO the
+      # container. app/middleware/auth.py exempts /mcp/* and /a2a/* from
+      # X-API-Key only while bound to loopback, and it reads this variable from
+      # its own environment. start-cerid.sh exports CERID_BIND_ADDR=0.0.0.0 into
+      # the shell for LAN mode but never writes it to .env, so without this line
+      # the middleware read the 127.0.0.1 default and kept every MCP tool —
+      # deletes and purges included — exempt on a LAN-exposed port, while
+      # docs/LAN_REMOTE_ACCESS.md promised "API key is mandatory".
+      - CERID_BIND_ADDR=${CERID_BIND_ADDR:-127.0.0.1}
+      - CHROMA_URL=http://ai-companion-chroma:8000
+      - NEO4J_URI=bolt://ai-companion-neo4j:7687
+      - NEO4J_USER=neo4j
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@ai-companion-redis:6379
+      # Suppress chromadb client-side posthog telemetry. Must be set before
+      # `import chromadb` since telemetry initializes at module load (Sentry MCP-1).
+      - ANONYMIZED_TELEMETRY=false
+      - CHROMA_ANONYMIZED_TELEMETRY=false
+      - ARCHIVE_PATH=/archive
+      - CERID_SYNC_DIR=/sync
+      # §7.1 — pin the knowledge-pack registry path explicitly so it can't
+      # silently resolve to a missing file (the "registry serves 0" failure).
+      # /app is the in-container package root (WORKDIR); the slim registry
+      # ships at config/knowledge_packs.json. Operators pointing at a
+      # curated/community registry override this in .env.
+      - CERID_KNOWLEDGE_PACKS_REGISTRY=${CERID_KNOWLEDGE_PACKS_REGISTRY:-/app/config/knowledge_packs.json}
+      # Slice 5.3 Track-A enrichment backfill — opt-in (default OFF for safe
+      # distribution). Set true to drain the pre-5.1 bare-tag artifact backlog
+      # nightly (metadata-only, paced, self-idles when drained). New artifacts
+      # are enriched at ingest (5.1), so this only matters for legacy backlogs.
+      - CERID_BACKFILL_ENRICHMENT_ENABLED=${CERID_BACKFILL_ENRICHMENT_ENABLED:-false}
+      - ENABLE_SEMANTIC_CACHE=true
+      - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
+      - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
+      - SEMANTIC_CACHE_DIM=768
+      - SENTRY_DSN=${SENTRY_DSN_MCP}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
+      - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
+      - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-openrouter}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
+      # MCP SSE advertises this host:port in its `endpoint` event. The
+      # default in app/routers/mcp_sse.py is the Docker-internal hostname
+      # `ai-companion-mcp:8888`, which works container-to-container but
+      # is unreachable for host-side MCP clients like Claude Code (whose
+      # POST /mcp/messages then DNS-fails). Override to the published
+      # host:port — the container itself routes via `127.0.0.1:8888->8888`.
+      - MCP_EXTERNAL_HOST=${MCP_EXTERNAL_HOST:-localhost:8888}
+      - HOST_MEMORY_GB=${HOST_MEMORY_GB:-}
+      - HOST_OS=${HOST_OS:-}
+      - HOST_CPU=${HOST_CPU:-}
+      - HOST_CPU_CORES=${HOST_CPU_CORES:-}
+      - HOST_GPU=${HOST_GPU:-}
+      - HOST_GPU_ACCEL=${HOST_GPU_ACCEL:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - llm-network
+    init: true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 6G
+    healthcheck:
+      # 10s timeout (was 5s — Workstream A Phase 1.3 defence-in-depth) so a
+      # slow /sdk/v1/* response under peak load doesn't trip the orchestrator
+      # into a false-positive restart while the actual /health/ping handler
+      # is still healthy. Retries × interval keeps the failure window similar.
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8888/health/ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+  # ──────────────────────────────────────────────
+  # Layer 2b: Background memory worker
+  # ──────────────────────────────────────────────
+
+  # Drains the `cerid-memory` RQ queue. Memory extraction is an LLM call sized
+  # against cloud latency; on a local daemon it is ~15× slower, and running it
+  # inline blew the interactive p99<10s SLO (measured >120s once per-memory
+  # consolidation and conflict-resolution are included). With this worker
+  # running, `is_memory_async_mode()` auto-enables on local-inference installs
+  # and the request returns 202 immediately.
+  #
+  # Safe to stop: the eligibility probe checks for a live worker and falls back
+  # to the synchronous path rather than enqueuing into a queue nobody drains.
+  # Slower, but no memory is ever lost.
+  memory-worker:
+    container_name: ai-companion-memory-worker
+    build:
+      context: .
+      dockerfile: src/mcp/Dockerfile
+      args:
+        CERID_PRELOAD_MODELS: ${CERID_PRELOAD_MODELS:-false}
+    command: ["python", "-m", "rq.cli", "worker", "cerid-memory"]
+    working_dir: /app
+    volumes:
+      - ./src/mcp:/app
+      - ./.env:/host-env/.env
+      - ${HOME}/cerid-archive:/archive:cached
+      - ${CERID_SYNC_DIR_HOST:-${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}}:/sync
+    env_file:
+      - .env
+    environment:
+      - CERID_ENV_FILE=/host-env/.env
+      - CHROMA_URL=http://ai-companion-chroma:8000
+      - NEO4J_URI=bolt://ai-companion-neo4j:7687
+      - NEO4J_USER=neo4j
+      - PYTHONPATH=/app
+      - RQ_REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD:-changeme-redis}@ai-companion-redis:6379/0}
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    networks:
+      - llm-network
+    init: true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  # ──────────────────────────────────────────────
+  # Layer 3: Frontend
+  # ──────────────────────────────────────────────
+
+  cerid-web:
+    container_name: cerid-web
+    build:
+      context: ./src/web
+      dockerfile: Dockerfile
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
+    environment:
+      - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+      # Injected into the served UI's window.__ENV__ by docker-entrypoint.sh so
+      # the browser sends X-API-Key. Required when the MCP enforces auth (LAN
+      # mode); empty by default for local single-host use. start-cerid.sh derives
+      # it from CERID_API_KEY.
+      - VITE_CERID_API_KEY=${VITE_CERID_API_KEY:-}
+      # Frontend Sentry (GA_CHECKLIST P0). Empty by default — the SDK
+      # no-ops without a DSN. Set in .env or the host shell to start
+      # shipping FE errors to the cerid-ai-web Sentry project. Re-read
+      # by docker-entrypoint.sh at every container start so DSN rotation
+      # does not require a rebuild.
+      - VITE_SENTRY_DSN_WEB=${VITE_SENTRY_DSN_WEB:-}
+      # Stamped into Sentry's `release` tag. Defaults to "dev"; production
+      # operators should pin to a versioned tag matching the MCP backend's
+      # SENTRY_RELEASE so traces line up across the stack.
+      - VITE_APP_VERSION=${VITE_APP_VERSION:-}
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ──────────────────────────────────────────────
+  # Optional: Local LLM (Ollama Add-On)
+  # ──────────────────────────────────────────────
+  # Activated via: OLLAMA_ENABLED=true in .env (set by start-cerid.sh prompt)
+  # Start with: docker compose --profile ollama up -d
+  # macOS Apple Silicon: runs natively (not in Docker) for Metal acceleration
+
+  ollama:
+    container_name: cerid-ollama
+    image: ${CERID_OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: ["ollama"]
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ──────────────────────────────────────────────
+  # Optional: SearXNG (self-hosted metasearch for verification evidence)
+  # ──────────────────────────────────────────────
+  # Independent, privacy-first search evidence for hallucination
+  # verification (Quality Program Phase 3.3) — supplements the OpenRouter
+  # `:online`-annotation URLs so evidence isn't sourced from one vendor.
+  # Activated via: docker compose --profile searxng up -d
+  # After it's healthy, set SEARXNG_URL=http://cerid-searxng:8080 in .env
+  # and restart mcp-server (utils/web_search.py reads it once at process
+  # start — see the "env-capture-allowed" note on SEARXNG_URL there).
+  # Not started by `docker compose up -d` alone — same opt-in pattern as
+  # the `ollama` service above.
+
+  searxng:
+    container_name: cerid-searxng
+    image: searxng/searxng:latest
+    profiles: ["searxng"]
+    ports:
+      - "127.0.0.1:${CERID_PORT_SEARXNG:-8080}:8080"
+    volumes:
+      # Read-write: SearXNG's entrypoint generates uwsgi.ini alongside our
+      # settings.yml on first boot (CHOWN/SETUID/SETGID below scope exactly
+      # what that init step needs, nothing more).
+      - ./stacks/infrastructure/searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:${CERID_PORT_SEARXNG:-8080}/
+      # Required when the profile is enabled: generate into .env with
+      #   openssl rand -hex 32
+      # (empty default keeps `docker compose config` valid for everyone
+      # not running the profile; SearXNG refuses to start without it).
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  llm-network:
+    external: true   # Created by start-cerid.sh before compose runs.
+    # All compose files (root + stacks/*) reference this same external network
+    # so every container — infra, mcp, web — shares one DNS namespace and can
+    # resolve each other by container name.  The former "driver: bridge" entry
+    # caused Docker Compose to create a project-scoped "cerid-ai_llm-network"
+    # that was invisible to the stacks/ compose files (which all use external: true),
+    # producing a network split where redis/neo4j/chroma were unreachable from MCP.
+
+volumes:
+  ollama-data:

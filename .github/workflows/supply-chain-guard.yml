@@ -1,0 +1,45 @@
+name: supply-chain-guard
+
+# Rejects commits authored/attributed to an AI assistant. Enforces the
+# no-AI-attribution commit policy AND detects the IronWorm npm worm's
+# propagation signature (backdated `claude <claude@users.noreply.github.com>`
+# commits — JFrog, 2026-06-04). Scans only the new commits in each push/PR.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  no-ai-commits:
+    name: no AI-authored commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # full history so the commit range resolves
+      - name: Scan new commits (policy + IronWorm IOC)
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          if [ -n "$PR_BASE" ]; then
+            RANGE="$PR_BASE..$PR_HEAD"
+          elif [ -n "$PUSH_BEFORE" ] && ! printf '%s' "$PUSH_BEFORE" | grep -q '^0\{40\}$'; then
+            RANGE="$PUSH_BEFORE..$PUSH_AFTER"
+          else
+            RANGE="HEAD~1..HEAD"
+          fi
+          echo "Scanning range: $RANGE"
+          bash scripts/guard-no-ai-commits.sh "$RANGE"

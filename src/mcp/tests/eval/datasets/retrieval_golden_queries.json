@@ -1,0 +1,54 @@
+{
+  "description": "Golden queries for the live-retrieval harness (Phase 0.1). Scored against LIVE /query output over the self-seeded eval-fixture corpus. 'corpus' is the seed manifest (filename -> domain); 'queries' map each query to the fixture doc(s) that should be retrieved. query_type buckets: exact_fact | paraphrase | cross_domain | temporal | distractor_trap. 'domain' is the per-domain bucket label ('cross' for multi-domain queries); 'search_domains' is the list of domains the harness issues /query against (single-domain endpoint, results merged for cross-domain).",
+  "corpus": [
+    {"filename": "eval-fixture-coding-rate-limiter.md", "domain": "coding"},
+    {"filename": "eval-fixture-coding-retry-policy.md", "domain": "coding"},
+    {"filename": "eval-fixture-coding-cache-eviction.md", "domain": "coding"},
+    {"filename": "eval-fixture-coding-db-index.md", "domain": "coding"},
+    {"filename": "eval-fixture-coding-auth-tokens.md", "domain": "coding"},
+    {"filename": "eval-fixture-coding-deploy-pipeline.md", "domain": "coding"},
+    {"filename": "eval-fixture-projects-atlas-roadmap.md", "domain": "projects"},
+    {"filename": "eval-fixture-projects-orion-budget.md", "domain": "projects"},
+    {"filename": "eval-fixture-projects-orion-scope.md", "domain": "projects"},
+    {"filename": "eval-fixture-projects-vega-launch.md", "domain": "projects"},
+    {"filename": "eval-fixture-projects-nimbus-vendor.md", "domain": "projects"},
+    {"filename": "eval-fixture-projects-standup-cadence.md", "domain": "projects"},
+    {"filename": "eval-fixture-notes-coffee-recipe.md", "domain": "notes"},
+    {"filename": "eval-fixture-notes-tea-recipe.md", "domain": "notes"},
+    {"filename": "eval-fixture-notes-garden-planting.md", "domain": "notes"},
+    {"filename": "eval-fixture-notes-book-summary.md", "domain": "notes"},
+    {"filename": "eval-fixture-notes-travel-packing.md", "domain": "notes"},
+    {"filename": "eval-fixture-notes-home-network.md", "domain": "notes"}
+  ],
+  "queries": [
+    {"id": "q01", "query": "What refill rate does the Zephyr rate limiter use?", "query_type": "exact_fact", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-rate-limiter.md"]},
+    {"id": "q02", "query": "How long do JWT access tokens stay valid?", "query_type": "exact_fact", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-auth-tokens.md"]},
+    {"id": "q03", "query": "Which index did we choose for the events jsonb column?", "query_type": "exact_fact", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-db-index.md"]},
+    {"id": "q04", "query": "What is the Aurora cache TTL?", "query_type": "exact_fact", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-cache-eviction.md"]},
+    {"id": "q05", "query": "What is the total budget for Project Orion?", "query_type": "exact_fact", "domain": "projects", "search_domains": ["projects"], "expected_docs": ["eval-fixture-projects-orion-budget.md"]},
+    {"id": "q06", "query": "Which database did Nimbus pick for the ledger?", "query_type": "exact_fact", "domain": "projects", "search_domains": ["projects"], "expected_docs": ["eval-fixture-projects-nimbus-vendor.md"]},
+    {"id": "q07", "query": "What water temperature does the pour-over coffee recipe use?", "query_type": "exact_fact", "domain": "notes", "search_domains": ["notes"], "expected_docs": ["eval-fixture-notes-coffee-recipe.md"]},
+    {"id": "q08", "query": "Which power adapter type do I need for Iceland?", "query_type": "exact_fact", "domain": "notes", "search_domains": ["notes"], "expected_docs": ["eval-fixture-notes-travel-packing.md"]},
+    {"id": "q09", "query": "Which VLAN is assigned to IoT devices on my home network?", "query_type": "exact_fact", "domain": "notes", "search_domains": ["notes"], "expected_docs": ["eval-fixture-notes-home-network.md"]},
+
+    {"id": "q10", "query": "How fast does the throttler replenish its permits?", "query_type": "paraphrase", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-rate-limiter.md"]},
+    {"id": "q11", "query": "When do login credentials stop working and need renewal?", "query_type": "paraphrase", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-auth-tokens.md"]},
+    {"id": "q12", "query": "How much money has been allocated to Orion?", "query_type": "paraphrase", "domain": "projects", "search_domains": ["projects"], "expected_docs": ["eval-fixture-projects-orion-budget.md"]},
+    {"id": "q13", "query": "What data store backs the Nimbus accounting service?", "query_type": "paraphrase", "domain": "projects", "search_domains": ["projects"], "expected_docs": ["eval-fixture-projects-nimbus-vendor.md"]},
+    {"id": "q14", "query": "Steps for brewing filter coffee by hand", "query_type": "paraphrase", "domain": "notes", "search_domains": ["notes"], "expected_docs": ["eval-fixture-notes-coffee-recipe.md"]},
+    {"id": "q15", "query": "How are stale entries purged from the Aurora store?", "query_type": "paraphrase", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-cache-eviction.md"]},
+
+    {"id": "q16", "query": "Where in our systems and setup do we apply rate limiting?", "query_type": "cross_domain", "domain": "cross", "search_domains": ["coding", "notes"], "expected_docs": ["eval-fixture-coding-rate-limiter.md", "eval-fixture-notes-home-network.md"]},
+    {"id": "q17", "query": "What database technology decisions have we made?", "query_type": "cross_domain", "domain": "cross", "search_domains": ["coding", "projects"], "expected_docs": ["eval-fixture-coding-db-index.md", "eval-fixture-projects-nimbus-vendor.md"]},
+    {"id": "q18", "query": "What did we finish or launch, and on what date?", "query_type": "cross_domain", "domain": "cross", "search_domains": ["projects", "notes"], "expected_docs": ["eval-fixture-projects-vega-launch.md", "eval-fixture-notes-book-summary.md"]},
+
+    {"id": "q19", "query": "When did Project Vega reach general availability?", "query_type": "temporal", "domain": "projects", "search_domains": ["projects"], "expected_docs": ["eval-fixture-projects-vega-launch.md"]},
+    {"id": "q20", "query": "When did I plant the tomatoes this spring?", "query_type": "temporal", "domain": "notes", "search_domains": ["notes"], "expected_docs": ["eval-fixture-notes-garden-planting.md"]},
+    {"id": "q21", "query": "When did I finish reading The Long Signal?", "query_type": "temporal", "domain": "notes", "search_domains": ["notes"], "expected_docs": ["eval-fixture-notes-book-summary.md"]},
+
+    {"id": "q22", "query": "What is the retry backoff base delay for the Zephyr client?", "query_type": "distractor_trap", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-retry-policy.md"], "distractor_docs": ["eval-fixture-coding-rate-limiter.md"]},
+    {"id": "q23", "query": "What steeping temperature should I use for green tea?", "query_type": "distractor_trap", "domain": "notes", "search_domains": ["notes"], "expected_docs": ["eval-fixture-notes-tea-recipe.md"], "distractor_docs": ["eval-fixture-notes-coffee-recipe.md"]},
+    {"id": "q24", "query": "What are the Orion project deliverables and scope?", "query_type": "distractor_trap", "domain": "projects", "search_domains": ["projects"], "expected_docs": ["eval-fixture-projects-orion-scope.md"], "distractor_docs": ["eval-fixture-projects-orion-budget.md"]},
+    {"id": "q25", "query": "How many times does the Zephyr client retry before it gives up?", "query_type": "distractor_trap", "domain": "coding", "search_domains": ["coding"], "expected_docs": ["eval-fixture-coding-retry-policy.md"], "distractor_docs": ["eval-fixture-coding-rate-limiter.md"]}
+  ]
+}

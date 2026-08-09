@@ -1,0 +1,417 @@
+// Copyright (c) 2026 Cerid AI. All rights reserved.
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+import { useState, useEffect, useCallback } from "react"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PaneError } from "@/components/ui/pane-error"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Brain,
+  Pencil,
+  Trash2,
+  RefreshCw,
+  Lightbulb,
+  ArrowRight,
+  Bookmark,
+  Loader2,
+  X,
+  Archive,
+  Clock,
+  MessageSquare,
+  FolderKanban,
+} from "lucide-react"
+import { fetchMemories, updateMemory, deleteMemory, archiveMemories } from "@/lib/api"
+import { notifyError } from "@/lib/query-client"
+import type { Memory } from "@/lib/types"
+import { cn } from "@/lib/utils"
+
+const MEMORY_TYPES = [
+  { key: "empirical", label: "Empirical", icon: Lightbulb, bg: "bg-blue-500/10", text: "text-blue-500" },
+  { key: "decision", label: "Decisions", icon: ArrowRight, bg: "bg-amber-500/10", text: "text-amber-500" },
+  { key: "preference", label: "Preferences", icon: Bookmark, bg: "bg-green-500/10", text: "text-green-500" },
+  { key: "project_context", label: "Project", icon: FolderKanban, bg: "bg-purple-500/10", text: "text-purple-500" },
+  { key: "temporal", label: "Temporal", icon: Clock, bg: "bg-orange-500/10", text: "text-orange-500" },
+  { key: "conversational", label: "Conversational", icon: MessageSquare, bg: "bg-cyan-500/10", text: "text-cyan-500" },
+] as const
+
+// Legacy type mapping for memories created before the 6-type classification
+const LEGACY_TYPE_MAP: Record<string, string> = {
+  fact: "empirical",
+  action_item: "project_context",
+}
+
+type MemoryTypeKey = (typeof MEMORY_TYPES)[number]["key"]
+
+function getTypeConfig(type: string) {
+  const mapped = LEGACY_TYPE_MAP[type] ?? type
+  return MEMORY_TYPES.find((t) => t.key === mapped) ?? MEMORY_TYPES[0]
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
+  } catch {
+    return iso
+  }
+}
+
+function truncateId(id: string, len = 12): string {
+  return id.length > len ? id.slice(0, len) + "..." : id
+}
+
+export default function MemoriesPane() {
+  const [memories, setMemories] = useState<Memory[]>([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<MemoryTypeKey | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editText, setEditText] = useState("")
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [archiving, setArchiving] = useState(false)
+  const [archiveResult, setArchiveResult] = useState<string | null>(null)
+
+  const loadMemories = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetchMemories({ limit: 500 })
+      setMemories(res.memories)
+    } catch (err) {
+      console.error("Failed to load memories:", err)
+      setError("The backend may be unavailable. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const handleArchive = useCallback(async () => {
+    setArchiving(true)
+    setArchiveResult(null)
+    try {
+      const res = await archiveMemories(180)
+      setArchiveResult(
+        res.archived > 0
+          ? `Archived ${res.archived} old memories`
+          : "No memories older than 180 days",
+      )
+      if (res.archived > 0) loadMemories()
+      setTimeout(() => setArchiveResult(null), 4000)
+    } catch (err) {
+      setArchiveResult(err instanceof Error ? err.message : "Archive failed")
+      setTimeout(() => setArchiveResult(null), 4000)
+    } finally {
+      setArchiving(false)
+    }
+  }, [loadMemories])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
+    loadMemories()
+  }, [loadMemories])
+
+  const typeCounts = memories.reduce<Record<string, number>>((acc, m) => {
+    const mapped = LEGACY_TYPE_MAP[m.type] ?? m.type
+    acc[mapped] = (acc[mapped] ?? 0) + 1
+    return acc
+  }, {})
+
+  const filtered = filter ? memories.filter((m) => (LEGACY_TYPE_MAP[m.type] ?? m.type) === filter) : memories
+
+  const handleEdit = (memory: Memory) => {
+    setEditingId(memory.id)
+    setEditText(memory.content)
+    setDeletingId(null)
+  }
+
+  const handleSave = async () => {
+    if (!editingId || !editText.trim()) return
+    setSaving(true)
+    try {
+      const updated = await updateMemory(editingId, editText.trim())
+      setMemories((prev) =>
+        prev.map((m) => (m.id === editingId ? { ...m, content: updated.content } : m)),
+      )
+      setEditingId(null)
+      setEditText("")
+    } catch (err) {
+      notifyError(err, { op: "memory.update", memoryId: editingId })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCancelEdit = () => {
+    setEditingId(null)
+    setEditText("")
+  }
+
+  const handleDelete = async (id: string) => {
+    setSaving(true)
+    try {
+      await deleteMemory(id)
+      setMemories((prev) => prev.filter((m) => m.id !== id))
+      setDeletingId(null)
+    } catch (err) {
+      notifyError(err, { op: "memory.delete", memoryId: id })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Header */}
+      <div className="border-b px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Brain className="h-5 w-5 text-primary" />
+            <h2 className="text-lg font-semibold">Memories</h2>
+            {!loading && (
+              <span className="text-xs text-muted-foreground">({memories.length})</span>
+            )}
+          </div>
+          <div className="flex gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={handleArchive}
+              disabled={loading || archiving}
+              aria-label="Archive memories older than 180 days"
+            >
+              {archiving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Archive className="h-3.5 w-3.5" aria-hidden="true" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={loadMemories}
+              disabled={loading}
+              aria-label="Refresh memories"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+
+        {archiveResult && (
+          <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-label-xs text-muted-foreground">
+            {archiveResult}
+          </div>
+        )}
+
+        {/* Type filters */}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button
+            variant="ghost"
+            size="xs"
+            className={cn("h-6", filter === null && "bg-muted font-medium")}
+            onClick={() => setFilter(null)}
+          >
+            All
+            <Badge variant="secondary" className="ml-1 h-4 px-1 text-label-xs">
+              {memories.length}
+            </Badge>
+          </Button>
+          {MEMORY_TYPES.map((t) => {
+            const count = typeCounts[t.key] ?? 0
+            return (
+              <Button
+                key={t.key}
+                variant="ghost"
+                size="xs"
+                className={cn("h-6", filter === t.key && "bg-muted font-medium")}
+                onClick={() => setFilter(filter === t.key ? null : t.key)}
+              >
+                <t.icon className={cn("mr-0.5 h-3 w-3", t.text)} />
+                {t.label}
+                <Badge variant="secondary" className="ml-1 h-4 px-1 text-label-xs">
+                  {count}
+                </Badge>
+              </Button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Content */}
+      {/* D.2: loading state — shadcn Skeleton */}
+      {loading ? (
+        <div className="space-y-3 p-4" aria-label="Loading memories" role="status">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-20 w-full rounded-lg" />
+          ))}
+        </div>
+      ) : error ? (
+        /* D.2: error state — shared PaneError primitive */
+        <div className="flex items-center justify-center p-8">
+          <div className="w-full max-w-md">
+            <PaneError
+              title="Failed to load memories"
+              description={error}
+              onRetry={loadMemories}
+            />
+          </div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+          <Brain className="h-10 w-10 opacity-30" />
+          {filter ? (
+            <p className="text-sm">No {getTypeConfig(filter).label.toLowerCase()} found.</p>
+          ) : (
+            <>
+              <p className="text-sm font-medium">No memories extracted yet.</p>
+              <p className="text-xs">
+                Start a conversation to build your memory bank.
+              </p>
+            </>
+          )}
+        </div>
+      ) : (
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="space-y-2 p-4">
+            {filtered.map((memory) => {
+              const cfg = getTypeConfig(memory.type)
+              const isEditing = editingId === memory.id
+              const isDeleting = deletingId === memory.id
+
+              return (
+                <Card key={memory.id} className="overflow-hidden">
+                  <CardContent className="min-w-0 p-3">
+                    {/* Type badge + actions */}
+                    <div className="flex items-start justify-between gap-2">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge
+                            variant="secondary"
+                            className={cn("cursor-help gap-1 text-label-sm", cfg.bg, cfg.text)}
+                          >
+                            <cfg.icon className="h-3 w-3" aria-hidden="true" />
+                            {cfg.label.replace(/s$/, "")}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-64">
+                          <p>Memory type: <strong>{cfg.label}</strong>. Set at extraction time by the memory pipeline; not user-editable.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="flex gap-0.5">
+                        {!isEditing && !isDeleting && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => handleEdit(memory)}
+                              aria-label="Edit memory"
+                            >
+                              <Pencil className="h-3 w-3" aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => {
+                                setDeletingId(memory.id)
+                                setEditingId(null)
+                              }}
+                              aria-label="Delete memory"
+                            >
+                              <Trash2 className="h-3 w-3" aria-hidden="true" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Content or edit mode */}
+                    {isEditing ? (
+                      <div className="mt-2 space-y-2">
+                        <textarea
+                          className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                          rows={3}
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means user explicitly invoked the action
+                          autoFocus
+                        />
+                        <div className="flex gap-1.5">
+                          <Button
+                            size="xs"
+                            onClick={handleSave}
+                            disabled={saving || !editText.trim()}
+                          >
+                            {saving && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={handleCancelEdit}
+                            disabled={saving}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm leading-relaxed [overflow-wrap:anywhere]">
+                        {memory.content}
+                      </p>
+                    )}
+
+                    {/* Delete confirmation */}
+                    {isDeleting && (
+                      <div className="mt-2 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+                        <span className="flex-1 text-xs text-destructive">Are you sure?</span>
+                        <Button
+                          variant="destructive"
+                          size="xs"
+                          onClick={() => handleDelete(memory.id)}
+                          disabled={saving}
+                        >
+                          {saving && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                          Delete
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => setDeletingId(null)}
+                          disabled={saving}
+                          aria-label="Cancel delete"
+                        >
+                          <X className="h-3 w-3" aria-hidden="true" />
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Metadata footer (read-only — provenance, not controls) */}
+                    <div className="mt-2 flex items-center gap-2 text-label-xs text-muted-foreground">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help" aria-label={`Source conversation ${memory.conversation_id}`}>
+                            conv: {truncateId(memory.conversation_id)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-72">
+                          <p className="font-mono text-label-xs">{memory.conversation_id}</p>
+                          <p className="mt-1 text-label-xs text-muted-foreground">Source conversation — open in the Chat sidebar to revisit.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <span aria-label={`Created ${memory.created_at}`}>{formatDate(memory.created_at)}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </ScrollArea>
+      )}
+    </div>
+  )
+}
