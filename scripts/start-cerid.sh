@@ -261,6 +261,19 @@ fi
 preflight_checks() {
     local fail=0
 
+    # Bake src/mcp/VERSION from pyproject before anything boots. The compose
+    # bind-mounts ./src/mcp over /app, which shadows the VERSION the image
+    # generates at build time — without this, every mounted deployment
+    # self-reports 0.0.0 (or whatever stale artifact the host tree carries).
+    # Same logic as `make version-file`; fail-soft: version display is not
+    # worth blocking a boot over.
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import tomllib,sys; sys.stdout.write(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" \
+            > src/mcp/VERSION 2>/dev/null \
+            && echo "  Version file: $(cat src/mcp/VERSION)" \
+            || echo "  Warning: could not generate src/mcp/VERSION (python3 <3.11?); /health will show a fallback version"
+    fi
+
     # Check required env vars are non-empty
     # OPENROUTER_API_KEY is not required when a local inference backend
     # (ollama/quenchforge, both serving the Ollama API on :11434) is active.
