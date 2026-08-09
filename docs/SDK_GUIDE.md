@@ -47,7 +47,9 @@ pip install cerid-sdk
 ```
 
 ```python
-from cerid_sdk import CeridClient
+# The distribution is `cerid-sdk`; the import name is `cerid`
+# (verified against the published 0.1.1 wheel).
+from cerid import CeridClient
 
 client = CeridClient(
     base_url="http://localhost:8888",
