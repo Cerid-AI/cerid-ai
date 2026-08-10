@@ -11,7 +11,7 @@
 
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2 } from "lucide-react"
+import { Loader2, Lock } from "lucide-react"
 import { listIngestionSources, type SourceRecord } from "@/lib/api/sources"
 import { listConnectors } from "@/lib/api/connectors"
 import { fetchEmailStatus } from "@/lib/api/email"
@@ -24,7 +24,9 @@ import { ConnectorDetail } from "./connector-detail"
 import { EmailDetail } from "./email-detail"
 import { AppleDetail } from "./apple-detail"
 import { SourcesEmptyGallery } from "./sources-empty-gallery"
+import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
 import { sourceToRow, connectorToRow, emailToRow, appleRows, type DisplayRow } from "./source-rows"
+import { useEntitlements } from "@/hooks/use-entitlements"
 import type { ConnectorStatus } from "@/lib/api/connectors"
 import type { AppleBridgeKind } from "./apple-detail"
 
@@ -76,7 +78,15 @@ function SourceRow({
         </span>
       </button>
       {/* Toggle — only for folder sources */}
-      {isFolderKind && onToggle ? (
+      {row.proLocked ? (
+        <span
+          className="mr-2 flex h-5 shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 text-label-xxs font-medium text-amber-600 dark:text-amber-400"
+          title={`${row.displayName} requires Cerid Pro`}
+        >
+          <Lock className="h-2.5 w-2.5" aria-hidden="true" />
+          Pro
+        </span>
+      ) : isFolderKind && onToggle ? (
         <button
           type="button"
           role="switch"
@@ -115,9 +125,12 @@ function SourceRow({
 
 export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string) => void } = {}) {
   const qc = useQueryClient()
+  const { forFlag } = useEntitlements()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // Kind whose Pro gate the user just walked into — drives the upgrade dialog.
+  const [proLockedKind, setProLockedKind] = useState<string | null>(null)
 
   const {
     data: sources = [],
@@ -160,13 +173,25 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
     void refetchEmailStatus()
   }
 
+  // The Apple bridge's Pro gate. Spelled out one flag at a time rather than
+  // looked up from a map: these calls ARE the enforcement for three features
+  // with no backend chokepoint, and scripts/lint-pro-gating.py can only see a
+  // literal flag name. A dynamic lookup would leave the lint crediting the
+  // plugin manifests, which gate plugin *loading* — a path the desktop bridge
+  // never takes.
+  const appleLocks = {
+    notes: forFlag("apple_notes_reader", "pro").state === "locked",
+    mail: forFlag("apple_mail_reader", "pro").state === "locked",
+    imessage: forFlag("imessage_reader", "pro").state === "locked",
+  }
+
   // Unified row list: source rows, connector rows, email row, Apple bridge rows.
   // appleRows() returns [] in browser builds (no window.cerid.appleConnectors).
   const rows: DisplayRow[] = [
     ...sources.map(sourceToRow),
     ...connectors.map(connectorToRow),
     ...(emailStatus ? [emailToRow(emailStatus)] : []),
-    ...appleRows(),
+    ...appleRows((kind) => appleLocks[kind]),
   ]
 
   // "Configured" = a source the user actually added, or a connector/email/
@@ -184,6 +209,12 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
     selectedRow?.rowType === "source" ? (selectedRow.backing as SourceRecord) : null
 
   const handleSelect = (row: DisplayRow) => {
+    // A locked row never opens its detail pane — that pane is the scan/ingest
+    // surface, so opening it would hand over the feature.
+    if (row.proLocked) {
+      setProLockedKind(row.kind)
+      return
+    }
     setSelectedId(row.id)
     setDetailOpen(true)
   }
@@ -255,6 +286,7 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
               setDetailOpen(true)
             }
           }}
+          onProLocked={setProLockedKind}
         />
         {selectedRow?.rowType === "connector" && (
           <ConnectorDetail
@@ -263,6 +295,11 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
             onClose={() => setDetailOpen(false)}
           />
         )}
+        <ProUpgradeOverlay
+          open={proLockedKind !== null}
+          kind={proLockedKind}
+          onClose={() => setProLockedKind(null)}
+        />
       </>
     )
   }
@@ -330,6 +367,12 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
           onClose={() => setDetailOpen(false)}
         />
       )}
+
+      <ProUpgradeOverlay
+        open={proLockedKind !== null}
+        kind={proLockedKind}
+        onClose={() => setProLockedKind(null)}
+      />
     </>
   )
 }

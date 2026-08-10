@@ -270,6 +270,28 @@ smoke:
 # Gates every sprint in the consolidation program. Runs against the
 # live stack at http://127.0.0.1:8888 (override with
 # CERID_PRESERVATION_MCP). NEO4J_PASSWORD must be in the env or in .env.
+pro-feature-health: ## Gate: no Pro feature is entitled-but-not-loaded (needs a live stack)
+	@echo "[pro-feature-health] requires stack running (scripts/start-cerid.sh)"
+	.venv/bin/python scripts/lint-pro-feature-health.py
+
+validate-pro: pro-feature-health ## Full Pro-feature validation matrix against a live stack
+	@echo "[validate-pro] Pro preservation + E2E suites"
+	@cd src/mcp && ../../.venv/bin/python -m pytest \
+	  tests/integration/test_preservation_apple_connectors.py \
+	  tests/integration/test_preservation_cloud_connectors.py \
+	  tests/integration/test_preservation_daily_digest.py \
+	  tests/integration/test_preservation_inbox_triage.py \
+	  tests/integration/test_preservation_meeting_capture.py \
+	  tests/integration/test_apple_connectors_e2e.py \
+	  tests/integration/test_meeting_capture_e2e.py \
+	  -v --tb=short --junit-xml=/tmp/validate-pro-results.xml ; \
+	rc=$$? ; \
+	echo "" ; \
+	echo "[validate-pro] skipped features (each needs a credential or host capability):" ; \
+	.venv/bin/python scripts/lint-no-silent-preservation-skips.py \
+	  --junit-xml /tmp/validate-pro-results.xml || true ; \
+	exit $$rc
+
 preservation-check: ## Run capability-preservation invariants (I1-I8) against a live stack
 	@echo "[preservation] requires stack running (scripts/start-cerid.sh)"
 	@cd src/mcp && ../../.venv/bin/python -m pytest tests/integration/ -m preservation -v --tb=short \

@@ -64,6 +64,13 @@ export const KIND_DESCRIPTORS: Record<string, SourceKindDescriptor> = {
 
   // Email IMAP (Stage B)
   email: { kind: "email", label: "Email (IMAP)", icon: Mail, blurb: "IMAP mailbox" },
+
+  // Electron bridge rows use the short AppleBridgeKind names, not the source
+  // kinds above (source-rows.ts :: APPLE_BRIDGE_KINDS). Without these aliases
+  // they fell through to the generic-plug fallback and rendered as "mail" /
+  // "notes" — including in the Pro upgrade dialog's title.
+  notes: { kind: "notes", label: "Apple Notes", icon: Notebook, blurb: "Sync from local Notes.app" },
+  mail: { kind: "mail", label: "Apple Mail", icon: Inbox, blurb: "Local Mail.app archive" },
 }
 
 export function descriptorFor(kind: string): SourceKindDescriptor {

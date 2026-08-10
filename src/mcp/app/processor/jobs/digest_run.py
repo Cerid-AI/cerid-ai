@@ -60,11 +60,14 @@ class DigestRunJob(BaseJob):
     async def run(self, progress_cb: ProgressCallback) -> JobResult:
         # Lazy import: keep job discovery (build_default_registry imports
         # this module at startup) free of the agent wiring.
+        from app.routers.license import current_license_watermark
         from core.agents.daily_digest import generate_daily_digest
 
         await progress_cb(0.0)
         logger.info("digest_run.start")
-        result = await generate_daily_digest(persist=True)
+        result = await generate_daily_digest(
+            persist=True, license_notice=current_license_watermark(),
+        )
         await progress_cb(1.0)
         logger.info(
             "digest_run.done digest_id=%s artifacts=%d skipped=%s",

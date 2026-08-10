@@ -163,7 +163,12 @@ FEATURE_FLAGS = {
     "apple_calendar_eventkit":   _pro_level(),
     "reminders_eventkit":        _pro_level(),
     "apple_photos_reader":       _pro_level(),
-    "spotlight_donation":        _pro_level(),  # Phase G.4 — donate KB artifacts to CoreSpotlight
+    # Implemented desktop-side, not here: CoreSpotlight is a host API a
+    # container cannot reach. The call site is
+    # packages/desktop/src/main/connectors/spotlight.ts (Settings → Extensions
+    # → Spotlight). This flag was briefly False + PLANNED_FEATURES on
+    # 2026-08-09, when the Swift helper existed and nothing called it.
+    "spotlight_donation":        _pro_level(),
 
     # ---- Enterprise features ----
     "multi_user":                CERID_MULTI_USER or _enterprise_level(),
@@ -246,7 +251,16 @@ _PRO_TIER_FLAGS: frozenset[str] = frozenset(
     for bucket_name, flags in FEATURE_BUCKETS.items()
     if bucket_name.startswith("pro_")
     for flag in flags
-) | frozenset({"calendar_sync"})  # back-compat alias
+) | frozenset({
+    # Pro flags that live outside any `pro_*` bucket. A flag initialised with
+    # `_pro_level()` but missing here is frozen at its import-time value:
+    # `_refresh_flags()` never touches it, so activating a license leaves it
+    # reported as locked, and losing one leaves it reported as unlocked.
+    # `test_pro_tier_flag_population` enumerates the population so a new
+    # non-bucketed Pro flag cannot drift the same way.
+    "calendar_sync",       # back-compat alias
+    "spotlight_donation",  # mac-native, implemented desktop-side
+})
 
 _ENTERPRISE_TIER_FLAGS: frozenset[str] = frozenset(
     {"multi_user", "sso_saml", "audit_logging", "priority_support"}

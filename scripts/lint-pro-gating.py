@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -72,6 +74,65 @@ def discover_gated_flags(roots: list[Path]) -> set[str]:
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
                     gated.add(first.value)
                 # Decorator form: @require_feature("flag_name") — same shape
+    gated |= _manifest_gated_flags(roots)
+    gated |= _renderer_gated_flags()
+    return gated
+
+
+def _renderer_gated_flags() -> set[str]:
+    """Flags enforced in the web renderer rather than by any backend call.
+
+    Some Pro features run entirely on the host — Spotlight donation writes to
+    CoreSpotlight, the Apple bridge connectors read Notes/Mail/Messages in the
+    Electron main process — so there is no backend chokepoint to decorate. The
+    gate is ``useEntitlements().forFlag("<flag>", "pro")`` in the renderer.
+
+    This looks for the flag as a literal first argument to ``forFlag``, so an
+    exemption cannot be claimed by writing a comment: the call has to exist.
+    Renderer gates are client-side and therefore bypassable by a determined
+    user — a deliberate posture choice, not an oversight. Anything with a
+    backend path must still gate there; this is only for features that have
+    none.
+    """
+    web_src = REPO_ROOT / "src" / "web" / "src"
+    if not web_src.is_dir():
+        return set()
+    pattern = re.compile(r"""forFlag\(\s*["']([a-z0-9_]+)["']""")
+    gated: set[str] = set()
+    for path in list(web_src.rglob("*.ts")) + list(web_src.rglob("*.tsx")):
+        if "__tests__" in path.parts:
+            continue
+        try:
+            gated |= set(pattern.findall(path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return gated
+
+
+def _manifest_gated_flags(roots: list[Path]) -> set[str]:
+    """Flags gated by a plugin manifest rather than by a call in Python.
+
+    A plugin declaring ``"tier": "pro"`` is refused at load time by
+    ``plugins/__init__.py`` (``is_tier_met(required_tier)``), so its declared
+    ``feature_flags`` really are gated — the enforcement just lives in JSON,
+    where the AST scan above cannot see it. Only manifests that actually
+    declare a paid tier count; ``feature_flags`` on a community plugin gates
+    nothing.
+    """
+    gated: set[str] = set()
+    for root in roots:
+        for manifest_path in root.rglob("manifest.json"):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(manifest, dict):
+                continue
+            if manifest.get("tier") not in ("pro", "enterprise"):
+                continue
+            flags = manifest.get("feature_flags", [])
+            if isinstance(flags, list):
+                gated |= {f for f in flags if isinstance(f, str)}
     return gated
 
 

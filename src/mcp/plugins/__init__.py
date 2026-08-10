@@ -38,6 +38,15 @@ logger = logging.getLogger("ai-companion.plugins")
 # Global registry of loaded plugins
 _loaded_plugins: dict[str, dict[str, Any]] = {}
 
+# Plugins that FAILED to load, keyed by directory name. Until 2026-08-09 these
+# were logged at ERROR and then discarded, so a paid feature could stop loading
+# and nothing downstream could tell: /health looked fine and the capability map
+# kept reporting the feature as entitled. Three Pro plugins were dead this way
+# for an unknown length of time. Keeping the failures is what lets
+# /health.pro_features and scripts/lint-pro-feature-health.py gate on
+# "entitled but not loaded".
+_failed_plugins: dict[str, dict[str, Any]] = {}
+
 # Tool handlers registered by ToolPlugin instances (name -> async handler)
 _plugin_tool_handlers: dict[str, Any] = {}
 
@@ -243,11 +252,46 @@ def _scan_directory(base_dir: Path, loaded: list[str]) -> None:
             info = _load_single_plugin(entry)
             if info:
                 _loaded_plugins[info["name"]] = info
+                _failed_plugins.pop(entry.name, None)  # recovered on reload
                 loaded.append(info["name"])
         except PluginLoadError as e:
             logger.error(str(e))
+            _record_plugin_failure(entry, e)
         except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Unexpected error loading plugin from {entry}: {e}")
+            _record_plugin_failure(entry, e)
+
+
+def _record_plugin_failure(entry: Path, exc: Exception) -> None:
+    """Remember why a plugin did not load, so a gate can see it.
+
+    The manifest is re-read best-effort: the load may have failed *because* the
+    manifest is unreadable, and a bookkeeping helper must never raise into the
+    scan loop. ``tier`` and ``feature_flags`` are what let the health surface
+    decide whether this failure withheld something the customer paid for.
+    """
+    tier = "unknown"
+    feature_flags: list[str] = []
+    name = entry.name
+    try:
+        manifest = json.loads((entry / "manifest.json").read_text(encoding="utf-8"))
+        if isinstance(manifest, dict):
+            tier = str(manifest.get("tier", "community"))
+            name = str(manifest.get("name", entry.name))
+            flags = manifest.get("feature_flags")
+            if isinstance(flags, list):
+                feature_flags = [f for f in flags if isinstance(f, str)]
+    except (OSError, ValueError):
+        pass
+
+    _failed_plugins[entry.name] = {
+        "name": name,
+        "path": str(entry),
+        "tier": tier,
+        "feature_flags": feature_flags,
+        "error_type": type(exc).__name__,
+        "error": str(exc)[:300],
+    }
 
 
 def load_plugins(plugin_dir: str | None = None) -> list[str]:
@@ -312,6 +356,16 @@ def get_loaded_plugins() -> dict[str, dict[str, Any]]:
         name: {k: v for k, v in info.items() if k != "module"}
         for name, info in _loaded_plugins.items()
     }
+
+
+def get_failed_plugins() -> dict[str, dict[str, Any]]:
+    """Return the plugins that failed to load this process, keyed by directory.
+
+    Consumed by ``/health.pro_features`` and
+    ``scripts/lint-pro-feature-health.py`` to turn a silent ERROR log into a
+    gate.
+    """
+    return {name: dict(info) for name, info in _failed_plugins.items()}
 
 
 def discover_plugins(plugin_dir: str | None = None) -> list[dict[str, Any]]:

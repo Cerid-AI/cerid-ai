@@ -18,6 +18,11 @@ export interface ConnectorStatus {
   missing_env: string[]
   data_source_registered: boolean
   data_source_configured: boolean
+  /** Which sibling MCP this connector needs, or null for the Apple/TCC ones.
+   *  Optional so a payload from an older backend still parses. */
+  requires_sibling?: string | null
+  /** null means "no sibling needed" OR "needed but never contacted" —
+   *  disambiguate with requires_sibling before treating it as fine. */
   sibling_reachable: boolean | null
   sibling_circuit_open: boolean | null
   auth_kind: string

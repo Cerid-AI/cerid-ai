@@ -273,3 +273,47 @@ describe("ConnectorDetail", () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 })
+
+// ── Sibling reachability ─────────────────────────────────────────────────────
+// `sibling_reachable: null` carries two meanings — "no sibling needed" (the
+// Apple/TCC connectors) and "needed, but never contacted". The row used to be
+// hidden on null, so the second case rendered as silence and the operator read
+// silence as success. `requires_sibling` is what tells them apart.
+
+describe("ConnectorDetail — sibling reachability", () => {
+  it("hides the row when the connector has no sibling at all", () => {
+    render(
+      <ConnectorDetail
+        connector={makeConnector({ requires_sibling: null, sibling_reachable: null })}
+        open
+        onClose={vi.fn()}
+      />,
+      { wrapper: wrap() },
+    )
+    expect(screen.queryByText(/Sibling service/i)).not.toBeInTheDocument()
+  })
+
+  it("says 'not contacted yet' rather than hiding it, when one IS required", () => {
+    render(
+      <ConnectorDetail
+        connector={makeConnector({ requires_sibling: "ms365", sibling_reachable: null })}
+        open
+        onClose={vi.fn()}
+      />,
+      { wrapper: wrap() },
+    )
+    expect(screen.getByText(/Sibling service \(ms365\) — not contacted yet/i)).toBeInTheDocument()
+  })
+
+  it("reports plain reachability once a call has succeeded", () => {
+    render(
+      <ConnectorDetail
+        connector={makeConnector({ requires_sibling: "ms365", sibling_reachable: true })}
+        open
+        onClose={vi.fn()}
+      />,
+      { wrapper: wrap() },
+    )
+    expect(screen.getByText("Sibling service reachable")).toBeInTheDocument()
+  })
+})

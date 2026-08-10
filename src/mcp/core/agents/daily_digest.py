@@ -100,6 +100,10 @@ class DigestResult:
     skipped: bool = False
     skip_reason: str = ""
     persisted_artifact_id: str | None = None
+    # Set by the app layer when this server runs Pro features without a
+    # license. Empty on a licensed or trialing install. core/ cannot read
+    # entitlement state itself (it may not import app/), so it is threaded in.
+    license_notice: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,6 +121,7 @@ class DigestResult:
             "skipped": self.skipped,
             "skip_reason": self.skip_reason,
             "persisted_artifact_id": self.persisted_artifact_id,
+            "license_notice": self.license_notice,
         }
 
 
@@ -411,6 +416,7 @@ async def generate_daily_digest(
     quality_threshold: float = DEFAULT_QUALITY_FLAG_THRESHOLD,
     persist: bool = True,
     mcp_base_url: str | None = None,
+    license_notice: str = "",
 ) -> DigestResult:
     """Run one digest generation pass.
 
@@ -432,6 +438,7 @@ async def generate_daily_digest(
         digest_id=str(uuid.uuid4()),
         generated_at=datetime.now(tz=timezone.utc).isoformat(),
         window_hours=window_hours,
+        license_notice=license_notice,
     )
 
     if not is_feature_enabled("daily_digest"):

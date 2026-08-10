@@ -30,13 +30,17 @@ const BULLETS = [
   "Custom Smart RAG — per-source weighting + retrieval orchestration",
 ]
 
+/** Where a self-hosted user goes to compare plans and buy. */
+const PRICING_URL = "https://cerid.ai/pricing"
+
 interface ProUpgradeOverlayProps {
   open: boolean
   kind: string | null
   onClose: () => void
-  /** Called when the user confirms they want to upgrade. The host
-   *  app should route to Stripe checkout (or its in-app equivalent),
-   *  then re-open the wizard via onContinueAfterUpgrade. */
+  /** Overrides the default upgrade action (open the pricing page). Hosts that
+   *  can start checkout in-app pass their own. Defaulted rather than optional-
+   *  with-no-fallback: an Upgrade button that silently does nothing is worse
+   *  than no button. */
   onUpgrade?: (kind: string) => void
 }
 
@@ -85,17 +89,26 @@ export function ProUpgradeOverlay({
           ))}
         </ul>
 
+        <p className="text-label-xs text-muted-foreground">
+          14-day free trial, no credit card — start it in Settings → Plan &amp; Billing.
+        </p>
+
         <div className="flex items-center justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onClose} className="cerid-press">
             Continue with free
           </Button>
           <Button
             onClick={() => {
-              if (kind) onUpgrade?.(kind)
+              if (onUpgrade) {
+                if (kind) onUpgrade(kind)
+                return
+              }
+              window.open(PRICING_URL, "_blank", "noopener,noreferrer")
+              onClose()
             }}
             className="cerid-press"
           >
-            Upgrade to Pro
+            See Pro plans
           </Button>
         </div>
       </DialogContent>

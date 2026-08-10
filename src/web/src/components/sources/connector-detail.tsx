@@ -17,7 +17,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, XCircle, Minus } from "lucide-react"
+import { CheckCircle2, XCircle, Minus, Lock } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,8 @@ import {
   type OAuthStartResponse,
 } from "@/lib/api/connectors"
 import type { ConnectorStatusExt } from "./source-rows"
+import { useEntitlements } from "@/hooks/use-entitlements"
+import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
 
 // ---------------------------------------------------------------------------
 // Public props
@@ -81,7 +83,16 @@ function ConnectorDetailInner({
   const [authBusy, setAuthBusy] = useState(false)
   const [disconnectResult, setDisconnectResult] = useState<string | null>(null)
   const [disconnectBusy, setDisconnectBusy] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // "locked" (tier too low) is the only state an upgrade fixes. "flag-off"
+  // means the server disabled it and the plan is already sufficient — telling
+  // that user to buy Pro would be wrong and annoying.
+  const { forFlag } = useEntitlements()
+  const proLocked =
+    !connector.data_source_configured &&
+    forFlag(connector.feature_flag).state === "locked"
 
   // Clean up polling interval on unmount
   useEffect(() => {
@@ -176,8 +187,18 @@ function ConnectorDetailInner({
             <StatusRow label="Environment variables" ok={connector.env_complete} />
             <StatusRow label="Feature enabled" ok={connector.feature_enabled} />
             <StatusRow label="Connected" ok={connector.data_source_configured} />
-            {connector.sibling_reachable !== null && (
-              <StatusRow label="Sibling service reachable" ok={connector.sibling_reachable} />
+            {/* Keyed on requires_sibling, not on the value: `null` means both
+                "no sibling needed" (Apple) and "needed but never contacted",
+                and hiding the second case reported silence as success. */}
+            {connector.requires_sibling && (
+              <StatusRow
+                label={
+                  connector.sibling_reachable === null
+                    ? `Sibling service (${connector.requires_sibling}) — not contacted yet`
+                    : "Sibling service reachable"
+                }
+                ok={connector.sibling_reachable}
+              />
             )}
           </ul>
 
@@ -220,6 +241,23 @@ function ConnectorDetailInner({
               </Button>
             )}
           </Section>
+        ) : proLocked ? (
+          // Pro-gated on this tier. Previously this rendered a disabled
+          // Connect button beside a red "Feature enabled ✗" row — a dead end
+          // that never said the feature was purchasable. Only shown for a
+          // genuine tier lock; a Pro user whose server flag is off gets the
+          // ordinary disabled control below, not an upgrade pitch.
+          <Section title="Connection">
+            <p className="text-sm text-muted-foreground">
+              {connector.display_name} is part of Cerid Pro.
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <Button size="sm" onClick={() => setUpgradeOpen(true)} className="cerid-press">
+                <Lock className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                Unlock with Pro
+              </Button>
+            </div>
+          </Section>
         ) : (
           <Section title="Connection">
             {!authFlow && (
@@ -241,6 +279,12 @@ function ConnectorDetailInner({
           </Section>
         )}
       </div>
+
+      <ProUpgradeOverlay
+        open={upgradeOpen}
+        kind={connector.slug}
+        onClose={() => setUpgradeOpen(false)}
+      />
     </div>
   )
 }

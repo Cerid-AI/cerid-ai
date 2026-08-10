@@ -71,7 +71,16 @@ start in default/free deployments.
 
 ### 4. First-use OAuth handshake
 
-Open `http://localhost:8810/oauth/start` in a browser on the host machine.
+There is no browsable start page (`/oauth/start` is a 404 — the claim was
+wrong until 2026-08-09). Start the flow through Cerid, which calls the
+sibling's `start_google_auth` tool and returns the consent URL:
+
+```bash
+K=$(grep -m1 '^CERID_API_KEY=' .env | cut -d= -f2-)
+curl -s -X POST -H "X-API-Key: $K" localhost:8888/connectors/google_calendar/auth/start
+```
+
+Open the returned URL in a browser on the host machine.
 Complete the Google sign-in flow; consent to the Calendar scopes (and
 Gmail scopes if you're enabling both). The OAuth refresh token is written
 to the container's persistent volume and survives restarts.
@@ -133,6 +142,6 @@ unchanged — stitching is additive, never blocking.
 |---|---|
 | Boot log: `CERID_CONNECTORS_BEARER unset — Pro cloud connectors not registered` | Set the env var in `.env`, then `docker compose up -d` again. |
 | Boot log: `GOOGLE_OAUTH_CLIENT_ID missing — google-workspace-mcp disabled` | Add both `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` and recreate the sibling container so it picks up the new env. |
-| Meeting artifacts never pick up event titles | Calendar scope not granted during OAuth. Revoke the grant from your Google account settings, then re-run `http://localhost:8810/oauth/start`. |
+| Meeting artifacts never pick up event titles | Calendar scope not granted during OAuth. Revoke the grant in your Google account settings, then redo the handshake above. |
 | `breaker-open` errors in `/health` referencing `google-workspace-mcp` | Sibling container has crashed or is restarting. Check `docker logs cerid-google-workspace-mcp`. |
 | Stitching attaches the wrong event | Multiple overlapping events in the recording window. Use the event-id override on the meeting artifact to pin the correct one. |

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: BUSL-1.1
-"""Speaker diarization via pyannote.audio 3.x.
+"""Speaker diarization via pyannote.audio 4.x.
 
 Requires:
   - HF_TOKEN env var (Hugging Face access token).
@@ -69,7 +69,8 @@ def _load_pipeline():
     from pyannote.audio import Pipeline
 
     logger.info("Loading pyannote pipeline %s (first use; ~3s)", _PIPELINE_NAME)
-    _pipeline_cache = Pipeline.from_pretrained(_PIPELINE_NAME, use_auth_token=hf_token)
+    # pyannote 4.x renamed the kwarg: use_auth_token -> token.
+    _pipeline_cache = Pipeline.from_pretrained(_PIPELINE_NAME, token=hf_token)
     return _pipeline_cache
 
 

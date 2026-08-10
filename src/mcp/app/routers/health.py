@@ -364,6 +364,7 @@ def degradation_status() -> dict:
     except Exception as exc:
         log_swallowed_error("app.routers.health.inference_health_payload", exc)
 
+
     # E1 CR-023: surface the local-LLM/rerank fallback degradation the /health
     # inference_routing snapshot records. /health/status previously omitted it, so
     # a GUI polling this endpoint could not show a live serving!=configured
@@ -625,6 +626,63 @@ def _load_recommendations(
     return out
 
 
+def _pro_feature_health() -> dict:
+    """Per-Pro-flag liveness: entitled, implemented, and why not if not.
+
+    ``degraded`` is the actionable bit — a flag the current tier entitles whose
+    backing plugin failed to load. Desktop-implemented features (Apple
+    connectors, Spotlight donation) have no backend plugin by design, so they
+    are reported ``implementation: "desktop"`` rather than counted as broken.
+    """
+    import config.features as features
+    from plugins import get_failed_plugins, get_loaded_plugins
+
+    loaded = get_loaded_plugins()
+    failed = get_failed_plugins()
+
+    # flag -> the failure that withheld it
+    blocked: dict[str, dict] = {}
+    for info in failed.values():
+        for flag in info.get("feature_flags") or []:
+            blocked[flag] = info
+    # A failed plugin often does not declare feature_flags; fall back to its
+    # own name so a plugin named after its flag is still attributed.
+    for key, info in failed.items():
+        blocked.setdefault(str(info.get("name") or key), info)
+
+    supplied: set[str] = set()
+    for info in loaded.values():
+        supplied.update(info.get("feature_flags") or [])
+        supplied.add(str(info.get("name", "")))
+
+    out: dict[str, dict] = {}
+    degraded: list[str] = []
+    for flag in sorted(features.FEATURE_FLAGS):
+        if features._get_feature_tier(flag) not in ("pro", "enterprise"):
+            continue
+        entitled = bool(features.FEATURE_FLAGS.get(flag))
+        entry: dict[str, object] = {"entitled": entitled}
+        if flag in features.PLANNED_FEATURES:
+            entry["implementation"] = "planned"
+        elif flag in blocked:
+            info = blocked[flag]
+            entry["implementation"] = "backend_plugin"
+            entry["loaded"] = False
+            entry["blocked_reason"] = f"{info.get('error_type')}: {info.get('error')}"
+            if entitled:
+                degraded.append(flag)
+        elif flag in supplied:
+            entry["implementation"] = "backend_plugin"
+            entry["loaded"] = True
+        else:
+            # No backend plugin claims it: either served by a router/agent in
+            # this process, or implemented in the desktop app.
+            entry["implementation"] = "in_process_or_desktop"
+        out[flag] = entry
+
+    return {"degraded": sorted(degraded), "features": out}
+
+
 def _build_health_payload() -> dict:
     """Run the blocking health checks + invariants snapshot + augmentations.
 
@@ -638,6 +696,15 @@ def _build_health_payload() -> dict:
     """
     result = health_check()
     result["invariants"] = _invariants_snapshot()
+    # Paid-feature liveness. The invariant worth watching is `entitled and not
+    # loaded`: the customer is paying for a feature whose implementation the
+    # runtime dropped. Three Pro plugins sat in exactly that state because
+    # plugin load failures were logged at ERROR and then discarded.
+    # scripts/lint-pro-feature-health.py gates on the `degraded` list.
+    try:
+        result["pro_features"] = _pro_feature_health()
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.pro_features", _exc)
     # Phase E.5 (v0.92): trust-score summary alongside core invariants.
     # Pure metadata — not part of the healthy/degraded gate. Failures
     # here must never affect the /health response code.

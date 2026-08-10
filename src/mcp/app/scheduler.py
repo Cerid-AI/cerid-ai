@@ -116,8 +116,10 @@ async def _run_daily_digest() -> None:
         return
 
     try:
+        from app.routers.license import current_license_watermark
         from core.agents.daily_digest import generate_daily_digest
         result = await generate_daily_digest(
+            license_notice=current_license_watermark(),
             window_hours=int(os.getenv("DAILY_DIGEST_WINDOW_HOURS", "24")),
             persist=True,
         )

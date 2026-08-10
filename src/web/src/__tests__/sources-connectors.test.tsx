@@ -18,6 +18,10 @@ vi.mock("@/lib/api/connectors", () => ({
   getConnectorAuthStatus: vi.fn(),
   disconnectConnector: vi.fn(),
 }))
+vi.mock("@/lib/api/billing", () => ({
+  fetchCapabilities: vi.fn(),
+  openBillingPortal: vi.fn(),
+}))
 vi.mock("@/lib/api/email", () => ({
   fetchEmailStatus: vi.fn(),
   configureEmail: vi.fn(),
@@ -27,12 +31,19 @@ vi.mock("@/lib/api/email", () => ({
 import { listIngestionSources, listSourceKinds } from "@/lib/api/sources"
 import { listConnectors } from "@/lib/api/connectors"
 import { fetchEmailStatus } from "@/lib/api/email"
+import { fetchCapabilities } from "@/lib/api/billing"
 import { SourcesConnectors } from "@/components/sources/sources-connectors"
 
 const mockSources = listIngestionSources as ReturnType<typeof vi.fn>
 const mockConnectors = listConnectors as ReturnType<typeof vi.fn>
 const mockFetchEmailStatus = fetchEmailStatus as ReturnType<typeof vi.fn>
 const mockListSourceKinds = listSourceKinds as ReturnType<typeof vi.fn>
+const mockCapabilities = fetchCapabilities as ReturnType<typeof vi.fn>
+
+/** Entitlement source behind useEntitlements — drives the Pro lock affordances. */
+function capabilitiesFor(tier: "community" | "pro") {
+  return { tier, features: {}, buckets: {} }
+}
 
 function wrap() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -43,6 +54,7 @@ function wrap() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockCapabilities.mockResolvedValue(capabilitiesFor("pro"))
   mockSources.mockResolvedValue([
     { id: "folder:1", kind: "folder", display_name: "Notes", status: "connected", config: { path: "/n" } },
   ])
@@ -237,6 +249,49 @@ describe("SourcesConnectors", () => {
       fireEvent.click(imsgTitle)
       expect(await screen.findByTestId("imessage-conversation-list")).toBeInTheDocument()
     })
+
+    // ── Pro gate ───────────────────────────────────────────────────────────
+    // These three are Pro (apple_notes_reader / apple_mail_reader /
+    // imessage_reader) but nothing server-side enforces it: the bridge never
+    // touches the plugin loader and ingests via the generic /ingest/structured
+    // route. Until 2026-08-09 a community desktop user could scan and ingest
+    // all three, so the row gate below IS the enforcement.
+
+    it("community: Apple rows stay visible but wear the Pro lock", async () => {
+      mockCapabilities.mockResolvedValue(capabilitiesFor("community"))
+      installBridge()
+      render(<SourcesConnectors />, { wrapper: wrap() })
+      // Visible — discoverability is the funnel; they are not hidden.
+      expect(await screen.findByTitle("Apple Mail")).toBeInTheDocument()
+      expect(
+        await screen.findByTitle("Apple Mail requires Cerid Pro"),
+      ).toBeInTheDocument()
+      expect(
+        await screen.findByTitle("iMessage requires Cerid Pro"),
+      ).toBeInTheDocument()
+    })
+
+    it("community: selecting a locked row opens the upgrade dialog, never the scan UI", async () => {
+      mockCapabilities.mockResolvedValue(capabilitiesFor("community"))
+      installBridge()
+      render(<SourcesConnectors />, { wrapper: wrap() })
+      fireEvent.click(await screen.findByTitle("Apple Mail"))
+
+      expect(await screen.findByText(/requires Cerid Pro/)).toBeInTheDocument()
+      // The scan is the feature. It must not have run.
+      expect(mockMailScan).not.toHaveBeenCalled()
+    })
+
+    it("pro: rows carry no lock and still open the scan UI", async () => {
+      installBridge()  // capabilities default to pro
+      render(<SourcesConnectors />, { wrapper: wrap() })
+      fireEvent.click(await screen.findByTitle("Apple Notes"))
+
+      expect(await screen.findByText(/5 notes/)).toBeInTheDocument()
+      expect(
+        screen.queryByTitle("Apple Notes requires Cerid Pro"),
+      ).not.toBeInTheDocument()
+    })
   })
 })
 
@@ -318,5 +373,45 @@ describe("SourcesConnectors — four-state matrix", () => {
     // ConnectorDetail dialog opens with the status + explainer sections.
     expect(await screen.findByText("Status")).toBeInTheDocument()
     expect(screen.getByText("How this connector works")).toBeInTheDocument()
+  })
+
+  it("empty: a Pro tile offers the upgrade path instead of a dead end on community", async () => {
+    mockCapabilities.mockResolvedValue(capabilitiesFor("community"))
+    mockSources.mockResolvedValue([])
+    mockFetchEmailStatus.mockResolvedValue({
+      configured: false, last_poll: null, messages_ingested: 0, errors: [],
+    })
+    mockListSourceKinds.mockResolvedValue([
+      { kind: "gmail", family: "mail", tier: "pro", availability: "oauth" },
+    ])
+    render(<SourcesConnectors />, { wrapper: wrap() })
+
+    await screen.findByText(/Connect your first source/i)
+    // The tile must stay clickable — a greyed-out tile cannot sell anything.
+    const tile = await screen.findByRole("button", { name: /gmail/i })
+    expect(tile).not.toBeDisabled()
+    fireEvent.click(tile)
+
+    expect(await screen.findByText(/requires Cerid Pro/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /see pro plans/i })).toBeInTheDocument()
+    // And it names the no-card trial, which is the cheaper first step.
+    expect(screen.getByText(/14-day free trial/i)).toBeInTheDocument()
+  })
+
+  it("empty: a Core tile is unaffected by the Pro gate", async () => {
+    mockCapabilities.mockResolvedValue(capabilitiesFor("community"))
+    mockSources.mockResolvedValue([])
+    mockFetchEmailStatus.mockResolvedValue({
+      configured: false, last_poll: null, messages_ingested: 0, errors: [],
+    })
+    mockListSourceKinds.mockResolvedValue([
+      { kind: "folder", family: "files", tier: "core", availability: "available" },
+    ])
+    render(<SourcesConnectors />, { wrapper: wrap() })
+
+    await screen.findByText(/Connect your first source/i)
+    fireEvent.click(await screen.findByRole("button", { name: /folder/i }))
+
+    expect(screen.queryByText(/requires Cerid Pro/i)).not.toBeInTheDocument()
   })
 })

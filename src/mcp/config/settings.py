@@ -1545,8 +1545,14 @@ SYNC_CRDT_ENABLED = True
 CERID_CONNECTORS_BEARER = os.getenv("CERID_CONNECTORS_BEARER", "")
 # Streamable-HTTP URLs for the sibling MCP servers. Defaults point at the
 # Docker network DNS names that stacks/connectors/docker-compose.yml creates.
+# Port 8810, not 8000: the sibling's OAuth redirect_uri is derived from its
+# LISTEN port, so stacks/connectors publishes the same port inside and out
+# (CERID_PORT_GOOGLE_MCP on both sides of the mapping) — otherwise the consent
+# callback is sent to a port nothing listens on. Kept a literal so
+# gen_env_example.py can render it; if you override CERID_PORT_GOOGLE_MCP, set
+# GOOGLE_WORKSPACE_MCP_URL to match or the backend dials the wrong port.
 GOOGLE_WORKSPACE_MCP_URL = os.getenv(
-    "GOOGLE_WORKSPACE_MCP_URL", "http://cerid-google-workspace-mcp:8000/mcp",
+    "GOOGLE_WORKSPACE_MCP_URL", "http://cerid-google-workspace-mcp:8810/mcp",
 )
 MS365_MCP_URL = os.getenv("MS365_MCP_URL", "http://cerid-ms365-mcp:3000/mcp")
 # OAuth client credentials for Google Workspace MCP single-user mode.

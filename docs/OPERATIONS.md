@@ -183,7 +183,7 @@ Plugins extend cerid-ai functionality without modifying core code.
 
 ```bash
 # In .env
-CERID_TIER=community          # or "pro" for BSL-1.1 plugins
+CERID_TIER=community          # baseline tier floor; see docs/LICENSING.md
 CERID_PLUGIN_DIR=plugins      # Plugin directory
 CERID_ENABLED_PLUGINS=        # Comma-separated plugin IDs to auto-enable
 ```

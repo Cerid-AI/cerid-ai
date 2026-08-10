@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -255,5 +255,80 @@ describe("ExtensionsCategory — accessibility", () => {
     const { container } = render(<ExtensionsCategory />, { wrapper })
     await screen.findByText("Plugins")
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+// ── Spotlight ────────────────────────────────────────────────────────────────
+// The section only exists in the desktop app (CoreSpotlight is a host API), and
+// it is Pro. Both halves are load-bearing: without the desktop check a browser
+// user sees a button that cannot work; without the Pro check `spotlight_donation`
+// has no gate anywhere, since the feature never touches the backend.
+
+function installSpotlightBridge() {
+  const donate = vi.fn().mockResolvedValue({ ok: true, scanned: 12, donated: 12 })
+  const purge = vi.fn().mockResolvedValue({ ok: true })
+  ;(window as unknown as { cerid: object }).cerid = {
+    appleConnectors: { spotlight: { donate, purge } },
+  }
+  return { donate, purge }
+}
+
+describe("ExtensionsCategory — Spotlight", () => {
+  afterEach(() => {
+    delete (window as unknown as { cerid?: object }).cerid
+  })
+
+  it("is absent in a browser build (no desktop bridge)", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<ExtensionsCategory />, { wrapper })
+    await screen.findByText("Plugins")
+    expect(screen.queryByText("Spotlight")).not.toBeInTheDocument()
+  })
+
+  it("community: shows the section but offers no donate button", async () => {
+    installSpotlightBridge()
+    vi.stubGlobal("fetch", mockApis()) // capabilities → community
+    render(<ExtensionsCategory />, { wrapper })
+
+    expect(await screen.findByText("Spotlight")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Donate to Spotlight/i })).not.toBeInTheDocument()
+    })
+    expect(screen.getByText(/Requires Pro plan/i)).toBeInTheDocument()
+  })
+
+  it("pro: donating calls the bridge and reports what landed", async () => {
+    const { donate } = installSpotlightBridge()
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/billing/capabilities")) {
+        return ok({ tier: "pro", features: {}, buckets: {} })
+      }
+      return mockApis()(url)
+    }))
+    render(<ExtensionsCategory />, { wrapper })
+
+    const button = await screen.findByRole("button", { name: /Donate to Spotlight/i })
+    await userEvent.click(button)
+
+    await waitFor(() => expect(donate).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText(/Donated 12 of 12 artifacts/i)).toBeInTheDocument()
+  })
+
+  it("pro: a helper failure surfaces instead of reading as success", async () => {
+    installSpotlightBridge()
+    ;(window as unknown as { cerid: { appleConnectors: { spotlight: { donate: unknown } } } })
+      .cerid.appleConnectors.spotlight.donate = vi.fn().mockResolvedValue({
+        ok: false, scanned: 0, donated: 0, error: "ceridspotlight helper not found",
+      })
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/billing/capabilities")) {
+        return ok({ tier: "pro", features: {}, buckets: {} })
+      }
+      return mockApis()(url)
+    }))
+    render(<ExtensionsCategory />, { wrapper })
+
+    await userEvent.click(await screen.findByRole("button", { name: /Donate to Spotlight/i }))
+    expect(await screen.findByText(/ceridspotlight helper not found/i)).toBeInTheDocument()
   })
 })

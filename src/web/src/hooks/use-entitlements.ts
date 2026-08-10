@@ -26,6 +26,15 @@ import type { SettingDef } from "@/lib/settings-registry"
 
 export type EntitlementState = "available" | "locked" | "flag-off" | "degraded"
 
+/** Why the server has the tier it has — see the license router for the
+    authoritative definitions. Drives the unlicensed/expired affordances. */
+export type LicenseState =
+  | "community"
+  | "trial"
+  | "trial_expired"
+  | "licensed"
+  | "unlicensed_pro"
+
 export interface EntitlementInfo {
   state: EntitlementState
   /** Set when state === "locked". */
@@ -38,6 +47,8 @@ const AVAILABLE: EntitlementInfo = { state: "available" }
 
 export interface Entitlements {
   tier: FeatureTier
+  /** Provenance of the current tier. Undefined until capabilities load. */
+  licenseState?: LicenseState
   isLoading: boolean
   isError: boolean
   /** Resolve a single server feature flag (optionally with the registry
@@ -56,6 +67,7 @@ export function useEntitlements(): Entitlements {
   })
 
   const tier: FeatureTier = data?.tier ?? "community"
+  const licenseState = (data as { license_state?: LicenseState } | undefined)?.license_state
 
   const forFlag = useCallback(
     (featureFlag?: string, entitlement?: "pro" | "enterprise"): EntitlementInfo => {
@@ -86,5 +98,5 @@ export function useEntitlements(): Entitlements {
     [forFlag],
   )
 
-  return { tier, isLoading, isError, forFlag, forDef }
+  return { tier, licenseState, isLoading, isError, forFlag, forDef }
 }

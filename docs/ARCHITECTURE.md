@@ -464,8 +464,11 @@ ConnectorPlugins (`gmail`, `google_calendar`, `outlook`,
 `swift build` (no Xcode `.xcodeproj` needed): `ceridek` (EventKit),
 `ceridphotos` (PhotoKit metadata), `ceridspotlight` (CoreSpotlight
 donor). Python plugins (`plugins/apple_calendar`,
-`plugins/apple_photos`, `plugins/spotlight_donor`) invoke them via
-`asyncio.subprocess` and parse JSON-over-stdio. TCC grants inherit
+`plugins/apple_photos`) invoke the first two via
+`asyncio.subprocess` and parse JSON-over-stdio; `ceridspotlight` is
+driven from the desktop main process instead
+(`packages/desktop/src/main/connectors/spotlight.ts`), because
+CoreSpotlight indexes the host, not the container. TCC grants inherit
 from the parent Electron app's signed bundle — load-bearing contract
 documented in `packages/desktop/swift/README.md`.
 

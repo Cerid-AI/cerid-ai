@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/atlas-views"
 import { mcpUrl, mcpHeaders } from "@/lib/api/common"
 import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
+import { useNavigation } from "@/contexts/navigation-context"
 
 export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki"
 
@@ -100,6 +101,7 @@ export function SubjectsViewsSidebar({
   const isPro = health?.pro_unlocked ?? false
   const freeTierCap = health?.free_tier_max_views ?? 3
   const list = views ?? []
+  const { goTo } = useNavigation()
   const showCapHint = !isPro && list.length >= freeTierCap
 
   return (
@@ -201,8 +203,17 @@ export function SubjectsViewsSidebar({
 
       {showCapHint && (
         <footer className="border-t border-border bg-amber-500/5 px-3 py-2 text-label-xs text-amber-700 dark:text-amber-400">
-          Free tier supports {freeTierCap} pinned views. Upgrade to Pro for
-          unlimited saved views across all modes.
+          Free tier supports {freeTierCap} pinned views.{" "}
+          {/* Was plain prose naming an upgrade with no way to reach it. Points
+              in-app rather than to the website: the free trial lives here. */}
+          <button
+            type="button"
+            onClick={() => goTo("settings", { category: "plan" })}
+            className="font-medium underline underline-offset-2 hover:no-underline"
+          >
+            Upgrade to Pro
+          </button>{" "}
+          for unlimited saved views across all modes.
         </footer>
       )}
     </Card>

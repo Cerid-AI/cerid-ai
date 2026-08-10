@@ -148,8 +148,11 @@ async def run_automation_now(name: str) -> RunNowResponse:
             result=triage.to_dict(),
         )
     if name == "daily_digest":
+        from app.routers.license import current_license_watermark
         from core.agents.daily_digest import generate_daily_digest
-        digest = await generate_daily_digest(persist=True)
+        digest = await generate_daily_digest(
+            persist=True, license_notice=current_license_watermark(),
+        )
         return RunNowResponse(
             feature=name,
             triggered=True,

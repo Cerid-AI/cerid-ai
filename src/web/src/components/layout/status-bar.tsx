@@ -9,6 +9,7 @@ import { isLocalProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { TrustScoreChip } from "@/components/trust-score"
 import { BackendStatusPill } from "@/components/layout/backend-status-pill"
+import { LicenseStatusBadge } from "@/components/settings/license-notice"
 
 const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
   chromadb: { purpose: "Vector embeddings & semantic search", tech: "ChromaDB" },
@@ -107,6 +108,10 @@ export function StatusBar({
             <p className="text-muted-foreground">Last checked: {lastChecked}</p>
           </TooltipContent>
         </Tooltip>
+
+        {/* Unlicensed-Pro marker: always present while paid features run
+            without a license, so the state is visible from any screen. */}
+        <LicenseStatusBadge />
 
         {health?.degradation_tier && health.degradation_tier !== "full" && (
           <Tooltip>

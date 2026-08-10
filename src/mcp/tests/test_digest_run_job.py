@@ -67,7 +67,9 @@ async def test_run_generates_and_persists_digest():
     ) as mock_generate:
         result = await DigestRunJob().run(progress_cb=_noop_progress)
 
-    mock_generate.assert_awaited_once_with(persist=True)
+    # license_notice is threaded from the app layer (core/ cannot read
+    # entitlement state itself) and is empty on a licensed/community install.
+    mock_generate.assert_awaited_once_with(persist=True, license_notice="")
     assert result.metadata["digest_id"] == "did-job"
     assert result.metadata["artifact_count"] == 5
     assert result.metadata["persisted_artifact_id"] == "art:did-job"

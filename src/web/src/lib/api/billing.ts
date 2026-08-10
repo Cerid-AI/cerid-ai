@@ -21,10 +21,46 @@ export interface CapabilitiesResponse {
   buckets: Record<string, unknown>
 }
 
+/**
+ * Per-feature entitlement map, from whichever edition this build talks to.
+ *
+ * The commercial server serves it under /billing; the community server has no
+ * billing router and serves the same shape under /license. Probing rather than
+ * hardcoding keeps one client working against both — and the fallback is not
+ * cosmetic: without it every Pro surface in the community build renders locked
+ * forever, including for a customer who activated a real key.
+ */
+// Which edition this server is, once discovered. A server does not change
+// edition under a running tab, so probing once spares the community build a
+// wasted 404 on every refetch.
+let _capabilitiesPath: string | null = null
+
 export async function fetchCapabilities(): Promise<CapabilitiesResponse> {
+  if (_capabilitiesPath) {
+    const cached = await fetch(`${MCP_BASE}${_capabilitiesPath}`, { headers: mcpHeaders() })
+    if (cached.ok) return cached.json()
+    // Re-probe next call rather than pinning a path that has stopped working.
+    _capabilitiesPath = null
+    throw new Error(await extractError(cached, "Failed to fetch capabilities"))
+  }
+
   const res = await fetch(`${MCP_BASE}/billing/capabilities`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch capabilities"))
-  return res.json()
+  if (res.ok) {
+    _capabilitiesPath = "/billing/capabilities"
+    return res.json()
+  }
+  // Only a missing route means "wrong edition" — a 500 or a 403 is a real
+  // failure on the endpoint that does exist, and must not be retried elsewhere.
+  if (res.status !== 404) {
+    throw new Error(await extractError(res, "Failed to fetch capabilities"))
+  }
+
+  const community = await fetch(`${MCP_BASE}/license/capabilities`, { headers: mcpHeaders() })
+  if (!community.ok) {
+    throw new Error(await extractError(community, "Failed to fetch capabilities"))
+  }
+  _capabilitiesPath = "/license/capabilities"
+  return community.json()
 }
 
 /**

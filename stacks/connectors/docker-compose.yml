@@ -21,6 +21,10 @@ services:
   # Tools surfaced to Cerid: search_gmail_messages, get_gmail_message_content,
   # list_calendars, get_events. Single-user OAuth mode keeps the credential
   # path simple — one Google Cloud "Desktop app" client per Cerid install.
+  #
+  # Everything below was rewritten on 2026-08-09, the first time this service
+  # was actually started. As shipped it could not run at all, and two of its
+  # settings were inert. Each fix is annotated; do not "simplify" them back.
   google-workspace-mcp:
     container_name: cerid-google-workspace-mcp
     profiles: ["pro"]
@@ -28,27 +32,54 @@ services:
       # Pinned to v1.21.0 commit so we don't pick up breaking changes
       # silently. Bump deliberately + smoke-test the tools/list shape.
       context: https://github.com/taylorwilsdon/google_workspace_mcp.git#v1.21.0
+    # ONE shell string, not a flag list. The image's ENTRYPOINT is
+    # ["/bin/sh","-c"], so a list becomes sh's own argv and the container
+    # crash-loops with `/bin/sh: 0: Illegal option --`.
+    #
+    # --single-user has no env equivalent (MCP_SINGLE_USER_MODE is set BY this
+    # flag, not read as input), which is why the override exists at all.
+    # --read-only is the REAL scope restriction: it requests read-only scopes
+    # and disables write tools. The previous WORKSPACE_MCP_ALLOWED_SCOPES was
+    # read by nothing — grep the image, there are zero references — so the
+    # "read-only by default" this file used to claim was never enforced.
     command:
-      - "--transport=streamable-http"
-      - "--single-user"
-      - "--host=0.0.0.0"
-      - "--port=8000"
+      - "uv run main.py --transport streamable-http --single-user --read-only --tools gmail calendar"
+    # Container and host port MUST match. The OAuth redirect_uri is built as
+    # WORKSPACE_MCP_BASE_URI:WORKSPACE_MCP_PORT (auth/oauth_config.py) — i.e.
+    # from the LISTEN port, with no notion of a published one. With the old
+    # 8810:8000 mapping the consent screen redirected the browser to
+    # localhost:8000, where nothing listens, so the handshake could never
+    # complete even once the server was reachable.
     ports:
-      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GOOGLE_MCP:-8810}:8000"
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GOOGLE_MCP:-8810}:${CERID_PORT_GOOGLE_MCP:-8810}"
     environment:
       # Operator provides these in .env from a Google Cloud Console
       # "Desktop app" OAuth client. The sibling-MCP server owns the OAuth
       # flow + refresh-token rotation; Cerid backend never touches them.
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
-      # Bearer token Cerid backend uses to authenticate to this MCP server.
-      # Same value plumbed into MCPClientPool's outbound Authorization header.
-      - WORKSPACE_MCP_AUTH_TOKEN=${CERID_CONNECTORS_BEARER:-}
-      # Restrict scopes to read-only Gmail + read-only Calendar by default.
-      # Operator can broaden via env override.
-      - WORKSPACE_MCP_ALLOWED_SCOPES=${GOOGLE_MCP_SCOPES:-gmail.readonly,calendar.readonly}
+      # Host/port are env-only; --host/--port are NOT flags this server accepts
+      # (see `main.py --help`), and passing them was part of why it never ran.
+      - WORKSPACE_MCP_HOST=0.0.0.0
+      - WORKSPACE_MCP_PORT=${CERID_PORT_GOOGLE_MCP:-8810}
+      # The account the single-user OAuth flow connects. start_google_auth
+      # takes it as a parameter and defaults to this; without it Cerid's
+      # /connectors/gmail/auth/start has no account to start a consent for.
+      - USER_GOOGLE_EMAIL=${USER_GOOGLE_EMAIL:-}
+      # NOTE: this server has no client-auth mechanism — there is no
+      # WORKSPACE_MCP_AUTH_TOKEN in the image. The bearer Cerid sends is
+      # ignored here, and the service's protection is that it is bound to
+      # loopback (CERID_BIND_ADDR). Do not re-add the variable: it read as a
+      # security control that did not exist. Neither sibling honours a bearer
+      # — ms365-mcp had the same dead setting under a different name.
     volumes:
-      - google-workspace-mcp-credentials:/root/.google_workspace_mcp
+      # Mounted at the HOME dir, not at ~/.google_workspace_mcp. Docker seeds a
+      # fresh named volume from the image path — including ownership — only
+      # when that path exists in the image. ~/.google_workspace_mcp does not,
+      # so it was created root-owned while the server runs as uid 1000 (app),
+      # and OAuth tokens could never have been written. /home/app does exist
+      # and is app-owned, so the volume inherits that. Verified empirically.
+      - google-workspace-mcp-credentials:/home/app
     networks:
       - llm-network
     restart: unless-stopped
@@ -57,7 +88,7 @@ services:
       # for liveness probing (returns 405/406 for non-JSON-RPC requests; any
       # response means the process is alive). curl -sf treats 4xx as success
       # via --fail-with-body so we accept any byte-back.
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/mcp | grep -qE '^(2|4)' || exit 1"]
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${CERID_PORT_GOOGLE_MCP:-8810}/mcp | grep -qE '^(2|4)' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -76,24 +107,58 @@ services:
     container_name: cerid-ms365-mcp
     profiles: ["pro"]
     build:
-      # Pinned to v0.111.0 commit. Softeria ships ~1 release/day — every
-      # bump must pass the smoke test before we move the pin.
-      context: https://github.com/softeria/ms-365-mcp-server.git#v0.111.0
+      # Pinned by tag. Softeria ships ~1 release/day — every bump must pass the
+      # smoke test before we move the pin.
+      #
+      # Moved off v0.111.0 on 2026-08-09: that tag's image CANNOT BE BUILT. Its
+      # release stage ran `npm ci --omit=dev` on node:20 while the builder used
+      # node:24, and the two npm majors disagreed about the lockfile —
+      # `Missing: yaml@2.9.0 from lock file`, exit 1, every time. v0.137.0 uses
+      # node:24 in both stages, which removes the split.
+      context: https://github.com/softeria/ms-365-mcp-server.git#v0.137.0
+    # ENTRYPOINT is ["node","dist/index.js"], so these ARE argv (unlike the
+    # Google sibling, whose entrypoint is a shell).
+    #   --enable-auth-tools: login/logout tools are OFF by default in HTTP
+    #     mode, and they are how the device-code flow is driven.
+    #   --read-only: real, enforced; the scope allowlist below is a second
+    #     belt but this is the switch that disables write operations.
     command:
       - "--http=3000"
+      - "--enable-auth-tools"
+      - "--read-only"
     ports:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MS365_MCP:-8811}:3000"
     environment:
-      # Static bearer for client→server auth (same value as the Google MCP).
-      # MSAL OAuth credentials are owned by the server, persisted to the
-      # bind-mounted token cache.
-      - MS365_MCP_AUTH_TOKEN=${CERID_CONNECTORS_BEARER:-}
       # File-based token cache because keytar isn't available in containers.
       - MS365_MCP_TOKEN_CACHE_PATH=/data/token-cache.json
-      # Scope restriction for v1 — read-only Mail + Calendar.
-      - MS365_MCP_ALLOWED_SCOPES=${MS365_MCP_SCOPES:-Mail.Read,Calendars.Read}
-      # Personal mode (default; not org-wide).
-      - MS365_MCP_MODE=${MS365_MCP_MODE:-personal}
+      # Scope restriction for v1 — read-only Mail + Calendar. Verified real:
+      # cli.js reads this into options.allowedScopes.
+      #
+      # WHITESPACE-separated, not comma. `--help` says so and the parser means
+      # it: the old comma form was read as ONE scope literally named
+      # "Mail.Read,Calendars.Read", which matched nothing, so every mail and
+      # calendar tool was filtered out and the server exposed only its auth and
+      # utility tools. Graph then answered 403 on verify-login. Eleven tools
+      # were listed either way, which is what made it look like it was working.
+      - MS365_MCP_ALLOWED_SCOPES=${MS365_MCP_SCOPES:-Mail.Read Calendars.Read}
+      # MSAL authority. Unset means "common", which as of June 2026 fails
+      # SILENT REFRESH for personal Microsoft accounts — the first login works
+      # and every renewal after it does not. Personal accounts need
+      # "consumers"; a work/school tenant needs its tenant id (or "organizations").
+      - MS365_MCP_TENANT_ID=${MS365_MCP_TENANT_ID:-}
+      #
+      # Two variables were REMOVED here on 2026-08-09 because the image never
+      # read either of them (grep the bundle in dist/ — neither name appears):
+      #
+      #   MS365_MCP_AUTH_TOKEN=${CERID_CONNECTORS_BEARER}
+      #     Documented as "static bearer for client→server auth". No such
+      #     setting exists; the real name is MS365_MCP_OAUTH_TOKEN and it is an
+      #     inbound Graph token, not a client-auth secret. Like the Google
+      #     sibling, this server's protection is loopback binding.
+      #   MS365_MCP_MODE=personal
+      #     The real switch is MS365_MCP_ORG_MODE, which enables ORG mode when
+      #     "true"/"1". Personal is the default when it is unset, so the
+      #     intended behaviour is what you get by saying nothing.
     volumes:
       - ms365-mcp-data:/data
     networks:

@@ -37,6 +37,14 @@ class _ConnectorState:
     client: MCPHTTPClient
     failures: int = 0
     opened_at: float | None = None  # circuit-breaker open timestamp
+    # Whether this connector has EVER completed a call. A closed circuit does
+    # not mean reachable: the breaker only opens after _FAILURE_THRESHOLD
+    # recorded failures, so a connector nobody has called yet — including one
+    # whose container was never started — is indistinguishable from a healthy
+    # one by `is_open()` alone. Callers that report reachability to an operator
+    # must consult this too, or they report "connected" for a container that
+    # does not exist (observed 2026-08-09 against a down ms365-mcp).
+    ever_succeeded: bool = False
 
     def is_open(self) -> bool:
         """Circuit is open while cool-down period hasn't elapsed."""
@@ -61,6 +69,7 @@ class _ConnectorState:
             )
         self.failures = 0
         self.opened_at = None
+        self.ever_succeeded = True
 
 
 class MCPClientPool:
@@ -110,6 +119,7 @@ class MCPClientPool:
                 "url": state.client.url,
                 "failures": state.failures,
                 "circuit_open": state.is_open(),
+                "ever_succeeded": state.ever_succeeded,
             }
             for name, state in self._connectors.items()
         ]

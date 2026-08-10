@@ -1,1 +1,4 @@
+# The "Sponsor" button. Cerid is funded by Pro subscriptions, not donations —
+# point it at the product so the button converts instead of asking for charity.
 github: [Cerid-AI]
+custom: ["https://cerid.ai/pricing"]

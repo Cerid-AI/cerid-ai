@@ -34,6 +34,9 @@ export interface DisplayRow {
   status: "connected" | "paused" | "available" | "error"
   /** Optional secondary line for the list row (e.g. a connector's sync semantics). */
   detail?: string
+  /** Row is visible but behind the Pro gate — selecting it opens the upgrade
+      dialog instead of the detail pane. */
+  proLocked?: boolean
   backing: SourceRecord | ConnectorStatus | EmailRow | AppleRow
 }
 
@@ -100,6 +103,13 @@ export function connectorToRow(c: ConnectorStatusExt): DisplayRow {
 // Status is always "available" — we don't lift per-scan state to the row level;
 // that state lives inside AppleDetail (scanned on dialog open). Keeping the
 // row status simple avoids a bridge scan on every SourcesConnectors mount.
+//
+// These three are Pro but, unlike every other Pro connector, nothing
+// server-side enforces that: they never touch the plugin loader (which refuses
+// pro-tier plugins at community tier), and they ingest through the generic
+// /ingest/structured route. Until 2026-08-09 a community desktop user could
+// scan and ingest all three. The lock below IS the enforcement — rows stay
+// visible (they are the funnel) but route to the upgrade dialog.
 // ---------------------------------------------------------------------------
 
 const APPLE_BRIDGE_KINDS: Array<{ kind: AppleBridgeKind; displayName: string }> = [
@@ -108,7 +118,11 @@ const APPLE_BRIDGE_KINDS: Array<{ kind: AppleBridgeKind; displayName: string }> 
   { kind: "imessage", displayName: "iMessage" },
 ]
 
-export function appleRows(): DisplayRow[] {
+// `isLocked` is required, not defaulted: a call site that forgets it should
+// fail the build rather than silently ship the connectors unlocked again. It
+// is resolved per kind, not per tier, so a server with one of the three flags
+// switched off locks that one row and leaves the others alone.
+export function appleRows(isLocked: (kind: AppleBridgeKind) => boolean): DisplayRow[] {
   if (typeof window === "undefined" || !window.cerid?.appleConnectors) return []
   return APPLE_BRIDGE_KINDS.map(({ kind, displayName }) => ({
     id: `apple:${kind}`,
@@ -116,6 +130,7 @@ export function appleRows(): DisplayRow[] {
     kind,
     displayName,
     status: "available" as const,
+    proLocked: isLocked(kind),
     backing: { bridgeKind: kind } as AppleRow,
   }))
 }

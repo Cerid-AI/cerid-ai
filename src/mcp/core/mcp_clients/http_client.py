@@ -12,7 +12,8 @@ talks to them over ``http://<service-name>:8080/mcp``.
 from __future__ import annotations
 
 import logging
-from contextlib import AsyncExitStack
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 logger = logging.getLogger("ai-companion.mcp_client_http")
@@ -56,15 +57,23 @@ class MCPHTTPClient:
         self._session: Any = None
         self._tools_cache: list[Any] | None = None
 
-    async def connect(self) -> None:
-        """Open the streamable-HTTP connection and initialize the session.
+    @asynccontextmanager
+    async def _session_scope(self) -> AsyncIterator[Any]:
+        """One initialized session, opened and closed inside the CALLER's task.
 
-        Idempotent: calling connect() on an already-connected client is a
-        no-op (returns cached state).
+        Sessions are deliberately NOT reused across calls. ``streamablehttp_client``
+        hands back anyio memory-object streams owned by the task group that
+        entered it; the moment that task finishes — a FastAPI request handler,
+        or the startup lifespan — anyio closes them. A later call from a
+        different task then hits ``ClosedResourceError`` even though the server
+        is perfectly healthy. That is exactly what happened to every Pro cloud
+        connector: the pool connected once during startup and every subsequent
+        tool call failed (observed 2026-08-09 on /connectors/gmail/auth/start).
+
+        A fresh connection per call costs one round-trip. These connectors are
+        on-demand lookups, not hot paths, and a correct answer beats a saved
+        handshake.
         """
-        if self._session is not None:
-            return
-
         # Lazy import — the ``mcp`` package is heavy and imports openssl
         # primitives that some CI environments don't have without extras.
         try:
@@ -76,39 +85,43 @@ class MCPHTTPClient:
                 "Install with `pip install 'mcp>=1.27'`."
             ) from exc
 
-        self._exit_stack = AsyncExitStack()
-        # streamablehttp_client returns (read_stream, write_stream, terminator)
-        transport = await self._exit_stack.enter_async_context(
-            streamablehttp_client(self.url, headers=self._headers or None)
-        )
-        read_stream, write_stream, _terminator = transport
+        async with AsyncExitStack() as stack:
+            # streamablehttp_client returns (read_stream, write_stream, terminator)
+            read_stream, write_stream, _terminator = await stack.enter_async_context(
+                streamablehttp_client(self.url, headers=self._headers or None)
+            )
+            session = await stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+            await session.initialize()
+            yield session
 
-        self._session = await self._exit_stack.enter_async_context(
-            ClientSession(read_stream, write_stream)
-        )
-        await self._session.initialize()
-        logger.info(
-            "MCP client connected: connector=%s url=%s",
-            self.connector_name, self.url,
-        )
+    async def connect(self) -> None:
+        """Verify the server is reachable and speaks MCP.
+
+        Kept for callers that want a startup-time reachability probe. It no
+        longer parks a session for later use — see ``_session_scope``.
+        """
+        async with self._session_scope():
+            logger.info(
+                "MCP client connected: connector=%s url=%s",
+                self.connector_name, self.url,
+            )
 
     async def disconnect(self) -> None:
-        """Close the session and underlying transport."""
-        if self._exit_stack is not None:
-            await self._exit_stack.aclose()
+        """Drop cached state. Sessions are per-call, so there is no live
+        transport to tear down — kept so existing callers keep working."""
         self._exit_stack = None
         self._session = None
         self._tools_cache = None
 
     async def list_tools(self) -> list[Any]:
-        """Cache-fronted ``tools/list`` call. Tool inventories rarely change
-        per session; we cache to avoid the round-trip on every call_tool."""
+        """Cache-fronted ``tools/list``. The inventory is stable for a given
+        server, so it is cached across calls even though sessions are not."""
         if self._tools_cache is not None:
             return self._tools_cache
-        if self._session is None:
-            await self.connect()
-        assert self._session is not None
-        result = await self._session.list_tools()
+        async with self._session_scope() as session:
+            result = await session.list_tools()
         # mcp 1.27 returns an object with .tools; older variants returned a list directly
         tools = getattr(result, "tools", result)
         self._tools_cache = list(tools)
@@ -119,18 +132,11 @@ class MCPHTTPClient:
         name: str,
         arguments: dict[str, Any] | None = None,
     ) -> Any:
-        """Invoke a tool on the connected MCP server.
-
-        Raises ``RuntimeError`` if the session isn't connected (use connect()
-        or the async-context-manager form first).
-        """
-        if self._session is None:
-            await self.connect()
-        assert self._session is not None
-        return await self._session.call_tool(name, arguments or {})
+        """Invoke a tool, in a session scoped to this call."""
+        async with self._session_scope() as session:
+            return await session.call_tool(name, arguments or {})
 
     async def __aenter__(self) -> MCPHTTPClient:
-        await self.connect()
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:

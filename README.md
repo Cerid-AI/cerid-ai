@@ -8,7 +8,7 @@ A privacy-first, local-first workspace that unifies your code, finance, projects
 [![License](https://img.shields.io/badge/License-FSL--1.1--ALv2-blue)](LICENSE)
 [![CI](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml)
 
-[Docs](docs/) · [Website](https://cerid.ai) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
+[Docs](docs/) · [Website](https://cerid.ai) · [Pricing](https://cerid.ai/pricing) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
 
 ---
 
@@ -69,6 +69,38 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 - **Full Observability** — Health checks, cost tracking, queue depth, swallowed error counters
 
 All data stays local. Only LLM API calls leave your machine.
+
+---
+
+## Core vs Pro
+
+Everything above is **Cerid Core** — free, self-hosted, no account, no telemetry,
+no seat limits, nothing that expires. It is a complete product on its own.
+
+**Cerid Pro** ($15/mo · $144/yr) adds the surfaces that reach outside your own
+disk: the connectors that pull your mail, calendars and meetings in, plus the
+retrieval and analysis layers built on top of them.
+
+| | Core | Pro |
+|---|---|---|
+| Knowledge surfaces (wiki / vector / graph / memory), 12 agents, 55 MCP tools | ✓ | ✓ |
+| Local + web sources: folders, RSS, bookmarks, webhooks, browser extension | ✓ | ✓ |
+| Local LLM pipeline (Ollama / quenchforge), hallucination detection, SDKs | ✓ | ✓ |
+| Cloud connectors — Gmail, Outlook, Google + Microsoft Calendar | — | ✓ |
+| Apple connectors — Mail, Notes, Photos, Reminders, Calendar, iMessage | — | ✓ |
+| Meeting Capture — transcription with calendar-aware stitching | — | ✓ |
+| Custom Smart RAG (per-source weighting), advanced analytics, daily digest | — | ✓ |
+| AI inbox triage, metamorphic verification | — | ✓ |
+
+Full flag-by-flag breakdown: [`docs/TIER_MATRIX.md`](docs/TIER_MATRIX.md).
+**Cerid Vault** (enterprise: multi-user, SSO, audit logging, SLA) —
+[vault@cerid.ai](mailto:vault@cerid.ai).
+
+**Try Pro free for 14 days — no credit card.** Settings → Plan & Billing →
+*Start 14-day free trial*. To buy, see [cerid.ai/pricing](https://cerid.ai/pricing)
+and paste the key you receive into that same pane. Upgrading never needs a
+reinstall, and if you stop paying, Core keeps working — nothing you built is
+locked away.
 
 ---
 

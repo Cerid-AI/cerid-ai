@@ -22,7 +22,11 @@ not inside the Cerid backend:
 - Container name: `cerid-google-workspace-mcp`.
 - Internal address: `http://cerid-google-workspace-mcp:8000/mcp`.
 - Transport: streamable-HTTP.
-- AuthN to the MCP server: static bearer token (`CERID_CONNECTORS_BEARER`).
+- AuthN to the MCP server: **none**. The upstream image has no client-auth
+  mechanism (there is no `WORKSPACE_MCP_AUTH_TOKEN` in it), so the bearer Cerid
+  sends is ignored. The container's protection is that it binds to loopback
+  only. This doc claimed a static-bearer control until 2026-08-09; it never
+  existed. The ms365 sibling *does* honour one.
 - AuthN to Google: OAuth 2.0, owned entirely by the sibling container.
   The Cerid backend never sees Google refresh tokens.
 
@@ -71,11 +75,26 @@ start in default/free deployments.
 
 ### 4. First-use OAuth handshake
 
-Open `http://localhost:8810/oauth/start` in a browser on the host machine.
-Complete the Google sign-in flow; consent to the Gmail read scopes. The
-OAuth refresh token is written to the container's persistent volume and
-survives restarts. You do not need to repeat this step unless you revoke
-access from your Google account settings.
+There is **no browsable start page** — `/oauth/start` is a 404. This doc and
+Cerid's own `/connectors/gmail/auth/start` both claimed one until 2026-08-09,
+the first time the container was run. The sibling's only HTTP route is the
+`/oauth2callback` the consent screen redirects back to; the flow is started by
+an MCP tool call.
+
+Set `USER_GOOGLE_EMAIL` in `.env` to the account you are connecting, then:
+
+```bash
+K=$(grep -m1 '^CERID_API_KEY=' .env | cut -d= -f2-)
+curl -s -X POST -H "X-API-Key: $K" localhost:8888/connectors/gmail/auth/start
+```
+
+That calls the sibling's `start_google_auth` tool and returns the consent URL.
+Open it on the host, complete sign-in, and consent to the read scopes. The
+refresh token is written to the container's persistent volume and survives
+restarts. You do not need to repeat this unless you revoke access in your
+Google account settings — **or** unless the OAuth consent screen is still in
+"Testing", in which case Google expires the refresh token after 7 days. See
+`docs/RUNBOOK_PRO_CONNECTORS.md` §2.
 
 ## Enable in Cerid
 
@@ -117,5 +136,6 @@ ids and lightweight metadata may be cached for deduplication.
 | Boot log: `CERID_CONNECTORS_BEARER unset — Pro cloud connectors not registered` | Set the env var in `.env`, then `docker compose up -d` again. |
 | Boot log: `GOOGLE_OAUTH_CLIENT_ID missing — google-workspace-mcp disabled` | Add both `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` and recreate the sibling container so it picks up the new env. |
 | `breaker-open` errors in `/health` referencing `google-workspace-mcp` | Sibling container has crashed or is restarting. Check `docker logs cerid-google-workspace-mcp`. |
-| `http://localhost:8810/oauth/start` returns 404 | Sibling container is not running, or the `pro` profile was not passed. Re-run the compose command with `--profile pro`. |
+| `/oauth/start` returns 404 | Expected — that route never existed. Use the `auth/start` call in §4. |
+| `auth/start` says the sibling is unreachable | Container not running, or the `pro` profile was not passed. Re-run compose with `--profile pro`. |
 | 401 from MCP server in backend logs | Bearer token mismatch between the backend's env and the sibling's env. Confirm both containers were recreated after the last `.env` edit. |

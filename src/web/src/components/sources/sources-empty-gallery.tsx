@@ -19,6 +19,7 @@ import { useQuery } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { DataState } from "@/components/ui/data-state"
 import { listSourceKinds } from "@/lib/api/sources"
+import { useEntitlements } from "@/hooks/use-entitlements"
 import type { SourceKindMetaExt } from "./source-kind-meta"
 import { descriptorFor } from "./source-kind-icons"
 
@@ -28,9 +29,20 @@ interface SourcesEmptyGalleryProps {
       When omitted, oauth tiles stay disabled with copy naming the
       Sources → Connectors tab (where the connector rows live). */
   onOpenConnector?: (kind: string) => void
+  /** Called instead of the normal open when a Pro tile is clicked on a tier
+      that can't use it. Without this the wizard opens and then fails at the
+      server gate — the tile advertises the feature and dead-ends on it. */
+  onProLocked?: (kind: string) => void
 }
 
-export function SourcesEmptyGallery({ onSelectKind, onOpenConnector }: SourcesEmptyGalleryProps) {
+export function SourcesEmptyGallery({
+  onSelectKind,
+  onOpenConnector,
+  onProLocked,
+}: SourcesEmptyGalleryProps) {
+  const { tier } = useEntitlements()
+  // Enterprise inherits Pro, so gate on "not community" rather than == pro.
+  const proLocked = tier === "community"
   const { data: kinds, isLoading, isError, refetch } = useQuery<SourceKindMetaExt[]>({
     queryKey: ["source-kinds"],
     queryFn: listSourceKinds,
@@ -79,7 +91,17 @@ export function SourcesEmptyGallery({ onSelectKind, onOpenConnector }: SourcesEm
       <SectionTitle label="Pro" subtitle={`${pro.length} unlock with upgrade`} className="mt-8" />
       <div className="cerid-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {pro.map((k) => (
-          <Tile key={k.kind} meta={k} onClick={() => onSelectKind(k.kind)} onOpenConnector={onOpenConnector} />
+          <Tile
+            key={k.kind}
+            meta={k}
+            onClick={() =>
+              proLocked && onProLocked ? onProLocked(k.kind) : onSelectKind(k.kind)
+            }
+            // A locked tile must reach the upgrade path even for kinds whose
+            // normal route is the connector flow, so suppress that handoff.
+            onOpenConnector={proLocked && onProLocked ? undefined : onOpenConnector}
+            forceSelectable={proLocked && !!onProLocked}
+          />
         ))}
       </div>
     </div>
@@ -107,10 +129,15 @@ function Tile({
   meta,
   onClick,
   onOpenConnector,
+  forceSelectable = false,
 }: {
   meta: SourceKindMetaExt
   onClick: () => void
   onOpenConnector?: (kind: string) => void
+  /** Keep the tile clickable even when its normal route is unavailable —
+      used for Pro-locked tiles, whose click opens the upgrade dialog. A
+      greyed-out tile can't sell anything. */
+  forceSelectable?: boolean
 }) {
   const desc = descriptorFor(meta.kind)
   const Icon = desc.icon
@@ -119,7 +146,12 @@ function Tile({
   // oauth kinds connect via the ConnectorDetail flow on this same
   // Sources → Connectors tab — actionable when the host wires it.
   const oauthActionable = availability === "oauth" && !!onOpenConnector
-  const selectable = availability === "available" || oauthActionable
+  // "coming soon" and "requires desktop" stay disabled regardless: those are
+  // statements about the build, not about the plan, and no upgrade fixes them.
+  const selectable =
+    availability === "available" ||
+    oauthActionable ||
+    (forceSelectable && availability === "oauth")
 
   return (
     <button

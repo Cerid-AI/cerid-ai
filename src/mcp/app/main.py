@@ -84,6 +84,9 @@ from app.routers import (
 from app.routers import (
     graph as graph_router,
 )
+from app.routers import (
+    license as license_router,
+)
 from app.scheduler import start_scheduler, stop_scheduler
 from config.features import CERID_MULTI_USER
 from core.utils.swallowed import log_swallowed_error
@@ -440,6 +443,39 @@ async def _check_infra_connectivity() -> None:
     )
 
 
+def _warn_if_unlicensed_pro() -> None:
+    """Say so, every boot, when paid features are on without a license.
+
+    Deliberately not a failure and not rate-limited: pinning ``CERID_TIER`` to a
+    paid tier is supported for air-gapped and enterprise images, so this must
+    not block anyone — but it must also never be mistaken for a licensed
+    install, by an operator or by whoever reads the logs after them.
+    """
+    try:
+        from app.deps import get_redis
+        from app.routers.license import STATE_UNLICENSED_PRO, entitlement_state
+        from utils.license import verification_enabled
+
+        if not verification_enabled():
+            logger.warning(
+                "license_notice: CERID_LICENSE_PUBLIC_KEY is empty — license signatures "
+                "are NOT verified on this server, so any correctly-shaped key unlocks "
+                "paid features. Intended for local preview only; unset the variable to "
+                "restore verification."
+            )
+
+        if entitlement_state(get_redis()) == STATE_UNLICENSED_PRO:
+            logger.warning(
+                "license_notice: paid-tier features are enabled by CERID_TIER=%s with no "
+                "license key and no trial on this server. This is an UNLICENSED copy of "
+                "Cerid Pro. Buy a license at https://cerid.ai/pricing, or start the free "
+                "14-day trial in Settings → Plan & Billing.",
+                os.getenv("CERID_TIER", "community"),
+            )
+    except Exception as exc:  # noqa: BLE001 — a notice must never affect boot
+        log_swallowed_error('app.main.license_notice', exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Install signal handlers AFTER uvicorn startup (uvicorn overwrites module-level handlers)
@@ -451,6 +487,22 @@ async def lifespan(app: FastAPI):
     # Warns and continues in degraded mode on persistent failure rather than
     # crashing, so the /health endpoint remains reachable for diagnosis.
     await _check_infra_connectivity()
+
+    # Re-derive the tier from persisted entitlement. FEATURE_TIER is read from
+    # CERID_TIER at import, so without this an activated license or a running
+    # trial silently reverts to the baseline on every restart. Skipped when the
+    # commercial router is present — that build runs its own reconcile at boot.
+    if not _commercial_billing_present():
+        try:
+            from app.deps import get_redis
+            from app.routers.license import reconcile_license_state
+
+            logger.info("License reconcile at startup — tier %r",
+                        reconcile_license_state(get_redis()))
+        except Exception as exc:  # noqa: BLE001 — never block boot on entitlement
+            logger.warning("License reconcile skipped: %s", exc)
+
+    _warn_if_unlicensed_pro()
 
     # Startup validation: warn on missing critical env vars
     if not os.getenv("OPENROUTER_API_KEY"):
@@ -1229,6 +1281,25 @@ app.include_router(atlas_views.router)
 
 # Constellation tour mode — LLM-narrated camera arc (Phase B Day 7).
 app.include_router(graph_tour.router)
+
+# Offline license activation + self-serve trial. The commercial build ships a
+# Stripe-backed router owning the same Redis keys; mounting both would let two
+# writers race on cerid:license:status, so this one stands down when that one
+# is present (that build registers its own router later during bootstrap).
+def _commercial_billing_present() -> bool:
+    """True when the internal Stripe router is importable in this build."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("routers.billing") is not None
+    except (ImportError, AttributeError, ValueError):
+        # No `routers` package at all (the public tree strips it wholesale) —
+        # find_spec raises rather than returning None when the PARENT is missing.
+        return False
+
+
+if not _commercial_billing_present():
+    app.include_router(license_router.router)
 
 # Whisper model download manager — Phase E Day 3.
 app.include_router(whisper_models.router)

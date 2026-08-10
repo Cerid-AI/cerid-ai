@@ -4,6 +4,7 @@
 """Tests for /connectors REST surface (Phase F.2 deferred cleanup)."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +32,62 @@ def test_every_connector_instruction_doc_exists() -> None:
     assert not missing, f"connectors point at non-existent docs: {missing}"
 
 
+# Connector plugins that reach the user through the Electron bridge rows
+# (src/web/src/components/sources/source-rows.ts :: APPLE_BRIDGE_KINDS) rather
+# than /connectors. Sources → Connectors concatenates both feeds with no dedup,
+# so a connector belongs to exactly one of them or it renders twice.
+_BRIDGE_ROW_CONNECTORS = {"apple_mail", "apple_imessage"}
+
+
+def test_every_connector_plugin_reaches_a_ui_surface() -> None:
+    """A ``"type": "connector"`` plugin in neither feed is unreachable.
+
+    Sources → Connectors is fed by /connectors *plus* the desktop bridge rows.
+    A paid connector in neither is invisible however complete its backend is.
+    """
+    from app.routers.connectors import _CONNECTORS
+
+    listed_flags = {meta.feature_flag for meta in _CONNECTORS.values()}
+    unreachable = {}
+    for manifest_path in sorted((REPO_ROOT / "src/mcp/plugins").glob("*/manifest.json")):
+        manifest = json.loads(manifest_path.read_text())
+        if manifest.get("type") != "connector":
+            continue
+        name = manifest.get("name")
+        if name in _BRIDGE_ROW_CONNECTORS:
+            assert name not in _CONNECTORS, (
+                f"{name} is in both feeds — the gallery would show it twice"
+            )
+            continue
+        flags = manifest.get("feature_flags") or []
+        if not any(flag in listed_flags for flag in flags):
+            unreachable[name] = flags
+
+    assert not unreachable, (
+        f"connector plugins reachable from no UI surface: {unreachable}"
+    )
+
+
+def test_bridge_row_connectors_are_actually_in_the_bridge_row_list() -> None:
+    """The exemption above is only honest if the bridge really renders them.
+
+    Without this, dropping a kind from APPLE_BRIDGE_KINDS would leave the
+    connector reaching *no* surface while the gate above stayed green.
+    """
+    rows_ts = (
+        REPO_ROOT / "src/web/src/components/sources/source-rows.ts"
+    ).read_text()
+    bridge_block = rows_ts.split("APPLE_BRIDGE_KINDS", 1)[-1].split("]", 1)[0]
+
+    # Manifest name `apple_mail` → bridge kind `mail`; `apple_imessage` → `imessage`.
+    for plugin_name in sorted(_BRIDGE_ROW_CONNECTORS):
+        kind = plugin_name.removeprefix("apple_")
+        assert f'kind: "{kind}"' in bridge_block, (
+            f"{plugin_name} is exempted from /connectors but "
+            f'kind: "{kind}" is not in APPLE_BRIDGE_KINDS'
+        )
+
+
 def _make_app() -> FastAPI:
     from app.routers.connectors import router
 
@@ -48,7 +105,7 @@ def client(monkeypatch):
 
 
 class TestListConnectors:
-    def test_lists_all_seven(self, client):
+    def test_lists_every_connector(self, client):
         resp = client.get("/connectors")
         assert resp.status_code == 200
         slugs = [c["slug"] for c in resp.json()["connectors"]]
@@ -59,6 +116,10 @@ class TestListConnectors:
         assert "apple_calendar" in slugs
         assert "apple_photos" in slugs
         assert "apple_reminders" in slugs
+        # Mail / iMessage / Notes are bridge rows, not REST rows — see
+        # _BRIDGE_ROW_CONNECTORS above.
+        assert "apple_mail" not in slugs
+        assert "apple_imessage" not in slugs
 
     def test_each_carries_required_fields(self, client):
         connectors = client.get("/connectors").json()["connectors"]
@@ -106,6 +167,82 @@ class TestListConnectors:
         assert apple_cal["auth_kind"] == "tcc_only"
 
 
+class TestSiblingReachability:
+    """A closed circuit breaker is not evidence of reachability.
+
+    The breaker opens only after three recorded failures, so a sibling nobody
+    has called — including one whose container was never started — looks
+    identical to a healthy one. Reporting that as reachable made `outlook` and
+    `outlook_calendar` read "connected" on 2026-08-09 while no ms365 container
+    existed at all.
+    """
+
+    @staticmethod
+    def _with_pool(monkeypatch, entries):
+        import sys
+        import types
+
+        mod = types.ModuleType("core.mcp_clients.client_pool")
+        mod.get_pool = lambda: types.SimpleNamespace(list_connectors=lambda: entries)
+        monkeypatch.setitem(sys.modules, "core.mcp_clients.client_pool", mod)
+
+    def test_never_contacted_is_unknown_not_reachable(self, client, monkeypatch):
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 0,
+             "circuit_open": False, "ever_succeeded": False},
+        ])
+        outlook = next(
+            c for c in client.get("/connectors").json()["connectors"]
+            if c["slug"] == "outlook"
+        )
+        assert outlook["sibling_reachable"] is None
+        assert outlook["requires_sibling"] == "ms365"
+
+    def test_a_successful_call_makes_it_reachable(self, client, monkeypatch):
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 0,
+             "circuit_open": False, "ever_succeeded": True},
+        ])
+        outlook = next(
+            c for c in client.get("/connectors").json()["connectors"]
+            if c["slug"] == "outlook"
+        )
+        assert outlook["sibling_reachable"] is True
+
+    def test_open_circuit_is_unreachable_even_if_it_once_worked(self, client, monkeypatch):
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 3,
+             "circuit_open": True, "ever_succeeded": True},
+        ])
+        outlook = next(
+            c for c in client.get("/connectors").json()["connectors"]
+            if c["slug"] == "outlook"
+        )
+        assert outlook["sibling_reachable"] is False
+
+    def test_apple_connectors_declare_no_sibling(self, client):
+        cal = next(
+            c for c in client.get("/connectors").json()["connectors"]
+            if c["slug"] == "apple_calendar"
+        )
+        # Same null as "not contacted yet" — requires_sibling is what tells the
+        # UI which of the two it is looking at.
+        assert cal["requires_sibling"] is None
+        assert cal["sibling_reachable"] is None
+
+    def test_auth_status_separates_unknown_from_unreachable(self, client, monkeypatch):
+        # The env check comes first in the detail ladder; this test is about
+        # what it says once the env IS complete.
+        monkeypatch.setenv("CERID_CONNECTORS_BEARER", "test-bearer")
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 0,
+             "circuit_open": False, "ever_succeeded": False},
+        ])
+        detail = client.get("/connectors/outlook/auth/status").json()["detail"]
+        assert "not been contacted yet" in detail
+        assert "not reachable" not in detail
+
+
 class TestGetConnector:
     def test_unknown_slug_returns_404(self, client):
         resp = client.get("/connectors/nonexistent")
@@ -120,12 +257,61 @@ class TestGetConnector:
 
 
 class TestStartAuth:
-    def test_google_returns_browser_url(self, client):
-        resp = client.post("/connectors/gmail/auth/start")
-        assert resp.status_code == 200
-        body = resp.json()
+    """Google's flow is an MCP tool call, not a browsable page.
+
+    This used to assert only that *some* URL came back, which the old
+    implementation satisfied by returning ``http://127.0.0.1:8810/oauth/start``
+    — a route that 404s. The test passed for as long as the feature was broken.
+    """
+
+    def test_google_without_an_account_asks_for_one_instead_of_inventing_a_url(
+        self, client, monkeypatch,
+    ):
+        monkeypatch.delenv("USER_GOOGLE_EMAIL", raising=False)
+        body = client.post("/connectors/gmail/auth/start").json()
         assert body["auth_kind"] == "google_oauth"
-        assert "http" in body["auth_url"].lower()
+        assert body["auth_url"] is None
+        assert "USER_GOOGLE_EMAIL" in body["instructions"]
+
+    def test_google_returns_the_consent_url_the_sibling_produced(
+        self, client, monkeypatch,
+    ):
+        import sys
+        import types
+
+        url = "https://accounts.google.com/o/oauth2/auth?client_id=x&scope=y"
+        mod = types.ModuleType("core.mcp_clients.client_pool")
+
+        async def _call_tool(name, tool, args):
+            assert tool == "start_google_auth"
+            return f"Please visit {url} to authorize."
+
+        mod.get_pool = lambda: types.SimpleNamespace(call_tool=_call_tool)
+        monkeypatch.setitem(sys.modules, "core.mcp_clients.client_pool", mod)
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "someone@example.com")
+
+        body = client.post("/connectors/gmail/auth/start").json()
+        assert body["auth_url"] == url
+        assert "someone@example.com" in body["instructions"]
+
+    def test_google_surfaces_an_unreachable_sibling_rather_than_a_url(
+        self, client, monkeypatch,
+    ):
+        import sys
+        import types
+
+        mod = types.ModuleType("core.mcp_clients.client_pool")
+
+        async def _boom(*_a, **_k):
+            raise ConnectionError("connection refused")
+
+        mod.get_pool = lambda: types.SimpleNamespace(call_tool=_boom)
+        monkeypatch.setitem(sys.modules, "core.mcp_clients.client_pool", mod)
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "someone@example.com")
+
+        body = client.post("/connectors/gmail/auth/start").json()
+        assert body["auth_url"] is None
+        assert "connection refused" in body["instructions"]
 
     def test_microsoft_returns_device_code_instructions(self, client):
         resp = client.post("/connectors/outlook/auth/start")

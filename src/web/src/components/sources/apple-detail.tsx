@@ -122,6 +122,18 @@ interface CeridAppleBridge {
         errors: string[]
       }>
     }
+    /** Spotlight runs the other way — it reads the KB and donates it to
+     *  CoreSpotlight — so it has no scan/ingest pair and no row here. Its
+     *  surface is Settings → Extensions. */
+    spotlight?: {
+      donate: (payload: { mcp_base_url: string; max_items?: number }) => Promise<{
+        ok: boolean
+        scanned: number
+        donated: number
+        error?: string
+      }>
+      purge: () => Promise<{ ok: boolean; error?: string }>
+    }
   }
 }
 

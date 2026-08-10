@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any
 
 from app.data_sources.base import DataSource, DataSourceResult
 from app.data_sources.calendar_protocol import CalendarEvent
+from core.mcp_clients.result_text import tool_text
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.data_sources.google_calendar")
@@ -57,12 +59,16 @@ class GoogleCalendarDataSource(DataSource):
                     "time_min": start.isoformat(),
                     "time_max": end.isoformat(),
                     "max_results": max_results,
+                    # Without this the server emits a one-line summary per
+                    # event with no description, location or attendees — the
+                    # fields meeting_capture stitching actually matches on.
+                    "detailed": True,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — sibling MCP can fail many ways
             log_swallowed_error("google_calendar.list_events", exc)
             return []
-        return _coerce_events(raw)
+        return parse_events(raw)
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         """DataSource fan-out — natural-language calendar query.
@@ -82,14 +88,21 @@ class GoogleCalendarDataSource(DataSource):
                     "time_min": now.isoformat(),
                     "time_max": (now + timedelta(days=30)).isoformat(),
                     "max_results": int(kwargs.get("max_results", 25)),
-                    "q": query,  # if the server supports keyword filter; ignored otherwise
+                    # The parameter is `query`, not `q`. Unknown keywords are
+                    # not "ignored otherwise" as the old comment assumed — the
+                    # server validates with pydantic and rejects the whole
+                    # call ("q Unexpected keyword argument"), returning that
+                    # error as a tool RESULT. Every calendar query failed this
+                    # way and reported zero events.
+                    "query": query,
+                    "detailed": True,
                 },
             )
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("google_calendar.query", exc)
             return []
 
-        events = _coerce_events(raw)
+        events = parse_events(raw)
         out: list[DataSourceResult] = []
         for ev in events:
             title = ev.get("title", "(no title)")
@@ -115,81 +128,87 @@ class GoogleCalendarDataSource(DataSource):
         return out
 
 
-def _coerce_events(raw: Any) -> list[CalendarEvent]:
-    """Normalize the MCP response shape to a list of CalendarEvent dicts.
+# ``get_events`` returns PROSE, not JSON — see the module docstring. With
+# detailed=True the server emits one block per event
+# (gcalendar/calendar_tools.py in the sibling image):
+#
+#     - "Standup" (Starts: 2026-05-21T10:00:00-04:00, Ends: 2026-05-21T10:15:00-04:00)
+#       Description: No Description
+#       Location: No Location
+#       Meeting Link: https://meet.google.com/abc      <- only when present
+#       Attendees: a@example.com, b@example.com
+#       Attendee Details: ...
+#       ID: 6f1c… | Link: https://www.google.com/calendar/event?eid=…
+#
+# The header is matched non-greedily up to the literal ``" (Starts:`` so a
+# title containing a quote cannot swallow the timing fields.
+_EVENT_HEADER_RE = re.compile(
+    r'^-\s+"(?P<title>.*?)"\s+\(Starts:\s*(?P<start>[^,]+),\s*Ends:\s*(?P<end>[^)]+)\)',
+    re.MULTILINE,
+)
+_FIELD_RES = {
+    "description": re.compile(r"^\s+Description:\s*(.*)$", re.MULTILINE),
+    "location": re.compile(r"^\s+Location:\s*(.*)$", re.MULTILINE),
+    "attendees": re.compile(r"^\s+Attendees:\s*(.*)$", re.MULTILINE),
+}
+_ID_RE = re.compile(r"(?:^\s+|\s)ID:\s*(?P<id>\S+)\s*\|\s*Link:\s*(?P<link>\S+)", re.MULTILINE)
 
-    Different google-workspace-mcp versions return events under different
-    keys (``events``, ``items``, ``results``, plain list). Each event's
-    ``start``/``end`` may be ``{"dateTime": "..."}`` (timed) or
-    ``{"date": "..."}`` (all-day).
+# The server writes these literals when a field is absent. Carrying them
+# through would put "No Description" in an answer as though it were content.
+_ABSENT = {"No Description", "No Location", "No Title", "None", "No Link", "No ID"}
+
+
+def _clean(value: str) -> str:
+    value = value.strip()
+    return "" if value in _ABSENT else value
+
+
+def parse_events(raw: Any) -> list[CalendarEvent]:
+    """Parse a ``get_events`` reply into CalendarEvent dicts.
+
+    Replaces a shape-guessing coercer that looked for ``events``/``items``/
+    ``results`` keys. The server has never returned any of those: it returns
+    text, and ``pool.call_tool`` wraps it in a ``CallToolResult``, so the old
+    isinstance checks matched nothing and every calendar query came back
+    empty.
     """
-    events_in: list[dict[str, Any]] = []
-    if isinstance(raw, list):
-        events_in = [e for e in raw if isinstance(e, dict)]
-    elif isinstance(raw, dict):
-        for key in ("events", "items", "results", "data"):
-            if isinstance(raw.get(key), list):
-                events_in = [e for e in raw[key] if isinstance(e, dict)]
-                break
+    text = tool_text(raw)
+    if not text:
+        return []
 
+    headers = list(_EVENT_HEADER_RE.finditer(text))
     out: list[CalendarEvent] = []
-    for e in events_in:
-        ev: CalendarEvent = {}
-        if (eid := e.get("id")) is not None:
-            ev["id"] = str(eid)
-        if (title := e.get("summary") or e.get("title")) is not None:
-            ev["title"] = str(title)
+    for i, match in enumerate(headers):
+        # Body of this event = up to the next event header (or end of text).
+        block_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        block = text[match.end():block_end]
 
-        start_dt = _parse_event_time(e.get("start"))
-        end_dt = _parse_event_time(e.get("end"))
-        if start_dt:
+        ev: CalendarEvent = {}
+        if title := _clean(match.group("title")):
+            ev["title"] = title
+        if start_dt := _safe_iso(match.group("start").strip()):
             ev["start"] = start_dt
-        if end_dt:
+        if end_dt := _safe_iso(match.group("end").strip()):
             ev["end"] = end_dt
 
-        attendees_raw = e.get("attendees", [])
-        if isinstance(attendees_raw, list):
-            attendees: list[str] = []
-            for a in attendees_raw:
-                if isinstance(a, str):
-                    attendees.append(a)
-                elif isinstance(a, dict):
-                    if "email" in a:
-                        attendees.append(str(a["email"]))
-                    elif "displayName" in a:
-                        attendees.append(str(a["displayName"]))
-            if attendees:
-                ev["attendees"] = attendees
-
-        if (organizer := e.get("organizer")) is not None:
-            if isinstance(organizer, dict):
-                ev["organizer"] = str(organizer.get("email") or organizer.get("displayName") or "")
+        for field, pattern in _FIELD_RES.items():
+            found = pattern.search(block)
+            if not found:
+                continue
+            value = _clean(found.group(1))
+            if not value:
+                continue
+            if field == "attendees":
+                ev["attendees"] = [a.strip() for a in value.split(",") if a.strip()]
             else:
-                ev["organizer"] = str(organizer)
-        if (desc := e.get("description")) is not None:
-            ev["description"] = str(desc)
-        if (loc := e.get("location")) is not None:
-            ev["location"] = str(loc)
+                ev[field] = value  # type: ignore[literal-required]
+
+        if id_match := _ID_RE.search(block):
+            if eid := _clean(id_match.group("id")):
+                ev["id"] = eid
 
         out.append(ev)
     return out
-
-
-def _parse_event_time(value: Any) -> datetime | None:
-    """Google Calendar events represent timing as either:
-      {"dateTime": "2026-05-21T10:00:00-04:00"}    (timed)
-      {"date": "2026-05-21"}                       (all-day)
-      "2026-05-21T10:00:00-04:00"                  (some MCP servers flatten it)
-    """
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return _safe_iso(value)
-    if isinstance(value, dict):
-        dt = value.get("dateTime") or value.get("date")
-        if isinstance(dt, str):
-            return _safe_iso(dt)
-    return None
 
 
 def _safe_iso(s: str) -> datetime | None:

@@ -33,8 +33,27 @@ import {
   fetchMcpServers, addMcpServer, deleteMcpServer, reconnectMcpServer,
   type McpServerAddRequest,
 } from "@/lib/api/governance"
+import { MCP_BASE } from "@/lib/api/common"
 import type { Plugin, PluginConfig } from "@/lib/types"
 import { useEntitlements } from "@/hooks/use-entitlements"
+import { useNavigation } from "@/contexts/navigation-context"
+import { LicenseNotice } from "@/components/settings/license-notice"
+
+/** Inline route to the plan pane. These spots used to name "Plan & Billing"
+    in prose with no way to get there — an upgrade prompt that cannot be
+    acted on is just a complaint. */
+function PlanLink({ children }: { children: React.ReactNode }) {
+  const { goTo } = useNavigation()
+  return (
+    <button
+      type="button"
+      onClick={() => goTo("settings", { category: "plan" })}
+      className="font-medium underline underline-offset-2 hover:no-underline"
+    >
+      {children}
+    </button>
+  )
+}
 import { logSwallowedError } from "@/lib/log-swallowed"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -164,7 +183,8 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
       )}
       {isLocked && (
         <p className="text-label-xs text-muted-foreground">
-          Requires {needsEnterprise ? "Enterprise" : "Pro"} plan.
+          Requires {needsEnterprise ? "Enterprise" : "Pro"} plan —{" "}
+          <PlanLink>see plans or start a free trial</PlanLink>.
         </p>
       )}
       {plugin.config_schema && Object.keys(plugin.config_schema).length > 0 && (
@@ -853,7 +873,8 @@ function AutomationRow({ automation, onChanged }: { automation: AutomationState;
       )}
       {isLocked && (
         <p className="text-label-xs text-muted-foreground">
-          Requires Pro plan. Go to <strong>Plan &amp; Billing</strong> to upgrade.
+          Requires Pro plan —{" "}
+          <PlanLink>see plans or start a free trial</PlanLink>.
         </p>
       )}
       {runError && (
@@ -886,8 +907,8 @@ function AutomationsSection() {
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription className="text-xs">
-            Scheduled automations are a Pro feature. Upgrade in{" "}
-            <strong>Plan &amp; Billing</strong> to enable them.
+            Scheduled automations are a Pro feature.{" "}
+            <PlanLink>See plans or start a free trial</PlanLink>.
           </AlertDescription>
         </Alert>
       )}
@@ -919,11 +940,112 @@ function AutomationsSection() {
   )
 }
 
+// ── Spotlight ─────────────────────────────────────────────────────────────────
+
+/** The Spotlight bridge, or null outside the desktop app. CoreSpotlight is a
+    host API — a containerised backend can never reach it, so this section only
+    exists when the Electron main process is on the other side. */
+function spotlightBridge() {
+  if (typeof window === "undefined") return null
+  return window.cerid?.appleConnectors?.spotlight ?? null
+}
+
+function SpotlightSection() {
+  const ent = useEntitlements()
+  const entInfo = ent.forFlag("spotlight_donation", "pro")
+  const isLocked = entInfo.state === "locked"
+  const bridge = spotlightBridge()
+  const [busy, setBusy] = useState<"donating" | "purging" | null>(null)
+  const [result, setResult] = useState<string>("")
+  const [error, setError] = useState("")
+
+  if (bridge === null) return null
+
+  const handleDonate = async () => {
+    setBusy("donating")
+    setError("")
+    setResult("")
+    try {
+      const r = await bridge.donate({ mcp_base_url: MCP_BASE })
+      if (r.ok) {
+        setResult(`Donated ${r.donated} of ${r.scanned} artifacts to Spotlight.`)
+      } else {
+        setError(r.error ?? "Donation failed")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Donation failed")
+      logSwallowedError(err, "extensions.spotlightDonate")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handlePurge = async () => {
+    setBusy("purging")
+    setError("")
+    setResult("")
+    try {
+      const r = await bridge.purge()
+      if (r.ok) setResult("Removed Cerid's items from Spotlight.")
+      else setError(r.error ?? "Removal failed")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Removal failed")
+      logSwallowedError(err, "extensions.spotlightPurge")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Spotlight"
+      description="Make your knowledge base searchable from Cmd-Space. Titles and summaries are indexed by macOS on this machine; nothing is sent anywhere."
+    >
+      {isLocked ? (
+        <p className="text-label-xs text-muted-foreground">
+          Requires Pro plan — <PlanLink>see plans or start a free trial</PlanLink>.
+        </p>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDonate}
+            disabled={busy !== null}
+            className="h-7 text-xs"
+          >
+            {busy === "donating" ? "Donating…" : "Donate to Spotlight"}
+          </Button>
+          <ConfirmActionButton
+            danger="confirm"
+            title="Remove Cerid's Spotlight entries?"
+            description="Your knowledge base is untouched — this only clears the macOS search-index entries Cerid donated."
+            actionLabel="Remove"
+            onConfirm={handlePurge}
+            disabled={busy !== null}
+            variant="outline"
+            className="h-7 text-xs"
+          >
+            {busy === "purging" ? "Removing…" : "Remove from Spotlight"}
+          </ConfirmActionButton>
+        </div>
+      )}
+      {result && <p className="text-label-xs text-muted-foreground">{result}</p>}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-label-xs">{error}</AlertDescription>
+        </Alert>
+      )}
+    </SectionCard>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ExtensionsCategory() {
   return (
     <div className="density-stack">
+      <LicenseNotice />
       <Card>
         <CardContent className="py-3">
           <p className="text-label-sm leading-relaxed text-muted-foreground">
@@ -938,6 +1060,7 @@ export default function ExtensionsCategory() {
       <McpSection />
       <KnowledgeProvidersSection />
       <AutomationsSection />
+      <SpotlightSection />
     </div>
   )
 }

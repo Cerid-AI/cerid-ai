@@ -52,11 +52,18 @@ FROM python:3.12.13-slim-trixie
 ENV ANONYMIZED_TELEMETRY=false \
     CHROMA_ANONYMIZED_TELEMETRY=false
 
-# Pro plugins requiring tesseract-ocr and ffmpeg should install them in a
-# plugin-specific layer or via the sidecar.  Core image stays minimal.
+# ffmpeg is REQUIRED, not optional: the meeting_capture Pro plugin ships in
+# this image and cannot run without it. decode.py shells out to the `ffmpeg`
+# binary to make 16 kHz mono PCM, and pyannote 4.x decodes through torchcodec,
+# which dlopen()s the FFmpeg shared libs. Neither existed here, so Meeting
+# Capture was undeployable in the shipped image even once its plugin loaded —
+# and decode.py's docstring claimed ffmpeg was "bundled with Cerid's Docker
+# image", which it was not. The older "install it in a plugin-specific layer"
+# note is dropped because no such layer was ever built.
+# tesseract-ocr stays out: the ocr plugin degrades cleanly without it.
 RUN apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1000 cerid

@@ -119,7 +119,12 @@ python-multipart>=0.0.32,<1
 pywhispercpp>=1.5.0,<2
 # Speaker diarization (HF gated: pyannote/speaker-diarization-3.1 + segmentation-3.0).
 # Brings torch + torchaudio as transitive deps (~700MB wheel — accepted for Pro tier).
-pyannote.audio>=3.3,<4
+# MUST stay >=4: pyannote 3.x reads torchaudio.AudioMetaData, which torchaudio
+# removed by 2.11 — the combination the lock resolved. That AttributeError was
+# raised at plugin-load time, so the whole Meeting Capture bucket (diarization,
+# calendar stitching, summary) silently failed to load on every start while its
+# feature flags still reported Pro-enabled. 4.x drops that path (torchcodec).
+pyannote.audio>=4.0.7,<5
 # Voice activity detection (also pulled by pyannote, pinning for reproducibility)
 silero-vad>=5.1,<6
 

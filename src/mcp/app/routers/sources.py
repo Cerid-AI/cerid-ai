@@ -135,6 +135,18 @@ def _desktop_helper_available(kind: str) -> bool | None:
     return bool(probe()) if callable(probe) else True
 
 
+# Kinds whose ingestion lives entirely in the desktop app's main process
+# (packages/desktop/src/main/connectors/*.ts), which pushes artifacts straight
+# to the ingest API via ingest-client.ts. There is deliberately no backend
+# SourceConnector for these, so the registry probe below cannot see them — and
+# without this set they fell through to "coming_soon", telling a paying Pro
+# customer with the desktop app installed that a shipped feature did not exist.
+_DESKTOP_APP_KINDS: frozenset[str] = frozenset({
+    "apple_notes",  # connectors/apple_notes.ts  → ipc connectors:apple-notes:scan
+    "imessage",     # connectors/imessage.ts     → ipc connectors:imessage:scan
+})
+
+
 def _kind_availability(kind: str, oauth_kinds: set[str]) -> str:
     """Capability flag for a source kind, so the wizard can gate kinds that
     have no working ingestion path (rather than letting POST /sources 501).
@@ -160,6 +172,9 @@ def _kind_availability(kind: str, oauth_kinds: set[str]) -> str:
         if _desktop_helper_available(kind) is False:
             return "requires_desktop"
         return "available"
+    if kind in _DESKTOP_APP_KINDS:
+        # Implemented in the desktop app, not behind a backend connector.
+        return "requires_desktop"
     if kind in oauth_kinds:
         return "oauth"
     return "coming_soon"

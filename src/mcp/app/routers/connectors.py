@@ -24,10 +24,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.connectors")
 
@@ -40,6 +43,16 @@ router = APIRouter(prefix="/connectors", tags=["connectors"])
 # the operator completes the OAuth flow — different connectors have
 # different shapes (Google's single-user OAuth callback vs Microsoft's
 # device-code vs Apple's TCC-only no-OAuth path).
+#
+# Apple Notes / Mail / iMessage are deliberately NOT listed here. Sources →
+# Connectors builds its rows by concatenating /connectors with the Electron
+# bridge rows in src/web/.../source-rows.ts (APPLE_BRIDGE_KINDS), with no
+# dedup, and those three already ingest through the bridge
+# (packages/desktop/src/main/connectors/*.ts). Adding them would render each
+# one twice in the desktop build — once working, once reporting a Swift helper
+# the container cannot see. Calendar / Photos / Reminders are the inverse: REST
+# rows here, deliberately excluded from APPLE_BRIDGE_KINDS. Keep that split;
+# test_connectors_router.py pins it.
 class ConnectorMeta(BaseModel):
     slug: str
     display_name: str
@@ -47,7 +60,7 @@ class ConnectorMeta(BaseModel):
     auth_kind: Literal["google_oauth", "msal_device_code", "tcc_only"]
     requires_env: list[str]
     requires_sibling: str | None  # e.g. "google_workspace" / "ms365" / None for Apple
-    data_source_name: str | None  # registry key; None if not a DataSource (e.g. spotlight_donor)
+    data_source_name: str | None  # registry key; None if the connector is not a DataSource
     instruction_doc: str  # relative path to operator-facing docs
     # Operator-facing explainer (P0-C.4): what the connector reads, whether
     # it syncs continuously / imports once / reads on demand, and where the
@@ -170,7 +183,12 @@ class ConnectorStatus(BaseModel):
     missing_env: list[str]
     data_source_registered: bool
     data_source_configured: bool
-    sibling_reachable: bool | None  # None when no sibling needed
+    # Which sibling MCP this connector needs, or None for the Apple/TCC ones.
+    # Without it ``sibling_reachable: null`` is ambiguous — it means both "no
+    # sibling required" and "required but never contacted", and the UI was
+    # hiding the second case as though it were the first.
+    requires_sibling: str | None
+    sibling_reachable: bool | None  # None = no sibling, or not contacted yet
     sibling_circuit_open: bool | None
     auth_kind: str
     instruction_doc: str
@@ -208,6 +226,19 @@ class DisconnectResponse(BaseModel):
     detail: str
 
 
+_URL_RE = re.compile(r"https://\S+")
+
+
+def _first_url(text: str) -> str | None:
+    """First https URL in the sibling's free-text reply.
+
+    ``start_google_auth`` returns prose with the consent link embedded rather
+    than a structured field, so there is nothing better to key on.
+    """
+    match = _URL_RE.search(text)
+    return match.group(0).rstrip(").,'\"") if match else None
+
+
 # ── status assembly ───────────────────────────────────────────────────
 
 def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
@@ -236,7 +267,18 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
             sibling = pool_state.get(meta.requires_sibling)
             if sibling is not None:
                 sibling_circuit_open = bool(sibling.get("circuit_open", False))
-                sibling_reachable = not sibling_circuit_open
+                if sibling_circuit_open:
+                    sibling_reachable = False
+                elif sibling.get("ever_succeeded"):
+                    sibling_reachable = True
+                else:
+                    # Registered, breaker closed, never actually talked to.
+                    # Reporting True here is what made a connector whose
+                    # container was not running read as "connected" — the
+                    # breaker needs three failures before it opens, and
+                    # nothing had called it even once. None means "unknown",
+                    # and that is the truth until a call succeeds.
+                    sibling_reachable = None
             else:
                 sibling_reachable = False
                 sibling_circuit_open = False
@@ -253,6 +295,7 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
         missing_env=missing_env,
         data_source_registered=data_source_registered,
         data_source_configured=data_source_configured,
+        requires_sibling=meta.requires_sibling,
         sibling_reachable=sibling_reachable,
         sibling_circuit_open=sibling_circuit_open,
         auth_kind=meta.auth_kind,
@@ -288,14 +331,48 @@ async def start_auth(slug: str) -> ConnectorOAuthStartResponse:
         raise HTTPException(status_code=404, detail=f"unknown connector: {slug}")
 
     if meta.auth_kind == "google_oauth":
-        port = os.getenv("CERID_PORT_GOOGLE_MCP", "8810")
-        auth_url = f"http://127.0.0.1:{port}/oauth/start"
+        # The sibling has no browsable start page — /oauth/start is a 404, and
+        # this endpoint returned that URL from Phase F until 2026-08-09, the
+        # first time anyone ran the container. The flow is an MCP tool call
+        # (``start_google_auth``) that returns the consent URL; the server's
+        # only HTTP route is the /oauth2callback the consent screen redirects
+        # back to.
+        email = os.getenv("USER_GOOGLE_EMAIL", "").strip()
+        if not email:
+            return ConnectorOAuthStartResponse(
+                auth_kind="google_oauth",
+                instructions=(
+                    "Set USER_GOOGLE_EMAIL in .env to the Google account to "
+                    "connect, recreate the connector stack, then retry — the "
+                    "sibling needs an account to start the consent flow for."
+                ),
+            )
+        try:
+            from core.mcp_clients.client_pool import get_pool
+            raw = await get_pool().call_tool(
+                meta.requires_sibling or "google_workspace",
+                "start_google_auth",
+                {"service_name": "gmail", "user_google_email": email},
+            )
+        except Exception as exc:  # noqa: BLE001 — surfaced to the operator below
+            log_swallowed_error("app.routers.connectors.start_google_auth", exc)
+            return ConnectorOAuthStartResponse(
+                auth_kind="google_oauth",
+                instructions=(
+                    f"Could not reach {meta.requires_sibling}: {exc}. Bring the "
+                    "connector stack up (--profile pro) and retry."
+                ),
+            )
+        auth_url = _first_url(str(raw))
         return ConnectorOAuthStartResponse(
             auth_kind="google_oauth",
             auth_url=auth_url,
             instructions=(
-                f"Open {auth_url} in your browser to complete Google OAuth. "
-                f"The token will be persisted in the google-workspace-mcp container."
+                f"Open the returned URL in a browser on this machine and consent "
+                f"to the read-only scopes for {email}. The refresh token is "
+                f"written to the google-workspace-mcp container's volume."
+                if auth_url
+                else f"The sibling did not return a consent URL: {str(raw)[:300]}"
             ),
         )
 
@@ -347,6 +424,15 @@ async def get_auth_status(slug: str) -> OAuthStatusResponse:
             detail = "OAuth complete; sibling MCP reachable."
         elif not status.env_complete:
             detail = f"Missing env vars: {status.missing_env}"
+        elif status.sibling_reachable is None:
+            # Distinct from "not reachable": nothing has called it yet, so we
+            # have no evidence either way. Saying "not reachable" here sent
+            # operators to debug a container that was fine.
+            detail = (
+                f"Sibling {meta.requires_sibling} has not been contacted yet — "
+                "run a query through this connector, or bring the stack up if "
+                "it is not running."
+            )
         elif not status.sibling_reachable:
             detail = f"Sibling {meta.requires_sibling} not reachable. " \
                      "Bring up the connector stack via docker compose."
