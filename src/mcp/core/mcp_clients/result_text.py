@@ -17,6 +17,22 @@ from __future__ import annotations
 from typing import Any
 
 
+def is_error_result(raw: Any) -> bool:
+    """True when an MCP tool result carries the protocol's error flag.
+
+    MCP reports tool-level failures — unknown tool name, argument validation,
+    an upstream 401 — as a *result* with ``isError`` set, not as an exception.
+    Nothing in this codebase inspected that flag, so a connector that had
+    answered nothing but errors still counted as having succeeded, and the
+    operator was told the sibling was reachable (observed against ms365-mcp,
+    which 401s every Graph call). Treat an error result as "not a success".
+    """
+    flag = getattr(raw, "isError", None)
+    if flag is None and isinstance(raw, dict):
+        flag = raw.get("isError")
+    return bool(flag)
+
+
 def tool_text(raw: Any) -> str:
     """Best-effort text of an MCP tool result.
 

@@ -7,13 +7,26 @@ container. Equivalent role to GoogleCalendarDataSource for the
 Microsoft side. The meeting_capture calendar stitching falls back to
 this source when google_calendar isn't registered.
 
-NOTE: registry.get('outlook_calendar') isn't in calendar_stitch.py's
-fallback chain yet — Phase F Day 5 ships the Google path only.
-Updating the fallback to include outlook_calendar is a one-line change
-in calendar_stitch.py once an operator actually configures both.
+The tool is ``get-calendar-view`` (``GET /me/calendarView``, scope
+``Calendars.Read``), with **camelCase** ``startDateTime`` / ``endDateTime`` and
+``$top`` — read from the running image's ``dist/generated/client.js`` on
+2026-08-10.
+
+This was previously ``list-calendar-events`` with ``start_date_time`` /
+``end_date_time`` / ``top``. That tool exists but has no date parameters at
+all, and the server's argument schema is ``.passthrough()``: unknown keys are
+logged as "Dropping unrecognized parameter" and discarded rather than
+rejected. The kebab→camel normalizer does not touch snake_case, so the window
+could never survive. Masked while parsing was broken; once parsing worked it
+would have returned the first N events of the mailbox for EVERY window, and
+``calendar_stitch.match_to_event`` would have attributed meeting recordings to
+unrelated events — wrong data, which is worse than none. ``list-calendar-events``
+also returns only ``seriesMaster`` rows, per its own upstream tip; the
+calendarView route expands recurrences, which is what stitching needs.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -21,6 +34,7 @@ from typing import Any
 
 from app.data_sources.base import DataSource, DataSourceResult
 from app.data_sources.calendar_protocol import CalendarEvent
+from core.mcp_clients.result_text import is_error_result, tool_text
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.data_sources.outlook_calendar")
@@ -48,24 +62,19 @@ class OutlookCalendarDataSource(DataSource):
         end: datetime,
         max_results: int = 50,
     ) -> list[CalendarEvent]:
-        # Microsoft Graph: /me/calendarView?startDateTime=&endDateTime=
-        # Softeria tool name is 'list-calendar-events' on most pinned SHAs.
-        for tool_name in ("list-calendar-events", "list_calendar_events", "calendarView"):
-            try:
-                raw = await self._call_mcp(
-                    tool_name,
-                    {
-                        "start_date_time": start.isoformat(),
-                        "end_date_time": end.isoformat(),
-                        "top": max_results,
-                    },
-                )
-                events = _coerce_events(raw)
-                if events:
-                    return events
-            except Exception as exc:  # noqa: BLE001
-                log_swallowed_error(f"outlook_calendar.list_events.{tool_name}", exc)
-        return []
+        try:
+            raw = await self._call_mcp(
+                "get-calendar-view",
+                {
+                    "startDateTime": start.isoformat(),
+                    "endDateTime": end.isoformat(),
+                    "$top": max_results,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — sibling MCP can fail many ways
+            log_swallowed_error("outlook_calendar.list_events", exc)
+            return []
+        return parse_events(raw)
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         from datetime import timedelta, timezone
@@ -99,19 +108,36 @@ class OutlookCalendarDataSource(DataSource):
         return out
 
 
-def _coerce_events(raw: Any) -> list[CalendarEvent]:
+def parse_events(raw: Any) -> list[CalendarEvent]:
     """Microsoft Graph event shape:
       { id, subject, start: {dateTime, timeZone}, end: {dateTime, timeZone},
         attendees: [{emailAddress: {address}}], organizer, location, body }
+
+    ``call_tool`` returns a ``CallToolResult`` whose text is a JSON document,
+    so the old isinstance-on-``raw`` checks matched nothing and every calendar
+    query returned ``[]`` — indistinguishable from a genuinely empty calendar.
     """
+    if is_error_result(raw):
+        logger.warning(
+            "outlook_calendar: tool returned an error result: %s", tool_text(raw)[:200],
+        )
+        return []
+    text = tool_text(raw)
+    if not text:
+        return []
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
+        log_swallowed_error("outlook_calendar.parse_events", exc)
+        return []
+
     events_in: list[dict[str, Any]] = []
-    if isinstance(raw, list):
-        events_in = [e for e in raw if isinstance(e, dict)]
-    elif isinstance(raw, dict):
-        for key in ("value", "events", "items"):
-            if isinstance(raw.get(key), list):
-                events_in = [e for e in raw[key] if isinstance(e, dict)]
-                break
+    if isinstance(payload, list):
+        events_in = [e for e in payload if isinstance(e, dict)]
+    elif isinstance(payload, dict):
+        value = payload.get("value")
+        if isinstance(value, list):
+            events_in = [e for e in value if isinstance(e, dict)]
 
     out: list[CalendarEvent] = []
     for e in events_in:

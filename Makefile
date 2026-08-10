@@ -288,8 +288,13 @@ validate-pro: pro-feature-health ## Full Pro-feature validation matrix against a
 	rc=$$? ; \
 	echo "" ; \
 	echo "[validate-pro] skipped features (each needs a credential or host capability):" ; \
-	.venv/bin/python scripts/lint-no-silent-preservation-skips.py \
-	  --junit-xml /tmp/validate-pro-results.xml || true ; \
+	$(CURDIR)/.venv/bin/python $(CURDIR)/scripts/lint-no-silent-preservation-skips.py \
+	  --junit-xml /tmp/validate-pro-results.xml ; \
+	skiprc=$$? ; \
+	if [ $$skiprc -ne 0 ] ; then \
+	  echo "[validate-pro] skip report FAILED (exit $$skiprc)" ; \
+	  [ $$rc -eq 0 ] && rc=$$skiprc ; \
+	fi ; \
 	exit $$rc
 
 preservation-check: ## Run capability-preservation invariants (I1-I8) against a live stack

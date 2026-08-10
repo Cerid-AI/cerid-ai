@@ -70,7 +70,15 @@ def higher_tier(a: str, b: str) -> str:
     a Pro trial running on an operator's ``CERID_TIER=enterprise`` box must
     not knock that box down to Pro.
     """
-    return a if _TIER_RANK.get(a, 0) >= _TIER_RANK.get(b, 0) else b
+    rank_a, rank_b = _TIER_RANK.get(a, 0), _TIER_RANK.get(b, 0)
+    if rank_a != rank_b:
+        return a if rank_a > rank_b else b
+    # Equal rank. Returning `a` unconditionally meant an unrecognised name beat
+    # a real one — higher_tier("garbage", "community") == "garbage" — and that
+    # string then reached set_tier(). On a tie, prefer the name we recognise.
+    if a in _TIER_RANK:
+        return a
+    return b if b in _TIER_RANK else "community"
 
 
 # --- Response models ---------------------------------------------------------

@@ -363,7 +363,14 @@ async def start_auth(slug: str) -> ConnectorOAuthStartResponse:
                     "connector stack up (--profile pro) and retry."
                 ),
             )
-        auth_url = _first_url(str(raw))
+        # tool_text(), not str(): str() on a CallToolResult gives the pydantic
+        # repr, in which a newline is the two literal characters \ and n. The
+        # URL regex matches \S+, so it ran straight past the end of the URL and
+        # handed the operator a consent link ending "prompt=select_account\nMarkdown".
+        from core.mcp_clients.result_text import tool_text
+
+        raw_text = tool_text(raw)
+        auth_url = _first_url(raw_text)
         return ConnectorOAuthStartResponse(
             auth_kind="google_oauth",
             auth_url=auth_url,
@@ -372,18 +379,21 @@ async def start_auth(slug: str) -> ConnectorOAuthStartResponse:
                 f"to the read-only scopes for {email}. The refresh token is "
                 f"written to the google-workspace-mcp container's volume."
                 if auth_url
-                else f"The sibling did not return a consent URL: {str(raw)[:300]}"
+                else f"The sibling did not return a consent URL: {raw_text[:300]}"
             ),
         )
 
     if meta.auth_kind == "msal_device_code":
-        # Surface the device-code via the sibling's CLI surface (operator
-        # runs `docker compose exec ms365-mcp ms365-mcp login`).
+        # Every part of the previous instruction was wrong: it named only the
+        # stacks compose file (wrong project → "service not running"), omitted
+        # --profile pro (service filtered out entirely), and invoked an
+        # `ms365-mcp` binary that does not exist in the image — the package bin
+        # is `ms-365-mcp-server`, and login is a FLAG, not a subcommand.
         return ConnectorOAuthStartResponse(
             auth_kind="msal_device_code",
             instructions=(
-                "Run: docker compose -f stacks/connectors/docker-compose.yml "
-                "exec ms365-mcp ms365-mcp login — it prints a code + URL. "
+                "Run: docker compose -f docker-compose.yml -f stacks/connectors/docker-compose.yml --profile pro "
+                "exec ms365-mcp node dist/index.js --login — it prints a code + URL. "
                 "Visit microsoft.com/devicelogin, paste the code, complete login. "
                 "Token cached to the bind-mounted volume."
             ),
@@ -460,9 +470,11 @@ async def disconnect(slug: str) -> DisconnectResponse:
             slug=slug,
             cleared=False,
             detail=(
-                "Run: docker compose -f stacks/connectors/docker-compose.yml "
-                "exec google-workspace-mcp rm -rf /root/.google_workspace_mcp/credentials"
-                " — then restart the container."
+                "Run: docker compose -f docker-compose.yml -f stacks/connectors/docker-compose.yml --profile pro "
+                "exec google-workspace-mcp rm -rf /home/app/.google_workspace_mcp"
+                " — then restart the container. (This said /root until "
+                "2026-08-10; the server runs as uid 1000 with HOME=/home/app, "
+                "so the old path cleared nothing and reported no error.)"
             ),
         )
     if meta.auth_kind == "msal_device_code":
@@ -470,8 +482,8 @@ async def disconnect(slug: str) -> DisconnectResponse:
             slug=slug,
             cleared=False,
             detail=(
-                "Run: docker compose -f stacks/connectors/docker-compose.yml "
-                "exec ms365-mcp ms365-mcp logout"
+                "Run: docker compose -f docker-compose.yml -f stacks/connectors/docker-compose.yml --profile pro "
+                "exec ms365-mcp node dist/index.js --logout"
             ),
         )
     return DisconnectResponse(

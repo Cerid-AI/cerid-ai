@@ -89,10 +89,25 @@ function ConnectorDetailInner({
   // "locked" (tier too low) is the only state an upgrade fixes. "flag-off"
   // means the server disabled it and the plan is already sufficient — telling
   // that user to buy Pro would be wrong and annoying.
-  const { forFlag } = useEntitlements()
+  const { forFlag, isLoading: entitlementsLoading } = useEntitlements()
+  // Two things this line has to get right, and it previously got both wrong.
+  //
+  // 1. The second argument is the registry-tier fallback, and it is not
+  //    optional in practice: without it a flag missing from
+  //    `capabilities.features` resolves to AVAILABLE. Every connector here is
+  //    Pro, so omitting it made the upgrade prompt vanish exactly when
+  //    capabilities were unavailable — back to the dead end this replaced.
+  // 2. `isLoading` must suppress the verdict. `tier` defaults to "community"
+  //    while the request is in flight, so a *paying* customer was shown
+  //    "Unlock with Pro" on first paint. Nothing read isLoading anywhere in
+  //    the app. Suppressing it is safe: the Connect button is independently
+  //    disabled by the server's own `connector.feature_enabled`, so no action
+  //    is reachable in the gap. On ERROR isLoading is false and the tier
+  //    default applies, so an unreachable server still fails closed.
   const proLocked =
+    !entitlementsLoading &&
     !connector.data_source_configured &&
-    forFlag(connector.feature_flag).state === "locked"
+    forFlag(connector.feature_flag, "pro").state === "locked"
 
   // Clean up polling interval on unmount
   useEffect(() => {

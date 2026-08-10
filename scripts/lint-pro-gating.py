@@ -48,6 +48,13 @@ FEATURES_PY = MCP_ROOT / "config" / "features.py"
 GATE_FUNCTIONS = frozenset({"require_feature", "is_feature_enabled", "check_feature"})
 
 
+def _is_test_path(path: Path) -> bool:
+    """True for anything that is test code rather than shipping code."""
+    if path.name.startswith("test_") or path.name == "conftest.py":
+        return True
+    return any(part in {"tests", "test", "__tests__"} for part in path.parts)
+
+
 def discover_gated_flags(roots: list[Path]) -> set[str]:
     """Walk every .py file under roots and collect the literal string args
     passed to any of GATE_FUNCTIONS."""
@@ -56,6 +63,15 @@ def discover_gated_flags(roots: list[Path]) -> set[str]:
         for py_path in root.rglob("*.py"):
             # skip the lint script itself + tests of features.py + features.py
             if py_path.name in {"features.py", "lint-pro-gating.py"}:
+                continue
+            # A gate in a TEST is not a gate. This scanner counted them, so a
+            # paid feature could ship with no runtime enforcement and satisfy
+            # the lint purely because a test called is_feature_enabled("flag")
+            # — you could turn it green by writing a test. Proven by A/B: a
+            # synthetic Pro flag gated only from src/mcp/tests/ exited 0.
+            # The renderer scanner below already excluded __tests__; these two
+            # halves simply disagreed.
+            if _is_test_path(py_path):
                 continue
             try:
                 tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))

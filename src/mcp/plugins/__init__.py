@@ -60,6 +60,15 @@ class PluginLoadError(Exception):
     pass
 
 
+class MissingDependencyError(PluginLoadError):
+    """A plugin's declared pip dependencies are not importable.
+
+    Its own type name is what /health.pro_features shows the operator as
+    ``blocked_reason``, so it is worth distinguishing from a generic load
+    failure — "MissingDependency" is actionable, "PluginLoadError" is not.
+    """
+
+
 def _validate_manifest(manifest: dict[str, Any], plugin_dir: Path) -> None:
     """Validate plugin manifest has required fields."""
     required = ["name", "version", "type"]
@@ -172,6 +181,17 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
             f"Plugin '{name}' missing dependencies: {missing_deps}. "
             f"Install with: pip install {' '.join(missing_deps)}"
         )
+        # Record it. A bare `return None` here is how the original defect hid:
+        # meeting_capture declares pyannote.audio, that import broke, the
+        # plugin vanished, and because nothing was recorded /health.pro_features
+        # reported its three flags as "in_process_or_desktop" with an empty
+        # `degraded` list — the very gate built to catch this stayed green.
+        # A missing dependency on an ENTITLED plugin is a broken install, not
+        # an operator choice (unlike ENABLED_PLUGINS, which is deliberate).
+        _record_plugin_failure(
+            plugin_dir,
+            MissingDependencyError(f"missing dependencies: {', '.join(missing_deps)}"),
+        )
         return None
 
     # Load the plugin module. `submodule_search_locations` makes the module a
@@ -235,6 +255,13 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
         "type": manifest["type"],
         "description": manifest.get("description", ""),
         "tier": required_tier,
+        # Carried so /health.pro_features can attribute a flag to the plugin
+        # that supplies it. Its absence here made the health block's positive
+        # signal unreachable: the consumer reads `feature_flags` and fell back
+        # to the plugin NAME, which matches a flag name for exactly one plugin.
+        # Every other loaded Pro plugin was reported identically to a flag with
+        # no implementation at all. _record_plugin_failure already recorded it.
+        "feature_flags": list(manifest.get("feature_flags") or []),
         "module": module,
     }
 

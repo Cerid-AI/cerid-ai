@@ -20,13 +20,17 @@ not inside the Cerid backend:
 - Image: `taylorwilsdon/google_workspace_mcp`, pinned by git commit SHA in
   `stacks/connectors/docker-compose.yml`.
 - Container name: `cerid-google-workspace-mcp`.
-- Internal address: `http://cerid-google-workspace-mcp:8000/mcp`.
+- Internal address: `http://cerid-google-workspace-mcp:8810/mcp`. The container
+  and host ports must match — the OAuth consent screen redirects the browser to
+  the port the container believes it is on.
 - Transport: streamable-HTTP.
 - AuthN to the MCP server: **none**. The upstream image has no client-auth
   mechanism (there is no `WORKSPACE_MCP_AUTH_TOKEN` in it), so the bearer Cerid
   sends is ignored. The container's protection is that it binds to loopback
   only. This doc claimed a static-bearer control until 2026-08-09; it never
-  existed. The ms365 sibling *does* honour one.
+  existed. Neither does the ms365 sibling: it forwards the client's bearer
+  straight to Microsoft Graph rather than checking it, which is why Cerid's
+  static hex token arrives there as an invalid JWT.
 - AuthN to Google: OAuth 2.0, owned entirely by the sibling container.
   The Cerid backend never sees Google refresh tokens.
 

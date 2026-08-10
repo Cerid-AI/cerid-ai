@@ -160,3 +160,43 @@ def test_an_empty_verify_key_disables_verification(monkeypatch):
     finally:
         monkeypatch.delenv("CERID_LICENSE_PUBLIC_KEY", raising=False)
         importlib.reload(lic)
+
+
+# --- Regressions from the 2026-08-10 entitlement audit -----------------------
+
+
+class TestMalformedVerifyKeyFailsClosed:
+    """A verify key that is SET but unparseable must reject everything.
+
+    Both "unset" and "malformed" used to return None from _load_public_key,
+    and None means dev mode: accept any format-valid key as Pro. So a
+    truncated or whitespace-mangled CERID_LICENSE_PUBLIC_KEY — an ordinary
+    env-file copy-paste slip — silently turned verification OFF and minted
+    perpetual Pro for any correctly-shaped blob. Misconfiguration must fail
+    closed, never open.
+    """
+
+    def _reload(self, monkeypatch, value: str):
+        import importlib
+
+        import utils.license as lic
+
+        monkeypatch.setenv("CERID_LICENSE_PUBLIC_KEY", value)
+        return importlib.reload(lic)
+
+    def test_a_malformed_key_is_detected(self, monkeypatch):
+        lic = self._reload(monkeypatch, "this-is-not-base64-of-an-ed25519-key!!")
+        assert lic.public_key_is_malformed() is True
+
+    def test_a_malformed_key_rejects_a_well_shaped_licence(self, monkeypatch):
+        lic = self._reload(monkeypatch, "short")
+        shaped = "CERID-PRO-" + "-".join(["AAAA"] * 29)
+        out = lic.validate_license_key(shaped)
+        assert out["valid"] is False
+        assert out["tier"] == "community"
+
+    def test_an_unset_key_is_not_reported_malformed(self, monkeypatch):
+        """Dev mode is a deliberate configuration, not an error — keep the
+        two distinguishable so the boot log can name the right one."""
+        lic = self._reload(monkeypatch, "")
+        assert lic.public_key_is_malformed() is False

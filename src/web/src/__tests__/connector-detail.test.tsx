@@ -13,6 +13,35 @@ vi.mock("@/lib/api/connectors", () => ({
   disconnectConnector: vi.fn(),
 }))
 
+// Capabilities were NOT mocked here until 2026-08-10, so fetchCapabilities hit
+// real fetch in jsdom, rejected, and every test ran with `data` undefined. That
+// was survivable only because the Pro gate fail-opened on a missing flag; the
+// moment the gate was corrected these tests started rendering the upgrade pane.
+// In other words the whole file was exercising the bug. Mock it explicitly, and
+// cover BOTH branches — there was previously no test for `proLocked` at all.
+vi.mock("@/lib/api/billing", () => ({
+  fetchCapabilities: vi.fn(),
+}))
+
+import { fetchCapabilities } from "@/lib/api/billing"
+const mockCapabilities = fetchCapabilities as ReturnType<typeof vi.fn>
+
+/** An entitled server: the flag is present and enabled. */
+function entitled(flag: string) {
+  return {
+    tier: "pro",
+    features: { [flag]: { enabled: true, tier_required: "pro" } },
+  }
+}
+
+/** A community server: the flag exists but this tier cannot use it. */
+function locked(flag: string) {
+  return {
+    tier: "community",
+    features: { [flag]: { enabled: false, tier_required: "pro" } },
+  }
+}
+
 import {
   startConnectorAuth,
   getConnectorAuthStatus,
@@ -53,6 +82,9 @@ function makeConnector(overrides: Partial<ConnectorStatus> = {}): ConnectorStatu
 describe("ConnectorDetail", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Default to an entitled server so the connect/disconnect/auth tests
+    // exercise the real flow rather than the upgrade pane.
+    mockCapabilities.mockResolvedValue(entitled("CONNECTOR_GOOGLE_DRIVE"))
   })
 
   it("renders the connector display name in the dialog title", () => {
@@ -315,5 +347,33 @@ describe("ConnectorDetail — sibling reachability", () => {
       { wrapper: wrap() },
     )
     expect(screen.getByText("Sibling service reachable")).toBeInTheDocument()
+  })
+})
+
+describe("ConnectorDetail Pro gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("shows the upgrade path when the tier cannot use the connector", async () => {
+    mockCapabilities.mockResolvedValue(locked("CONNECTOR_GOOGLE_DRIVE"))
+    render(
+      <ConnectorDetail connector={makeConnector()} open onClose={vi.fn()} />,
+      { wrapper: wrap() },
+    )
+    expect(await screen.findByText(/is part of Cerid Pro/i)).toBeInTheDocument()
+  })
+
+  it("fails CLOSED when capabilities cannot be loaded", async () => {
+    // The original defect: forFlag() was called without its tier fallback, so
+    // an unresolved flag returned AVAILABLE and the upgrade prompt vanished
+    // exactly when the server could not be asked. Every connector here is Pro,
+    // so "unknown" must render locked, never unlocked.
+    mockCapabilities.mockRejectedValue(new Error("network down"))
+    render(
+      <ConnectorDetail connector={makeConnector()} open onClose={vi.fn()} />,
+      { wrapper: wrap() },
+    )
+    expect(await screen.findByText(/is part of Cerid Pro/i)).toBeInTheDocument()
   })
 })

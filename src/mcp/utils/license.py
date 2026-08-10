@@ -53,14 +53,38 @@ class LicenseValidation(TypedDict):
     error: str | None
 
 
-def _load_public_key() -> Ed25519PublicKey | None:
-    """The configured verify key, or ``None`` when unset/invalid (dev mode)."""
+def public_key_is_malformed() -> bool:
+    """True when a verify key IS configured but cannot be parsed.
+
+    Distinguishing this from "unset" is load-bearing. Both used to return
+    ``None`` from :func:`_load_public_key`, and ``None`` means dev mode —
+    accept any format-valid key as Pro. So a truncated or whitespace-mangled
+    ``CERID_LICENSE_PUBLIC_KEY`` (an ordinary env-file copy-paste slip, and
+    ``base64.b64decode`` is lenient enough to let plenty through) silently
+    turned verification OFF and minted perpetual Pro for any 72-byte blob.
+    A misconfigured verifier must reject everything, never accept everything.
+    """
     if not _PUBLIC_KEY_B64:
-        return None
+        return False
+    return _parse_public_key() is None
+
+
+def _parse_public_key() -> Ed25519PublicKey | None:
     try:
         return Ed25519PublicKey.from_public_bytes(base64.b64decode(_PUBLIC_KEY_B64))
     except (ValueError, TypeError):
         return None
+
+
+def _load_public_key() -> Ed25519PublicKey | None:
+    """The configured verify key, or ``None`` when genuinely unset (dev mode).
+
+    Callers MUST check :func:`public_key_is_malformed` first — see its
+    docstring for why ``None`` alone is not safe to act on.
+    """
+    if not _PUBLIC_KEY_B64:
+        return None
+    return _parse_public_key()
 
 
 def verification_enabled() -> bool:
@@ -94,6 +118,14 @@ def validate_license_key(key: str, *, check_expiry: bool = True) -> LicenseValid
     if len(raw) != _BODY_LEN:
         return fmt_error
     payload, signature = raw[:_PAYLOAD_LEN], raw[_PAYLOAD_LEN:]
+
+    if public_key_is_malformed():
+        # Configured but unparseable: fail CLOSED. Falling through to the
+        # dev-mode branch below would accept every shaped key as Pro.
+        return {
+            "valid": False, "tier": "community", "expires_at": None,
+            "error": "License verification is misconfigured; contact your administrator.",
+        }
 
     pub = _load_public_key()
     if pub is None:

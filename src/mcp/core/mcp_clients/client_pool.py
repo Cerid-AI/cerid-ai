@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.mcp_clients.http_client import MCPHTTPClient
+from core.mcp_clients.result_text import is_error_result, tool_text
 
 logger = logging.getLogger("ai-companion.mcp_client_pool")
 
@@ -44,6 +45,10 @@ class _ConnectorState:
     # one by `is_open()` alone. Callers that report reachability to an operator
     # must consult this too, or they report "connected" for a container that
     # does not exist (observed 2026-08-09 against a down ms365-mcp).
+    #
+    # "Succeeded" means a NON-ERROR result. Setting it on any returned object
+    # made a sibling that answers nothing but 401s report reachable, which is
+    # the same lie this flag was added to stop, one layer down.
     ever_succeeded: bool = False
 
     def is_open(self) -> bool:
@@ -150,15 +155,36 @@ class MCPClientPool:
 
         try:
             result = await state.client.call_tool(tool_name, arguments)
-            state.record_success()
-            return result
-        except (ValueError, OSError, RuntimeError, ConnectionError) as exc:
+        except Exception as exc:  # noqa: BLE001 — re-raised below, not swallowed
+            # Was a four-type tuple. anyio wraps transport errors in an
+            # ExceptionGroup (httpx.ConnectError inside a TaskGroup), which
+            # matched none of them, so record_failure() never ran against a
+            # DOWN sibling: `failures` stayed 0, the breaker could never open,
+            # and every call paid the full connect timeout. The pool's own
+            # tests injected ConnectionError — a type that *was* in the tuple —
+            # so the gate could not see this.
             state.record_failure()
             logger.warning(
                 "MCP call %s.%s failed: %s (failures=%d)",
                 connector_name, tool_name, exc, state.failures,
             )
             raise
+
+        if is_error_result(result):
+            # A tool-level error (unknown tool, bad argument, upstream 401)
+            # arrives as a normal result. It is NOT evidence the connector
+            # works, so it must not set `ever_succeeded` — that flag is what
+            # the operator's "sibling reachable" indicator reads. It is also
+            # not a transport failure, so it does not feed the breaker: the
+            # container is up, the call was answered.
+            logger.warning(
+                "MCP call %s.%s returned an error result: %s",
+                connector_name, tool_name, tool_text(result)[:200],
+            )
+            return result
+
+        state.record_success()
+        return result
 
     async def disconnect_all(self) -> None:
         """Cleanly close every connector. Called from FastAPI lifespan

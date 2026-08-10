@@ -39,6 +39,7 @@ from app.services.watched_folders_bridge import (
     list_folder_sources,
     update_folder_source,
 )
+from config.features import is_tier_met
 from core.ingest.sources.kinds import (
     KIND_FAMILY,
     KIND_TIER,
@@ -323,6 +324,20 @@ async def create_source(body: CreateSourceRequest):
     kind = body.kind
     if kind not in SOURCE_KINDS:
         raise HTTPException(status_code=422, detail=f"Unknown source kind: {kind}")
+
+    # Pro kinds are enforced HERE, at the only chokepoint every creation path
+    # shares. KIND_TIER's own comment claimed the connector instantiation path
+    # enforced it "via app.config.features.is_feature_enabled" — that module
+    # does not exist, and no check existed anywhere on this route. The desktop
+    # Add-Source wizard reaches it directly (bypassing the renderer-side Pro
+    # gate on the connector rows), so a community install could create and
+    # sync `apple_mail` / `apple_reminders` sources. Renderer gating is
+    # discoverability; this is the enforcement.
+    if KIND_TIER.get(kind) == "pro" and not is_tier_met("pro"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Source kind '{kind}' requires Cerid Pro.",
+        )
 
     # Folder kind: delegate to the watched-folders store (preserves path
     # validation + _ALLOWED_ROOTS + vault_write Redis coupling).

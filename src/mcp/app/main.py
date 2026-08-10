@@ -454,9 +454,19 @@ def _warn_if_unlicensed_pro() -> None:
     try:
         from app.deps import get_redis
         from app.routers.license import STATE_UNLICENSED_PRO, entitlement_state
-        from utils.license import verification_enabled
+        from utils.license import public_key_is_malformed, verification_enabled
 
-        if not verification_enabled():
+        if public_key_is_malformed():
+            # Distinct from "empty": the operator meant to enable verification
+            # and the value is unusable. Every key is now rejected, so say that
+            # rather than reusing the "is empty" text, which sent operators
+            # looking for an unset variable that is in fact set.
+            logger.error(
+                "license_notice: CERID_LICENSE_PUBLIC_KEY is set but could not be "
+                "parsed as an Ed25519 public key — ALL license keys will be rejected. "
+                "Re-copy the value; it is base64 of the 32-byte raw key."
+            )
+        elif not verification_enabled():
             logger.warning(
                 "license_notice: CERID_LICENSE_PUBLIC_KEY is empty — license signatures "
                 "are NOT verified on this server, so any correctly-shaped key unlocks "

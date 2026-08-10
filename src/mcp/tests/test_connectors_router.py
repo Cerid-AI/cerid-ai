@@ -356,16 +356,38 @@ class TestAuthStatus:
 
 
 class TestDisconnect:
-    def test_google_returns_docker_exec_instruction(self, client):
+    """These instructions are the operator's only path to revoking access, so
+    they must be runnable. All three shipped commands were wrong until
+    2026-08-10 — and because the endpoint reports ``cleared: False`` either
+    way, following them cleared nothing and reported no error.
+    """
+
+    def test_google_names_the_real_credentials_path(self, client):
         resp = client.post("/connectors/gmail/disconnect")
         body = resp.json()
         assert body["cleared"] is False
         assert "docker compose" in body["detail"]
+        # The server runs as uid 1000 with HOME=/home/app; /root does not exist
+        # in that image and is not writable by the server user.
+        assert "/home/app/.google_workspace_mcp" in body["detail"]
+        assert "/root/" not in body["detail"]
 
-    def test_microsoft_returns_ms365_logout_instruction(self, client):
+    def test_microsoft_logout_command_is_actually_invocable(self, client):
         resp = client.post("/connectors/outlook/disconnect")
-        body = resp.json()
-        assert "ms365-mcp logout" in body["detail"]
+        detail = resp.json()["detail"]
+        # `ms365-mcp` is not an executable in the image (the package bin is
+        # `ms-365-mcp-server`), and logout is a FLAG, not a subcommand.
+        assert "node dist/index.js --logout" in detail
+        assert "ms365-mcp logout" not in detail
+
+    @pytest.mark.parametrize("slug", ["gmail", "outlook", "outlook_calendar"])
+    def test_every_compose_command_can_resolve_its_service(self, client, slug):
+        """Naming only the stacks file puts you in compose project
+        `connectors`, where the service does not exist; omitting the profile
+        filters it out entirely. Both were wrong in every shipped string."""
+        detail = client.post(f"/connectors/{slug}/disconnect").json()["detail"]
+        assert "-f docker-compose.yml" in detail
+        assert "--profile pro" in detail
 
     def test_apple_returns_settings_revocation(self, client):
         resp = client.post("/connectors/apple_calendar/disconnect")

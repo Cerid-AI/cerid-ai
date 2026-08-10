@@ -9,6 +9,7 @@ mock MCP server fixture.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -157,3 +158,71 @@ async def test_circuit_recovers_after_cool_down():
     assert result == {"ok": True}
     assert state.failures == 0
     assert state.opened_at is None
+
+
+# --- Regressions from the 2026-08-10 connector audit -------------------------
+#
+# Both of these were live defects that the tests above could not see, because
+# every failure case here injects ConnectionError — a type the old handler
+# happened to catch. Real transports do not fail that tidily.
+
+
+@pytest.mark.asyncio
+async def test_an_exception_group_still_records_a_failure():
+    """anyio wraps transport errors in an ExceptionGroup (httpx.ConnectError
+    raised inside a TaskGroup). The handler caught a four-type tuple that
+    matched none of them, so `failures` stayed 0 against a DOWN sibling, the
+    breaker could never open, and every call paid the full connect timeout.
+    """
+    pool = MCPClientPool()
+    pool.register("ms365", "http://ms365-mcp:3000/mcp")
+    state = pool._connectors["ms365"]
+    state.client = MagicMock()
+    state.client.call_tool = AsyncMock(
+        side_effect=ExceptionGroup("unhandled", [OSError("connect refused")]),
+    )
+
+    with pytest.raises(ExceptionGroup):
+        await pool.call_tool("ms365", "list-mail-messages")
+    assert state.failures == 1
+
+
+@pytest.mark.asyncio
+async def test_an_error_result_does_not_count_as_a_success():
+    """MCP reports tool-level failure as a RESULT with isError set, not as an
+    exception. Recording that as success made `ever_succeeded` true for a
+    sibling answering nothing but 401s, and /connectors then told the operator
+    the sibling was reachable — the exact lie ever_succeeded was added to stop.
+    """
+    pool = MCPClientPool()
+    pool.register("ms365", "http://ms365-mcp:3000/mcp")
+    state = pool._connectors["ms365"]
+    state.client = MagicMock()
+    state.client.call_tool = AsyncMock(
+        return_value=SimpleNamespace(
+            content=[SimpleNamespace(text="InvalidAuthenticationToken")],
+            isError=True,
+        ),
+    )
+
+    result = await pool.call_tool("ms365", "list-mail-messages")
+    assert result is not None            # still returned to the caller
+    assert state.ever_succeeded is False  # but it is NOT evidence of health
+    # Not a transport fault either — the container answered — so the breaker
+    # must not trip on it.
+    assert state.failures == 0
+
+
+@pytest.mark.asyncio
+async def test_a_clean_result_still_marks_the_connector_healthy():
+    """Guard the fix from over-reaching: a normal result must still count."""
+    pool = MCPClientPool()
+    pool.register("gmail", "http://gmail-mcp:8080/mcp")
+    state = pool._connectors["gmail"]
+    state.client = MagicMock()
+    state.client.call_tool = AsyncMock(
+        return_value=SimpleNamespace(content=[SimpleNamespace(text="ok")], isError=False),
+    )
+
+    await pool.call_tool("gmail", "search_gmail_messages")
+    assert state.ever_succeeded is True

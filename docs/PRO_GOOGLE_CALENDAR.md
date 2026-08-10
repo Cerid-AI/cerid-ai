@@ -21,9 +21,15 @@ connector — one Google Workspace MCP server covers both APIs:
 - Image: `taylorwilsdon/google_workspace_mcp`, pinned by git commit SHA in
   `stacks/connectors/docker-compose.yml`.
 - Container name: `cerid-google-workspace-mcp`.
-- Internal address: `http://cerid-google-workspace-mcp:8000/mcp`.
+- Internal address: `http://cerid-google-workspace-mcp:8810/mcp`. The container
+  and host ports must match — the OAuth consent screen redirects the browser to
+  the port the container believes it is on.
 - Transport: streamable-HTTP.
-- AuthN to the MCP server: static bearer token (`CERID_CONNECTORS_BEARER`).
+- AuthN to the MCP server: **none**. The upstream image has no client-auth
+  mechanism, so the bearer Cerid sends is ignored; the container's protection is
+  that it binds to loopback only. This doc claimed a static-bearer control until
+  2026-08-10 — it never existed. (The same correction was made in `PRO_GMAIL.md`
+  on 2026-08-09; this file describes the *same container* and was missed.)
 - AuthN to Google: OAuth 2.0, owned entirely by the sibling container.
   The Cerid backend never sees Google refresh tokens.
 

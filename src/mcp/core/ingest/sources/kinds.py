@@ -79,9 +79,14 @@ KIND_FAMILY: Final[dict[SourceKind, SourceFamily]] = {
     "knowledge_pack": "pack",
 }
 
-# Mapping from kind → tier. Read at startup; the FE shows the Pro
-# badge based on this table, and the connector instantiation path
-# enforces it via ``app.config.features.is_feature_enabled``.
+# Mapping from kind → tier. Read at startup; the FE shows the Pro badge from
+# this table, and ``app.routers.sources.create_source`` enforces it with
+# ``config.features.is_tier_met`` before any connector is instantiated.
+#
+# This comment used to name ``app.config.features.is_feature_enabled`` as the
+# enforcement point. No such module exists and no gate was present on that
+# route at all, so a community install could create Pro sources through the
+# Add-Source wizard. Do not describe a guarantee here without a call site.
 KIND_TIER: Final[dict[SourceKind, Literal["core", "pro"]]] = {
     # Core
     "folder": "core",
