@@ -161,7 +161,20 @@ _MASK_REVEAL_CHARS = 4
 
 
 def mask_license_key(key: str) -> str:
-    """Mask a license key for display: ``CERID-PRO-****-****-****-****-XXXX``."""
+    """Mask a license key for display: reveal only the last group.
+
+    Format-agnostic — works for any number of body groups. The long Ed25519
+    body collapses to a single ``****`` run so the UI shows
+    ``CERID-PRO-****-<last>``.
+
+    This used to mask each group individually, which matched the four-group
+    example the old docstring gave but not reality: a real key is 29 groups, so
+    an activated open-core install rendered ~150 characters of asterisks into
+    the Plan & Billing field. The internal tree already collapsed it; this file
+    is a sanctioned fork and never received the port. Found 2026-08-10 by
+    activating a key against the running sandbox — no test covered this
+    function in either tree.
+    """
     if not key or not key.startswith("CERID-PRO-"):
         return key
     body = key.replace("CERID-PRO-", "")
@@ -174,5 +187,4 @@ def mask_license_key(key: str) -> str:
             if len(body) > _MASK_REVEAL_CHARS
             else "CERID-PRO-****"
         )
-    masked = "-".join("****" for _ in parts[:-1])
-    return f"CERID-PRO-{masked}-{parts[-1]}"
+    return f"CERID-PRO-****-{parts[-1]}"

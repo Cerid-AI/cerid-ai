@@ -200,3 +200,53 @@ class TestMalformedVerifyKeyFailsClosed:
         two distinguishable so the boot log can name the right one."""
         lic = self._reload(monkeypatch, "")
         assert lic.public_key_is_malformed() is False
+
+
+class TestMaskLicenseKey:
+    """`mask_license_key` had NO tests in either tree, which is how two
+    defects survived in it: a fail-open that echoed an unrecognised key back
+    verbatim, and (public only) a per-group mask that rendered ~150 characters
+    of asterisks into the settings field for a real 29-group key. Both were
+    found by activating a key against a running server, not by reading."""
+
+    def _real_shaped_key(self) -> str:
+        # 29 groups, the shape validate_license_key actually accepts.
+        return "CERID-PRO-" + "-".join(["ABCD"] * 28 + ["VQCA"])
+
+    def test_collapses_the_body_to_a_single_run(self):
+        from utils.license import mask_license_key
+
+        masked = mask_license_key(self._real_shaped_key())
+        assert masked == "CERID-PRO-****-VQCA"
+        # The defect this pins: one run, not one per group.
+        assert masked.count("****") == 1
+
+    def test_stays_short_for_a_real_length_key(self):
+        from utils.license import mask_license_key
+
+        assert len(mask_license_key(self._real_shaped_key())) < 32
+
+    def test_reveals_the_last_group_so_two_keys_are_distinguishable(self):
+        from utils.license import mask_license_key
+
+        a = mask_license_key("CERID-PRO-" + "-".join(["ABCD"] * 28 + ["AAAA"]))
+        b = mask_license_key("CERID-PRO-" + "-".join(["ABCD"] * 28 + ["BBBB"]))
+        assert a != b
+
+    def test_an_ungrouped_body_is_not_echoed_back(self):
+        """Fails CLOSED. This value goes into an API response, so returning the
+        input verbatim on an unexpected shape would leak the key."""
+        from utils.license import mask_license_key
+
+        raw = "CERID-PRO-" + "Z" * 60
+        masked = mask_license_key(raw)
+        assert raw not in masked
+        assert masked.startswith("CERID-PRO-****")
+
+    def test_a_foreign_string_is_returned_unchanged(self):
+        """Not a key at all — nothing to mask, and mangling it would hide a
+        config error from the operator."""
+        from utils.license import mask_license_key
+
+        assert mask_license_key("not-a-key") == "not-a-key"
+        assert mask_license_key("") == ""
