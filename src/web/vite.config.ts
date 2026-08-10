@@ -23,6 +23,19 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/__tests__/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // Vitest defaults to 5000ms, which this suite cannot hold on a busy box.
+    // It blocked `make push` three times across 2026-08-09/10 with 16, 20 and
+    // 22 timeouts — in DIFFERENT files each run, none related to the change,
+    // and the same suite passed 226/226 standalone every time. 226 files times
+    // a jsdom environment plus React Testing Library setup is enough work that
+    // a background Spotlight reindex pushes individual tests past 5s.
+    //
+    // That is a gate reporting machine load, not correctness, and the cost is
+    // worse than the delay: the obvious escape is `git push --no-verify`,
+    // which also skips the supply-chain guard (see scripts/safe-push.sh).
+    // A real hang still fails, just at 20s instead of 5s.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
   build: {
     sourcemap: false,
