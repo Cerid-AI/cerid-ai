@@ -145,6 +145,12 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	fi
 	@echo "[drift] doc-env-vars"
 	.venv/bin/python scripts/lint-doc-env-vars.py
+	@echo "[drift] swift-helper-manifests"
+	@if [ -f scripts/lint-swift-helper-manifests.py ]; then \
+	  .venv/bin/python scripts/lint-swift-helper-manifests.py; \
+	else \
+	  echo "  (internal-only gate — not present in this checkout, skipped)"; \
+	fi
 	@echo "[drift] public-leak-preflight"
 	@if [ -f scripts/lint-public-leak-preflight.py ]; then \
 	  .venv/bin/python scripts/lint-public-leak-preflight.py; \

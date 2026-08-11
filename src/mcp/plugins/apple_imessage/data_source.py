@@ -2,9 +2,31 @@
 # SPDX-License-Identifier: BUSL-1.1
 """Apple iMessage DataSource — Phase 4.2.
 
-Wraps the ``ceridimessage`` Swift helper via subprocess + JSON-over-stdout,
-mirroring the AppleMailDataSource pattern. The helper reads the local iMessage
-SQLite store (``~/Library/Messages/chat.db``); reading it requires **Full Disk
+.. warning::
+
+   **This path is inert: the ``ceridimessage`` helper does not exist.**
+   ``packages/desktop/swift/`` contains five packages — EventKit, Photos,
+   Spotlight, Reminders, Mail — and no iMessage target has ever been written,
+   so the binary is never built by ``make``, never bundled into the .app, and
+   ``is_configured()`` cannot return True on any machine. The manifest claimed
+   it under ``requires.swift_helpers`` until 2026-08-10; nothing reads that
+   field, so the claim could not drift loudly.
+
+   iMessage still works for users, by a different route entirely: it is a
+   *bridge* kind (``source-rows.ts :: APPLE_BRIDGE_KINDS``) and the desktop
+   app reads ``chat.db`` directly through better-sqlite3 in
+   ``packages/desktop/src/main/connectors/imessage.ts`` — no Swift helper
+   involved. That is the implementation; this module is a vestige of a
+   REST-side design that was never finished.
+
+   **Operator decision:** write ``CeridIMessage`` (and add it to ``HELPERS``
+   in the swift ``Makefile``), or delete this plugin. Leaving it costs a
+   permanently-unconfigurable data source. ``scripts/lint-swift-helper-manifests.py``
+   now blocks any *new* instance of the same claim.
+
+Wraps a Swift helper via subprocess + JSON-over-stdout, mirroring the
+AppleMailDataSource pattern. The helper would read the local iMessage SQLite
+store (``~/Library/Messages/chat.db``); reading it requires **Full Disk
 Access** for the Cerid desktop app (a System Settings toggle).
 
 **Privacy gate:** iMessage content is the most sensitive Apple surface, so the
@@ -15,7 +37,7 @@ never spawns the helper — no chat.db access at all. This complements
 ``utils.domain_privacy`` (which gates the ingested ``messages`` domain in
 retrieval); this check guards the live data-source path.
 
-Helper contract (``packages/desktop/swift/CeridIMessage``):
+Helper contract (``packages/desktop/swift/CeridIMessage``, **not yet written**):
   - ``ceridimessage scan`` → ``{"ok": bool, "message_count": int,
     "messages": [{"text": str, "sender": str, "date": str, "chat": str}]}``
   - Full-Disk-Access denial → **exit code 77** (parity with CeridMail).

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from plugins.apple_imessage import data_source as apple_imessage_ds
 from plugins.apple_imessage.data_source import AppleIMessageDataSource
 
 
@@ -63,7 +64,10 @@ class TestConfiguration:
         with patch("platform.system", return_value="Linux"):
             assert AppleIMessageDataSource(helper_path=helper_path).is_configured() is False
 
-    def test_is_configured_requires_helper_present(self):
+    def test_is_configured_requires_helper_present(self, unresolvable_swift_helper):
+        # helper_path=None resolves through _resolve_helper_path(), whose last
+        # fallback is the developer's swift/build/ — see the fixture's docstring.
+        unresolvable_swift_helper(apple_imessage_ds)
         with patch("platform.system", return_value="Darwin"):
             assert AppleIMessageDataSource(helper_path=None).is_configured() is False
 
@@ -111,7 +115,8 @@ class TestQuery:
             assert await ds.query("any") == []
 
     @pytest.mark.asyncio
-    async def test_no_helper_path_returns_empty(self):
+    async def test_no_helper_path_returns_empty(self, unresolvable_swift_helper):
+        unresolvable_swift_helper(apple_imessage_ds)
         assert await AppleIMessageDataSource(helper_path=None).query("any") == []
 
 

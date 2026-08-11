@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from plugins.apple_photos import data_source as apple_photos_ds
 from plugins.apple_photos.data_source import ApplePhotosDataSource
 
 
@@ -82,7 +83,10 @@ async def test_query_renders_results(helper_path):
     assert "image" in results[0].content.lower()
 
 
-def test_is_configured_requires_darwin_and_helper(helper_path):
+def test_is_configured_requires_darwin_and_helper(helper_path, unresolvable_swift_helper):
+    # helper_path=None resolves through _resolve_helper_path(), whose last
+    # fallback is the developer's swift/build/ — see the fixture's docstring.
+    unresolvable_swift_helper(apple_photos_ds)
     with patch("platform.system", return_value="Linux"):
         assert ApplePhotosDataSource(helper_path=helper_path).is_configured() is False
     with patch("platform.system", return_value="Darwin"):

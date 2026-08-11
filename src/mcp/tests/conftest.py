@@ -219,3 +219,33 @@ def mock_chroma():
 def mock_redis():
     """Mock Redis client."""
     return MagicMock()
+
+
+@pytest.fixture
+def unresolvable_swift_helper(monkeypatch):
+    """Make a plugin's ``_resolve_helper_path()`` report "no helper built".
+
+    Constructing an Apple data source with ``helper_path=None`` falls through
+    to ``_resolve_helper_path()``, whose last fallback is the developer's
+    ``packages/desktop/swift/build/<helper>``. So "is_configured() is False
+    when no helper is present" was really asserting that the developer had not
+    built the Swift helpers.
+
+    Nobody had, because they could not: the swift ``Makefile``'s per-helper
+    recipe guessed each binary name by lowercasing the directory
+    (``CeridEventKit`` -> ``cerideventkit``, actually ``ceridek``) and its
+    ``||`` fallback computed the identical string, so ``make`` failed on the
+    first target. Only ``make universal``, which reads the product name out of
+    ``Package.swift``, ever worked — and that path runs only in CI. Fixing the
+    Makefile turned five of these tests red at once.
+
+    Usage::
+
+        def test_x(unresolvable_swift_helper):
+            unresolvable_swift_helper(module_under_test)
+    """
+
+    def _apply(module) -> None:
+        monkeypatch.setattr(module, "_resolve_helper_path", lambda: None)
+
+    return _apply

@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from plugins.apple_calendar import data_source as apple_calendar_ds
 from plugins.apple_calendar.data_source import AppleCalendarDataSource
 
 
@@ -34,7 +35,10 @@ class TestConfiguration:
             ds = AppleCalendarDataSource(helper_path=helper_path)
             assert ds.is_configured() is False
 
-    def test_is_configured_requires_helper_present(self):
+    def test_is_configured_requires_helper_present(self, unresolvable_swift_helper):
+        # helper_path=None resolves through _resolve_helper_path(), whose last
+        # fallback is the developer's swift/build/ — see the fixture's docstring.
+        unresolvable_swift_helper(apple_calendar_ds)
         with patch("platform.system", return_value="Darwin"):
             ds = AppleCalendarDataSource(helper_path=None)
             assert ds.is_configured() is False
@@ -105,7 +109,8 @@ class TestListEvents:
         assert events == []
 
     @pytest.mark.asyncio
-    async def test_no_helper_path_returns_empty(self):
+    async def test_no_helper_path_returns_empty(self, unresolvable_swift_helper):
+        unresolvable_swift_helper(apple_calendar_ds)
         ds = AppleCalendarDataSource(helper_path=None)
         events = await ds.list_events(
             start=datetime(2026, 5, 21, tzinfo=timezone.utc),

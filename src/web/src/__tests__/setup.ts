@@ -6,6 +6,7 @@ import { afterEach, expect, vi } from "vitest"
 import type { ReactElement, ReactNode, JSXElementConstructor } from "react"
 import { cleanup, configure, type RenderOptions } from "@testing-library/react"
 import { toHaveNoViolations } from "jest-axe"
+import { installOrphanedTimerTracking, sweepOrphanedTimers } from "./orphaned-timers"
 
 // Testing Library's default async budget is 1000ms, which several drawer /
 // dialog tests sit just under: `entity-analysis-drawer` resolves its
@@ -69,10 +70,32 @@ vi.mock("sonner", () => ({
   Toaster: () => null,
 }))
 
-// Ensure React Testing Library cleanup runs after every test and flush
-// pending requestAnimationFrame callbacks to avoid jsdom teardown errors.
+// Radix open-delay timers get orphaned the moment they are created and, when
+// one fires after its jsdom environment is torn down, the whole run exits 1 on
+// an uncaught "window is not defined" with every test passing. Rationale, the
+// upstream bug, and the 2026-08-10 CI failure are documented in
+// ./orphaned-timers.ts.
+installOrphanedTimerTracking()
+
+// Ensure React Testing Library cleanup runs after every test, then sweep any
+// timer that outlived the unmount. Nothing is mounted at this point, so a
+// surviving timer cannot be observed by anything — only by teardown, as a
+// crash. Set CERID_REPORT_LEAKED_TIMERS=1 to list what was swept.
+// `process` is not in this tsconfig's `types`, so reach it through globalThis
+// rather than adding @types/node to the web app for one debug switch.
+const reportSweptTimers =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.CERID_REPORT_LEAKED_TIMERS === "1"
+
 afterEach(() => {
   cleanup()
+  const swept = sweepOrphanedTimers()
+  if (reportSweptTimers) {
+    for (const stack of swept) {
+      const frame = stack.split("\n").find((l) => l.includes("@radix-ui"))
+      console.warn(`[leaked-timer] swept after unmount :: ${frame?.trim() ?? "app source"}`)
+    }
+  }
 })
 
 // Polyfill ResizeObserver for jsdom (required by Radix ScrollArea)

@@ -4,12 +4,12 @@
   "type": "connector",
   "tier": "pro",
   "license": "BUSL-1.1",
-  "description": "Apple iMessage (chat.db) via signed Swift helper; private_mode L2+",
+  "description": "Apple iMessage (chat.db); served by the desktop bridge, not a Swift helper; private_mode L2+",
   "feature_flags": ["imessage_reader"],
   "requires": {
     "platform": "darwin",
     "macos_min": "14.0",
-    "swift_helpers": ["ceridimessage"],
+    "swift_helpers": [],
     "tcc_grants": ["full_disk_access"],
     "private_mode_min": 2
   }
