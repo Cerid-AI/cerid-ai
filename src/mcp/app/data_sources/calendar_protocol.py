@@ -32,6 +32,9 @@ class CalendarEvent(TypedDict, total=False):
     organizer: str
     description: str
     location: str
+    # Provider deep link to the event itself. Optional: not every provider
+    # returns one, and citations fall back to the calendar home when absent.
+    html_link: str
 
 
 @runtime_checkable

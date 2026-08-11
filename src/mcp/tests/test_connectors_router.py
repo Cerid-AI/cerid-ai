@@ -264,6 +264,15 @@ class TestStartAuth:
     — a route that 404s. The test passed for as long as the feature was broken.
     """
 
+    @pytest.fixture(autouse=True)
+    def _entitled(self, monkeypatch):
+        """These cases are about the FLOW, so entitle the connector. Starting
+        an authorization is Pro-gated (see TestStartAuthIsGated); without this
+        every case below would assert against a 403 instead."""
+        import config.features as features
+
+        monkeypatch.setattr(features, "is_feature_enabled", lambda _f: True)
+
     def test_google_without_an_account_asks_for_one_instead_of_inventing_a_url(
         self, client, monkeypatch,
     ):
@@ -313,12 +322,6 @@ class TestStartAuth:
         assert body["auth_url"] is None
         assert "connection refused" in body["instructions"]
 
-    def test_microsoft_returns_device_code_instructions(self, client):
-        resp = client.post("/connectors/outlook/auth/start")
-        body = resp.json()
-        assert body["auth_kind"] == "msal_device_code"
-        assert "devicelogin" in body["instructions"]
-
     def test_apple_returns_system_settings_link(self, client):
         resp = client.post("/connectors/apple_calendar/auth/start")
         body = resp.json()
@@ -328,6 +331,213 @@ class TestStartAuth:
     def test_unknown_slug_404s(self, client):
         resp = client.post("/connectors/nope/auth/start")
         assert resp.status_code == 404
+
+
+def _tool_result(text: str, *, is_error: bool = False):
+    """The shape ``MCPClientPool.call_tool`` actually returns.
+
+    A bare ``str`` would pass through ``tool_text`` untouched and so would not
+    exercise the flattening the real reply needs; ``structuredContent`` is None
+    on the ms365 sibling, which is the whole reason the code has to be parsed
+    out of prose.
+    """
+    import types
+
+    return types.SimpleNamespace(
+        content=[types.SimpleNamespace(text=text)],
+        structuredContent=None,
+        isError=is_error,
+    )
+
+
+# Verbatim reply from the running ms365 sibling's `login` tool. Note the
+# top-level key is "error" and isError is False *on the success path* — there
+# is no flag that distinguishes this from a failure, so the parser cannot
+# branch on one.
+_LIVE_LOGIN_REPLY = (
+    '{"error":"device_code_required","message":"To sign in, use a web browser '
+    "to open the page https://www.microsoft.com/link and enter the code "
+    'VDBF68NR to authenticate.\\nAfter login run the \\"verify login\\" command"}'
+)
+
+
+class TestMicrosoftDeviceCodeStart:
+    """The device code comes from the sibling, not from a docstring.
+
+    Until 2026-08-10 this branch returned a fixed string telling the operator to
+    `docker compose exec` into a container and read a code off its stdout —
+    impossible from the desktop app, and the declared ``device_code`` /
+    ``verification_uri`` fields were assigned by nothing anywhere in the repo.
+    `login` is a live MCP tool on the sibling (the stack passes
+    --enable-auth-tools), so the code can simply be fetched.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _entitled(self, monkeypatch):
+        import config.features as features
+
+        monkeypatch.setattr(features, "is_feature_enabled", lambda _f: True)
+
+    @staticmethod
+    def _with_pool(monkeypatch, call_tool):
+        import sys
+        import types
+
+        # Load the real package BEFORE shadowing one of its submodules:
+        # ``core.mcp_clients.__init__`` re-exports ``MCPClientPool`` out of
+        # ``client_pool``, so with the stub already in sys.modules the router's
+        # later ``from core.mcp_clients.result_text import ...`` would import the
+        # parent for the first time and die on the missing name. That made these
+        # cases pass or fail on whether some earlier test happened to have loaded
+        # the package — an ordering dependency, not a behaviour.
+        import core.mcp_clients  # noqa: F401
+
+        mod = types.ModuleType("core.mcp_clients.client_pool")
+        mod.get_pool = lambda: types.SimpleNamespace(call_tool=call_tool)
+        monkeypatch.setitem(sys.modules, "core.mcp_clients.client_pool", mod)
+
+    def test_returns_the_code_and_url_the_sibling_issued(self, client, monkeypatch):
+        seen = {}
+
+        async def _call_tool(sibling, tool, args):
+            seen["sibling"], seen["tool"], seen["args"] = sibling, tool, args
+            return _tool_result(_LIVE_LOGIN_REPLY)
+
+        self._with_pool(monkeypatch, _call_tool)
+
+        body = client.post("/connectors/outlook/auth/start").json()
+        assert seen == {"sibling": "ms365", "tool": "login", "args": {}}
+        assert body["auth_kind"] == "msal_device_code"
+        assert body["device_code"] == "VDBF68NR"
+        assert body["verification_uri"] == "https://www.microsoft.com/link"
+        # The operator still has to be told where to put the code.
+        assert "VDBF68NR" in body["instructions"]
+        assert "https://www.microsoft.com/link" in body["instructions"]
+
+    def test_does_not_invent_an_expiry_the_sibling_never_sent(
+        self, client, monkeypatch,
+    ):
+        """``expires_in`` is declared but the login reply carries no expiry.
+
+        Filling it with MSAL's default would expire the code in the UI at a time
+        the sibling never agreed to — a number we made up reads identically to
+        one it reported.
+        """
+        async def _call_tool(*_a):
+            return _tool_result(_LIVE_LOGIN_REPLY)
+
+        self._with_pool(monkeypatch, _call_tool)
+        assert client.post("/connectors/outlook/auth/start").json()["expires_in"] is None
+
+    def test_url_does_not_swallow_the_rest_of_the_sentence(self, client, monkeypatch):
+        """The URL is mid-sentence; a greedy read hands over a dead link.
+
+        The Google branch already shipped a consent URL ending
+        "prompt=select_account\\nMarkdown" for exactly this reason.
+        """
+        async def _call_tool(*_a):
+            return _tool_result(_LIVE_LOGIN_REPLY)
+
+        self._with_pool(monkeypatch, _call_tool)
+        uri = client.post("/connectors/outlook/auth/start").json()["verification_uri"]
+        assert uri.endswith("/link")
+        assert " " not in uri and "\\n" not in uri and "enter" not in uri
+
+    def test_a_url_at_a_line_break_is_not_glued_to_the_next_word(
+        self, client, monkeypatch,
+    ):
+        r"""The reply is JSON, so a newline inside ``message`` is the two
+        characters \ and n until the envelope is decoded — and the URL regex
+        matches \S+. Reading the raw envelope is what shipped a Google consent
+        link ending "prompt=select_account\nMarkdown". Decode, then parse.
+        """
+        async def _call_tool(*_a):
+            return _tool_result(
+                '{"error":"device_code_required","message":"Open '
+                'https://www.microsoft.com/link\\nand enter the code ZZQ12345."}'
+            )
+
+        self._with_pool(monkeypatch, _call_tool)
+        body = client.post("/connectors/outlook/auth/start").json()
+        assert body["verification_uri"] == "https://www.microsoft.com/link"
+        assert body["device_code"] == "ZZQ12345"
+
+    def test_an_error_flagged_reply_is_not_mined_for_a_code(self, client, monkeypatch):
+        """MCP reports tool failure as a RESULT, not an exception.
+
+        ``except`` never fires for a rejected bearer or an unknown tool name, so
+        the isError flag is the only signal there is — and this payload is the
+        reason the check cannot be skipped as redundant: it is well-formed
+        device-code prose, so a parser that ignores the flag extracts a perfectly
+        plausible code out of a reply the server said had failed. Today's sibling
+        sets isError False here, but its payload's top-level key is already
+        ``"error"``, so a version that flags it is one upstream line away. Not
+        trusting a flagged reply costs a fallback; trusting one hands the
+        operator a code that will not work and no way to tell why.
+        """
+        async def _call_tool(*_a):
+            return _tool_result(_LIVE_LOGIN_REPLY, is_error=True)
+
+        self._with_pool(monkeypatch, _call_tool)
+
+        body = client.post("/connectors/outlook/auth/start").json()
+        assert body["device_code"] is None
+        assert body["verification_uri"] is None
+        assert "node dist/index.js --login" in body["instructions"]
+        assert "--profile pro" in body["instructions"]
+
+    def test_unparseable_reply_falls_back_and_shows_what_came_back(
+        self, client, monkeypatch,
+    ):
+        async def _call_tool(*_a):
+            return _tool_result("Already signed in as someone@example.com.")
+
+        self._with_pool(monkeypatch, _call_tool)
+
+        body = client.post("/connectors/outlook/auth/start").json()
+        assert body["device_code"] is None
+        assert "Already signed in" in body["instructions"]
+        assert "node dist/index.js --login" in body["instructions"]
+
+    def test_unreachable_sibling_falls_back_rather_than_returning_nothing(
+        self, client, monkeypatch,
+    ):
+        """An operator whose stack is down is the one who most needs the
+        manual path — an empty response strands them."""
+        async def _boom(*_a):
+            raise ConnectionError("connection refused")
+
+        self._with_pool(monkeypatch, _boom)
+
+        body = client.post("/connectors/outlook/auth/start").json()
+        assert body["device_code"] is None
+        assert "connection refused" in body["instructions"]
+        assert "node dist/index.js --login" in body["instructions"]
+        assert "-f docker-compose.yml" in body["instructions"]
+
+    def test_the_fallback_does_not_name_a_url_the_sibling_contradicts(
+        self, client, monkeypatch,
+    ):
+        """The manual string said "microsoft.com/devicelogin"; the sibling
+        issues codes against microsoft.com/link. Point at the URL the login
+        actually prints instead of a second, hardcoded one."""
+        async def _boom(*_a):
+            raise ConnectionError("down")
+
+        self._with_pool(monkeypatch, _boom)
+        instructions = client.post("/connectors/outlook/auth/start").json()["instructions"]
+        assert "devicelogin" not in instructions
+        assert "the URL it prints" in instructions
+
+    def test_outlook_calendar_uses_the_same_flow(self, client, monkeypatch):
+        """Both ms365 connectors share auth_kind, and a per-slug regression
+        would leave one of the two paid connectors on the dead path."""
+        async def _call_tool(*_a):
+            return _tool_result(_LIVE_LOGIN_REPLY)
+
+        self._with_pool(monkeypatch, _call_tool)
+        body = client.post("/connectors/outlook_calendar/auth/start").json()
+        assert body["device_code"] == "VDBF68NR"
 
 
 class TestAuthStatus:
@@ -393,3 +603,124 @@ class TestDisconnect:
         resp = client.post("/connectors/apple_calendar/disconnect")
         body = resp.json()
         assert "System Settings" in body["detail"]
+
+
+class TestStartAuthIsGated:
+    """Starting an authorization is a GRANT, and it was ungated.
+
+    `feature_enabled` was computed for /connectors and only ever reported, so a
+    community install could walk a real Google consent screen and have a
+    refresh token written into the sibling's volume. Ingest would then refuse
+    to use it — value withheld, credential handed over anyway.
+    """
+
+    def test_community_tier_cannot_start_an_authorization(self, client, monkeypatch):
+        import config.features as features
+
+        monkeypatch.setattr(features, "is_feature_enabled", lambda _f: False)
+        res = client.post("/connectors/gmail/auth/start")
+        assert res.status_code == 403
+        assert "Pro" in res.json()["detail"]
+
+    def test_community_tier_cannot_start_a_microsoft_device_code(
+        self, client, monkeypatch,
+    ):
+        """The gate has to survive the branch becoming a real sibling call.
+
+        A device code is a grant in progress: complete it and a token lands in
+        the ms365 container's volume for an install whose ingest will refuse to
+        use it. The sibling must not be asked for one at all.
+        """
+        import sys
+        import types
+
+        import config.features as features
+        import core.mcp_clients  # noqa: F401 — see TestMicrosoftDeviceCodeStart._with_pool
+
+        monkeypatch.setattr(features, "is_feature_enabled", lambda _f: False)
+
+        calls = []
+
+        async def _call_tool(*args):
+            calls.append(args)
+            raise AssertionError("sibling contacted despite the Pro gate")
+
+        mod = types.ModuleType("core.mcp_clients.client_pool")
+        mod.get_pool = lambda: types.SimpleNamespace(call_tool=_call_tool)
+        monkeypatch.setitem(sys.modules, "core.mcp_clients.client_pool", mod)
+
+        res = client.post("/connectors/outlook/auth/start")
+        assert res.status_code == 403
+        assert "Pro" in res.json()["detail"]
+        assert calls == []
+
+    def test_disconnect_is_NOT_gated(self, client, monkeypatch):
+        """Deliberate asymmetry. Gating revocation would trap a user with
+        access they want to remove — a gate that blocks the safety action is
+        worse than no gate."""
+        import config.features as features
+
+        monkeypatch.setattr(features, "is_feature_enabled", lambda _f: False)
+        assert client.post("/connectors/gmail/disconnect").status_code == 200
+
+    def test_auth_status_is_NOT_gated(self, client, monkeypatch):
+        """Read-only, and the UI needs it to render the locked state."""
+        import config.features as features
+
+        monkeypatch.setattr(features, "is_feature_enabled", lambda _f: False)
+        assert client.get("/connectors/gmail/auth/status").status_code == 200
+
+
+class TestBridgeOnlyConnectorsAreStillGuarded:
+    """`apple_notes` has no backend plugin — correctly.
+
+    The desktop app implements it end to end; adding a backend plugin would be
+    a rival implementation of one feature, the mistake the `spotlight_donor`
+    deletion already corrected. But the reachability invariant above iterates
+    plugin MANIFESTS, so a bridge-only connector is invisible to it: dropping
+    `{ kind: "notes" }` from APPLE_BRIDGE_KINDS would remove a paid connector
+    from the UI with every gate green.
+
+    These anchor on `config.features.NON_PLUGIN_IMPLEMENTATIONS`, which
+    declares independently where a flag with no plugin actually lives.
+    """
+
+    def _bridge_block(self) -> str:
+        rows = (REPO_ROOT / "src/web/src/components/sources/source-rows.ts").read_text()
+        return rows.split("APPLE_BRIDGE_KINDS", 1)[-1].split("]", 1)[0]
+
+    def test_every_desktop_declared_connector_flag_reaches_a_surface(self):
+        import config.features as features
+
+        # `spotlight_donation` is a Settings → Extensions surface, not a source
+        # row, so it is excluded here; the Pro-gating lint covers it via its
+        # renderer gate.
+        bridge_flags = {
+            flag for flag, where in features.NON_PLUGIN_IMPLEMENTATIONS.items()
+            if where == "desktop" and flag != "spotlight_donation"
+        }
+        assert bridge_flags, "no desktop-declared connector flags — anchor is empty"
+
+        block = self._bridge_block()
+        missing = []
+        for flag in sorted(bridge_flags):
+            kind = flag.removeprefix("apple_").removesuffix("_reader")
+            if f'kind: "{kind}"' not in block:
+                missing.append((flag, kind))
+        assert not missing, (
+            "declared desktop-implemented but absent from APPLE_BRIDGE_KINDS, "
+            f"so nothing renders them: {missing}"
+        )
+
+    def test_a_bridge_kind_is_never_also_a_rest_connector(self):
+        """Sources → Connectors concatenates both feeds with no dedup, so a
+        kind in both renders twice — once working, once reporting a Swift
+        helper the container cannot see."""
+        from app.routers.connectors import _CONNECTORS
+
+        block = self._bridge_block()
+        for slug in _CONNECTORS:
+            kind = slug.removeprefix("apple_")
+            assert f'kind: "{kind}"' not in block, (
+                f"{slug} is a REST connector AND a bridge row — it would render twice"
+            )

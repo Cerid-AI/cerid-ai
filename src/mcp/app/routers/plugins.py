@@ -42,6 +42,10 @@ class PluginInfo(BaseModel):
     file_types: list[str] = Field(default_factory=list)
     config_schema: dict[str, Any] | None = None
     capabilities: list[str] = Field(default_factory=list)
+    # ``config.features.FEATURE_FLAGS`` keys this plugin's manifest declares.
+    # Empty for manifests that declare none — a caller cannot tell "no flags"
+    # from "field absent", so an empty list is the honest default.
+    feature_flags: list[str] = Field(default_factory=list)
 
 
 class PluginConfig(BaseModel):
@@ -159,6 +163,7 @@ def _manifest_to_info(manifest: dict[str, Any], enabled: bool) -> PluginInfo:
         file_types=manifest.get("file_types", []),
         config_schema=manifest.get("config_schema"),
         capabilities=manifest.get("capabilities", []),
+        feature_flags=list(manifest.get("feature_flags") or []),
     )
 
 

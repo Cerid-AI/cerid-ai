@@ -244,3 +244,72 @@ class TestDelete:
         # After reset, falls back to defaults
         body = resp.json()
         assert body["schedule"] == "*/15 * * * *"
+
+
+# --- Sprint 3: the gate that could not be evaluated, and the cadence that
+#     was written and never read ------------------------------------------
+
+
+class TestFeatureGateFailsClosed:
+    """`_require_feature` wrapped the whole check in `except ImportError: pass`,
+    so a gate that could not be evaluated silently ALLOWED the request. A gate
+    that cannot answer must refuse. Planting the fail-open turned nothing red
+    before this test existed."""
+
+    def test_an_unimportable_gate_refuses_rather_than_permits(self):
+        import sys
+        from unittest.mock import patch
+
+        from fastapi import HTTPException
+
+        from app.routers.pro_automations import _require_feature
+
+        spec = {"feature_flag": "inbox_triage"}
+        # `from config.features import ...` raises ImportError when the module
+        # maps to None in sys.modules.
+        with patch.dict(sys.modules, {"config.features": None}):
+            try:
+                _require_feature(spec)
+            except HTTPException as exc:
+                assert exc.status_code == 503
+                assert "refusing" in exc.detail.lower()
+            else:
+                raise AssertionError("gate failed OPEN — it permitted the request")
+
+    def test_a_disabled_flag_is_still_a_403(self):
+        from unittest.mock import patch
+
+        from fastapi import HTTPException
+
+        from app.routers.pro_automations import _require_feature
+
+        with patch("config.features.is_feature_enabled", return_value=False):
+            try:
+                _require_feature({"feature_flag": "inbox_triage"})
+            except HTTPException as exc:
+                assert exc.status_code == 403
+            else:
+                raise AssertionError("a disabled flag must be refused")
+
+
+class TestScheduleIsActuallyRead:
+    """`PUT /settings/pro-automations/{name}` persisted a cron to Redis and the
+    scheduler registered straight from config.SCHEDULE_*, so a paying
+    customer's cadence change returned 200 and never took effect."""
+
+    def test_registration_prefers_the_stored_schedule_over_the_env_default(self):
+        from unittest.mock import patch
+
+        from app.scheduler import _automation_schedule
+
+        with patch("utils.pro_automations.get_schedule", return_value="0 9 * * *"):
+            assert _automation_schedule("daily_digest", "0 7 * * *") == "0 9 * * *"
+
+    def test_it_falls_back_to_env_when_the_store_is_unreachable(self):
+        """A Redis outage must not silently unschedule a customer's automation."""
+        from unittest.mock import patch
+
+        from app.scheduler import _automation_schedule
+
+        with patch("utils.pro_automations.get_schedule", side_effect=RuntimeError("redis down")):
+            assert _automation_schedule("daily_digest", "0 7 * * *") == "0 7 * * *"

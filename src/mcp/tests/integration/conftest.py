@@ -37,6 +37,7 @@ import os
 import uuid
 import warnings
 from collections.abc import Iterator
+from typing import NoReturn
 
 import pytest
 
@@ -64,8 +65,15 @@ def record_preservation_skip(
     request: pytest.FixtureRequest,
     invariant_id: str,
     reason: str,
-) -> None:
+) -> NoReturn:
     """Emit a warning and record a JUnit property, then skip the test.
+
+    Returns ``NoReturn`` because it always raises through ``pytest.skip()``.
+    That is not cosmetic: bare ``pytest.skip()`` is typed ``NoReturn``, so
+    callers get type narrowing after the skip branch ("this is not None
+    below"). Declaring ``-> None`` silently discarded that narrowing and
+    introduced a union-attr error at every converted call site. It was
+    invisible because pyproject excludes tests/ from mypy.
 
     Use this instead of bare ``pytest.skip()`` in any fixture-level code
     that skips a preservation test due to a missing environment variable

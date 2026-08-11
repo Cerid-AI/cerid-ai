@@ -2,10 +2,24 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""Generate .env.example from src/mcp/config/settings.py os.getenv calls.
+"""Generate .env.example from the os.getenv calls across src/mcp.
 
-Walks the AST of settings.py and emits a sorted .env.example file with
-each discovered env var and its default value (if a simple string literal).
+Walks the AST and emits a sorted .env.example with each discovered env var.
+
+Two corrections, both made 2026-08-10 after `--check` reported "in sync"
+while the entire Pro connector stack was undocumented:
+
+1. It scanned ONLY settings.py, so anything read elsewhere was invisible —
+   CERID_TIER (config/features.py), USER_GOOGLE_EMAIL (routers/connectors.py),
+   CERID_TRIAL_DAYS and CERID_LICENSE_* (routers/license.py, utils/license.py),
+   HF_TOKEN, and the connector-stack ports. The gate passed because it was
+   comparing the file against a question it had narrowed to nothing.
+
+2. A var whose default is COMPUTED rather than a literal was rendered
+   `NAME=`, which is not "unset" — it sets the empty string, so the computed
+   default in code never runs. `cp .env.example .env` produced an empty
+   CERID_MACHINE_ID and a broken CERID_SIDECAR_URL. Those are now emitted
+   commented out, so copying the file leaves the code's default intact.
 
 Usage:
     python scripts/gen_env_example.py                 # regenerate, write to .env.example
@@ -19,16 +33,58 @@ import difflib
 import sys
 from pathlib import Path
 
+# Sentinel: os.getenv had a default, but it is computed rather than literal.
+COMPUTED_DEFAULT = "<computed>"
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_FILE = REPO_ROOT / "src" / "mcp" / "config" / "settings.py"
 ENV_EXAMPLE_FILE = REPO_ROOT / ".env.example"
+SCAN_ROOT = REPO_ROOT / "src" / "mcp"
+
+# settings.py is the canonical config module: everything it reads is
+# documented, whatever the name. For the OTHER modules now scanned, filter by
+# RULE rather than a list nobody maintains — our own namespace plus the
+# third-party credentials an operator genuinely has to supply — so widening the
+# walk cannot sweep in one-off reads from unrelated code.
+_PROJECT_PREFIX = "CERID_"
+_THIRD_PARTY_ALLOWLIST = frozenset({
+    "HF_TOKEN",
+    "OPENROUTER_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "NEO4J_PASSWORD",
+    "NEO4J_USER",
+    "NEO4J_URI",
+    "USER_GOOGLE_EMAIL",
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "MS365_MCP_TENANT_ID",
+})
+
+
+def _is_documented_var(name: str) -> bool:
+    return name.startswith(_PROJECT_PREFIX) or name in _THIRD_PARTY_ALLOWLIST
+
+
+def _iter_sources():
+    """Every non-test module under src/mcp, plus settings.py first."""
+    yield SETTINGS_FILE
+    for path in sorted(SCAN_ROOT.rglob("*.py")):
+        if path == SETTINGS_FILE:
+            continue
+        parts = set(path.parts)
+        if "tests" in parts or path.name.startswith("test_"):
+            continue
+        yield path
 
 
 class GetenvVisitor(ast.NodeVisitor):
     """Collect (name, default) pairs from os.getenv(...) calls."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, filtered: bool = True) -> None:
         self.entries: list[tuple[str, str | None]] = []
+        # settings.py is unfiltered; every other module is filtered by rule.
+        self.filtered = filtered
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         # Match os.getenv("NAME", [default]) or os.environ.get("NAME", [default])
@@ -36,7 +92,8 @@ class GetenvVisitor(ast.NodeVisitor):
             name_node = node.args[0]
             if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
                 default = self._extract_default(node.args[1]) if len(node.args) > 1 else None
-                self.entries.append((name_node.value, default))
+                if not self.filtered or _is_documented_var(name_node.value):
+                    self.entries.append((name_node.value, default))
         self.generic_visit(node)
 
     @staticmethod
@@ -60,16 +117,31 @@ class GetenvVisitor(ast.NodeVisitor):
     def _extract_default(node: ast.expr) -> str | None:
         if isinstance(node, ast.Constant):
             return str(node.value) if node.value is not None else None
-        return None  # complex defaults (f-strings, variables) not rendered
+        # A computed default (f-string, variable, call). Distinct from "no
+        # default at all" — see COMPUTED_DEFAULT.
+        return COMPUTED_DEFAULT
 
 
-def extract_env_vars(source: str) -> list[tuple[str, str | None]]:
-    tree = ast.parse(source)
-    visitor = GetenvVisitor()
-    visitor.visit(tree)
-    # Dedup; keep first seen occurrence
+def extract_env_vars(sources: "list[tuple[str, str]] | str") -> list[tuple[str, str | None]]:
+    """Accepts a single source string (legacy) or (label, source) pairs."""
+    if isinstance(sources, str):
+        sources = [("<source>", sources)]
+    entries: list[tuple[str, str | None]] = []
+    for label, src in sources:
+        visitor = GetenvVisitor(filtered=(label != str(SETTINGS_FILE)))
+        try:
+            visitor.visit(ast.parse(src))
+        except SyntaxError:
+            continue
+        entries.extend(visitor.entries)
+    # Dedup: FIRST seen wins, and settings.py is yielded first, so the
+    # canonical config module always decides. Preferring a literal from
+    # elsewhere looked helpful but is wrong — CERID_SIDECAR_URL is computed
+    # from CERID_SIDECAR_PORT in settings.py while inference_routing.py
+    # hardcodes 8889 in three places, so the "helpful" literal would document a
+    # value that goes stale the moment the port is changed.
     seen: dict[str, str | None] = {}
-    for name, default in visitor.entries:
+    for name, default in entries:
         if name not in seen:
             seen[name] = default
     return sorted(seen.items())
@@ -80,6 +152,13 @@ def extract_env_vars(source: str) -> list[tuple[str, str | None]]:
 # them. Registered explicitly (V1 Task 4.3 — INSTALL.md points operators
 # here for port collisions). Keep in sync with docker-compose.yml.
 COMPOSE_VARS: list[tuple[str, str]] = [
+    # Connector stack (stacks/connectors/docker-compose.yml, --profile pro).
+    # Absent until 2026-08-10: the whole Pro connector stack was undocumented
+    # while the drift gate reported the file in sync.
+    ("CERID_PORT_GOOGLE_MCP", "8810"),
+    ("CERID_PORT_MS365_MCP", "8811"),
+    ("CERID_BIND_ADDR", "127.0.0.1"),
+    ("MS365_MCP_TENANT_ID", "common"),
     ("CERID_PORT_MCP", "8888"),
     ("CERID_PORT_GUI", "3000"),
     ("CERID_PORT_NEO4J", "7474"),
@@ -97,7 +176,11 @@ def render_env_example(entries: list[tuple[str, str | None]]) -> str:
         "",
     ]
     for name, default in entries:
-        if default is not None:
+        if default is COMPUTED_DEFAULT:
+            # Commented ON PURPOSE. `NAME=` would set the empty string and
+            # defeat the default computed in code.
+            lines.append(f"# {name}=   # default is computed at runtime")
+        elif default is not None:
             lines.append(f"{name}={default}")
         else:
             lines.append(f"{name}=")
@@ -120,8 +203,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    source = SETTINGS_FILE.read_text(encoding="utf-8")
-    entries = extract_env_vars(source)
+    sources = [(str(p), p.read_text(encoding="utf-8")) for p in _iter_sources()]
+    entries = extract_env_vars(sources)
     expected = render_env_example(entries)
 
     if args.check:

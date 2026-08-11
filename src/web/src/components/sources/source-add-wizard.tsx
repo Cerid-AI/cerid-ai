@@ -18,7 +18,7 @@
 
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, ChevronRight, Loader2 } from "lucide-react"
+import { CheckCircle2, ChevronRight, Loader2, Lock } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -37,6 +37,8 @@ import type { SourceKindMetaExt } from "./source-kind-meta"
 import { descriptorFor } from "./source-kind-icons"
 import { WebhookShareCard } from "./webhook-share-card"
 import { KindSpecificFields } from "./source-config-form"
+import { useEntitlements } from "@/hooks/use-entitlements"
+import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
 
 type WizardStep = "pick" | "configure" | "result"
 
@@ -80,8 +82,31 @@ function SourceAddWizardInner({
   const [displayName, setDisplayName] = useState<string>("")
   const [config, setConfig] = useState<Record<string, unknown>>({})
   const [created, setCreated] = useState<SourceRecord | null>(null)
+  // Kind whose Pro gate the user just walked into — drives the upgrade dialog,
+  // same shape as SourcesConnectors.
+  const [upgradeKind, setUpgradeKind] = useState<string | null>(null)
 
   const queryClient = useQueryClient()
+
+  // This wizard is reachable from the AddSourceFab (⌘⇧S) without passing
+  // through SourcesConnectors or the empty gallery, so it needs its own gate:
+  // before this it let a community user configure a Pro kind all the way to
+  // Connect and then surfaced the server's 403 as a raw error string.
+  //
+  // Resolution is per TIER, not per flag: /sources/kinds carries `tier` but no
+  // `feature_flag`, so there is nothing to resolve a flag from. The second
+  // argument to forFlag is the registry-tier fallback and is what makes an
+  // unresolvable entitlement fail CLOSED — omitting it returns "available".
+  // `isLoading` suppresses the verdict because `tier` defaults to "community"
+  // while capabilities are in flight, and a paying customer must not be shown
+  // an upgrade pitch on first paint. The server stays the enforcement point
+  // (POST /sources 403s for Pro kinds at community tier); this only keeps the
+  // wizard from walking someone into that dead end.
+  const { forFlag, isLoading: entitlementsLoading } = useEntitlements()
+  const proTierLocked =
+    !entitlementsLoading && forFlag(undefined, "pro").state === "locked"
+  const isKindLocked = (meta?: SourceKindMetaExt) =>
+    meta?.tier === "pro" && proTierLocked
 
   const { data: kinds } = useQuery<SourceKindMetaExt[]>({
     queryKey: ["source-kinds"],
@@ -125,6 +150,11 @@ function SourceAddWizardInner({
     },
   })
 
+  // A pre-selected kind (FAB deep-link, gallery hand-off) skips the pick step,
+  // so the lock has to be re-checked here too — otherwise the one entry point
+  // that never renders a tile is also the one with no gate.
+  const selectionLocked = isKindLocked(selectedMeta)
+
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
       <DialogContent className="sm:max-w-lg">
@@ -140,14 +170,33 @@ function SourceAddWizardInner({
         {step === "pick" && (
           <PickStep
             kinds={filteredKinds}
+            isLocked={(k) => isKindLocked(filteredKinds.find((m) => m.kind === k))}
             onPick={(k) => {
+              // Locked rows stay visible and clickable — they are the funnel —
+              // but route to the upgrade dialog instead of the configure step.
+              if (isKindLocked(filteredKinds.find((m) => m.kind === k))) {
+                setUpgradeKind(k)
+                return
+              }
               setKind(k)
               setStep("configure")
             }}
           />
         )}
 
-        {step === "configure" && kind && (
+        {step === "configure" && kind && selectionLocked && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {descriptorFor(kind).label} is part of Cerid Pro.
+            </p>
+            <Button onClick={() => setUpgradeKind(kind)} className="cerid-press">
+              <Lock className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+              Unlock with Pro
+            </Button>
+          </div>
+        )}
+
+        {step === "configure" && kind && !selectionLocked && (
           <ConfigureStep
             kind={kind}
             providers={providers}
@@ -166,6 +215,12 @@ function SourceAddWizardInner({
         {step === "result" && created && (
           <ResultStep record={created} onClose={onClose} />
         )}
+
+        <ProUpgradeOverlay
+          open={upgradeKind !== null}
+          kind={upgradeKind}
+          onClose={() => setUpgradeKind(null)}
+        />
       </DialogContent>
     </Dialog>
   )
@@ -177,9 +232,13 @@ function SourceAddWizardInner({
 
 function PickStep({
   kinds,
+  isLocked,
   onPick,
 }: {
   kinds: SourceKindMetaExt[]
+  /** Pro-tier kind this plan can't use. Required, not defaulted: a call site
+      that forgets it should fail the build rather than ship the grid ungated. */
+  isLocked: (kind: string) => boolean
   onPick: (kind: string) => void
 }) {
   return (
@@ -188,6 +247,9 @@ function PickStep({
         const desc = descriptorFor(k.kind)
         const Icon = desc.icon
         const availability = k.availability ?? "available"
+        const locked = isLocked(k.kind)
+        // A locked tile stays clickable — it opens the upgrade dialog. Greying
+        // it out would hide the thing we're selling.
         const selectable = availability === "available"
         const prefix =
           availability === "coming_soon"
@@ -213,7 +275,9 @@ function PickStep({
             )}
             aria-label={
               selectable
-                ? `Add ${desc.label}`
+                ? locked
+                  ? `${desc.label} — requires Cerid Pro`
+                  : `Add ${desc.label}`
                 : availability === "oauth"
                   ? `${desc.label} — connect in Settings`
                   : availability === "requires_desktop"

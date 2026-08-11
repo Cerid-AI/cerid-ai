@@ -108,7 +108,7 @@ Set the feature flag:
 gmail_connector=true
 ```
 
-Operators on the Pro tier (`CERID_FEATURE_TIER=pro`) get this flag flipped
+Operators on the Pro tier (`CERID_TIER=pro`) get this flag flipped
 on automatically — no manual override needed.
 
 ## What gets ingested

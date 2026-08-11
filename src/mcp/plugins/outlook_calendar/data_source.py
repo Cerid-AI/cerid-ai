@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Any
 
@@ -47,7 +46,33 @@ class OutlookCalendarDataSource(DataSource):
     api_key_env_var = "CERID_CONNECTORS_BEARER"  # pragma: allowlist secret
 
     def is_configured(self) -> bool:
-        return bool(os.getenv("CERID_CONNECTORS_BEARER"))
+        """True only once the sibling has actually answered a call.
+
+        This returned ``bool(CERID_CONNECTORS_BEARER)`` — a value the ms365
+        sibling never reads as client auth. It forwards the client's bearer
+        straight to Microsoft Graph, so our static token is not a credential
+        here at all; the real credential is a device-code login cached inside
+        the container's own volume, which this process cannot inspect.
+
+        The result was `/connectors/outlook` reporting `configured` on an
+        install that had never logged in — a green surface derived from
+        evidence that had nothing to do with the thing being claimed.
+
+        `ever_succeeded` is the only signal the backend genuinely has: it is
+        set when a call returns a NON-ERROR result, so it cannot be satisfied
+        by the 401s an unauthenticated sibling produces. Before the first
+        successful call this reads False, which surfaces as "not yet
+        authorized" — the honest answer.
+        """
+        try:
+            from core.mcp_clients.client_pool import get_pool
+
+            for state in get_pool().list_connectors():
+                if state.get("name") == "ms365":
+                    return bool(state.get("ever_succeeded"))
+        except Exception as exc:  # noqa: BLE001 — status must never 500
+            log_swallowed_error("outlook_calendar.is_configured", exc)
+        return False
 
     async def _call_mcp(self, tool_name: str, args: dict[str, Any]) -> Any:
         from core.mcp_clients.client_pool import get_pool

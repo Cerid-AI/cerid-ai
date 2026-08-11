@@ -2,10 +2,15 @@
     "name": "ocr",
     "version": "1.0.0",
     "type": "parser",
-    "tier": "pro",
+    "tier": "community",
+    "feature_flags": [
+        "ocr_parsing"
+    ],
     "license": "BUSL-1.1",
     "description": "OCR support for scanned PDFs and image-only documents. Uses Docling (primary) with Tesseract fallback.",
-    "requires": ["docling"],
+    "requires": [
+        "docling"
+    ],
     "config": {
         "OCR_ENGINE": {
             "description": "OCR engine to use: 'docling' (recommended) or 'tesseract'",

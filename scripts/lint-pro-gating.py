@@ -4,10 +4,14 @@
 """Lint that every Pro-tier feature flag has at least one runtime gate.
 
 Background: until Phase 1 of the 2026-05-20 Pro Tier Implementation Plan,
-the 12 Pro flags in ``config.features.FEATURE_FLAGS`` were declared but
+the Pro flags in ``config.features.FEATURE_FLAGS`` were declared but
 zero call-sites consulted them at user-facing entry points. Paying for
 Pro changed no behavior. This lint enforces the bucket-migration discipline
 going forward.
+
+The set was 12 flags when that plan was written; it is 23 as of 2026-08-10
+and grows with each Pro bucket. Do not hard-code the count here — the run
+itself reports it ("OK: all N Pro flags have at least one gate").
 
 For every flag mapped to the Pro tier (per ``_PRO_TIER_FLAGS`` in
 ``config.features``) we require at least one of the following call patterns

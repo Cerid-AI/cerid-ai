@@ -96,8 +96,8 @@ curl http://localhost:8888/settings/rag/weights/sources
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Sliders locked, "Pro feature" overlay | Community tier or feature flag off | Upgrade to Pro, or set `CERID_FEATURE_TIER=pro` in `.env` for self-hosted |
-| Save returns 403 | `custom_smart_rag` feature off server-side | Verify `CERID_FEATURE_TIER=pro` then restart MCP container |
+| Sliders locked, "Pro feature" overlay | Community tier or feature flag off | Upgrade to Pro, or set `CERID_TIER=pro` in `.env` for self-hosted |
+| Save returns 403 | `custom_smart_rag` feature off server-side | Verify `CERID_TIER=pro` then restart MCP container |
 | Changes don't seem to affect rankings | Weights only matter when source is active | Confirm the source is enabled in Sources → Connectors, and your query actually touches that source |
 | Sliders show non-default weights you didn't set | Stale state from prior session | Click "Reset all" to start fresh |
 | No effect after save | Query cache holding old results | Issue a new query; the cache invalidates per-query, not per-weight-change |

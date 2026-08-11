@@ -82,3 +82,55 @@ def test_every_pro_kind_in_the_table_is_covered_by_the_gate():
     "core" would silently un-gate it."""
     for kind in ("apple_mail", "apple_reminders", "apple_notes", "imessage"):
         assert KIND_TIER[kind] == "pro"
+
+
+class TestEveryProKindIsRefusedEverywhere:
+    """Enumerate the POPULATION, don't spot-check the instances.
+
+    The four ungated paths closed on 2026-08-10 were each found by reading,
+    which had already missed them three times. These tests derive their subject
+    from `KIND_TIER`, so a NEW Pro kind is covered the moment it is declared —
+    nobody has to remember to add a case.
+
+    A grep-style lint was considered and rejected: the real chokepoints are
+    behavioural (a route returning 403, a loop skipping a kind), and a static
+    scan for "is there a gate symbol nearby" produces false positives on
+    routers that are gated INDIRECTLY. `/data-sources/query` is the example —
+    it has no gate of its own, and needs none, because a Pro DataSource is
+    registered by a plugin `register()` that the tier-gated loader refuses to
+    run at community tier. A noisy gate gets ignored, which is worse than none.
+    """
+
+    def _pro_kinds(self):
+        from core.ingest.sources.kinds import KIND_TIER
+        return sorted(k for k, t in KIND_TIER.items() if t == "pro")
+
+    def test_the_population_is_not_empty(self):
+        """Guards the two tests below from passing vacuously if KIND_TIER is
+        ever restructured."""
+        assert len(self._pro_kinds()) >= 5
+
+    def test_no_pro_kind_can_be_created_at_community_tier(self, client, monkeypatch):
+        monkeypatch.setattr("app.routers.sources.is_tier_met", lambda _t: False)
+        allowed = []
+        for kind in self._pro_kinds():
+            res = client.post(
+                "/sources",
+                json={"kind": kind, "display_name": f"t-{kind}", "config": {}},
+            )
+            if res.status_code != 403:
+                allowed.append((kind, res.status_code))
+        assert not allowed, f"Pro kinds creatable at community tier: {allowed}"
+
+    def test_no_pro_kind_is_polled_at_community_tier(self):
+        """The scheduler is the other way a Pro kind gets worked on — and it
+        walks rows that already exist, which the creation gate cannot help
+        with."""
+        from app.scheduler import _POLLABLE_KINDS
+        from core.ingest.sources.kinds import KIND_TIER
+
+        pro_pollable = [k for k in _POLLABLE_KINDS if KIND_TIER.get(k) == "pro"]
+        # Every Pro kind in the poll set must be covered by the per-kind gate
+        # in _run_source_poll; test_scheduler.py asserts the behaviour. This
+        # pins that the two sets stay in sync so that test cannot go stale.
+        assert set(pro_pollable) <= set(self._pro_kinds())

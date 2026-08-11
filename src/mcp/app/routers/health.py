@@ -675,12 +675,36 @@ def _pro_feature_health() -> dict:
             entry["implementation"] = "backend_plugin"
             entry["loaded"] = True
         else:
-            # No backend plugin claims it: either served by a router/agent in
-            # this process, or implemented in the desktop app.
-            entry["implementation"] = "in_process_or_desktop"
+            # No backend plugin claims it, so it must say where it DOES live.
+            # This used to be a catch-all "in_process_or_desktop" that
+            # `degraded` never drew from, which made 14 of 27 paid flags
+            # structurally unfalsifiable: deleting a broken plugin, or adding a
+            # flag nobody implemented, both landed here and read as fine.
+            declared = features.NON_PLUGIN_IMPLEMENTATIONS.get(flag)
+            entry["implementation"] = declared or "unknown"
+            if declared in (None, "unimplemented") and entitled:
+                degraded.append(flag)
+            if declared == "unimplemented":
+                entry["blocked_reason"] = (
+                    "declared unimplemented: no plugin, no gate, no call site"
+                )
+            elif declared is None:
+                entry["blocked_reason"] = (
+                    "no backend plugin supplies this flag and it is not declared "
+                    "in config.features.NON_PLUGIN_IMPLEMENTATIONS"
+                )
         out[flag] = entry
 
-    return {"degraded": sorted(degraded), "features": out}
+    # The tier the flags above were computed at. Reported so a caller can tell
+    # WHICH tier it is looking at: scripts/lint-pro-feature-health.py's
+    # --require-tier could only ask "is anything entitled?", so
+    # `--require-tier enterprise` passed happily against a Pro stack — a check
+    # named after a tier that never compared one.
+    return {
+        "tier": features.FEATURE_TIER,
+        "degraded": sorted(degraded),
+        "features": out,
+    }
 
 
 def _build_health_payload() -> dict:

@@ -581,6 +581,50 @@ PLANNED_FEATURES: frozenset[str] = frozenset({
 })
 
 
+# Where a paid flag is implemented when NO backend plugin supplies it.
+#
+# /health.pro_features used to sort every such flag into an
+# "in_process_or_desktop" bucket that its `degraded` list never drew from —
+# 14 of 27 paid flags landed there, so the gate could not fail for any of them.
+# A residual bucket is not an answer, it is the absence of one. Every paid flag
+# must now be plugin-backed, PLANNED, or named here; anything else reports
+# `implementation: "unknown"` and degrades when entitled, so adding a paid flag
+# without deciding where it lives fails loudly.
+#
+# Each entry below was verified against its actual gate site on 2026-08-10.
+NON_PLUGIN_IMPLEMENTATIONS: dict[str, str] = {
+    # --- served by a router or agent in this process ---
+    "advanced_analytics":          "in_process",  # app/routers/analytics.py
+    "calendar_sync":               "in_process",  # app/routers/connectors.py
+    "custom_smart_rag":            "in_process",  # app/routers/rag_weights.py
+    "daily_digest":                "in_process",  # app/routers/digests.py
+    "inbox_triage":                "in_process",  # app/routers/pro_automations.py
+    "multi_user":                  "in_process",  # app/routers/settings.py
+    "pro_visualization_analytics": "in_process",  # app/routers/atlas_views.py
+    "pro_visualization_timeline":  "in_process",  # app/routers/atlas_views.py
+    "pro_visualization_tour":      "in_process",  # app/routers/graph_tour.py
+
+    # --- implemented in the Electron app; a container can never supply these ---
+    "apple_notes_reader":          "desktop",     # packages/desktop/.../apple_notes.ts
+    "spotlight_donation":          "desktop",     # packages/desktop/.../spotlight.ts
+
+    # --- not code at all: a support commitment, nothing to load or gate ---
+    "priority_support":            "entitlement_only",
+
+    # --- SOLD, ADVERTISED, AND NOT IMPLEMENTED ---
+    # Both are ✓ for Enterprise in docs/TIER_MATRIX.md and neither is in
+    # PLANNED_FEATURES, yet a repo-wide search on 2026-08-10 found them ONLY in
+    # this file, the UI capability copy, and the tier-matrix generator's label
+    # map — no gate, no call site, no implementation. They are recorded
+    # truthfully here rather than hidden in a residual bucket: on an Enterprise
+    # install they are entitled, so they will surface as `degraded`, which is
+    # the correct and actionable answer. Resolve by implementing them or by
+    # moving them to PLANNED_FEATURES — not by adding them to the list above.
+    "audit_logging":               "unimplemented",
+    "sso_saml":                    "unimplemented",
+}
+
+
 def is_feature_enabled(feature_name: str) -> bool:
     """Check if a tier-gated feature is enabled (fail-closed for unknown)."""
     if feature_name not in FEATURE_FLAGS:

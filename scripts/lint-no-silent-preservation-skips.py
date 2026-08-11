@@ -33,7 +33,45 @@ import sys
 import xml.etree.ElementTree as ET  # noqa: B314 — parsing trusted CI-generated JUnit XML
 
 _PROPERTY_NAME = "preservation_skipped"
-_PRESERVATION_SUITE_KEYWORDS = ("preservation",)
+
+# Invariant ids that CANNOT run in CI for a structural reason, not a
+# configuration one. The Apple connectors need signed Swift helpers on PATH and
+# TCC grants that only a real macOS app bundle can hold (Phase 4); the meeting
+# fixtures are large binaries kept out of the repo. Declaring them here is what
+# separates "we could not verify this, and we know why" from "an invariant
+# silently went unchecked".
+#
+# This list is the gate's blast radius: everything NOT in it fails. Adding an
+# entry is a claim that the skip is impossible to fix in CI — not that it is
+# inconvenient. A missing env var or a down stack must never be listed.
+_EXPECTED_SKIP_PREFIXES = (
+    "apple-mail",
+    "apple-reminders",
+    "apple-eventkit",
+    "apple-connector-registry",
+    "meeting-capture-fixture-dir",
+    "meeting-capture-single-speaker",
+    "meeting-capture-multi-speaker",
+)
+
+
+def _is_expected_skip(message: str) -> bool:
+    """True when a DECLARED skip names an invariant known to be CI-impossible.
+
+    Matched against the invariant id that record_preservation_skip writes into
+    the property text as ``preservation_skip: <id>: <reason>``.
+    """
+    body = message.split("preservation_skip:", 1)[-1].strip()
+    ident = body.split(":", 1)[0].strip()
+    return any(ident.startswith(p) for p in _EXPECTED_SKIP_PREFIXES)
+# "preservation" alone matched NOTHING. pytest writes the testsuite name as
+# "pytest" and the classname as "src.mcp.tests.integration.<module>", so
+# neither ever contained the keyword and this gate silently audited zero tests
+# — for the one suite it exists to audit. Verified 2026-08-10 by dumping the
+# real XML. `tests.integration` is the right second keyword because that
+# package's conftest auto-marks EVERYTHING in it `preservation`, so membership
+# of the package is exactly the property being tested for.
+_PRESERVATION_SUITE_KEYWORDS = ("preservation", "tests.integration", "tests/integration")
 
 
 def _is_preservation_suite(suite_name: str) -> bool:
@@ -87,6 +125,11 @@ def _collect_skips(tree: ET.ElementTree) -> list[str]:
                 for prop in props.iter("property"):
                     if prop.get("name") == _PROPERTY_NAME:
                         value = prop.get("value", "")
+                        # A DECLARED skip naming a CI-impossible invariant is
+                        # the system working as intended: we know what was not
+                        # verified and why. Anything else still fails.
+                        if _is_expected_skip(value):
+                            continue
                         skips.append(
                             f"  [property] {classname}::{test_name}: {value}"
                         )

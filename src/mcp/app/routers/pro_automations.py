@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import utils.pro_automations as automations
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.pro_automations_router")
 
@@ -75,13 +76,22 @@ class RunNowResponse(BaseModel):
 def _require_feature(spec: dict[str, Any]) -> None:
     try:
         from config.features import is_feature_enabled
-        if not is_feature_enabled(spec["feature_flag"]):
-            raise HTTPException(
-                status_code=403,
-                detail=f"{spec['feature_flag']} feature flag is off (Pro tier).",
-            )
-    except ImportError:
-        pass
+    except ImportError as exc:
+        # Fail CLOSED. This was `except ImportError: pass`, wrapped around the
+        # whole check — so a gate that could not be evaluated silently allowed
+        # the request. A gate that cannot answer must refuse, not permit; the
+        # import failing at all means the process is misconfigured, and serving
+        # a paid automation on the way past is the worst possible response.
+        raise HTTPException(
+            status_code=503,
+            detail="Feature gating is unavailable; refusing the request.",
+        ) from exc
+
+    if not is_feature_enabled(spec["feature_flag"]):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{spec['feature_flag']} feature flag is off (Pro tier).",
+        )
 
 
 @router.get("", response_model=AutomationListResponse)
@@ -116,6 +126,20 @@ async def put_automation(name: str, req: ProAutomationUpdate) -> AutomationState
         raise HTTPException(status_code=400, detail=str(exc))
     except (RuntimeError, KeyError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    # Apply the new cadence to the RUNNING scheduler. Until 2026-08-10 the
+    # schedule was written to Redis and read by nobody — the scheduler
+    # registered jobs straight from config.SCHEDULE_*, so a paying customer's
+    # cadence change returned 200 and never took effect. Startup now reads the
+    # stored value; this makes it apply without waiting for a restart.
+    if req.schedule is not None:
+        try:
+            from app.scheduler import reschedule_automation
+
+            reschedule_automation(name)
+        except Exception as exc:  # noqa: BLE001 — persisted fine; live apply is best-effort
+            log_swallowed_error("pro_automations.reschedule", exc)
+
     return AutomationState(**automations.get_state(name))
 
 

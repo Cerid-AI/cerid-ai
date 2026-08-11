@@ -60,6 +60,14 @@ class PluginLoadError(Exception):
     pass
 
 
+class PluginDisabledError(PluginLoadError):
+    """Excluded by ``CERID_ENABLED_PLUGINS``.
+
+    An operator choice rather than a fault, but it still withholds whatever
+    feature flags the plugin supplies, so it is recorded and reported.
+    """
+
+
 class MissingDependencyError(PluginLoadError):
     """A plugin's declared pip dependencies are not importable.
 
@@ -132,6 +140,12 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
     plugin_module_path = plugin_dir / "plugin.py"
 
     if not manifest_path.exists():
+        # Deliberately NOT recorded as a failure. A directory with no manifest
+        # is not a plugin that failed to load — it is not a plugin at all
+        # (`__pycache__` is the common case), and recording it would fill the
+        # health surface with noise that hides the real entries. The other two
+        # silent-skip paths (disabled, missing deps) ARE recorded, because both
+        # withhold a feature flag that still reports enabled.
         logger.debug(f"Skipping {plugin_dir.name}: no manifest.json")
         return None
 
@@ -154,6 +168,16 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
     # Check if enabled
     if not _is_plugin_enabled(name):
         logger.info(f"Plugin '{name}' skipped (not in ENABLED_PLUGINS)")
+        # Recorded, not silent. Disabling a plugin is a legitimate operator
+        # choice, but it does NOT switch off the feature flags that plugin
+        # supplies — so the customer keeps being told the feature is enabled
+        # while nothing serves it. Surfacing it as blocked-with-a-reason lets
+        # /health.pro_features say which knob caused it, and makes narrowing
+        # CERID_ENABLED_PLUGINS stop being a way to turn the gate green.
+        _record_plugin_failure(
+            plugin_dir,
+            PluginDisabledError("not in CERID_ENABLED_PLUGINS"),
+        )
         return None
 
     # Check feature tier requirement

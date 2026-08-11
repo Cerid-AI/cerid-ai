@@ -460,17 +460,26 @@ ConnectorPlugins (`gmail`, `google_calendar`, `outlook`,
 
 ### Native Swift helpers (Phase G)
 
-`packages/desktop/swift/` ships three SPM CLI executables built via
+`packages/desktop/swift/` ships five SPM CLI executables built via
 `swift build` (no Xcode `.xcodeproj` needed): `ceridek` (EventKit),
-`ceridphotos` (PhotoKit metadata), `ceridspotlight` (CoreSpotlight
-donor). Python plugins (`plugins/apple_calendar`,
-`plugins/apple_photos`) invoke the first two via
+`ceridphotos` (PhotoKit metadata), `ceridreminders` (EventKit
+reminders), `ceridmail` (Mail.app), and `ceridspotlight`
+(CoreSpotlight donor). Python plugins (`src/mcp/plugins/apple_calendar`,
+`src/mcp/plugins/apple_photos`, `src/mcp/plugins/apple_reminders`,
+`src/mcp/plugins/apple_mail`) invoke the first four via
 `asyncio.subprocess` and parse JSON-over-stdio; `ceridspotlight` is
 driven from the desktop main process instead
 (`packages/desktop/src/main/connectors/spotlight.ts`), because
 CoreSpotlight indexes the host, not the container. TCC grants inherit
 from the parent Electron app's signed bundle — load-bearing contract
 documented in `packages/desktop/swift/README.md`.
+
+Until 2026-08-10 this section said "three" and pointed at
+`plugins/apple_calendar` / `plugins/apple_photos`. The count predates
+`ceridreminders` and `ceridmail`, and the Apple plugins have never lived
+under the top-level `plugins/` tree — that tree exists and holds the
+BUSL-1.1 Pro plugins, so the wrong path leads somewhere real and empty
+rather than to an obvious error.
 
 The three Xcode-required native targets (App Intents, Share
 Extension, Quick Look) are deferred — see

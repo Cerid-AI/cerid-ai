@@ -68,10 +68,43 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 # ---------------------------------------------------------------------------
 
 
+# Kind → the ``config.features.FEATURE_FLAGS`` key that gates it.
+#
+# Nothing else in the tree pairs a source kind with a flag: KIND_TIER carries
+# only the coarse core/pro split, and the flag names live in
+# ``config.features.FEATURE_FLAGS`` (all kinds) and
+# ``app.routers.connectors._CONNECTORS`` (the seven OAuth/EventKit ones). This
+# is the authority for the pairing; ``tests/test_sources_kind_feature_flag.py``
+# fails when a Pro kind has no entry, when an entry names a flag that is not a
+# real FEATURE_FLAGS key, and when an entry disagrees with the connector meta.
+#
+# Core kinds are deliberately absent — they are not feature-gated, so their
+# ``feature_flag`` is None rather than a placeholder that reads as a gate.
+KIND_FEATURE_FLAG: dict[str, str] = {
+    # Cloud connectors (mirrors app.routers.connectors._CONNECTORS)
+    "gmail": "gmail_connector",
+    "outlook": "outlook_connector",
+    "google_calendar": "google_calendar_sync",
+    "outlook_calendar": "outlook_calendar_sync",
+    "apple_calendar": "apple_calendar_eventkit",
+    "apple_photos": "apple_photos_reader",
+    "apple_reminders": "reminders_eventkit",
+    # Desktop-side readers — no connector meta; flag names from FEATURE_FLAGS.
+    "apple_notes": "apple_notes_reader",
+    "apple_mail": "apple_mail_reader",
+    "imessage": "imessage_reader",
+    # Meeting capture ships three Pro flags (diarization / calendar stitching /
+    # summary); diarization is the one that gates ingesting the audio at all.
+    "meeting_audio": "meeting_diarization",
+}
+
+
 class SourceKindMeta(BaseModel):
     kind: str
     family: str
     tier: str  # "core" | "pro"
+    # FEATURE_FLAGS key gating this kind; None for ungated Core kinds.
+    feature_flag: str | None = None
     # "available" | "oauth" | "coming_soon" | "requires_desktop"
     availability: str = "coming_soon"
     providers: list[str] = []  # webhook-backed kinds: the recipe providers to pick
@@ -278,6 +311,7 @@ async def list_source_kinds():
             kind=k,
             family=KIND_FAMILY[k],
             tier=KIND_TIER[k],
+            feature_flag=KIND_FEATURE_FLAG.get(k),
             availability=_kind_availability(k, oauth_kinds),
             providers=_kind_providers(k),
             requires_desktop=_kind_requires_desktop(k),

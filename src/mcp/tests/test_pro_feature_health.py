@@ -139,6 +139,21 @@ def test_the_same_failure_is_not_degraded_when_unentitled(plugin_state):
 
 
 def test_a_loaded_plugin_reports_healthy(plugin_state):
+    """A plugin that loaded supplies its flags, and they report loaded.
+
+    Two things changed here on 2026-08-10. The fixture's `feature_flags` key
+    used to be fiction — `get_loaded_plugins()` did not return it, so this
+    passed against a shape production never produced while real loaded plugins
+    were attributed to nothing. That is fixed at the source, so the fixture is
+    now realistic.
+
+    Second, it asserted `degraded == []` while stubbing exactly ONE plugin.
+    That only held because every other paid flag fell into the residual bucket.
+    Now that an unbacked paid flag degrades, a one-plugin fixture legitimately
+    degrades the other twelve — so assert the flag under test, not the whole
+    report. Suppressing that by stubbing every plugin would restore the very
+    blindness this change removed.
+    """
     import config.features as features
 
     features.set_tier("pro")
@@ -151,8 +166,9 @@ def test_a_loaded_plugin_reports_healthy(plugin_state):
     )
     report = health._pro_feature_health()
 
-    assert report["degraded"] == []
     assert report["features"]["meeting_diarization"]["loaded"] is True
+    assert report["features"]["meeting_diarization"]["implementation"] == "backend_plugin"
+    assert "meeting_diarization" not in report["degraded"]
 
 
 def test_planned_features_are_not_reported_broken(plugin_state):
@@ -170,14 +186,156 @@ def test_planned_features_are_not_reported_broken(plugin_state):
             assert flag not in report["degraded"]
 
 
-def test_desktop_and_in_process_features_are_not_reported_broken(plugin_state):
-    """Router-served features (analytics, digests) and desktop-implemented
-    connectors have no backend plugin. Absence of a plugin is not a failure."""
+def test_declared_non_plugin_features_are_not_reported_broken(plugin_state):
+    """Router-served and desktop-implemented features have no backend plugin,
+    and absence of a plugin is not a failure — PROVIDED they say so.
+
+    Rewritten 2026-08-10. This asserted `implementation == "in_process_or_desktop"`,
+    which pinned the residual bucket itself as correct: any flag with no plugin
+    landed there, so the test passed equally for a feature genuinely served by a
+    router and for one nobody had implemented. It now asserts the SPECIFIC
+    declared home, so a flag losing its declaration is visible.
+    """
     import config.features as features
 
     features.set_tier("pro")
     health = plugin_state(loaded={}, failed={})
     report = health._pro_feature_health()
 
-    assert report["features"]["advanced_analytics"]["implementation"] == "in_process_or_desktop"
-    assert report["degraded"] == []
+    assert report["features"]["advanced_analytics"]["implementation"] == "in_process"
+    assert report["features"]["spotlight_donation"]["implementation"] == "desktop"
+    # Nothing here is a plugin failure, so nothing router- or desktop-served
+    # may appear in `degraded`.
+    assert "advanced_analytics" not in report["degraded"]
+    assert "spotlight_donation" not in report["degraded"]
+
+
+def test_an_undeclared_paid_flag_degrades(plugin_state, monkeypatch):
+    """The point of the redesign: a paid flag with no plugin and no declaration
+    must FAIL, not fall into a bucket nothing reads."""
+    import config.features as features
+
+    features.set_tier("pro")
+    orig_tier = features._get_feature_tier
+    monkeypatch.setitem(features.FEATURE_FLAGS, "brand_new_paid_thing", True)
+    monkeypatch.setattr(
+        features, "_get_feature_tier",
+        lambda f: "pro" if f == "brand_new_paid_thing" else orig_tier(f),
+    )
+    health = plugin_state(loaded={}, failed={})
+    report = health._pro_feature_health()
+
+    assert report["features"]["brand_new_paid_thing"]["implementation"] == "unknown"
+    assert "brand_new_paid_thing" in report["degraded"]
+
+
+def test_a_flag_declared_unimplemented_degrades_when_entitled(plugin_state):
+    """`audit_logging` and `sso_saml` are ✓ Enterprise in TIER_MATRIX.md, are
+    not PLANNED, and a repo-wide search finds no gate or call site for either.
+    Recorded truthfully so an Enterprise install reports them, rather than
+    hidden in a bucket that reads as fine."""
+    import config.features as features
+
+    features.set_tier("enterprise")
+    health = plugin_state(loaded={}, failed={})
+    report = health._pro_feature_health()
+
+    assert report["features"]["sso_saml"]["implementation"] == "unimplemented"
+    assert "sso_saml" in report["degraded"]
+
+
+# --- Sprint 2: the residual bucket, and the gates that could not fail --------
+
+
+class TestEveryPaidFlagHasADeclaredHome:
+    """The invariant that replaced the `in_process_or_desktop` catch-all.
+
+    That bucket was where 14 of 27 paid flags lived, and `degraded` never drew
+    from it — so deleting a broken plugin, narrowing CERID_ENABLED_PLUGINS, or
+    adding a flag nobody implemented all landed there and read as healthy.
+    """
+
+    def _paid_flags(self):
+        import config.features as f
+        return [
+            k for k in f.FEATURE_FLAGS
+            if f._get_feature_tier(k) in ("pro", "enterprise")
+        ]
+
+    def test_every_paid_flag_is_plugin_backed_planned_or_declared(self):
+        import json
+        import pathlib
+
+        import config.features as f
+
+        root = pathlib.Path(__file__).resolve().parents[3]
+        manifest_flags: set[str] = set()
+        for m in (root / "src/mcp/plugins").glob("*/manifest.json"):
+            manifest_flags.update(json.loads(m.read_text()).get("feature_flags") or [])
+
+        undeclared = [
+            flag for flag in self._paid_flags()
+            if flag not in manifest_flags
+            and flag not in f.PLANNED_FEATURES
+            and flag not in f.NON_PLUGIN_IMPLEMENTATIONS
+        ]
+        assert not undeclared, (
+            "paid flags with no home — add a plugin, mark PLANNED, or declare "
+            f"in NON_PLUGIN_IMPLEMENTATIONS: {sorted(undeclared)}"
+        )
+
+    def test_declarations_use_a_known_kind(self):
+        import config.features as f
+
+        allowed = {"in_process", "desktop", "entitlement_only", "unimplemented"}
+        bad = {k: v for k, v in f.NON_PLUGIN_IMPLEMENTATIONS.items() if v not in allowed}
+        assert not bad, f"unknown implementation kinds: {bad}"
+
+    def test_the_map_does_not_claim_flags_a_plugin_already_supplies(self):
+        """Two homes for one flag means one of them is a lie, and the reader
+        cannot tell which."""
+        import json
+        import pathlib
+
+        import config.features as f
+
+        root = pathlib.Path(__file__).resolve().parents[3]
+        manifest_flags: set[str] = set()
+        for m in (root / "src/mcp/plugins").glob("*/manifest.json"):
+            manifest_flags.update(json.loads(m.read_text()).get("feature_flags") or [])
+
+        overlap = manifest_flags & set(f.NON_PLUGIN_IMPLEMENTATIONS)
+        assert not overlap, f"declared non-plugin but supplied by a plugin: {sorted(overlap)}"
+
+
+class TestManifestTierMatchesItsFlags:
+    """`plugins/ocr` declared `tier: pro` while its only flag, `ocr_parsing`,
+    is community. At community tier the loader therefore skipped it while the
+    flag kept reporting enabled — the feature was advertised and absent. Pin
+    the class, not the instance."""
+
+    def test_no_manifest_requires_a_higher_tier_than_its_flags(self):
+        import json
+        import pathlib
+
+        import config.features as f
+
+        root = pathlib.Path(__file__).resolve().parents[3]
+        rank = {"community": 0, "pro": 1, "enterprise": 2}
+        mismatched = {}
+        for m in sorted((root / "src/mcp/plugins").glob("*/manifest.json")):
+            d = json.loads(m.read_text())
+            flags = d.get("feature_flags") or []
+            if not flags:
+                continue
+            need = rank.get(str(d.get("tier", "community")), 0)
+            for flag in flags:
+                have = rank.get(f._get_feature_tier(flag), 0)
+                if need > have:
+                    mismatched[d.get("name")] = (
+                        f"manifest tier={d.get('tier')} but {flag} is "
+                        f"{f._get_feature_tier(flag)}"
+                    )
+        assert not mismatched, (
+            f"plugin gated above the tier of the flag it supplies: {mismatched}"
+        )

@@ -99,7 +99,7 @@ Set the feature flag:
 google_calendar_sync=true
 ```
 
-Operators on the Pro tier (`CERID_FEATURE_TIER=pro`) get this flag flipped
+Operators on the Pro tier (`CERID_TIER=pro`) get this flag flipped
 on automatically.
 
 ## What gets ingested

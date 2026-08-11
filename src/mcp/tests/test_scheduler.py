@@ -95,3 +95,72 @@ class TestTriggerJob:
         assert result["status"] == "started"
         assert result["id"] == "compute_umap_3d"
         assert result["invalidates"] == ["cerid:graph:emb3d:*"]
+
+
+class TestSourcePollGatesProKinds:
+    """`_run_source_poll` walked `_POLLABLE_KINDS` with no feature check, and
+    that tuple includes `apple_mail` and `apple_reminders`. The job is
+    registered unconditionally at */15, so a community install with either
+    source on record kept ingesting mail and reminders indefinitely — unlike
+    `_run_daily_digest` and `_run_inbox_triage`, which both gate before doing
+    any work.
+
+    POST /sources now refuses to CREATE them, which does nothing for sources
+    created before that landed — and those are exactly the rows this loop
+    walks.
+    """
+
+    def test_the_pollable_set_still_contains_the_pro_kinds_this_guards(self):
+        """If someone removes them the gate is moot, but so is the risk —
+        this pins that the two facts stay in sync."""
+        from app.scheduler import _POLLABLE_KINDS
+        from core.ingest.sources.kinds import KIND_TIER
+
+        pro = [k for k in _POLLABLE_KINDS if KIND_TIER.get(k) == "pro"]
+        assert set(pro) == {"apple_mail", "apple_reminders"}
+
+    def test_core_kinds_are_never_gated(self):
+        """rss and url_watch are core; gating the whole JOB instead of each
+        KIND would have silently stopped community ingestion."""
+        from app.scheduler import _POLLABLE_KINDS
+        from core.ingest.sources.kinds import KIND_TIER
+
+        assert KIND_TIER.get("rss") == "core"
+        assert KIND_TIER.get("url_watch") == "core"
+        assert {"rss", "url_watch"} <= set(_POLLABLE_KINDS)
+
+    def test_pro_kinds_are_skipped_at_community_tier(self, monkeypatch):
+        """The behavioural assertion: at community tier the loop must not ask
+        the registry for a Pro connector at all."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        import app.scheduler as sched
+
+        asked: list[str] = []
+
+        def _fake_get_connector(kind):
+            asked.append(kind)
+            return None
+
+        # Patch on app.scheduler: get_redis/get_neo4j are imported at MODULE
+        # scope there, so patching app.deps.* leaves the bound names untouched
+        # and the job bails on a real Redis connection before ever reaching the
+        # loop under test.
+        monkeypatch.setattr("config.features.is_tier_met", lambda _t: False)
+        with patch("core.ingest.sources.registry.get_connector", _fake_get_connector), \
+             patch.object(sched, "get_redis", MagicMock()), \
+             patch.object(sched, "get_neo4j", MagicMock()), \
+             patch("app.db.neo4j.sources.list_sources", return_value=[]):
+            asyncio.run(sched._run_source_poll())
+
+        # Assert the loop RAN before asserting what it skipped. Without this
+        # the two negative assertions pass trivially whenever the function
+        # bails early — which is exactly what happened the first time this was
+        # written: removing the gate left the test green.
+        assert "rss" in asked, (
+            "the poll loop never reached the registry, so the negative "
+            f"assertions below would prove nothing (asked={asked})"
+        )
+        assert "apple_mail" not in asked, "Pro kind polled at community tier"
+        assert "apple_reminders" not in asked, "Pro kind polled at community tier"

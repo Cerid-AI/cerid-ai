@@ -34,7 +34,7 @@ The digest has five sections:
 Two gates — both must be open:
 
 1. **Pro feature flag**: `daily_digest` is on by default for Pro
-   accounts. For self-hosted: set `CERID_FEATURE_TIER=pro` in `.env`.
+   accounts. For self-hosted: set `CERID_TIER=pro` in `.env`.
 2. **Operator opt-in**: set `CERID_DAILY_DIGEST_ENABLED=true` in
    `.env` then restart the MCP container.
 
@@ -128,7 +128,7 @@ you've integrated (Slack, custom in-app, Apple Watch via Shortcuts).
 | Symptom | Cause | Fix |
 |---|---|---|
 | Scheduler logs "0 artifacts" | No KB ingest activity in window | Expected. The digest still persists as a "zero-activity" record. |
-| `feature_gated` skip reason | Pro flag off | Set `CERID_FEATURE_TIER=pro` + restart |
+| `feature_gated` skip reason | Pro flag off | Set `CERID_TIER=pro` + restart |
 | Cron doesn't fire | `CERID_DAILY_DIGEST_ENABLED` unset | Verify, then restart MCP container |
 | Digest empty even with activity | LLM unavailable | Check `stage="daily_digest"` provider routing |
 | 403 on `/digests/run-now` | Feature flag off | Same as feature_gated above |

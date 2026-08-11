@@ -77,6 +77,24 @@ def main(argv: list[str] | None = None) -> int:
 
     features = pro.get("features") or {}
     if args.require_tier:
+        # Compare the tier, which is what the flag's name promises. This used
+        # to check only that SOMETHING was entitled, so --require-tier=enterprise
+        # passed against a Pro stack: a non-empty-population check wearing a
+        # tier check's name. The anti-vacuity check is kept as well — both
+        # failures are real, and they are different failures.
+        rank = {"community": 0, "pro": 1, "enterprise": 2}
+        actual = pro.get("tier")
+        if actual is None:
+            print("::error::pro-feature-health: /health.pro_features has no 'tier' "
+                  "field, so --require-tier cannot be checked. Old build?")
+            return 2
+        if rank.get(actual, -1) < rank.get(args.require_tier, 99):
+            print(f"::error::pro-feature-health: --require-tier={args.require_tier} "
+                  f"but the stack is running tier {actual!r}. Set CERID_TIER "
+                  "before booting — the paid-feature checks below would be "
+                  "evaluated against the wrong entitlement set.")
+            return 2
+
         entitled = [f for f, e in features.items() if e.get("entitled")]
         if not entitled:
             print(f"::error::pro-feature-health: --require-tier={args.require_tier} "

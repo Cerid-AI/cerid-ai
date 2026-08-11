@@ -22,6 +22,7 @@ reachable": MCPClientPool.list_connectors() circuit state.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -208,6 +209,10 @@ class ConnectorOAuthStartResponse(BaseModel):
     # Microsoft device-code: returns the code + verification URI
     device_code: str | None = None
     verification_uri: str | None = None
+    # Stays None for ms365: the sibling's login reply carries no expiry of any
+    # kind, and MSAL's default would be a number we invented rather than one it
+    # told us. An absent field is honest; a fabricated one expires the code in
+    # the UI at a time the sibling never agreed to.
     expires_in: int | None = None
     # Apple TCC: returns the System Settings deep-link
     settings_url: str | None = None
@@ -237,6 +242,45 @@ def _first_url(text: str) -> str | None:
     """
     match = _URL_RE.search(text)
     return match.group(0).rstrip(").,'\"") if match else None
+
+
+# MSAL's device-code prose: "... enter the code VDBF68NR to authenticate."
+# The capture is uppercase-only on purpose: made case-insensitive it matches the
+# next ordinary word of a differently-worded sentence ("enter the code shown in
+# your browser" → "shown"), handing the operator a word to type into Microsoft's
+# form instead of a code, with no way to tell it was never one.
+_DEVICE_CODE_RE = re.compile(r"[Cc]ode\s+([A-Z0-9]{6,})\b")
+
+# Fallback for an ms365 sibling that is down or answers something we cannot
+# read. Kept as the operator's escape hatch: losing it strands whoever most
+# needs it — the one whose connector stack will not start.
+_MS365_MANUAL_LOGIN = (
+    "Run: docker compose -f docker-compose.yml -f stacks/connectors/docker-compose.yml --profile pro "
+    "exec ms365-mcp node dist/index.js --login — it prints a code + URL. "
+    "Open the URL it prints, enter the code, and complete the Microsoft "
+    "sign-in. Token cached to the bind-mounted volume."
+)
+
+
+def _parse_device_code(text: str) -> tuple[str | None, str | None]:
+    """``(device_code, verification_uri)`` from the ms365 sibling's login reply.
+
+    The reply is prose inside a JSON envelope: ``structuredContent`` is None,
+    ``isError`` is False, and the top-level key is ``"error":
+    "device_code_required"`` even on the success path — so there is nothing to
+    branch on and the code + URL have to be read out of the free-text
+    ``message``. Same shape of problem ``_first_url`` already solves for Google.
+    """
+    message = text
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and isinstance(payload.get("message"), str):
+        message = payload["message"]
+
+    match = _DEVICE_CODE_RE.search(message)
+    return (match.group(1) if match else None), _first_url(message)
 
 
 # ── status assembly ───────────────────────────────────────────────────
@@ -330,6 +374,27 @@ async def start_auth(slug: str) -> ConnectorOAuthStartResponse:
     if meta is None:
         raise HTTPException(status_code=404, detail=f"unknown connector: {slug}")
 
+    # Gate the GRANT. `feature_enabled` was computed for /connectors and only
+    # ever reported, so a community install could walk a real Google consent
+    # screen and have a refresh token written into the sibling's volume. The
+    # ingest path would then refuse to use it — value withheld, but the
+    # credential handed over anyway, which is the wrong half to get right.
+    #
+    # Deliberately NOT applied to /disconnect or /auth/status: gating disconnect
+    # would stop a user REVOKING access they should always be able to revoke,
+    # and status is read-only. A gate that blocks the safety action is worse
+    # than no gate.
+    from config.features import is_feature_enabled
+
+    if not is_feature_enabled(meta.feature_flag):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{meta.display_name} requires Cerid Pro — not starting an "
+                "authorization the server would refuse to use."
+            ),
+        )
+
     if meta.auth_kind == "google_oauth":
         # The sibling has no browsable start page — /oauth/start is a 404, and
         # this endpoint returned that URL from Phase F until 2026-08-09, the
@@ -384,18 +449,58 @@ async def start_auth(slug: str) -> ConnectorOAuthStartResponse:
         )
 
     if meta.auth_kind == "msal_device_code":
-        # Every part of the previous instruction was wrong: it named only the
-        # stacks compose file (wrong project → "service not running"), omitted
-        # --profile pro (service filtered out entirely), and invoked an
-        # `ms365-mcp` binary that does not exist in the image — the package bin
-        # is `ms-365-mcp-server`, and login is a FLAG, not a subcommand.
+        # `login` is a live MCP tool on the sibling — the connector stack passes
+        # --enable-auth-tools, which is exactly what makes the device-code flow
+        # drivable over HTTP. Until 2026-08-10 this branch returned a string
+        # telling the operator to `docker compose exec` and read a code off a
+        # container's stdout, which no desktop user can do; the declared
+        # device_code / verification_uri fields were never assigned by anything.
+        #
+        # Route through the pool, never a bare MCPHTTPClient: the sibling 401s
+        # the whole transport without an Authorization header, and the pool is
+        # what attaches it.
+        try:
+            from core.mcp_clients.client_pool import get_pool
+            raw = await get_pool().call_tool(
+                meta.requires_sibling or "ms365", "login", {},
+            )
+        except Exception as exc:  # noqa: BLE001 — falls back to the manual path
+            log_swallowed_error("app.routers.connectors.ms365_login", exc)
+            return ConnectorOAuthStartResponse(
+                auth_kind="msal_device_code",
+                instructions=(
+                    f"Could not reach {meta.requires_sibling}: {exc}. "
+                    f"{_MS365_MANUAL_LOGIN}"
+                ),
+            )
+
+        # MCP reports tool failure as a RESULT carrying isError, not as an
+        # exception, so the except above never fires for e.g. an unknown tool
+        # name or a rejected bearer. Checking the flag is the only way to tell
+        # those apart from a reply we simply could not parse.
+        from core.mcp_clients.result_text import is_error_result, tool_text
+
+        raw_text = tool_text(raw)
+        device_code, verification_uri = (
+            (None, None) if is_error_result(raw) else _parse_device_code(raw_text)
+        )
+        if not device_code or not verification_uri:
+            return ConnectorOAuthStartResponse(
+                auth_kind="msal_device_code",
+                instructions=(
+                    "The ms365 sibling did not return a device code "
+                    f"({raw_text[:300] or 'empty reply'}). {_MS365_MANUAL_LOGIN}"
+                ),
+            )
         return ConnectorOAuthStartResponse(
             auth_kind="msal_device_code",
+            device_code=device_code,
+            verification_uri=verification_uri,
             instructions=(
-                "Run: docker compose -f docker-compose.yml -f stacks/connectors/docker-compose.yml --profile pro "
-                "exec ms365-mcp node dist/index.js --login — it prints a code + URL. "
-                "Visit microsoft.com/devicelogin, paste the code, complete login. "
-                "Token cached to the bind-mounted volume."
+                f"Open {verification_uri} in a browser and enter the code "
+                f"{device_code}, then sign in to the Microsoft account to "
+                "connect. The token is cached to the ms365 container's volume; "
+                "this page reports connected once the sibling answers."
             ),
         )
 

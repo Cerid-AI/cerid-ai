@@ -24,28 +24,36 @@ from pathlib import Path
 
 import pytest
 
+from .conftest import record_preservation_skip
+
 # All tests in this module need the meeting_capture plugin. Skip the
 # whole module when the plugin's deps aren't importable.
 pytest.importorskip("plugins.meeting_capture")
 
 
 @pytest.fixture
-def fixture_dir() -> Path:
+def fixture_dir(request: pytest.FixtureRequest) -> Path:
     """Returns the dir holding fixture audio. Empty until the
     fixtures land in a follow-up commit; tests skip when missing.
     """
     p = Path(__file__).parent / "fixtures" / "meeting_capture"
     if not p.exists():
-        pytest.skip("meeting_capture fixtures not present")
+        record_preservation_skip(
+            request,
+            "meeting-capture-fixture-dir",
+            "meeting_capture fixtures not present",
+        )
     return p
 
 
 @pytest.mark.preservation
-def test_single_speaker_short(fixture_dir: Path):
+def test_single_speaker_short(request: pytest.FixtureRequest, fixture_dir: Path):
     """30s single-speaker recording should land a non-empty transcript."""
     clip = fixture_dir / "single_speaker_30s.wav"
     if not clip.exists():
-        pytest.skip(f"fixture missing: {clip}")
+        record_preservation_skip(
+            request, "meeting-capture-single-speaker", f"fixture missing: {clip}"
+        )
 
     from plugins.meeting_capture import decode, transcribe
 
@@ -58,13 +66,15 @@ def test_single_speaker_short(fixture_dir: Path):
 
 
 @pytest.mark.preservation
-def test_multi_speaker_calendar_stitch(fixture_dir: Path):
+def test_multi_speaker_calendar_stitch(request: pytest.FixtureRequest, fixture_dir: Path):
     """Multi-speaker fixture: diarization splits + calendar stitch
     attaches metadata.
     """
     clip = fixture_dir / "multi_speaker_short.wav"
     if not clip.exists():
-        pytest.skip(f"fixture missing: {clip}")
+        record_preservation_skip(
+            request, "meeting-capture-multi-speaker", f"fixture missing: {clip}"
+        )
 
     from plugins.meeting_capture import calendar_stitch, decode, diarize, merge, transcribe
 

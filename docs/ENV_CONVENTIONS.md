@@ -37,7 +37,7 @@ These exist for historical reasons and should **not** be renamed (would break ex
 | `NEO4J_PASSWORD` | `.env` | *(none)* | Neo4j database password |
 | `OPENROUTER_API_KEY` | `.env` | *(none)* | OpenRouter API key for LLM access |
 | `OPENAI_API_KEY` | `.env` | *(none)* | OpenAI API key (optional provider) |
-| `CERID_USE_BIFROST` | `.env` | `false` | Enable Bifrost LLM gateway for intent routing. When `false` (default), LLM calls route directly to OpenRouter. |
+| ~~`CERID_USE_BIFROST`~~ | — | — | **Retired.** Bifrost was removed on 2026-04-17 (audit C-4); this variable is read by nothing. LLM calls go straight to OpenRouter. Only `BIFROST_TIMEOUT` survives, and only as the timeout name for verification + contextual chunking. |
 | `INFERENCE_MODE` | `.env` | `auto` | Embedding provider: `auto` (detect best), `onnx-cpu`, `onnx-gpu`, `ollama`, `fastembed-sidecar` |
 | `CERID_SIDECAR_PORT` | `.env` | `8889` | FastEmbed sidecar port for native GPU embeddings |
 

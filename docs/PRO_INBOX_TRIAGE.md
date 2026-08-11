@@ -28,7 +28,7 @@ having it buried under `promo`.
 Two gates — both must be open:
 
 1. **Pro feature flag**: `inbox_triage` is on by default for Pro
-   accounts. For self-hosted: set `CERID_FEATURE_TIER=pro` in `.env`.
+   accounts. For self-hosted: set `CERID_TIER=pro` in `.env`.
 2. **Operator opt-in**: set `CERID_INBOX_TRIAGE_ENABLED=true` in
    `.env` then restart the MCP container. (This double-gate prevents
    inadvertent LLM cost on every Pro install.)
@@ -115,7 +115,7 @@ Outlook message via the source's web_url metadata.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Scheduler logs "0 threads" repeatedly | No Gmail/Outlook unread in the last 24h | Expected — set a wider `query` like "newer_than:7d" via `pkb_inbox_triage` manual call |
-| `feature_gated` in skipped list | Pro flag off | Set `CERID_FEATURE_TIER=pro` + restart |
+| `feature_gated` in skipped list | Pro flag off | Set `CERID_TIER=pro` + restart |
 | `not_configured` in skipped list | OAuth not completed for that source | See `docs/PRO_GMAIL.md` / `docs/PRO_OUTLOOK.md` |
 | Categorizations seem off | LLM stage drifting | Try `PROVIDER_STAGE_INBOX_TRIAGE=openrouter` for stronger model, or write a custom prompt override via `INBOX_TRIAGE_PROMPT` env (future work) |
 | Cron not firing | `CERID_INBOX_TRIAGE_ENABLED` unset, or empty `SCHEDULE_INBOX_TRIAGE` | Verify both, restart MCP container |

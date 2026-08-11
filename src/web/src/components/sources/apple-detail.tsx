@@ -28,9 +28,12 @@ import {
   Loader2,
   AlertTriangle,
   CheckCircle2,
+  Lock,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MCP_BASE } from "@/lib/api/common"
+import { useEntitlements } from "@/hooks/use-entitlements"
+import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
 
 // ---------------------------------------------------------------------------
 // Types for the Electron bridge interface — inlined here to keep this module
@@ -180,6 +183,29 @@ const KIND_META: Record<AppleBridgeKind, { title: string; blurb: string; Icon: t
 export function AppleDetail({ kind, open, onClose }: AppleDetailProps) {
   const meta = KIND_META[kind]
   const Icon = meta.Icon
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+
+  // The bridge kinds are Pro, and nothing server-side enforces that: they never
+  // reach the plugin loader and ingest through the generic /ingest/structured
+  // route. `appleRows(isLocked)` takes a REQUIRED predicate so a new row call
+  // site can't ship them unlocked — but the component was reachable without
+  // going through a row at all (`<AppleDetail kind="mail" open />` compiled and
+  // rendered the scan/ingest pane), which defeated that guarantee. The check
+  // belongs at this boundary too, so the promise holds however the pane is
+  // mounted.
+  //
+  // Flags are spelled out one literal at a time, matching SourcesConnectors: a
+  // dynamic lookup would be invisible to scripts/lint-pro-gating.py, which is
+  // what asserts these renderer gates exist at all. Only "locked" (tier too
+  // low) routes to the upgrade path — "flag-off" means the operator disabled a
+  // feature the plan already covers, and pitching Pro to a Pro user is wrong.
+  const { forFlag, isLoading: entitlementsLoading } = useEntitlements()
+  const locks: Record<AppleBridgeKind, boolean> = {
+    notes: forFlag("apple_notes_reader", "pro").state === "locked",
+    mail: forFlag("apple_mail_reader", "pro").state === "locked",
+    imessage: forFlag("imessage_reader", "pro").state === "locked",
+  }
+  const proLocked = locks[kind]
 
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
@@ -197,14 +223,48 @@ export function AppleDetail({ kind, open, onClose }: AppleDetailProps) {
         {open && (
           <div className="px-5 py-4">
             {!isDesktopAvailable() ? (
+              // Checked before the Pro gate on purpose: a browser build can
+              // never run the bridge whatever the plan, so an upgrade would
+              // not fix it. Same rule the gallery applies to requires_desktop
+              // tiles — a statement about the build, not about the plan.
               <p className="text-sm text-muted-foreground">
                 {meta.title} is a desktop-only source. Open this in the Cerid AI desktop app.
               </p>
+            ) : entitlementsLoading ? (
+              // Neither verdict is safe yet: `tier` defaults to "community"
+              // while capabilities are in flight, so rendering the gate would
+              // pitch Pro at a paying customer, and rendering the pane would
+              // start the bridge scan before we know the plan allows it.
+              // Waiting costs one dialog frame.
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                Checking your plan…
+              </p>
+            ) : proLocked ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {meta.title} is part of Cerid Pro.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => setUpgradeOpen(true)}
+                  className="cerid-press"
+                >
+                  <Lock className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                  Unlock with Pro
+                </Button>
+              </div>
             ) : (
               <AppleDetailInner kind={kind} />
             )}
           </div>
         )}
+
+        <ProUpgradeOverlay
+          open={upgradeOpen}
+          kind={kind}
+          onClose={() => setUpgradeOpen(false)}
+        />
       </DialogContent>
     </Dialog>
   )

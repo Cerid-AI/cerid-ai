@@ -18,8 +18,6 @@
 1	src/mcp/app/data_sources/rss_feed.py
 3	src/mcp/app/data_sources/wikipedia.py
 1	src/mcp/app/data_sources/wolfram.py
-2	src/mcp/app/eval/harness.py
-4	src/mcp/app/eval/memory_efficacy.py
 1	src/mcp/app/mcp_tools/batch.py
 5	src/mcp/app/mcp_tools/feedback.py
 1	src/mcp/app/mcp_tools/fundamentals.py
@@ -54,7 +52,6 @@
 20	src/mcp/core/agents/hallucination/verification.py
 2	src/mcp/core/agents/memory.py
 7	src/mcp/core/agents/query_agent.py
-4	src/mcp/core/agents/trading_agent.py
 1	src/mcp/core/agents/verified_memory.py
 1	src/mcp/core/ingest/parsers/docx_parser.py
 1	src/mcp/core/ingest/parsers/email_parser.py

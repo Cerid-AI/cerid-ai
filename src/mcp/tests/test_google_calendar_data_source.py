@@ -122,3 +122,62 @@ class TestDataSourceContract:
                 end=datetime(2026, 5, 22, tzinfo=timezone.utc),
             )
         assert events == []
+
+
+class TestResultBodyCarriesWhatWasParsed:
+    """Found 2026-08-10 by putting the FIRST real event through this path.
+
+    `parse_events` extracted `location` and the per-event link, and `query()`
+    dropped both — so "where is my meeting?" answered with nothing while the
+    answer sat in the parsed dict, and every citation pointed at the calendar's
+    front page. The operator's seeded event had a street address as its only
+    substantive field, which is why an empty calendar could never have shown
+    this: the parser was right and the consumer was lossy.
+    """
+
+    LIVE = (
+        "Successfully retrieved 1 events from calendar 'primary' for a@example.com:\n"
+        '- "Test Event" (Starts: 2026-08-12T00:30:00-04:00, '
+        "Ends: 2026-08-12T01:30:00-04:00)\n"
+        "  Description: No Description\n"
+        "  Location: HomeGoods, 8357 Leesburg Pike, Vienna, VA 22182, USA\n"
+        "  Attendees: None\n"
+        "  ID: evt_live | Link: https://www.google.com/calendar/event?eid=abc"
+    )
+
+    @pytest.mark.asyncio
+    async def test_location_reaches_the_answer(self):
+        ds = GoogleCalendarDataSource()
+        with patch.object(ds, "_call_mcp", AsyncMock(return_value=self.LIVE)):
+            results = await ds.query("test")
+        assert "Leesburg Pike" in results[0].content
+
+    @pytest.mark.asyncio
+    async def test_a_location_free_event_does_not_emit_an_empty_field(self):
+        """The server writes "No Location" for absent values; the parser drops
+        it, and the body must not then print `Location: `."""
+        ds = GoogleCalendarDataSource()
+        reply = self.LIVE.replace(
+            "  Location: HomeGoods, 8357 Leesburg Pike, Vienna, VA 22182, USA\n",
+            "  Location: No Location\n",
+        )
+        with patch.object(ds, "_call_mcp", AsyncMock(return_value=reply)):
+            results = await ds.query("test")
+        assert "Location:" not in results[0].content
+
+    @pytest.mark.asyncio
+    async def test_the_citation_deep_links_to_the_event(self):
+        ds = GoogleCalendarDataSource()
+        with patch.object(ds, "_call_mcp", AsyncMock(return_value=self.LIVE)):
+            results = await ds.query("test")
+        assert results[0].source_url.endswith("eid=abc")
+
+    @pytest.mark.asyncio
+    async def test_it_falls_back_to_the_calendar_home_without_a_link(self):
+        ds = GoogleCalendarDataSource()
+        reply = self.LIVE.replace(
+            " | Link: https://www.google.com/calendar/event?eid=abc", "",
+        )
+        with patch.object(ds, "_call_mcp", AsyncMock(return_value=reply)):
+            results = await ds.query("test")
+        assert results[0].source_url.startswith("https://calendar.google.com/")

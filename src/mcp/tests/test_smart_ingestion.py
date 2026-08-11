@@ -268,8 +268,22 @@ class TestOCRPluginManifest:
         manifest = json.loads(manifest_path.read_text())
         assert manifest["name"] == "ocr"
         assert manifest["type"] == "parser"
-        assert manifest["tier"] == "pro"
         assert "version" in manifest
+
+        # Assert the RELATIONSHIP, not a hardcoded tier. This asserted
+        # `tier == "pro"` while `ocr_parsing` had been demoted to community,
+        # so it actively defended the mismatch: the loader refused the plugin
+        # at community tier while the flag kept reporting the feature enabled.
+        # Pinning a literal here is what let the two drift apart.
+        import config.features as features
+
+        rank = {"community": 0, "pro": 1, "enterprise": 2}
+        for flag in manifest.get("feature_flags") or []:
+            assert rank[manifest["tier"]] <= rank[features._get_feature_tier(flag)], (
+                f"manifest tier {manifest['tier']!r} is above the tier of {flag!r} "
+                f"({features._get_feature_tier(flag)!r}) — the plugin would be "
+                "skipped while the flag still reports enabled"
+            )
 
     def test_plugin_module_exists(self):
         plugin_path = Path(__file__).parent.parent / "plugins" / "ocr" / "plugin.py"

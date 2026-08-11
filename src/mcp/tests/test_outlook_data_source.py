@@ -174,3 +174,45 @@ class TestToResults:
         out = _to_results([{}])
         assert out[0].title == "(no subject)"
         assert "(unknown)" in out[0].content
+
+
+class TestIsConfiguredIsEvidenceBased:
+    """`is_configured` returned `bool(CERID_CONNECTORS_BEARER)` — a value the
+    ms365 sibling never reads as client auth. It forwards the client's bearer
+    to Microsoft Graph, so the real credential is a device-code login cached in
+    the container's own volume. The bearer being set said nothing about
+    whether anyone had logged in, and `/connectors/outlook` reported
+    `configured` on installs that never had."""
+
+    def _pool(self, *, ever_succeeded):
+        from unittest.mock import MagicMock
+        pool = MagicMock()
+        pool.list_connectors.return_value = [
+            {"name": "ms365", "ever_succeeded": ever_succeeded},
+        ]
+        return pool
+
+    def test_a_set_bearer_alone_is_not_configured(self, monkeypatch):
+        monkeypatch.setenv("CERID_CONNECTORS_BEARER", "deadbeef")
+        with patch("core.mcp_clients.client_pool.get_pool",
+                   return_value=self._pool(ever_succeeded=False)):
+            assert OutlookDataSource().is_configured() is False
+            assert OutlookCalendarDataSource().is_configured() is False
+
+    def test_configured_once_the_sibling_has_answered_cleanly(self):
+        with patch("core.mcp_clients.client_pool.get_pool",
+                   return_value=self._pool(ever_succeeded=True)):
+            assert OutlookDataSource().is_configured() is True
+            assert OutlookCalendarDataSource().is_configured() is True
+
+    def test_an_unregistered_sibling_is_not_configured(self):
+        from unittest.mock import MagicMock
+        pool = MagicMock()
+        pool.list_connectors.return_value = []
+        with patch("core.mcp_clients.client_pool.get_pool", return_value=pool):
+            assert OutlookDataSource().is_configured() is False
+
+    def test_status_never_raises_when_the_pool_is_unavailable(self):
+        with patch("core.mcp_clients.client_pool.get_pool",
+                   side_effect=RuntimeError("no pool")):
+            assert OutlookDataSource().is_configured() is False

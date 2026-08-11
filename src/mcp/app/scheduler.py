@@ -1604,7 +1604,22 @@ async def _run_source_poll() -> None:
             return
         max_arts = int(getattr(config, "SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE", 50))
         polled = ingested = 0
+        from config.features import is_tier_met
+        from core.ingest.sources.kinds import KIND_TIER
+
         for kind in _POLLABLE_KINDS:
+            # Gate per KIND, not per job: rss and url_watch are core and must
+            # keep polling. `apple_mail` and `apple_reminders` are Pro and had
+            # NO check here at all — unlike _run_daily_digest and
+            # _run_inbox_triage, which both gate before doing any work. This
+            # job is registered unconditionally at */15, so a community install
+            # with either source on record kept ingesting mail and reminders
+            # indefinitely. POST /sources now refuses to create them, but that
+            # does nothing for sources created before that landed, which is
+            # exactly the population this loop walks.
+            if KIND_TIER.get(kind) == "pro" and not is_tier_met("pro"):
+                logger.debug("source_poll: skipping %s — requires Pro", kind)
+                continue
             connector = get_connector(kind)
             if connector is None:
                 continue
@@ -1639,6 +1654,51 @@ async def _run_source_poll() -> None:
         duration = time.time() - start
         _log_execution("source_poll", "error", duration, str(e))
         logger.error("source_poll scheduled job failed: %s", e)
+
+
+def _automation_schedule(name: str, env_default: str) -> str:
+    """Effective cron for a Pro automation: operator override, else env.
+
+    ``utils.pro_automations.get_schedule`` already resolves
+    Redis-override -> env -> default; the scheduler simply never called it, so
+    ``PUT /settings/pro-automations/{name}`` persisted a cadence that nothing
+    read. Falls back to the env value if Redis is unreachable, so a cache
+    outage cannot silently unschedule a customer's automation.
+    """
+    try:
+        from utils.pro_automations import get_schedule
+        return get_schedule(name)
+    except Exception as exc:  # noqa: BLE001 — never block startup on this
+        log_swallowed_error("app.scheduler.automation_schedule", exc)
+        return env_default
+
+
+def reschedule_automation(name: str) -> bool:
+    """Apply a changed cadence to the RUNNING scheduler.
+
+    Without this a cadence change would only take effect on the next restart,
+    which is the same "returns 200, changes nothing" the stored-but-unread
+    schedule already produced — just with a longer fuse. Returns False when
+    there is no live scheduler or no such job, so the caller can say so.
+    """
+    if _scheduler is None:
+        return False
+    cron = _automation_schedule(name, "")
+    try:
+        if not cron:
+            # Empty means disabled: drop the job rather than leaving the old
+            # cadence running.
+            if _scheduler.get_job(name):
+                _scheduler.remove_job(name)
+            return True
+        if _scheduler.get_job(name) is None:
+            return False
+        _scheduler.reschedule_job(name, trigger=CronTrigger.from_crontab(cron))
+        logger.info("automation %s rescheduled to %r", name, cron)
+        return True
+    except Exception as exc:  # noqa: BLE001 — a bad cron must not 500 the API
+        log_swallowed_error("app.scheduler.reschedule_automation", exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1788,10 +1848,18 @@ def start_scheduler() -> AsyncIOScheduler:
 
     # Phase K Day 1 — daily digest (default 7 AM UTC when
     # CERID_DAILY_DIGEST_ENABLED is set + daily_digest feature on).
-    if getattr(config, "SCHEDULE_DAILY_DIGEST", ""):
+    # Prefer the operator's stored cadence over the env default. Both Pro
+    # automations expose a schedule through PUT /settings/pro-automations/{name},
+    # which persisted it to Redis — and nothing ever read it back, because the
+    # scheduler registered straight from config.SCHEDULE_*. A paying customer's
+    # cadence change returned 200 and did nothing. get_schedule() already
+    # resolves Redis override -> env -> default, so this is the read that was
+    # missing, not new policy. Empty still means "do not register".
+    _digest_cron = _automation_schedule("daily_digest", getattr(config, "SCHEDULE_DAILY_DIGEST", ""))
+    if _digest_cron:
         _scheduler.add_job(
             _run_daily_digest,
-            CronTrigger.from_crontab(config.SCHEDULE_DAILY_DIGEST),
+            CronTrigger.from_crontab(_digest_cron),
             id="daily_digest",
             name="Daily digest (Pro)",
             replace_existing=True,
@@ -1801,10 +1869,11 @@ def start_scheduler() -> AsyncIOScheduler:
     # Phase J Day 2 — inbox triage (every 15 min by default when
     # CERID_INBOX_TRIAGE_ENABLED is set + inbox_triage feature on).
     # Empty SCHEDULE_INBOX_TRIAGE disables the cron entirely.
-    if getattr(config, "SCHEDULE_INBOX_TRIAGE", ""):
+    _triage_cron = _automation_schedule("inbox_triage", getattr(config, "SCHEDULE_INBOX_TRIAGE", ""))
+    if _triage_cron:
         _scheduler.add_job(
             _run_inbox_triage,
-            CronTrigger.from_crontab(config.SCHEDULE_INBOX_TRIAGE),
+            CronTrigger.from_crontab(_triage_cron),
             id="inbox_triage",
             name="Inbox triage (Pro)",
             replace_existing=True,

@@ -24,15 +24,19 @@ import shutil
 
 import pytest
 
+from .conftest import record_preservation_skip
+
 
 def _helper_present(name: str) -> bool:
     return shutil.which(name) is not None
 
 
 @pytest.mark.preservation
-def test_apple_mail_scan():
+def test_apple_mail_scan(request: pytest.FixtureRequest):
     if not _helper_present("ceridmail"):
-        pytest.skip("ceridmail not on PATH")
+        record_preservation_skip(
+            request, "apple-mail", "ceridmail not on PATH"
+        )
 
     import subprocess
 
@@ -48,9 +52,11 @@ def test_apple_mail_scan():
 
 
 @pytest.mark.preservation
-def test_apple_reminders_scan():
+def test_apple_reminders_scan(request: pytest.FixtureRequest):
     if not _helper_present("ceridreminders"):
-        pytest.skip("ceridreminders not on PATH")
+        record_preservation_skip(
+            request, "apple-reminders", "ceridreminders not on PATH"
+        )
 
     import subprocess
 
@@ -66,9 +72,11 @@ def test_apple_reminders_scan():
 
 
 @pytest.mark.preservation
-def test_apple_eventkit_scan():
+def test_apple_eventkit_scan(request: pytest.FixtureRequest):
     if not _helper_present("ceridek"):
-        pytest.skip("ceridek not on PATH")
+        record_preservation_skip(
+            request, "apple-eventkit", "ceridek not on PATH"
+        )
 
     import subprocess
 
@@ -82,7 +90,7 @@ def test_apple_eventkit_scan():
 
 
 @pytest.mark.preservation
-def test_connector_health_checks():
+def test_connector_health_checks(request: pytest.FixtureRequest):
     """Each registered Apple connector returns a deterministic
     health status based on helper-binary presence."""
     from core.ingest.sources.registry import get_connector
@@ -93,7 +101,11 @@ def test_connector_health_checks():
     ):
         connector = get_connector(kind)
         if connector is None:
-            pytest.skip(f"{kind} connector not registered")
+            record_preservation_skip(
+                request,
+                f"apple-connector-registry:{kind}",
+                f"{kind} connector not registered",
+            )
         result = asyncio.run(connector.health_check("test-source", {}))
         if _helper_present(helper):
             assert result.ok, f"{kind} reported unhealthy when helper present"

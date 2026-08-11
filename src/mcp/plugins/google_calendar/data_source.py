@@ -109,18 +109,27 @@ class GoogleCalendarDataSource(DataSource):
             start = ev.get("start")
             end = ev.get("end")
             attendees = ev.get("attendees", [])
+            # Location was parsed and then dropped. The first real event ever
+            # put through this path (2026-08-10) had a street address as its
+            # ONLY substantive field, so "where is my meeting?" answered with
+            # nothing while the answer sat in the parsed dict.
+            location = ev.get("location")
             body = (
                 f"Title: {title}\n"
                 f"Start: {start.isoformat() if isinstance(start, datetime) else start}\n"
                 f"End: {end.isoformat() if isinstance(end, datetime) else end}\n"
-                f"Attendees: {', '.join(attendees) if attendees else '(none)'}\n"
+                + (f"Location: {location}\n" if location else "")
+                + f"Attendees: {', '.join(attendees) if attendees else '(none)'}\n"
                 f"{ev.get('description', '')}"
             )
+            # Deep-link to the event when the reply carried one, so a citation
+            # lands on the event rather than the calendar's front page.
+            link = ev.get("html_link")
             out.append(
                 DataSourceResult(
                     title=title,
                     content=body,
-                    source_url="https://calendar.google.com/calendar/u/0/r",
+                    source_url=link or "https://calendar.google.com/calendar/u/0/r",
                     source_name="Google Calendar",
                     confidence=0.65,
                 ),
@@ -206,6 +215,11 @@ def parse_events(raw: Any) -> list[CalendarEvent]:
         if id_match := _ID_RE.search(block):
             if eid := _clean(id_match.group("id")):
                 ev["id"] = eid
+            # The reply carries a per-event Link on the same line; it was
+            # matched and then thrown away, so every citation pointed at the
+            # calendar's front page instead of the event.
+            if elink := _clean(id_match.group("link")):
+                ev["html_link"] = elink
 
         out.append(ev)
     return out
