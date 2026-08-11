@@ -86,8 +86,13 @@ def _is_preservation_suite(suite_name: str) -> bool:
     return any(kw in suite_name.lower() for kw in _PRESERVATION_SUITE_KEYWORDS)
 
 
-def _collect_skips(tree: ET.ElementTree) -> list[str]:
-    """Return a list of human-readable skip descriptions found in the XML.
+def _collect_skips(tree: ET.ElementTree) -> tuple[list[str], list[str]]:
+    """Return (unexpected, excused) human-readable skip descriptions.
+
+    Both are returned because reporting only the first lets a clean run print
+    "no preservation skips found" while several invariants went unverified —
+    excusing a skip is a decision, and a decision that leaves no trace in the
+    output is indistinguishable from nothing having happened.
 
     Two detection modes:
 
@@ -102,6 +107,7 @@ def _collect_skips(tree: ET.ElementTree) -> list[str]:
        lint job is designed to detect).
     """
     skips: list[str] = []
+    excused: list[str] = []
 
     root = tree.getroot()
 
@@ -129,6 +135,7 @@ def _collect_skips(tree: ET.ElementTree) -> list[str]:
                         # the system working as intended: we know what was not
                         # verified and why. Anything else still fails.
                         if _is_expected_skip(value):
+                            excused.append(f"  [expected] {classname}::{test_name}: {value}")
                             continue
                         skips.append(
                             f"  [property] {classname}::{test_name}: {value}"
@@ -160,7 +167,7 @@ def _collect_skips(tree: ET.ElementTree) -> list[str]:
                     f"  [skipped] {classname}::{test_name}: {message}"
                 )
 
-    return skips
+    return skips, excused
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -198,12 +205,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    skips = _collect_skips(tree)
+    skips, excused = _collect_skips(tree)
+
+    if excused:
+        print(
+            f"lint-no-silent-preservation-skips: {len(excused)} declared skip(s) "
+            f"excused as CI-impossible — these invariants were NOT verified:"
+        )
+        for line in excused:
+            print(line)
+        print("")
 
     if not skips:
         print(
-            f"lint-no-silent-preservation-skips: OK — "
-            f"no preservation skips found in {args.junit_xml}"
+            f"lint-no-silent-preservation-skips: OK — no UNEXPECTED preservation "
+            f"skips in {args.junit_xml} ({len(excused)} excused)"
         )
         return 0
 

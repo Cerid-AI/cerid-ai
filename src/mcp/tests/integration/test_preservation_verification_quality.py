@@ -21,6 +21,8 @@ import time
 
 import pytest
 
+from .conftest import record_preservation_skip
+
 pytestmark = pytest.mark.preservation
 
 # The stream must finish comfortably inside the server's own total budget;
@@ -52,7 +54,7 @@ def _run_verify_stream(http_client, response_text: str, conversation_id: str,
     return events
 
 
-def test_verify_stream_completes_and_not_all_timeouts(http_client):
+def test_verify_stream_completes_and_not_all_timeouts(http_client, request):
     """The 2026-07-13 beta failure: all 7 claims died on per-claim timeouts
     and the report saved with methods=['cross_model', 'timeout'].
 
@@ -77,7 +79,11 @@ def test_verify_stream_completes_and_not_all_timeouts(http_client):
     summaries = [e for e in events if e.get("type") == "summary"]
     assert summaries, f"no summary event (events: {[e.get('type') for e in events]})"
     if summaries[0].get("skipped"):
-        pytest.skip("verification skipped (feature off or response too short)")
+        record_preservation_skip(
+            request,
+            "verification-quality",
+            "verification skipped (feature off or response too short)",
+        )
 
     claim_events = [e for e in events if e.get("type") == "claim_verified"]
     assert claim_events, "no claim_verified events for a two-claim response"
@@ -88,7 +94,7 @@ def test_verify_stream_completes_and_not_all_timeouts(http_client):
     )
 
 
-def test_stale_cutoff_response_never_confirmed_from_kb(http_client):
+def test_stale_cutoff_response_never_confirmed_from_kb(http_client, request):
     """A response that admits a stale knowledge cutoff must not have its
     claims pre-resolved from KB snapshots (kb_batch), whatever the corpus
     contains — those claims need the live web path.
@@ -107,7 +113,11 @@ def test_stale_cutoff_response_never_confirmed_from_kb(http_client):
     summaries = [e for e in events if e.get("type") == "summary"]
     assert summaries, "no summary event"
     if summaries[0].get("skipped"):
-        pytest.skip("verification skipped (feature off or response too short)")
+        record_preservation_skip(
+            request,
+            "verification-quality",
+            "verification skipped (feature off or response too short)",
+        )
 
     claim_events = [e for e in events if e.get("type") == "claim_verified"]
     kb_batch = [e for e in claim_events if e.get("verification_method") == "kb_batch"]

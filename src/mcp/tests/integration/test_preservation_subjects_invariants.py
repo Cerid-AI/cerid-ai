@@ -23,6 +23,8 @@ import time
 
 import pytest
 
+from .conftest import record_preservation_skip
+
 pytestmark = pytest.mark.preservation
 
 
@@ -82,7 +84,7 @@ def test_atlas_views_delete_is_idempotent(http_client):
 # ---------------------------------------------------------------------------
 
 
-def _measure_p95(client, path: str, samples: int = 10) -> float:
+def _measure_p95(client, path: str, request, samples: int = 10) -> float:
     times: list[float] = []
     for _ in range(samples):
         t0 = time.perf_counter()
@@ -92,18 +94,20 @@ def _measure_p95(client, path: str, samples: int = 10) -> float:
             times.append(elapsed)
     times.sort()
     if not times:
-        pytest.skip(f"{path}: no successful samples")
+        record_preservation_skip(
+            request, "subjects-latency-budget", f"{path}: no successful samples",
+        )
     idx = max(0, int(len(times) * 0.95) - 1)
     return times[idx]
 
 
-def test_graph_health_p95_under_200ms(http_client):
-    p95 = _measure_p95(http_client, "/graph/health")
+def test_graph_health_p95_under_200ms(http_client, request):
+    p95 = _measure_p95(http_client, "/graph/health", request)
     assert p95 < 200, f"/graph/health p95 {p95:.1f}ms — middleware regression?"
 
 
-def test_atlas_views_health_p95_under_200ms(http_client):
-    p95 = _measure_p95(http_client, "/atlas/views/health")
+def test_atlas_views_health_p95_under_200ms(http_client, request):
+    p95 = _measure_p95(http_client, "/atlas/views/health", request)
     assert p95 < 200, f"/atlas/views/health p95 {p95:.1f}ms — middleware regression?"
 
 
@@ -135,12 +139,12 @@ def test_embeddings_3d_filter_threads_through(http_client):
     assert r.status_code in (200, 503)
 
 
-def test_embeddings_3d_p95_under_500ms_when_cached(http_client):
+def test_embeddings_3d_p95_under_500ms_when_cached(http_client, request):
     """Cached fast-path budget — 500ms ceiling accounts for the first
     fetch warming the cache; subsequent hits should be well below."""
     # Warm the cache
     http_client.get("/graph/embeddings/3d")
-    p95 = _measure_p95(http_client, "/graph/embeddings/3d", samples=8)
+    p95 = _measure_p95(http_client, "/graph/embeddings/3d", request, samples=8)
     assert p95 < 500, f"/graph/embeddings/3d cached p95 {p95:.1f}ms"
 
 
@@ -149,7 +153,7 @@ def test_embeddings_3d_p95_under_500ms_when_cached(http_client):
 # ---------------------------------------------------------------------------
 
 
-def test_graph_default_excludes_isolated(http_client):
+def test_graph_default_excludes_isolated(http_client, request):
     """GET /graph/map with no include_isolated param returns a node set
     whose orphan ratio is 0 — every returned entity has at least one edge
     among the returned link set.
@@ -163,15 +167,21 @@ def test_graph_default_excludes_isolated(http_client):
     in ``entities`` must also appear in at least one link triple.
 
     Vacuously true for an empty graph (0 entities → pass, since the
-    default-exclusion invariant holds trivially). We do NOT skip — a skip
-    would trip the no-silent-preservation-skips gate on a fresh CI stack.
+    default-exclusion invariant holds trivially). The 503 branch DOES skip —
+    the docstring claimed the opposite while the code below skipped anyway —
+    but it now declares the invariant so the gate reports what went unverified
+    instead of an anonymous skip.
     """
     r = http_client.get("/graph/map")
     assert r.status_code in (200, 503), (
         f"/graph/map {r.status_code}: {r.text[:200]}"
     )
     if r.status_code == 503:
-        pytest.skip("/graph/map 503 — Neo4j/Redis unavailable on this stack")
+        record_preservation_skip(
+            request,
+            "subjects-graph-map-orphans",
+            "/graph/map 503 — Neo4j/Redis unavailable on this stack",
+        )
 
     body = r.json()
 

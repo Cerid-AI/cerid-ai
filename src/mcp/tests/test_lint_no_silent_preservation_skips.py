@@ -250,3 +250,71 @@ def test_bare_testsuite_root_detected(capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "I3" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Scenario 8: an EXCUSED skip is still reported, and is still not a pass
+#
+# Excusing a CI-impossible invariant is a decision. A decision that leaves no
+# trace in the output is indistinguishable from nothing having happened, and
+# the gate printed "no preservation skips found" while excusing six of them on
+# a real `make validate-pro` run.
+# ---------------------------------------------------------------------------
+
+
+def _excused_xml(*extra: str) -> str:
+    cases = "".join(extra)
+    return f"""\
+<testsuites>
+  <testsuite name="preservation">
+    <testcase name="test_apple_mail_scan" classname="tests.integration.test_apple_connectors_e2e">
+      <properties>
+        <property name="preservation_skipped"
+                  value="preservation_skip: apple-mail: ceridmail not on PATH"/>
+      </properties>
+      <skipped message="ceridmail not on PATH"/>
+    </testcase>
+{cases}  </testsuite>
+</testsuites>
+"""
+
+
+def test_excused_skip_exits_zero_but_is_enumerated(capsys):
+    path = _write_xml(_excused_xml())
+    try:
+        rc = _script.main(["--junit-xml", str(path)])
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    # The excused invariant must be named — that it did not fail the build does
+    # not mean it was verified.
+    assert "apple-mail" in out
+    assert "NOT verified" in out
+    assert "1 excused" in out
+    # And the OK line must not claim there were none.
+    assert "no preservation skips found" not in out
+
+
+def test_excused_skip_does_not_mask_an_unexpected_one(capsys):
+    unexpected = """\
+    <testcase name="test_graph_default_excludes_isolated" classname="tests.integration.test_preservation_subjects_invariants">
+      <properties>
+        <property name="preservation_skipped"
+                  value="preservation_skip: subjects-graph-map-orphans: /graph/map 503"/>
+      </properties>
+      <skipped message="/graph/map 503"/>
+    </testcase>
+"""
+    path = _write_xml(_excused_xml(unexpected))
+    try:
+        rc = _script.main(["--junit-xml", str(path)])
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "apple-mail" in out  # excused, still listed
+    assert "subjects-graph-map-orphans" in out  # unexpected, fails the build
+    assert "FAIL" in out

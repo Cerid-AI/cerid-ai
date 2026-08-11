@@ -29,7 +29,7 @@ from __future__ import annotations
 import time
 import uuid
 
-import pytest
+from .conftest import record_preservation_skip
 
 
 def _sync_configured(http_client) -> bool:
@@ -40,9 +40,11 @@ def _sync_configured(http_client) -> bool:
     return r.status_code == 200
 
 
-def test_list_conversations_returns_iterable(http_client):
+def test_list_conversations_returns_iterable(http_client, request):
     if not _sync_configured(http_client):
-        pytest.skip("sync directory not configured in this environment")
+        record_preservation_skip(
+            request, "i8-sync-dir", "sync directory not configured in this environment",
+        )
     r = http_client.get("/user-state/conversations")
     assert r.status_code == 200, (
         f"/user-state/conversations HTTP {r.status_code}: {r.text[:200]}"
@@ -53,9 +55,11 @@ def test_list_conversations_returns_iterable(http_client):
     )
 
 
-def test_conversation_crud_round_trip(http_client, cleanup_ids):
+def test_conversation_crud_round_trip(http_client, cleanup_ids, request):
     if not _sync_configured(http_client):
-        pytest.skip("sync directory not configured in this environment")
+        record_preservation_skip(
+            request, "i8-sync-dir", "sync directory not configured in this environment",
+        )
 
     conv_id = f"preservation-i8-{uuid.uuid4().hex[:8]}"
     cleanup_ids.append(("conversation", conv_id))
@@ -70,7 +74,9 @@ def test_conversation_crud_round_trip(http_client, cleanup_ids):
     # 1. Create
     r = http_client.post("/user-state/conversations", json=payload)
     if r.status_code == 503:
-        pytest.skip(f"sync directory reported 503 at write: {r.text[:120]}")
+        record_preservation_skip(
+            request, "i8-sync-dir-write", f"sync directory reported 503 at write: {r.text[:120]}",
+        )
     assert r.status_code == 200, (
         f"POST /user-state/conversations HTTP {r.status_code}: {r.text[:200]}"
     )
@@ -96,9 +102,11 @@ def test_conversation_crud_round_trip(http_client, cleanup_ids):
     assert r.json().get("deleted") == conv_id
 
 
-def test_conversation_missing_id_returns_400(http_client):
+def test_conversation_missing_id_returns_400(http_client, request):
     if not _sync_configured(http_client):
-        pytest.skip("sync directory not configured in this environment")
+        record_preservation_skip(
+            request, "i8-sync-dir", "sync directory not configured in this environment",
+        )
     r = http_client.post("/user-state/conversations", json={"title": "no id here"})
     # Either 400 (documented) or 422 (Pydantic) is acceptable — this
     # test guards against silent acceptance of malformed writes.
@@ -107,9 +115,11 @@ def test_conversation_missing_id_returns_400(http_client):
     )
 
 
-def test_bulk_conversation_save(http_client, cleanup_ids):
+def test_bulk_conversation_save(http_client, cleanup_ids, request):
     if not _sync_configured(http_client):
-        pytest.skip("sync directory not configured in this environment")
+        record_preservation_skip(
+            request, "i8-sync-dir", "sync directory not configured in this environment",
+        )
     ids = [f"preservation-i8-bulk-{uuid.uuid4().hex[:8]}" for _ in range(3)]
     for i in ids:
         cleanup_ids.append(("conversation", i))
@@ -119,7 +129,9 @@ def test_bulk_conversation_save(http_client, cleanup_ids):
     ]
     r = http_client.post("/user-state/conversations/bulk", json=payload)
     if r.status_code == 503:
-        pytest.skip("sync directory reported 503")
+        record_preservation_skip(
+            request, "i8-sync-dir-write", "sync directory reported 503 at bulk write",
+        )
     assert r.status_code == 200, (
         f"POST /user-state/conversations/bulk HTTP {r.status_code}: {r.text[:200]}"
     )
