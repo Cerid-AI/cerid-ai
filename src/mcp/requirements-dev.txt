@@ -12,7 +12,7 @@ pytest-benchmark>=5.2.3,<6
 # reportlab only writes test files and never ships in production).
 reportlab>=4.5.1,<5
 # Phase 3a — in-process Redis fake for processor queue tests
-fakeredis>=2.36.2,<3
+fakeredis>=2.37.0,<3
 # ReDoS audit (DUO138). The CI `security` job runs this, but nothing local did,
 # so a catastrophic-backtracking regex could only fail AFTER a push — and it sat
 # invisible behind an earlier failing step in the same job (2026-08-04,
