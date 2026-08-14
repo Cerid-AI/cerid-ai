@@ -8,9 +8,10 @@ __all__ = [
     "init_schema",
     # artifacts
     "create_artifact", "delete_artifact", "find_artifact_by_filename",
+    "find_artifact_by_external_id",
     "update_artifact", "get_artifact", "get_active_memories", "get_quality_scores",
     "get_verification_report", "save_verification_report",
-    "list_artifacts", "recategorize_artifact", "set_artifact_properties",
+    "count_artifacts", "list_artifacts", "recategorize_artifact", "set_artifact_properties",
     "update_artifact_summary",
     # relationships
     "create_relationship", "find_related_artifacts",
@@ -18,7 +19,7 @@ __all__ = [
     "write_has_attachment",
     # taxonomy
     "get_taxonomy", "create_domain", "create_sub_category",
-    "list_tags", "update_artifact_taxonomy",
+    "list_tags", "count_tags", "update_artifact_taxonomy",
     # memory (Phase 44 Part 2)
     "ensure_memory_schema", "create_memory_node", "update_memory_access",
     "archive_memory", "link_memory_to_artifact", "supersede_memory",
@@ -32,8 +33,10 @@ __all__ = [
 ]
 
 from app.db.neo4j.artifacts import (  # noqa: F401,E402
+    count_artifacts,
     create_artifact,
     delete_artifact,
+    find_artifact_by_external_id,
     find_artifact_by_filename,
     get_active_memories,
     get_artifact,
@@ -68,6 +71,7 @@ from app.db.neo4j.relationships import (  # noqa: F401,E402
 )
 from app.db.neo4j.schema import init_schema  # noqa: F401,E402
 from app.db.neo4j.taxonomy import (  # noqa: F401,E402
+    count_tags,
     create_domain,
     create_sub_category,
     get_taxonomy,

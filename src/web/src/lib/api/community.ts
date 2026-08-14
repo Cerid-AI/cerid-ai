@@ -40,6 +40,7 @@ function normalizeCommunitySummary(raw: Record<string, unknown>): CommunitySumma
   return {
     community_id: String(raw.community_id ?? ""),
     level: Number(raw.level ?? 0),
+    name: raw.name != null ? String(raw.name) : null,
     summary: raw.summary != null ? String(raw.summary) : null,
     member_count: Number(raw.member_count ?? 0),
     last_summarized_at: raw.last_summarized_at != null ? String(raw.last_summarized_at) : null,
@@ -53,10 +54,14 @@ function normalizeCommunityFull(raw: Record<string, unknown>): CommunityFull {
   const related = Array.isArray(raw.related_communities)
     ? (raw.related_communities as Record<string, unknown>[]).map(normalizeRelatedCommunity)
     : []
+  const summary = normalizeCommunitySummary(raw)
+  const membersTotal = Number(raw.members_total ?? summary.member_count)
 
   return {
-    ...normalizeCommunitySummary(raw),
+    ...summary,
     members,
+    members_total: membersTotal,
+    members_truncated: Boolean(raw.members_truncated ?? members.length < membersTotal),
     related_communities: related,
   }
 }

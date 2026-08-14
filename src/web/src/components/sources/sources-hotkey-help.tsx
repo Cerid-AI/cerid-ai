@@ -37,13 +37,12 @@ const SOURCES_HOTKEYS: HotkeyEntry[] = [
   { keys: "⌘ 3", action: "Meetings tab", available: true },
   { keys: "⌘ 4", action: "Connectors tab", available: true },
   { keys: "⌘ ⇧ S", action: "Open Add Source FAB (radial menu)", available: false },
-  { keys: "⌘ ⇧ C", action: "Toggle Constellation view", available: false },
   { keys: "⌘ ⇧ V", action: "Start Voice Note (Core dictation)", available: false },
   { keys: "⌘ ⇧ W", action: "Open Webhook share card for the active source", available: false },
   { keys: "F", action: "Filter — focus connector-list search", available: false },
   { keys: "R", action: "Refresh / re-sync the focused source", available: false },
   { keys: "D", action: "Open detail pane for focused source", available: false },
-  { keys: "Esc", action: "Close any open overlay / FAB / wizard / Constellation", available: true },
+  { keys: "Esc", action: "Close any open overlay / FAB / wizard", available: true },
 ]
 
 export function SourcesHotkeyHelp() {

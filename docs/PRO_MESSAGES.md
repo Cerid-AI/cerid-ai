@@ -54,11 +54,16 @@ chat:
 Each message becomes part of a per-conversation artifact tagged with
 `source: imessage`.
 
-> **Status:** the connector currently surfaces recent messages via the
-> `ceridimessage` helper's `scan`. Per-conversation opt-in enable/disable and
-> the `attributedBody` body recovery described below land with the helper's full
-> `chat.db` reader — no reconfiguration is needed when it does; the same Full
-> Disk Access grant and the `sensitive_domain_retrieval` toggle (below) cover it.
+> **How it reads your messages.** The desktop app opens
+> `~/Library/Messages/chat.db` directly and reads it in-process — there is no
+> separate helper binary in the path. Per-conversation opt-in and the
+> `attributedBody` body recovery described above are both live; nothing here is
+> pending. Full Disk Access is the only grant involved.
+>
+> This note previously described a `ceridimessage` helper doing the scan, and
+> deferred opt-in and `attributedBody` recovery until that helper's "full
+> `chat.db` reader" arrived. No such helper has ever existed, and both features
+> had already shipped in the desktop app. Corrected 2026-08-11.
 
 ## What's NOT ingested
 

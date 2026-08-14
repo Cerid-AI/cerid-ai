@@ -12,24 +12,22 @@ from app.services.ingestion import validate_file_path
 # ---------------------------------------------------------------------------
 
 class TestValidateFilePath:
-    @patch("app.services.ingestion.config")
-    def test_valid_path_within_archive(self, mock_config, tmp_path):
+    def test_valid_path_within_archive(self, monkeypatch, tmp_path):
         """Paths within the archive root are accepted."""
         archive = tmp_path / "archive"
         archive.mkdir()
         test_file = archive / "test.txt"
         test_file.write_text("content")
-        mock_config.ARCHIVE_PATH = str(archive)
+        monkeypatch.setattr("app.services.ingestion.config.ARCHIVE_PATH", str(archive))
 
         result = validate_file_path(str(test_file))
         assert result.name == "test.txt"
 
-    @patch("app.services.ingestion.config")
-    def test_path_traversal_rejected(self, mock_config, tmp_path):
+    def test_path_traversal_rejected(self, monkeypatch, tmp_path):
         """Directory traversal attempts should be rejected."""
         archive = tmp_path / "archive"
         archive.mkdir()
-        mock_config.ARCHIVE_PATH = str(archive)
+        monkeypatch.setattr("app.services.ingestion.config.ARCHIVE_PATH", str(archive))
 
         outside = tmp_path / "outside.txt"
         outside.write_text("secret")
@@ -87,7 +85,9 @@ class TestIngestFile:
     @patch("app.services.ingestion.get_redis")
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_file_calls_parser(self, mock_chroma, mock_neo4j, mock_redis, mock_parse, tmp_path):
+    def test_ingest_file_calls_parser(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_parse, monkeypatch, tmp_path
+    ):
         """ingest_file should call the parser for the given file."""
         mock_parse.return_value = "parsed content here"
         mock_chroma.return_value = MagicMock()
@@ -100,19 +100,18 @@ class TestIngestFile:
         test_file = tmp_path / "test.txt"
         test_file.write_text("hello world")
 
-        with patch("app.services.ingestion.config") as mock_config:
-            mock_config.ARCHIVE_PATH = str(tmp_path)
-            mock_config.DOMAINS = ["coding"]
-            mock_config.DEFAULT_DOMAIN = "coding"
-            import asyncio
-            try:
-                # asyncio.run replaces deprecated get_event_loop().run_until_complete
-                # (Python 3.12 raises "no current event loop" on first call from
-                # main thread when no loop has been created).
-                asyncio.run(
-                    ingest_file(str(test_file), domain="coding"),
-                )
-            except (AttributeError, TypeError, KeyError):
-                pass  # Expected — mocking is incomplete for full pipeline
+        monkeypatch.setattr("app.services.ingestion.config.ARCHIVE_PATH", str(tmp_path))
+        monkeypatch.setattr("app.services.ingestion.config.DOMAINS", ["coding"])
+        monkeypatch.setattr("app.services.ingestion.config.DEFAULT_DOMAIN", "coding")
+        import asyncio
+        try:
+            # asyncio.run replaces deprecated get_event_loop().run_until_complete
+            # (Python 3.12 raises "no current event loop" on first call from
+            # main thread when no loop has been created).
+            asyncio.run(
+                ingest_file(str(test_file), domain="coding"),
+            )
+        except (AttributeError, TypeError, KeyError):
+            pass  # Expected — mocking is incomplete for full pipeline
 
         mock_parse.assert_called_once()

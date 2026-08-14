@@ -20,6 +20,7 @@ ingest paths, same artifact-id space.)
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -46,8 +47,39 @@ _USER_AGENT = "CeridAI-RSS/1.0"
 _MAX_FEED_BYTES = 8 * 1024 * 1024  # cap untrusted feed body (memory / DoS guard)
 _ATOM = "{http://www.w3.org/2005/Atom}"
 _CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}encoded"
+# RSS 1.0 (RDF): <item> lives in the RSS-1.0 namespace, its guid is the
+# rdf:about attribute, and its date is dc:date — none of which the RSS-2.0
+# unqualified-<item> branch below matches. Ported from the retired legacy
+# poller (app/data_sources/rss_feed.py) so RDF feeds don't parse to zero.
+_RSS10 = "{http://purl.org/rss/1.0/}"
+_RDF = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}"
+_DC = "{http://purl.org/dc/elements/1.1/}"
 def _text(el: ET.Element | None) -> str:
     return (el.text or "").strip() if el is not None else ""
+
+
+def _html_to_text(html: str) -> str:
+    """Strip HTML tags, decode entities, collapse whitespace.
+
+    Feed ``<description>``/``content:encoded`` bodies are frequently HTML
+    (including CDATA-wrapped markup and escaped entities), not plain text —
+    WB-06: ingesting them raw pollutes chunk text with tags/CDATA noise.
+    Mirrors ``app.data_sources.rss_feed.html_to_text`` (the legacy poller)
+    but is duplicated rather than imported: ``core`` must never import
+    ``app`` (import-linter boundary in ``src/mcp/.importlinter``).
+    """
+    text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL)
+    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&quot;", '"', text)
+    text = re.sub(r"&#39;", "'", text)
+    text = re.sub(r"&apos;", "'", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 def _normalize_date(raw: str) -> str | None:
@@ -105,6 +137,18 @@ def _parse_feed(
             "url": _text(it.find("link")),
             "content": _text(it.find("description")) or _text(it.find(_CONTENT_NS)),
             "published_at": _normalize_date(_text(it.find("pubDate"))),
+        })
+    # RSS 1.0 (RDF): namespaced <item>, guid = rdf:about, date = dc:date.
+    for it in root.iter(f"{_RSS10}item"):
+        guid = it.get(f"{_RDF}about") or _text(it.find(f"{_RSS10}link"))
+        if not guid:
+            continue
+        items.append({
+            "guid": guid,
+            "title": _text(it.find(f"{_RSS10}title")),
+            "url": _text(it.find(f"{_RSS10}link")),
+            "content": _text(it.find(f"{_RSS10}description")),
+            "published_at": _normalize_date(_text(it.find(f"{_DC}date"))),
         })
     # Atom: <entry>
     for en in root.iter(f"{_ATOM}entry"):
@@ -212,7 +256,17 @@ class RssConnector(SourceConnector):
 
         ingest_fn = get_source_ingest_fn()
         url = (config.get("url") or "").strip()
-        if ingest_fn is None or not url:
+        if ingest_fn is None:
+            # AF-021: distinct from a normal empty poll (no new entries) — the
+            # sink is unwired, so every poll of every RSS source silently no-ops
+            # until app startup's DI wiring is fixed. Warn distinctly so this
+            # doesn't read as "feed had nothing new".
+            logger.warning(
+                "rss.fetch_since: ingest sink not wired, skipping poll for %s "
+                "(connector polling disabled)", source_id,
+            )
+            return
+        if not url:
             return
 
         try:
@@ -229,7 +283,8 @@ class RssConnector(SourceConnector):
         domain = (config.get("domain") or "general").strip() or "general"
 
         for entry in entries:  # oldest-first → monotonic cursor advance
-            content = (entry.get("content") or entry.get("title") or "").strip()
+            raw_content = entry.get("content") or entry.get("title") or ""
+            content = _html_to_text(raw_content).strip()
             if not content:
                 continue
             t0 = time.monotonic()

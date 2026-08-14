@@ -282,12 +282,30 @@ export async function fetchSetupHealth(): Promise<SetupHealth> {
   return res.json()
 }
 
+/** Thrown when the system check reached the server and the server said no.
+    Carries the status so callers can tell "refused" from "unreachable" —
+    `throw new Error("System check failed")` discarded it, so a 401 and a dead
+    socket arrived at the catch block completely indistinguishable. */
+export class SystemCheckHttpError extends Error {
+  // Declared, not a constructor parameter property — `erasableSyntaxOnly` is
+  // on, and parameter properties emit runtime code.
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = "SystemCheckHttpError"
+    this.status = status
+  }
+}
+
 export async function fetchSystemCheck(): Promise<SystemCheckResponse> {
   const res = await fetch(`${MCP_BASE}/setup/system-check?_t=${Date.now()}`, {
     headers: mcpHeaders(),
     cache: "no-store",
   })
-  if (!res.ok) throw new Error("System check failed")
+  if (!res.ok) {
+    throw new SystemCheckHttpError(res.status, await extractError(res, "System check failed"))
+  }
   return res.json()
 }
 
@@ -310,6 +328,7 @@ export async function fetchOpenRouterCredits(): Promise<import("../types").OpenR
   const res = await fetch(`${MCP_BASE}/providers/credits`, {
     headers: mcpHeaders(),
   })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): credits-unavailable is indistinguishable from credits-fetch-failed
   if (!res.ok) return { available: false, error: `HTTP ${res.status}` }
   return res.json()
 }
@@ -318,6 +337,7 @@ export async function fetchProviderCredits(): Promise<import("../types").Provide
   const res = await fetch(`${MCP_BASE}/providers/credits`, {
     headers: mcpHeaders(),
   })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): "not configured" is indistinguishable from "fetch failed"
   if (!res.ok) return { configured: false }
   return res.json()
 }
@@ -347,6 +367,7 @@ export interface ConfiguredProvidersResponse {
 /** Non-throwing — availability hints are best-effort decoration. */
 export async function fetchConfiguredProviders(): Promise<ConfiguredProvidersResponse> {
   const res = await fetch(`${MCP_BASE}/providers/configured`, { headers: mcpHeaders() })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): zero-providers is indistinguishable from fetch-failed
   if (!res.ok) return { providers: [], total: 0 }
   return res.json()
 }
@@ -363,6 +384,7 @@ export interface ModelCatalogResponse {
  *  full catalog) rather than over-filter to nothing. */
 export async function fetchModelCatalog(): Promise<ModelCatalogResponse> {
   const res = await fetch(`${MCP_BASE}/models/catalog`, { headers: mcpHeaders() })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): carries a `source: "unavailable"` discriminator by design (see docblock above), grandfathered under the blunt structural match
   if (!res.ok) return { ids: [], source: "unavailable", count: 0 }
   return res.json()
 }
@@ -372,7 +394,7 @@ export async function fetchModelCatalog(): Promise<ModelCatalogResponse> {
 
 export async function fetchOllamaStatus(): Promise<import("../types").OllamaStatus> {
   const res = await fetch(`${MCP_BASE}/providers/ollama/status`, { headers: mcpHeaders() })
-  if (!res.ok) return { enabled: false, url: "", reachable: false, models: [], default_model: "", default_model_installed: false }
+  if (!res.ok) throw new Error(await extractError(res, `Ollama status fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -472,7 +494,7 @@ export interface VaultProfileResponse {
 
 export async function fetchWatchedFolders(): Promise<{ folders: WatchedFolder[]; total: number }> {
   const res = await fetch(`${MCP_BASE}/watched-folders`, { headers: mcpHeaders() })
-  if (!res.ok) return { folders: [], total: 0 }
+  if (!res.ok) throw new Error(await extractError(res, `Watched folders fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -509,12 +531,14 @@ export async function scanWatchedFolder(id: string): Promise<{ status: string }>
 
 export async function fetchVaultProfile(id: string): Promise<VaultProfileResponse | null> {
   const res = await fetch(`${MCP_BASE}/watched-folders/${id}/vault-profile`, { headers: mcpHeaders() })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): null-as-"no vault profile" is indistinguishable from null-as-fetch-failed
   if (!res.ok) return null
   return res.json()
 }
 
 export async function fetchInternalProvider(): Promise<{ provider: string; model: string; ollama_available: boolean }> {
   const res = await fetch(`${MCP_BASE}/providers/internal`, { headers: mcpHeaders() })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): same shape as fetchOllamaStatus's masked-failure default
   if (!res.ok) return { provider: "bifrost", model: "", ollama_available: false }
   return res.json()
 }
@@ -634,9 +658,13 @@ function normalizePluginList(data: { plugins?: unknown; total?: number }): Plugi
     ? data.plugins
     : Object.values((data.plugins ?? {}) as Record<string, unknown>)
   const plugins = rawList.map((entry) => {
-    const p = entry as Partial<Plugin>
+    // The dict-shaped payload (app.routers.health wins GET /plugins in the
+    // real app) carries the loader record, which spells the manifest type as
+    // `type`; the plugins-router shape spells it `plugin_type`. Accept both.
+    const p = entry as Partial<Plugin> & { type?: string }
     return {
       ...p,
+      plugin_type: p.plugin_type ?? p.type,
       file_types: Array.isArray(p.file_types) ? p.file_types : [],
       capabilities: Array.isArray(p.capabilities) ? p.capabilities : [],
     } as Plugin
@@ -800,6 +828,31 @@ export async function fetchWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   return res.json()
 }
 
+// -- Model Assignments (role → model routing) --------------------------------
+
+export interface ModelAssignmentsResponse {
+  assignments: Record<string, string>
+  source: "user_config" | "defaults"
+}
+
+export async function fetchModelAssignments(): Promise<ModelAssignmentsResponse> {
+  const res = await fetch(`${MCP_BASE}/models/assignments`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch model assignments failed: ${res.status}`))
+  return res.json()
+}
+
+export async function updateModelAssignments(
+  assignments: Record<string, string>,
+): Promise<{ success: boolean; restart_required: boolean; message: string }> {
+  const res = await fetch(`${MCP_BASE}/models/assignments`, {
+    method: "PUT",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ assignments }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Update model assignments failed: ${res.status}`))
+  return res.json()
+}
+
 // -- Model Updates -----------------------------------------------------------
 
 export interface ModelUpdateEntry {
@@ -832,13 +885,14 @@ export interface ModelUpdatesFullResponse {
 
 export async function fetchModelUpdates(): Promise<ModelUpdatesResponse> {
   const res = await fetch(`${MCP_BASE}/models/updates`, { headers: mcpHeaders() })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): zero-updates is indistinguishable from fetch-failed
   if (!res.ok) return { new: [], deprecated: [], last_checked: null }
   return res.json()
 }
 
 export async function fetchModelUpdatesFull(): Promise<ModelUpdatesFullResponse> {
   const res = await fetch(`${MCP_BASE}/models/updates`, { headers: mcpHeaders() })
-  if (!res.ok) return { updates: [], last_checked: null, catalog_size: 0 }
+  if (!res.ok) throw new Error(await extractError(res, `Model updates fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -864,6 +918,22 @@ export async function dismissModelUpdate(updateId: string): Promise<void> {
   if (!res.ok) throw new Error(await extractError(res, `Dismiss failed: ${res.status}`))
 }
 
+export interface ApplyModelUpdatesResponse {
+  applied: Array<{ role: string; from: string; to: string }>
+  restart_required: boolean
+  catalog_size: number
+  tier_updates: Array<{ id: string; from: string; to: string }>
+}
+
+export async function applyModelUpdates(): Promise<ApplyModelUpdatesResponse> {
+  const res = await fetch(`${MCP_BASE}/models/updates/apply`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Apply model updates failed: ${res.status}`))
+  return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // Private Mode
 // ---------------------------------------------------------------------------
@@ -881,19 +951,25 @@ export async function fetchPrivateMode(): Promise<{ enabled: boolean; level: num
 }
 
 export async function enablePrivateMode(level: number = 1): Promise<void> {
-  await fetch(`${MCP_BASE}/settings/private-mode`, {
+  const res = await fetch(`${MCP_BASE}/settings/private-mode`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ level }),
   })
+  // WB-37: throw on failure so callers can reconcile their optimistically-set
+  // local state instead of believing a write that never landed.
+  if (!res.ok) throw new Error(await extractError(res, `Enable private mode failed: ${res.status}`))
 }
 
 export async function disablePrivateMode(clearCache: boolean = false): Promise<void> {
-  await fetch(`${MCP_BASE}/settings/private-mode`, {
+  const res = await fetch(`${MCP_BASE}/settings/private-mode`, {
     method: "DELETE",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ clear_cache: clearCache }),
   })
+  // WB-37: throw on failure so callers can reconcile their optimistically-set
+  // local state instead of believing a write that never landed.
+  if (!res.ok) throw new Error(await extractError(res, `Disable private mode failed: ${res.status}`))
 }
 
 /**
@@ -942,7 +1018,7 @@ export async function fetchIngestHistory(
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set("offset", cursor)
   const res = await fetch(`${MCP_BASE}/admin/ingest-history?${params}`, { headers: mcpHeaders() })
-  if (!res.ok) return { items: [], total: 0, next_cursor: null }
+  if (!res.ok) throw new Error(await extractError(res, `Ingest history fetch failed: ${res.status}`))
   return res.json()
 }
 

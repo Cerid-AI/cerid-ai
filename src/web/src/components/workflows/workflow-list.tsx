@@ -8,7 +8,9 @@ import {
   fetchWorkflows,
   deleteWorkflow,
   fetchWorkflowRuns,
+  runWorkflow,
 } from "@/lib/api"
+import { consumesQueryInput } from "./node-catalog"
 import { cn } from "@/lib/utils"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -18,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PaneError } from "@/components/ui/pane-error"
+import { Input } from "@/components/ui/input"
 import {
   Plus,
   Pencil,
@@ -31,6 +34,7 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  Play,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -109,6 +113,37 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
   const [runsError, setRunsError] = useState<Record<string, string>>({})
   const [deleting, setDeleting] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // UX-21: Run straight from the card — no editor round-trip. `runFor` is
+  // the card whose run-input row is open; a query-consuming pipeline asks
+  // for its input here instead of running on a made-up one.
+  const [runFor, setRunFor] = useState<string | null>(null)
+  const [runInput, setRunInput] = useState("")
+  const [runningId, setRunningId] = useState<string | null>(null)
+  const [lastRun, setLastRun] = useState<Record<string, WorkflowRun>>({})
+
+  const startRun = useCallback(async (wf: Workflow) => {
+    if (consumesQueryInput(wf.nodes) && !runInput.trim()) {
+      setRunsError((prev) => ({ ...prev, [wf.id]: "This pipeline takes a query — enter it first" }))
+      return
+    }
+    setRunningId(wf.id)
+    setRunsError((prev) => {
+      const next = { ...prev }
+      delete next[wf.id]
+      return next
+    })
+    try {
+      const run = await runWorkflow(wf.id, runInput.trim() ? { query: runInput.trim() } : {})
+      setLastRun((prev) => ({ ...prev, [wf.id]: run }))
+      setRunFor(null)
+      setRunInput("")
+    } catch (e) {
+      logSwallowedError(e, "workflow-list.runWorkflow", { workflowId: wf.id })
+      setRunsError((prev) => ({ ...prev, [wf.id]: e instanceof Error ? e.message : "Run failed" }))
+    } finally {
+      setRunningId(null)
+    }
+  }, [runInput])
 
   const handleDelete = useCallback(async (wf: Workflow) => {
     setDeleting(wf.id)
@@ -257,6 +292,23 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        aria-label="Run workflow"
+                        onClick={() => {
+                          setRunFor((prev) => (prev === wf.id ? null : wf.id))
+                          setRunInput("")
+                        }}
+                        disabled={runningId === wf.id || !wf.enabled}
+                      >
+                        {runningId === wf.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Edit workflow" onClick={() => onEdit(wf)}>
                         <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                       </Button>
@@ -279,6 +331,40 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                       </Button>
                     </div>
                   </div>
+
+                  {/* UX-21: inline run-input row (opened by the card's Run) */}
+                  {runFor === wf.id && (
+                    <div className="mt-2 flex items-center gap-1.5">
+                      {consumesQueryInput(wf.nodes) && (
+                        <Input
+                          value={runInput}
+                          onChange={(e) => setRunInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") void startRun(wf) }}
+                          placeholder="Query to run on..."
+                          aria-label="Query input for this run"
+                          className="h-7 flex-1 text-xs"
+                          // eslint-disable-next-line jsx-a11y/no-autofocus -- user-triggered inline input; mount means the card's Run was explicitly clicked
+                          autoFocus
+                        />
+                      )}
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => void startRun(wf)}
+                        disabled={runningId === wf.id}
+                      >
+                        {runningId === wf.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Start run"}
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Freshest run fired from this card */}
+                  {lastRun[wf.id] && (
+                    <div className="mt-2 flex items-center gap-2 text-label-xs text-muted-foreground">
+                      <RunStatusBadge status={lastRun[wf.id].status} />
+                      <span className="font-mono">{lastRun[wf.id].id.slice(0, 8)}</span>
+                    </div>
+                  )}
 
                   {/* Expandable run history */}
                   <button

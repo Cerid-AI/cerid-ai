@@ -60,6 +60,8 @@ from app.services.external_ingest import ExternalIngestRequest, IngestResult, in
 from app.services.ingestion import ingest_content, ingest_file
 from config.features import FEATURE_FLAGS, FEATURE_TIER
 from config.taxonomy import DOMAINS, TAXONOMY
+from core.processor.job import JobState
+from core.utils.swallowed import log_swallowed_error
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -91,6 +93,9 @@ class SdkIngestVoiceNoteResponse(BaseModel):
     transcript: Any
     transcribe_ms: Any
     word_count: Any
+    reason: Any = None
+    duplicate_of: Any = None
+    error: Any = None
 
 
 
@@ -101,33 +106,45 @@ _422 = {"description": "Invalid request parameters"}
 
 
 # ---------------------------------------------------------------------------
-# Queue-availability probes (defensive imports for the public distribution)
+# Async memory-extract routing (canonical background processor)
 # ---------------------------------------------------------------------------
 #
-# ``app.queue`` is internal-only per .sync-manifest.yaml — community/public
-# installs ship without it. The async memory_extract path is internal-only
-# by design ("community installs without queue workers don't pay the cost"
-# — app/queue/__init__.py docstring); the sync path is the universal
-# contract. Detect the gap once at module import time and short-circuit
-# the async branches accordingly.
+# Memory extraction runs inline by default, or is handed to the canonical
+# background processor (``app.processor`` / ``RedisJobQueue``, on
+# ``app.state.processor_queue``) and polled for its result. The async path is
+# gated the same way the retired RQ system gated it: explicit opt-in via
+# ``MEMORY_QUEUE_MODE=async``, or auto-enabled on local-inference installs
+# where inline extraction blows the interactive SLO. The processor worker is
+# always started with the app, so the old RQ worker-liveness probe collapses
+# to "the processor queue is present on app.state" — checked at enqueue time
+# so a request never enqueues into a queue nobody drains (which would lose the
+# memory).
 
-try:
-    from app.queue import (  # noqa: F401  — re-exported via _queue_avail
-        _rq_available,
-        get_memory_queue,
-        is_memory_async_mode,
-    )
-    _queue_avail = True
-except ImportError:
-    _queue_avail = False
-    _rq_available = False  # type: ignore[assignment]
+# Processor lifecycle state → the SDK's stable status vocabulary. Mapping keeps
+# the public ``GET /memory/extract/jobs/{job_id}`` contract unchanged across
+# the RQ→processor migration.
+_PROC_STATE_TO_SDK_STATUS: dict[JobState, str] = {
+    JobState.PENDING: "queued",
+    JobState.RUNNING: "started",
+    JobState.COMPLETED: "finished",
+    JobState.FAILED: "failed",
+    JobState.HELD: "failed",
+    JobState.PAUSED: "deferred",
+}
 
-    def is_memory_async_mode() -> bool:  # type: ignore[no-redef]
-        """Public-distribution stub — async queue isn't shipped here."""
+
+def _memory_async_enabled() -> bool:
+    """True when ``/sdk/v1/memory/extract`` should default to the async
+    processor path — explicit opt-in, or auto on local inference."""
+    if str(getattr(config, "MEMORY_QUEUE_MODE", "sync")).lower() == "async":
+        return True
+    try:
+        from core.routing.provider_state import is_local_provider
+
+        return is_local_provider()  # no-arg = the active provider
+    except Exception as exc:  # noqa: BLE001 — probe failure ⇒ safe sync default
+        log_swallowed_error("sdk.memory_async_probe", exc)
         return False
-
-    def get_memory_queue():  # type: ignore[no-redef]
-        raise RuntimeError("Async memory queue is internal-only.")
 
 
 # ---------------------------------------------------------------------------
@@ -197,30 +214,31 @@ async def sdk_memory_extract(req: MemoryExtractionRequest, request: Request, wai
     """
     from fastapi.responses import JSONResponse
 
-    if wait or not is_memory_async_mode():
+    queue = getattr(request.app.state, "processor_queue", None)
+
+    if wait or queue is None or not _memory_async_enabled():
+        # Sync path — also the fail-safe fallback when the processor queue is
+        # not up: enqueuing into a queue nobody drains would lose the memory.
         # Idempotency-Key (GA P0.5 D1) on the sync path only; the async/202 path
-        # is already job-id idempotent via the queue.
+        # is already job-id idempotent via the queue record.
         return await idempotent(request, lambda: memory_extract_endpoint(req))
 
-    queue = get_memory_queue()
-    job = queue.enqueue(
-        "app.queue.tasks.memory_extract_task",
-        kwargs={
-            "response_text": req.response_text,
-            "conversation_id": req.conversation_id,
-            "model": req.model,
-        },
-        # Keep results around long enough for trading-agent's reflection
-        # loop (60s scan interval × ~10 cycles before a stale poll = 10 min
-        # ceiling). Failed jobs persist for the same window so operators
-        # can inspect the traceback via ``rq info``.
-        result_ttl=600,
-        failure_ttl=600,
-    )
+    from app.processor.jobs.memory_extract import MemoryExtractJob
+
+    payload = {
+        "response_text": req.response_text,
+        "conversation_id": req.conversation_id,
+        "model": req.model,
+    }
+    job = MemoryExtractJob(**payload)
+    # The worker re-instantiates the job as ``MemoryExtractJob(**record.payload)``,
+    # so the payload must carry the __init__ kwargs verbatim.
+    record = job.new_record(payload=payload)
+    job_id = await queue.enqueue(record)
     accepted = SDKMemoryExtractAcceptedResponse(
-        job_id=job.id,
+        job_id=job_id,
         status="queued",
-        status_url=f"/sdk/v1/memory/extract/jobs/{job.id}",
+        status_url=f"/sdk/v1/memory/extract/jobs/{job_id}",
         conversation_id=req.conversation_id,
     )
     return JSONResponse(
@@ -243,38 +261,39 @@ async def sdk_memory_extract(req: MemoryExtractionRequest, request: Request, wai
     ),
     responses={404: {"description": "Unknown job_id"}, 503: _503},
 )
-async def sdk_memory_extract_job_status(job_id: str) -> SDKMemoryExtractJobStatus:
-    if not _queue_avail or not _rq_available:
+async def sdk_memory_extract_job_status(
+    job_id: str, request: Request
+) -> SDKMemoryExtractJobStatus:
+    queue = getattr(request.app.state, "processor_queue", None)
+    if queue is None:
         raise HTTPException(
             status_code=503,
-            detail="Async memory queue is not configured (rq not installed).",
+            detail="Background processor queue is not available.",
         )
 
-    from rq.exceptions import NoSuchJobError  # type: ignore[import-not-found]
-    from rq.job import Job  # type: ignore[import-not-found]
-
-    queue = get_memory_queue()
-    try:
-        job = Job.fetch(job_id, connection=queue.connection)
-    except NoSuchJobError:
+    record = await queue.get(job_id)
+    if record is None:
         raise HTTPException(status_code=404, detail=f"Unknown job_id: {job_id}")
 
-    status = job.get_status()  # rq's canonical status string
+    status = _PROC_STATE_TO_SDK_STATUS.get(record.state, "unknown")
     payload: dict = {
         "job_id": job_id,
-        "status": status or "unknown",
-        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
-        "started_at": job.started_at.isoformat() if job.started_at else None,
-        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
+        "status": status,
+        "enqueued_at": record.enqueued_at.isoformat() if record.enqueued_at else None,
+        "started_at": record.started_at.isoformat() if record.started_at else None,
+        "ended_at": record.completed_at.isoformat() if record.completed_at else None,
         "result": None,
         "error": None,
     }
-    if status == "finished" and job.result is not None:
-        # The worker returns the same dict shape ``SDKMemoryExtractResponse``
-        # describes — Pydantic re-validates here so any drift is loud.
-        payload["result"] = SDKMemoryExtractResponse(**job.result).model_dump()
+    if status == "finished":
+        # The worker stores the SDKMemoryExtractResponse envelope in
+        # JobResult.metadata['result']; Pydantic re-validates here so any
+        # drift is loud.
+        envelope = (record.metadata or {}).get("result")
+        if envelope is not None:
+            payload["result"] = SDKMemoryExtractResponse(**envelope).model_dump()
     elif status == "failed":
-        payload["error"] = (job.exc_info or "").strip().split("\n")[-1] or "worker failure"
+        payload["error"] = record.error_message or "worker failure"
 
     return SDKMemoryExtractJobStatus(**payload)
 
@@ -725,11 +744,14 @@ async def _sdk_ingest_voice_note_impl(request: Request) -> dict:
 
         elapsed_ms = int((_time.perf_counter() - started) * 1000)
         return {
-            "status": "ingested",
+            "status": ingest_result.get("status", "error"),
             "artifact_id": ingest_result.get("artifact_id"),
             "transcript": text,
             "transcribe_ms": elapsed_ms,
             "word_count": len(text.split()),
+            "reason": ingest_result.get("reason"),
+            "duplicate_of": ingest_result.get("duplicate_of"),
+            "error": ingest_result.get("error"),
         }
     finally:
         try:

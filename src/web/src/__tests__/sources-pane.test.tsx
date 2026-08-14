@@ -10,6 +10,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import SourcesPane from "@/components/sources/sources-pane"
+import { NavigationProvider, useNavigation } from "@/contexts/navigation-context"
 
 // Stub KnowledgePane so jsdom doesn't try to mount its sub-tree (which
 // includes graph-explorer that pulls sigma).
@@ -80,6 +81,33 @@ describe("SourcesPane — mode switcher", () => {
   it("Library mode mounts the existing KnowledgePane", async () => {
     renderSources()
     expect(await screen.findByTestId("kb-stub")).toBeInTheDocument()
+  })
+
+  it("same-pane goTo(sources, { sourcesMode }) switches the sub-tab (deep-link mechanism)", async () => {
+    // The mount initializer reads ?sources_mode= exactly once; the navVersion
+    // subscription is what makes a goTo work while the pane is already active.
+    function GoToActivity() {
+      const { goTo } = useNavigation()
+      return (
+        <button type="button" onClick={() => goTo("sources", { sourcesMode: "activity" })}>
+          go-activity
+        </button>
+      )
+    }
+    window.history.replaceState({}, "", "/")
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NavigationProvider activePane="sources" onPaneChange={() => {}}>
+          <GoToActivity />
+          <SourcesPane />
+        </NavigationProvider>
+      </QueryClientProvider>,
+    )
+    expect(screen.getByRole("tab", { name: /library/i })).toHaveAttribute("aria-selected", "true")
+    fireEvent.click(screen.getByText("go-activity"))
+    expect(screen.getByRole("tab", { name: /activity/i })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByTestId("activity-stub")).toBeInTheDocument()
   })
 })
 

@@ -146,20 +146,30 @@ def find_orphaned_chunks(
             logger.debug(f"Collection not found for domain {domain}: {e}")
             continue
 
-        all_data = collection.get(include=["metadatas"])
-        if not all_data["ids"]:
-            continue
-
+        # WB-35: page through the collection instead of loading every chunk's
+        # metadata for the whole domain at once — same pattern as
+        # app/routers/kb_admin.py::_domain_version_distribution.
         domain_orphans = []
-        for i, chunk_id in enumerate(all_data["ids"]):
-            meta = all_data["metadatas"][i] if all_data["metadatas"] else {}
-            artifact_id = meta.get("artifact_id", "")
-            if artifact_id and artifact_id not in neo4j_ids:
-                domain_orphans.append({
-                    "chunk_id": chunk_id,
-                    "artifact_id": artifact_id,
-                    "filename": meta.get("filename", ""),
-                })
+        offset = 0
+        page = 1000
+        while True:
+            batch = collection.get(limit=page, offset=offset, include=["metadatas"])
+            batch_ids = batch.get("ids") or []
+            if not batch_ids:
+                break
+            metadatas = batch.get("metadatas") or []
+            for i, chunk_id in enumerate(batch_ids):
+                meta = metadatas[i] if metadatas else {}
+                artifact_id = meta.get("artifact_id", "")
+                if artifact_id and artifact_id not in neo4j_ids:
+                    domain_orphans.append({
+                        "chunk_id": chunk_id,
+                        "artifact_id": artifact_id,
+                        "filename": meta.get("filename", ""),
+                    })
+            if len(batch_ids) < page:
+                break
+            offset += page
 
         if domain_orphans:
             orphaned[domain] = domain_orphans

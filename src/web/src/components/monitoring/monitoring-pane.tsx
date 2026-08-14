@@ -28,20 +28,20 @@ export function MonitoringPane() {
     refetchInterval: 30_000,
   })
 
-  const { data: ingestLog } = useQuery({
+  const { data: ingestLog, isError: errorIngestLog, refetch: refetchIngestLog } = useQuery({
     queryKey: ["ingest-log"],
     queryFn: () => fetchIngestLog(200),
     refetchInterval: 30_000,
   })
 
-  const { data: scheduler } = useQuery({
+  const { data: scheduler, isError: errorScheduler, refetch: refetchScheduler } = useQuery({
     queryKey: ["scheduler"],
     queryFn: fetchSchedulerStatus,
     refetchInterval: 30_000,
   })
 
   const [digestHours, setDigestHours] = useState(24)
-  const { data: digest, isLoading: loadingDigest } = useQuery({
+  const { data: digest, isLoading: loadingDigest, isError: errorDigest, refetch: refetchDigest } = useQuery({
     queryKey: ["digest", digestHours],
     queryFn: () => fetchDigest(digestHours),
     refetchInterval: 60_000,
@@ -84,7 +84,15 @@ export function MonitoringPane() {
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-4 p-4">
             <PaneErrorBoundary label="Knowledge Digest" queryClient={queryClient}>
-              <DigestCard digest={digest} isLoading={loadingDigest} onPeriodChange={setDigestHours} />
+              {errorDigest ? (
+                <PaneError
+                  title="Failed to load knowledge digest"
+                  description="Check that the backend is running, then retry."
+                  onRetry={() => void refetchDigest()}
+                />
+              ) : (
+                <DigestCard digest={digest} isLoading={loadingDigest} onPeriodChange={setDigestHours} />
+              )}
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Processor" queryClient={queryClient}>
               <ProcessorPane />
@@ -105,10 +113,26 @@ export function MonitoringPane() {
               <KBOperations />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Ingestion Timeline" queryClient={queryClient}>
-              <IngestionTimeline entries={ingestLog?.entries} />
+              {errorIngestLog ? (
+                <PaneError
+                  title="Failed to load ingestion activity"
+                  description="Check that the backend is running, then retry."
+                  onRetry={() => void refetchIngestLog()}
+                />
+              ) : (
+                <IngestionTimeline entries={ingestLog?.entries} />
+              )}
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Scheduler Status" queryClient={queryClient}>
-              <SchedulerStatus scheduler={scheduler} />
+              {errorScheduler ? (
+                <PaneError
+                  title="Failed to load scheduler status"
+                  description="Check that the backend is running, then retry."
+                  onRetry={() => void refetchScheduler()}
+                />
+              ) : (
+                <SchedulerStatus scheduler={scheduler} />
+              )}
             </PaneErrorBoundary>
           </div>
         </ScrollArea>

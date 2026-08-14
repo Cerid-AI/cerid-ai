@@ -3,14 +3,17 @@
 
 import { useState } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import {
   MessageSquare, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
-  Shield, Compass, Files, Newspaper, Gauge, SlidersHorizontal, Workflow,
+  Shield, Compass, Files, Newspaper, Gauge, SlidersHorizontal, Workflow, Brain, Zap,
+  Download, Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { useConversationsContext } from "@/contexts/conversations-context"
@@ -18,10 +21,10 @@ import { withViewTransition } from "@/lib/view-transitions"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { fetchModelUpdatesFull } from "@/lib/api"
-import { fetchHealth } from "@/lib/api/settings"
+import { applyModelUpdates, fetchHealth } from "@/lib/api/settings"
 import { useSettingsMode, setSettingsMode } from "@/lib/settings-mode"
 
-export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities" | "subjects" | "sources" | "briefs" | "workflows"
+export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities" | "subjects" | "sources" | "briefs" | "workflows" | "automations"
 
 interface SidebarProps {
   activePane: Pane
@@ -43,13 +46,18 @@ interface SidebarProps {
 // Legacy goTo("monitoring"|"audit"|"agents"|...) calls resolve via
 // the NavigationProvider redirect map. Pane type retains values for
 // one release window so existing tests + direct programmatic mounts
-// keep working; current pane shape is Chat / Subjects / Briefs / Sources / Settings
-// (Briefs added Task 2.2 — daily/weekly claim-verified summaries).
+// keep working.
+// Memories was un-consolidated (RA-08): Subjects/Atlas never grew a
+// memory-viewing UI, so the redirect stranded MemoriesPane entirely.
+// Automations added as a routable pane (RA-09) — the backend registers
+// and runs automations regardless, so they need a visible home.
 const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "chat", icon: MessageSquare, label: "Chat" },
   { pane: "subjects", icon: Compass, label: "Subjects" },
+  { pane: "memories", icon: Brain, label: "Memories" },
   { pane: "briefs", icon: Newspaper, label: "Briefs" },
   { pane: "workflows", icon: Workflow, label: "Workflows" },
+  { pane: "automations", icon: Zap, label: "Automations" },
   { pane: "sources", icon: Files, label: "Sources" },
   { pane: "settings", icon: Settings, label: "Settings" },
 ]
@@ -77,13 +85,34 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
   } = useConversationsContext()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
   const settingsMode = useSettingsMode()
-  const { data: modelUpdates } = useQuery({
+  const { data: modelUpdates, isError: updatesCheckFailed } = useQuery({
     queryKey: ["model-updates"],
     queryFn: fetchModelUpdatesFull,
     refetchInterval: 300_000,
     staleTime: 120_000,
   })
-  const updateCount = modelUpdates?.updates?.length ?? 0
+  // WB-22: a failed check is not "zero updates" — suppress the count badge
+  // rather than assert a number the fetch never produced.
+  const updateCount = updatesCheckFailed ? 0 : modelUpdates?.updates?.length ?? 0
+
+  // RA-31: on-demand adoption from the sidebar badge itself — previously the
+  // badge only surfaced the count and clicking it navigated to Settings,
+  // with no path to actually apply the pending updates from here.
+  const queryClient = useQueryClient()
+  const applyUpdatesMutation = useMutation({
+    mutationFn: applyModelUpdates,
+    onSuccess: (result) => {
+      toast.success(
+        result.applied.length > 0
+          ? `Applied ${result.applied.length} model update${result.applied.length === 1 ? "" : "s"}`
+          : "Already up to date",
+      )
+      void queryClient.invalidateQueries({ queryKey: ["model-updates"] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to apply model updates")
+    },
+  })
 
   // Backend version — shown in the sidebar footer so bug reports include it.
   // Slow refetch (5m) because version only flips on MCP container restart.
@@ -219,6 +248,45 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                     </TooltipTrigger>
                     <TooltipContent side="right">New conversation</TooltipContent>
                   </Tooltip>
+                </div>
+              )
+            }
+            if (pane === "settings" && showBadge) {
+              return (
+                <div key={pane} className="flex items-center gap-1">
+                  {navButton}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 text-teal-600 hover:text-teal-700 dark:text-teal-400"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`${updateCount} model update${updateCount === 1 ? "" : "s"} available`}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent side="right" className="w-64 space-y-2">
+                      <p className="text-sm font-medium">
+                        {updateCount} model update{updateCount === 1 ? "" : "s"} available
+                      </p>
+                      <p className="text-label-xs text-muted-foreground">
+                        Adopt the latest in-family model for every routed role.
+                      </p>
+                      <Button
+                        size="sm"
+                        className="w-full"
+                        disabled={applyUpdatesMutation.isPending}
+                        onClick={() => applyUpdatesMutation.mutate()}
+                      >
+                        {applyUpdatesMutation.isPending && (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        )}
+                        Apply now
+                      </Button>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               )
             }

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 import config
 from app.deps import get_redis
@@ -164,14 +164,25 @@ async def processor_status(request: Request) -> dict[str, Any]:
 async def processor_recent(
     request: Request,
     limit: int = 20,
+    job_type: str | None = None,
+    per_type_cap: int = Query(5, ge=0),
 ) -> list[dict[str, Any]]:
-    """Return the most recently completed/failed jobs."""
+    """Return the most recent terminal jobs, newest first.
+
+    The default listing caps each job type at ``per_type_cap`` records so a
+    high-frequency type cannot displace everything else (live, wiki_refresh
+    held 88 of the 100 most recent records). ``per_type_cap=0`` restores the
+    raw newest-first slice; ``job_type=<type>`` drills into one type,
+    uncapped.
+    """
     queue = _get_queue(request)
     if queue is None:
         return []
 
     try:
-        records = await queue.list_recent(limit)
+        records = await queue.list_recent(
+            limit, job_type=job_type, per_type_cap=per_type_cap
+        )
         return [r.to_dict() for r in records]
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error("processor.router.list_recent", exc)

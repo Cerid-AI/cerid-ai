@@ -15,6 +15,9 @@ import pytest
 
 from app.db.neo4j.community_summaries import (
     SUMMARY_PROMPT,
+    _clean_name,
+    _disambiguate_name,
+    _parse_name_summary,
     _summarise,
     list_community_summaries,
     summarize_communities,
@@ -74,7 +77,7 @@ class TestSummarisePromptShape:
             captured.append(messages)
             return "summary text"
 
-        out = await _summarise(
+        name, summary = await _summarise(
             entities=[
                 {"name": "Federal Reserve", "entity_type": "ORG"},
                 {"name": "BTC", "entity_type": "ASSET"},
@@ -82,7 +85,8 @@ class TestSummarisePromptShape:
             passages=["passage one about money policy", "passage two about cryptocurrency"],
             llm_caller=caller,
         )
-        assert out == "summary text"
+        assert summary == "summary text"
+        assert name == "Summary text"  # derived fallback: no Name: line given
         assert len(captured) == 1
         prompt = captured[0][-1]["content"]
         assert "Federal Reserve (ORG)" in prompt
@@ -91,12 +95,66 @@ class TestSummarisePromptShape:
         assert "passage two about cryptocurrency" in prompt
 
     async def test_strips_whitespace_around_summary(self):
-        out = await _summarise(
+        _name, summary = await _summarise(
             entities=[{"name": "X", "entity_type": "ORG"}],
             passages=["snippet"],
             llm_caller=_llm_caller_returning("   the theme   \n\n"),
         )
-        assert out == "the theme"
+        assert summary == "the theme"
+
+    async def test_two_line_reply_parses_name_and_summary(self):
+        name, summary = await _summarise(
+            entities=[{"name": "Spark", "entity_type": "ASSET"}],
+            passages=["snippet"],
+            llm_caller=_llm_caller_returning(
+                "Name: Apache Spark Streaming\n"
+                "Summary: Distributed stream processing with Spark."
+            ),
+        )
+        assert name == "Apache Spark Streaming"
+        assert summary == "Distributed stream processing with Spark."
+
+
+# ---------------------------------------------------------------------------
+# _parse_name_summary / _clean_name / _disambiguate_name — UX-15
+# ---------------------------------------------------------------------------
+
+
+class TestNameParsing:
+    def test_boilerplate_opener_stripped_from_name(self):
+        # Both participle ("related to") and present ("relates to") forms.
+        assert _clean_name("Content related to database management") == (
+            "Database management"
+        )
+        assert _clean_name("This community revolves around Apache Spark") == (
+            "Apache Spark"
+        )
+
+    def test_numeric_name_rejected(self):
+        assert _clean_name("0.7143") == ""
+
+    def test_name_capped_at_word_boundary(self):
+        long = "One Two Three Four Five Six Seven Eight Nine Ten"
+        capped = _clean_name(long)
+        assert len(capped.split()) <= 8
+        assert not capped.endswith(" ")
+
+    def test_summary_only_blob_still_yields_summary(self):
+        name, summary = _parse_name_summary(
+            "The theme revolves around container orchestration tooling."
+        )
+        assert "container orchestration" in summary
+        assert name.startswith("Container orchestration")
+
+    def test_collision_gets_entity_suffix(self):
+        used = {"apache spark"}
+        out = _disambiguate_name(
+            "Apache Spark", used, [{"name": "SparkContext"}],
+        )
+        assert out == "Apache Spark (SparkContext)"
+
+    def test_no_collision_passthrough(self):
+        assert _disambiguate_name("Helm", set(), [{"name": "x"}]) == "Helm"
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +214,98 @@ class TestSummarizeCommunities:
             llm_caller=_llm_caller_returning("theme"),
         )
         assert out["summarised"] == 3
+
+
+def _driver_with_named_communities(
+    targets: list[dict], named: dict[str, str],
+) -> tuple[MagicMock, list[dict]]:
+    """Driver that answers the target, name-lookup and persist queries
+    separately, honouring ``exclude_id`` on the name lookup.
+
+    ``named`` maps community id -> already-persisted name (i.e. what an
+    earlier generation run wrote). Returns the driver plus the list that
+    collects persisted rows.
+    """
+    persisted: list[dict] = []
+    driver = MagicMock()
+    session = driver.session.return_value.__enter__.return_value
+
+    def _run(cypher, **params):
+        if "c.name IS NOT NULL" in cypher:
+            exclude = params.get("exclude_id")
+            return [
+                {"name": n} for cid, n in named.items() if cid != exclude
+            ]
+        if "SET c.summary" in cypher:
+            persisted.append(params)
+            named[params["cid"]] = params["name"]
+            return []
+        return targets
+
+    session.run.side_effect = _run
+    return driver, persisted
+
+
+@pytest.mark.asyncio
+class TestNameCollisionAcrossRuns:
+    """A second generation pass must see names the first pass persisted."""
+
+    async def test_name_minted_mid_run_is_still_seen(self):
+        """A concurrent pass writes a name after this run began.
+
+        The old behaviour snapshotted taken names once at run start, so a
+        name minted by another pass mid-run was invisible and both passes
+        shipped the same label.
+        """
+        targets = [
+            {"community_id": "0:8", "level": 0,
+             "entities": [{"name": "HelmChart", "entity_type": "ASSET",
+                           "degree": 2}]},
+            {"community_id": "0:9", "level": 0,
+             "entities": [{"name": "SparkContext", "entity_type": "ASSET",
+                           "degree": 3}]},
+        ]
+        named: dict[str, str] = {}
+        driver, persisted = _driver_with_named_communities(targets, named)
+        chroma = _chroma_returning({
+            "HelmChart": "chart templating",
+            "SparkContext": "streaming internals",
+        })
+
+        calls = {"n": 0}
+
+        async def caller(messages):  # noqa: ARG001
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # Another generation pass lands "Apache Spark" while this
+                # run is between communities.
+                named["0:1"] = "Apache Spark"
+                return "Name: Helm Charts\nSummary: Chart templating."
+            return "Name: Apache Spark\nSummary: Stream processing internals."
+
+        out = await summarize_communities(driver, chroma, llm_caller=caller)
+        assert out["summarised"] == 2
+        assert persisted[1]["name"] == "Apache Spark (SparkContext)"
+
+    async def test_resummarising_does_not_collide_with_its_own_name(self):
+        targets = [{
+            "community_id": "0:1",
+            "level": 0,
+            "entities": [{"name": "SparkContext", "entity_type": "ASSET",
+                          "degree": 3}],
+        }]
+        # The community being re-summarised already carries this name.
+        driver, persisted = _driver_with_named_communities(
+            targets, {"0:1": "Apache Spark"},
+        )
+        chroma = _chroma_returning({"SparkContext": "streaming internals"})
+        await summarize_communities(
+            driver, chroma,
+            llm_caller=_llm_caller_returning(
+                "Name: Apache Spark\nSummary: Stream processing internals.",
+            ),
+        )
+        assert persisted[0]["name"] == "Apache Spark"
 
 
 # ---------------------------------------------------------------------------

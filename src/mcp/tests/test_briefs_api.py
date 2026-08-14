@@ -315,15 +315,20 @@ class TestListBriefsEndpoint:
                     ],
                 },
             ],  # hydrate_claims_for_briefs batch query
+            [
+                {"brief_id": "brief-new", "n": 0},
+                {"brief_id": "brief-old", "n": 0},
+            ],  # count_artifacts_since_generation batch query (UX-18)
         ]
 
         with patch("app.deps.get_neo4j", return_value=driver):
             resp = briefs_client.get("/briefs", params={"kind": "daily"})
 
         assert resp.status_code == 200
-        # Exactly 2 round-trips for a 2-brief list: the list query + ONE
-        # batch hydrate — not 1 + N per-brief hydrations.
-        assert session.run.call_count == 2
+        # Exactly 3 round-trips for a 2-brief list: the list query + ONE
+        # batch hydrate + ONE batch staleness count — not 1 + N per-brief
+        # hydrations. Constant in the number of briefs.
+        assert session.run.call_count == 3
         body = resp.json()
         assert [b["id"] for b in body] == ["brief-new", "brief-old"]
         assert len(body[0]["claims"]) == 1
@@ -499,3 +504,156 @@ class TestRouteRegistrationOrder:
         assert resp.status_code == 200
         assert "write_to_vault" in resp.json()
         mock_get_brief.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# UX-18 — staleness marker: a brief generated before a large ingest is
+# marked stale once the day's data changes materially.
+# ---------------------------------------------------------------------------
+
+
+class TestCountArtifactsSinceGeneration:
+    def test_counts_per_brief_via_one_query(self, mock_neo4j):
+        from app.db.neo4j.briefs import count_artifacts_since_generation
+
+        driver, session = mock_neo4j
+        session.run.return_value = [
+            {"brief_id": "brief-1", "n": 443},
+            {"brief_id": "brief-2", "n": 0},
+        ]
+
+        specs = [
+            {
+                "brief_id": "brief-1",
+                "generated_at": "2026-08-12T06:00:00+00:00",
+                "window_end": "2026-08-13T06:00:00+00:00",
+            },
+            {
+                "brief_id": "brief-2",
+                "generated_at": "2026-08-11T06:00:00+00:00",
+                "window_end": "2026-08-12T06:00:00+00:00",
+            },
+        ]
+        out = count_artifacts_since_generation(driver, specs)
+
+        assert out == {"brief-1": 443, "brief-2": 0}
+        assert session.run.call_count == 1
+        assert session.run.call_args.kwargs["specs"] == specs
+
+    def test_empty_specs_short_circuits(self, mock_neo4j):
+        from app.db.neo4j.briefs import count_artifacts_since_generation
+
+        driver, session = mock_neo4j
+        assert count_artifacts_since_generation(driver, []) == {}
+        session.run.assert_not_called()
+
+
+class TestStaleMarker:
+    """generate → ingest → the read API marks the brief stale."""
+
+    def test_list_marks_brief_stale_after_large_ingest(self, briefs_client):
+        record = _make_record(
+            "brief-aug12", "daily", datetime(2026, 8, 12, 6, tzinfo=timezone.utc),
+            {"CONNECTIONS": "empty inbox"},
+        )
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.db.neo4j.briefs.list_briefs", return_value=[record]),
+            patch("app.db.neo4j.briefs.hydrate_claims_for_briefs", return_value={}),
+            patch(
+                "app.db.neo4j.briefs.count_artifacts_since_generation",
+                return_value={"brief-aug12": 443},
+            ) as mock_count,
+        ):
+            resp = briefs_client.get("/briefs", params={"kind": "daily"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["stale"] is True
+        assert body[0]["new_items_since_generation"] == 443
+        # The window handed to the counter is the brief's own day.
+        spec = mock_count.call_args.args[1][0]
+        assert spec["brief_id"] == "brief-aug12"
+        assert spec["generated_at"].startswith("2026-08-12T06:00:00")
+        assert spec["window_end"].startswith("2026-08-13T06:00:00")
+
+    def test_list_below_threshold_is_not_stale(self, briefs_client):
+        record = _make_record(
+            "brief-1", "daily", datetime(2026, 8, 12, 6, tzinfo=timezone.utc),
+            {"CONNECTIONS": "quiet day"},
+        )
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.db.neo4j.briefs.list_briefs", return_value=[record]),
+            patch("app.db.neo4j.briefs.hydrate_claims_for_briefs", return_value={}),
+            patch(
+                "app.db.neo4j.briefs.count_artifacts_since_generation",
+                return_value={"brief-1": 2},
+            ),
+        ):
+            resp = briefs_client.get("/briefs", params={"kind": "daily"})
+
+        body = resp.json()
+        assert body[0]["stale"] is False
+        assert body[0]["new_items_since_generation"] == 2
+
+    def test_weekly_window_is_seven_days(self, briefs_client):
+        record = _make_record(
+            "weekly-1", "weekly", datetime(2026, 8, 10, 6, tzinfo=timezone.utc),
+            {"EMERGING_THESIS": "thesis"},
+        )
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.db.neo4j.briefs.list_briefs", return_value=[record]),
+            patch("app.db.neo4j.briefs.hydrate_claims_for_briefs", return_value={}),
+            patch(
+                "app.db.neo4j.briefs.count_artifacts_since_generation",
+                return_value={},
+            ) as mock_count,
+        ):
+            resp = briefs_client.get("/briefs", params={"kind": "weekly"})
+
+        assert resp.status_code == 200
+        spec = mock_count.call_args.args[1][0]
+        assert spec["window_end"].startswith("2026-08-17T06:00:00")
+
+    def test_count_failure_degrades_to_not_stale_not_empty_list(self, briefs_client):
+        """A staleness-count crash must not take the whole list down."""
+        record = _make_record(
+            "brief-1", "daily", datetime(2026, 8, 12, 6, tzinfo=timezone.utc),
+            {"CONNECTIONS": "x"},
+        )
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.db.neo4j.briefs.list_briefs", return_value=[record]),
+            patch("app.db.neo4j.briefs.hydrate_claims_for_briefs", return_value={}),
+            patch(
+                "app.db.neo4j.briefs.count_artifacts_since_generation",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            resp = briefs_client.get("/briefs", params={"kind": "daily"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 1
+        assert body[0]["stale"] is False
+
+    def test_get_single_brief_carries_stale_marker(self, briefs_client):
+        record = _make_record(
+            "brief-aug12", "daily", datetime(2026, 8, 12, 6, tzinfo=timezone.utc),
+            {"CONNECTIONS": "empty inbox"},
+        )
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.db.neo4j.briefs.get_brief", return_value=record),
+            patch("app.db.neo4j.briefs.hydrate_claims", return_value=[]),
+            patch(
+                "app.db.neo4j.briefs.count_artifacts_since_generation",
+                return_value={"brief-aug12": 443},
+            ),
+        ):
+            resp = briefs_client.get("/briefs/brief-aug12")
+
+        assert resp.status_code == 200
+        assert resp.json()["stale"] is True

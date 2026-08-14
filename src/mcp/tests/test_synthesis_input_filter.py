@@ -171,7 +171,7 @@ class TestBriefGenerationCorpusFilter:
         from app.processor.jobs.brief_generation import _assemble_corpus
 
         driver = _FakeDriver(claims=mixed_claims, briefs=[])
-        _, notes_text = _assemble_corpus(driver, "2026-05-10")
+        _, notes_text, _ = _assemble_corpus(driver, "2026-05-10")
         assert "ORPHAN claim" in notes_text
         assert "USER claim" in notes_text
         assert "SYNTH claim" not in notes_text  # excluded
@@ -181,7 +181,7 @@ class TestBriefGenerationCorpusFilter:
         from app.processor.jobs.brief_generation import _assemble_corpus
 
         driver = _FakeDriver(claims=mixed_claims, briefs=[])
-        _, notes_text = _assemble_corpus(driver, "2026-05-10")
+        _, notes_text, _ = _assemble_corpus(driver, "2026-05-10")
         assert "ORPHAN claim" in notes_text
 
 

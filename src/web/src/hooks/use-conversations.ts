@@ -107,6 +107,13 @@ export function useConversations() {
 
   const active = conversations.find((c) => c.id === activeId) ?? null
 
+  // Set when a server sync op fails and cleared on the next success — a
+  // persistent "not syncing" signal instead of the previous fire-and-forget
+  // catches that swallowed failures with no visible trace (WB-46). The mount
+  // merge below re-pushes on every reload, so without this a failing sync
+  // just retried silently forever with no way to tell.
+  const [syncFailing, setSyncFailing] = useState(false)
+
   // Verification tracking — persists across ChatPanel unmount/remount (lives in ConversationsContext)
   const [verifiedConversations, setVerifiedConversations] = useState<Set<string>>(() => new Set())
 
@@ -202,10 +209,12 @@ export function useConversations() {
     if (isPrivateModeActive()) return  // local-only; symmetric for upsert + delete
     if (op.kind === "delete") {
       deleteConversationSync(id)
-        .then(() => clearTombstone(id))         // server acked → forget the tombstone
-        .catch(() => { /* keep tombstone; retried by the mount merge */ })
+        .then(() => { clearTombstone(id); setSyncFailing(false) })  // server acked → forget the tombstone
+        .catch(() => setSyncFailing(true))       // keep tombstone; retried by the mount merge
     } else {
-      syncConversation(op.convo).catch(() => { /* fire-and-forget; mount merge re-pushes */ })
+      syncConversation(op.convo)
+        .then(() => setSyncFailing(false))
+        .catch(() => setSyncFailing(true))       // mount merge re-pushes
     }
   }, [clearTombstone])
 
@@ -575,7 +584,7 @@ export function useConversations() {
             } else if (localTs > serverTs && !isPrivateModeActive()) {
               // Local has newer changes the server never received (e.g.
               // previous syncConversation() failed). Push now.
-              syncConversation(existing).catch(() => { /* fire-and-forget */ })
+              syncConversation(existing).then(() => setSyncFailing(false)).catch(() => setSyncFailing(true))
             }
           }
 
@@ -584,7 +593,7 @@ export function useConversations() {
           if (!isPrivateModeActive()) {
             for (const c of local) {
               if (!serverIds.has(c.id) && !tombstones.has(c.id)) {
-                syncConversation(c).catch(() => { /* fire-and-forget */ })
+                syncConversation(c).then(() => setSyncFailing(false)).catch(() => setSyncFailing(true))
               }
             }
           }
@@ -608,5 +617,6 @@ export function useConversations() {
     saveVerification, getVerification, getAllVerificationReports,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
     bulkDelete, bulkArchive,
+    syncFailing,
   }
 }

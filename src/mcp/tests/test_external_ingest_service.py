@@ -328,6 +328,30 @@ class TestIngestExternal:
         assert result.errors[0]["phase"] == "ingest"
 
     @pytest.mark.asyncio
+    async def test_external_id_and_source_kind_stamped_into_metadata(self) -> None:
+        """AF-052 — when the mapping resolves an external id, ingest_external
+        threads it (plus source_kind = source_type) into the ingest metadata so
+        the ingest service can dedup a re-delivered item into the same artifact
+        instead of a second one."""
+        request = ExternalIngestRequest(
+            source_type="readwise",
+            payload={"text": "Highlight", "url": "https://readwise.io/h/7", "hid": "rw-7"},
+            field_mappings=FieldMappings(content="text", source_uri="url", id="hid"),
+        )
+        captured: dict[str, object] = {}
+
+        def _capture(content, domain, metadata, **kwargs):
+            captured.update(metadata)
+            return {"status": "success", "artifact_id": "a", "domain": domain, "chunks": 1}
+
+        with patch("app.services.ingestion.ingest_content", side_effect=_capture):
+            result = await ingest_external(request, tenant="default")
+
+        assert result.accepted == 1
+        assert captured.get("external_id") == "rw-7"
+        assert captured.get("source_kind") == "readwise"
+
+    @pytest.mark.asyncio
     async def test_mapping_error_returns_error_in_result(self) -> None:
         request = ExternalIngestRequest(
             source_type="broken",

@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 /**
- * App first-run gating (beta triage 2026-07-12 P0-B4).
+ * App first-run gating.
  *
- * The wizard used to be gated on localStorage alone, so any fresh browser
- * re-entered onboarding on a configured instance. The backend's
- * `/setup/status.onboarding_complete` is now the source of truth;
- * localStorage remains only a cache (and the fallback for older backends
- * that omit the field).
+ * RA-12 (2026-08-11 reachability audit): the OnboardingDialog tour and its
+ * `onboarding_complete` flag routing were deleted. The setup wizard is gated
+ * on `/setup/status.setup_required` alone — a configured instance never
+ * re-enters the wizard from a fresh browser (the beta-triage P0-B4 clobber
+ * class), and per-machine first-run is DesktopSetup's job, independent of
+ * any server flag.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -82,48 +83,33 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   mockFetchSettings.mockResolvedValue({ multi_user: false, feature_tier: "community" })
-  mockFetchSetupStatus.mockResolvedValue({ ...CONFIGURED_STATUS, onboarding_complete: true })
+  mockFetchSetupStatus.mockResolvedValue({ ...CONFIGURED_STATUS })
 })
 
-describe("App — server-side onboarding gate", () => {
-  it("skips the wizard in a fresh browser when the backend says onboarding is complete", async () => {
-    // localStorage empty — pre-fix this re-entered the wizard.
+describe("App — setup-required gate (RA-12: onboarding flag routing deleted)", () => {
+  it("skips the wizard on a configured instance, even in a fresh browser", async () => {
     renderApp()
 
     await waitFor(() => expect(screen.getByTestId("app-layout")).toBeInTheDocument())
     expect(screen.queryByTestId("setup-wizard")).not.toBeInTheDocument()
-    // Flag is cached locally for offline/legacy sessions
-    expect(localStorage.getItem("cerid-onboarding-complete")).toBe("true")
   })
 
-  it("shows the skippable wizard when the backend says onboarding is incomplete, overriding the localStorage cache", async () => {
-    localStorage.setItem("cerid-onboarding-complete", "true")
+  it("ignores a server-side onboarding_complete=false — the tour flag no longer routes to the wizard", async () => {
     mockFetchSetupStatus.mockResolvedValue({ ...CONFIGURED_STATUS, onboarding_complete: false })
 
     renderApp()
 
-    const wizard = await screen.findByTestId("setup-wizard")
-    expect(wizard).toHaveAttribute("data-canskip", "true")
-    // Stale cache is dropped — the backend is the source of truth
-    expect(localStorage.getItem("cerid-onboarding-complete")).toBeNull()
+    await waitFor(() => expect(screen.getByTestId("app-layout")).toBeInTheDocument())
+    expect(screen.queryByTestId("setup-wizard")).not.toBeInTheDocument()
   })
 
-  it("falls back to the localStorage cache when an older backend omits the flag", async () => {
+  it("ignores a stale localStorage onboarding cache", async () => {
     localStorage.setItem("cerid-onboarding-complete", "true")
-    mockFetchSetupStatus.mockResolvedValue({ ...CONFIGURED_STATUS })
 
     renderApp()
 
     await waitFor(() => expect(screen.getByTestId("app-layout")).toBeInTheDocument())
     expect(screen.queryByTestId("setup-wizard")).not.toBeInTheDocument()
-  })
-
-  it("shows the wizard on an older backend with no localStorage flag (legacy first run)", async () => {
-    mockFetchSetupStatus.mockResolvedValue({ ...CONFIGURED_STATUS })
-
-    renderApp()
-
-    expect(await screen.findByTestId("setup-wizard")).toBeInTheDocument()
   })
 
   it("forces the wizard (non-skippable) when setup is required", async () => {
@@ -133,7 +119,6 @@ describe("App — server-side onboarding gate", () => {
       missing_keys: ["OPENROUTER_API_KEY"],
       optional_keys: [],
       configured_providers: [],
-      onboarding_complete: false,
     })
 
     renderApp()
@@ -142,8 +127,23 @@ describe("App — server-side onboarding gate", () => {
     expect(wizard).toHaveAttribute("data-canskip", "false")
   })
 
+  it("shows the main app when the backend is unreachable (no wizard dead-end)", async () => {
+    mockFetchSetupStatus.mockRejectedValue(new Error("network down"))
+
+    renderApp()
+
+    await waitFor(() => expect(screen.getByTestId("app-layout")).toBeInTheDocument())
+    expect(screen.queryByTestId("setup-wizard")).not.toBeInTheDocument()
+  })
+
   it("hides the wizard after onComplete fires", async () => {
-    mockFetchSetupStatus.mockResolvedValue({ ...CONFIGURED_STATUS, onboarding_complete: false })
+    mockFetchSetupStatus.mockResolvedValue({
+      configured: false,
+      setup_required: true,
+      missing_keys: ["OPENROUTER_API_KEY"],
+      optional_keys: [],
+      configured_providers: [],
+    })
 
     renderApp()
     fireEvent.click(await screen.findByText("finish-wizard"))

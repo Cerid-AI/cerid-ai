@@ -31,6 +31,7 @@ function makeCommunitySummary(overrides: Partial<CommunitySummary> = {}): Commun
   return {
     community_id: "0:7",
     level: 0,
+    name: null,
     summary: "Machine learning research community centred on transformers and large models.",
     member_count: 25,
     last_summarized_at: "2026-05-10T02:00:00+00:00",
@@ -42,6 +43,7 @@ function makeCommunityFull(overrides: Partial<CommunityFull> = {}): CommunityFul
   return {
     community_id: "0:7",
     level: 0,
+    name: null,
     summary: "Machine learning research community centred on transformers and large models.",
     member_count: 25,
     last_summarized_at: "2026-05-10T02:00:00+00:00",
@@ -49,6 +51,8 @@ function makeCommunityFull(overrides: Partial<CommunityFull> = {}): CommunityFul
       { canonical_id: "person:yann-lecun", name: "Yann LeCun", entity_type: "PERSON" },
       { canonical_id: "org:meta-ai", name: "Meta AI", entity_type: "ORG" },
     ],
+    members_total: 25,
+    members_truncated: true,
     related_communities: [{ community_id: "0:4", co_mention_count: 38 }],
     ...overrides,
   }

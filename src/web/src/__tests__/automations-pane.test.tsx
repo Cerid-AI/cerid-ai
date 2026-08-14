@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render as rtlRender, screen, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import React from "react"
 import { axe } from "jest-axe"
 
 vi.mock("@/lib/api", () => ({
@@ -13,9 +15,21 @@ vi.mock("@/lib/api", () => ({
   toggleAutomation: vi.fn(),
   runAutomation: vi.fn(),
 }))
+// The dialog's domain picker reads the live domain aggregate (UX-08);
+// unavailable here → falls back to the static taxonomy.
+vi.mock("@/lib/api/domains", () => ({
+  fetchDomainCounts: vi.fn(() => Promise.reject(new Error("down"))),
+}))
 
 import { fetchAutomations } from "@/lib/api"
 import AutomationsPane from "@/components/automations/automations-pane"
+
+// AutomationDialog uses useQuery for the domain list — every render needs
+// a QueryClientProvider.
+function render(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+}
 
 const mockAutomations = [
   {

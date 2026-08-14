@@ -204,7 +204,6 @@ class AppleMailConnector(SourceConnector):
                         "title": subject,
                         "from": msg.get("from", ""),
                         "message_id": msg.get("id", ""),
-                        "received_at": msg.get("date", ""),
                     },
                 )
             except Exception as exc:  # noqa: BLE001 — one bad message must not abort the source

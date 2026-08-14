@@ -81,7 +81,14 @@ export function BriefsList({ briefs, onSelect }: BriefsListProps) {
                 >
                   <CardHeader className="px-4 pb-2">
                     <div className="flex items-center justify-between gap-3">
-                      <CardTitle className="text-base capitalize">{brief.kind} brief</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-base capitalize">{brief.kind} brief</CardTitle>
+                        {brief.stale && (
+                          <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-label-xs text-amber-600 dark:text-amber-400">
+                            Stale
+                          </span>
+                        )}
+                      </div>
                       <LastUpdated timestamp={Date.parse(brief.generated_at)} />
                     </div>
                   </CardHeader>

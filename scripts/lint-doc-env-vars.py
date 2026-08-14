@@ -75,7 +75,10 @@ def known_vars() -> set[str]:
     for path in REPO_ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in CODE_EXTS:
             continue
-        if CODE_SKIP & set(path.parts):
+        # Relative parts, not absolute: a checkout living under a skip-named
+        # dir (agent worktree at .claude/worktrees/*) otherwise scans nothing
+        # and reports every doc-mentioned var as unknown (2026-08-13).
+        if CODE_SKIP & set(path.relative_to(REPO_ROOT).parts):
             continue
         # Skip THIS file. Its docstring names CERID_FEATURE_TIER to explain the
         # defect, and counting that made the oracle vouch for the very name the
@@ -90,7 +93,7 @@ def known_vars() -> set[str]:
     # Dockerfiles and compose overlays carry names too, and have no suffix.
     for extra in ("Dockerfile", "docker-compose.yml", "Makefile"):
         for path in REPO_ROOT.rglob(extra):
-            if CODE_SKIP & set(path.parts):
+            if CODE_SKIP & set(path.relative_to(REPO_ROOT).parts):
                 continue
             try:
                 out.update(_VAR_RE.findall(path.read_text(encoding="utf-8", errors="replace")))
@@ -105,7 +108,7 @@ def iter_docs():
             yield root
         elif root.is_dir():
             for p in sorted(root.rglob("*.md")):
-                if SKIP_DIR_PARTS & set(p.parts):
+                if SKIP_DIR_PARTS & set(p.relative_to(root).parts):
                     continue
                 yield p
 

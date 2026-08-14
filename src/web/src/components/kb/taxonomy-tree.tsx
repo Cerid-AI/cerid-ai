@@ -206,7 +206,10 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
           {Object.entries(taxonomy.domains).map(([domain, info]) => {
             const isExpanded = expanded.has(domain)
             const isActive = filter.domain === domain
-            const domainCount = artifactCounts?.get(domain) ?? (info.artifact_count > 0 ? info.artifact_count : undefined)
+            // WB-26: prefer the server's unbounded count(a) from get_taxonomy
+            // over the client-computed count, which is derived from a single
+            // capped browse page and undercounts once a domain exceeds it.
+            const domainCount = (info.artifact_count > 0 ? info.artifact_count : undefined) ?? artifactCounts?.get(domain)
 
             return (
               <div key={domain}>

@@ -7,6 +7,18 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
+  // Relative, not the "/" default. The desktop app loads this same bundle from
+  // disk via `loadFile`, and under file:// a root-absolute `/assets/index.js`
+  // resolves to the FILESYSTEM root — so every script and stylesheet 404s and
+  // the window renders blank with no error in the main process, because the
+  // failure is a renderer subresource. That is exactly how the packaged app
+  // shipped: `loadFile` itself succeeded, so nothing logged.
+  //
+  // Safe for the container build too: the SPA lives at a single path and only
+  // ever writes query params (navigation-context.tsx, analytics-panel.tsx,
+  // meetings-capture-panel.tsx all mutate searchParams and leave pathname
+  // alone), so relative asset URLs always resolve against the same directory.
+  base: "./",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -53,23 +65,6 @@ export default defineConfig({
             return "vendor-markdown"
           }
           if (id.includes("node_modules/@tanstack/react-query")) return "vendor-query"
-          // Phase B — split the 3D stack so Constellation chunk stays
-          // under 800KB. ORDER MATTERS: check @react-three FIRST so
-          // its files (which contain "three" in path) route to r3f
-          // chunk, then catch raw three.js in vendor-three.
-          // Postprocessing rides the same lazy 3D chunk as fiber/drei. A
-          // separate vendor-postfx chunk was tried and rolldown merged the
-          // three.js core into it, which would make BASE constellation load
-          // depend on the postfx chunk — worse than the ~46KB gzip it saves.
-          if (
-            id.includes("@react-three/fiber") ||
-            id.includes("@react-three/drei") ||
-            id.includes("@react-three/postprocessing") ||
-            id.includes("node_modules/postprocessing")
-          ) {
-            return "vendor-r3f"
-          }
-          if (id.includes("node_modules/three") || id.includes("/three/three.")) return "vendor-three"
           // cosmos.gl "Live" mode (B8) + its luma.gl renderer — lazy chunk,
           // only loaded when the user switches to the self-organizing scene.
           // Its transitive d3-* deps are caught by the d3 rule above (also lazy).

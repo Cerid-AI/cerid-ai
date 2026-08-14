@@ -17,6 +17,8 @@ the three deliverables of the v0.93.5 L4 enforcement pass:
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -98,8 +100,17 @@ def test_validator_rejects_l5_and_negative(client):
         assert r.status_code == 422
 
 
-def test_session_wipe_clears_global_flag(client):
+def test_session_wipe_clears_global_flag(client, monkeypatch):
     tc, fake = client
+    # WB-45: "wiped" now reflects whether Neo4j was reachable and the
+    # orchestrator ran — mock both to a deterministic success so this test
+    # stays about the Redis flag-clear, not real Neo4j reachability.
+    monkeypatch.setattr("app.routers.settings.get_neo4j", lambda: MagicMock())
+    fake_summary = {"conversation_sync_deleted": False}
+    monkeypatch.setattr(
+        "app.routers.settings.wipe_conversation_state",
+        lambda *a, **k: fake_summary,
+    )
     fake.store[_PRIVATE_MODE_KEY] = "4"
     r = tc.post(
         "/settings/private-mode/session-wipe",
@@ -111,6 +122,7 @@ def test_session_wipe_clears_global_flag(client):
         "wiped": True,
         "level_after": 0,
         "conversation_id": "conv-123",
+        "summary": fake_summary,
     }
     assert _PRIVATE_MODE_KEY not in fake.store
 

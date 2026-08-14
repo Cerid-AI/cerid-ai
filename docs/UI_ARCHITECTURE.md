@@ -72,7 +72,7 @@ The Pane union retains the legacy values for one release window so existing test
 | Pane | Entry component | Sub-tabs / modes |
 |---|---|---|
 | Chat | `components/chat/chat-panel.tsx` | (no sub-tabs) |
-| Subjects | `components/subjects/subjects-pane.tsx` | Atlas (decomposition icicle + Neighborhood leaf) / Constellation (cartographic map, R3F) / Timeline (Tephra) / Wiki (FOLIO) |
+| Subjects | `components/subjects/subjects-pane.tsx` | Atlas (decomposition icicle + Neighborhood leaf) / Constellation (cartographic map + cosmos.gl Live) / Timeline (Tephra) / Wiki (FOLIO) |
 | Sources | `components/sources/sources-pane.tsx` | Library (current KB pane) / Activity / Connectors |
 | Settings | `components/settings/settings-pane.tsx` | 8 intent categories (Models, Knowledge, Retrieval & Answers, Privacy, Extensions, Appearance, Plan & Billing, System) + a separate **Diagnostics** console entry below the separator (preserves the `?diagnostics_tab=` contract) |
 
@@ -99,8 +99,7 @@ Diagnostics sub-tabs (inside Settings):
 | Search palette | `components/subjects/search-palette.tsx` | ⌘K-invoked entity picker for Subjects pane. |
 | Wiki provenance markers | `components/wiki/provenance-marker.tsx` | Inline section badges: auto / user-edited / contradicted / uncertain. |
 | Wiki mini-graph | `components/wiki/mini-graph.tsx` | Expandable inline Atlas at 1-hop, lazy-loaded. |
-| Constellation ambient particles | `components/subjects/constellation/ambient-particles.tsx` | 800-point THREE.Points cloud, AdditiveBlending. One draw call. |
-| Constellation tour mode | `components/subjects/constellation/tour-controller.tsx` | LLM-narrated camera arc + GSAP-style lerp + Web Speech API TTS + always-on subtitle. Pro-gated via `POST /graph/tour/generate`. |
+| Constellation tour mode | `components/subjects/constellation/map/map-tour.tsx` | LLM-narrated guided tour on the 2D map: sigma camera framing per stop + always-on narration panel. Pro-gated via `POST /graph/tour/generate`. (The R3F 3D scene was cut 2026-08-13.) |
 | Sources activity stream | `components/sources/activity-stream.tsx` | Polling (3s active / 30s history) live ingestion stream with 4-stage pipeline progress. |
 | Sources connectors panel | `components/sources/sources-connectors.tsx` | Unified list+detail of watched folders + external APIs + plugins. |
 | Knowledge-source selector | `components/chat/knowledge-source-selector.tsx` | Chip in chat composer (kb / kb+web / llm+kb). |

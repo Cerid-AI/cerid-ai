@@ -143,9 +143,10 @@ class TestClearDomain:
         )
         assert res.status_code == 404
 
-    def test_clear_domain_success(self, client: TestClient):
+    def test_clear_domain_success(self, client: TestClient, monkeypatch):
         # AF-093: clear_domain now deletes the whole domain in ONE domain-scoped
         # DETACH DELETE via delete_artifacts_by_domain, not a per-artifact loop.
+        monkeypatch.setattr("app.routers.kb_admin.config.DOMAINS", ["code", "finance"])
         with (
             patch(
                 "app.routers.kb_admin.delete_artifacts_by_domain",
@@ -154,10 +155,7 @@ class TestClearDomain:
             patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
             patch("app.routers.kb_admin.get_chroma"),
             patch("app.routers.kb_admin.get_neo4j"),
-            patch("app.routers.kb_admin.config") as mock_config,
         ):
-            mock_config.DOMAINS = ["code", "finance"]
-            mock_config.collection_name.return_value = "domain_code"
             res = client.post(
                 "/admin/kb/clear-domain/code",
                 json={"confirm": True},
@@ -209,7 +207,7 @@ class TestDeleteArtifact:
 
 
 class TestKBStats:
-    def test_stats_success(self, client: TestClient):
+    def test_stats_success(self, client: TestClient, monkeypatch):
         # kb_stats now reads a single grouped Cypher aggregation via the
         # domain_artifact_stats helper (no per-domain 10k row pull).
         dom_stats = {
@@ -218,14 +216,12 @@ class TestKBStats:
         mock_collection = MagicMock()
         mock_collection.count.return_value = 10
 
+        monkeypatch.setattr("app.routers.kb_admin.config.DOMAINS", ["code"])
         with (
             patch("app.routers.kb_admin.get_neo4j"),
             patch("app.routers.kb_admin.get_chroma") as mock_chroma_fn,
             patch("app.routers.kb_admin.domain_artifact_stats", return_value=dom_stats),
-            patch("app.routers.kb_admin.config") as mock_config,
         ):
-            mock_config.DOMAINS = ["code"]
-            mock_config.collection_name.return_value = "domain_code"
             mock_chroma_fn.return_value.get_collection.return_value = mock_collection
             res = client.get("/admin/kb/stats")
 
@@ -273,7 +269,8 @@ class TestSemanticCacheInvalidationHook:
         mock_remove.assert_called_once()
 
 
-    def test_clear_domain_invalidates_semantic_cache(self, client: TestClient):
+    def test_clear_domain_invalidates_semantic_cache(self, client: TestClient, monkeypatch):
+        monkeypatch.setattr("app.routers.kb_admin.config.DOMAINS", ["code", "finance"])
         with (
             patch(
                 "app.routers.kb_admin.delete_artifacts_by_domain",
@@ -283,10 +280,7 @@ class TestSemanticCacheInvalidationHook:
             patch("app.routers.kb_admin.invalidate_semantic_cache") as mock_sem_invalidate,
             patch("app.routers.kb_admin.get_chroma"),
             patch("app.routers.kb_admin.get_neo4j"),
-            patch("app.routers.kb_admin.config") as mock_config,
         ):
-            mock_config.DOMAINS = ["code", "finance"]
-            mock_config.collection_name.return_value = "domain_code"
             res = client.post("/admin/kb/clear-domain/code", json={"confirm": True})
 
         assert res.status_code == 200
@@ -612,3 +606,56 @@ class TestEmbeddingVersionsEndpoint:
     def test_unknown_domain_404s(self, client: TestClient):
         res = client.get("/admin/kb/embedding-versions", params={"domain": "not-a-real-domain"})
         assert res.status_code == 404
+
+
+class TestPurgeTestResidue:
+    _SUMMARY = {
+        "artifacts_found": 2,
+        "artifacts_purged": 0,
+        "entities_found": 1,
+        "entities_purged": 0,
+        "skipped_in_grace": 1,
+        "samples": ["e2e-marker-abc123", "GreenTech Inc."],
+    }
+
+    def test_default_is_dry_run(self, client: TestClient):
+        with patch(
+            "app.services.kb_hygiene.sweep_test_residue",
+            return_value=dict(self._SUMMARY),
+        ) as mock_sweep:
+            res = client.post("/admin/kb/purge-test-residue", json={})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["dry_run"] is True
+        assert data["artifacts_found"] == 2
+        assert mock_sweep.call_args.kwargs["apply"] is False
+
+    def test_confirm_applies_the_purge(self, client: TestClient):
+        applied = {**self._SUMMARY, "artifacts_purged": 2, "entities_purged": 1}
+        with (
+            patch(
+                "app.services.kb_hygiene.sweep_test_residue",
+                return_value=applied,
+            ) as mock_sweep,
+            patch(
+                "app.routers.kb_admin.invalidate_cache_non_blocking",
+                new_callable=AsyncMock,
+            ) as mock_bust,
+        ):
+            res = client.post(
+                "/admin/kb/purge-test-residue", json={"confirm": True},
+            )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["dry_run"] is False
+        assert data["artifacts_purged"] == 2
+        assert mock_sweep.call_args.kwargs["apply"] is True
+        mock_bust.assert_awaited_once()
+
+    def test_sweep_failure_500s(self, client: TestClient):
+        with patch(
+            "app.services.kb_hygiene.sweep_test_residue",
+            side_effect=RuntimeError("neo4j down"),
+        ):
+            res = client.post("/admin/kb/purge-test-residue", json={})
+        assert res.status_code == 500

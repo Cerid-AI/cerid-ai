@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 import sentry_sdk
@@ -31,8 +32,20 @@ def create_artifact(
     tags_json: str = "[]",
     quality_score: float = 0.5,
     client_source: str = "",
+    external_id: str = "",
+    source_kind: str = "",
 ) -> str:
-    """Create an Artifact node and link it to its Domain (and optionally SubCategory/Tags)."""
+    """Create an Artifact node and link it to its Domain (and optionally SubCategory/Tags).
+
+    ``external_id`` + ``source_kind`` (AF-052) record the stable external
+    identifier a connector assigned to this artifact (Apple Notes id, Mail
+    Message-ID, …) alongside the connector kind that issued it. They are
+    reserved for external captures — distinct from ``source_id`` (a :Source
+    UUID) — and are the key :func:`find_artifact_by_external_id` matches on so
+    a re-ingest of the same external item edits in place instead of creating a
+    second artifact. Empty strings are the migration-safe default: artifacts
+    predating this field carry no ``external_id`` property and never collide.
+    """
     sub_cat = sub_category or config.DEFAULT_SUB_CATEGORY
     now = utcnow_iso()
 
@@ -65,6 +78,13 @@ def create_artifact(
                 a.updated_at = $ingested_at,
                 a.chunk_count = $chunk_count,
                 a.chunk_ids = $chunk_ids_json
+            // external_id / source_kind land on both create and match: a
+            // content-addressed node first written by a filename/upload path
+            // (no external_id) must still gain the identifier when the same
+            // content later arrives from a connector. COALESCE keeps a
+            // previously-set value from being wiped by an empty re-delivery.
+            SET a.external_id = CASE WHEN $external_id <> '' THEN $external_id ELSE a.external_id END,
+                a.source_kind = CASE WHEN $source_kind <> '' THEN $source_kind ELSE a.source_kind END
             MERGE (a)-[:BELONGS_TO]->(d)
             RETURN a.id AS id
             """,
@@ -80,6 +100,8 @@ def create_artifact(
             content_hash=content_hash,
             quality_score=quality_score,
             client_source=client_source,
+            external_id=external_id or "",
+            source_kind=source_kind or "",
             ingested_at=now,
         )
         record = result.single()
@@ -190,6 +212,44 @@ def find_artifact_by_filename(
         }
 
 
+def find_artifact_by_external_id(
+    driver,
+    source_kind: str,
+    external_id: str,
+) -> dict[str, Any] | None:
+    """Find an existing artifact by its (source_kind, external_id) pair.
+
+    AF-052 — the dedup key for external captures (Apple Notes/Mail/…). A
+    connector re-ingesting the same external item (same ``external_id``, edited
+    content) matches here so the ingest service routes it to the edit/update
+    path instead of creating a second artifact. Returns the same shape as
+    :func:`find_artifact_by_filename` so both re-ingest branches are
+    interchangeable. Scoped by ``source_kind`` so two connectors can't collide
+    on a shared external id. An empty ``external_id`` never matches (the
+    property is unset on artifacts predating this field), keeping the read
+    migration-safe.
+    """
+    if not external_id:
+        return None
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (a:Artifact {source_kind: $source_kind, external_id: $external_id}) "
+            "RETURN a.id AS id, a.content_hash AS content_hash, "
+            "a.chunk_ids AS chunk_ids "
+            "ORDER BY a.ingested_at ASC LIMIT 1",
+            source_kind=source_kind or "",
+            external_id=external_id,
+        )
+        record = result.single()
+        if not record:
+            return None
+        return {
+            "id": record["id"],
+            "content_hash": record["content_hash"],
+            "chunk_ids": record["chunk_ids"],
+        }
+
+
 def update_artifact(
     driver,
     artifact_id: str,
@@ -270,11 +330,31 @@ def list_artifacts(
     search: str | None = None,
     offset: int = 0,
     limit: int = 50,
+    include_machine: bool = True,
 ) -> list[dict[str, Any]]:
-    """List artifacts, optionally filtered by domain, sub_category, tag, client_source, date, quality, and a filename/summary substring."""
+    """List artifacts, optionally filtered by domain, sub_category, tag, client_source, date, quality, and a filename/summary substring.
+
+    ``include_machine=False`` (UX-26) excludes machine-named artifacts —
+    extracted memories, audit transcripts, test markers, and content-hash
+    hex names — so a default Library view shows what the user chose to
+    keep. Defaults to True so internal callers (curator, reindex loops,
+    digests) keep seeing the full population.
+    """
     base_query = "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
     conditions = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
+
+    if not include_machine:
+        # coalesce: a null filename must be filtered as machine noise, not
+        # dropped from BOTH views by null-propagation through NOT.
+        conditions.append(
+            "NOT (coalesce(a.filename, '') = '' "
+            "OR a.filename STARTS WITH 'memory_' "
+            "OR a.filename STARTS WITH 'audit-tr_' "
+            "OR a.filename STARTS WITH 'e2e-marker-' "
+            "OR a.filename STARTS WITH 'preservation-probe-' "
+            "OR a.filename =~ '[0-9a-fA-F]{16,}')"
+        )
 
     if domain:
         conditions.append("d.name = $domain")
@@ -344,6 +424,78 @@ def list_artifacts(
             }
             for record in result
         ]
+
+
+def count_artifacts(
+    driver,
+    domain: str | None = None,
+    sub_category: str | None = None,
+    tag: str | None = None,
+    client_source: str | None = None,
+    since: str | None = None,
+    min_quality: float | None = None,
+    search: str | None = None,
+    include_machine: bool = True,
+) -> int:
+    """Count artifacts matching the same filters as :func:`list_artifacts`,
+    without materializing rows. Used wherever a caller needs a true total
+    (e.g. dry-run reporting, pagination) instead of ``len(list_artifacts(...))``
+    against a capped page, which under-reports once the result set exceeds
+    the page's ``limit``.
+
+    ``include_machine`` must mirror the list call it totals for — a count
+    over a different population than the page recreates the mismatched-count
+    class (UX-28).
+    """
+    base_query = "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
+    conditions = []
+    params: dict[str, Any] = {}
+
+    if not include_machine:
+        conditions.append(
+            "NOT (coalesce(a.filename, '') = '' "
+            "OR a.filename STARTS WITH 'memory_' "
+            "OR a.filename STARTS WITH 'audit-tr_' "
+            "OR a.filename STARTS WITH 'e2e-marker-' "
+            "OR a.filename STARTS WITH 'preservation-probe-' "
+            "OR a.filename =~ '[0-9a-fA-F]{16,}')"
+        )
+
+    if domain:
+        conditions.append("d.name = $domain")
+        params["domain"] = domain
+    if sub_category:
+        conditions.append("a.sub_category = $sub_category")
+        params["sub_category"] = sub_category
+    if tag:
+        base_query = (
+            "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain), "
+            "(a)-[:TAGGED_WITH]->(t:Tag {name: $tag}) "
+        )
+        params["tag"] = tag.strip().lower()
+    if client_source:
+        conditions.append("a.client_source = $client_source")
+        params["client_source"] = client_source
+    if since:
+        conditions.append("a.ingested_at >= $since")
+        params["since"] = since
+    if min_quality is not None:
+        conditions.append("a.quality_score >= $min_quality")
+        params["min_quality"] = min_quality
+    if search:
+        conditions.append(
+            "(toLower(a.filename) CONTAINS toLower($search) "
+            "OR toLower(coalesce(a.summary, '')) CONTAINS toLower($search))"
+        )
+        params["search"] = search
+
+    if conditions:
+        base_query += "WHERE " + " AND ".join(conditions) + " "
+    base_query += "RETURN count(a) AS total"
+
+    with driver.session() as session:
+        row = session.run(base_query, **params).single()
+        return int(row["total"]) if row and row["total"] is not None else 0
 
 
 def list_duplicate_artifacts(driver) -> list[dict[str, Any]]:
@@ -493,34 +645,81 @@ def update_artifact_summary(
         return result.single() is not None
 
 
+def _parse_chunk_ids(raw: Any) -> list[str]:
+    raw = raw or "[]"
+    try:
+        return json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 def delete_artifact(
     driver,
     artifact_id: str,
 ) -> dict[str, Any]:
-    """Delete an artifact and all its relationships. Returns deletion details."""
+    """Delete an artifact, all its relationships, and any HAS_ATTACHMENT
+    children (cascade — AF-069). Returns deletion details.
+
+    Attachment children (e.g. files extracted from an email) are chained
+    off the parent via ``HAS_ATTACHMENT`` at any depth; leaving them behind
+    when the parent is deleted orphans their :Artifact nodes in Neo4j.
+    Their chunk_ids are folded into the returned ``chunk_ids`` list so the
+    content-lifecycle coordinator's Chroma/BM25/SPLADE fan-out cleans up
+    the children's chunks too, not just the parent's.
+    """
     with driver.session() as session:
         # Fetch chunk_ids before deletion (needed for tombstone + ChromaDB cleanup)
         result = session.run(
             "MATCH (a:Artifact {id: $id}) "
-            "RETURN a.chunk_ids AS chunk_ids, a.domain AS domain, a.filename AS filename",
+            "OPTIONAL MATCH (a)-[:HAS_ATTACHMENT*1..]->(c:Artifact) "
+            "WITH a, collect(DISTINCT c) AS children "
+            "RETURN a.chunk_ids AS chunk_ids, a.domain AS domain, a.filename AS filename, "
+            "       [x IN children | x.chunk_ids] AS child_chunk_ids",
             id=artifact_id,
         )
         record = result.single()
         if not record:
             return {"deleted": False, "reason": "not_found"}
 
-        chunk_ids_raw = record["chunk_ids"] or "[]"
-        try:
-            chunk_ids = json.loads(chunk_ids_raw) if isinstance(chunk_ids_raw, str) else chunk_ids_raw
-        except (json.JSONDecodeError, TypeError):
-            chunk_ids = []
+        chunk_ids = _parse_chunk_ids(record["chunk_ids"])
+        for raw_child_chunk_ids in record.get("child_chunk_ids") or []:
+            chunk_ids.extend(_parse_chunk_ids(raw_child_chunk_ids))
 
         domain = record["domain"] or ""
         filename = record["filename"] or ""
 
-        # Delete the artifact and all relationships
+        # AF-068 — before detaching this artifact, revert any inbound
+        # WIKILINKS_TO/EMBEDS edges to a PendingArtifact placeholder keyed
+        # by this artifact's filename stem, mirroring the placeholder
+        # wikilinks.py's write_wikilink_edge creates on ingest (:96) and
+        # the shape resolve_pending_artifacts (:150-211) expects to promote.
+        # Without this, deleting a wikilink target and later re-ingesting a
+        # same-named note finds no placeholder — the inbound links are
+        # silently lost instead of reverting to pending.
+        stem = Path(filename).stem if filename else ""
+        if stem:
+            now = utcnow_iso()
+            for rel_type in ("WIKILINKS_TO", "EMBEDS"):
+                session.run(
+                    f"MATCH (src:Artifact)-[old_rel:{rel_type}]->(a:Artifact {{id: $id}}) "
+                    "WITH src, old_rel "
+                    "MERGE (p:PendingArtifact {name: $stem}) "
+                    "  ON CREATE SET p.created_at = $now "
+                    f"MERGE (src)-[new_rel:{rel_type} "
+                    "    {source_chunk_id: old_rel.source_chunk_id}]->(p) "
+                    "ON CREATE SET new_rel = properties(old_rel), "
+                    "              new_rel.pending = true",
+                    id=artifact_id,
+                    stem=stem,
+                    now=now,
+                )
+
+        # Delete the artifact, its relationships, and any HAS_ATTACHMENT
+        # children in the same transaction.
         session.run(
-            "MATCH (a:Artifact {id: $id}) DETACH DELETE a",
+            "MATCH (a:Artifact {id: $id}) "
+            "OPTIONAL MATCH (a)-[:HAS_ATTACHMENT*1..]->(c:Artifact) "
+            "DETACH DELETE a, c",
             id=artifact_id,
         )
 

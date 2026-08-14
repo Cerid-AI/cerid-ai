@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 import config
 import config.features as features_mod
 from app.deps import get_neo4j, get_redis
-from app.services.private_mode import PRIVATE_MODE_KEY
+from app.services.private_mode import PRIVATE_MODE_KEY, get_private_mode_level
 from app.services.session_wipe import wipe_conversation_state
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
@@ -28,6 +28,7 @@ class WipePrivateSessionResponse(BaseModel):
     wiped: bool
     level_after: int
     conversation_id: Any
+    summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResetPrivateModeResponse(BaseModel):
@@ -61,6 +62,7 @@ class GetSettingsEndpointResponse(BaseModel):
     enable_self_rag: Any
     hallucination_threshold: Any
     auto_inject_threshold: Any
+    auto_inject_max: Any
     cost_sensitivity: Any
     feature_tier: Any
     feature_flags: Any
@@ -194,6 +196,9 @@ class SettingsUpdateRequest(BaseModel):
     )
     auto_inject_threshold: float | None = Field(
         None, ge=0.0, le=1.0, description="Minimum relevance score for auto-injection"
+    )
+    auto_inject_max: int | None = Field(
+        None, ge=1, description="Maximum number of chunks auto-injected per message"
     )
     enable_model_router: bool | None = Field(
         None, description="Toggle automatic model routing based on query complexity"
@@ -409,6 +414,7 @@ async def get_settings_endpoint():
         "enable_self_rag": config.ENABLE_SELF_RAG,
         "hallucination_threshold": config.HALLUCINATION_THRESHOLD,
         "auto_inject_threshold": config.AUTO_INJECT_THRESHOLD,
+        "auto_inject_max": config.AUTO_INJECT_MAX,
         "cost_sensitivity": config.COST_SENSITIVITY,
         "feature_tier": config.FEATURE_TIER,
         "feature_flags": config.FEATURE_FLAGS,
@@ -542,6 +548,10 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     if req.auto_inject_threshold is not None:
         config.AUTO_INJECT_THRESHOLD = req.auto_inject_threshold  # type: ignore[assignment]
         updated["auto_inject_threshold"] = req.auto_inject_threshold
+
+    if req.auto_inject_max is not None:
+        config.AUTO_INJECT_MAX = req.auto_inject_max  # type: ignore[assignment]
+        updated["auto_inject_max"] = req.auto_inject_max
 
     if req.enable_model_router is not None:
         set_toggle("enable_model_router", req.enable_model_router)
@@ -838,14 +848,22 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     # Audit P1-11: macOS advisory lock collisions with Dropbox surface as
     # OSError(EDEADLK). Retry briefly (3x, 100/200/400ms) before giving up
     # so a transient lock does not silently drop the user's settings write.
-    try:
-        if getattr(config, "SYNC_DIR", ""):
-            from app.sync.user_state import write_settings_with_retry
-            await write_settings_with_retry(config.SYNC_DIR, updated)
-    except Exception as exc:
-        from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error('app.routers.settings', exc)
-        logger.warning("Failed to persist settings to sync dir: %s", exc)
+    # WB-36: write_settings_with_retry's bool return was discarded, so a
+    # False (write never landed) still reported status:success — mirrors the
+    # fix already applied to the same helper contract in
+    # app/routers/user_state.py's save_preferences.
+    if getattr(config, "SYNC_DIR", ""):
+        from app.sync.user_state import write_settings_with_retry
+        ok = await write_settings_with_retry(config.SYNC_DIR, updated)
+        if not ok:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Settings were not saved to cloud sync — another process "
+                    "(likely Dropbox) held the file lock. Try again or pause "
+                    "Dropbox briefly."
+                ),
+            )
 
     logger.info(f"Settings updated: {updated}")
     return {"status": "success", "updated": updated}
@@ -871,14 +889,16 @@ def _sync_dir() -> str:
 
 @router.get("/settings/private-mode", response_model=dict[str, Any])
 async def get_private_mode():
-    """Return current private mode level (0 = disabled)."""
-    try:
-        redis = get_redis()
-        level = redis.get(_PRIVATE_MODE_KEY)
-        return {"level": int(level) if level is not None else 0}
-    except Exception as exc:
-        log_swallowed_error('app.routers.settings', exc)
-        return {"level": 0}
+    """Return current private mode level (0 = disabled).
+
+    WB-38: read through ``get_private_mode_level()`` — the last-known-level
+    fail-safe in ``app.services.private_mode`` — instead of a hand-rolled
+    Redis read that collapsed any exception to 0. Failing open to 0 here
+    silently defeated the client's CR-020 "keep the local value on error"
+    guard and every server-side ``private_blocks``/``saves_blocked``
+    guarantee the same module already protects from a transient Redis blip.
+    """
+    return {"level": get_private_mode_level()}
 
 
 class PrivateModeRequest(BaseModel):
@@ -993,6 +1013,12 @@ async def wipe_private_session(req: SessionWipeRequest):
         log_swallowed_error("session_wipe.get_neo4j", exc, context={"conversation_id": req.conversation_id})
         neo4j_driver = None
 
+    # WB-45: "wiped" must reflect whether the graph store was actually
+    # reachable and the orchestrator ran to completion — the endpoint
+    # previously returned the literal `True` unconditionally, so a caller had
+    # no way to tell "everything was wiped" from "Neo4j was unreachable and
+    # every graph deletion was skipped".
+    orchestrator_ran = True
     try:
         summary = wipe_conversation_state(
             req.conversation_id,
@@ -1003,6 +1029,7 @@ async def wipe_private_session(req: SessionWipeRequest):
     except Exception as exc:
         log_swallowed_error("session_wipe.orchestrator", exc, context={"conversation_id": req.conversation_id})
         summary = {}
+        orchestrator_ran = False
 
     redis = get_redis()
     session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{req.conversation_id}"
@@ -1010,14 +1037,17 @@ async def wipe_private_session(req: SessionWipeRequest):
         pipe.delete(_PRIVATE_MODE_KEY)
         pipe.delete(session_key)
         pipe.execute()
+
+    wiped = neo4j_driver is not None and orchestrator_ran
     logger.info(
         "private_mode.l4_session_wiped",
-        extra={"conversation_id": req.conversation_id, "wipe_summary": summary},
+        extra={"conversation_id": req.conversation_id, "wipe_summary": summary, "wiped": wiped},
     )
     return {
-        "wiped": True,
+        "wiped": wiped,
         "level_after": 0,
         "conversation_id": req.conversation_id,
+        "summary": summary,
     }
 
 

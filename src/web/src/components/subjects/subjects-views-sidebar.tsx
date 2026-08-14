@@ -27,7 +27,11 @@ import { mcpUrl, mcpHeaders } from "@/lib/api/common"
 import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
 import { useNavigation } from "@/contexts/navigation-context"
 
-export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki"
+// RA-11: includes "communities" so the header's ViewsPopoverButton (which
+// renders for every Subjects mode) type-checks — GraphExplorer has no
+// save-view UI of its own, so list_views' "unknown mode returns []" backend
+// contract is what actually keeps this a no-op for that mode.
+export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki" | "communities"
 
 // Static layout presets for constellation mode — client-side only,
 // not persisted to Redis (free-tier cap of 3 user views is untouched).

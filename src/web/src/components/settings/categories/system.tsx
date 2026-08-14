@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Download, Upload, AlertTriangle, RefreshCw, Archive, DatabaseBackup,
+  ShieldCheck, ShieldAlert,
 } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -19,14 +20,18 @@ import {
   SettingRow, AdvancedDisclosure, ConfirmActionButton, ReadOnlyEnvHint,
 } from "@/components/settings/settings-primitives"
 import { getDef } from "@/lib/settings-registry"
+import { useEntitlements } from "@/hooks/use-entitlements"
+import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
 import {
   fetchSystemCheck, fetchStorageMetrics, fetchSyncStatus,
   triggerSyncExport, triggerSyncImport,
+  fetchAuditRecords, verifyAuditChain, type AuditRecord,
 } from "@/lib/api"
 import { checkForUpdates } from "@/lib/api/updates"
 import type { UpdateCheckResult } from "@/lib/api/updates"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { ConnectionSection } from "@/components/settings/connection-section"
+import { PermissionsStep, getCeridBridge } from "@/components/setup/permissions-step"
 import type { SettingsCategoryPageProps } from "./page-props"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,6 +86,20 @@ function UpdateCheckButton() {
       setState({ status: "error", message: err instanceof Error ? err.message : "Unknown error" })
     }
   }
+
+  // Tray "Check for Updates" sends app:check-update to the renderer instead of
+  // running the check itself, so this listener is what makes the tray click
+  // produce the same spinner/dialog feedback as clicking the button here.
+  useEffect(() => {
+    if (!isDesktop) return
+    const bridge = (window as unknown as {
+      cerid: { app: { onCheckUpdate: (cb: () => void) => () => void } }
+    }).cerid.app
+    return bridge.onCheckUpdate(() => {
+      void handleCheck()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleCheck is stable per render intent; re-subscribing on identity change would drop in-flight tray clicks
+  }, [isDesktop])
 
   return (
     <div className="density-stack w-full">
@@ -402,6 +421,16 @@ function SyncSection() {
 
 // ── Backup ────────────────────────────────────────────────────────────────────
 
+/** Desktop-only richer export: main-process handler runs scripts/backup-kb.sh
+    into a user-chosen folder. Returns null in browser builds. */
+function getDesktopExportData(): (() => Promise<{ success: boolean; path?: string; error?: string }>) | null {
+  if (typeof window === "undefined") return null
+  const cerid = (window as Window & {
+    cerid?: { app?: { exportData?: () => Promise<{ success: boolean; path?: string; error?: string }> } }
+  }).cerid
+  return cerid?.app?.exportData ?? null
+}
+
 function BackupSection() {
   const backupDef = getDef("system.sync.backup")!
   const queryClient = useQueryClient()
@@ -413,6 +442,28 @@ function BackupSection() {
   })
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<string | null>(null)
+  const [nativeRunning, setNativeRunning] = useState(false)
+  const [nativeResult, setNativeResult] = useState<string | null>(null)
+  const exportData = getDesktopExportData()
+
+  const handleNativeExport = async () => {
+    if (!exportData) return
+    setNativeRunning(true)
+    setNativeResult(null)
+    try {
+      const res = await exportData()
+      if (res.success) {
+        setNativeResult(res.path ? `Backup archive written to ${res.path}.` : "Backup archive written.")
+      } else if (res.error !== "cancelled") {
+        setNativeResult("Backup export failed: " + (res.error ?? "Unknown error"))
+      }
+    } catch (err) {
+      setNativeResult("Backup export failed: " + (err instanceof Error ? err.message : "Unknown error"))
+      logSwallowedError(err, "system.desktopExportData")
+    } finally {
+      setNativeRunning(false)
+    }
+  }
 
   const handleFullExport = async () => {
     setRunning(true)
@@ -505,6 +556,24 @@ function BackupSection() {
             Writes a full snapshot to the sync directory. Run scripts/cerid-backup.sh separately for a portable, restorable archive.
           </p>
           {result && <p className="text-xs text-muted-foreground">{result}</p>}
+          {exportData && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleNativeExport()}
+                disabled={nativeRunning}
+                className="gap-1.5 w-fit"
+              >
+                <Archive className={cn("h-4 w-4", nativeRunning && "animate-pulse")} />
+                {nativeRunning ? "Exporting…" : "Save backup archive to this Mac…"}
+              </Button>
+              <p className="text-label-xs text-muted-foreground">
+                Exports a portable, restorable archive to a folder you choose on this machine — no shell required.
+              </p>
+              {nativeResult && <p className="text-xs text-muted-foreground">{nativeResult}</p>}
+            </>
+          )}
         </div>
       </SettingRow>
     </SectionCard>
@@ -558,7 +627,7 @@ function TogglesSection() {
     <SectionCard title="Pipeline Toggles">
       <AdvancedDisclosure category="system" group="toggles">
         <SettingRow def={memoryDef}>
-          <ReadOnlyEnvHint envVar="CERID_FEATURE_memory_recall" />
+          <ReadOnlyEnvHint envVar="ENABLE_MEMORY_RECALL" />
         </SettingRow>
         <SettingRow def={parentChildDef}>
           <ReadOnlyEnvHint envVar="CERID_FEATURE_parent_child_retrieval" />
@@ -571,12 +640,167 @@ function TogglesSection() {
   )
 }
 
+// ── Audit Log (RA-32) ──────────────────────────────────────────────────────
+
+function VerifyChainChip() {
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["audit-log-verify"],
+    queryFn: verifyAuditChain,
+    staleTime: 30_000,
+  })
+
+  if (isLoading) return <Skeleton className="h-6 w-32" />
+  if (isError || !data) {
+    return (
+      <Badge variant="outline" className="gap-1 text-label-xs">
+        <ShieldAlert className="h-3 w-3" aria-hidden="true" />
+        Verify failed
+        <button type="button" onClick={() => void refetch()} className="underline">retry</button>
+      </Badge>
+    )
+  }
+  return data.ok ? (
+    <Badge variant="secondary" className="gap-1 text-label-xs text-emerald-600 dark:text-emerald-400">
+      <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+      Chain verified ({data.checked} records)
+    </Badge>
+  ) : (
+    <Badge variant="destructive" className="gap-1 text-label-xs">
+      <ShieldAlert className="h-3 w-3" aria-hidden="true" />
+      Tampered at seq {data.broken_at} — {data.reason}
+    </Badge>
+  )
+}
+
+function AuditLogTable() {
+  const [outcome, setOutcome] = useState<"" | "success" | "failure" | "denied">("")
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["audit-log-records", outcome],
+    queryFn: () => fetchAuditRecords({ limit: 25, outcome: outcome || undefined }),
+    staleTime: 15_000,
+  })
+
+  return (
+    <div className="w-full density-stack">
+      <div className="flex items-center gap-2">
+        <VerifyChainChip />
+        <Select value={outcome || "all"} onValueChange={(v) => setOutcome(v === "all" ? "" : v as typeof outcome)}>
+          <SelectTrigger className="ml-auto h-8 w-32" aria-label="Filter by outcome">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All outcomes</SelectItem>
+            <SelectItem value="success">Success</SelectItem>
+            <SelectItem value="failure">Failure</SelectItem>
+            <SelectItem value="denied">Denied</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void refetch()}
+          className="h-8 gap-1 text-xs"
+          aria-label="Refresh audit log"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Refresh
+        </Button>
+      </div>
+
+      {isLoading && <Skeleton className="h-40 w-full" />}
+
+      {isError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Failed to load audit log.{" "}
+            <button type="button" onClick={() => void refetch()} className="underline">Retry</button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {data && data.records.length === 0 && (
+        <EmptyState
+          icon={ShieldCheck}
+          title="No audit records"
+          description={outcome ? `No records with outcome "${outcome}".` : "No administrative or security actions have been recorded yet."}
+        />
+      )}
+
+      {data && data.records.length > 0 && (
+        <div className="divide-y divide-border rounded-md border text-xs">
+          {data.records.map((r: AuditRecord) => (
+            <div key={r.seq} className="flex items-center gap-3 px-3 py-1.5">
+              <span className="w-10 shrink-0 font-mono text-muted-foreground">#{r.seq}</span>
+              <span className="w-40 shrink-0 truncate font-mono text-muted-foreground">{r.ts}</span>
+              <span className="w-24 shrink-0 truncate">{r.actor}</span>
+              <span className="min-w-0 flex-1 truncate font-medium">{r.action}</span>
+              <Badge
+                variant={r.outcome === "success" ? "secondary" : "destructive"}
+                className="shrink-0 text-label-xs"
+              >
+                {r.outcome}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      )}
+      {data && (
+        <p className="text-label-xs text-muted-foreground">
+          Showing {data.records.length} of {data.total} record{data.total !== 1 && "s"}.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AuditLogGroup() {
+  const def = getDef("system.audit.log")!
+  const { forDef, isError: entitlementsError } = useEntitlements()
+  const locked = forDef(def).state !== "available"
+
+  return (
+    <SectionCard title="Audit Log">
+      <SettingRow def={def} />
+      {entitlementsError ? (
+        <EntitlementsUnavailableNote />
+      ) : locked ? (
+        <p className="text-label-xs text-muted-foreground">
+          Enterprise license required to view audit records.
+        </p>
+      ) : (
+        <AuditLogTable />
+      )}
+    </SectionCard>
+  )
+}
+
+// ── macOS Permissions (desktop app only) ──────────────────────────────────────
+//
+// Permanent home for the per-machine TCC grants (GUI spec item 3). Mounts the
+// same PermissionsStep the desktop setup wizard uses, but only when the
+// desktop bridge is present — in browser builds the section renders nothing
+// (the component's own browser-fallback copy would be noise here).
+
+function MacPermissionsSection() {
+  const def = getDef("system.permissions")!
+  if (getCeridBridge() === null) return null
+  return (
+    <SectionCard title="macOS Permissions">
+      <SettingRow def={def} />
+      <PermissionsStep hideIntro />
+    </SectionCard>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SystemCategory({ settings }: SettingsCategoryPageProps) {
   return (
     <div className="density-stack">
       <ConnectionSection />
+      <MacPermissionsSection />
       <ServerInfoSection settings={settings} />
       <PlatformSection />
       <StorageSection />
@@ -584,6 +808,7 @@ export default function SystemCategory({ settings }: SettingsCategoryPageProps) 
       <BackupSection />
       <InfraSection />
       <TogglesSection />
+      <AuditLogGroup />
     </div>
   )
 }

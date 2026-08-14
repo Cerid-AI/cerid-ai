@@ -51,6 +51,7 @@ from typing import Any
 
 import config
 from core.processor.cost import CostEstimate
+from core.processor.cost import estimate as _estimate_llm_cost
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
 from core.utils.swallowed import log_swallowed_error
@@ -96,6 +97,11 @@ _Z_RELIEF_AMPLITUDE = 3.0
 # Recency-z: amplitude as a fraction of the map radius (_FALLBACK_SCALE).
 # Must be ≤ 0.3 so the 2D mental map stays dominant.
 _Z_RECENCY_FRACTION = 0.3  # z_amplitude = _FALLBACK_SCALE * _Z_RECENCY_FRACTION
+
+# Periphery predicate: communities at or below this size are sub-Leiden
+# (min_community_size prunes their Community node) — their members belong
+# to the rim tail, not the connected core.
+_PERIPHERAL_MAX_COMMUNITY_SIZE = 2
 
 # Community artifacts — base key (force layout).
 # Per-layout keys: "cerid:graph:map:communities:{layout}"
@@ -144,6 +150,14 @@ _SEMANTIC_RANDOM_STATE = 42  # fixed so nightly recomputes are reproducible
 # as the fallback label source when the LLM summary is absent.
 _TOP_TERMS_PER_COMMUNITY = 5
 
+# AF-100: the layout passes (force/wells/domain/semantic) are pure CPU/numpy,
+# but _run_l1_summary_batch is LLM-bound via summarize_communities. Per-
+# community token budget mirrors what the prompt itself already documents:
+# "6 passages plus prompt = ~2k tokens" in, and the call's own max_tokens=200
+# out (community_summaries.py:54, default_llm_caller).
+_L1_SUMMARY_EST_TOKENS_IN_PER_COMMUNITY = 2000
+_L1_SUMMARY_EST_TOKENS_OUT_PER_COMMUNITY = 200
+
 
 class ComputeUmap3DJob(BaseJob):
     """Nightly job: 2D cartographic layout + community artifacts for Constellation.
@@ -163,13 +177,77 @@ class ComputeUmap3DJob(BaseJob):
         return Priority.LOW
 
     def estimate_cost(self) -> CostEstimate:
-        return CostEstimate(
-            estimated_tokens_in=0,
-            estimated_tokens_out=0,
-            model="cpu/umap",
-            estimated_usd=Decimal("0.00"),
-            confidence="high",
+        """Pre-execution estimate — AF-100: previously flat zero, which hid the
+        LLM-bound L1 summary batch from budgeting entirely. A prior fix made
+        this unconditionally report the worst-case ceiling
+        (``COMMUNITY_SUMMARY_MAX_PER_RUN``) regardless of how many L1
+        communities actually lack a summary — that flipped
+        ``JobRecord.requires_llm`` to ``True`` on every nightly run, including
+        the ~95% of the job that is pure CPU layout work with nothing to
+        summarise, routing every run through the hybrid-mode cost-cap gate.
+        Query the real pending count instead: zero pending means zero
+        estimated tokens, so ``requires_llm`` stays ``False`` on the nights
+        there's nothing to summarise.
+        """
+        pending = self._count_pending_l1_summaries()
+        if pending <= 0:
+            model = config.INTERNAL_LLM_MODEL or config.INTERNAL_LLM_MODEL_DEFAULT
+            return CostEstimate(
+                estimated_tokens_in=0,
+                estimated_tokens_out=0,
+                model=model,
+                estimated_usd=Decimal("0.00"),
+                confidence="high",
+            )
+        l1_cap = int(getattr(config, "COMMUNITY_SUMMARY_MAX_PER_RUN", 200))
+        n = min(pending, l1_cap)
+        tokens_in = n * _L1_SUMMARY_EST_TOKENS_IN_PER_COMMUNITY
+        tokens_out = n * _L1_SUMMARY_EST_TOKENS_OUT_PER_COMMUNITY
+        model = config.INTERNAL_LLM_MODEL or config.INTERNAL_LLM_MODEL_DEFAULT
+        try:
+            return _estimate_llm_cost(model, tokens_in, tokens_out, confidence="medium")
+        except ValueError:
+            # Configured/default model isn't in the static pricing table (e.g. a
+            # dynamically stage-routed OpenRouter slug — core.utils.internal_llm.
+            # _resolve_stage_provider picks the actual provider per call). Still
+            # surface the token estimate so budgeting isn't blind; don't guess a
+            # dollar figure for a model this table doesn't know how to price.
+            return CostEstimate(
+                estimated_tokens_in=tokens_in,
+                estimated_tokens_out=tokens_out,
+                model=model,
+                estimated_usd=Decimal("0.00"),
+                confidence="medium",
+            )
+
+    def _count_pending_l1_summaries(self) -> int:
+        """Count ``Community(level=1)`` rows missing a summary.
+
+        A real measurement (mirrors ``_list_summary_targets``'s WHERE clause
+        in community_summaries.py), not a worst-case ceiling. Returns 0 on
+        any Neo4j unavailability so estimate_cost degrades to "no LLM cost"
+        rather than fabricating a nonzero estimate.
+        """
+        try:
+            from app.deps import get_neo4j  # noqa: PLC0415
+
+            driver = get_neo4j()
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("compute_umap_3d.estimate_cost.get_neo4j", exc)
+            return 0
+        if driver is None:
+            return 0
+        cypher = (
+            "MATCH (c:Community {level: 1}) WHERE c.summary IS NULL "
+            "RETURN count(c) AS n"
         )
+        try:
+            with driver.session() as session:
+                record = session.run(cypher).single()
+                return int(record["n"]) if record else 0
+        except (OSError, RuntimeError, ValueError) as exc:
+            log_swallowed_error("compute_umap_3d.estimate_cost.count_pending", exc)
+            return 0
 
     async def run(self, progress_cb: ProgressCallback) -> JobResult:
         await progress_cb(0.0)
@@ -204,6 +282,12 @@ class ComputeUmap3DJob(BaseJob):
         except Exception as exc:  # noqa: BLE001 — layout must never kill the job
             log_swallowed_error("processor.compute_umap_3d.force_layout", exc)
             coords = self._fallback_layout(entities)
+
+        # Stamp the shared periphery predicate on every coord row so
+        # _write_coords persists it (consumed by the /graph filters + UI toggle).
+        peripheral = self._peripheral_flags(entities, edges)
+        for c in coords:
+            c["peripheral"] = peripheral.get(c["id"], False)
         await progress_cb(0.7)
 
         # Build degree map and 2D position array for artifact computation.
@@ -255,6 +339,12 @@ class ComputeUmap3DJob(BaseJob):
 
         # Semantic layout pass: PaCMAP over entity embeddings, with automatic
         # FA2-over-SIMILAR_TO fallback (A7). Position ≈ meaning.
+        # AF-013: semantic_method is carried into JobResult.metadata below so a
+        # predecessor (compute_entity_embeddings) that hasn't populated enough
+        # embeddings is visible as "fa2"/"none" on THIS job's own result,
+        # instead of only a debug-level log line nobody without shell access
+        # to the container would ever see.
+        semantic_method = "none"
         try:
             semantic_coords = await asyncio.to_thread(
                 self._semantic_layout, entities, driver
@@ -266,10 +356,11 @@ class ComputeUmap3DJob(BaseJob):
                 entities, semantic_pos2d, degree_map, driver=driver, layout="semantic"
             )
             self._store_layout_positions(semantic_coords, layout="semantic")
+            semantic_method = semantic_coords[0]["method"] if semantic_coords else "none"
             logger.info(
                 "compute_umap_3d.semantic_layout wrote count=%d method=%s",
                 len(semantic_coords),
-                semantic_coords[0]["method"] if semantic_coords else "none",
+                semantic_method,
             )
         except Exception as exc:  # noqa: BLE001 — non-default layout is best-effort
             log_swallowed_error("processor.compute_umap_3d.semantic_layout", exc)
@@ -284,8 +375,10 @@ class ComputeUmap3DJob(BaseJob):
         # L1 community summary batch — generate summaries for the 262 L1
         # communities that currently have none (level=1, skip_with_existing=True).
         # Runs best-effort after all layout passes; does not block cache bust.
+        l1_tokens_in = 0
+        l1_tokens_out = 0
         try:
-            await self._run_l1_summary_batch(driver)
+            l1_tokens_in, l1_tokens_out = await self._run_l1_summary_batch(driver)
         except Exception as exc:  # noqa: BLE001 — best-effort, never blocks
             log_swallowed_error("processor.compute_umap_3d.l1_summary_batch", exc)
 
@@ -295,35 +388,64 @@ class ComputeUmap3DJob(BaseJob):
         logger.info("compute_umap_3d.wrote count=%d method=%s", len(coords), method)
         return JobResult(
             job_id=f"compute_umap_3d:{self._tenant_id}",
-            actual_tokens_in=0,
-            actual_tokens_out=0,
-            metadata={"count": len(coords), "method": method},
+            # AF-100: previously hardcoded 0/0 even though the L1 summary batch
+            # above is LLM-bound — the job's actual cost was invisible to the
+            # actuals ledger (worker.py's post-run cost tracking falls back to
+            # the estimate only when these are None, not when they're 0).
+            actual_tokens_in=l1_tokens_in,
+            actual_tokens_out=l1_tokens_out,
+            metadata={
+                "count": len(coords),
+                "method": method,
+                "semantic_method": semantic_method,
+            },
         )
 
-    async def _run_l1_summary_batch(self, driver: Any) -> None:
+    async def _run_l1_summary_batch(self, driver: Any) -> tuple[int, int]:
         """Trigger L1 community summary generation via community_summaries.py.
 
         Generates summaries for level-1 communities (262 total, currently
         none have summaries) using the same machinery as the level-0 batch.
         Skips communities that already have summaries (skip_with_existing=True).
         Requires the Chroma vector store and LLM to be available.
+
+        Returns ``(tokens_in, tokens_out)`` actually consumed across the batch
+        (AF-100). ``summarize_communities``'s ``llm_caller`` contract
+        (``list[dict] -> str``) returns only completion text — ``call_internal_llm``
+        carries no token-usage return value to thread through — so a chars/4
+        estimate is taken per call, the same heuristic ``folder_scanner.py``
+        uses for its own token estimate. That is still a real per-call
+        measurement of what was actually sent/received, not a flat constant.
         """
         try:
             from app.db.neo4j.community_summaries import summarize_communities  # noqa: PLC0415
             from app.deps import get_chroma  # noqa: PLC0415
         except ImportError as exc:
             log_swallowed_error("compute_umap_3d.l1_summary_batch.import", exc)
-            return
+            return 0, 0
 
         try:
             chroma_client = get_chroma()
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("compute_umap_3d.l1_summary_batch.chroma", exc)
-            return
+            return 0, 0
 
         if chroma_client is None:
             logger.info("compute_umap_3d.l1_summary_batch: chroma unavailable, skipping")
-            return
+            return 0, 0
+
+        tokens: dict[str, int] = {"in": 0, "out": 0}
+
+        async def _counting_llm_caller(messages: list[dict[str, str]]) -> str:
+            from core.utils.internal_llm import call_internal_llm  # noqa: PLC0415
+
+            prompt_chars = sum(len(m.get("content", "")) for m in messages)
+            tokens["in"] += max(1, prompt_chars // 4)
+            content = await call_internal_llm(
+                messages, temperature=0.2, max_tokens=200, stage="community_summary",
+            )
+            tokens["out"] += max(1, len(content) // 4)
+            return content
 
         logger.info("compute_umap_3d.l1_summary_batch: starting L1 community summarisation")
         try:
@@ -332,14 +454,20 @@ class ComputeUmap3DJob(BaseJob):
                 chroma_client,
                 level=1,
                 skip_with_existing_summary=True,
+                llm_caller=_counting_llm_caller,
             )
             logger.info(
-                "compute_umap_3d.l1_summary_batch: done summarised=%d skipped_existing=%d",
+                "compute_umap_3d.l1_summary_batch: done summarised=%d skipped_existing=%d "
+                "tokens_in=%d tokens_out=%d",
                 result.get("summarised", 0),
                 result.get("skipped_existing", 0),
+                tokens["in"],
+                tokens["out"],
             )
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("compute_umap_3d.l1_summary_batch.run", exc)
+
+        return tokens["in"], tokens["out"]
 
     def _bust_serving_cache(self) -> None:
         """Drop the /graph/embeddings/3d Redis cache after writing coords.
@@ -406,6 +534,7 @@ class ComputeUmap3DJob(BaseJob):
                 e.umap_y = row.y,
                 e.umap_z = row.z,
                 e.umap_method = row.method,
+                e.layout_peripheral = coalesce(row.peripheral, false),
                 e.umap_computed_at = $now
         """
         try:
@@ -413,6 +542,49 @@ class ComputeUmap3DJob(BaseJob):
                 session.run(cypher, rows=coords, now=now)
         except (OSError, RuntimeError, ValueError) as exc:
             log_swallowed_error("compute_umap_3d._write_coords", exc)
+
+    @staticmethod
+    def _peripheral_flags(
+        entities: list[dict[str, Any]],
+        edges: list[tuple[str, str, float]],
+    ) -> dict[str, bool]:
+        """One shared "periphery" predicate for the whole serving stack.
+
+        A node is peripheral when the layout can't integrate it into the
+        connected core: zero degree in the layout's edge universe (the exact
+        14.5-radius shell), no real community ('isolated' sentinel / none),
+        or a sub-Leiden community (size ≤ 2, below min_community_size).
+        Persisted as ``Entity.layout_peripheral`` so the router filter and
+        the UI toggle count the same population the layout placed on the rim
+        — previously the two were computed from different predicates and
+        the "Show isolated" toggle missed most of the visible ring.
+        """
+        degree: dict[str, int] = {}
+        for s, t, _w in edges:
+            if s == t:
+                continue
+            degree[s] = degree.get(s, 0) + 1
+            degree[t] = degree.get(t, 0) + 1
+
+        comm_sizes: dict[str, int] = {}
+        for ent in entities:
+            comm = ent.get("community")
+            if comm is not None:
+                key = str(comm)
+                comm_sizes[key] = comm_sizes.get(key, 0) + 1
+
+        flags: dict[str, bool] = {}
+        for ent in entities:
+            comm = ent.get("community")
+            comm_key = str(comm) if comm is not None else ""
+            no_community = comm is None or comm_key == "isolated"
+            tiny_community = (
+                comm_sizes.get(comm_key, 0) <= _PERIPHERAL_MAX_COMMUNITY_SIZE
+            )
+            flags[ent["id"]] = (
+                degree.get(ent["id"], 0) == 0 or no_community or tiny_community
+            )
+        return flags
 
     # -----------------------------------------------------------------
     # Layout helpers
@@ -1502,12 +1674,12 @@ class ComputeUmap3DJob(BaseJob):
     # -----------------------------------------------------------------
 
     @staticmethod
-    @staticmethod
     def _first_clause(text: str, max_chars: int = 32) -> str:
         """Extract the first sentence clause from a summary for short lane labels.
 
         Splits on the first '. ', ': ', ', ', or newline — whichever comes
-        first — and truncates to max_chars.  Returns the stripped result or
+        first — and truncates to max_chars at a word boundary, appending an
+        ellipsis when anything was cut.  Returns the stripped result or
         an empty string if the input is empty.
 
         Numeric-garbage guard (A6): if the extracted first clause is a bare
@@ -1517,14 +1689,14 @@ class ComputeUmap3DJob(BaseJob):
         if not text:
             return ""
         import re as _re  # noqa: PLC0415
+
         # LLM community summaries open with boilerplate ("The theme revolves
-        # around X", "This community centers on Y") — strip the lead-in so the
-        # label carries the subject, not the filler.
+        # around X", "This community centers on Y", "Content related to Z") —
+        # strip the lead-in so the label carries the subject, not the filler.
+        from app.db.neo4j.community_summaries import _BOILERPLATE_OPENER  # noqa: PLC0415
+
         stripped = _re.sub(
-            r"^(?:the|this|a)?\s*"
-            r"(?:theme|community|cluster|topic|content|summary)?\s*"
-            r"(?:revolves?\s+around|centers?\s+(?:on|around)|focuses?\s+on|"
-            r"is\s+(?:about|centered\s+(?:on|around))|covers|concerns|relates\s+to)\s+",
+            _BOILERPLATE_OPENER,
             "",
             text.strip(),
             flags=_re.IGNORECASE,
@@ -1539,7 +1711,13 @@ class ComputeUmap3DJob(BaseJob):
         if _re.match(r"^\d+(\.\d+)?$", first):
             return ""
         first = first[0].upper() + first[1:]
-        return first[:max_chars]
+        if len(first) <= max_chars:
+            return first
+        # Word-boundary truncation, never mid-word ("…database mana").
+        cut = first[: max_chars - 1]
+        if " " in cut:
+            cut = cut.rsplit(" ", 1)[0]
+        return cut.rstrip(",;:") + "…"
 
     def _community_artifacts(
         self,
@@ -1564,25 +1742,33 @@ class ComputeUmap3DJob(BaseJob):
         index by both forms so lookups succeed regardless of which form
         the entities list carries.
         """
-        # Tephra Cycle-2: fetch Community.summary from Neo4j indexed by both
+        # Tephra Cycle-2: fetch Community.summary (and the curated short
+        # Community.name, when present) from Neo4j indexed by both
         # "{level}:{native_id}" and the scalar native_id.
         summary_map: dict[str, str] = {}  # both key forms → summary text
+        name_map: dict[str, str] = {}  # both key forms → short name
         if driver is not None:
             try:
                 with driver.session() as _s:
                     result = _s.run(
                         "MATCH (c:Community) WHERE c.summary IS NOT NULL "
-                        "RETURN c.id AS cid, c.summary AS summary"
+                        "RETURN c.id AS cid, c.summary AS summary, c.name AS name"
                     )
                     for row in result:
-                        cid_val = str(row["cid"] or "")
-                        summary_text = str(row["summary"] or "")
-                        if cid_val and summary_text:
-                            summary_map[cid_val] = summary_text
-                            # Also index by the native_id scalar if the format is "level:id"
-                            parts = cid_val.split(":", 1)
-                            if len(parts) == 2 and parts[1].isdigit():
-                                summary_map[parts[1]] = summary_text
+                        cid_val = str(row.get("cid") or "")
+                        summary_text = str(row.get("summary") or "")
+                        name_text = str(row.get("name") or "")
+                        if not cid_val:
+                            continue
+                        keys = [cid_val]
+                        parts = cid_val.split(":", 1)
+                        if len(parts) == 2 and parts[1].isdigit():
+                            keys.append(parts[1])
+                        for key in keys:
+                            if summary_text:
+                                summary_map[key] = summary_text
+                            if name_text:
+                                name_map[key] = name_text
             except Exception as exc:  # noqa: BLE001 — summary lookup is best-effort
                 log_swallowed_error(
                     "processor.compute_umap_3d.community_summary_fetch", exc
@@ -1622,15 +1808,23 @@ class ComputeUmap3DJob(BaseJob):
             ]
             hub_name = top_hubs[0]["name"] if top_hubs else comm_id
 
-            # Tephra Cycle-2: derive short_label from Community.summary.
-            # Lookup tries both the raw comm_id and the scalar native_id.
-            summary_text = summary_map.get(comm_id, "")
-            if not summary_text:
-                # Try "{level}:{native_id}" form (comm_id may be a bare scalar)
-                parts = comm_id.split(":", 1)
-                if len(parts) == 2:
-                    summary_text = summary_map.get(parts[1], "")
-            short_label = self._first_clause(summary_text, max_chars=32) or hub_name
+            # Label ladder: curated Community.name → first clause of the
+            # summary → top-hub entity name. Lookups try both the raw
+            # comm_id and the scalar native_id.
+            def _lookup(mapping: dict[str, str], key: str) -> str:
+                val = mapping.get(key, "")
+                if not val:
+                    parts = key.split(":", 1)
+                    if len(parts) == 2:
+                        val = mapping.get(parts[1], "")
+                return val
+
+            summary_text = _lookup(summary_map, comm_id)
+            short_label = (
+                _lookup(name_map, comm_id)
+                or self._first_clause(summary_text, max_chars=32)
+                or hub_name
+            )
             label = short_label  # backwards-compat field name
 
             # Trust mix.

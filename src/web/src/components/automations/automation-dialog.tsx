@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react"
 import { useFocusOnMount } from "@/hooks/use-focus-on-mount"
+import { useLiveDomains } from "@/hooks/use-live-domains"
 import type { Automation, AutomationCreate } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -37,7 +38,6 @@ const ACTION_OPTIONS: { value: AutomationCreate["action"]; label: string; descri
   { value: "ingest", label: "Ingest", description: "Auto-ingest new content" },
 ]
 
-const DOMAIN_OPTIONS = ["coding", "finance", "projects", "personal", "general"]
 
 interface AutomationDialogProps {
   open: boolean
@@ -56,6 +56,10 @@ function resolvePresetKey(cron: string): string {
 
 export default function AutomationDialog({ open, onClose, automation, onSave, saving }: AutomationDialogProps) {
   const isEdit = !!automation
+
+  // UX-08 — domain checkboxes come from the live domain aggregate
+  // (connector domains included), not a per-surface hardcoded list.
+  const domainOptions = useLiveDomains()
 
   // Focus the name field when the dialog first opens. Pass `open` so
   // re-mounts (close → reopen) re-focus.
@@ -234,7 +238,7 @@ export default function AutomationDialog({ open, onClose, automation, onSave, sa
           <div className="space-y-1.5">
             <Label>Domains</Label>
             <div className="flex flex-wrap gap-2">
-              {DOMAIN_OPTIONS.map((domain) => (
+              {domainOptions.map((domain) => (
                 <label
                   key={domain}
                   className={cn(

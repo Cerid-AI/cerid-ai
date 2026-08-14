@@ -52,25 +52,18 @@ test("E-15 Constellation map hovers a node, toggles 3D, switches quality tiers",
   }
   expect(hovered, "hovering the map core should raise an entity tooltip").toBe(true)
 
-  // --- 3D mode via the view toggle ---
+  // --- Live mode via the view toggle (the R3F "3D" mode was cut 2026-08-13;
+  // Map | Live are the two remaining scenes) ---
   // force: the agent-console footer overlay trips Playwright's hit-target
   // check even though the radios are genuinely clickable (verified live).
-  await page.getByRole("radio", { name: "3D", exact: true }).click({ force: true })
+  await page.getByRole("radio", { name: "Live", exact: true }).click({ force: true })
 
-  // The Render-quality radiogroup only exists in the 3D scene — it (not the
-  // "entities · connections" text, which the map status line also matches)
-  // proves the 3D view mounted. Generous timeout: the R3F chunks lazy-load
-  // on first 3D activation.
-  const qualityGroup = page.getByRole("radiogroup", { name: "Render quality" })
-  await expect(qualityGroup).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText(/entities · [\d,]+ connections/)).toBeVisible({ timeout: 20_000 })
-  await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 })
-
-  // Quality tiers: Ultra adds postprocessing — the canvas must survive
-  // the GL-context remount both ways.
-  await page.getByRole("radio", { name: "Ultra" }).click({ force: true })
-  await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 })
-  await page.getByRole("radio", { name: "High" }).click({ force: true })
+  // The Live scene is its own lazy chunk (vendor-cosmos) with its own
+  // canvas; the simulation control strip proves it mounted. Generous
+  // timeout for the first-activation chunk load.
+  await expect(
+    page.getByRole("button", { name: /Pause simulation|Run simulation/ }),
+  ).toBeVisible({ timeout: 30_000 })
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 })
 
   // Restore the default view for whoever runs the suite next (mode is

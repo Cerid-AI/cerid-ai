@@ -14,7 +14,7 @@
 
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Check, Copy, Lock, Webhook } from "lucide-react"
+import { AlertCircle, Check, Copy, Lock, RefreshCw, Webhook } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { mcpUrl, mcpHeaders } from "@/lib/api/common"
@@ -36,11 +36,37 @@ interface WebhookShareCardProps {
 }
 
 export function WebhookShareCard({ sourceId }: WebhookShareCardProps) {
-  const { data, isLoading } = useQuery<WebhookUrlPayload>({
+  const { data, isLoading, isError, refetch } = useQuery<WebhookUrlPayload>({
     queryKey: ["webhook-url", sourceId],
     queryFn: () => fetchWebhookUrl(sourceId),
     staleTime: 5 * 60_000,
   })
+
+  // Checked before the loading guard: once retries exhaust, isLoading goes
+  // false while data stays undefined, and `isLoading || !data` alone rendered
+  // the skeleton shimmer forever with no way out.
+  if (isError) {
+    return (
+      <div className="liquid-glass rounded-lg px-4 py-3" role="alert">
+        <div className="flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+          <span className="text-sm font-medium">Couldn&apos;t load the receiver URL</span>
+        </div>
+        <p className="mt-1 text-label-xs text-muted-foreground">
+          The webhook source was created, but fetching its receiver URL failed.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="cerid-press mt-2"
+          onClick={() => void refetch()}
+        >
+          <RefreshCw className="mr-1.5 h-3 w-3" aria-hidden="true" />
+          Retry
+        </Button>
+      </div>
+    )
+  }
 
   if (isLoading || !data) {
     return (

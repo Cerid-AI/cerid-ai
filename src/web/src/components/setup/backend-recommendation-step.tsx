@@ -95,8 +95,14 @@ export function BackendRecommendationStep({
                         {opt.badge}
                       </Badge>
                     )}
+                    {/* Explicit label, not just a border tint — clicking the
+                        already-highlighted default must read as "confirmed",
+                        not as a dead control (GUI spec NICE 14 / defect #5). */}
                     {isActive && (
-                      <Check className="h-3.5 w-3.5 text-brand" aria-hidden="true" />
+                      <span className="flex items-center gap-1 text-label-xs font-medium text-brand">
+                        <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                        Selected
+                      </span>
                     )}
                   </span>
                 </div>

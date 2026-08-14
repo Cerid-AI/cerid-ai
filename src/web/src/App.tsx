@@ -20,23 +20,31 @@ import { AuthProvider } from "@/contexts/auth-context"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
+import { paneFromLocation } from "@/lib/url-state"
 import { SetupWizard } from "@/components/setup/setup-wizard"
+import {
+  DesktopSetup,
+  needsDesktopSetup,
+  readDesktopSetupFlag,
+} from "@/components/setup/desktop-setup"
 import { useTheme } from "@/hooks/use-theme"
 import { LiquidGlassDefs } from "@/components/ui/liquid-glass-defs"
 import { OpeningSequence } from "@/components/ui/opening-sequence"
 
-// Phase A/B/C consolidation aftermath — only the 4 user-facing panes are
-// mounted here. Legacy panes (knowledge / monitoring / audit / memories /
-// agents / wiki / communities) live on as sub-views inside SourcesPane,
-// SettingsPane → DiagnosticsSection, and SubjectsPane; any `goTo("monitoring")`
-// etc. is rewritten by NavigationProvider's `applyRedirect` map before
-// `setActivePane` fires, so this switch never sees the legacy values.
-// See `contexts/navigation-context.tsx::LEGACY_PANE_REDIRECTS`.
+// Phase A/B/C consolidation aftermath — legacy panes (knowledge /
+// monitoring / audit / agents / wiki / communities) live on as sub-views
+// inside SourcesPane, SettingsPane → DiagnosticsSection, and SubjectsPane;
+// any `goTo("monitoring")` etc. is rewritten by NavigationProvider's
+// `applyRedirect` map before `setActivePane` fires, so this switch never
+// sees those values. See `contexts/navigation-context.tsx::LEGACY_PANE_REDIRECTS`.
+// Memories (RA-08) and Automations (RA-09) are first-class panes mounted here.
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 const SubjectsPane = lazy(() => import("@/components/subjects/subjects-pane"))
 const SourcesPane = lazy(() => import("@/components/sources/sources-pane"))
 const BriefsPane = lazy(() => import("@/components/briefs/briefs-pane"))
 const WorkflowsPane = lazy(() => import("@/components/workflows/workflows-pane"))
+const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
+const AutomationsPane = lazy(() => import("@/components/automations/automations-pane"))
 const AtlasPerfHarness = lazy(() => import("@/components/dev/atlas-perf-harness"))
 
 /**
@@ -50,6 +58,16 @@ const AtlasPerfHarness = lazy(() => import("@/components/dev/atlas-perf-harness"
 function isDevRoute(): string | null {
   if (typeof window === "undefined") return null
   return new URLSearchParams(window.location.search).get("dev")
+}
+
+/**
+ * SF-7 — the pane a cold load of the current URL names. Resolved once at
+ * module scope: the pathname at first paint is the deep link; later
+ * pathname writes come from syncPanePath and must not re-run this.
+ */
+function coldLoadPane(): Pane {
+  if (typeof window === "undefined") return "chat"
+  return paneFromLocation(window.location.pathname) ?? "chat"
 }
 
 function PaneLoader() {
@@ -73,16 +91,27 @@ export default function App() {
   // Tracks the active pane so global chrome can be gated per-pane. The
   // Sources pane has its own "Add a new source" FAB, so the global Quick
   // Capture FAB is hidden there to avoid the two overlapping (BETA-001).
-  const [currentPane, setCurrentPane] = useState<Pane>("chat")
+  const [currentPane, setCurrentPane] = useState<Pane>(coldLoadPane)
+  // Pane AppLayout mounts on. Two writers: a cold load of a deep URL
+  // (/subjects?mode=timeline must land on Subjects, not Chat — SF-7) and
+  // DesktopSetup's "Take me to Connectors" exit — AppLayout owns pane state
+  // after mount, so both must ride the initial value (GUI spec MUST 1).
+  const [initialPane, setInitialPane] = useState<Pane>(coldLoadPane)
   const tierCycling = useRef(false)
-  // Initial value comes from the localStorage cache; the backend's
-  // setup-status response overrides it below (server-side flag is the
-  // source of truth — beta triage 2026-07-12 P0-B4: localStorage-only
-  // gating re-ran the wizard in every fresh browser on a configured
-  // instance and let it clobber live env config).
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
-  })
+  // Per-MACHINE setup, independent of the server's onboarding flag. A desktop
+  // client connecting to a server configured months ago from a browser sees
+  // setup_required=false and onboarding_complete=true, and would otherwise
+  // land in the main app having never been asked for a TCC grant or told where
+  // the Apple connectors are. The server's flag is not a statement about this
+  // Mac.
+  const [showDesktopSetup, setShowDesktopSetup] = useState(() =>
+    needsDesktopSetup({
+      hasDesktopBridge:
+        typeof window !== "undefined" &&
+        !!(window as unknown as { cerid?: unknown }).cerid,
+      completedFlag: readDesktopSetupFlag(),
+    }),
+  )
 
   const cycleTier = useCallback(async () => {
     if (tierCycling.current) return
@@ -112,25 +141,12 @@ export default function App() {
     // Check setup status first, then load settings
     fetchSetupStatus()
       .then((status) => {
-        if (status.setup_required) {
-          setSetupRequired(true)
-        } else {
-          setSetupRequired(false)
-        }
-        // Backend onboarding flag wins over the localStorage cache. Older
-        // backends omit the field — keep the cached behavior then.
-        if (typeof status.onboarding_complete === "boolean") {
-          setShowOnboarding(!status.onboarding_complete)
-          try {
-            if (status.onboarding_complete) {
-              localStorage.setItem("cerid-onboarding-complete", "true")
-            } else {
-              localStorage.removeItem("cerid-onboarding-complete")
-            }
-          } catch {
-            // localStorage unavailable (private mode) — state alone suffices
-          }
-        }
+        // RA-12: the wizard is gated on setup_required alone. The old
+        // onboarding_complete flag existed for the deleted OnboardingDialog
+        // tour; routing it to SetupWizard forced a full (env-clobbering)
+        // wizard onto configured instances. DesktopSetup covers per-machine
+        // first-run independently.
+        setSetupRequired(!!status.setup_required)
       })
       .catch(() => {
         // Backend unreachable — skip setup check, show main app
@@ -170,17 +186,55 @@ export default function App() {
     )
   }
 
-  // Show setup wizard if backend reports no API keys configured OR first-run onboarding
-  if (setupRequired || showOnboarding) {
+  // Show setup wizard if backend reports no API keys configured
+  if (setupRequired) {
+    // Wrapped in the SAME window chrome AppLayout uses — full-height circuit
+    // background, vignette, safe-area insets. The wizard replaces AppLayout
+    // rather than rendering inside it, so without this the dialog floated on a
+    // bare page: different background, no vignette, and no safe-area padding
+    // under the frameless (hiddenInset) title bar. The first screen of the
+    // product looked like a different product.
     return (
-      <SetupWizard
-        open
-        canSkip={!setupRequired && showOnboarding}
-        onComplete={() => {
-          setSetupRequired(false)
-          setShowOnboarding(false)
-        }}
-      />
+      <div className="cerid-content-rise flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
+        <div className="vignette" aria-hidden="true" />
+        <div className="app-drag-region" aria-hidden="true" />
+        <SetupWizard
+          open
+          canSkip={false}
+          onComplete={() => setSetupRequired(false)}
+        />
+      </div>
+    )
+  }
+
+  // Per-machine setup, AFTER the server wizard (which may not run at all).
+  // Rendered inside the app chrome so the window looks like the product.
+  if (showDesktopSetup) {
+    return (
+      <div className="cerid-content-rise flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
+        <div className="vignette" aria-hidden="true" />
+        <div className="app-drag-region" aria-hidden="true" />
+        <DesktopSetup
+          open
+          onDone={() => setShowDesktopSetup(false)}
+          onOpenConnectors={() => {
+            // Land directly on the Apple rows — "Sources → Connectors" is not
+            // a path anyone guesses.
+            try {
+              const url = new URL(window.location.href)
+              url.searchParams.set("sources_mode", "connectors")
+              window.history.replaceState({}, "", url.toString())
+            } catch {
+              // URL unavailable — the pane still opens on its default mode.
+            }
+            // AppLayout hasn't mounted yet — seed its initial pane; the
+            // ?sources_mode= write above selects the Connectors sub-tab.
+            setInitialPane("sources")
+            setCurrentPane("sources")
+            setShowDesktopSetup(false)
+          }}
+        />
+      </div>
     )
   }
 
@@ -200,7 +254,7 @@ export default function App() {
     <ProtectedRoute multiUser={multiUser}>
     <ConversationsProvider>
     <KBInjectionProvider>
-    <AppLayout featureTier={featureTier} onCycleTier={cycleTier} onActivePaneChange={setCurrentPane}>
+    <AppLayout featureTier={featureTier} onCycleTier={cycleTier} onActivePaneChange={setCurrentPane} initialPane={initialPane}>
       {(activePane, openSidebar) => {
         switch (activePane) {
           case "chat":
@@ -214,6 +268,8 @@ export default function App() {
           case "sources":
           case "briefs":
           case "workflows":
+          case "memories":
+          case "automations":
             return (
               <PaneErrorBoundary label={activePane} queryClient={queryClient}>
                 <Suspense fallback={<PaneLoader />}>
@@ -222,11 +278,13 @@ export default function App() {
                   {activePane === "sources" && <SourcesPane />}
                   {activePane === "briefs" && <BriefsPane />}
                   {activePane === "workflows" && <WorkflowsPane />}
+                  {activePane === "memories" && <MemoriesPane />}
+                  {activePane === "automations" && <AutomationsPane />}
                 </Suspense>
               </PaneErrorBoundary>
             )
-          // Legacy panes (knowledge / monitoring / audit / memories / agents /
-          // wiki / communities) are not handled here — NavigationProvider's
+          // Legacy panes (knowledge / monitoring / audit / agents / wiki /
+          // communities) are not handled here — NavigationProvider's
           // redirect map rewrites them to subjects/sources/settings before
           // they reach this switch. Keeping them in the Pane type union
           // preserves the goTo() contract for programmatic callers.

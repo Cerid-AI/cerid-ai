@@ -65,6 +65,38 @@ describe("ArtifactCard", () => {
     expect(screen.getByText("middleware")).toBeInTheDocument()
   })
 
+  // WB-67: query_agent.py never parses `keywords` before returning it — it
+  // arrives as a JSON-encoded string, not an array. Expanding the card used
+  // to call `.map` on that raw string, throwing and crashing the pane.
+  it("parses the backend's JSON-encoded keywords string when expanded, without crashing", async () => {
+    const user = userEvent.setup()
+    render(
+      <ArtifactCard
+        result={makeResult({ keywords: '["fastapi", "async"]' })}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onInject={vi.fn()}
+      />,
+    )
+    await user.click(screen.getByText("test-document.py"))
+    expect(screen.getByText("fastapi")).toBeInTheDocument()
+    expect(screen.getByText("async")).toBeInTheDocument()
+  })
+
+  it("renders no keyword badges for an empty keywords string, without crashing", async () => {
+    const user = userEvent.setup()
+    render(
+      <ArtifactCard
+        result={makeResult({ keywords: "[]" })}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onInject={vi.fn()}
+      />,
+    )
+    await user.click(screen.getByText("test-document.py"))
+    expect(screen.queryByText("fastapi")).not.toBeInTheDocument()
+  })
+
   it("shows quality badge with Q-score format for excellent scores", () => {
     render(
       <ArtifactCard

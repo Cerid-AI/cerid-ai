@@ -109,7 +109,7 @@ class SourceKindMeta(BaseModel):
     availability: str = "coming_soon"
     providers: list[str] = []  # webhook-backed kinds: the recipe providers to pick
     # True for kinds backed by a desktop helper/daemon (apple_mail,
-    # apple_reminders, clipboard) regardless of whether it is currently present.
+    # clipboard) regardless of whether it is currently present.
     requires_desktop: bool = False
     # folder kind only: container-side roots a watched folder must live under.
     allowed_roots: list[str] = []
@@ -138,8 +138,8 @@ def _kind_providers(kind: str) -> list[str]:
 
 def _kind_requires_desktop(kind: str) -> bool:
     """True for kinds whose ingestion path runs through a desktop helper or
-    host daemon (apple_mail → ceridmail, apple_reminders → ceridreminders,
-    clipboard → host clipboard daemon). Derived from the connector's
+    host daemon (apple_mail → ceridmail, clipboard → host clipboard
+    daemon). Derived from the connector's
     ``requires_desktop`` attribute so new helper-backed kinds are covered
     automatically."""
     import core.ingest.sources.connectors as _conns  # noqa: F401 — registers connectors
@@ -176,8 +176,11 @@ def _desktop_helper_available(kind: str) -> bool | None:
 # without this set they fell through to "coming_soon", telling a paying Pro
 # customer with the desktop app installed that a shipped feature did not exist.
 _DESKTOP_APP_KINDS: frozenset[str] = frozenset({
-    "apple_notes",  # connectors/apple_notes.ts  → ipc connectors:apple-notes:scan
-    "imessage",     # connectors/imessage.ts     → ipc connectors:imessage:scan
+    "apple_notes",      # connectors/apple_notes.ts     → ipc connectors:apple-notes:scan
+    "imessage",         # connectors/imessage.ts        → ipc connectors:imessage:scan
+    "apple_calendar",   # connectors/apple_calendar.ts  → ipc connectors:apple-calendar:scan
+    "apple_photos",     # connectors/apple_photos.ts    → ipc connectors:apple-photos:scan
+    "apple_reminders",  # connectors/apple_reminders.ts → ipc connectors:apple-reminders:scan
 })
 
 
@@ -269,7 +272,17 @@ def _redact_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _to_record(src: dict[str, Any]) -> SourceRecord:
+def _to_record(
+    src: dict[str, Any], *, total_artifacts_24h: int | None = None,
+) -> SourceRecord:
+    """Convert a raw Source dict into the wire ``SourceRecord``.
+
+    ``total_artifacts_24h`` (AF-023): callers that have a live driver should
+    pass ``srcdb.count_artifacts_last_24h(...)`` here — the stored node
+    property is a write-time accumulator nothing ever decremented. Omit it
+    to fall back to whatever's on ``src`` (kept so this stays a pure
+    transform for callers/tests that don't have a driver).
+    """
     return SourceRecord(
         id=src["id"],
         kind=src["kind"],
@@ -282,7 +295,10 @@ def _to_record(src: dict[str, Any]) -> SourceRecord:
         total_artifacts=src.get("total_artifacts", 0),
         total_chunks=src.get("total_chunks", 0),
         total_edges=src.get("total_edges", 0),
-        total_artifacts_24h=src.get("total_artifacts_24h", 0),
+        total_artifacts_24h=(
+            total_artifacts_24h if total_artifacts_24h is not None
+            else src.get("total_artifacts_24h", 0)
+        ),
         connection_time_ms=src.get("connection_time_ms"),
         last_sync_at=src.get("last_sync_at"),
         created_at=src.get("created_at"),
@@ -326,7 +342,11 @@ async def list_sources(kind: str | None = None):
     """List every Source, newest first. Optional ?kind= filter."""
     if kind is not None and kind not in SOURCE_KINDS:
         raise HTTPException(status_code=422, detail=f"Unknown source kind: {kind}")
-    rows = [_to_record(r) for r in srcdb.list_sources(get_neo4j(), kind=kind)]
+    driver = get_neo4j()
+    rows = [
+        _to_record(r, total_artifacts_24h=srcdb.count_artifacts_last_24h(driver, r["id"]))
+        for r in srcdb.list_sources(driver, kind=kind)
+    ]
     if kind in (None, "folder"):
         rows += [SourceRecord(**s) for s in list_folder_sources(get_redis())]
     return rows
@@ -339,10 +359,11 @@ async def get_source(source_id: str):
         if proj is None:
             raise HTTPException(status_code=404, detail="Source not found")
         return SourceRecord(**proj)
-    src = srcdb.get_source(get_neo4j(), source_id)
+    driver = get_neo4j()
+    src = srcdb.get_source(driver, source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
-    return _to_record(src)
+    return _to_record(src, total_artifacts_24h=srcdb.count_artifacts_last_24h(driver, source_id))
 
 
 @router.post("", response_model=SourceRecord, status_code=201)
@@ -438,7 +459,9 @@ async def create_source(body: CreateSourceRequest):
             tier=tier,
             connection_time_ms=0,
         )
-        return _to_record(src)
+        # A brand-new source has no linked artifacts yet — the 24h window is
+        # trivially 0, no need for the live-count query.
+        return _to_record(src, total_artifacts_24h=0)
 
     # Connector-backed kind: run connect()
     connector = get_connector(kind)  # type: ignore[arg-type]
@@ -479,7 +502,9 @@ async def create_source(body: CreateSourceRequest):
         except Exception as exc:
             log_swallowed_error("sources.create_source.set_cursor", exc)
 
-    return _to_record(src)
+    # A brand-new source has no linked artifacts yet — the 24h window is
+    # trivially 0, no need for the live-count query.
+    return _to_record(src, total_artifacts_24h=0)
 
 
 _CLIPBOARD_HEARTBEAT_KEY = "cerid:clipboard:alive"
@@ -613,7 +638,8 @@ async def update_source_config(source_id: str, body: ConfigPatch):
         proj = await update_folder_source(get_redis(), source_id, body.config)
         return SourceRecord(**proj)
 
-    src = srcdb.get_source(get_neo4j(), source_id)
+    driver = get_neo4j()
+    src = srcdb.get_source(driver, source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
@@ -629,8 +655,10 @@ async def update_source_config(source_id: str, body: ConfigPatch):
         # Webhook-backed kinds have no remote system to probe; skip connect.
         # Preserve the minted token and hmac_secret from the stored config —
         # callers cannot replace them via this endpoint (they're redacted).
-        updated = srcdb.update_source_config(get_neo4j(), source_id, merged)
-        return _to_record(updated)
+        updated = srcdb.update_source_config(driver, source_id, merged)
+        return _to_record(
+            updated, total_artifacts_24h=srcdb.count_artifacts_last_24h(driver, source_id),
+        )
 
     connector = get_connector(kind)  # type: ignore[arg-type]
     if connector is None:
@@ -650,8 +678,10 @@ async def update_source_config(source_id: str, body: ConfigPatch):
             detail=f"Connector failed to re-validate: {exc}",
         ) from exc
 
-    updated = srcdb.update_source_config(get_neo4j(), source_id, result.config)
-    return _to_record(updated)
+    updated = srcdb.update_source_config(driver, source_id, result.config)
+    return _to_record(
+        updated, total_artifacts_24h=srcdb.count_artifacts_last_24h(driver, source_id),
+    )
 
 
 class PolicyPatch(BaseModel):
@@ -723,10 +753,13 @@ async def update_source_policy(source_id: str, body: PolicyPatch):
 
         set_source_quality_floor(source_id, body.quality_floor)
 
-    refreshed = srcdb.get_source(get_neo4j(), source_id)
+    driver = get_neo4j()
+    refreshed = srcdb.get_source(driver, source_id)
     if refreshed is None:
         raise HTTPException(status_code=404, detail="Source disappeared after update")
-    return _to_record(refreshed)
+    return _to_record(
+        refreshed, total_artifacts_24h=srcdb.count_artifacts_last_24h(driver, source_id),
+    )
 
 
 @router.delete("/{source_id}", status_code=204)

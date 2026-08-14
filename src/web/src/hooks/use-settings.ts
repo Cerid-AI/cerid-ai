@@ -19,6 +19,14 @@ function readFloat(key: string, fallback: number): number {
   return fallback
 }
 
+function readInt(key: string, fallback: number): number {
+  try {
+    const v = localStorage.getItem(key)
+    if (v !== null) { const n = parseInt(v, 10); if (!isNaN(n)) return n }
+  } catch (err) { logSwallowedError(err, "localStorage.getItem", { key }) }
+  return fallback
+}
+
 function persist(key: string, value: string): void {
   try { localStorage.setItem(key, value) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key }) }
 }
@@ -122,6 +130,9 @@ export function useSettings() {
     return "manual"
   })
   const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.15))
+  // Mirrors the server's AUTO_INJECT_MAX default (src/mcp/config/settings.py) so
+  // a client that never hydrates from the server still matches it.
+  const [autoInjectMax, setAutoInjectMaxState] = useState(() => readInt("cerid-auto-inject-max", 3))
 
   const [inlineMarkups, setInlineMarkupsState] = useState(() => {
     try { const v = localStorage.getItem("cerid-inline-markups"); return v === null ? true : v === "true" } catch { return true }
@@ -185,6 +196,18 @@ export function useSettings() {
     } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-private-mode-level" }) }
     return 0
   })
+  // WB-37: mirrors privateModeLevel so the optimistic setters below can read
+  // the pre-change value to revert to on a failed server write, without
+  // adding privateModeLevel to their useCallback deps (they intentionally
+  // stay referentially stable, matching the rest of this file's setters).
+  const privateModeLevelRef = useRef(privateModeLevel)
+  useEffect(() => { privateModeLevelRef.current = privateModeLevel }, [privateModeLevel])
+  // WB-38: set the instant an optimistic private-mode write starts
+  // (togglePrivateMode / changePrivateModeLevel below), so the mount-time
+  // hydration below can tell "the user just changed this locally, don't let
+  // the in-flight GET clobber it" apart from "nothing local has touched this
+  // yet, the server's answer is authoritative."
+  const privateModeLocalWriteRef = useRef(false)
 
   // L4 ephemeral lifecycle (Cycle 3.2 / v0.93.5). When Private Mode is at
   // Level 4, register a beforeunload handler that fires the backend
@@ -223,14 +246,18 @@ export function useSettings() {
     if (hydratedRef.current) return
     hydratedRef.current = true
 
-    // Fetch runtime settings + full user-state in parallel. We need both
-    // because `fetchSettings()` surfaces the live server values and
-    // `fetchUserState().settings.updated_at` is the cross-machine revision
-    // stamp used for version-vector reconciliation (audit F-7).
+    // Fetch runtime settings + full user-state + private mode in parallel.
+    // We need `fetchSettings()` for the live server values, `fetchUserState()
+    // .settings.updated_at` for the cross-machine revision stamp used for
+    // version-vector reconciliation (audit F-7), and `fetchPrivateMode()`
+    // folded into the same batch (WB-38) so its hydration can reuse the same
+    // `serverWins` decision below instead of resolving on its own schedule
+    // and unconditionally overwriting localStorage.
     Promise.all([
       fetchSettings().catch(() => null),
       fetchUserState().catch(() => null),
-    ]).then(([s, state]) => {
+      fetchPrivateMode().catch(() => null),
+    ]).then(([s, state, pm]) => {
       // ── Version-vector reconciliation ────────────────────────────────────
       // Compare local `cerid-settings-updated-at` against server
       // `settings.updated_at`.  If server is strictly newer, force-replace
@@ -258,6 +285,12 @@ export function useSettings() {
           if (serverWins || !localStorage.getItem("cerid-auto-inject-threshold")) {
             setAutoInjectThresholdState(s.auto_inject_threshold)
             persist("cerid-auto-inject-threshold", String(s.auto_inject_threshold))
+          }
+        }
+        if (s.auto_inject_max !== undefined) {
+          if (serverWins || !localStorage.getItem("cerid-auto-inject-max")) {
+            setAutoInjectMaxState(s.auto_inject_max)
+            persist("cerid-auto-inject-max", String(s.auto_inject_max))
           }
         }
         if (s.enable_hallucination_check !== undefined) hydrateHallucination(s.enable_hallucination_check, serverWins)
@@ -334,24 +367,30 @@ export function useSettings() {
         setInlineMarkupsState(v)
         persist("cerid-inline-markups", String(v))
       }
-    }).catch(() => { /* Server unavailable — use localStorage values */ })
 
-    // Hydrate private mode from the server. Private mode is a single GLOBAL
-    // server flag (Redis cerid:private_mode:global), not a per-browser
-    // preference, so the server is authoritative: reconcile the local cache from
-    // it on every load, not just when unset. A stale localStorage value that
-    // disagrees with the server otherwise turns conversation sync into a silent
-    // server-side no-op — the client keeps POSTing saves the server drops
-    // because it (correctly) thinks private mode is on (CR-020). On a server
-    // error fetchPrivateMode throws, so the local value is kept.
-    fetchPrivateMode()
-      .then((pm) => {
+      // ── Private mode (WB-38) ────────────────────────────────────────────
+      // Private mode is a single GLOBAL server flag (Redis
+      // cerid:private_mode:global) — the server is authoritative, and
+      // `get_private_mode_level()` now holds the last-known level rather than
+      // failing open to 0 on a Redis blip, so a successful GET here is trustworthy
+      // as-is. This must NOT gate on `serverWins`: that revision comes from
+      // settings.json's `updated_at`, which private-mode writes (POST/DELETE
+      // /settings/private-mode) never advance on either the client or the
+      // server, so gating on it made this hydration a near-permanent no-op for
+      // any client that hadn't also touched an unrelated setting. Instead,
+      // gate only on `privateModeLocalWriteRef`: skip the overwrite solely
+      // when the user just fired an optimistic local write (togglePrivateMode
+      // / changePrivateModeLevel) that this same-tick GET raced ahead of.
+      // `fetchPrivateMode()` throws on failure (CR-020), so `pm` is `null`
+      // here when the server was unreachable — the local value is kept
+      // either way in that case.
+      if (pm && !privateModeLocalWriteRef.current) {
         setPrivateModeEnabled(pm.enabled)
         setPrivateModeLevel(pm.level)
         persist("cerid-private-mode", String(pm.enabled))
         persist("cerid-private-mode-level", String(pm.level))
-      })
-      .catch(() => { /* Server unavailable — keep localStorage values */ })
+      }
+    }).catch(() => { /* Server unavailable — use localStorage values */ })
   }, [hydrateFeedback, hydrateAutoInject, hydrateHallucination, hydrateMemory])
 
   const toggleDashboard = useCallback(() => {
@@ -388,6 +427,13 @@ export function useSettings() {
     updateSettings({ auto_inject_threshold: value }).catch(() => { /* noop */ })
   }, [])
 
+  const setAutoInjectMax = useCallback((value: number) => {
+    setAutoInjectMaxState(value)
+    persist("cerid-auto-inject-max", String(value))
+    bumpSettingsUpdatedAt()
+    updateSettings({ auto_inject_max: value }).catch(() => { /* noop */ })
+  }, [])
+
   const setRagMode = useCallback((mode: RagMode) => {
     setRagModeState(mode)
     persist("cerid-rag-mode", mode)
@@ -402,36 +448,51 @@ export function useSettings() {
     updateSettings({ cost_sensitivity: value }).catch(() => { /* noop */ })
   }, [])
 
+  // WB-37: revert the optimistically-applied state + localStorage record to
+  // whatever they were before the failed write, rather than leaving the UI
+  // showing a private-mode state the server never actually adopted.
+  const revertPrivateMode = useCallback((enabled: boolean, level: number) => {
+    setPrivateModeEnabled(enabled)
+    setPrivateModeLevel(level)
+    persist("cerid-private-mode", String(enabled))
+    persist("cerid-private-mode-level", String(level))
+  }, [])
+
   const togglePrivateMode = useCallback(() => {
+    privateModeLocalWriteRef.current = true
     setPrivateModeEnabled((prev) => {
       const next = !prev
+      const prevLevel = privateModeLevelRef.current
       if (next) {
         const level = 1
         setPrivateModeLevel(level)
         persist("cerid-private-mode", "true")
         persist("cerid-private-mode-level", String(level))
-        enablePrivateMode(level).catch(() => { /* noop */ })
+        enablePrivateMode(level).catch(() => { revertPrivateMode(prev, prevLevel) })
       } else {
         setPrivateModeLevel(0)
         persist("cerid-private-mode", "false")
         persist("cerid-private-mode-level", "0")
-        disablePrivateMode(false).catch(() => { /* noop */ })
+        disablePrivateMode(false).catch(() => { revertPrivateMode(prev, prevLevel) })
       }
       return next
     })
-  }, [])
+  }, [revertPrivateMode])
 
   const changePrivateModeLevel = useCallback((level: number) => {
+    privateModeLocalWriteRef.current = true
+    const prevLevel = privateModeLevelRef.current
+    const prevEnabled = prevLevel > 0
     setPrivateModeLevel(level)
     setPrivateModeEnabled(level > 0)
     persist("cerid-private-mode", String(level > 0))
     persist("cerid-private-mode-level", String(level))
     if (level > 0) {
-      enablePrivateMode(level).catch(() => { /* noop */ })
+      enablePrivateMode(level).catch(() => { revertPrivateMode(prevEnabled, prevLevel) })
     } else {
-      disablePrivateMode(false).catch(() => { /* noop */ })
+      disablePrivateMode(false).catch(() => { revertPrivateMode(prevEnabled, prevLevel) })
     }
-  }, [])
+  }, [revertPrivateMode])
 
   return {
     feedbackLoop, toggleFeedbackLoop,
@@ -440,6 +501,7 @@ export function useSettings() {
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject,
     autoInjectThreshold, setAutoInjectThreshold,
+    autoInjectMax, setAutoInjectMax,
     includePacks, toggleIncludePacks,
     costSensitivity, updateCostSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,

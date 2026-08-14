@@ -20,6 +20,7 @@ CERID_API="http://localhost:${CERID_PORT}"
 CERID_API_KEY_VAL="${CERID_API_KEY:-}"
 CERID_SECRET_VAL="${CERID_WEBHOOK_SECRET:-}"
 SERVICES_DIR="$HOME/Library/Services"
+WEBHOOK_STATE_FILE="$HOME/Library/Application Support/Cerid/macos-integration-webhook.json"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,11 +54,87 @@ check_macos() {
     fi
 }
 
+# curl with the optional X-API-Key header. Not a bash array (macOS ships
+# bash 3.2, where an empty array under `set -u` is an unbound-variable
+# error on expansion) — a conditional call is the portable equivalent.
+_curl_auth() {
+    if [ -n "$CERID_API_KEY_VAL" ]; then
+        curl -H "X-API-Key: ${CERID_API_KEY_VAL}" "$@"
+    else
+        curl "$@"
+    fi
+}
+
+# Resolve the tokenized webhook URL these integrations POST to. The
+# receiver is POST /sdk/v1/ingest/webhook/{token} — the token identifies a
+# webhook-kind (:Source) record, so one must exist before any integration
+# can send data. Creates it once (webhook-kind sources are cheap and take
+# no connector lifecycle) and caches the URL so re-running the installer
+# doesn't mint a new source every time. Prints the URL on stdout; prints
+# nothing and returns 1 on failure.
+resolve_webhook_url() {
+    if [ -f "$WEBHOOK_STATE_FILE" ]; then
+        local cached
+        cached=$(python3 -c "
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get('url', ''))
+except Exception:
+    pass
+" "$WEBHOOK_STATE_FILE" 2>/dev/null)
+        if [ -n "$cached" ]; then
+            echo "$cached"
+            return 0
+        fi
+    fi
+
+    # macOS ships bash 3.2; an empty bash array under `set -u` throws
+    # "unbound variable" on expansion (auth_flags[@]), so the optional
+    # X-API-Key header is threaded via a helper rather than an array.
+    local create_resp source_id
+    create_resp=$(_curl_auth -sf --max-time 10 -X POST "${CERID_API}/sources" \
+        -H "Content-Type: application/json" \
+        -d '{"kind": "webhook", "display_name": "macOS Quick Actions", "config": {}}' 2>/dev/null)
+    if [ -z "$create_resp" ]; then
+        err "Could not create a webhook source at ${CERID_API}/sources"
+        return 1
+    fi
+    source_id=$(printf '%s' "$create_resp" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+    if [ -z "$source_id" ]; then
+        err "Webhook source creation returned no id: $create_resp"
+        return 1
+    fi
+
+    local url_resp url
+    url_resp=$(_curl_auth -sf --max-time 10 "${CERID_API}/sources/${source_id}/webhook-url" 2>/dev/null)
+    if [ -z "$url_resp" ]; then
+        err "Could not fetch the webhook URL for source ${source_id}"
+        return 1
+    fi
+    url=$(printf '%s' "$url_resp" | python3 -c "import json,sys; print(json.load(sys.stdin).get('url',''))" 2>/dev/null)
+    if [ -z "$url" ]; then
+        err "Webhook URL response missing 'url': $url_resp"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$WEBHOOK_STATE_FILE")"
+    printf '{"source_id": "%s", "url": "%s"}\n' "$source_id" "$url" > "$WEBHOOK_STATE_FILE"
+    chmod 600 "$WEBHOOK_STATE_FILE"
+    echo "$url"
+}
+
 # ---------------------------------------------------------------------------
 # Install: Finder Quick Action ("Send to Cerid KB")
 # ---------------------------------------------------------------------------
 
 install_quick_action() {
+    local webhook_url
+    webhook_url=$(resolve_webhook_url)
+    if [ -z "$webhook_url" ]; then
+        err "Skipping Finder Quick Action — no webhook URL to send to"
+        return 1
+    fi
+
     local workflow_dir="$SERVICES_DIR/Send to Cerid KB.workflow/Contents"
     mkdir -p "$workflow_dir"
 
@@ -269,7 +346,7 @@ WFLOW
 # Cerid AI - Finder Quick Action helper
 # Reads file content and POSTs to Cerid webhook
 
-CERID_API="${CERID_API}"
+CERID_WEBHOOK_URL="${webhook_url}"
 
 for f in "\$@"; do
     if [ ! -r "\$f" ]; then
@@ -282,7 +359,7 @@ for f in "\$@"; do
     fi
     title=\$(basename "\$f")
     json_content=\$(printf '%s' "\$content" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-    if curl -sf --max-time 30 -X POST "\${CERID_API}/ingest/webhook" \\
+    if curl -sf --max-time 30 -X POST "\${CERID_WEBHOOK_URL}" \\
         -H "Content-Type: application/json" \\
         ${auth_flags} \\
         -d "{\"text\": \${json_content}, \"source\": \"finder\", \"title\": \"\$title\"}" \\
@@ -304,6 +381,13 @@ SCRIPT
 # ---------------------------------------------------------------------------
 
 install_services_menu() {
+    local webhook_url
+    webhook_url=$(resolve_webhook_url)
+    if [ -z "$webhook_url" ]; then
+        err "Skipping Services menu item — no webhook URL to send to"
+        return 1
+    fi
+
     local workflow_dir="$SERVICES_DIR/Ingest to Cerid.workflow/Contents"
     mkdir -p "$workflow_dir"
 
@@ -474,7 +558,7 @@ WFLOW
 # Cerid AI - Services menu helper
 # Reads selected text from stdin and POSTs to Cerid webhook
 
-CERID_API="${CERID_API}"
+CERID_WEBHOOK_URL="${webhook_url}"
 
 text=\$(cat)
 if [ -z "\$text" ] || [ \${#text} -lt 10 ]; then
@@ -486,7 +570,7 @@ fi
 text=\$(printf '%s' "\$text" | head -c 50000)
 json_text=\$(printf '%s' "\$text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
 
-if curl -sf --max-time 30 -X POST "\${CERID_API}/ingest/webhook" \\
+if curl -sf --max-time 30 -X POST "\${CERID_WEBHOOK_URL}" \\
     -H "Content-Type: application/json" \\
     ${auth_flags} \\
     -d "{\"text\": \${json_text}, \"source\": \"services-menu\"}" \\
@@ -512,6 +596,7 @@ uninstall() {
     rm -rf "$SERVICES_DIR/Ingest to Cerid.workflow" 2>/dev/null || true
     rm -f "$SERVICES_DIR/cerid-send.sh" 2>/dev/null || true
     rm -f "$SERVICES_DIR/cerid-text.sh" 2>/dev/null || true
+    rm -f "$WEBHOOK_STATE_FILE" 2>/dev/null || true
     ok "All Cerid macOS integrations removed"
 }
 

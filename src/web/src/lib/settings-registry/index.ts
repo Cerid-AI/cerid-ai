@@ -64,7 +64,7 @@ export const CATEGORY_META: CategoryMeta[] = [
   { id: "knowledge", label: "Knowledge", description: "Feed Cerid your sources", icon: Database },
   { id: "retrieval", label: "Retrieval & Answers", description: "Tune how Cerid finds and verifies answers", icon: SlidersHorizontal },
   { id: "privacy", label: "Privacy", description: "Control privacy & data boundaries", icon: Shield },
-  { id: "extensions", label: "Extensions", description: "Extend Cerid", icon: Puzzle },
+  { id: "extensions", label: "Extensions", description: "Plugins, MCP servers, providers, automations", icon: Puzzle },
   { id: "appearance", label: "Appearance", description: "Make it yours", icon: Palette },
   { id: "plan", label: "Plan & Billing", description: "Manage your plan", icon: CreditCard },
   { id: "system", label: "System", description: "Operate the server", icon: Server },

@@ -49,6 +49,13 @@ from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.processor.reembed_chunks")
 
+# AF-037: a single bad page must not abort the whole domain scan (mirrors the
+# per-batch update handler below), but a collection that fails on EVERY page
+# (e.g. genuinely unreachable) must not spin forever advancing past failures
+# it can never recover from. Bail after this many consecutive page-read
+# failures within one domain.
+_MAX_CONSECUTIVE_BATCH_FAILURES = 3
+
 
 class ReembedChunksJob(BaseJob):
     """Re-embed chunks whose ``embedding_model_version`` stamp is stale."""
@@ -95,15 +102,21 @@ class ReembedChunksJob(BaseJob):
         total_processed = 0
         total_reembedded = 0
         total_skipped = 0
-        by_domain: dict[str, dict[str, int]] = {}
+        by_domain: dict[str, dict[str, Any]] = {}
+        truncated_domains: list[str] = []
 
         for i, domain in enumerate(domains):
-            processed, reembedded, skipped = await self._reembed_domain(chroma, domain)
+            processed, reembedded, skipped, failed_offsets = await self._reembed_domain(
+                chroma, domain
+            )
             by_domain[domain] = {
                 "processed": processed,
                 "reembedded": reembedded,
                 "skipped": skipped,
+                "failed_offsets": failed_offsets,
             }
+            if failed_offsets:
+                truncated_domains.append(domain)
             total_processed += processed
             total_reembedded += reembedded
             total_skipped += skipped
@@ -125,9 +138,17 @@ class ReembedChunksJob(BaseJob):
                     "app.processor.jobs.reembed_chunks.query_cache_invalidate", exc,
                 )
 
+        if truncated_domains:
+            logger.warning(
+                "reembed_chunks.truncated domains=%s — one or more pages failed to "
+                "read; scan is incomplete, not just empty",
+                truncated_domains,
+            )
         logger.info(
-            "reembed_chunks.done domains=%s processed=%d reembedded=%d skipped=%d force=%s",
+            "reembed_chunks.done domains=%s processed=%d reembedded=%d skipped=%d "
+            "force=%s truncated=%s",
             domains, total_processed, total_reembedded, total_skipped, self._force,
+            truncated_domains,
         )
         return JobResult(
             job_id=f"reembed_chunks:{self._domain or 'all'}",
@@ -139,13 +160,24 @@ class ReembedChunksJob(BaseJob):
                 "skipped": total_skipped,
                 "by_domain": by_domain,
                 "force": self._force,
+                # AF-037: a domain scan that hit unreadable pages is NOT the
+                # same as one that scanned everything and found nothing stale
+                # — distinguish "complete" from "truncated" instead of
+                # reporting COMPLETED either way.
+                "truncated": bool(truncated_domains),
+                "truncated_domains": truncated_domains,
             },
         )
 
-    async def _reembed_domain(self, chroma: Any, domain: str) -> tuple[int, int, int]:
+    async def _reembed_domain(
+        self, chroma: Any, domain: str,
+    ) -> tuple[int, int, int, list[int]]:
         """Page through one domain's collection, re-embedding stale chunks.
 
-        Returns ``(processed, reembedded, skipped)`` counts for that domain.
+        Returns ``(processed, reembedded, skipped, failed_offsets)`` for that
+        domain. ``failed_offsets`` is non-empty when one or more pages could
+        not be read — the caller must not report the domain as fully scanned
+        when it isn't (AF-037).
         """
         target_version = config.embedding_version_for_domain(domain)
         coll_name = config.collection_name(domain)
@@ -156,12 +188,14 @@ class ReembedChunksJob(BaseJob):
                 "app.processor.jobs.reembed_chunks.get_collection", exc,
                 context={"domain": domain},
             )
-            return 0, 0, 0
+            return 0, 0, 0, []
 
         processed = 0
         reembedded = 0
         skipped = 0
         offset = 0
+        failed_offsets: list[int] = []
+        consecutive_failures = 0
         while True:
             try:
                 batch = await asyncio.to_thread(
@@ -170,13 +204,27 @@ class ReembedChunksJob(BaseJob):
                     offset=offset,
                     include=["documents", "metadatas"],
                 )
-            except Exception as exc:  # noqa: BLE001 — observability boundary
+            except Exception as exc:  # noqa: BLE001 — one bad batch must not abort the domain
                 log_swallowed_error(
                     "app.processor.jobs.reembed_chunks.get_batch", exc,
                     context={"domain": domain, "offset": offset},
                 )
-                break
+                failed_offsets.append(offset)
+                consecutive_failures += 1
+                if consecutive_failures >= _MAX_CONSECUTIVE_BATCH_FAILURES:
+                    logger.warning(
+                        "reembed_chunks: domain=%s aborting after %d consecutive "
+                        "batch-read failures at offset=%d",
+                        domain, consecutive_failures, offset,
+                    )
+                    break
+                # Advance past the failed page rather than re-reading the same
+                # offset forever — we don't know how many ids that page held,
+                # so best-effort skip by the configured page size.
+                offset += self._batch
+                continue
 
+            consecutive_failures = 0
             ids = batch.get("ids") or []
             if not ids:
                 break
@@ -225,4 +273,4 @@ class ReembedChunksJob(BaseJob):
             if len(ids) < self._batch:
                 break
 
-        return processed, reembedded, skipped
+        return processed, reembedded, skipped, failed_offsets

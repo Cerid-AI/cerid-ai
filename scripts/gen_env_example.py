@@ -60,10 +60,24 @@ _THIRD_PARTY_ALLOWLIST = frozenset({
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "MS365_MCP_TENANT_ID",
 })
+# Retrieval feature flags read directly at each call site (hype_indexer.py,
+# query_agent.py, core/retrieval/sparse.py) rather than centralized as
+# settings.py attributes — settings.py:168 documents this as an intentional
+# mirror of the parent-child pattern. AF-046: they were getenv-only and
+# invisible to the AST walk, so list them explicitly like the third-party
+# credentials above.
+_INTERNAL_FLAG_ALLOWLIST = frozenset({
+    "RETRIEVAL_HYPE_ENABLED",
+    "RETRIEVAL_SPARSE_ENABLED",
+})
 
 
 def _is_documented_var(name: str) -> bool:
-    return name.startswith(_PROJECT_PREFIX) or name in _THIRD_PARTY_ALLOWLIST
+    return (
+        name.startswith(_PROJECT_PREFIX)
+        or name in _THIRD_PARTY_ALLOWLIST
+        or name in _INTERNAL_FLAG_ALLOWLIST
+    )
 
 
 def _iter_sources():

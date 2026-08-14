@@ -1,0 +1,14 @@
+# success_status_literal_allowlist.txt — grandfathered Gate 4 hits
+# Enforced by scripts/lint-success-status-literal.py --check
+# (tasks/2026-08-11-consolidated-audit.md sec 3, gate 4).
+#
+# Format: <path>:<lineno>  # <one-line reason citing an audit finding id>
+# Shrink-only — fixing a site removes its line; the gate fails on any
+# stale entry (line no longer a hit) or any new, un-allowlisted hit.
+#
+# Regenerate (preserves reasons for still-live keys) with:
+#   python scripts/lint-success-status-literal.py --update
+src/mcp/app/db/redis/processor_queue.py:499  # AF-037 — mark_completed marks JobState.COMPLETED unconditionally; it is a queue primitive the worker calls only on the success path (mark_failed handles failure), so COMPLETED reflects the caller's decision (tasks/2026-07-15-audit-remediation-verification.md:455-460)
+src/mcp/app/scheduler.py:169  # AF-013 — _enqueue_and_await_completion's polling except (list_recent failure) `break`s the while loop and falls through to the unconditional "timeout" _log_execution below, never to this per-record success branch; heuristic false positive from the linter's lack of control-flow analysis, not an instance of the swallow-then-report-success defect class
+src/mcp/app/scheduler.py:584  # Same class as AF-019 (webhook_drain) — quarantine_purge computes `failed` per-item and prints it in the success detail string without gating on it; not separately numbered by the 2026-07-15 audit
+src/mcp/app/scheduler.py:742  # Same class as AF-019 (webhook_drain) — folder_scan's watched-folders branch computes `total_errored` and prints it in the success detail string without gating on it; not separately numbered by the 2026-07-15 audit

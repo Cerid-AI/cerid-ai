@@ -211,19 +211,12 @@ class TestEnsureDir:
 # ---------------------------------------------------------------------------
 
 class TestDefaultSyncDir:
-    @patch("app.sync._helpers.config")
-    def test_uses_config_value(self, mock_config):
-        mock_config.SYNC_DIR = "/custom/sync"
+    def test_uses_config_value(self, monkeypatch):
+        monkeypatch.setattr("app.sync._helpers.config.SYNC_DIR", "/custom/sync")
         assert _default_sync_dir() == "/custom/sync"
 
-    @patch("app.sync._helpers.config")
-    def test_fallback_when_no_config(self, mock_config):
-        # Remove SYNC_DIR attribute
-        del mock_config.SYNC_DIR
-        mock_config.configure_mock(**{})
-        # hasattr should return False
-        type(mock_config).SYNC_DIR = property(lambda self: (_ for _ in ()).throw(AttributeError))
-
+    def test_fallback_when_no_config(self, monkeypatch):
+        monkeypatch.delattr("app.sync._helpers.config.SYNC_DIR", raising=False)
         result = _default_sync_dir()
         assert "cerid-sync" in result
 
@@ -271,10 +264,8 @@ class TestReadManifest:
 # ---------------------------------------------------------------------------
 
 class TestWriteManifest:
-    @patch("sync.manifest.config")
-    def test_writes_manifest(self, mock_config, tmp_path):
-        mock_config.DOMAINS = ["coding", "general"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_writes_manifest(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.sync.manifest.config.DOMAINS", ["coding", "general"])
 
         result = write_manifest(str(tmp_path), machine_id="test-host")
 
@@ -284,20 +275,16 @@ class TestWriteManifest:
         assert "timestamp" in result
         assert "files" in result
 
-    @patch("sync.manifest.config")
-    def test_default_machine_id(self, mock_config, tmp_path):
-        mock_config.DOMAINS = []
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_default_machine_id(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.sync.manifest.config.DOMAINS", [])
 
         with patch("socket.gethostname", return_value="my-host"):
             result = write_manifest(str(tmp_path))
 
         assert result["machine_id"] == "my-host"
 
-    @patch("sync.manifest.config")
-    def test_tracks_domain_files(self, mock_config, tmp_path):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_tracks_domain_files(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.sync.manifest.config.DOMAINS", ["coding"])
 
         result = write_manifest(str(tmp_path))
 
@@ -306,10 +293,8 @@ class TestWriteManifest:
         has_chroma = any("chroma" in k and "coding" in k for k in files)
         assert has_chroma
 
-    @patch("sync.manifest.config")
-    def test_hashes_existing_files(self, mock_config, tmp_path):
-        mock_config.DOMAINS = []
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_hashes_existing_files(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("app.sync.manifest.config.DOMAINS", [])
 
         # Create a neo4j artifacts file
         neo4j_dir = tmp_path / "neo4j"
@@ -413,11 +398,10 @@ class TestExportNeo4j:
 # ---------------------------------------------------------------------------
 
 class TestExportRedis:
-    @patch("sync.export.config")
-    def test_exports_audit_log(self, mock_config, tmp_path):
+    def test_exports_audit_log(self, monkeypatch, tmp_path):
         from app.sync.export import export_redis
 
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+        monkeypatch.setattr("app.sync.export.config.REDIS_INGEST_LOG", "ingest:log")
         redis = MagicMock()
 
         entries = [
@@ -429,11 +413,10 @@ class TestExportRedis:
         result = export_redis(redis, str(tmp_path))
         assert result["entries_exported"] == 2
 
-    @patch("sync.export.config")
-    def test_handles_redis_error(self, mock_config, tmp_path):
+    def test_handles_redis_error(self, monkeypatch, tmp_path):
         from app.sync.export import export_redis
 
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+        monkeypatch.setattr("app.sync.export.config.REDIS_INGEST_LOG", "ingest:log")
         redis = MagicMock()
         redis.lrange.side_effect = RuntimeError("Redis down")
 
@@ -446,12 +429,11 @@ class TestExportRedis:
 # ---------------------------------------------------------------------------
 
 class TestImportRedis:
-    @patch("sync.import_.config")
-    def test_imports_new_entries(self, mock_config, tmp_path):
+    def test_imports_new_entries(self, monkeypatch, tmp_path):
         from app.sync.import_ import import_redis
 
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
-        mock_config.REDIS_LOG_MAX = 10000
+        monkeypatch.setattr("app.sync.import_.config.REDIS_INGEST_LOG", "ingest:log")
+        monkeypatch.setattr("app.sync.import_.config.REDIS_LOG_MAX", 10000)
 
         # Create export file
         redis_dir = tmp_path / "redis"
@@ -468,12 +450,11 @@ class TestImportRedis:
         assert result["entries_added"] == 1
         assert result["entries_skipped"] == 0
 
-    @patch("sync.import_.config")
-    def test_deduplicates_existing(self, mock_config, tmp_path):
+    def test_deduplicates_existing(self, monkeypatch, tmp_path):
         from app.sync.import_ import import_redis
 
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
-        mock_config.REDIS_LOG_MAX = 10000
+        monkeypatch.setattr("app.sync.import_.config.REDIS_INGEST_LOG", "ingest:log")
+        monkeypatch.setattr("app.sync.import_.config.REDIS_LOG_MAX", 10000)
 
         redis_dir = tmp_path / "redis"
         redis_dir.mkdir()
@@ -489,12 +470,11 @@ class TestImportRedis:
         assert result["entries_added"] == 0
         assert result["entries_skipped"] == 1
 
-    @patch("sync.import_.config")
-    def test_missing_export_file(self, mock_config, tmp_path):
+    def test_missing_export_file(self, monkeypatch, tmp_path):
         from app.sync.import_ import import_redis
 
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
-        mock_config.REDIS_LOG_MAX = 10000
+        monkeypatch.setattr("app.sync.import_.config.REDIS_INGEST_LOG", "ingest:log")
+        monkeypatch.setattr("app.sync.import_.config.REDIS_LOG_MAX", 10000)
 
         redis = MagicMock()
         result = import_redis(redis, str(tmp_path))

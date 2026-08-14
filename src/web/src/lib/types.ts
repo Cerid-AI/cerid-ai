@@ -106,6 +106,38 @@ export function findModel(modelId: string): ModelOption | undefined {
   return MODELS.find((m) => m.id === modelId)
 }
 
+/** Model-id tokens that read as acronyms, upper-cased whole. */
+const MODEL_LABEL_ACRONYMS = new Set(["gpt", "ai", "llm"])
+
+/**
+ * Human label for a model id that isn't in MODELS — derived from the id tail
+ * (last "/"-segment). Used by the chat selector so a registry-supplied id (a
+ * catalog-refreshed tier slot absent from the static MODELS list) still shows
+ * a readable name instead of the raw slug. Examples:
+ *   "openrouter/openai/gpt-4o-mini"        -> "GPT-4o Mini"
+ *   "openrouter/google/gemini-3.1-flash-lite" -> "Gemini-3.1 Flash Lite"
+ * A version-ish token (starts with a digit) stays hyphen-attached to the
+ * product name, matching how vendors write model names; other tokens are
+ * space-joined.
+ */
+export function deriveModelLabel(modelId: string): string {
+  const tail = modelId.split("/").pop() ?? modelId
+  let out = ""
+  for (const token of tail.split("-")) {
+    if (!token) continue
+    if (out === "") {
+      out = MODEL_LABEL_ACRONYMS.has(token.toLowerCase())
+        ? token.toUpperCase()
+        : token.charAt(0).toUpperCase() + token.slice(1)
+    } else if (/^\d/.test(token)) {
+      out += `-${token}`
+    } else {
+      out += ` ${token.charAt(0).toUpperCase()}${token.slice(1)}`
+    }
+  }
+  return out || tail
+}
+
 export interface ArtifactDetail {
   artifact_id: string
   title: string
@@ -396,7 +428,7 @@ export interface KBQueryResult {
   domain: string
   sub_category?: string
   tags?: string[]
-  keywords?: string[]
+  keywords?: string // JSON string array — backend never parses this before returning it (query_agent.py)
   chunk_index: number
   chunk_count?: number
   collection: string
@@ -564,12 +596,22 @@ export interface SchedulerStatus {
   jobs: { id: string; name: string; next_run: string | null; trigger: string }[]
 }
 
-export interface SchedulerJobRunResult {
-  status: "started"
-  id: string
-  name: string
-  invalidates: string[]
-}
+// Run-now is honest about duplicates (SF-2): a queue-backed job with a live
+// pending/running equivalent answers "collapsed_into_pending", not "started".
+export type SchedulerJobRunResult =
+  | {
+      status: "started"
+      id: string
+      name: string
+      invalidates: string[]
+    }
+  | {
+      status: "collapsed_into_pending"
+      id: string
+      name: string
+      existing_job_id: string
+      detail: string
+    }
 
 export interface IngestLogEntry {
   event: string
@@ -789,6 +831,7 @@ export interface ServerSettings {
   hallucination_threshold: number
   enable_auto_inject: boolean
   auto_inject_threshold: number
+  auto_inject_max: number
   feature_tier: string
   feature_flags: Record<string, boolean>
   domains: string[]
@@ -917,6 +960,7 @@ export interface SettingsUpdate {
   cost_sensitivity?: string
   enable_auto_inject?: boolean
   auto_inject_threshold?: number
+  auto_inject_max?: number
   enable_self_rag?: boolean
   storage_mode?: string
   hybrid_vector_weight?: number
@@ -1325,14 +1369,24 @@ export type PluginStatus = "installed" | "active" | "error" | "disabled"
 
 export interface Plugin {
   name: string
+  /** Human-facing label served from the plugin manifest (`apple_mail` →
+      "Apple Mail"). Optional so a client talking to an older server that
+      predates the field still renders — fall back to `name`. */
+  display_name?: string
   version: string
   description: string
+  /** Manifest `type` (connector | parser | agent | …). Connector-backing
+      packs cross-link to Sources → Connectors. Optional for older servers. */
+  plugin_type?: string
   tier_required: string
   enabled: boolean
   status: PluginStatus
   file_types: string[]
   config_schema: Record<string, unknown> | null
   capabilities: string[]
+  // FEATURE_FLAGS keys the plugin's manifest declares (empty when none).
+  // Optional so cached pre-upgrade payloads still type-check.
+  feature_flags?: string[]
 }
 
 export interface PluginConfig {
@@ -1501,17 +1555,6 @@ export interface AgentConsoleEvent {
   level: "info" | "success" | "warning" | "error"
   timestamp: number
   metadata: Record<string, unknown>
-}
-
-// === Dead Letter Queue ===
-
-export interface DLQEntry {
-  id: string
-  payload: Record<string, unknown>
-  error: string
-  attempt: number
-  next_retry_at: string
-  created_at: string
 }
 
 // === Storage Dashboard ===

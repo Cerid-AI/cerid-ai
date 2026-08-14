@@ -78,11 +78,11 @@ src/web/src/components/kb/kb-context-panel.tsx:477
 # shadcn focus-ring convention (focus-visible:ring-ring/50 focus-visible:ring-[3px])
 # applied to interactive tier rows, filter inputs, and breadcrumb buttons.
 # Design context specifies this as the canonical shadcn focus pattern.
-src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:203
-src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:222
-src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:288
-src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:335
-src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:731
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:206
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:225
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:291
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:338
+src/web/src/components/subjects/atlas/decomposition/DecompositionIcicle.tsx:876
 
 # --- Section: Workflow editor + canvas chrome --------------------------------
 # Dropdown widths and SVG geometry tuned to fit agent/node names exactly.

@@ -17,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { EmptyState } from "@/components/ui/empty-state"
+import { PaneError } from "@/components/ui/pane-error"
 import { CheckCircle2, Loader2, Library, Trash2, AlertCircle, Download, Info } from "lucide-react"
 import { formatFileSize } from "@/lib/utils"
 import {
@@ -137,7 +138,17 @@ export function KnowledgeLibraryDialog({ open, onOpenChange, onPackInstalled }: 
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading registry…
                 </div>
               )}
-              {!registryQuery.isLoading && totalAvailable === 0 && (
+              {/* WB-14: an errored registry fetch and a genuinely empty
+                  registry are different claims — don't tell a user whose
+                  request failed to go set an env var that's already set. */}
+              {!registryQuery.isLoading && registryQuery.isError && (
+                <PaneError
+                  title="Couldn't load the knowledge pack registry"
+                  description={registryQuery.error instanceof Error ? registryQuery.error.message : "Connection error — check backend services."}
+                  onRetry={() => void registryQuery.refetch()}
+                />
+              )}
+              {!registryQuery.isLoading && !registryQuery.isError && totalAvailable === 0 && (
                 <EmptyState
                   icon={Info}
                   title="No packs in registry"
@@ -176,7 +187,14 @@ export function KnowledgeLibraryDialog({ open, onOpenChange, onPackInstalled }: 
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading installed packs…
                 </div>
               )}
-              {!installedQuery.isLoading && installedById.size === 0 && (
+              {!installedQuery.isLoading && installedQuery.isError && (
+                <PaneError
+                  title="Couldn't load installed packs"
+                  description={installedQuery.error instanceof Error ? installedQuery.error.message : "Connection error — check backend services."}
+                  onRetry={() => void installedQuery.refetch()}
+                />
+              )}
+              {!installedQuery.isLoading && !installedQuery.isError && installedById.size === 0 && (
                 <EmptyState
                   icon={Library}
                   title="No knowledge packs installed"
@@ -240,6 +258,7 @@ function PackCard({ pack, installed, busy, onInstall, onUninstall }: PackCardPro
           {pack.artifact_count > 0 && <span>{pack.artifact_count} artifacts</span>}
           {pack.license && <span>license: {pack.license}</span>}
           {pack.provenance?.source && <span>source: {pack.provenance.source}</span>}
+          {pack.provenance?.curator && <span>curator: {pack.provenance.curator}</span>}
         </div>
       </div>
       <div className="flex flex-shrink-0 gap-2">

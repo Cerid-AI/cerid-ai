@@ -27,6 +27,14 @@ export default function WorkflowsPane() {
     void queryClient.invalidateQueries({ queryKey: ["workflows"] })
   }
 
+  // UX-21: Save must not eject the user from the builder mid-edit. Keep the
+  // editor open on the saved workflow (which now has an id, so Run unlocks
+  // for a first-time save) and refresh the list cache in the background.
+  const stayAfterSave = (saved: Workflow) => {
+    setEditing(saved)
+    void queryClient.invalidateQueries({ queryKey: ["workflows"] })
+  }
+
   if (editing === null) {
     return (
       <WorkflowList
@@ -40,7 +48,7 @@ export default function WorkflowsPane() {
   return (
     <WorkflowEditor
       workflow={editing === "new" ? null : editing}
-      onSave={returnToList}
+      onSave={stayAfterSave}
       onBack={returnToList}
     />
   )

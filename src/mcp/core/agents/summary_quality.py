@@ -98,3 +98,44 @@ def is_insufficient_summary(summary: str | None) -> bool:
     if INSUFFICIENT_SENTINEL in text:
         return True
     return bool(ABSENCE_RE.search(_first_substantive_sentence(text)))
+
+
+# Wrong-entity shape (todo item 5, backstop for the shape BTC had): the
+# summary does not deny grounding — it asserts that the SUBJECT ITSELF is
+# something else ("the entity in question is not BTC but rather..."). The
+# absence patterns above never match it, so a page that redirects its own
+# subject to a different one sailed through and was served as grounding.
+#
+# The patterns are deliberately about the act of REFERENCE — "the entity in
+# question", "does not refer to", "refers to a different" — never the bare
+# "is not ... but" shape. A naive widening to the latter nearly deleted
+# real summaries: "Matt Butcher is not a Microsoft employee but rather
+# works at Fermyon" and "Azure Kubernetes Service is not just a container
+# platform but a managed offering" are legitimate facts about the subject,
+# not subject redirections. The red/green probe in
+# tests/test_summary_quality.py pins both directions.
+WRONG_ENTITY_PATTERNS: tuple[str, ...] = (
+    r"the\s+(?:entity|subject|term|name)\s+(?:in\s+question\s+)?"
+    r"(?:here\s+)?is\s+not",
+    r"(?:does|do)\s+not\s+(?:actually\s+)?refer\s+to",
+    r"(?:appears?|seems?)\s+to\s+refer\s+to\s+a\s+different",
+    r"is\s+not\s+the\s+(?:entity|subject|topic)\s+"
+    r"(?:discussed|described|mentioned|in\s+question)",
+    r"(?:actually|instead)\s+refers?\s+to\s+.{1,80}?,?\s+not\s+",
+)
+
+WRONG_ENTITY_RE = re.compile("|".join(WRONG_ENTITY_PATTERNS), re.I)
+
+
+def is_wrong_entity_summary(summary: str | None) -> bool:
+    """True when the summary opens by redirecting its own subject.
+
+    Same first-substantive-sentence discipline as
+    :func:`is_insufficient_summary`: a summary that states facts first and
+    scopes later is honest, the harmful shape leads with the redirection.
+    Empty text is NOT flagged here — that is the insufficiency check's call.
+    """
+    text = (summary or "").strip()
+    if not text:
+        return False
+    return bool(WRONG_ENTITY_RE.search(_first_substantive_sentence(text)))

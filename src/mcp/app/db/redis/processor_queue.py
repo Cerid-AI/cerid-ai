@@ -19,12 +19,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from core.processor.job import JobRecord, JobResult, JobState
 from core.processor.priority import Priority, priority_order
 from core.utils.swallowed import log_swallowed_error
+
+logger = logging.getLogger("ai-companion.processor_queue")
 
 # ---------------------------------------------------------------------------
 # Key helpers
@@ -49,6 +52,14 @@ def _job_key(job_id: str) -> str:
 # finished records simply age out.
 JOB_RECORD_TTL_S = 14 * 24 * 3600  # 14 days
 
+# The recent-index sorted set had no retention at all: job hashes age out via
+# JOB_RECORD_TTL_S but their index entries stayed forever, so the set grew
+# without bound and list_recent silently under-filled as its newest members
+# pointed at expired hashes. Bounded two ways on every terminal-state write:
+# by score (nothing older than the record TTL — an index entry without a hash
+# is pure noise) and by rank as a backstop for high-throughput bursts.
+RECENT_INDEX_MAX = 1000
+
 
 def _touch_job_ttl(redis_client: Any, job_id: str) -> None:
     """(Re)arm the retention window on a job record. Best-effort."""
@@ -56,6 +67,15 @@ def _touch_job_ttl(redis_client: Any, job_id: str) -> None:
         redis_client.expire(_job_key(job_id), JOB_RECORD_TTL_S)
     except Exception as exc:  # noqa: BLE001 — retention is housekeeping, never fatal
         log_swallowed_error("app.db.redis.processor_queue.ttl", exc)
+
+
+def _trim_recent_index(redis_client: Any, now_ts: float) -> None:
+    """Apply both retention bounds to the recent index. Best-effort."""
+    try:
+        redis_client.zremrangebyscore(_RECENT_KEY, "-inf", now_ts - JOB_RECORD_TTL_S)
+        redis_client.zremrangebyrank(_RECENT_KEY, 0, -(RECENT_INDEX_MAX + 1))
+    except Exception as exc:  # noqa: BLE001 — retention is housekeeping, never fatal
+        log_swallowed_error("app.db.redis.processor_queue.trim_recent", exc)
 
 
 _RUNNING_KEY = f"{_PREFIX}:running"
@@ -180,6 +200,63 @@ def enqueue_job(
     return record.id
 
 
+def _pending_stale_ttl_s() -> int:
+    """Age beyond which a pending marker is an orphan, not a duplicate."""
+    import config  # noqa: PLC0415 — keep this module importable without config side effects
+
+    return int(getattr(config, "PROCESSOR_PENDING_STALE_TTL_S", 21600))
+
+
+def _is_stale_pending(enqueued_at_raw: Any) -> bool:
+    """True when a pending marker's enqueued_at is older than the stale TTL.
+
+    An unparsable/missing timestamp also counts as stale: such a record can
+    never be reasoned about and would otherwise absorb duplicates forever.
+    """
+    if not enqueued_at_raw:
+        return True
+    raw = enqueued_at_raw.decode() if isinstance(enqueued_at_raw, bytes) else str(enqueued_at_raw)
+    try:
+        enqueued_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return True
+    if enqueued_at.tzinfo is None:
+        enqueued_at = enqueued_at.replace(tzinfo=timezone.utc)
+    age_s = (datetime.now(tz=timezone.utc) - enqueued_at).total_seconds()
+    return age_s > _pending_stale_ttl_s()
+
+
+def _prune_stale_pending(redis_client: Any, job_id: str, queue_list_key: str) -> None:
+    """Remove an orphaned pending marker so it cannot absorb future enqueues.
+
+    The record is marked FAILED (with an explicit reason) and surfaced on the
+    recent set rather than deleted, so the supersession is observable. SF-2:
+    a marker orphaned by a container restart collapsed every later enqueue —
+    including manual run-now — into itself, with nothing ever running.
+    """
+    try:
+        redis_client.lrem(queue_list_key, 0, job_id)
+        now = datetime.now(tz=timezone.utc)
+        redis_client.hset(
+            _job_key(job_id),
+            mapping={
+                "state": JobState.FAILED.value,
+                "completed_at": now.isoformat(),
+                "error_message": (
+                    "stale pending marker superseded "
+                    "(older than PROCESSOR_PENDING_STALE_TTL_S; likely orphaned by a restart)"
+                ),
+            },
+        )
+        redis_client.zadd(_RECENT_KEY, {job_id: now.timestamp()})
+        _trim_recent_index(redis_client, now.timestamp())
+        logger.info("pruned stale pending job marker %s from %s", job_id, queue_list_key)
+    except Exception as exc:  # noqa: BLE001 — pruning is housekeeping, never fatal
+        log_swallowed_error(
+            "processor.redis_queue.prune_stale", exc, context={"job_id": job_id}
+        )
+
+
 def find_active_job_id(
     redis_client: Any,
     job_type: str,
@@ -195,6 +272,13 @@ def find_active_job_id(
     the knowledge-pack install and digest-run collapse paths use — so no
     parallel bookkeeping can drift from the queue.
 
+    A matching PENDING marker older than ``PROCESSOR_PENDING_STALE_TTL_S``
+    is not returned: it is pruned (marked failed, removed from its list) and
+    the scan continues, so a marker orphaned by a restart can never absorb
+    new enqueues indefinitely (SF-2). Running-set entries are exempt — long
+    runs are legitimate, and dead-worker ghosts are recovered by
+    ``recover_orphaned_running`` at worker start.
+
     Fail-open: any Redis error during the scan returns ``None`` ("no
     duplicate found") so a broken dedupe check can never block real work —
     the worst case is one stacked duplicate, the pre-collapse behaviour.
@@ -203,32 +287,35 @@ def find_active_job_id(
         return v.decode() if isinstance(v, bytes) else str(v)
 
     try:
-        job_ids: list[str] = []
+        # (job_id, pending-list key) — key None for running-set entries.
+        job_ids: list[tuple[str, str | None]] = []
         for priority in priority_order():
-            job_ids.extend(
-                _s(j) for j in redis_client.lrange(_queue_key(priority), 0, -1)
-            )
-        job_ids.extend(_s(j) for j in redis_client.smembers(_RUNNING_KEY))
+            key = _queue_key(priority)
+            job_ids.extend((_s(j), key) for j in redis_client.lrange(key, 0, -1))
+        job_ids.extend((_s(j), None) for j in redis_client.smembers(_RUNNING_KEY))
 
-        for job_id in job_ids:
-            stored_type, stored_payload_raw = redis_client.hmget(
-                _job_key(job_id), ["job_type", "payload"]
+        for job_id, list_key in job_ids:
+            stored_type, stored_payload_raw, stored_enqueued_at = redis_client.hmget(
+                _job_key(job_id), ["job_type", "payload", "enqueued_at"]
             )
             if stored_type is None or _s(stored_type) != job_type:
                 continue
-            if payload is None:
-                return job_id
-            try:
-                stored_payload = (
-                    json.loads(_s(stored_payload_raw)) if stored_payload_raw else {}
-                )
-            except (TypeError, ValueError) as exc:
-                log_swallowed_error(
-                    "processor.redis_queue.find_active", exc, context={"job_id": job_id}
-                )
+            if payload is not None:
+                try:
+                    stored_payload = (
+                        json.loads(_s(stored_payload_raw)) if stored_payload_raw else {}
+                    )
+                except (TypeError, ValueError) as exc:
+                    log_swallowed_error(
+                        "processor.redis_queue.find_active", exc, context={"job_id": job_id}
+                    )
+                    continue
+                if stored_payload != payload:
+                    continue
+            if list_key is not None and _is_stale_pending(stored_enqueued_at):
+                _prune_stale_pending(redis_client, job_id, list_key)
                 continue
-            if stored_payload == payload:
-                return job_id
+            return job_id
     except Exception as exc:  # noqa: BLE001 — fail-open, see docstring
         log_swallowed_error(
             "processor.redis_queue.find_active", exc, context={"job_type": job_type}
@@ -353,6 +440,16 @@ class RedisJobQueue:
             return None
         return await self.enqueue(job_record)
 
+    async def get(self, job_id: str) -> JobRecord | None:
+        """Return the persisted record for ``job_id``, or ``None`` if it is
+        absent or has aged past its retention TTL.
+
+        Read-only single-job fetch for status polling (e.g. the SDK
+        ``/memory/extract/jobs/{job_id}`` endpoint). Public wrapper over the
+        internal loader so callers don't reach into ``_load_record``.
+        """
+        return await self._load_record(job_id)
+
     async def dequeue(self, priorities: list[Priority]) -> JobRecord | None:
         """Pop the next ready job in priority order.
 
@@ -412,6 +509,7 @@ class RedisJobQueue:
         # Add to recent sorted set (score = epoch seconds for ordering)
         score = record.completed_at.timestamp()
         await self._run(self._r.zadd, _RECENT_KEY, {job_id: score})
+        await self._run(_trim_recent_index, self._r, score)
 
     async def mark_held(self, job_id: str, result: JobResult) -> None:
         """Transition running → HELD; a cost-cap / budget hold stopped the job.
@@ -432,6 +530,7 @@ class RedisJobQueue:
         await self._run(self._r.srem, _RUNNING_KEY, job_id)
         score = record.completed_at.timestamp()
         await self._run(self._r.zadd, _RECENT_KEY, {job_id: score})
+        await self._run(_trim_recent_index, self._r, score)
 
     async def mark_failed(self, job_id: str, error_message: str) -> None:
         """Transition running → failed; record error_message."""
@@ -445,6 +544,7 @@ class RedisJobQueue:
         await self._run(self._r.srem, _RUNNING_KEY, job_id)
         score = record.completed_at.timestamp()
         await self._run(self._r.zadd, _RECENT_KEY, {job_id: score})
+        await self._run(_trim_recent_index, self._r, score)
 
     async def recover_orphaned_running(self) -> list[str]:
         """Requeue jobs stranded in the running set by a dead worker.
@@ -490,20 +590,59 @@ class RedisJobQueue:
             result[priority] = int(length)
         return result
 
-    async def list_recent(self, limit: int) -> list[JobRecord]:
-        """Return up to ``limit`` most recently completed/failed jobs (newest first).
+    async def list_recent(
+        self,
+        limit: int,
+        *,
+        job_type: str | None = None,
+        per_type_cap: int | None = None,
+    ) -> list[JobRecord]:
+        """Return up to ``limit`` most recent terminal jobs (newest first).
 
         Uses the ``cerid:proc:recent`` sorted set scored by completion
-        epoch, so ordering is stable across restarts.
+        epoch, so ordering is stable across restarts. The full (bounded)
+        index is walked newest-first until ``limit`` records are collected,
+        so an index entry whose hash has expired no longer shrinks the
+        response — it is dropped from the index instead (self-heal).
+
+        ``job_type``
+            Only return records of this type (uncapped) — the drill-down
+            for a high-frequency type the default mix caps.
+        ``per_type_cap``
+            At most this many records of any single job type. De-noises the
+            default listing: 88 of the 100 most recent records were
+            wiki_refresh live, displacing every other job type. ``None`` or
+            ``0`` disables capping.
         """
-        # ZREVRANGE returns members in descending score order
+        # ZREVRANGE returns members in descending score order. The index is
+        # bounded at RECENT_INDEX_MAX, so fetching it whole stays cheap.
         job_ids = await self._run(
-            self._r.zrevrange, _RECENT_KEY, 0, limit - 1
+            self._r.zrevrange, _RECENT_KEY, 0, RECENT_INDEX_MAX - 1
         )
         records: list[JobRecord] = []
+        seen_by_type: dict[str, int] = {}
         for jid in job_ids:
+            if len(records) >= limit:
+                break
             jid_str = jid.decode() if isinstance(jid, bytes) else str(jid)
             record = await self._load_record(jid_str)
-            if record is not None:
-                records.append(record)
+            if record is None:
+                # Hash expired (or never existed): the index entry is noise.
+                try:
+                    await self._run(self._r.zrem, _RECENT_KEY, jid_str)
+                except Exception as exc:  # noqa: BLE001 — self-heal is best-effort
+                    log_swallowed_error(
+                        "processor.redis_queue.list_recent_heal",
+                        exc,
+                        context={"job_id": jid_str},
+                    )
+                continue
+            if job_type is not None and record.job_type != job_type:
+                continue
+            if job_type is None and per_type_cap:
+                count = seen_by_type.get(record.job_type, 0)
+                if count >= per_type_cap:
+                    continue
+                seen_by_type[record.job_type] = count + 1
+            records.append(record)
         return records

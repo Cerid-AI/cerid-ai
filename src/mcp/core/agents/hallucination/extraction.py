@@ -35,6 +35,7 @@ from core.agents.hallucination.patterns import (
     SPECIFIC_QUESTION_PATTERNS,
     STALE_KNOWLEDGE_PATTERNS,
     STRONG_FACTUAL_PATTERNS,
+    is_meta_self_referential,
 )
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.internal_llm import call_internal_llm
@@ -337,6 +338,11 @@ def _extract_ignorance_claims(response_text: str) -> list[str]:
             continue
         clean = sentence.rstrip(".,;: ")
         if not clean or clean in seen:
+            continue
+        # Meta/self-referential admissions (assistant identity, access to the
+        # USER'S data) have no external referent to verify — surfacing one let
+        # the UX-09 false denial earn a green "1/1 verified" badge.
+        if is_meta_self_referential(sentence):
             continue
         if any(p.search(sentence) for p in IGNORANCE_ADMISSION_PATTERNS):
             claims.append(clean)
@@ -740,6 +746,24 @@ async def extract_claims(
     def _merge_special(primary: list[str]) -> list[str]:
         return _merge_special_claims(primary, ignorance_claims, evasion_claims, citation_claims, max_claims)
 
+    def _drop_meta_claims(claims: list[str], source: str) -> list[str]:
+        """Drop meta/self-referential claims from any extraction source.
+
+        The LLM extractor is prompted to exclude meta-commentary but does not
+        reliably do so; the heuristic's NON_FACTUAL_PATTERNS miss identity
+        statements embedded mid-response. A claim about the assistant itself
+        ("I'm a large language model", "I don't have access to your Apple
+        Mail") has no external truth to check, so verifying it can only
+        launder an abstention into a green badge (UX-09).
+        """
+        kept = [c for c in claims if not is_meta_self_referential(c)]
+        if len(kept) < len(claims):
+            logger.info(
+                "Dropped %d meta/self-referential %s claim(s)",
+                len(claims) - len(kept), source,
+            )
+        return kept
+
     def _enforce_subject_validity(claims: list[str], source: str) -> list[str]:
         """Drop claims whose head is an unresolved pronoun or bare predicate.
 
@@ -772,7 +796,7 @@ async def extract_claims(
 
     # Try LLM extraction first
     llm_claims = await _extract_claims_llm(response_text, max_claims, user_query=user_query)
-    llm_claims = _enforce_subject_validity(llm_claims, "LLM")
+    llm_claims = _drop_meta_claims(_enforce_subject_validity(llm_claims, "LLM"), "LLM")
     if llm_claims:
         return _merge_special(llm_claims), "llm"
 
@@ -783,8 +807,11 @@ async def extract_claims(
         heuristic_claims = _resolve_pronouns_heuristic(
             heuristic_claims, response_text, user_query,
         )
-        heuristic_claims = _enforce_subject_validity(heuristic_claims, "heuristic")
-        return _merge_special(heuristic_claims), "heuristic"
+        heuristic_claims = _drop_meta_claims(
+            _enforce_subject_validity(heuristic_claims, "heuristic"), "heuristic",
+        )
+        if heuristic_claims:
+            return _merge_special(heuristic_claims), "heuristic"
 
     # Evasion claims alone are high priority
     if evasion_claims:

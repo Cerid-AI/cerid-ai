@@ -340,11 +340,19 @@ def client(monkeypatch):
 
 def test_endpoint_returns_documented_shape_when_neo4j_unreachable(client, monkeypatch):
     """Neo4j being down must not break the wipe endpoint's contract — the
-    get_neo4j() failure is swallowed and the store-backed steps are skipped."""
+    get_neo4j() failure is swallowed and the store-backed steps are skipped.
+
+    WB-45: the response must now honestly report ``wiped: False`` in this
+    case — every graph deletion was skipped, so claiming a full wipe was
+    misleading."""
     tc, fake_redis = client
     monkeypatch.setattr(
         "app.routers.settings.get_neo4j",
         MagicMock(side_effect=RuntimeError("NEO4J_PASSWORD is empty")),
+    )
+    monkeypatch.setattr(
+        "app.routers.settings.wipe_conversation_state",
+        lambda *a, **k: {"conversation_sync_deleted": False},
     )
     fake_redis.store[_PRIVATE_MODE_KEY] = "4"
 
@@ -354,16 +362,21 @@ def test_endpoint_returns_documented_shape_when_neo4j_unreachable(client, monkey
     )
     assert r.status_code == 200
     assert r.json() == {
-        "wiped": True,
+        "wiped": False,
         "level_after": 0,
         "conversation_id": "conv-e2e",
+        "summary": {"conversation_sync_deleted": False},
     }
     assert _PRIVATE_MODE_KEY not in fake_redis.store
 
 
 def test_endpoint_clears_session_key_even_when_wipe_orchestrator_fails(client, monkeypatch):
     """A hard failure inside wipe_conversation_state itself (not just a
-    missing driver) must not stop the Redis flag cleanup or the response."""
+    missing driver) must not stop the Redis flag cleanup or the response.
+
+    WB-45: an orchestrator failure means nothing was actually wiped, so the
+    response must now report ``wiped: False`` rather than unconditionally
+    ``True``."""
     tc, fake_redis = client
     monkeypatch.setattr("app.routers.settings.get_neo4j", lambda: object())
     monkeypatch.setattr(
@@ -378,5 +391,27 @@ def test_endpoint_clears_session_key_even_when_wipe_orchestrator_fails(client, m
         json={"conversation_id": "conv-fail"},
     )
     assert r.status_code == 200
-    assert r.json()["wiped"] is True
+    assert r.json()["wiped"] is False
     assert session_key not in fake_redis.store
+
+
+def test_endpoint_reports_wiped_true_when_neo4j_reachable_and_orchestrator_succeeds(
+    client, monkeypatch,
+):
+    """WB-45 positive case: wiped is True only when both conditions hold."""
+    tc, fake_redis = client
+    monkeypatch.setattr("app.routers.settings.get_neo4j", lambda: object())
+    fake_summary = {"conversation_sync_deleted": True, "conversation_node_deleted": True}
+    monkeypatch.setattr(
+        "app.routers.settings.wipe_conversation_state",
+        lambda *a, **k: fake_summary,
+    )
+
+    r = tc.post(
+        "/settings/private-mode/session-wipe",
+        json={"conversation_id": "conv-ok"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["wiped"] is True
+    assert body["summary"] == fake_summary

@@ -193,13 +193,17 @@ def _vault_write_brief(
         return False
 
 
-def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str]:
+def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str, int]:
     """Query Neo4j for inbox items and recent notes for the given date.
 
-    Returns (inbox_recent, notes_recent_7d) as plain strings.
-    This is intentionally a cheap stub that pages through persisted
-    :Brief and :Claim nodes. A richer implementation can replace
-    this function once the inbox graph schema is finalised.
+    Returns ``(inbox_recent, notes_recent_7d, new_items_24h)``. The third
+    element is the day's delta — inbox items plus artifacts ingested in
+    the 24 h before ``target_date`` — and drives the UX-18 nothing-new
+    decision: the 7-day notes window still holds old content on a quiet
+    day, so "notes are non-empty" is NOT evidence that anything new
+    happened. This is intentionally a cheap stub that pages through
+    persisted :Brief and :Claim nodes. A richer implementation can
+    replace this function once the inbox graph schema is finalised.
 
     RAG C3.3 loop-breaker
     ---------------------
@@ -212,11 +216,42 @@ def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str]:
     with no linked Artifact (legacy / direct-ingest) pass through
     unchanged.
     """
+    from datetime import date, timedelta
+
     inbox_items: list[str] = []
     notes_items: list[str] = []
+    new_artifacts_24h = 0
+
+    try:
+        window_start = (date.fromisoformat(target_date) - timedelta(days=1)).isoformat()
+    except ValueError:
+        window_start = target_date
 
     try:
         with driver.session() as session:
+            # Day's delta: artifacts ingested in the 24 h before target_date.
+            # ingested_at is a full ISO datetime; the date-only window_start
+            # prefix sorts before any datetime on that day, so the string
+            # comparison is temporal-order-correct. Isolated so a count
+            # failure degrades to 0 (LLM path) instead of killing the
+            # inbox/notes assembly below.
+            try:
+                count_row = session.run(
+                    """
+                    MATCH (a:Artifact)
+                    WHERE a.ingested_at >= $window_start
+                    RETURN count(a) AS n
+                    """,
+                    window_start=window_start,
+                ).single()
+                if count_row is not None:
+                    new_artifacts_24h = int(count_row.get("n") or 0)
+            except Exception as exc:  # noqa: BLE001
+                log_swallowed_error(
+                    "processor.brief_generation.count_new_items",
+                    exc,
+                    context={"target_date": target_date},
+                )
             # Inbox: items created in last 24 h (approximated by generated_at)
             inbox_rows = session.run(
                 """
@@ -262,7 +297,11 @@ def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str]:
             context={"target_date": target_date},
         )
 
-    return "\n\n".join(inbox_items), "\n\n".join(notes_items)
+    return (
+        "\n\n".join(inbox_items),
+        "\n\n".join(notes_items),
+        len(inbox_items) + new_artifacts_24h,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -401,26 +440,35 @@ class BriefGenerationJob(BaseJob):
         driver = _get_neo4j()
 
         # --- 1. Assemble corpus (synchronous Neo4j queries) ----------------
-        inbox_recent, notes_recent_7d = await asyncio.to_thread(
+        inbox_recent, notes_recent_7d, new_items_24h = await asyncio.to_thread(
             _assemble_corpus, driver, self._target_date
         )
+        has_new_data = new_items_24h > 0
         await progress_cb(0.3)
 
         # --- 2. LLM synthesis ----------------------------------------------
+        # UX-18: has_new_data=False short-circuits to the one-line
+        # nothing-new brief instead of synthesizing filler from old notes.
         record: "BriefRecord" = await brief_service.generate_daily(
             inbox_recent,
             notes_recent_7d,
+            has_new_data=has_new_data,
         )
         await progress_cb(0.7)
 
         # --- 2.5 (Task 2.1b) Best-effort claim verification ----------------
         # Off the hot path: a verification failure must never fail brief
         # generation. See _verify_and_persist_claims for the swallow.
-        claims = await _verify_and_persist_claims(driver, record, self._target_date)
-        if claims:
-            record = record.model_copy(
-                update={"claim_ids": [c["claim_id"] for c in claims]}
+        # Skipped on a nothing-new day — there is nothing to verify, and
+        # claim extraction over one honest line only manufactures noise.
+        if has_new_data:
+            claims = await _verify_and_persist_claims(
+                driver, record, self._target_date
             )
+            if claims:
+                record = record.model_copy(
+                    update={"claim_ids": [c["claim_id"] for c in claims]}
+                )
 
         # --- 3. Persist to Neo4j ------------------------------------------
         await brief_service.store(record, driver)

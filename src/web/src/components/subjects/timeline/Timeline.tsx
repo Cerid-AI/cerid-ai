@@ -728,9 +728,13 @@ function ExtendedEventsList({ events }: { events: TrackEventExtended[] }) {
 
 interface TimelineProps {
   onEntityPick?: (id: string) => void
+  /** Focal-entity handoff ("Open in Timeline" from Atlas/Wiki) — auto-pins
+   *  that entity's track so the view lands on its history rather than the
+   *  unfiltered global stratigraph. */
+  focalEntity?: string | null
 }
 
-export function Timeline({ onEntityPick }: TimelineProps) {
+export function Timeline({ onEntityPick, focalEntity }: TimelineProps) {
   const { goTo } = useNavigation()
 
   // Config — loaded from localStorage
@@ -943,6 +947,43 @@ export function Timeline({ onEntityPick }: TimelineProps) {
 
   // Pinned track entries for the shelf
   const pinnedTrackEntries = data?.tracks.filter((t) => pinnedIds.has(t.canonical_id)) ?? []
+
+  // Focal-entity handoff: once strata data is in, auto-pin the focal track.
+  // Applies once per focal id; the entity may be outside the track budget,
+  // in which case the lazy track fetch fills in its real name below.
+  const focalApplied = useRef<string | null>(null)
+  useEffect(() => {
+    if (!focalEntity || !data || focalApplied.current === focalEntity) return
+    focalApplied.current = focalEntity
+    const track = data.tracks.find((t) => t.canonical_id === focalEntity)
+    setPinnedTrack({
+      canonicalId: focalEntity,
+      name: track?.name ?? focalEntity,
+      communityId: track?.community_id ?? "",
+      trustState: track?.trust_state ?? "unknown",
+    })
+    setPinnedIds((prev) => {
+      const next = new Set(prev)
+      next.add(focalEntity)
+      return next
+    })
+    setPinnedCommunity(null)
+    setBucketDetail(null)
+    setSelectedEvent(null)
+  }, [focalEntity, data])
+
+  // Patch the placeholder name once the track detail lands (budget-cut case).
+  useEffect(() => {
+    if (
+      trackDetail?.name &&
+      pinnedTrack &&
+      trackDetail.canonical_id === pinnedTrack.canonicalId &&
+      pinnedTrack.name !== trackDetail.name
+    ) {
+      setPinnedTrack({ ...pinnedTrack, name: trackDetail.name })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackDetail])
 
   // Lane metadata lookup (from extended payload, if present)
   const lanesMetaMap = useMemo(() => {

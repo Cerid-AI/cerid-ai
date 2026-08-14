@@ -163,12 +163,9 @@ function SourceDetailInner({
       </DialogHeader>
 
       <div className="space-y-5 px-5 py-4">
-        {/* Activity — placeholder for SSE feed */}
+        {/* Activity */}
         <Section title="Activity">
-          <p className="text-label-xs text-muted-foreground">
-            Live artifacts stream in via /observability/source-activity once wired.
-          </p>
-          <div className="mt-2 grid grid-cols-3 gap-3 rounded-md border border-border bg-card/30 px-3 py-2 text-center">
+          <div className="grid grid-cols-3 gap-3 rounded-md border border-border bg-card/30 px-3 py-2 text-center">
             <Stat label="artifacts" value={source.total_artifacts} />
             <Stat label="chunks" value={source.total_chunks} />
             <Stat label="24h" value={source.total_artifacts_24h} />
@@ -391,6 +388,11 @@ function RetentionPicker({
           />
         )}
       </div>
+      <p className="mt-1 text-label-xs text-muted-foreground">
+        {mode === "keep_all"
+          ? "Keep all is the default — nothing is purged until you switch to By age or By count and apply the policy."
+          : "Applies nightly. Artifacts outside the limit are purged on the next retention pass."}
+      </p>
     </fieldset>
   )
 }

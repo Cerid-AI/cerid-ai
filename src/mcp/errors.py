@@ -19,6 +19,7 @@ __all__ = [
     "RateLimitError",
     "ConfigError",
     "FeatureGateError",
+    "StorageLimitExceededError",
     "error_response",
 ]
 
@@ -112,6 +113,18 @@ class FeatureGateError(CeridError):
 
     _default_prefix: str = "FEATURE_GATE_"
     http_status: int = 403
+
+
+class StorageLimitExceededError(CeridError):
+    """Corpus storage is at/above ``STORAGE_CRITICAL_PCT`` (AF-042).
+
+    Ingest backpressure only — rejects new ingest so the corpus cannot grow
+    past the configured limit. Does NOT evict or delete existing content;
+    eviction is a separate, destructive policy decision with its own design.
+    """
+
+    _default_prefix: str = "STORAGE_"
+    http_status: int = 507
 
 
 # ---------------------------------------------------------------------------

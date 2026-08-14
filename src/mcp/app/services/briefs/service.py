@@ -46,6 +46,13 @@ PROMPT_VERSION_WEEKLY = "weekly-v1"
 _DAILY_SECTIONS = ("CONNECTIONS", "PATTERN", "QUESTION")
 _WEEKLY_SECTIONS = ("EMERGING_THESIS", "CONTRADICTIONS", "KNOWLEDGE_GAPS", "ONE_ACTION")
 
+# UX-18 — the honest empty-delta brief. When nothing new landed in the
+# window, the daily brief says so in one line instead of asking the LLM
+# to synthesize insight from "no new information" (which produced filler
+# and outright falsehoods like "empty inbox" on a 443-message day).
+NOTHING_NEW_SECTION = "NOTHING NEW"
+NOTHING_NEW_BODY = "Nothing new — no new items landed since the last brief."
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -134,6 +141,7 @@ class BriefService:
         notes_recent_7d: str,
         *,
         verified_response_format_hint: str = "",
+        has_new_data: bool | None = None,
     ) -> BriefRecord:
         """Generate a daily brief from inbox and recent notes.
 
@@ -146,6 +154,14 @@ class BriefService:
         verified_response_format_hint
             Optional rendering hint injected into the prompt for
             ``<VerifiedResponse>`` downstream consumers.
+        has_new_data
+            UX-18 — the caller's verdict on whether anything actually
+            landed in the brief's window. ``False`` short-circuits to the
+            one-line nothing-new brief even when the 7-day notes context
+            is non-empty (old notes are context, not a delta — the LLM
+            would otherwise re-synthesize "insight" from them daily).
+            ``None`` (default, for callers without a delta signal) falls
+            back to "is the whole corpus empty?".
 
         Returns
         -------
@@ -154,6 +170,21 @@ class BriefService:
             ``"failed"`` on unrecoverable LLM errors.
         """
         from datetime import date
+
+        if has_new_data is None:
+            has_new_data = bool(
+                (inbox_recent or "").strip() or (notes_recent_7d or "").strip()
+            )
+        if not has_new_data:
+            return BriefRecord(
+                brief_id=str(uuid.uuid4()),
+                kind="daily",
+                generated_at=datetime.now(tz=timezone.utc),
+                prompt_version=PROMPT_VERSION_DAILY,
+                sections={NOTHING_NEW_SECTION: NOTHING_NEW_BODY},
+                claim_ids=[],
+                status="generated",
+            )
 
         prompt = (
             _DAILY_TEMPLATE

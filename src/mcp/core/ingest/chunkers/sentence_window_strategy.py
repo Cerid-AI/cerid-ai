@@ -10,12 +10,12 @@ is stashed in metadata under ``window_text``. The intent is to decouple
 retrieval precision (small chunks match better) from generation context (wider
 windows answer better).
 
-NOTE (AF-057): the *retrieval-side* half — a metadata-replacement post-processor
-that swaps the matched sentence for its ``window_text`` before the context is
-handed to the LLM — is NOT yet wired. So today ``window_text`` is stamped and
-stored but never read back: enabling this strategy currently narrows generation
-context to the single matched sentence rather than widening it. Wire the
-post-processor (or drop this field) before relying on the window at generation.
+The *retrieval-side* half (AF-057) is wired in
+``core.agents.query_agent``: ``_format_chroma_result`` projects
+``window_text`` off Chroma metadata onto each result, and
+``assemble_context`` substitutes it for the bare matched sentence before
+the context is handed to the LLM — retrieval ranks on the sentence,
+generation reads the window.
 
 Activated by ``ENABLE_SENTENCE_WINDOW=true`` via the chunker registry. The
 registration is conditional so the legacy fallback (`token chunker on
@@ -76,9 +76,9 @@ def narrative_sentence_window_strategy(
 
     Each output chunk has:
       - ``text`` — the single sentence (what gets embedded)
-      - ``metadata.window_text`` — joined window (stashed for a retrieval-side
-        metadata-replacement post-processor that is not yet wired; see the
-        module docstring — currently written but not read back)
+      - ``metadata.window_text`` — joined window, read back at query time by
+        ``query_agent.assemble_context``, which substitutes it for the
+        matched sentence before generation (see the module docstring)
       - ``metadata.window_start_idx`` / ``window_end_idx`` — bounds within
         the element (debug + adjacent-chunk merging)
       - ``metadata.sentence_idx`` — this sentence's position

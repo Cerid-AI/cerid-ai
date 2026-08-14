@@ -38,6 +38,7 @@ from app.routers import (
     analytics,
     artifacts,
     atlas_views,
+    audit_log,
     automations,
     brief_settings,
     briefs,
@@ -57,7 +58,6 @@ from app.routers import (
     meetings,
     memories,
     models,
-    oauth,
     observability,
     ollama_proxy,
     plugins,
@@ -713,8 +713,16 @@ async def lifespan(app: FastAPI):
 
         set_source_ingest_fn(_source_ingest_fn)
     except Exception as e:
-        log_swallowed_error('app.main', e)
-        logger.warning(f"Source ingest-sink wiring failed (connector polling disabled): {e}")
+        # Distinct module tag (not the generic 'app.main' shared by every DI-wiring
+        # block below) so this failure is individually countable in
+        # swallowed_error_counts() rather than commingled with unrelated sinks.
+        # AF-021: source polling silently no-ops indefinitely when this fails —
+        # health.invariants_snapshot / startup.invariants already live-probes
+        # get_source_ingest_fn() into `source_ingest_fn_wired`, so this failure is
+        # health-check-visible; ERROR (not warning) reflects that connector
+        # polling — not just one best-effort feature — goes dark as a result.
+        log_swallowed_error('app.main.source_ingest_sink_wiring', e)
+        logger.error(f"Source ingest-sink wiring failed (connector polling disabled): {e}")
 
     # Wire the Phase J/K agent DI seams (inbox triage + daily digest). core/
     # must not import app/, so app injects the registry + graph accessor here at
@@ -784,7 +792,7 @@ async def lifespan(app: FastAPI):
     # Load plugins
     try:
         from plugins import load_plugins
-        loaded = load_plugins()
+        loaded = load_plugins(app=app)
         if loaded:
             logger.info(f"Plugins loaded: {', '.join(loaded)}")
     except Exception as e:
@@ -1007,6 +1015,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_swallowed_error("app.main.prewarm_embedding_model", e)
 
+    # Pre-warm BM25 indexes. The first query for a domain in a fresh process
+    # otherwise pays the whole-corpus JSONL parse + tokenisation inline, which
+    # on a large domain can exhaust the retrieval budget outright
+    # (kb-cold-first-touch). Backgrounded so boot never waits on it.
+    try:
+        from core.retrieval.bm25 import warm_indexes
+
+        async def _warm_bm25() -> None:
+            warmed = await asyncio.get_running_loop().run_in_executor(
+                None, warm_indexes,
+            )
+            logger.info(
+                "BM25 indexes pre-warmed: %d domains, %d docs",
+                len(warmed), sum(warmed.values()),
+            )
+
+        asyncio.create_task(_warm_bm25())
+    except Exception as e:
+        log_swallowed_error("app.main.prewarm_bm25", e)
+
     # Validate collection embedding dimensions against the configured embedder.
     # Dim-locks inside existing Chroma collections are a silent landmine — we
     # surface them at boot with a remediation pointer rather than blowing up
@@ -1206,6 +1234,11 @@ app.add_middleware(
     allow_credentials=not _wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
+    # WB-24: GET /artifacts' X-Total-Count/X-Has-More pagination headers are
+    # otherwise invisible to fetch() on cross-origin requests (desktop
+    # "remote server" mode) — the CORS spec hides custom response headers
+    # from JS unless explicitly exposed.
+    expose_headers=["X-Total-Count", "X-Has-More"],
 )
 # 2. Metrics collection (added second — records latency/throughput, non-blocking)
 from app.middleware.metrics import MetricsMiddleware  # noqa: E402
@@ -1327,9 +1360,6 @@ import core.ingest.sources.connectors  # noqa: F401, E402
 
 app.include_router(sources.router)
 
-# Phase 3 (B3.2 / B3.3) — Pro connector OAuth entry + callback.
-app.include_router(oauth.router)
-
 # Custom Smart RAG weights surface (Phase I).
 app.include_router(rag_weights.router)
 
@@ -1338,6 +1368,11 @@ app.include_router(digests.router)
 
 # Pro-tier feature automation runtime overrides (UX consolidation).
 app.include_router(pro_automations.router)
+
+# Enterprise security audit log (append-only, hash-chained). Reading is gated
+# on `audit_logging`; recording is not — a log that only starts at purchase
+# would leave a new Enterprise customer nothing to read.
+app.include_router(audit_log.router)
 
 # Advanced analytics — Phase L (heatmap + sankey + quality timeline).
 app.include_router(analytics.router)
@@ -1383,6 +1418,15 @@ if CERID_MULTI_USER:
     from app.routers import auth as auth_router
     app.include_router(auth_router.router)
 
+    # SAML SSO rides on the same user model — it issues the same JWT for an
+    # IdP-attested identity instead of a password. Registered here rather than
+    # unconditionally because SSO with no user model to attach an identity to
+    # would be theatre: single-user mode has one operator on an API key and
+    # nobody for an IdP to distinguish. Also gated on the Enterprise
+    # `sso_saml` flag at every endpoint.
+    from app.routers import saml as saml_router
+    app.include_router(saml_router.router)
+
 # Former bridge-layer routers (Sprint F.2 of the 2026-04-19 consolidation
 # program moved them from src/mcp/routers/ to src/mcp/app/routers/).
 # src/mcp/routers/ now holds only billing.py, which stays there because
@@ -1391,7 +1435,6 @@ from app.routers import (  # noqa: E402,I001
     agent_console,
     custom_agents,
     data_sources,
-    dlq,
     mcp_client,
     plugin_registry,
     sdk_openapi,
@@ -1405,7 +1448,6 @@ _legacy_routers = [
     data_sources.router,
     watched_folders.router,
     system_monitor.router,
-    dlq.router,
     webhook_subscriptions.router,
     agent_console.router,
     agent_console.activity_router,

@@ -95,10 +95,10 @@ class TestEveryProKindIsRefusedEverywhere:
     A grep-style lint was considered and rejected: the real chokepoints are
     behavioural (a route returning 403, a loop skipping a kind), and a static
     scan for "is there a gate symbol nearby" produces false positives on
-    routers that are gated INDIRECTLY. `/data-sources/query` is the example —
-    it has no gate of its own, and needs none, because a Pro DataSource is
-    registered by a plugin `register()` that the tier-gated loader refuses to
-    run at community tier. A noisy gate gets ignored, which is worse than none.
+    routers that are gated INDIRECTLY. `app.data_sources.registry` is the
+    example — a Pro DataSource plugin needs no gate of its own because its
+    `register()` call is refused by the tier-gated loader at community tier.
+    A noisy gate gets ignored, which is worse than none.
     """
 
     def _pro_kinds(self):

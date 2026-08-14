@@ -200,25 +200,24 @@ def enqueue_refresh(slug: str, *, force: bool = False) -> bool:
         logger.debug("wiki_refresh.debounced slug=%s", slug)
         return False
 
-    try:
-        from app.db.redis.processor_queue import enqueue_job_if_absent  # noqa: PLC0415
-        from app.processor.jobs.wiki_refresh import WikiRefreshJob  # noqa: PLC0415
+    # WB-44: no blanket except-swallow here — a genuine Redis/import failure
+    # must propagate. The manual-refresh router (POST /wiki/entities/{slug}/
+    # refresh) already wraps this call in its own try/except that converts an
+    # exception into a 500; swallowing it here into `return False` instead
+    # produced a 202 "Refresh queued" toast for a request that never reached
+    # Redis. Callers that must not let one bad slug abort a whole batch
+    # (_on_entities_added below) catch locally around this call.
+    from app.db.redis.processor_queue import enqueue_job_if_absent  # noqa: PLC0415
+    from app.processor.jobs.wiki_refresh import WikiRefreshJob  # noqa: PLC0415
 
-        payload = {"entity_slug": slug}
-        job = WikiRefreshJob(**payload)
-        job_id = enqueue_job_if_absent(job, payload=payload)
-        if job_id is None:
-            logger.debug("wiki_refresh.collapsed slug=%s (already pending/running)", slug)
-            return False
-        logger.info("wiki_refresh.enqueued slug=%s force=%s", slug, force)
-        return True
-    except Exception as exc:  # noqa: BLE001 — observability boundary
-        log_swallowed_error(
-            "processor.subscribers.wiki_refresh.enqueue",
-            exc,
-            context={"slug": slug, "force": force},
-        )
+    payload = {"entity_slug": slug}
+    job = WikiRefreshJob(**payload)
+    job_id = enqueue_job_if_absent(job, payload=payload)
+    if job_id is None:
+        logger.debug("wiki_refresh.collapsed slug=%s (already pending/running)", slug)
         return False
+    logger.info("wiki_refresh.enqueued slug=%s force=%s", slug, force)
+    return True
 
 
 def _on_entities_added(payload: dict[str, Any]) -> None:
@@ -262,8 +261,15 @@ def _on_entities_added(payload: dict[str, Any]) -> None:
             skipped_protected += 1
             logger.debug("wiki_refresh.human_edit_protected slug=%s", slug)
             continue
-        if enqueue_refresh(slug):
-            enqueued += 1
+        try:
+            if enqueue_refresh(slug):
+                enqueued += 1
+        except Exception as exc:  # noqa: BLE001 — one bad slug must not abort the batch
+            log_swallowed_error(
+                "processor.subscribers.wiki_refresh.batch_enqueue",
+                exc,
+                context={"slug": slug, "artifact_id": payload.get("artifact_id")},
+            )
     logger.info(
         "wiki_refresh.dispatch artifact=%s slugs=%d enqueued=%d skipped_protected=%d",
         payload.get("artifact_id"), len(slugs), enqueued, skipped_protected,

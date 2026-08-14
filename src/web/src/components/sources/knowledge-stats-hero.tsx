@@ -38,6 +38,8 @@ interface MetricCardProps {
   sparkValues: number[]
   onClick?: () => void
   ariaLabel?: string
+  /** Native tooltip naming the scope of the count (UX-28). */
+  title?: string
 }
 
 function MetricCard({
@@ -47,6 +49,7 @@ function MetricCard({
   sparkValues,
   onClick,
   ariaLabel,
+  title,
 }: MetricCardProps) {
   const formatted = value.toLocaleString()
   // metric-pulse animates when value changes — re-key the value span
@@ -59,6 +62,7 @@ function MetricCard({
       type="button"
       onClick={onClick}
       aria-label={ariaLabel ?? `${label}: ${formatted}`}
+      title={title}
       className={cn(
         "cerid-press group flex flex-col items-start gap-1 rounded-lg px-3 py-2 text-left transition-colors",
         "hover:bg-accent/40",
@@ -226,6 +230,10 @@ export function KnowledgeStatsHero({
           delta24h={stats.growth.artifacts_24h}
           sparkValues={series((s) => s.nodes.artifacts, stats.nodes.artifacts)}
           onClick={onArtifactsClick}
+          // UX-28: this is the whole-corpus count; the Library header counts
+          // its own (possibly filtered) view — name the scope so the pair
+          // can't read as a contradiction.
+          title="All artifacts in your knowledge base — Library filters don't change this count"
         />
         <MetricCard
           label="Chunks"

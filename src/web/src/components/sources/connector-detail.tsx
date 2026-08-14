@@ -34,6 +34,8 @@ import {
 } from "@/lib/api/connectors"
 import type { ConnectorStatusExt } from "./source-rows"
 import { useEntitlements } from "@/hooks/use-entitlements"
+import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
+import { useNavigation } from "@/contexts/navigation-context"
 import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
 
 // ---------------------------------------------------------------------------
@@ -53,7 +55,7 @@ interface ConnectorDetailProps {
 export function ConnectorDetail({ connector, open, onClose }: ConnectorDetailProps) {
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
-      <DialogContent className="max-w-lg p-0">
+      <DialogContent className="max-w-2xl p-0">
         {open && (
           <ConnectorDetailInner
             key={connector.slug}
@@ -78,6 +80,7 @@ function ConnectorDetailInner({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const { goTo } = useNavigation()
   const [authFlow, setAuthFlow] = useState<OAuthStartResponse | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
   const [authBusy, setAuthBusy] = useState(false)
@@ -89,7 +92,7 @@ function ConnectorDetailInner({
   // "locked" (tier too low) is the only state an upgrade fixes. "flag-off"
   // means the server disabled it and the plan is already sufficient — telling
   // that user to buy Pro would be wrong and annoying.
-  const { forFlag, isLoading: entitlementsLoading } = useEntitlements()
+  const { forFlag, isLoading: entitlementsLoading, isError: entitlementsError } = useEntitlements()
   // Two things this line has to get right, and it previously got both wrong.
   //
   // 1. The second argument is the registry-tier fallback, and it is not
@@ -217,6 +220,25 @@ function ConnectorDetailInner({
             )}
           </ul>
 
+          {/* A connector's DataSource is registered by its server plugin, so an
+              unloaded plugin makes this connector inert — a causal link the UI
+              previously never stated. Name the cause and link to the fix. */}
+          {!connector.data_source_registered && (
+            <p className="mt-2 text-label-xs text-muted-foreground">
+              This connector&apos;s server plugin isn&apos;t loaded —{" "}
+              <button
+                type="button"
+                className="text-primary underline underline-offset-2 hover:opacity-80"
+                onClick={() => {
+                  onClose()
+                  goTo("settings", { category: "extensions" })
+                }}
+              >
+                check Settings → Extensions
+              </button>
+            </p>
+          )}
+
           {/* Missing env list */}
           {!connector.env_complete && connector.missing_env.length > 0 && (
             <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 dark:border-amber-800/40 dark:bg-amber-900/20">
@@ -255,6 +277,10 @@ function ConnectorDetailInner({
                 {disconnectBusy ? "Disconnecting…" : "Disconnect"}
               </Button>
             )}
+          </Section>
+        ) : proLocked && entitlementsError ? (
+          <Section title="Connection">
+            <EntitlementsUnavailableNote />
           </Section>
         ) : proLocked ? (
           // Pro-gated on this tier. Previously this rendered a disabled

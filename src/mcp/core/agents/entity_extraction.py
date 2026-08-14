@@ -143,6 +143,25 @@ def _is_version_token(name: str) -> bool:
     return has_separator
 
 
+def _is_degenerate_email(name: str) -> bool:
+    """True for bare minimal email fragments like ``a@b``.
+
+    A real address always carries a dotted domain; an @-shaped token whose
+    domain part has no dot cannot be one and is extraction noise (observed
+    on mail ingests: a literal ``a@b`` example became a graph entity).
+    Leading-@ social handles are not address-shaped and are admitted.
+    """
+    stripped = name.strip()
+    if stripped.startswith("@") or stripped.count("@") != 1:
+        return False
+    if any(ch.isspace() for ch in stripped):
+        return False
+    _local, _, domain = stripped.partition("@")
+    if not domain:
+        return True
+    return "." not in domain
+
+
 def is_junk_entity_name(name: str) -> bool:
     """Structural junk gate for entity names.
 
@@ -151,12 +170,14 @@ def is_junk_entity_name(name: str) -> bool:
     (``app.processor.jobs.wiki_refresh``), and per adapter route
     (``app.services.external_apis.wiki_enrichment``). Rejects only shapes
     that cannot be real entities: empty / single characters, doc-file
-    paths, and pure version tokens.
+    paths, pure version tokens, and degenerate email fragments.
     """
     stripped = name.strip()
     if len(stripped) < _MIN_ENTITY_NAME_CHARS:
         return True
     if _is_doc_path_like(stripped):
+        return True
+    if _is_degenerate_email(stripped):
         return True
     return _is_version_token(stripped)
 
@@ -272,10 +293,11 @@ async def extract_entities_from_text(
         )
         return []
 
-    return _drop_unsupported(
+    supported = _drop_unsupported(
         list(_normalise_entities(parsed, min_confidence=min_confidence)),
         cleaned,
     )
+    return _drop_example_row_persons(supported, cleaned)
 
 
 # Corporate/legal suffixes to strip before checking presence, so "Apple Inc."
@@ -365,6 +387,41 @@ def _drop_unsupported(entities: list[Entity], text: str) -> list[Entity]:
             "entity_extraction.dropped %d of %d extracted entities absent from "
             "the source text", len(entities) - len(kept), len(entities),
         )
+    return kept
+
+
+# Example-row context: an INSERT/VALUES statement line, or a bare tuple row
+# from a multi-line VALUES list ("  ('John', 25),"). Sample-data personal
+# names pass every other check — the name IS present in the text — so the
+# gate is contextual: a PERSON whose every occurrence sits inside SQL
+# example rows is sample data, not a person the corpus is about. Names that
+# also appear in prose anywhere in the text are kept, which is what makes
+# this safe for a conversation corpus where the same shape is legitimate.
+_SQL_EXAMPLE_LINE_RE = re.compile(r"(?i)\b(?:insert\s+into|values\s*\()")
+_SQL_TUPLE_ROW_RE = re.compile(r"^\s*\(\s*['\"]")
+
+
+def _drop_example_row_persons(entities: list[Entity], text: str) -> list[Entity]:
+    """Drop PERSON entities that only ever occur inside SQL example rows."""
+    if not entities:
+        return []
+    lines = text.split("\n")
+    kept: list[Entity] = []
+    for ent in entities:
+        if ent.entity_type != "PERSON":
+            kept.append(ent)
+            continue
+        needle = ent.name.lower()
+        containing = [ln for ln in lines if needle in ln.lower()]
+        if containing and all(
+            _SQL_EXAMPLE_LINE_RE.search(ln) or _SQL_TUPLE_ROW_RE.match(ln)
+            for ln in containing
+        ):
+            logger.debug(
+                "entity_extraction.dropped_example_row_person name=%r", ent.name,
+            )
+            continue
+        kept.append(ent)
     return kept
 
 

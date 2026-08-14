@@ -368,12 +368,15 @@ describe("ConnectorDetail Pro gate", () => {
     // The original defect: forFlag() was called without its tier fallback, so
     // an unresolved flag returned AVAILABLE and the upgrade prompt vanished
     // exactly when the server could not be asked. Every connector here is Pro,
-    // so "unknown" must render locked, never unlocked.
+    // so "unknown" must render locked, never unlocked. WB-09: it must also say
+    // WHY — "is part of Cerid Pro" is a wrong, confident claim about a paying
+    // customer's tier when the truth is "couldn't check".
     mockCapabilities.mockRejectedValue(new Error("network down"))
     render(
       <ConnectorDetail connector={makeConnector()} open onClose={vi.fn()} />,
       { wrapper: wrap() },
     )
-    expect(await screen.findByText(/is part of Cerid Pro/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Couldn.t confirm your plan/i)).toBeInTheDocument()
+    expect(screen.queryByText(/is part of Cerid Pro/i)).not.toBeInTheDocument()
   })
 })

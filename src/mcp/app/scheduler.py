@@ -11,6 +11,7 @@ Execution results are logged to Redis for monitoring.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 import time
@@ -62,6 +63,15 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
         logger.warning(f"Failed to log scheduled job {job_name}: {e}")
 
 
+# Outcome of the most recent _enqueue_periodic call in this task's context.
+# Lets the manual-trigger wrapper (_run_and_invalidate) tell "the job body
+# enqueued real work" apart from "the job body collapsed into a duplicate and
+# ran nothing" — the latter must never be logged as a success (SF-2).
+_last_enqueue_outcome: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "cerid_periodic_enqueue_outcome", default=None,
+)
+
+
 async def _enqueue_periodic(queue: Any, job: Any, job_name: str, start: float) -> str | None:
     """Enqueue a recurring job with duplicate collapse.
 
@@ -82,11 +92,92 @@ async def _enqueue_periodic(queue: Any, job: Any, job_name: str, start: float) -
     else:
         job_id = await queue.enqueue(record)
     if job_id is None:
+        _last_enqueue_outcome.set("collapsed")
         _log_execution(job_name, "skipped", time.time() - start, "duplicate pending/running")
         logger.debug("%s enqueue skipped: equivalent job already pending or running", job_name)
     else:
+        _last_enqueue_outcome.set("enqueued")
         _log_execution(job_name, "enqueued", time.time() - start)
         logger.debug("%s enqueued via processor job_id=%s", job_name, job_id)
+    return job_id
+
+
+# AF-013: compute_entity_embeddings -> compute_umap_3d -> compute_trust_state ->
+# derive_domains are scheduled back-to-back at fixed cron offsets (15/30/31/32
+# past the hour) on the assumption each predecessor has drained by the time the
+# next one's cron tick fires. _enqueue_periodic never confirmed that — it logs
+# "enqueued" and returns, so a predecessor that overruns its window produces no
+# signal at all; the successor just runs (build_similarity_edges' AF-013 fix
+# addressed its own worst case — purging edges before checking data existed —
+# but the sequencing gap upstream of it was untouched). These four stages poll
+# the processor queue's own completion record instead of returning at enqueue
+# time, so a stage that is still running/failed/missing when its allotted
+# window elapses is logged as "timeout"/"error" rather than silently as
+# "enqueued". Bounded so a stuck job can never hang the scheduler loop.
+_STAGE_COMPLETION_TIMEOUT_S = float(os.getenv("SCHEDULER_STAGE_COMPLETION_TIMEOUT_S", "600"))
+_STAGE_COMPLETION_POLL_S = float(os.getenv("SCHEDULER_STAGE_COMPLETION_POLL_S", "5"))
+
+
+async def _enqueue_and_await_completion(
+    queue: Any, job: Any, job_name: str, start: float,
+) -> str | None:
+    """Enqueue via ``_enqueue_periodic``, then block until the job is terminal.
+
+    Used only by the compute_entity_embeddings/compute_umap_3d/
+    compute_trust_state/derive_domains graph-pipeline stages (AF-013) — the
+    other ``_enqueue_periodic`` callers (e.g. the 60 s ``ingest_recovery``
+    cron) deliberately keep fire-and-forget semantics; blocking those would
+    change their cadence contract.
+
+    Polls ``queue.list_recent`` (the same read path ``/processor/recent``
+    uses) rather than inventing a new completion channel. Logs the terminal
+    ``_log_execution`` status the queued path never emitted before (only
+    "enqueued" was ever recorded) so a stall or failure is finally visible to
+    the same execution log the direct-run fallback already writes to.
+    """
+    job_id = await _enqueue_periodic(queue, job, job_name, start)
+    if job_id is None:
+        return None  # collapsed into an already-pending/running duplicate
+
+    from core.processor.job import JobState  # noqa: PLC0415
+
+    list_recent = getattr(queue, "list_recent", None)
+    if list_recent is None:
+        # Queue implementation has no completion read path — can't observe
+        # terminal state; keep the "enqueued" log _enqueue_periodic already wrote.
+        return job_id
+
+    deadline = time.time() + _STAGE_COMPLETION_TIMEOUT_S
+    while time.time() < deadline:
+        await asyncio.sleep(_STAGE_COMPLETION_POLL_S)
+        try:
+            records = await list_recent(50)
+        except Exception as exc:  # noqa: BLE001 — polling must never crash the scheduler
+            log_swallowed_error("app.scheduler.await_completion", exc)
+            break
+        for record in records:
+            if record.id != job_id:
+                continue
+            duration = time.time() - start
+            if record.state == JobState.FAILED:
+                _log_execution(job_name, "error", duration, record.error_message or "")
+                logger.warning("%s job_id=%s failed: %s", job_name, job_id, record.error_message)
+            elif record.state == JobState.HELD:
+                _log_execution(job_name, "held", duration, "cost-cap hold")
+                logger.warning("%s job_id=%s held (cost cap)", job_name, job_id)
+            else:
+                _log_execution(job_name, "success", duration)
+                logger.info("%s job_id=%s completed state=%s", job_name, job_id, record.state)
+            return job_id
+
+    _log_execution(
+        job_name, "timeout", time.time() - start,
+        f"job_id={job_id} not observed completed within {_STAGE_COMPLETION_TIMEOUT_S:.0f}s",
+    )
+    logger.warning(
+        "%s job_id=%s did not reach a terminal state within %.0fs",
+        job_name, job_id, _STAGE_COMPLETION_TIMEOUT_S,
+    )
     return job_id
 
 
@@ -108,11 +199,13 @@ async def _run_daily_digest() -> None:
 
     start = time.time()
     if not is_feature_enabled("daily_digest"):
+        _log_execution("daily_digest", "skipped", time.time() - start, "feature disabled")
         return
     # Redis override wins; env fallback. Surfaced via the
     # Settings → System → Pro Automations card.
     from utils.pro_automations import is_enabled as _automation_enabled
     if not _automation_enabled("daily_digest"):
+        _log_execution("daily_digest", "skipped", time.time() - start, "operator toggle off")
         return
 
     try:
@@ -175,12 +268,14 @@ async def _run_inbox_triage() -> None:
 
     start = time.time()
     if not is_feature_enabled("inbox_triage"):
-        return  # feature off — silent skip
+        _log_execution("inbox_triage", "skipped", time.time() - start, "feature disabled")
+        return
     # Redis override wins; env fallback when Redis is unavailable.
     # Surfaced via the Settings → System → Pro Automations card.
     from utils.pro_automations import is_enabled as _automation_enabled
     if not _automation_enabled("inbox_triage"):
-        return  # operator hasn't flipped the toggle
+        _log_execution("inbox_triage", "skipped", time.time() - start, "operator toggle off")
+        return
 
     try:
         from core.agents.inbox_triage import triage_inboxes
@@ -275,6 +370,34 @@ async def _run_stale_detection() -> None:
         duration = time.time() - start
         _log_execution("stale_detection", "error", duration, str(e))
         logger.error(f"Scheduled stale detection failed: {e}")
+
+
+async def _run_test_residue_sweep() -> None:
+    """Purge crashed test runs' leftovers from the production KB (UX-14/20).
+
+    Same sweep as POST /admin/kb/purge-test-residue, applied. The sweep's
+    one-hour grace window keeps an in-flight live-stack test run's probes
+    alive; only abandoned residue is removed.
+    """
+    start = time.time()
+    try:
+        from app.services.kb_hygiene import sweep_test_residue
+
+        summary = await asyncio.to_thread(
+            sweep_test_residue, get_neo4j(), get_chroma(), apply=True,
+        )
+        duration = time.time() - start
+        detail = (
+            f"{summary['artifacts_purged']} artifacts, "
+            f"{summary['entities_purged']} entities"
+        )
+        _log_execution("test_residue_sweep", "success", duration, detail)
+        logger.info(f"Scheduled test-residue sweep: {detail} in {duration:.1f}s")
+    except Exception as e:
+        log_swallowed_error('app.scheduler', e)
+        duration = time.time() - start
+        _log_execution("test_residue_sweep", "error", duration, str(e))
+        logger.error(f"Scheduled test-residue sweep failed: {e}")
 
 
 async def _run_curator() -> None:
@@ -652,6 +775,7 @@ async def _run_email_poll() -> None:
         if result.get("messages"):
             logger.info("email_poll: %s in %.1fs", detail, duration)
     except Exception as e:  # noqa: BLE001 — scheduler error surface
+        log_swallowed_error('app.scheduler', e)
         _log_execution("email_poll", "error", time.time() - start, str(e))
         logger.error("email_poll scheduled job failed: %s", e)
 
@@ -682,12 +806,19 @@ async def _run_ingest_recovery() -> None:
             from app.processor.jobs.ingest_recovery import IngestRecoveryJob
             await _enqueue_periodic(queue, IngestRecoveryJob(), "ingest_recovery", start)
         else:
-            # Fallback: run the recovery service directly.
-            from app.services.ingest_recovery import recover_orphan, scan_orphans
+            # Fallback: run the recovery service directly. AF-003: group by
+            # artifact_id (same as the processor job's grouped path) so this
+            # fallback also rebuilds chunk_count as the real N, not 1.
+            from app.services.ingest_recovery import (
+                group_orphans_by_artifact,
+                recover_artifact,
+                scan_orphans,
+            )
             orphans = await scan_orphans()
+            groups = group_orphans_by_artifact(orphans)
             committed = purged = deferred = 0
-            for orphan in orphans:
-                action = await recover_orphan(orphan)
+            for group in groups.values():
+                action = await recover_artifact(group)
                 action_val = str(action.value) if hasattr(action, "value") else str(action)
                 if action_val == "committed":
                     committed += 1
@@ -734,6 +865,7 @@ async def _run_wiki_drift_lint() -> None:
         threshold = int(os.environ.get("WIKI_DRIFT_LINT_MIN_MENTIONS", "10"))
         driver = get_neo4j()
         if driver is None:
+            _log_execution("wiki_drift_lint", "skipped", time.time() - start, "neo4j unavailable")
             logger.warning("wiki_drift_lint: Neo4j unavailable, skipping")
             return
 
@@ -786,21 +918,46 @@ async def _run_wiki_drift_lint() -> None:
         buckets = await asyncio.to_thread(_scan)
         forced = 0
         debounced = 0
+        enqueue_failed = 0
         for slug in buckets["contradiction"]:
-            # Contradictions bypass debounce — fresh summary now
-            if enqueue_refresh(slug, force=True):
-                forced += 1
+            # Contradictions bypass debounce — fresh summary now.
+            # WB-44: enqueue_refresh now raises on a genuine Redis failure
+            # instead of swallowing it — catch per-slug so one bad slug
+            # doesn't abort the rest of this batch, but count it so the
+            # run's own status reflects it instead of reporting success.
+            try:
+                if enqueue_refresh(slug, force=True):
+                    forced += 1
+            except Exception as exc:  # noqa: BLE001 — one bad slug must not abort the batch
+                enqueue_failed += 1
+                log_swallowed_error(
+                    "app.scheduler.wiki_drift_lint.enqueue_contradiction",
+                    exc,
+                    context={"slug": slug},
+                )
         for slug in buckets["gap"]:
-            if enqueue_refresh(slug, force=False):
-                debounced += 1
+            try:
+                if enqueue_refresh(slug, force=False):
+                    debounced += 1
+            except Exception as exc:  # noqa: BLE001 — one bad slug must not abort the batch
+                enqueue_failed += 1
+                log_swallowed_error(
+                    "app.scheduler.wiki_drift_lint.enqueue_gap",
+                    exc,
+                    context={"slug": slug},
+                )
 
         duration = time.time() - start
         detail = (
             f"contradictions={len(buckets['contradiction'])} forced={forced} "
-            f"gaps={len(buckets['gap'])} enqueued={debounced}"
+            f"gaps={len(buckets['gap'])} enqueued={debounced} failed={enqueue_failed}"
         )
-        _log_execution("wiki_drift_lint", "success", duration, detail)
-        logger.info("wiki_drift_lint: %s in %.1fs", detail, duration)
+        if enqueue_failed:
+            _log_execution("wiki_drift_lint", "error", duration, detail)
+            logger.error("wiki_drift_lint: %s in %.1fs", detail, duration)
+        else:
+            _log_execution("wiki_drift_lint", "success", duration, detail)
+            logger.info("wiki_drift_lint: %s in %.1fs", detail, duration)
     except Exception as e:
         log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
@@ -833,6 +990,7 @@ async def _run_wiki_stale_sweep() -> None:
         limit = int(os.environ.get("WIKI_STALE_SWEEP_LIMIT", "100"))
         driver = get_neo4j()
         if driver is None:
+            _log_execution("wiki_stale_sweep", "skipped", time.time() - start, "neo4j unavailable")
             logger.warning("wiki_stale_sweep: Neo4j unavailable, skipping")
             return
 
@@ -877,17 +1035,34 @@ async def _run_wiki_stale_sweep() -> None:
 
         slugs = await asyncio.to_thread(_scan_with_cutoff)
         enqueued = 0
+        enqueue_failed = 0
         for slug in slugs:
             # Force=False so per-entity debounce still applies; if the
             # subscriber already enqueued for this slug in the last
             # WIKI_REFRESH_DEBOUNCE_TTL seconds, the sweep skips it.
-            if enqueue_refresh(slug, force=False):
-                enqueued += 1
+            # WB-44: enqueue_refresh now raises on a genuine Redis failure —
+            # catch per-slug so one bad slug doesn't abort the rest of the
+            # sweep the way the old swallow-and-continue behavior did, but
+            # count it so the run's own status reflects it.
+            try:
+                if enqueue_refresh(slug, force=False):
+                    enqueued += 1
+            except Exception as exc:  # noqa: BLE001 — one bad slug must not abort the batch
+                enqueue_failed += 1
+                log_swallowed_error(
+                    "app.scheduler.wiki_stale_sweep.enqueue",
+                    exc,
+                    context={"slug": slug},
+                )
 
         duration = time.time() - start
-        detail = f"candidates={len(slugs)} enqueued={enqueued} limit={limit}"
-        _log_execution("wiki_stale_sweep", "success", duration, detail)
-        logger.info("wiki_stale_sweep: %s in %.1fs", detail, duration)
+        detail = f"candidates={len(slugs)} enqueued={enqueued} failed={enqueue_failed} limit={limit}"
+        if enqueue_failed:
+            _log_execution("wiki_stale_sweep", "error", duration, detail)
+            logger.error("wiki_stale_sweep: %s in %.1fs", detail, duration)
+        else:
+            _log_execution("wiki_stale_sweep", "success", duration, detail)
+            logger.info("wiki_stale_sweep: %s in %.1fs", detail, duration)
     except Exception as e:
         log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
@@ -908,7 +1083,8 @@ async def _run_config_recommender() -> None:
         try:
             from app.main import app as _app  # type: ignore[import]
             queue = getattr(getattr(_app, "state", None), "processor_queue", None)
-        except Exception:  # noqa: BLE001 — queue probe is best-effort
+        except Exception as exc:  # noqa: BLE001 — queue probe is best-effort
+            log_swallowed_error("app.scheduler.config_recommender.queue_probe", exc)
             queue = None
 
         if queue is not None:
@@ -920,11 +1096,13 @@ async def _run_config_recommender() -> None:
 
             try:
                 driver = get_neo4j()
-            except Exception:  # noqa: BLE001 — direct-call fallback only
+            except Exception as exc:  # noqa: BLE001 — direct-call fallback only
+                log_swallowed_error("app.scheduler.config_recommender.get_neo4j", exc)
                 driver = None
             try:
                 redis_client = get_redis()
-            except Exception:  # noqa: BLE001 — direct-call fallback only
+            except Exception as exc:  # noqa: BLE001 — direct-call fallback only
+                log_swallowed_error("app.scheduler.config_recommender.get_redis", exc)
                 redis_client = None
             meta = run_recommender_sync(driver, redis_client)
             duration = time.time() - start
@@ -937,6 +1115,7 @@ async def _run_config_recommender() -> None:
                 "config_recommender (direct): %s in %.1fs", detail, duration,
             )
     except Exception as e:  # noqa: BLE001 — scheduler error surface
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("config_recommender", "error", duration, str(e))
         logger.error("config_recommender scheduled job failed: %s", e)
@@ -973,6 +1152,9 @@ async def _run_k_program_metrics() -> None:
                 script = candidate
                 break
         if script is None:
+            _log_execution(
+                "k_program_metrics", "skipped", time.time() - start, "script not present",
+            )
             logger.info(
                 "k_program_metrics script not present (host-side operator tool) "
                 "— skipping scheduled run",
@@ -1144,7 +1326,10 @@ async def _run_compute_entity_embeddings() -> None:
     """Nightly per-entity embedding compute (mean-pool mention chunk vectors).
 
     Runs BEFORE compute_umap_3d so semantic kNN edges and layout both pick up
-    fresh embeddings. Gated via SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS.
+    fresh embeddings. Gated via SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS. AF-013:
+    when queued, blocks on the job's own completion (bounded by
+    _STAGE_COMPLETION_TIMEOUT_S) so a stall or failure is logged instead of
+    silently outliving the window before compute_umap_3d's cron tick.
     """
     start = time.time()
     try:
@@ -1159,7 +1344,7 @@ async def _run_compute_entity_embeddings() -> None:
 
         job = ComputeEntityEmbeddingsJob()
         if queue is not None:
-            await _enqueue_periodic(queue, job, "compute_entity_embeddings", start)
+            await _enqueue_and_await_completion(queue, job, "compute_entity_embeddings", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1226,6 +1411,8 @@ async def _run_compute_umap_3d() -> None:
     it directly (mirrors _run_ingest_recovery). Emits the deterministic fallback
     layout today (no umap dependency); coords key off community_id so the
     Constellation/atlas view renders. Gated via SCHEDULE_COMPUTE_UMAP_3D.
+    AF-013: when queued, blocks on the job's own completion so a stall/failure
+    is logged before compute_trust_state's cron tick fires one minute later.
     """
     start = time.time()
     try:
@@ -1240,7 +1427,7 @@ async def _run_compute_umap_3d() -> None:
 
         job = ComputeUmap3DJob()
         if queue is not None:
-            await _enqueue_periodic(queue, job, "compute_umap_3d", start)
+            await _enqueue_and_await_completion(queue, job, "compute_umap_3d", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1258,6 +1445,8 @@ async def _run_compute_trust_state() -> None:
 
     Runs 1 minute after compute_umap_3d (default 4:31 AM) so trust_state
     is fresh when Constellation renders.  Gated via SCHEDULE_COMPUTE_TRUST_STATE.
+    AF-013: when queued, blocks on the job's own completion so a stall/failure
+    is logged before derive_domains' cron tick fires one minute later.
     """
     start = time.time()
     try:
@@ -1272,7 +1461,7 @@ async def _run_compute_trust_state() -> None:
 
         job = ComputeTrustStateJob()
         if queue is not None:
-            await _enqueue_periodic(queue, job, "compute_trust_state", start)
+            await _enqueue_and_await_completion(queue, job, "compute_trust_state", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1297,7 +1486,8 @@ async def _run_derive_domains() -> None:
     Runs 1 minute after compute_trust_state (default 3:32 AM) so
     primary_domain is fresh when graph surfaces render. Independent of
     umap — runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
-    Gated via SCHEDULE_DERIVE_DOMAINS.
+    Gated via SCHEDULE_DERIVE_DOMAINS. AF-013: when queued, blocks on the
+    job's own completion so a stall/failure is logged rather than silent.
     """
     start = time.time()
     try:
@@ -1312,7 +1502,7 @@ async def _run_derive_domains() -> None:
 
         job = DeriveDomainsJob()
         if queue is not None:
-            await _enqueue_periodic(queue, job, "derive_domains", start)
+            await _enqueue_and_await_completion(queue, job, "derive_domains", start)
         else:
             async def _noop(_pct: float) -> None:
                 return None
@@ -1399,6 +1589,7 @@ async def _run_memory_consolidation_sweep() -> None:
         _log_execution("memory_consolidation_sweep", "success", duration, detail)
         logger.info("memory_consolidation_sweep: %s in %.1fs", detail, duration)
     except Exception as e:  # noqa: BLE001 — scheduler error surface
+        log_swallowed_error('app.scheduler', e)
         duration = time.time() - start
         _log_execution("memory_consolidation_sweep", "error", duration, str(e))
         logger.error("memory_consolidation_sweep scheduled job failed: %s", e)
@@ -1477,6 +1668,55 @@ async def _run_session_summaries() -> None:
         logger.error("session_summaries scheduled job failed: %s", e)
 
 
+# AF-019: entries were ingested one at a time (each ingest_content call awaited
+# in turn), so a run draining WEBHOOK_DRAIN_MAX_PER_RUN entries paid their
+# combined latency serially. Bounded by the same concurrency budget as the
+# rest of ingestion (config.INGEST_CONCURRENCY) rather than a new knob.
+_webhook_drain_semaphore = asyncio.Semaphore(config.INGEST_CONCURRENCY)
+
+
+async def _drain_webhook_entry(
+    source_id: str, domain: str, raw: str,
+) -> tuple[int, int, str | None]:
+    """Ingest one drained webhook entry under the shared concurrency limit.
+
+    Returns ``(ingested_count, failed_count, deadletter_raw)`` — ``deadletter_raw``
+    is the original payload when it should be pushed to the deadletter list,
+    else ``None``. Never raises: a poison entry is isolated, not propagated.
+    """
+    import json as _json
+
+    from app.services.ingestion import ingest_content
+
+    async with _webhook_drain_semaphore:
+        try:
+            entry = _json.loads(raw)
+            arts = entry.get("normalized") or [
+                {"content": _json.dumps(entry.get("payload", {})), "title": "webhook payload"}
+            ]
+            ingested = 0
+            for art in arts:
+                content = (art.get("content") or "").strip()
+                if not content:
+                    continue
+                meta = {
+                    "source_id": source_id,
+                    "source_type": "webhook",
+                    "title": art.get("title", ""),
+                    "url": art.get("url", ""),
+                }
+                # ingest_content is sync + dedup-safe (content-hash), so a
+                # re-delivery is idempotent.
+                await asyncio.to_thread(
+                    ingest_content, content=content, domain=domain, metadata=meta,
+                )
+                ingested += 1
+            return ingested, 0, None
+        except Exception as exc:  # noqa: BLE001 — isolate poison entries
+            log_swallowed_error("app.scheduler.webhook_drain.ingest", exc)
+            return 0, 1, raw
+
+
 async def _run_webhook_drain() -> None:
     """Consume cerid:webhook_inbox:* and route entries into the KB.
 
@@ -1484,16 +1724,13 @@ async def _run_webhook_drain() -> None:
     token + HMAC, normalizes via the adapter recipe, rpush'es onto
     cerid:webhook_inbox:{source_id}, and returns 202 — but nothing consumed that
     list, so every webhook payload was accepted then stranded. This is that
-    consumer. Per entry: LPOP → ingest_content (dedup-safe) → on failure move to
+    consumer. Per entry: LPOP → ingest_content (dedup-safe, bounded-concurrency
+    via _webhook_drain_semaphore) → on failure move to
     cerid:webhook_deadletter:{source_id} so one poison entry can't loop forever
     or stall the source. Bounded per run. Gated via SCHEDULE_WEBHOOK_DRAIN.
     """
-    import json as _json
-
     start = time.time()
     try:
-        from app.services.ingestion import ingest_content
-
         rc = get_redis()
         if rc is None:
             _log_execution("webhook_drain", "skipped", time.time() - start, "redis unavailable")
@@ -1504,7 +1741,9 @@ async def _run_webhook_drain() -> None:
             k.decode() if isinstance(k, bytes) else k
             for k in rc.scan_iter(match="cerid:webhook_inbox:*", count=100)
         ]
-        ingested = failed = drained = 0  # AF-019: drained is the GLOBAL per-run bound
+        drained = 0  # AF-019: drained is the GLOBAL per-run bound
+        pending: list[asyncio.Task[tuple[int, int, str | None]]] = []
+        pending_source_ids: list[str] = []
         for key in keys:
             if drained >= max_per_run:  # AF-019: cap across ALL matched keys, not per-key
                 break
@@ -1530,39 +1769,38 @@ async def _run_webhook_drain() -> None:
                 drained += 1
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8", "replace")
-                try:
-                    entry = _json.loads(raw)
-                    arts = entry.get("normalized") or [
-                        {"content": _json.dumps(entry.get("payload", {})), "title": "webhook payload"}
-                    ]
-                    for art in arts:
-                        content = (art.get("content") or "").strip()
-                        if not content:
-                            continue
-                        meta = {
-                            "source_id": source_id,
-                            "source_type": "webhook",
-                            "title": art.get("title", ""),
-                            "url": art.get("url", ""),
-                            "provider": art.get("provider", ""),
-                            "received_at": entry.get("received_at", ""),
-                        }
-                        # ingest_content is sync + dedup-safe (content-hash), so a
-                        # re-delivery is idempotent.
-                        await asyncio.to_thread(
-                            ingest_content, content=content, domain=domain, metadata=meta,
-                        )
-                        ingested += 1
-                except Exception as exc:  # noqa: BLE001 — isolate poison entries
+                pending.append(asyncio.ensure_future(_drain_webhook_entry(source_id, domain, raw)))
+                pending_source_ids.append(source_id)
+
+        ingested = failed = 0
+        if pending:
+            results = await asyncio.gather(*pending, return_exceptions=True)
+            for source_id, result in zip(pending_source_ids, results, strict=True):
+                if isinstance(result, BaseException):
                     failed += 1
+                    log_swallowed_error("app.scheduler.webhook_drain.task", result)
+                    continue
+                entry_ingested, entry_failed, deadletter_raw = result
+                ingested += entry_ingested
+                failed += entry_failed
+                if deadletter_raw is not None:
                     try:
-                        rc.rpush(f"cerid:webhook_deadletter:{source_id}", raw)
+                        rc.rpush(f"cerid:webhook_deadletter:{source_id}", deadletter_raw)
                     except Exception as dlx:  # noqa: BLE001
                         log_swallowed_error("app.scheduler.webhook_drain.deadletter", dlx)
-                    log_swallowed_error("app.scheduler.webhook_drain.ingest", exc)
+
         duration = time.time() - start
         detail = f"keys={len(keys)} ingested={ingested} failed={failed} drained={drained}/{max_per_run}"
-        _log_execution("webhook_drain", "success", duration, detail)
+        # AF-019: a run that drained entries but ingested nothing, or that hit
+        # any failure, is not "success" — the prior unconditional success log
+        # hid poisoned/empty drains from observability.
+        if failed and ingested:
+            status = "partial"
+        elif failed or (drained and not ingested):
+            status = "error"
+        else:
+            status = "success"
+        _log_execution("webhook_drain", status, duration, detail)
         if ingested or failed:
             logger.info("webhook_drain: %s in %.1fs", detail, duration)
     except Exception as e:  # noqa: BLE001 — scheduler error surface
@@ -1571,12 +1809,41 @@ async def _run_webhook_drain() -> None:
         logger.error("webhook_drain scheduled job failed: %s", e)
 
 
+# apple_reminders is NOT pollable: its container-side SourceConnector was
+# removed (the Linux MCP container can never run the ceridreminders helper);
+# it now ingests through the desktop app like the other Apple bridge kinds.
 _POLLABLE_KINDS: tuple[SourceKind, ...] = (
     "rss",
     "url_watch",
     "apple_mail",
-    "apple_reminders",
 )
+
+
+def _publish_source_activity(rc, event) -> None:
+    """Publish a SourceArtifactEvent to the Redis pubsub channel the
+    ``/observability/source-activity`` SSE endpoint subscribes to.
+
+    Best-effort: a publish failure must never interrupt the poll loop that
+    is actually responsible for ingesting the artifact.
+    """
+    import json as _json
+
+    from core.ingest.sources.base import SOURCE_ACTIVITY_CHANNEL
+
+    try:
+        rc.publish(
+            SOURCE_ACTIVITY_CHANNEL,
+            _json.dumps({
+                "type": "artifact",
+                "source_id": event.source_id,
+                "artifact_id": event.artifact_id,
+                "elapsed_ms": event.elapsed_ms,
+                "title": event.title,
+                "domain": event.domain,
+            }),
+        )
+    except Exception as exc:  # noqa: BLE001 — observability boundary, never blocks ingestion
+        log_swallowed_error("app.scheduler.source_poll.publish_activity", exc)
 
 
 async def _run_source_poll() -> None:
@@ -1609,14 +1876,13 @@ async def _run_source_poll() -> None:
 
         for kind in _POLLABLE_KINDS:
             # Gate per KIND, not per job: rss and url_watch are core and must
-            # keep polling. `apple_mail` and `apple_reminders` are Pro and had
-            # NO check here at all — unlike _run_daily_digest and
-            # _run_inbox_triage, which both gate before doing any work. This
-            # job is registered unconditionally at */15, so a community install
-            # with either source on record kept ingesting mail and reminders
-            # indefinitely. POST /sources now refuses to create them, but that
-            # does nothing for sources created before that landed, which is
-            # exactly the population this loop walks.
+            # keep polling. `apple_mail` is Pro and had NO check here at all —
+            # unlike _run_daily_digest and _run_inbox_triage, which both gate
+            # before doing any work. This job is registered unconditionally at
+            # */15, so a community install with such a source on record kept
+            # ingesting mail indefinitely. POST /sources now refuses to create
+            # them, but that does nothing for sources created before that
+            # landed, which is exactly the population this loop walks.
             if KIND_TIER.get(kind) == "pro" and not is_tier_met("pro"):
                 logger.debug("source_poll: skipping %s — requires Pro", kind)
                 continue
@@ -1641,13 +1907,20 @@ async def _run_source_poll() -> None:
                         set_cursor(rc, driver, source_id, event.cursor_after)
                         ingested += 1
                         n += 1
+                        _publish_source_activity(rc, event)
                         if n >= max_arts:
                             break
                 except Exception as exc:  # noqa: BLE001 — one source's failure mustn't stop the sweep
                     log_swallowed_error("app.scheduler.source_poll.fetch", exc)
         duration = time.time() - start
         detail = f"polled={polled} ingested={ingested}"
-        _log_execution("source_poll", "success", duration, detail)
+        # AF-021: polled>0 with ingested==0 is not distinguishable from a healthy
+        # "nothing new" run if we always log "success" — it's also what an
+        # unwired ingest sink or a fully-swallowed fetch_since failure looks
+        # like, indefinitely. Report a non-success status so that case is
+        # visible instead of blending into every genuinely quiet poll.
+        status = "empty" if polled and not ingested else "success"
+        _log_execution("source_poll", status, duration, detail)
         if ingested:
             logger.info("source_poll: %s in %.1fs", detail, duration)
     except Exception as e:  # noqa: BLE001 — scheduler error surface
@@ -1761,10 +2034,21 @@ async def _run_and_invalidate(job_id: str, func: Any, args: Any, kwargs: Any) ->
     the underlying job body had.
     """
     _mt_start = time.time()
+    _last_enqueue_outcome.set(None)
     try:
         result = func(*(args or ()), **(kwargs or {}))
         if asyncio.iscoroutine(result):
             await result
+        if _last_enqueue_outcome.get() == "collapsed":
+            # The job body collapsed into an existing pending/running duplicate
+            # and ran nothing — the body already logged "skipped". Logging
+            # "success" here is exactly the false record SF-2 diagnosed, and
+            # busting the serving caches would re-warm them from stale data.
+            logger.info(
+                "manual trigger %s: collapsed into pending/running duplicate — no run occurred",
+                job_id,
+            )
+            return
         dropped = _bust_job_caches(job_id)
         if dropped:
             logger.info("manual trigger %s: busted %d cache key(s)", job_id, dropped)
@@ -1776,12 +2060,54 @@ async def _run_and_invalidate(job_id: str, func: Any, args: Any, kwargs: Any) ->
         _manual_running.discard(job_id)
 
 
+# Scheduler jobs whose cron body enqueues a processor job of the SAME name
+# with an empty payload (via _enqueue_periodic → enqueue_if_absent). Run-now
+# pre-checks these against the queue so a trigger that would collapse into a
+# live duplicate says so, instead of answering "started" and logging a
+# success for a run that never happened (SF-2). New _enqueue_periodic call
+# sites should be added here; the contextvar backstop in _run_and_invalidate
+# keeps the execution log honest even for ones that are not.
+_QUEUE_BACKED_JOBS: frozenset[str] = frozenset({
+    "ingest_recovery",
+    "config_recommender",
+    "compute_entity_embeddings",
+    "compute_umap_3d",
+    "compute_trust_state",
+    "derive_domains",
+    "backfill_enrichment",
+})
+
+
+def _live_duplicate_job_id(job_type: str) -> str | None:
+    """Id of a live pending/running processor duplicate for ``job_type``.
+
+    Delegates to the queue's own ``find_active_job_id``, which prunes
+    restart-orphaned stale markers as it scans — so a stale marker never
+    reads as "live" here. Fail-open: any error means "no duplicate found"
+    and the trigger proceeds (the pre-fix behaviour).
+    """
+    try:
+        from app.db.redis.processor_queue import find_active_job_id  # noqa: PLC0415
+
+        redis = get_redis()
+        if redis is None:
+            return None
+        return find_active_job_id(redis, job_type, payload={})
+    except Exception as exc:  # noqa: BLE001 — pre-check must never block a trigger
+        log_swallowed_error("app.scheduler.trigger.duplicate_check", exc)
+        return None
+
+
 def trigger_job(job_id: str) -> dict[str, Any]:
     """Fire a scheduled job immediately, out-of-band, on the running loop.
 
     The job must be live in the scheduler — a job gated off in this deployment
     is simply absent and reported as unknown rather than force-run. Concurrent
-    manual runs of the same job are coalesced.
+    manual runs of the same job are coalesced. For queue-backed jobs, a
+    genuinely live pending/running duplicate is reported as
+    ``collapsed_into_pending`` — never "started" — and no execution record is
+    written for a run that did not happen; a stale restart-orphaned marker is
+    pruned by the check itself, so the trigger then runs for real.
 
     Raises:
         KeyError: no such live job (router → 404).
@@ -1794,6 +2120,24 @@ def trigger_job(job_id: str) -> dict[str, Any]:
         raise KeyError(job_id)
     if job_id in _manual_running:
         raise ValueError(f"job '{job_id}' is already running")
+
+    if job_id in _QUEUE_BACKED_JOBS:
+        existing = _live_duplicate_job_id(job_id)
+        if existing is not None:
+            logger.info(
+                "manual trigger %s: live duplicate %s already pending/running — not started",
+                job_id, existing,
+            )
+            return {
+                "status": "collapsed_into_pending",
+                "id": job_id,
+                "name": job.name,
+                "existing_job_id": existing,
+                "detail": (
+                    f"an equivalent '{job_id}' job is already pending or running "
+                    f"(processor job {existing}); no new run was started"
+                ),
+            }
 
     _manual_running.add(job_id)
     asyncio.create_task(
@@ -1845,6 +2189,18 @@ def start_scheduler() -> AsyncIOScheduler:
         name="Weekly stale detection",
         replace_existing=True,
     )
+
+    # UX-14/20 — the guard against crashed test runs' residue re-accreting.
+    # Empty cron string disables (same convention as the digest cron).
+    if config.SCHEDULE_TEST_RESIDUE_SWEEP:
+        _scheduler.add_job(
+            _run_test_residue_sweep,
+            CronTrigger.from_crontab(config.SCHEDULE_TEST_RESIDUE_SWEEP),
+            id="test_residue_sweep",
+            name="Weekly test-residue purge",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # Phase K Day 1 — daily digest (default 7 AM UTC when
     # CERID_DAILY_DIGEST_ENABLED is set + daily_digest feature on).

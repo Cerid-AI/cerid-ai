@@ -615,29 +615,35 @@ class TestCurate:
         return gs
 
     @staticmethod
-    def _config_defaults(mock_config, domains=None):
-        mock_config.DOMAINS = domains or ["coding"]
-        mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
-        mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
-        mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
-        mock_config.QUALITY_WEIGHT_COMPLETENESS = 0.25
-        mock_config.QUALITY_SUMMARY_MIN_CHARS = 50
-        mock_config.QUALITY_SUMMARY_MAX_CHARS = 500
-        mock_config.QUALITY_KEYWORDS_OPTIMAL = 5
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+    def _config_defaults(monkeypatch, domains=None):
+        """Pin curator settings on the REAL config module, per setting.
+
+        Only the attributes curator.py actually reads are pinned. The old
+        whole-module mock also set four QUALITY_WEIGHT_* values the code
+        never consults (one of which does not even exist on the real
+        config) — the MagicMock accepted them silently.
+        """
+        settings = {
+            "DOMAINS": domains or ["coding"],
+            "QUALITY_SUMMARY_MIN_CHARS": 50,
+            "QUALITY_SUMMARY_MAX_CHARS": 500,
+            "QUALITY_KEYWORDS_OPTIMAL": 5,
+            "TEMPORAL_HALF_LIFE_DAYS": 30,
+            "DEFAULT_SUB_CATEGORY": "general",
+        }
+        for name, value in settings.items():
+            monkeypatch.setattr(f"core.agents.curator.config.{name}", value)
 
     @pytest.mark.asyncio
     @patch("core.agents.curator.utcnow")
     @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
-    @patch("core.agents.curator.config")
     async def test_correct_response_shape(
-        self, mock_config, mock_store, mock_utcnow
+        self, mock_store, mock_utcnow, monkeypatch
     ):
         """Verify curate() returns all expected keys."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        self._config_defaults(mock_config)
+        self._config_defaults(monkeypatch)
 
         gs = self._make_graph_store([[
             {"id": "art-1", "filename": "test.py", "summary": "a" * 100,
@@ -659,14 +665,13 @@ class TestCurate:
     @pytest.mark.asyncio
     @patch("core.agents.curator.utcnow")
     @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
-    @patch("core.agents.curator.config")
     async def test_domain_filtering(
-        self, mock_config, mock_store, mock_utcnow
+        self, mock_store, mock_utcnow, monkeypatch
     ):
         """When domains are specified, only those domains should be scored."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        self._config_defaults(mock_config, domains=["coding", "finance", "general"])
+        self._config_defaults(monkeypatch, domains=["coding", "finance", "general"])
 
         gs = self._make_graph_store([[]])  # finance returns empty
         mock_store.return_value = 0
@@ -679,14 +684,13 @@ class TestCurate:
     @pytest.mark.asyncio
     @patch("core.agents.curator.utcnow")
     @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
-    @patch("core.agents.curator.config")
     async def test_handles_neo4j_list_failure(
-        self, mock_config, mock_store, mock_utcnow
+        self, mock_store, mock_utcnow, monkeypatch
     ):
         """If list_artifacts raises for a domain, curate() continues with warning."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        self._config_defaults(mock_config, domains=["coding", "finance"])
+        self._config_defaults(monkeypatch, domains=["coding", "finance"])
 
         gs = self._make_graph_store([
             Exception("Neo4j connection error"),
@@ -703,14 +707,13 @@ class TestCurate:
     @pytest.mark.asyncio
     @patch("core.agents.curator.utcnow")
     @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
-    @patch("core.agents.curator.config")
     async def test_handles_store_failure(
-        self, mock_config, mock_store, mock_utcnow
+        self, mock_store, mock_utcnow, monkeypatch
     ):
         """If _store_quality_scores raises, curate() continues and reports 0 stored."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        self._config_defaults(mock_config)
+        self._config_defaults(monkeypatch)
 
         gs = self._make_graph_store([[
             {"id": "art-1", "filename": "test.py", "summary": "a" * 100,
@@ -726,14 +729,13 @@ class TestCurate:
     @pytest.mark.asyncio
     @patch("core.agents.curator.utcnow")
     @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
-    @patch("core.agents.curator.config")
     async def test_low_quality_artifacts_sorted(
-        self, mock_config, mock_store, mock_utcnow
+        self, mock_store, mock_utcnow, monkeypatch
     ):
         """Low quality artifacts (< 0.5) should be sorted ascending by score."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        self._config_defaults(mock_config)
+        self._config_defaults(monkeypatch)
 
         gs = self._make_graph_store([[
             {"id": "bad-1", "filename": "bad1.py", "summary": "",
@@ -753,14 +755,13 @@ class TestCurate:
     @pytest.mark.asyncio
     @patch("core.agents.curator.utcnow")
     @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
-    @patch("core.agents.curator.config")
     async def test_no_artifacts(
-        self, mock_config, mock_store, mock_utcnow
+        self, mock_store, mock_utcnow, monkeypatch
     ):
         """No artifacts across any domain -> avg_quality_score = 0.0."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        self._config_defaults(mock_config)
+        self._config_defaults(monkeypatch)
 
         gs = self._make_graph_store([[]])
         mock_store.return_value = 0
@@ -775,14 +776,13 @@ class TestCurate:
     @pytest.mark.asyncio
     @patch("core.agents.curator.utcnow")
     @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
-    @patch("core.agents.curator.config")
     async def test_max_artifacts_passed(
-        self, mock_config, mock_store, mock_utcnow
+        self, mock_store, mock_utcnow, monkeypatch
     ):
         """max_artifacts kwarg should be passed through to list_artifacts."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        self._config_defaults(mock_config)
+        self._config_defaults(monkeypatch)
 
         gs = self._make_graph_store([[]])
         mock_store.return_value = 0

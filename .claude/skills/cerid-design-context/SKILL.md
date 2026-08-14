@@ -134,7 +134,7 @@ When in doubt, add a `// drift-allowed: <reason>` annotation on the violation li
 
 Before reaching for raw markup, climb this ladder:
 
-1. **shadcn primitive** — `Button`, `Badge`, `Card`, `Dialog`, `AlertDialog`, `Tooltip`, `Popover`, `Sheet`, `Tabs`, `ScrollArea`, `Skeleton`, `Separator`, `Input`, `Textarea`, `Select`, `Checkbox`, `Switch`, `Slider`, `Label`, `HoverCard`, `ContextMenu`. (See `components/ui/`.)
+1. **shadcn primitive** — `Button`, `Badge`, `Card`, `Dialog`, `AlertDialog`, `Tooltip`, `Popover`, `Sheet`, `Tabs`, `ScrollArea`, `Skeleton`, `Separator`, `Input`, `Textarea`, `Select`, `Checkbox`, `Switch`, `Slider`, `Label`, `HoverCard`. (See `components/ui/`.)
 2. **Cerid primitive** — `EmptyState`, `LastUpdated`, `InfoTip`, `DomainBadge`, `DataState`, `PaneErrorBoundary`, `ProgressBar`, `Textarea`. (Also under `components/ui/`.)
 3. **Feature-area composite** — `VerifiedResponse`, `TrustScoreChip`, `ProcessorPane`, `InvariantsCard`, `GraphExplorer`. (Under domain dirs.)
 4. **Hand-rolled JSX** — last resort. If you do this, ask whether a primitive should be extracted instead.

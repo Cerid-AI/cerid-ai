@@ -77,6 +77,29 @@ def test_mbox_truncation_fields_present_when_over_cap(tmp_path, monkeypatch):
     assert "3 more messages truncated" in result["text"]
 
 
+def test_mbox_non_utf8_charset_decoded_via_declared_charset(tmp_path):
+    """WB-07: an mbox message declaring a non-UTF-8 charset must decode via
+    that charset, not get force-decoded as UTF-8."""
+    import mailbox
+
+    path = tmp_path / "nonutf8.mbox"
+    box = mailbox.mbox(str(path))
+    msg = mailbox.mboxMessage()
+    msg["From"] = "sender@example.com"
+    msg["To"] = "rcv@example.com"
+    msg["Subject"] = "Charset test"
+    msg["Date"] = "Mon, 1 Jan 2026 00:00:00 +0000"
+    text = "Café société - naïve Zürich Ünicode"
+    msg.set_payload(text, charset="iso-8859-1")
+    box.add(msg)
+    box.flush()
+    box.close()
+
+    result = parse_mbox(str(path))
+    assert text in result["text"]
+    assert "�" not in result["text"]
+
+
 def test_mbox_message_cap_env_var_honored(tmp_path, monkeypatch):
     """``config.MBOX_MESSAGE_CAP`` is read per-call (not import-time)."""
     monkeypatch.setattr("config.MBOX_MESSAGE_CAP", 1)

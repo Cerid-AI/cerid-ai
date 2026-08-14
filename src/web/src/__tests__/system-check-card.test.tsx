@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import { axe } from "jest-axe"
 import type { SystemCheckResponse } from "@/lib/types"
@@ -83,6 +83,41 @@ describe("SystemCheckCard", () => {
     await waitFor(() => {
       expect(screen.getByText("Could not reach backend — is Docker running?")).toBeInTheDocument()
     })
+  })
+})
+
+describe("SystemCheckCard — desktop bridge (RA-01 / RA-02)", () => {
+  afterEach(() => {
+    delete (window as unknown as { cerid?: object }).cerid
+  })
+
+  it("fills the RAM row from window.cerid.system.requirements when the REST poll fails", async () => {
+    // Fresh Mac, no Docker: the backend is unreachable, but the desktop
+    // bridge knows the machine's RAM — the row must not sit on "Unknown".
+    mockFetchSystemCheck.mockRejectedValue(new Error("Network error"))
+    ;(window as unknown as { cerid: object }).cerid = {
+      system: {
+        requirements: vi.fn().mockResolvedValue({
+          ram_gb: 32,
+          disk_free_gb: 400,
+          ram_sufficient: true,
+          disk_sufficient: true,
+        }),
+      },
+    }
+    render(<SystemCheckCard onCheckComplete={vi.fn()} />)
+    expect(await screen.findByText(/32 GB — recommended config/)).toBeInTheDocument()
+  })
+
+  it("uses the platform-correct Docker Desktop URL from the bridge for the download link", async () => {
+    mockFetchSystemCheck.mockResolvedValue({ ...HEALTHY_RESULT, docker_running: false })
+    const bridgeUrl = "https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+    ;(window as unknown as { cerid: object }).cerid = {
+      docker: { downloadUrl: vi.fn().mockResolvedValue(bridgeUrl) },
+    }
+    render(<SystemCheckCard onCheckComplete={vi.fn()} />)
+    const link = await screen.findByRole("link", { name: /download docker desktop/i })
+    await waitFor(() => expect(link).toHaveAttribute("href", bridgeUrl))
   })
 })
 

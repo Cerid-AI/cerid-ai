@@ -134,3 +134,80 @@ class TestTierGating:
         with patch("plugins.is_tier_met", return_value=True):
             result = load_plugins(str(tmp_path))
         assert "pro_plugin" in result
+
+
+class TestFeatureFlagGating:
+    """A plugin's declared manifest.feature_flags must gate loading, not just
+    get collected for health-surface reporting (AF-081)."""
+
+    def test_plugin_skipped_when_declared_flag_disabled(self, tmp_path):
+        from plugins import _failed_plugins, _loaded_plugins, load_plugins
+
+        _loaded_plugins.clear()
+        _failed_plugins.clear()
+
+        d = tmp_path / "flagged_plugin"
+        d.mkdir()
+        (d / "manifest.json").write_text(
+            json.dumps({
+                "name": "flagged_plugin", "version": "1.0.0", "type": "parser",
+                "feature_flags": ["some_disabled_flag"],
+            })
+        )
+        (d / "plugin.py").write_text("def register(): pass\n")
+
+        with patch("plugins.is_feature_enabled", return_value=False):
+            result = load_plugins(str(tmp_path))
+        assert result == []
+        assert "flagged_plugin" in _failed_plugins
+        assert _failed_plugins["flagged_plugin"]["error_type"] == "FeatureFlagDisabledError"
+
+    def test_plugin_loads_when_declared_flag_enabled(self, tmp_path):
+        from plugins import _loaded_plugins, load_plugins
+
+        _loaded_plugins.clear()
+
+        d = tmp_path / "flagged_plugin"
+        d.mkdir()
+        (d / "manifest.json").write_text(
+            json.dumps({
+                "name": "flagged_plugin", "version": "1.0.0", "type": "parser",
+                "feature_flags": ["some_enabled_flag"],
+            })
+        )
+        (d / "plugin.py").write_text("def register(): pass\n")
+
+        with patch("plugins.is_feature_enabled", return_value=True):
+            result = load_plugins(str(tmp_path))
+        assert "flagged_plugin" in result
+
+    def test_plugin_with_no_declared_flags_is_unaffected(self, tmp_path):
+        """Absence of `feature_flags` in the manifest must not gate anything."""
+        from plugins import _loaded_plugins, load_plugins
+
+        _loaded_plugins.clear()
+
+        d = tmp_path / "unflagged_plugin"
+        d.mkdir()
+        (d / "manifest.json").write_text(
+            json.dumps({"name": "unflagged_plugin", "version": "1.0.0", "type": "parser"})
+        )
+        (d / "plugin.py").write_text("def register(): pass\n")
+
+        result = load_plugins(str(tmp_path))
+        assert "unflagged_plugin" in result
+
+    def test_real_voice_memos_manifest_flag_now_gates_loading(self):
+        """AF-081: `voice_memos_watch` was declared in the real manifest
+        (src/mcp/plugins/voice_memos/manifest.json) but had zero readers
+        anywhere — flipping it had no effect. It's now read by the same
+        admission check exercised above; this pins that against the real
+        plugin directory, not just a synthetic one."""
+        import plugins as plugins_mod
+        from plugins import _load_single_plugin, _loaded_plugins
+        root = Path(plugins_mod.__file__).resolve().parent / "voice_memos"
+
+        _loaded_plugins.clear()
+        with patch("plugins.is_feature_enabled", return_value=False):
+            info = _load_single_plugin(root)
+        assert info is None

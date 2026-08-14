@@ -668,8 +668,9 @@ class TestCommunityArtifactsShortLabel:
 
         job = self._make_job()
         result = job._first_clause("Artificial intelligence shapes future tech. More text.", 32)
-        # Should split on '.' and return first clause ≤32 chars
-        assert result == "Artificial intelligence shapes f"
+        # Should split on '.' and truncate at a word boundary with an
+        # ellipsis — never mid-word (UX-15).
+        assert result == "Artificial intelligence shapes…"
         assert len(result) <= 32
 
     def test_first_clause_empty(self):

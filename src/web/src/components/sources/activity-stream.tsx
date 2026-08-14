@@ -44,6 +44,7 @@ import { fetchIngestionProgress } from "@/lib/api/kb"
 import { fetchIngestHistory } from "@/lib/api/settings"
 import type { IngestionFileProgress, IngestHistoryEntry } from "@/lib/types"
 import { ProgressBar } from "@/components/ui/progress-bar"
+import { PaneError } from "@/components/ui/pane-error"
 
 const ACTIVE_POLL_MS = 3_000
 const HISTORY_POLL_MS = 30_000
@@ -157,12 +158,20 @@ function HistoryRow({ entry, isFresh }: { entry: IngestHistoryEntry; isFresh: bo
 // ---------------------------------------------------------------------------
 
 export function SourcesActivityStream() {
-  const { data: progress } = useQuery({
+  const {
+    data: progress,
+    isError: progressError,
+    refetch: refetchProgress,
+  } = useQuery({
     queryKey: ["ingestion-progress"],
     queryFn: fetchIngestionProgress,
     refetchInterval: ACTIVE_POLL_MS,
   })
-  const { data: history } = useQuery({
+  const {
+    data: history,
+    isError: historyError,
+    refetch: refetchHistory,
+  } = useQuery({
     queryKey: ["ingest-history"],
     queryFn: () => fetchIngestHistory(30),
     refetchInterval: HISTORY_POLL_MS,
@@ -192,6 +201,28 @@ export function SourcesActivityStream() {
   }, [progress])
 
   const historyEntries = history?.items ?? []
+
+  // Cold-mount failure: nothing loaded and at least one query errored. Without
+  // this branch a backend outage rendered the new-user "No activity yet"
+  // onboarding card — error presented in the success voice. After a successful
+  // load, react-query keeps the last data through failed polls, so this only
+  // fires when there is genuinely nothing to show.
+  if (activeFiles.length === 0 && historyEntries.length === 0 && (progressError || historyError)) {
+    return (
+      <div className="flex h-full items-center justify-center p-12">
+        <div className="w-full max-w-md">
+          <PaneError
+            title="Couldn't load activity"
+            description="The ingestion backend is unreachable."
+            onRetry={() => {
+              void refetchProgress()
+              void refetchHistory()
+            }}
+          />
+        </div>
+      </div>
+    )
+  }
 
   if (activeFiles.length === 0 && historyEntries.length === 0) {
     return (

@@ -75,3 +75,20 @@ async def test_exception_is_caught_and_logged(monkeypatch) -> None:
     )
     await sched._run_email_poll()  # must not raise
     assert calls[0][1] == "error"
+
+
+@pytest.mark.asyncio
+async def test_exception_reaches_swallowed_error_counter(monkeypatch) -> None:
+    """AF-039: the outer catch must also call log_swallowed_error, not just
+    _log_execution — otherwise the failure is invisible to
+    /health.swallowed_errors_last_hour."""
+    swallowed_calls: list[tuple] = []
+    monkeypatch.setattr(
+        sched, "log_swallowed_error", lambda *a, **k: swallowed_calls.append(a)
+    )
+    monkeypatch.setattr(
+        "app.data_sources.email_imap.poll_email",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    await sched._run_email_poll()
+    assert swallowed_calls and swallowed_calls[0][0] == "app.scheduler"

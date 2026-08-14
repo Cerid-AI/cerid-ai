@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import platform
 import uuid
 from http import HTTPStatus
 from pathlib import Path
@@ -31,6 +30,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core.utils.swallowed import log_swallowed_error
+from utils.host_info import get_host_hardware
 
 _logger = logging.getLogger("ai-companion.whisper_models")
 
@@ -100,7 +100,15 @@ _HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
 
 def _is_apple_silicon() -> bool:
-    return platform.system() == "Darwin" and platform.machine() == "arm64"
+    """Detect Apple Silicon on the *host*, not the container.
+
+    ``platform.system()``/``platform.machine()`` report the container's own
+    Linux environment, so a plain check here always reads CPU regardless of
+    the host. ``get_host_hardware()`` reads the HOST_* env vars start-cerid.sh
+    propagates from the real host (precedent: setup.py's ``/system-check``).
+    """
+    hw = get_host_hardware()
+    return hw.os.lower().startswith("macos") and "apple" in hw.cpu.lower()
 
 
 def _cache_dir() -> Path:

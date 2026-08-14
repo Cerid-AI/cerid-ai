@@ -121,7 +121,7 @@ class SDKMemoryExtractAcceptedResponse(_SDKBase):
     queue isn't enabled.
     """
 
-    job_id: str = Field(description="RQ job identifier — opaque to callers, use as-is in the status URL")
+    job_id: str = Field(description="Background job identifier — opaque to callers, use as-is in the status URL")
     status: str = Field(default="queued", description="Initial job status — always 'queued' on accept")
     status_url: str = Field(
         description="Path to GET for the job result. Relative to the SDK base URL.",
@@ -138,7 +138,7 @@ class SDKMemoryExtractJobStatus(_SDKBase):
     ``status='failed'``.
     """
 
-    job_id: str = Field(description="RQ job identifier")
+    job_id: str = Field(description="Background job identifier")
     status: str = Field(
         description=(
             "Job lifecycle state — one of: queued | started | finished | "

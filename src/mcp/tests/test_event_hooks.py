@@ -168,6 +168,52 @@ class TestWikiRefreshSubscriber:
 
         assert wiki_refresh.enqueue_refresh("") is False
 
+    # WB-44 --- genuine failures propagate instead of collapsing to False -------
+
+    def test_genuine_enqueue_failure_raises_not_swallowed(self, monkeypatch):
+        """A real Redis/enqueue failure must propagate — the manual-refresh
+        router relies on this to turn it into a 500 instead of a 202 that
+        claims the refresh was queued when it never reached Redis."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True  # debounce acquired, proceeds to enqueue
+        mock_enqueue = MagicMock(side_effect=ConnectionError("redis down"))
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            with pytest.raises(ConnectionError, match="redis down"):
+                wiki_refresh.enqueue_refresh("org:tesla")
+
+    def test_one_bad_slug_does_not_abort_the_batch(self, monkeypatch):
+        """AF/WB-44: _on_entities_added must still enqueue the remaining slugs
+        when one slug's enqueue_refresh raises."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+
+        def _enqueue_side_effect(job, payload=None):
+            if payload.get("entity_slug") == "org:broken":
+                raise ConnectionError("redis down")
+            return "job-id"
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job", side_effect=_enqueue_side_effect),
+            patch("core.utils.swallowed.log_swallowed_error"),
+        ):
+            wiki_refresh._on_entities_added({
+                "artifact_id": "a1",
+                "entity_slugs": ["org:broken", "org:tesla"],
+            })
+
+        # org:tesla still got its debounce+enqueue attempt despite org:broken
+        # raising first in the loop.
+        assert mock_redis.set.call_count == 2
+
     # WK4 --- grew-trigger tests -------------------------------------------------
 
     def test_grew_trigger_enqueues_debounced_for_existing_entity(self, monkeypatch):

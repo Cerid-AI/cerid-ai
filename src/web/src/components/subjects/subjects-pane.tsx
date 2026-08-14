@@ -4,7 +4,7 @@
 // Subjects pane — consolidates the legacy Knowledge / Wiki / Communities /
 // Memories panes into a single surface with a 4-way mode switcher:
 //   Atlas (DOM icicle decomposition by default; Neighborhood mode when entity target)
-//   Constellation (3D cinematic, Phase B)
+//   Constellation (cartographic map + cosmos.gl Live)
 //   Timeline (chronological scrubber, Phase M)
 //   Wiki (text page with provenance, Phase A)
 //
@@ -18,7 +18,7 @@
 // ?entity= with mode=atlas lands DIRECTLY in Neighborhood mode (E-17 contract).
 
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
-import { Bookmark, Compass, Sparkles, Clock, BookOpen, Loader2 } from "lucide-react"
+import { Bookmark, Compass, Sparkles, Clock, BookOpen, Network, Loader2 } from "lucide-react"
 import { useNavigation } from "@/contexts/navigation-context"
 import { Atlas } from "./atlas/Atlas"
 import { DecompositionIcicle } from "./atlas/decomposition"
@@ -31,17 +31,23 @@ import { listAtlasViews, type AtlasView } from "@/lib/api/atlas-views"
 import type { AtlasTierPosition } from "@/lib/graph/cycle4-contracts"
 
 const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
-// Lazy-load Constellation so the three.js bundle (~250KB gzipped)
-// only enters memory when the user actually picks 3D mode.
+// Lazy-load Constellation so the sigma map (and, on demand, the cosmos
+// Live chunk) only enters memory when the user opens the mode.
 const Constellation = lazy(() => import("./constellation/Constellation"))
 const Timeline = lazy(() => import("./timeline/Timeline"))
+// RA-11: Leiden community explorer (Phase R.2) — a distinct surface from
+// Constellation, which reads a different community-hierarchy endpoint. Was
+// shipped but never mounted anywhere reachable; restored here as a mode.
+const Communities = lazy(() =>
+  import("@/components/kb/graph-explorer").then((m) => ({ default: m.GraphExplorer })),
+)
 const EntityAnalysisDrawer = lazy(() =>
   import("./constellation/entity-analysis-drawer").then((m) => ({
     default: m.EntityAnalysisDrawer,
   })),
 )
 
-export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki"
+export type SubjectsMode = "atlas" | "constellation" | "timeline" | "wiki" | "communities"
 
 const MODE_DEFS: Array<{
   id: SubjectsMode
@@ -51,9 +57,10 @@ const MODE_DEFS: Array<{
   available: boolean
 }> = [
   { id: "atlas", label: "Atlas", icon: Compass, description: "2D analytic graph", available: true },
-  { id: "constellation", label: "Constellation", icon: Sparkles, description: "3D cinematic view", available: true },
+  { id: "constellation", label: "Constellation", icon: Sparkles, description: "Cartographic knowledge map", available: true },
   { id: "timeline", label: "Timeline", icon: Clock, description: "Chronological scrubber", available: true },
   { id: "wiki", label: "Wiki", icon: BookOpen, description: "Text page with provenance", available: true },
+  { id: "communities", label: "Communities", icon: Network, description: "Leiden community clusters", available: true },
 ]
 
 // Atlas view sub-state:
@@ -83,11 +90,12 @@ function ViewsPopoverButton({
   mode: SubjectsMode
   onRestore: (view: AtlasView) => void
 }) {
-  const { data: views } = useQuery({
+  const { data: views, isLoading, isError } = useQuery({
     queryKey: ["subjects-views", mode],
     queryFn: () => listAtlasViews({ mode }),
     staleTime: 30_000,
   })
+  const countKnown = !isLoading && !isError
   const count = views?.length ?? 0
   return (
     <Popover>
@@ -95,10 +103,10 @@ function ViewsPopoverButton({
         <button
           type="button"
           className="relative flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/40"
-          aria-label={`Saved views (${count})`}
+          aria-label={countKnown ? `Saved views (${count})` : "Saved views"}
         >
           <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />
-          {count > 0 && (
+          {countKnown && count > 0 && (
             <span className="min-w-[1rem] rounded-full bg-accent px-1 text-center text-label-xs font-medium leading-4 text-accent-foreground tabular-nums"> {/* drift-allowed: min-w-[1rem] pins badge-centering width for single/double-digit counts */}
               {count}
             </span>
@@ -283,7 +291,7 @@ export default function SubjectsPane() {
             )
           })}
         </div>
-        {focalEntity && mode !== "wiki" && (
+        {focalEntity && mode !== "wiki" && mode !== "communities" && (
           <span
             className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-0.5 text-label-xs font-medium text-foreground"
             style={{ viewTransitionName: "focal-entity" }} // drift-allowed: View Transition API requires setting view-transition-name via inline style; no Tailwind utility exists
@@ -311,7 +319,7 @@ export default function SubjectsPane() {
           mode={mode}
           onRestore={(view) => {
             setFocalEntity(view.entity)
-            const validModes: SubjectsMode[] = ["atlas", "constellation", "timeline", "wiki"]
+            const validModes: SubjectsMode[] = ["atlas", "constellation", "timeline", "wiki", "communities"]
             if (validModes.includes(view.mode as SubjectsMode)) {
               setMode(view.mode as SubjectsMode)
             }
@@ -413,6 +421,7 @@ export default function SubjectsPane() {
           >
             <Timeline
               onEntityPick={handleEntityPick}
+              focalEntity={focalEntity}
             />
           </Suspense>
         )}
@@ -426,6 +435,24 @@ export default function SubjectsPane() {
             }
           >
             <WikiPane />
+          </Suspense>
+        )}
+        {mode === "communities" && (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading Communities…
+              </div>
+            }
+          >
+            {/* Member entity pill → stay in Subjects, switch to Wiki (same
+                contract as the Atlas/Constellation "Open in Wiki" action)
+                instead of GraphExplorer's standalone-mount default, which
+                navigates to a top-level "wiki" pane that no longer exists on
+                its own. "Ask about this community" keeps GraphExplorer's
+                default — it already calls navigation.composeChat(). */}
+            <Communities onEntityClick={handleOpenInWiki} />
           </Suspense>
         )}
         </div>

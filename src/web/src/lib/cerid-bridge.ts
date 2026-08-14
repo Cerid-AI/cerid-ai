@@ -23,7 +23,13 @@ export interface ConnectionInfo {
 export interface ConnectionBridge {
   get(): Promise<ConnectionInfo>
   set(next: { mode: ConnectionMode; serverUrl: string; apiKey?: string }): Promise<ConnectionInfo>
-  test(next: { serverUrl: string; apiKey?: string }): Promise<{ ok: boolean; detail: string }>
+  test(next: { serverUrl: string; apiKey?: string }): Promise<{
+    ok: boolean
+    detail: string
+    /** 'required' means the server answered 401/403 — a different problem from
+     *  'unknown', which means we could not tell. Never collapse them. */
+    auth?: "ok" | "required" | "unknown"
+  }>
 }
 
 /** Returns the desktop connection bridge, or null in the browser build. */

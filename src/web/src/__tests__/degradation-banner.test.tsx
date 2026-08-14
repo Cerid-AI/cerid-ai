@@ -76,13 +76,11 @@ describe("DegradationBanner", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("renders nothing when health fetch fails", async () => {
+  it("renders an unknown-status banner when the health fetch fails, not the healthy 'full' tier", async () => {
     mockedFetch.mockRejectedValue(new Error("fail"))
     renderWithQuery(<DegradationBanner />)
-    await vi.waitFor(() => {
-      expect(mockedFetch).toHaveBeenCalled()
-    })
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    const alert = await screen.findByRole("alert")
+    expect(alert.textContent).toMatch(/system status unknown/)
   })
 
   // ---- Check Now button ----

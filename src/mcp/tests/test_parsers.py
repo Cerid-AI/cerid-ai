@@ -474,6 +474,61 @@ class TestParseEml:
         result = parse_file(str(f))
         assert result["file_type"] == "eml"
 
+    def test_eml_non_utf8_charset_decoded_via_declared_charset(self, tmp_path):
+        """WB-07: a message declaring a non-UTF-8 charset must decode via
+        that charset, not get force-decoded as UTF-8.
+
+        Before the fix, every accented character below became U+FFFD
+        regardless of what the part's own ``Content-Type`` said.
+        """
+        text = "Café société - naïve Zürich Ünicode"
+        msg = email.mime.text.MIMEText(text, "plain", "iso-8859-1")
+        msg["Subject"] = "Charset test"
+        msg["From"] = "alice@example.com"
+        msg["To"] = "bob@example.com"
+        msg["Date"] = "Mon, 28 Feb 2026 12:00:00 +0000"
+
+        f = tmp_path / "nonutf8.eml"
+        f.write_bytes(msg.as_bytes())
+
+        result = parse_file(str(f))
+        assert text in result["text"]
+        assert "�" not in result["text"]
+
+    def test_eml_html_non_utf8_charset_decoded_via_declared_charset(self, tmp_path):
+        """Same fix, HTML part: the charset comes from Content-Type, not UTF-8."""
+        text = "Café société"
+        msg = email.mime.text.MIMEText(f"<p>{text}</p>", "html", "iso-8859-1")
+        msg["Subject"] = "HTML charset test"
+        msg["From"] = "alice@example.com"
+        msg["To"] = "bob@example.com"
+        msg["Date"] = "Mon, 28 Feb 2026 12:00:00 +0000"
+
+        f = tmp_path / "nonutf8-html.eml"
+        f.write_bytes(msg.as_bytes())
+
+        result = parse_file(str(f))
+        assert text in result["text"]
+        assert "�" not in result["text"]
+
+    def test_eml_bogus_charset_falls_back_without_raising(self, tmp_path):
+        """An unresolvable charset name must not crash the parse."""
+        msg = email.mime.text.MIMEText("hello", "plain")
+        msg.set_charset(None)
+        msg.replace_header("Content-Type", "text/plain; charset=bogus-charset-xyz")
+        del msg["Content-Transfer-Encoding"]
+        msg["Content-Transfer-Encoding"] = "8bit"
+        msg["Subject"] = "Bogus charset"
+        msg["From"] = "alice@example.com"
+        msg["To"] = "bob@example.com"
+        msg["Date"] = "Mon, 28 Feb 2026 12:00:00 +0000"
+
+        f = tmp_path / "bogus-charset.eml"
+        f.write_bytes(msg.as_bytes())
+
+        result = parse_file(str(f))
+        assert "hello" in result["text"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: parse_rtf (real filesystem, pure function)

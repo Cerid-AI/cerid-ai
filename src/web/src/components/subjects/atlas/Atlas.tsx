@@ -532,7 +532,7 @@ function PillToolbar({
                   : "border-border/30 text-muted-foreground/40"
               }`}
             >
-              {type}
+              {type === "unknown" ? "untyped" : type}
               <span className="ml-1 text-muted-foreground/60">{count}</span>
             </button>
           )

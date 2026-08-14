@@ -698,13 +698,19 @@ async def source_activity_stream(
     Pass ``?source_id=<uuid>`` to scope to a single source (used by
     the source-detail pane's per-source activity feed).
 
-    Phase 1 ships the endpoint shape. The actual artifact-arrival
-    subscriber wires up in Phase 2 when the connector implementations
-    land — until then this emits keepalive comments so the FE can
-    render the connection-established state.
+    Subscribes to the Redis pubsub channel ``app.scheduler._run_source_poll``
+    publishes each ingested artifact to (``core.ingest.sources.base
+    .SOURCE_ACTIVITY_CHANNEL``). A 15s idle timeout emits a keepalive comment
+    so the connection survives quiet periods and reverse proxies don't time
+    it out.
     """
     import asyncio
     import json as _json
+
+    import redis.asyncio as redis_asyncio
+
+    import config
+    from core.ingest.sources.base import SOURCE_ACTIVITY_CHANNEL
 
     async def event_generator():
         # Initial connected event so the FE can confirm subscription.
@@ -712,15 +718,44 @@ async def source_activity_stream(
             f"data: {_json.dumps({'type': 'connected', 'source_id': source_id})}\n\n"
         ).encode("utf-8")
 
-        # Phase 1 placeholder loop — emits a keepalive every 15s.
-        # Phase 2 swaps in the real subscriber (Redis pubsub from the
-        # ingestion service publishes artifact-arrival events).
+        client = redis_asyncio.from_url(config.REDIS_URL, decode_responses=True)
+        pubsub = client.pubsub()
         try:
+            await pubsub.subscribe(SOURCE_ACTIVITY_CHANNEL)
             while True:
-                await asyncio.sleep(15)
-                yield b": keepalive\n\n"
+                try:
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=15.0,
+                    )
+                except asyncio.CancelledError:
+                    return
+                except Exception as exc:  # noqa: BLE001 — observability boundary
+                    log_swallowed_error("observability.source_activity.pubsub", exc)
+                    yield b": keepalive\n\n"
+                    continue
+
+                if message is None:
+                    yield b": keepalive\n\n"
+                    continue
+
+                try:
+                    payload = _json.loads(message["data"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+
+                if source_id and payload.get("source_id") != source_id:
+                    continue
+
+                yield f"data: {_json.dumps(payload)}\n\n".encode("utf-8")
         except asyncio.CancelledError:
             return
+        finally:
+            try:
+                await pubsub.unsubscribe(SOURCE_ACTIVITY_CHANNEL)
+                await pubsub.close()
+                await client.close()
+            except Exception as exc:  # noqa: BLE001 — best-effort cleanup on disconnect
+                log_swallowed_error("observability.source_activity.pubsub_close", exc)
 
     return StreamingResponse(
         event_generator(),

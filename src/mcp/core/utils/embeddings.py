@@ -261,8 +261,8 @@ class OnnxEmbeddingFunction:
 
         # Sidecar fast-path — only when explicitly preferred by inference
         # detection AND reachable. Sync-bridge to async via the proven
-        # ThreadPoolExecutor pattern (mirrors core.utils.contextual and
-        # app.queue.tasks; chromadb's EmbeddingFunction.__call__ is sync).
+        # ThreadPoolExecutor pattern (mirrors core.utils.contextual;
+        # chromadb's EmbeddingFunction.__call__ is sync).
         sidecar_result = self._maybe_embed_via_sidecar(input)
         if sidecar_result is not None:
             # Same ndarray-row requirement as the Quenchforge branch above.

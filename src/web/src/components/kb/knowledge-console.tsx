@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils"
 import { fetchDataSources, updateSettings } from "@/lib/api"
 import { useNavigation } from "@/contexts/navigation-context"
 import { IngestionProgress } from "./ingestion-progress"
+import { DegradedBanner } from "@/components/chat/degraded-banner"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
 
@@ -370,6 +371,7 @@ export function KnowledgeConsole({
   isError,
   refetch,
   hasQueried,
+  degradedReason,
   kbSources,
   memorySources,
   externalSources,
@@ -452,6 +454,14 @@ export function KnowledgeConsole({
           <AlertCircle className="h-4 w-4 text-destructive" />
           <span className="text-sm">Query failed</span>
           <button onClick={() => refetch()} className="text-xs text-primary hover:underline">Retry</button>
+        </div>
+      )}
+
+      {/* Honest degradation (UX-01/UX-02): when retrieval breached its budget,
+          say so instead of silently showing empty source sections. */}
+      {!isLoading && !isError && degradedReason && (
+        <div className="px-3 py-2">
+          <DegradedBanner reason={degradedReason} />
         </div>
       )}
 

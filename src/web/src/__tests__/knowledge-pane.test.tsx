@@ -9,7 +9,8 @@ import type { Artifact } from "@/lib/types"
 
 // Mock API module
 vi.mock("@/lib/api", () => ({
-  fetchArtifacts: vi.fn(),
+  fetchAllArtifacts: vi.fn(),
+  fetchAllTags: vi.fn(),
   queryKB: vi.fn(),
   uploadFile: vi.fn(),
   recategorizeArtifact: vi.fn(),
@@ -39,14 +40,33 @@ vi.mock("@/hooks/use-drag-drop", () => ({
   }),
 }))
 
-// Mock lazy-loaded ArtifactPreview
+// Mock lazy-loaded ArtifactPreview. It surfaces artifactId and onClose because
+// the ?artifact= deep-link tests below turn on both: which artifact was opened,
+// and what the pane does with the URL once it is dismissed.
 vi.mock("@/components/kb/artifact-preview", () => ({
-  default: () => <div data-testid="artifact-preview">Preview</div>,
+  default: ({ artifactId, onClose }: { artifactId: string; onClose: () => void }) => (
+    <div data-testid="artifact-preview" data-artifact-id={artifactId}>
+      Preview
+      <button data-testid="artifact-preview-close" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  ),
 }))
 
 // Mock sub-components that have complex dependencies
 vi.mock("@/components/kb/taxonomy-tree", () => ({
-  TaxonomyTree: () => <div data-testid="taxonomy-tree">Taxonomy</div>,
+  TaxonomyTree: ({ onFilterChange }: { onFilterChange?: (f: { domain: string | null; subCategory: string | null }) => void }) => (
+    <div data-testid="taxonomy-tree">
+      Taxonomy
+      <button
+        data-testid="taxonomy-set-coding"
+        onClick={() => onFilterChange?.({ domain: "coding", subCategory: null })}
+      >
+        set coding
+      </button>
+    </div>
+  ),
 }))
 vi.mock("@/components/kb/graph-preview", () => ({
   GraphPreview: () => null,
@@ -85,10 +105,11 @@ vi.mock("@/components/kb/knowledge-library-dialog", () => ({
   ),
 }))
 
-import { fetchArtifacts, queryKB } from "@/lib/api"
+import { fetchAllArtifacts, fetchAllTags, queryKB } from "@/lib/api"
 import { KnowledgePane } from "@/components/kb/knowledge-pane"
 
-const mockFetchArtifacts = fetchArtifacts as ReturnType<typeof vi.fn>
+const mockFetchAllArtifacts = fetchAllArtifacts as ReturnType<typeof vi.fn>
+const mockFetchAllTags = fetchAllTags as ReturnType<typeof vi.fn>
 const mockQueryKB = queryKB as ReturnType<typeof vi.fn>
 
 function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
@@ -109,6 +130,13 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
   }
 }
 
+/** Matches fetchAllArtifacts' resolved shape ({ artifacts, total }) — the
+ * component now derives its "Showing X of Y" count from `total`, not the
+ * page array's length. */
+function artifactsPage(artifacts: Artifact[]) {
+  return { artifacts, total: artifacts.length }
+}
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -122,7 +150,8 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.restoreAllMocks()
-  mockFetchArtifacts.mockResolvedValue([])
+  mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
+  mockFetchAllTags.mockResolvedValue({ tags: [], total: 0 })
   mockQueryKB.mockResolvedValue({ results: [] })
 })
 
@@ -130,7 +159,7 @@ describe("KnowledgePane", () => {
   // ---- Empty state ----
 
   it("renders empty state when no artifacts exist", async () => {
-    mockFetchArtifacts.mockResolvedValue([])
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
       expect(screen.getByText(/0 of 0 artifacts/i)).toBeInTheDocument()
@@ -149,7 +178,7 @@ describe("KnowledgePane", () => {
       makeArtifact({ id: "a1", filename: "report.pdf", domain: "research" }),
       makeArtifact({ id: "a2", filename: "notes.md", domain: "coding" }),
     ]
-    mockFetchArtifacts.mockResolvedValue(artifacts)
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage(artifacts))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
       expect(screen.getByText(/2 of 2 artifacts/i)).toBeInTheDocument()
@@ -188,7 +217,9 @@ describe("KnowledgePane", () => {
     fireEvent.change(input, { target: { value: "machine learning" } })
     fireEvent.keyDown(input, { key: "Enter" })
     await waitFor(() => {
-      expect(mockQueryKB).toHaveBeenCalledWith("machine learning", undefined)
+      // WB-25: topK now tracks displayLimit (PAGE_SIZE=50) instead of the
+      // fixed default of 10, so "Load more" can widen the rerank window.
+      expect(mockQueryKB).toHaveBeenCalledWith("machine learning", undefined, 50)
     })
   })
 
@@ -241,7 +272,7 @@ describe("KnowledgePane", () => {
 
   it("shows loading state while fetching artifacts", () => {
     // Make the promise hang
-    mockFetchArtifacts.mockReturnValue(new Promise(() => {}))
+    mockFetchAllArtifacts.mockReturnValue(new Promise(() => {}))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     // The component is in loading state — header still renders
     expect(screen.getByText("Knowledge Base")).toBeInTheDocument()
@@ -250,22 +281,22 @@ describe("KnowledgePane", () => {
   // ---- Error state ----
 
   it("shows error indicator on fetch failure", async () => {
-    mockFetchArtifacts.mockRejectedValue(new Error("Network failure"))
+    mockFetchAllArtifacts.mockRejectedValue(new Error("Network failure"))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     // Wait for the query to fail
     await waitFor(() => {
       // Error state triggers an error indicator in the component
-      expect(mockFetchArtifacts).toHaveBeenCalled()
+      expect(mockFetchAllArtifacts).toHaveBeenCalled()
     })
   })
 
   // ---- Refresh ----
 
-  it("calls fetchArtifacts on initial mount", async () => {
-    mockFetchArtifacts.mockResolvedValue([])
+  it("calls fetchAllArtifacts on initial mount", async () => {
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(mockFetchArtifacts).toHaveBeenCalled()
+      expect(mockFetchAllArtifacts).toHaveBeenCalled()
     })
   })
 
@@ -307,7 +338,7 @@ describe("KnowledgePane", () => {
     const artifacts = Array.from({ length: 75 }, (_, i) =>
       makeArtifact({ id: `art-${i}`, filename: `file-${i}.pdf` }),
     )
-    mockFetchArtifacts.mockResolvedValue(artifacts)
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage(artifacts))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
       // PAGE_SIZE is 50, so should show "Showing 50 of 75 artifacts"
@@ -321,7 +352,7 @@ describe("KnowledgePane", () => {
     const artifacts = Array.from({ length: 6 }, (_, i) =>
       makeArtifact({ id: `art-${i}`, filename: `file-${i}.pdf` }),
     )
-    mockFetchArtifacts.mockResolvedValue(artifacts)
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage(artifacts))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
       expect(screen.getByText(/Showing 6 of 6 artifacts/)).toBeInTheDocument()
@@ -329,6 +360,24 @@ describe("KnowledgePane", () => {
     // Guard against regression: must not render "Showing 50 of 6" (or any N>6 of 6).
     expect(screen.queryByText(/Showing 50 of 6 artifacts/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Showing 20 of 6 artifacts/)).not.toBeInTheDocument()
+  })
+
+  it("names the active filter scope in the count label (UX-28)", async () => {
+    // Unlabeled, "Showing 50 of 94 artifacts" beside the hero's corpus-wide
+    // count read as a contradiction — the 94 was a filtered subset.
+    const artifacts = Array.from({ length: 3 }, (_, i) =>
+      makeArtifact({ id: `art-${i}`, filename: `file-${i}.py`, domain: "coding" }),
+    )
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage(artifacts))
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 3 of 3 artifacts$/)).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("taxonomy-set-coding"))
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 3 of 3 artifacts in coding/)).toBeInTheDocument()
+    })
   })
 
   // ---- Search results count ----
@@ -379,14 +428,14 @@ describe("KnowledgePane", () => {
 
 describe("KnowledgePane — four-state matrix (D.2)", () => {
   it("idle/loading: shows Skeleton placeholders while fetching", () => {
-    mockFetchArtifacts.mockReturnValue(new Promise(() => {}))
+    mockFetchAllArtifacts.mockReturnValue(new Promise(() => {}))
     const { container } = render(<KnowledgePane />, { wrapper: createWrapper() })
     const skeletons = container.querySelectorAll("[class*=skeleton], [role=status]")
     expect(skeletons.length).toBeGreaterThan(0)
   })
 
   it("loaded: renders artifact list after data arrives", async () => {
-    mockFetchArtifacts.mockResolvedValue([makeArtifact({ id: "a1" })])
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([makeArtifact({ id: "a1" })]))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
       expect(screen.getByText(/Showing 1 of 1 artifact/i)).toBeInTheDocument()
@@ -394,7 +443,7 @@ describe("KnowledgePane — four-state matrix (D.2)", () => {
   })
 
   it("empty: shows empty state messaging when no artifacts", async () => {
-    mockFetchArtifacts.mockResolvedValue([])
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
       expect(screen.getByText(/No artifacts yet/i)).toBeInTheDocument()
@@ -402,7 +451,7 @@ describe("KnowledgePane — four-state matrix (D.2)", () => {
   })
 
   it("error: shows destructive Alert with Retry button on fetch failure", async () => {
-    mockFetchArtifacts.mockRejectedValue(new Error("Network failure"))
+    mockFetchAllArtifacts.mockRejectedValue(new Error("Network failure"))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     // The error Alert and Retry button appear once the query settles into error state
     await waitFor(() => {
@@ -418,9 +467,9 @@ describe("KnowledgePane — four-state matrix (D.2)", () => {
 describe("KnowledgePane — F-05-01 pack-install filter broadening", () => {
   it("switches the source filter to 'All sources' when a pack install completes", async () => {
     // Seed two artifacts so the source dropdown shows a value before install.
-    mockFetchArtifacts.mockResolvedValue([
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([
       makeArtifact({ id: "a1", filename: "personal.pdf" }),
-    ])
+    ]))
     render(<KnowledgePane />, { wrapper: createWrapper() })
 
     // Default selection is "Personal" (gui).
@@ -439,19 +488,68 @@ describe("KnowledgePane — F-05-01 pack-install filter broadening", () => {
 })
 
 // ---------------------------------------------------------------------------
+// ?artifact= — the landing point of a cerid:// Spotlight deep link
+// ---------------------------------------------------------------------------
+// The main process parses cerid://kb/<id> and the router calls
+// goTo("knowledge", { artifact: id }), which writes ?artifact= and redirects
+// here via Sources → library. This is the last link in that chain: without it
+// the URL carries the id and nothing opens, which is the same visible outcome
+// as the deep link never having been wired at all.
+
+describe("KnowledgePane — ?artifact= deep-link landing", () => {
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/")
+  })
+
+  it("opens the preview for the artifact named in the URL", async () => {
+    window.history.replaceState({}, "", "/?artifact=abc123")
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    const preview = await screen.findByTestId("artifact-preview")
+    // The id matters, not just that something opened — a preview on the wrong
+    // artifact is a worse outcome than none.
+    expect(preview).toHaveAttribute("data-artifact-id", "abc123")
+  })
+
+  it("opens nothing when the URL names no artifact", async () => {
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => expect(screen.getByText(/0 of 0 artifacts/i)).toBeInTheDocument())
+    expect(screen.queryByTestId("artifact-preview")).not.toBeInTheDocument()
+  })
+
+  it("drops ?artifact= when the preview is dismissed", async () => {
+    // Left in place it would re-open on the next navigation that bumps
+    // navVersion, for reasons the user could not connect to anything they did.
+    window.history.replaceState({}, "", "/?artifact=abc123&sources_mode=library")
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await screen.findByTestId("artifact-preview")
+
+    fireEvent.click(screen.getByTestId("artifact-preview-close"))
+
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("artifact")).toBeNull(),
+    )
+    // Only that key — the rest of the query string belongs to other panes.
+    expect(new URLSearchParams(window.location.search).get("sources_mode")).toBe("library")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // D.3: axe-clean
 // ---------------------------------------------------------------------------
 
 describe("KnowledgePane — axe-clean (D.3)", () => {
   it("is axe-clean (D.3) in empty state", async () => {
-    mockFetchArtifacts.mockResolvedValue([])
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([]))
     const { container } = render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => screen.getByText(/No artifacts yet/i))
     expect(await axe(container)).toHaveNoViolations()
   })
 
   it("is axe-clean (D.3) in error state", async () => {
-    mockFetchArtifacts.mockRejectedValue(new Error("fail"))
+    mockFetchAllArtifacts.mockRejectedValue(new Error("fail"))
     const { container } = render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => screen.getByRole("button", { name: /retry/i }), { timeout: 3000 })
     expect(await axe(container)).toHaveNoViolations()

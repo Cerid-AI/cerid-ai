@@ -118,4 +118,51 @@ describe("useConversations cloud sync", () => {
     expect(c?.title).toBe("Local edit")
     expect(c?.updatedAt).toBe(9_000)
   })
+
+  // WB-46: the mount merge re-pushes on every reload; without a persistent
+  // indicator a repeatedly-failing push looks identical to a healthy one.
+  it("surfaces syncFailing when the mount-merge re-push fails", async () => {
+    localStorage.setItem("cerid-conversations", JSON.stringify([
+      {
+        id: "shared", title: "Local edit", messages: [],
+        model: "openrouter/openai/gpt-4o-mini",
+        createdAt: 1_000, updatedAt: 9_000, archived: false,
+      },
+    ]))
+    const stale = {
+      id: "shared", title: "Stale server copy", messages: [],
+      model: "openrouter/openai/gpt-4o-mini",
+      createdAt: 1_000, updatedAt: 1_000, archived: false,
+    }
+    vi.mocked(api.fetchSyncedConversations).mockResolvedValueOnce([stale])
+    vi.mocked(api.syncConversation).mockRejectedValueOnce(new Error("500"))
+
+    const { result } = renderHook(() => useConversations())
+
+    await vi.waitFor(() => {
+      expect(result.current.syncFailing).toBe(true)
+    })
+  })
+
+  it("clears syncFailing once a subsequent sync succeeds", async () => {
+    const { result } = renderHook(() => useConversations())
+    // Let the empty-store mount merge finish first so its own push logic (which
+    // would otherwise race the create() below on the same new id) has nothing
+    // to push.
+    await vi.waitFor(() => {
+      expect(api.fetchSyncedConversations).toHaveBeenCalledTimes(1)
+    })
+
+    vi.mocked(api.syncConversation).mockRejectedValueOnce(new Error("500"))
+    act(() => { result.current.create("openrouter/openai/gpt-4o-mini") })
+    await vi.waitFor(() => {
+      expect(result.current.syncFailing).toBe(true)
+    })
+
+    vi.mocked(api.syncConversation).mockResolvedValueOnce(undefined)
+    act(() => { result.current.create("openrouter/openai/gpt-4o-mini") })
+    await vi.waitFor(() => {
+      expect(result.current.syncFailing).toBe(false)
+    })
+  })
 })

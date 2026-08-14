@@ -291,11 +291,44 @@ function ResultView({
         {result.transcript}
       </div>
 
+      <ResultStatusNote result={result} />
+
       <div className="flex justify-end pt-1">
         <Button onClick={onClose}>Done</Button>
       </div>
     </div>
   )
+}
+
+function ResultStatusNote({ result }: { result: VoiceNoteResponse }) {
+  switch (result.status) {
+    case "success":
+      return null
+    case "duplicate":
+      return (
+        <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Already ingested — matches an existing artifact
+          {result.duplicate_of ? ` (${result.duplicate_of})` : ""}.
+        </div>
+      )
+    case "dropped":
+      return (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Not saved —{" "}
+          {result.reason === "below_source_quality_floor"
+            ? "below the quality floor for this source."
+            : (result.reason ?? "dropped during ingestion.")}
+        </div>
+      )
+    case "error":
+      return (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Transcript captured, but ingestion failed{result.error ? `: ${result.error}` : "."}
+        </div>
+      )
+    default:
+      return null
+  }
 }
 
 function ErrorView({ error, onRetry }: { error: string; onRetry: () => void }) {

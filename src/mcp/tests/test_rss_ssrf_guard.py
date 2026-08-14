@@ -4,8 +4,6 @@
 """SSRF guard tests for outbound URL fetches."""
 from unittest.mock import patch
 
-import pytest
-
 
 class TestIsPrivateHost:
     def test_public_url_allowed(self):
@@ -106,48 +104,3 @@ class TestGuardOrLog:
         assert result is False
         assert len(captures) == 1
         assert "rss_feed.ssrf_blocked" in captures[0][0][0]
-
-
-class TestRssFeedIntegration:
-    @pytest.mark.asyncio
-    async def test_rss_feed_skips_private_url(self, monkeypatch):
-        """A feed config with a private-host URL must produce an empty result
-        and must never call _fetch_url (the underlying httpx.get wrapper).
-
-        The SSRF guard fires before the circuit breaker is even initialised,
-        so no circuit-breaker mock is needed.
-        """
-        private_feed = {
-            "id": "test001",
-            "url": "http://192.168.1.1/feed.xml",
-            "name": "Evil Feed",
-            "domain": "general",
-            "enabled": True,
-            "last_fetched": None,
-            "etag": None,
-            "last_modified": None,
-        }
-
-        # Patch sentry to avoid real calls
-        monkeypatch.setattr("sentry_sdk.capture_message", lambda *a, **k: None)
-
-        # Track whether _fetch_url is called
-        fetch_called = []
-        import app.data_sources.rss_feed as rss_module
-        original_fetch = rss_module._fetch_url
-
-        def tracking_fetch(*args, **kwargs):
-            fetch_called.append(args)
-            return original_fetch(*args, **kwargs)
-
-        monkeypatch.setattr(rss_module, "_fetch_url", tracking_fetch)
-
-        # Patch socket.getaddrinfo to return a private address
-        with patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("192.168.1.1", 0))]):
-            result = await rss_module.poll_feed(private_feed)
-
-        # The feed should be blocked — no new entries, ssrf_blocked error recorded
-        assert result["new_entries"] == 0
-        assert len(fetch_called) == 0  # proved: _fetch_url never called
-        assert any("ssrf" in str(e).lower() or "blocked" in str(e).lower()
-                   for e in result["errors"])

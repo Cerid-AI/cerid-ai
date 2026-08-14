@@ -53,9 +53,15 @@ def _Query(*args, **kwargs):
     return kwargs.get("default", None)
 
 
+class _Response:
+    def __init__(self, *args, **kwargs):
+        self.headers: dict[str, str] = {}
+
+
 _fastapi.APIRouter = _APIRouter
 _fastapi.HTTPException = _HTTPException
 _fastapi.Query = _Query
+_fastapi.Response = _Response
 _ensure_stub("fastapi", _fastapi)
 
 _pydantic = ModuleType("pydantic")

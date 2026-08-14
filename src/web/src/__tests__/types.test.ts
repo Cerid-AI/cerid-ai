@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { describe, it, expect } from "vitest"
-import { MODELS, DOMAINS, PROVIDER_COLORS, findModel } from "@/lib/types"
+import { MODELS, DOMAINS, PROVIDER_COLORS, findModel, deriveModelLabel } from "@/lib/types"
 import type { ChatMessage, SourceRef, Conversation, ModelOption } from "@/lib/types"
 
 describe("MODELS constant", () => {
@@ -187,6 +187,22 @@ describe("findModel", () => {
 
   it("returns undefined for unknown ID", () => {
     expect(findModel("unknown/model")).toBeUndefined()
+  })
+})
+
+describe("deriveModelLabel", () => {
+  it("derives a readable label from the id tail for an id not in MODELS", () => {
+    // A tier-resolved registry id (cheap-tier gemini slot) absent from MODELS.
+    expect(findModel("openrouter/google/gemini-3.1-flash-lite")).toBeUndefined()
+    expect(deriveModelLabel("openrouter/google/gemini-3.1-flash-lite")).toBe("Gemini-3.1 Flash Lite")
+  })
+
+  it("upper-cases the gpt acronym and keeps version tokens hyphen-attached", () => {
+    expect(deriveModelLabel("openrouter/openai/gpt-4o-mini")).toBe("GPT-4o Mini")
+  })
+
+  it("handles a bare id with no provider prefix", () => {
+    expect(deriveModelLabel("claude-sonnet")).toBe("Claude Sonnet")
   })
 })
 

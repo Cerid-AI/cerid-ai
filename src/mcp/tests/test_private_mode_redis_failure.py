@@ -18,8 +18,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import app.services.private_mode as pm
+from app.routers.settings import router
 
 
 @pytest.fixture(autouse=True)
@@ -89,3 +92,38 @@ def test_disabling_private_mode_is_not_overridden_by_the_cache():
 def test_missing_key_is_treated_as_disabled_and_cached():
     with patch.object(pm, "get_redis", return_value=_redis_returning(None)):
         assert pm.get_private_mode_level() == 0
+
+
+# ── WB-38: GET /settings/private-mode must read through the same fail-safe ──
+# The router used to hand-roll its own Redis read and collapse any exception
+# to `{"level": 0}`, duplicating (and diverging from) the fix above. These
+# hit the actual endpoint to prove the router delegates to
+# ``get_private_mode_level`` rather than re-introducing the fail-open path.
+
+
+@pytest.fixture
+def client():
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_get_endpoint_returns_the_live_level_when_redis_is_healthy(client):
+    with patch.object(pm, "get_redis", return_value=_redis_returning(b"3")):
+        r = client.get("/settings/private-mode")
+    assert r.status_code == 200
+    assert r.json() == {"level": 3}
+
+
+def test_get_endpoint_holds_last_known_level_on_redis_failure_not_zero(client):
+    with patch.object(pm, "get_redis", return_value=_redis_returning(b"4")):
+        assert client.get("/settings/private-mode").json() == {"level": 4}
+
+    with patch.object(pm, "get_redis", side_effect=ConnectionError("redis down")):
+        r = client.get("/settings/private-mode")
+
+    assert r.status_code == 200
+    assert r.json() == {"level": 4}, (
+        "GET /settings/private-mode failed open to level 0 on a Redis error "
+        "instead of holding the last known level"
+    )

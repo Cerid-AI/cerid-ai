@@ -11,7 +11,7 @@
 // is the routing + shell step.
 
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
-import { Loader2, Files, Activity, Settings as SettingsIcon, FileAudio } from "lucide-react"
+import { Loader2, Files, Activity, Cable, FileAudio } from "lucide-react"
 import { useNavigation } from "@/contexts/navigation-context"
 import { useHotkey } from "@/hooks/use-hotkey"
 import { KnowledgeStatsHero } from "./knowledge-stats-hero"
@@ -43,7 +43,9 @@ const MODE_DEFS: Array<{
   { id: "library", label: "Library", icon: Files, description: "Artifacts + uploads + search" },
   { id: "activity", label: "Activity", icon: Activity, description: "Live ingestion stream" },
   { id: "meetings", label: "Meetings", icon: FileAudio, description: "Upload audio recordings for transcription + diarization" },
-  { id: "connectors", label: "Connectors", icon: SettingsIcon, description: "Watched folders + external APIs + plugins" },
+  // Cable, not a gear: the gear collides with the Settings nav icon, and this
+  // tab is where your data comes from, not where the server is configured.
+  { id: "connectors", label: "Connectors", icon: Cable, description: "Apple apps, email, cloud accounts + watched folders" },
 ]
 
 function readQueryParam(name: string): string | null {
@@ -76,6 +78,20 @@ export default function SourcesPane() {
   }, [])
 
   const navigation = useNavigation()
+
+  // Same-pane goTo("sources", { sourcesMode }) consumption — mirrors the
+  // settings-pane navVersion pattern. The mount initializer above only reads
+  // ?sources_mode= once, so without this a goTo from inside the Sources pane
+  // (or any goTo while the pane is already active) wrote the URL and nothing
+  // visibly changed.
+  useEffect(() => {
+    if (navigation.navVersion === 0) return
+    const m = readQueryParam("sources_mode") as SourcesMode | null
+    if (m && MODE_DEFS.some((d) => d.id === m)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (URL / navigation); mirrors settings-pane
+      setMode(m)
+    }
+  }, [navigation.navVersion])
 
   // F2/F3 — wizard state. ``wizardFamily`` filters the kind picker;
   // ``wizardKind`` jumps straight to the configure step when the user

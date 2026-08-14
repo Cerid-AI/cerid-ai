@@ -50,7 +50,21 @@ describe("fetchUserState", () => {
 })
 
 describe("fetchSyncedConversations", () => {
-  it("returns conversations array", async () => {
+  it("parses the REAL backend shape — a bare JSON array (UX-06)", async () => {
+    // GET /user-state/conversations returns a bare list
+    // (app.routers.user_state.list_conversations → read_conversations).
+    // The old parser read `data.conversations` and got undefined → [] on
+    // every hydration, so the sidebar said "No conversations yet" despite
+    // prior-session chats syncing fine.
+    const convs = [{ id: "c1", title: "Test", messages: [], createdAt: 1000, updatedAt: 2000, model: "gpt-4" }]
+    vi.stubGlobal("fetch", mockFetch(convs))
+
+    const result = await fetchSyncedConversations()
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe("c1")
+  })
+
+  it("tolerates a wrapped {conversations: [...]} shape", async () => {
     const convs = [{ id: "c1", title: "Test", messages: [], createdAt: 1000, updatedAt: 2000, model: "gpt-4" }]
     vi.stubGlobal("fetch", mockFetch({ conversations: convs }))
 
@@ -81,6 +95,15 @@ describe("syncConversation", () => {
       }),
     )
   })
+
+  // WB-46: a swallowed non-2xx here is how a conversation the caller believes
+  // is synced silently never reaches the server (E1 CR-092).
+  it("rejects on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", mockFetch({ error_code: "SERVER_ERROR", message: "boom" }, 500))
+    const conv = { id: "c1", title: "Test", messages: [], createdAt: 1000, updatedAt: 2000, model: "gpt-4" }
+
+    await expect(syncConversation(conv as never)).rejects.toThrow()
+  })
 })
 
 describe("syncConversationsBulk", () => {
@@ -99,6 +122,13 @@ describe("syncConversationsBulk", () => {
         body: JSON.stringify(convs),
       }),
     )
+  })
+
+  it("rejects on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", mockFetch({ error_code: "SERVER_ERROR", message: "boom" }, 500))
+    const convs = [{ id: "c1", title: "A", messages: [], createdAt: 1, updatedAt: 2, model: "m" }]
+
+    await expect(syncConversationsBulk(convs as never)).rejects.toThrow()
   })
 })
 
@@ -127,5 +157,11 @@ describe("syncPreferences", () => {
         body: JSON.stringify(prefs),
       }),
     )
+  })
+
+  it("rejects on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", mockFetch({ error_code: "SERVER_ERROR", message: "boom" }, 500))
+
+    await expect(syncPreferences({ theme: "dark" })).rejects.toThrow()
   })
 })

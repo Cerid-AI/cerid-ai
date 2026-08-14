@@ -36,7 +36,6 @@ beforeEach(() => {
   ;(window as unknown as { cerid: object }).cerid = {
     permissions: {
       getAll: mockGetAll,
-      get: vi.fn(),
       request: mockRequest,
     },
     app: { openExternal: mockOpenExternal },
@@ -52,6 +51,16 @@ describe("PermissionsStep", () => {
     delete (window as unknown as { cerid?: object }).cerid
     render(<PermissionsStep />)
     expect(await screen.findByText(/desktop app/i)).toBeInTheDocument()
+  })
+
+  it("renders the error alert (not the loading spinner) when getAll rejects on mount", async () => {
+    // GUI spec MUST 2: a failed bridge read used to leave `states` null,
+    // which early-returned into "Reading permission state…" forever.
+    mockGetAll.mockRejectedValue(new Error("bridge exploded"))
+    render(<PermissionsStep />)
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("bridge exploded")
+    expect(screen.queryByText(/reading permission state/i)).not.toBeInTheDocument()
   })
 
   it("lists all six permission categories", async () => {

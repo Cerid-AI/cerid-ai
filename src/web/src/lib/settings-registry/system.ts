@@ -57,6 +57,19 @@ export const SYSTEM_DEFS: SettingDef[] = [
     type: "display",
     writer: { kind: "readonly", endpoint: "/settings" },
   },
+  // ── macOS Permissions (desktop app only) ───────────────────────────────────
+  {
+    id: "system.permissions",
+    category: "system",
+    group: "permissions",
+    level: "core",
+    label: "macOS permissions",
+    helpText: "Per-machine macOS privacy (TCC) grants used by desktop features: Microphone, Calendar, Reminders, Contacts, Photos, and Full Disk Access. Grant or revoke here or in macOS System Settings.",
+    scopeOfEffect: { scope: "device", display: "Applies to this machine only — stored by macOS, not the server." },
+    keywords: ["permission", "full disk access", "TCC", "microphone", "calendar", "photos", "reminders", "contacts", "privacy", "grant", "System"],
+    type: "display",
+    writer: { kind: "readonly" },
+  },
   // ── Storage ────────────────────────────────────────────────────────────────
   {
     id: "system.storage.usage",
@@ -207,11 +220,11 @@ export const SYSTEM_DEFS: SettingDef[] = [
     group: "toggles",
     level: "advanced",
     label: "Memory recall",
-    helpText: "Enables episodic memory recall during conversation turns. Toggle enable_memory_recall in FEATURE_TOGGLES (env-only — no UI writer).",
-    scopeOfEffect: { scope: "env", display: "Read-only here — set via server environment." },
-    keywords: ["memory", "recall", "episodic", "enable_memory_recall", "Pipeline"],
+    helpText: "Server-wide kill switch for episodic memory recall during conversation turns. Set ENABLE_MEMORY_RECALL in .env and restart. For per-conversation control, use the Memory switch in the chat composer instead.",
+    scopeOfEffect: { scope: "env", display: "Read-only here — set ENABLE_MEMORY_RECALL in .env and restart." },
+    keywords: ["memory", "recall", "episodic", "ENABLE_MEMORY_RECALL", "Pipeline"],
     type: "display",
-    writer: { kind: "env", envVar: "CERID_FEATURE_memory_recall" },
+    writer: { kind: "env", envVar: "ENABLE_MEMORY_RECALL" },
   },
   {
     id: "system.toggles.parentChildRetrieval",
@@ -240,4 +253,19 @@ export const SYSTEM_DEFS: SettingDef[] = [
   // KB maintenance actions (rebuild / rescore / regenerate / clear-domain)
   // moved to the Knowledge category's `maintenance` group (ST12, 2026-06-22) —
   // they operate on the knowledge base, so they belong with it.
+  // ── Audit Log (RA-32) ────────────────────────────────────────────────────
+  {
+    id: "system.audit.log",
+    category: "system",
+    group: "audit",
+    level: "core",
+    label: "Audit log",
+    helpText: "Tamper-evident, hash-chained log of administrative and security actions — license changes, plugin toggles, deletions. Enterprise tier.",
+    scopeOfEffect: { scope: "server", display: "Applies to this server instance — all sessions." },
+    keywords: ["audit", "log", "security", "tamper", "hash chain", "verify", "enterprise", "System"],
+    type: "display",
+    entitlement: "enterprise",
+    featureFlag: "audit_logging",
+    writer: { kind: "readonly", endpoint: "/audit-log" },
+  },
 ]

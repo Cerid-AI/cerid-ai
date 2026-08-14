@@ -38,44 +38,61 @@ def _make_result(content: str, relevance: float, **extra) -> dict:
     return r
 
 
-def _configure(mock_config, fusion_mode: str = "weighted_sum") -> None:
-    mock_config.DOMAINS = ["coding", "general"]
-    mock_config.DOMAIN_AFFINITY = {}
-    mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
-    mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
-    mock_config.QUALITY_BOOST_BASE = 0.8
-    mock_config.QUALITY_BOOST_FACTOR = 0.2
-    mock_config.QUALITY_METADATA_TAG_BOOST = 0.05
-    mock_config.QUALITY_METADATA_SUBCAT_BOOST = 0.08
-    mock_config.QUALITY_METADATA_MAX_BOOST = 0.15
-    mock_config.QUALITY_MIN_RELEVANCE_THRESHOLD = 0.15
-    mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-    mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
-    mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
-    mock_config.QUERY_CONTEXT_MESSAGES = 5
-    mock_config.AGENT_QUERY_BUDGET_SECONDS = 30.0
-    mock_config.HYBRID_FUSION_MODE = fusion_mode
+def _configure(fusion_mode: str = "weighted_sum") -> dict:
+    """Config overrides applied to the REAL config module, per setting."""
+    return {
+        "DOMAINS": ["coding", "general"],
+        "DOMAIN_AFFINITY": {},
+        "CROSS_DOMAIN_DEFAULT_AFFINITY": 0.2,
+        "QUERY_CONTEXT_MAX_CHARS": 14000,
+        "QUALITY_BOOST_BASE": 0.8,
+        "QUALITY_BOOST_FACTOR": 0.2,
+        "QUALITY_METADATA_TAG_BOOST": 0.05,
+        "QUALITY_METADATA_SUBCAT_BOOST": 0.08,
+        "QUALITY_METADATA_MAX_BOOST": 0.15,
+        "QUALITY_MIN_RELEVANCE_THRESHOLD": 0.15,
+        "TEMPORAL_HALF_LIFE_DAYS": 30,
+        "TEMPORAL_RECENCY_WEIGHT": 0.1,
+        "CONTEXT_MAX_CHUNKS_PER_ARTIFACT": 2,
+        "QUERY_CONTEXT_MESSAGES": 5,
+        "AGENT_QUERY_BUDGET_SECONDS": 30.0,
+        "HYBRID_FUSION_MODE": fusion_mode,
+    }
 
 
 _PIPELINE_PATCHES = (
     patch("core.agents.query_agent.log_event"),
     patch("core.agents.query_agent.graph_expand_results"),
     patch("core.agents.query_agent.multi_domain_query"),
-    patch("core.agents.query_agent.config"),
     patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False),
     patch("config.features.ENABLE_SEMANTIC_CACHE", False),
 )
 
 
-def _run(query_result: list[dict], mock_config_setup, rerank_side_effect=None):
+def _run(query_result: list[dict], config_overrides: dict, rerank_side_effect=None):
     """Drive agent_query with mocked retrieval + a controllable reranker."""
-    p_log, p_graph, p_mdq, p_cfg, p_adaptive, p_cache = _PIPELINE_PATCHES
-    with p_log, p_graph as mock_graph, p_mdq as mock_mdq, p_cfg as mock_config, \
-         p_adaptive, p_cache, \
-         patch("core.agents.query_agent.rerank_results") as mock_rerank, \
-         patch("core.utils.temporal.parse_temporal_intent", return_value=None), \
-         patch("core.utils.temporal.recency_score", return_value=0.0):
-        mock_config_setup(mock_config)
+    import contextlib
+
+    import config as config_module
+
+    p_log, p_graph, p_mdq, p_adaptive, p_cache = _PIPELINE_PATCHES
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(p_log)
+        mock_graph = stack.enter_context(p_graph)
+        mock_mdq = stack.enter_context(p_mdq)
+        stack.enter_context(p_adaptive)
+        stack.enter_context(p_cache)
+        mock_rerank = stack.enter_context(
+            patch("core.agents.query_agent.rerank_results")
+        )
+        stack.enter_context(
+            patch("core.utils.temporal.parse_temporal_intent", return_value=None)
+        )
+        stack.enter_context(
+            patch("core.utils.temporal.recency_score", return_value=0.0)
+        )
+        for name, value in config_overrides.items():
+            stack.enter_context(patch.object(config_module, name, value))
         mock_mdq.side_effect = [list(query_result), []]
         # graph_expand_results returns the MERGED list — an identity mock,
         # not return_value=[], which would swallow the retrieval results.
@@ -102,14 +119,14 @@ class TestScaleAwareFloor:
                 r["reranker_status"] = "quenchforge"
             return results
 
-        response, _ = _run([doc], _configure, _replace_with_ordinal)
+        response, _ = _run([doc], _configure(), _replace_with_ordinal)
         assert response["total_results"] == 1
         assert response["results"][0]["relevance"] == 0.02
 
     def test_junk_floored_before_rerank(self):
         """Below-floor fused relevance is dropped BEFORE the reranker sees it."""
         junk = _make_result("junk", relevance=0.05)
-        response, mock_rerank = _run([junk], _configure)
+        response, mock_rerank = _run([junk], _configure())
         assert response["total_results"] == 0
         passed_to_rerank = mock_rerank.call_args.kwargs["results"]
         assert passed_to_rerank == []
@@ -118,7 +135,7 @@ class TestScaleAwareFloor:
         """Keyword-arm-only docs (relevance capped at HYBRID_KEYWORD_WEIGHT,
         below the floor) must reach the reranker for judgment."""
         kw_doc = _make_result("keyword rescue", relevance=0.23, bm25_only=True)
-        response, mock_rerank = _run([kw_doc], _configure)
+        response, mock_rerank = _run([kw_doc], _configure())
         passed_to_rerank = mock_rerank.call_args.kwargs["results"]
         assert any(r.get("bm25_only") for r in passed_to_rerank)
         assert response["total_results"] == 1
@@ -127,7 +144,7 @@ class TestScaleAwareFloor:
         """RRF fused scores are rank-native (max ~ 1/k) — an absolute floor
         calibrated for weighted_sum would drop every result."""
         rrf_doc = _make_result("rrf ranked", relevance=0.016)
-        response, _ = _run([rrf_doc], lambda c: _configure(c, fusion_mode="rrf"))
+        response, _ = _run([rrf_doc], _configure(fusion_mode="rrf"))
         assert response["total_results"] == 1
 
     def test_retrieval_relevance_preserved_alongside_rerank_score(self):
@@ -138,7 +155,7 @@ class TestScaleAwareFloor:
                 r["relevance"] = 0.9
             return results
 
-        response, _ = _run([doc], _configure, _replace)
+        response, _ = _run([doc], _configure(), _replace)
         out = response["results"][0]
         assert out["relevance"] == 0.9
         assert out["retrieval_relevance"] == 0.4

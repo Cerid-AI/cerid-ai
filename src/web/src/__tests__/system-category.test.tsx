@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, within, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
@@ -24,6 +24,7 @@ const mockSettings: ServerSettings = {
   hallucination_threshold: 0.75,
   enable_auto_inject: false,
   auto_inject_threshold: 0.82,
+  auto_inject_max: 3,
   domains: ["code"],
   taxonomy: {},
   storage_mode: "extract_only",
@@ -272,5 +273,145 @@ describe("SystemCategory — accessibility", () => {
     const { container } = render(<SystemCategory {...defaultProps} />, { wrapper })
     await screen.findByText("Server Info")
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe("SystemCategory — audit log (RA-32)", () => {
+  const enterpriseCapabilities = {
+    tier: "enterprise",
+    features: { audit_logging: { enabled: true, tier_required: "enterprise" } },
+  }
+
+  const mockRecords = {
+    records: [
+      { seq: 2, ts: "2026-08-12T00:00:00Z", actor: "system", action: "license.activate", target: "-", outcome: "success", detail: {}, prev: "a", hash: "b" },
+      { seq: 1, ts: "2026-08-11T00:00:00Z", actor: "system", action: "plugin.enable", target: "gmail", outcome: "denied", detail: {}, prev: "-", hash: "a" },
+    ],
+    total: 2, limit: 25, offset: 0,
+  }
+
+  const mockVerify = { ok: true, checked: 2, records: 2, broken_at: null, reason: null }
+
+  function mockApisEnterprise(overrides: Record<string, () => Promise<unknown>> = {}) {
+    return vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/billing/capabilities")) return ok(enterpriseCapabilities)
+      if (url.includes("/audit-log/verify")) return (overrides.verify ?? (() => ok(mockVerify)))()
+      if (url.includes("/audit-log")) return (overrides.records ?? (() => ok(mockRecords)))()
+      return mockApis()(url)
+    })
+  }
+
+  it("locked: community tier shows the license-required message, no records fetched", async () => {
+    const fetchMock = mockApis() // default `{}` capabilities -> community tier
+    vi.stubGlobal("fetch", fetchMock)
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText("Audit log")).toBeInTheDocument()
+    expect(await screen.findByText(/Enterprise license required/i)).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/audit-log"))).toBe(false)
+  })
+
+  it("loading: skeleton shown while records fetch", async () => {
+    vi.stubGlobal("fetch", mockApisEnterprise({ records: () => new Promise(() => {}) }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText(/Chain verified/i)
+    const auditCard = screen.getByText("Audit Log").closest("[data-slot='card']") as HTMLElement
+    expect(auditCard.querySelectorAll("[data-slot='skeleton']").length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("error: records fetch failure shows a retry alert", async () => {
+    vi.stubGlobal("fetch", mockApisEnterprise({ records: () => Promise.reject(new Error("boom")) }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText(/Failed to load audit log/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument()
+  })
+
+  it("empty: zero records renders EmptyState, not a blank table", async () => {
+    vi.stubGlobal("fetch", mockApisEnterprise({ records: () => ok({ records: [], total: 0, limit: 25, offset: 0 }) }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText("No audit records")).toBeInTheDocument()
+  })
+
+  it("success: renders records and the verify-chain chip", async () => {
+    vi.stubGlobal("fetch", mockApisEnterprise())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText("license.activate")).toBeInTheDocument()
+    expect(screen.getByText("plugin.enable")).toBeInTheDocument()
+    expect(screen.getByText(/Chain verified \(2 records\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/Showing 2 of 2 records/i)).toBeInTheDocument()
+  })
+
+  it("tampered chain: verify chip reports the break point", async () => {
+    const tampered = { ok: false, checked: 2, records: 2, broken_at: 1, reason: "hash mismatch" }
+    vi.stubGlobal("fetch", mockApisEnterprise({ verify: () => ok(tampered) }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText(/Tampered at seq 1/i)).toBeInTheDocument()
+  })
+
+  it("is axe-clean when unlocked with records", async () => {
+    vi.stubGlobal("fetch", mockApisEnterprise())
+    const { container } = render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("license.activate")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe("SystemCategory — desktop bridge (macOS Permissions + native export)", () => {
+  const mockGetAll = vi.fn()
+  const mockExportData = vi.fn()
+
+  function stubBridge() {
+    mockGetAll.mockResolvedValue([
+      { category: "full-disk-access", status: "denied", required: false, description: "Read Mail and Messages archives." },
+    ])
+    mockExportData.mockResolvedValue({ success: true, path: "/tmp/cerid-export-x" })
+    ;(window as unknown as { cerid: object }).cerid = {
+      permissions: { getAll: mockGetAll, get: vi.fn(), request: vi.fn() },
+      app: { openExternal: vi.fn().mockResolvedValue({ success: true }), exportData: mockExportData },
+    }
+  }
+
+  afterEach(() => {
+    delete (window as unknown as { cerid?: object }).cerid
+    mockGetAll.mockReset()
+    mockExportData.mockReset()
+  })
+
+  it("browser build: no macOS Permissions section, no native export button", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Server Info")
+    expect(screen.queryByText("macOS Permissions")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Save backup archive/i })).not.toBeInTheDocument()
+  })
+
+  it("desktop build: macOS Permissions section shows live grant state (GUI spec item 3)", async () => {
+    stubBridge()
+    vi.stubGlobal("fetch", mockApis())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText("macOS Permissions")).toBeInTheDocument()
+    expect(await screen.findByText("Full Disk Access")).toBeInTheDocument()
+    expect(await screen.findByText("denied")).toBeInTheDocument()
+    expect(mockGetAll).toHaveBeenCalled()
+  })
+
+  it("desktop build: native export button invokes app.exportData and reports the path (RA-05)", async () => {
+    stubBridge()
+    vi.stubGlobal("fetch", mockApis())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    const button = await screen.findByRole("button", { name: /Save backup archive/i })
+    fireEvent.click(button)
+    await waitFor(() => expect(mockExportData).toHaveBeenCalled())
+    expect(await screen.findByText(/Backup archive written to \/tmp\/cerid-export-x/i)).toBeInTheDocument()
+  })
+
+  it("desktop build: a cancelled export shows no failure message", async () => {
+    stubBridge()
+    mockExportData.mockResolvedValue({ success: false, error: "cancelled" })
+    vi.stubGlobal("fetch", mockApis())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    const button = await screen.findByRole("button", { name: /Save backup archive/i })
+    fireEvent.click(button)
+    await waitFor(() => expect(mockExportData).toHaveBeenCalled())
+    expect(screen.queryByText(/Backup export failed/i)).not.toBeInTheDocument()
   })
 })

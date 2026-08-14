@@ -1,5 +1,6 @@
 {
   "name": "google_calendar",
+  "display_name": "Google Calendar",
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",

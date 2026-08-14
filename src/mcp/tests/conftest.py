@@ -151,10 +151,13 @@ def _reset_llm_client():
     old_key = os.environ.get("OPENROUTER_API_KEY")
     os.environ["OPENROUTER_API_KEY"] = "test-dummy-key"  # pragma: allowlist secret
 
-    # Also reset internal_llm client
+    # Also reset internal_llm client + bf-f3 pacing state (a simulated
+    # timeout in one test would otherwise arm the shared cooldown and slow
+    # every later local-LLM call in the process).
     with contextlib.suppress(Exception):  # best-effort internal_llm client reset
         import core.utils.internal_llm as _internal_llm_mod
         _internal_llm_mod._ollama_client = None
+        _internal_llm_mod._reset_pacing_state()
 
     _llm_mod._client = None
     clear_l1_cache()

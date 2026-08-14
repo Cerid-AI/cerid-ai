@@ -32,4 +32,8 @@ export interface Brief {
   generated_at: string
   sections: BriefSection[]
   claims: BriefClaim[]
+  /** UX-18 — substantial data landed after generation; the brief describes a
+      different day than the one that happened. Optional for older backends. */
+  stale?: boolean
+  new_items_since_generation?: number
 }

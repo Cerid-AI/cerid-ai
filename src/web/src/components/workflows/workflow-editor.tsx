@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import WorkflowCanvas from "./workflow-canvas"
 import WorkflowLegend from "./workflow-legend"
-import { FALLBACK_NODE_CATALOG, describeNode } from "./node-catalog"
+import { FALLBACK_NODE_CATALOG, describeNode, consumesQueryInput } from "./node-catalog"
 import {
   Plus,
   Trash2,
@@ -65,6 +65,7 @@ const NODE_TYPE_OPTIONS: { type: WorkflowNodeType; label: string }[] = [
   { type: "tool", label: "Tool" },
   { type: "condition", label: "Condition" },
 ]
+
 
 // localStorage key for the dismissible builder hint
 const BUILDER_HINT_KEY = "cerid.workflows.builder-hint-dismissed"
@@ -98,6 +99,9 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  // UX-21: the query the next Run feeds the pipeline — replaces the
+  // hardcoded { query: "test" } that ran pipelines on a made-up input.
+  const [runQuery, setRunQuery] = useState("")
   const [runResult, setRunResult] = useState<WorkflowRun | null>(null)
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, "pending" | "running" | "completed" | "failed">>({})
   const [edgeMode, setEdgeMode] = useState<string | null>(null) // source_id when connecting
@@ -246,6 +250,11 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
       setError("Save the workflow before running")
       return
     }
+    // UX-21: a query pipeline must ask for its input, not invent one.
+    if (consumesQueryInput(nodes) && !runQuery.trim()) {
+      setError("This pipeline takes a query — enter the query to run it on first")
+      return
+    }
     setRunning(true)
     setRunResult(null)
     setError(null)
@@ -256,7 +265,10 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
     setNodeStatuses(pendingStatuses)
 
     try {
-      const result = await runWorkflow(workflow.id, { query: "test" })
+      const result = await runWorkflow(
+        workflow.id,
+        runQuery.trim() ? { query: runQuery.trim() } : {},
+      )
       setRunResult(result)
 
       // Map result statuses to node statuses
@@ -276,7 +288,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
     } finally {
       setRunning(false)
     }
-  }, [workflow, nodes])
+  }, [workflow, nodes, runQuery])
 
   return (
     <div className="flex flex-col h-full">
@@ -367,7 +379,16 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
 
         <div className="flex-1" />
 
-        {/* Run + Save */}
+        {/* Run input + Run + Save */}
+        {consumesQueryInput(nodes) && (
+          <Input
+            value={runQuery}
+            onChange={(e) => setRunQuery(e.target.value)}
+            placeholder="Query to run on..."
+            aria-label="Run input query"
+            className="h-8 w-[200px] text-sm" // drift-allowed: toolbar run-input pinned width matches adjacent toolbar controls
+          />
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -461,6 +482,10 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
                 {runResult.status}
               </Badge>
               {runResult.error && <span className="text-red-700 dark:text-red-400 ml-2">{runResult.error}</span>}
+              {/* UX-21: green dots alone left per-node output undiscoverable. */}
+              {!runResult.error && (
+                <span className="ml-2">— select a node to inspect its result</span>
+              )}
             </div>
           )}
         </div>

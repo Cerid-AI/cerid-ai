@@ -25,8 +25,11 @@ import { EmailDetail } from "./email-detail"
 import { AppleDetail } from "./apple-detail"
 import { SourcesEmptyGallery } from "./sources-empty-gallery"
 import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
-import { sourceToRow, connectorToRow, emailToRow, appleRows, type DisplayRow } from "./source-rows"
+import { InstallExtensionCard } from "./install-extension-card"
+import { AppleDesktopCard } from "./apple-desktop-card"
+import { sourceToRow, connectorToRow, emailToRow, emailUnknownRow, appleRows, type DisplayRow } from "./source-rows"
 import { useEntitlements } from "@/hooks/use-entitlements"
+import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
 import type { ConnectorStatus } from "@/lib/api/connectors"
 import type { AppleBridgeKind } from "./apple-detail"
 
@@ -125,7 +128,7 @@ function SourceRow({
 
 export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string) => void } = {}) {
   const qc = useQueryClient()
-  const { forFlag } = useEntitlements()
+  const { forFlag, isLoading: entitlementsLoading, isError: entitlementsError } = useEntitlements()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -154,13 +157,33 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
     staleTime: 30_000,
   })
 
-  // Email status is an auxiliary row source — a failure here just omits the
-  // email row (see `emailStatus ? … : []` below), it never triggers the
-  // blocking error state.
-  const { data: emailStatus, refetch: refetchEmailStatus } = useQuery({
+  // Email status is an auxiliary row source — a failure here never triggers
+  // the blocking error state. It renders the email row in an explicit
+  // "couldn't check" state instead (see `emailUnknownRow()` below): the row
+  // is the always-present email affordance, so its existence must not depend
+  // on the status call succeeding.
+  const {
+    data: emailStatus,
+    isError: emailStatusError,
+    refetch: refetchEmailStatus,
+  } = useQuery({
     queryKey: ["email-status"],
     queryFn: fetchEmailStatus,
     staleTime: 30_000,
+  })
+
+  // Apple bridge rows are macOS-only: the platform comes from the desktop
+  // bridge's async app.platform() call, cached forever (a process cannot
+  // change OS). Rows stay hidden until it proves "darwin" so a future
+  // Windows/Linux desktop build never offers sources that cannot work.
+  const hasDesktopBridge =
+    typeof window !== "undefined" && !!window.cerid?.appleConnectors && !!window.cerid?.app?.platform
+  // eslint-disable-next-line cerid/no-query-error-as-empty -- intentional fail-closed: if platform() rejects, the macOS-only rows stay hidden, which is the safe degraded state (offering sources that may not work is worse than a missing row on a broken bridge)
+  const { data: desktopPlatform } = useQuery({
+    queryKey: ["desktop-platform"],
+    queryFn: () => window.cerid!.app!.platform(),
+    enabled: hasDesktopBridge,
+    staleTime: Infinity,
   })
 
   // List-driving queries gate loading/error; email is auxiliary.
@@ -179,19 +202,29 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
   // literal flag name. A dynamic lookup would leave the lint crediting the
   // plugin manifests, which gate plugin *loading* — a path the desktop bridge
   // never takes.
+  // `entitlementsLoading` suppresses the verdict: tier defaults "community"
+  // while capabilities are in flight, and a locked row routes to the upgrade
+  // dialog — a pitch a paying customer must not see on first paint. In the
+  // gap a click opens AppleDetail, which runs its own loading-aware gate. On
+  // a FAILED fetch loading is false and the "pro" fallback fails closed.
   const appleLocks = {
-    notes: forFlag("apple_notes_reader", "pro").state === "locked",
-    mail: forFlag("apple_mail_reader", "pro").state === "locked",
-    imessage: forFlag("imessage_reader", "pro").state === "locked",
+    notes: !entitlementsLoading && forFlag("apple_notes_reader", "pro").state === "locked",
+    mail: !entitlementsLoading && forFlag("apple_mail_reader", "pro").state === "locked",
+    imessage: !entitlementsLoading && forFlag("imessage_reader", "pro").state === "locked",
+    calendar: !entitlementsLoading && forFlag("apple_calendar_eventkit", "pro").state === "locked",
+    photos: !entitlementsLoading && forFlag("apple_photos_reader", "pro").state === "locked",
+    reminders: !entitlementsLoading && forFlag("reminders_eventkit", "pro").state === "locked",
   }
 
   // Unified row list: source rows, connector rows, email row, Apple bridge rows.
-  // appleRows() returns [] in browser builds (no window.cerid.appleConnectors).
+  // appleRows() returns [] in browser builds (no window.cerid.appleConnectors)
+  // and on non-macOS desktop builds. The email row survives its status fetch
+  // failing — it degrades to an explicit unknown state rather than vanishing.
   const rows: DisplayRow[] = [
     ...sources.map(sourceToRow),
     ...connectors.map(connectorToRow),
-    ...(emailStatus ? [emailToRow(emailStatus)] : []),
-    ...appleRows((kind) => appleLocks[kind]),
+    ...(emailStatus ? [emailToRow(emailStatus)] : emailStatusError ? [emailUnknownRow()] : []),
+    ...appleRows((kind) => appleLocks[kind], desktopPlatform ?? null),
   ]
 
   // "Configured" = a source the user actually added, or a connector/email/
@@ -312,6 +345,7 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
           <div className="mb-2 text-label-xs uppercase tracking-wide text-muted-foreground">
             {rows.length} source{rows.length === 1 ? "" : "s"}
           </div>
+          {entitlementsError && <EntitlementsUnavailableNote className="mb-2" />}
           <ul className="flex flex-col gap-0.5">
             {rows.map((row) => (
               <SourceRow
@@ -324,6 +358,18 @@ export function SourcesConnectors({ onAddSource }: { onAddSource?: (kind: string
               />
             ))}
           </ul>
+          {/* Browser-extension discovery — the packaged extension's only
+              in-product install path. */}
+          <div className="mt-3">
+            <InstallExtensionCard />
+          </div>
+          {/* UX-27: without the desktop bridge there are no Apple rows, and a
+              web-only user had no way to discover the flagship connectors. */}
+          {!hasDesktopBridge && (
+            <div className="mt-3">
+              <AppleDesktopCard />
+            </div>
+          )}
         </div>
 
         {/* Detail column placeholder when no selection */}

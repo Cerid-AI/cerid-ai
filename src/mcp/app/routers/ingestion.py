@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
+import uuid
 from threading import Lock as _TLock
 from typing import Any
 from urllib.parse import urlparse
@@ -28,6 +30,7 @@ from core.ingest.sources.safe_fetch import guarded_get
 from core.knowledge.adapter_html_scrape import extract_html_content
 from core.utils import cache
 from core.utils.swallowed import log_swallowed_error
+from errors import CeridError
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -35,6 +38,10 @@ class IngestionProgressEndpointResponse(BaseModel):
     files: Any
     total_files: Any
     completed_files: Any
+    # Per-connector sync/ingest state (sf-1 status truth) — the same shared
+    # state /ingestion/sync-state serves, inlined here so the progress UI
+    # sees connector activity instead of files:[] during a connector sync.
+    connectors: Any
 
 
 
@@ -104,12 +111,31 @@ class StructuredIngestRequest(BaseModel):
     """Payload for the Apple connectors and any other client that produces
     artifact-shaped content with arbitrary tag metadata. Differs from
     `IngestRequest` in that arbitrary metadata flows directly into the
-    artifact's tags (not just X-Client-ID header)."""
+    artifact's tags (not just X-Client-ID header).
+
+    Identifier fields (AF-007/AF-052):
+
+    * ``external_id`` — a stable idempotency key the connector assigns to the
+      source item (Apple Notes id, Mail Message-ID, ``imessage:<guid>``, …).
+      Re-posting the same ``external_id`` with changed content edits the same
+      artifact in place instead of creating a second one. It is NOT a :Source
+      reference and never reaches the per-source quality floor.
+    * ``source_id`` — reserved for a genuine :Source UUID. Legacy connectors
+      still send their external identifier in this field; the handler
+      reclassifies any ``source_id`` that is not UUID-shaped as an
+      ``external_id`` (see :func:`_split_structured_ids`), so only real
+      :Source UUIDs flow to source-linking + the quality floor.
+    * ``source_kind`` — the connector kind (``apple_notes``, ``apple_mail``,
+      …); scopes the ``external_id`` dedup so two connectors can't collide on a
+      shared id. Falls back to the ``X-Client-ID`` header when omitted.
+    """
 
     content: str
     domain: str = "general"
     metadata: dict[str, str] = Field(default_factory=dict)
-    source_id: str | None = None  # Idempotency key — Apple Notes id, Mail Message-ID, etc.
+    source_id: str | None = None  # Reserved for :Source UUIDs (see class docstring).
+    external_id: str | None = None  # Stable external idempotency key (Apple Notes id, …).
+    source_kind: str | None = None  # Connector kind; scopes external_id dedup.
 
 
 class IngestFileRequest(BaseModel):
@@ -149,6 +175,38 @@ class BatchIngestRequest(BaseModel):
     items: list[BatchIngestItem] = Field(..., max_length=20)
 
 
+class SyncStateReport(BaseModel):
+    """Progress report from a syncing client (e.g. the desktop main process).
+
+    Counters are absolute values for the current sync window — never
+    increments — so at-least-once delivery cannot double-count."""
+
+    phase: str = Field(pattern="^(syncing|idle|error)$")
+    total: int | None = Field(default=None, ge=0)
+    scanned: int | None = Field(default=None, ge=0)
+    posted: int | None = Field(default=None, ge=0)
+    failed: int | None = Field(default=None, ge=0)
+    error: str | None = None
+
+
+_CONNECTOR_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
+
+
+def _record_connector_ingest(client_source: str, result: Any) -> None:
+    """Count a server-side ingest outcome onto the shared sync state.
+
+    Keyed by the X-Client-ID the connectors already send, so every surface
+    reading /ingestion/sync-state sees what the server actually ingested."""
+    if not client_source:
+        return
+    try:
+        from app.services.sync_state import record_ingest_outcome
+        status = result.get("status", "error") if isinstance(result, dict) else "error"
+        record_ingest_outcome(get_redis(), client_source, status)
+    except Exception as e:  # noqa: BLE001 — status counting must never break ingest
+        log_swallowed_error("routers.ingestion.sync_state_record", e)
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.get("/ingestion/progress", response_model=IngestionProgressEndpointResponse)
@@ -158,7 +216,50 @@ def ingestion_progress_endpoint():
         _prune_stale()
         files = [{k: v for k, v in job.items() if k != "_ts"} for job in _active_jobs.values()]
     completed = sum(1 for f in files if f["status"] == "done")
-    return {"files": files, "total_files": len(files), "completed_files": completed}
+    try:
+        from app.services.sync_state import get_all_sync_states
+        connectors = get_all_sync_states(get_redis())
+    except Exception as e:  # noqa: BLE001 — progress must render even without Redis
+        log_swallowed_error("routers.ingestion.progress_sync_state", e)
+        connectors = []
+    return {
+        "files": files,
+        "total_files": len(files),
+        "completed_files": completed,
+        "connectors": connectors,
+    }
+
+
+@router.get("/ingestion/sync-state")  # response-model-allowed: dynamic response (shape varies)
+def sync_state_list_endpoint():
+    """Per-connector sync/ingest state — the shared source of truth the web
+    Sources hero, desktop connector cards, and tray all consume (sf-1)."""
+    from app.services.sync_state import get_all_sync_states
+
+    return {"connectors": get_all_sync_states(get_redis())}
+
+
+@router.post("/ingestion/sync-state/{connector}")  # response-model-allowed: dynamic response (shape varies)
+def sync_state_report_endpoint(connector: str, req: SyncStateReport):
+    """Accept a syncing client's progress report for one connector."""
+    if not _CONNECTOR_NAME_RE.match(connector):
+        raise HTTPException(status_code=422, detail=f"invalid connector name: {connector!r}")
+    from app.services.sync_state import report_sync
+
+    state = report_sync(
+        get_redis(),
+        connector,
+        phase=req.phase,
+        total=req.total,
+        scanned=req.scanned,
+        posted=req.posted,
+        failed=req.failed,
+        error=req.error,
+    )
+    if state is None:
+        # Redis down — the report was not persisted; say so rather than 200.
+        raise HTTPException(status_code=503, detail="sync state store unavailable")
+    return state
 
 
 @router.post("/ingest")  # response-model-allowed: dynamic response (shape varies)
@@ -167,6 +268,7 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     metadata = {"client_source": client_source} if client_source else None
     async with _ingest_semaphore:
         result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
+    _record_connector_ingest(client_source, result)
     try:
         from utils.query_cache import invalidate_cache_non_blocking
         asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
@@ -175,31 +277,108 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     return result
 
 
+def _is_source_uuid(value: str) -> bool:
+    """True iff *value* is a syntactically valid UUID.
+
+    :Source ids are ``str(uuid.uuid4())`` (``app.db.neo4j.sources.create_source``),
+    so a UUID-shaped identifier is a genuine :Source reference and anything else
+    (Apple Notes id, ``imessage:<guid>``, a Message-ID) is an external id.
+    """
+    try:
+        uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
+
+
+def _split_structured_ids(
+    external_id: str | None,
+    source_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Return ``(external_id, source_uuid)`` for the structured-ingest handler.
+
+    ``source_id`` is reserved for :Source UUIDs. An explicit ``external_id``
+    always stays external. A ``source_id`` that parses as a UUID is a genuine
+    :Source reference; a non-UUID ``source_id`` is a legacy external identifier
+    and is reclassified as ``external_id`` (unless the caller already supplied
+    one). This is what stops external ids from reaching the per-source quality
+    floor as if they were :Source ids (AF-007).
+    """
+    ext = external_id or None
+    src_uuid: str | None = None
+    if source_id:
+        if _is_source_uuid(source_id):
+            src_uuid = source_id
+        elif ext is None:
+            ext = source_id
+    return ext, src_uuid
+
+
+# AF-043: soft entitlement gate for /ingest/structured. Only the Pro Apple
+# connectors are gated here — everything else (generic API/tooling callers,
+# and the other Apple connectors not yet sold as a distinct SKU) stays open.
+_CONNECTOR_FEATURE_BY_SOURCE_KIND: dict[str, str] = {
+    "apple_notes": "apple_notes_reader",
+    "apple_mail": "apple_mail_reader",
+    "imessage": "imessage_reader",
+}
+
+
 @router.post("/ingest/structured")  # response-model-allowed: dynamic response (shape varies)
 async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Request):
     """Structured-content ingest. Used by the Apple connectors (Notes,
     Mail, Messages) — each maps a source row to one artifact with rich
     tag metadata that retrieval can filter by source.
 
-    Metadata keys are merged into the artifact's tag set. `source_id` is an
-    external idempotency hint here — re-ingesting the same source_id is a no-op
-    only in the sense that ChromaDB collapses duplicate content_hashes; explicit
-    dedup-by-source_id is tracked for Phase D.2. Note (CL-1): the ingest service
-    now links an artifact to a :Source node only when `source_id` resolves to a
-    real :Source (existence-checked), so an external id passed here can never
-    create a dangling FROM_SOURCE edge or spurious source counter — it is simply
-    treated as a filterable tag. (Fully reserving source_id for :Source UUIDs and
-    routing external ids through `external_id` is a deferred hygiene follow-up;
-    the existence check already makes the current overloading safe.)
+    Metadata keys are merged into the artifact's tag set. Identifier handling
+    (AF-007/AF-052): ``source_id`` is reserved for :Source UUIDs; the external
+    idempotency key (Apple Notes id, Mail Message-ID, …) travels in
+    ``external_id`` and drives dedup-by-external_id in the ingest service — a
+    re-post with edited content updates the same artifact rather than creating a
+    second one. Legacy connectors that still send their external identifier in
+    ``source_id`` are handled by :func:`_split_structured_ids`, which
+    reclassifies any non-UUID ``source_id`` as an ``external_id`` so external
+    ids never reach ``quality_floors.should_drop`` as if they were :Source ids.
+
+    AF-043: the Pro Apple connectors (Notes/Mail/iMessage) identify themselves
+    via ``X-Client-ID`` (see ``ingest-client.ts``), not a ``source_kind`` body
+    field, so the connector-identity resolution below doubles as the tier
+    gate's lookup key. Any other ``source_kind`` — including the other Apple
+    connectors (Calendar/Reminders/Photos) and generic API/tooling callers —
+    is not in ``_CONNECTOR_FEATURE_BY_SOURCE_KIND`` and stays ungated.
     """
     client_source = request.headers.get("X-Client-ID", "")
     metadata: dict[str, str] = dict(req.metadata)
     if client_source:
         metadata["client_source"] = client_source
-    if req.source_id:
-        metadata["source_id"] = req.source_id
+
+    # Connector identity: prefer an explicit field, then the X-Client-ID
+    # header connectors already send, then a metadata `source` tag. Also
+    # scopes the external_id dedup query below.
+    source_kind = req.source_kind or client_source or metadata.get("source", "")
+
+    gated_feature = _CONNECTOR_FEATURE_BY_SOURCE_KIND.get(source_kind)
+    if gated_feature is not None and not config.features.is_feature_enabled(gated_feature):
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Ingesting '{source_kind}' content requires a Pro or "
+                f"Enterprise tier ('{gated_feature}' is not entitled on this "
+                "install)."
+            ),
+        )
+
+    external_id, source_uuid = _split_structured_ids(req.external_id, req.source_id)
+    if source_uuid:
+        metadata["source_id"] = source_uuid
+    if external_id:
+        metadata["external_id"] = external_id
+        if source_kind:
+            metadata["source_kind"] = source_kind
+
     async with _ingest_semaphore:
         result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
+    _record_connector_ingest(client_source, result)
     try:
         from utils.query_cache import invalidate_cache_non_blocking
         asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
@@ -287,6 +466,12 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
     except ValueError as e:
         _complete_job(filename, error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
+    except CeridError as e:
+        # AF-042: let StorageLimitExceededError (and any other CeridError)
+        # through to the app-wide handler so its own http_status (507 for
+        # storage backpressure) renders instead of being downgraded to 500.
+        _complete_job(filename, error=str(e))
+        raise
     except Exception as e:
         _complete_job(filename, error=str(e))
         logger.error(f"Ingest file error: {e}")
@@ -319,7 +504,12 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
                 filenames.append(fn)
 
         items = [item.model_dump() for item in req.items]
-        result = await ingest_batch(items)
+        # AF-072: bind batch requests into the same router-wide admission gate
+        # single-item endpoints already respect — without this, concurrent
+        # /ingest_batch calls bypassed _ingest_semaphore entirely, each one
+        # only bounded by services/ingestion.py's own internal per-item limiter.
+        async with _ingest_semaphore:
+            result = await ingest_batch(items)
 
         for fn in filenames:
             _complete_job(fn)
@@ -336,6 +526,13 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
             _complete_job(fn, error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
+        raise
+    except CeridError as e:
+        # AF-042: let StorageLimitExceededError (and any other CeridError)
+        # through to the app-wide handler so its own http_status (507 for
+        # storage backpressure) renders instead of being downgraded to 500.
+        for fn in filenames:
+            _complete_job(fn, error=str(e))
         raise
     except Exception as e:
         for fn in filenames:

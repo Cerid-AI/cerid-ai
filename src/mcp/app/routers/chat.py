@@ -432,7 +432,12 @@ async def _success_gen(
                 if prompt_tokens or completion_tokens:
                     cost = estimate_cost(bare_model, prompt_tokens, completion_tokens)
                     collector = get_metrics_collector()
-                    collector.record_metric("llm_cost_usd", cost)
+                    # UX-10: tags drive the spend-attribution surfaces —
+                    # untagged points render as model "unknown" / stage "other".
+                    collector.record_metric(
+                        "llm_cost_usd", cost,
+                        tags={"model": bare_model, "stage": "chat"},
+                    )
                     logger.debug(
                         "Chat cost: model=%s prompt=%d completion=%d cost=$%.6f",
                         bare_model, prompt_tokens, completion_tokens, cost,
@@ -545,7 +550,10 @@ async def _anthropic_stream_translate(
                 cost = estimate_cost(
                     bare_model, usage["prompt_tokens"], usage["completion_tokens"]
                 )
-                get_metrics_collector().record_metric("llm_cost_usd", cost)
+                get_metrics_collector().record_metric(
+                    "llm_cost_usd", cost,
+                    tags={"model": bare_model, "stage": "chat"},
+                )
             except Exception as exc:  # noqa: BLE001 — metrics are best-effort
                 log_swallowed_error("app.routers.chat.anthropic_stream.llm_cost_record", exc)
         _record_chat_model_latency(bare_model, time.monotonic() - gen_start_monotonic)
@@ -641,7 +649,10 @@ async def _gemini_stream_translate(
                 cost = estimate_cost(
                     bare_model, usage["prompt_tokens"], usage["completion_tokens"]
                 )
-                get_metrics_collector().record_metric("llm_cost_usd", cost)
+                get_metrics_collector().record_metric(
+                    "llm_cost_usd", cost,
+                    tags={"model": bare_model, "stage": "chat"},
+                )
             except Exception as exc:  # noqa: BLE001 — metrics are best-effort
                 log_swallowed_error("app.routers.chat.gemini_stream.llm_cost_record", exc)
         _record_chat_model_latency(bare_model, time.monotonic() - gen_start_monotonic)

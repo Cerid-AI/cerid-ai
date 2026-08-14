@@ -86,6 +86,30 @@ async def test_match_to_event_source_missing_list_events(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_match_to_event_ignores_apple_calendar_registration(tmp_path):
+    """RA-67: the Apple Calendar branch was removed from the fallback chain —
+    it moved to the desktop bridge and can never run from this server-side
+    process. A registry that only has 'apple_calendar' (not google/outlook)
+    must behave exactly like no calendar being registered at all."""
+    from plugins.meeting_capture import calendar_stitch
+
+    fake_audio = tmp_path / "meeting.wav"
+    fake_audio.write_bytes(b"\x00" * 1024)
+
+    apple_source = MagicMock()
+    apple_source.name = "apple_calendar"
+
+    def _fake_get(name):
+        return apple_source if name == "apple_calendar" else None
+
+    with patch("app.data_sources.registry.get", side_effect=_fake_get):
+        result = await calendar_stitch.match_to_event(str(fake_audio), 3600.0)
+
+    assert result is None
+    apple_source.list_events.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_match_to_event_under_threshold_returns_none(tmp_path):
     """Coverage <80% should soft-skip rather than wrongly attribute the event."""
     from plugins.meeting_capture import calendar_stitch

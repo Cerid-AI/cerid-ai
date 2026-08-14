@@ -1,0 +1,44 @@
+# Host-capability allowlist — Gate 8 (tasks/2026-08-11-consolidated-audit.md §3)
+#
+# Plugins whose manifest declares a host binary (requires.swift_helpers) but
+# whose DataSource class has NOT yet been given a configured_state()
+# override that can report "structurally_unavailable". Until it does, a
+# runtime that can never execute the helper (the Linux MCP container) reports
+# the same "not configured yet" state as a user who simply hasn't clicked
+# Connect — mechanism M5 in tasks/2026-08-11-consolidated-audit.md.
+#
+# apple_reminders was the one instance actually fixed by the Gate 8 build
+# (2026-08-11, a real configured_state() override); on 2026-08-12 its plugin
+# was deleted outright when reminders moved to the desktop bridge
+# (packages/desktop/src/main/connectors/apple_reminders.ts). It must never
+# appear below; scripts/lint-host-capability.py fails on stale entries, so
+# this file cannot silently re-cover a fixed or deleted plugin.
+#
+# Format: one plugin name per line, with a comment above documenting the
+# tracking finding. Remove an entry once its plugin's DataSource gains a real
+# configured_state() override — the lint reports removed entries as an error
+# too, so it cannot rot silently in either direction.
+
+# Bridge-only connector since commit 5bac09e92 ("Bring Calendar and Photos to
+# the desktop bridge") — the REST plugin and its swift_helpers manifest claim
+# are still in the tree even though Sources -> Connectors now serves this
+# kind from packages/desktop/src/main/connectors/apple_calendar.ts instead.
+# is_configured() still gates on platform.system() == "Darwin" with no
+# configured_state() override. tasks/2026-08-11-reachability-audit.md item 2
+# ("Apple Calendar + Apple Photos advertised as 'Soon' on the build that
+# ships them") documents the same commit's fallout.
+apple_calendar
+
+# Same situation as apple_calendar — bridge-only since 5bac09e92, REST plugin
+# and manifest claim still present, no configured_state() override.
+# tasks/2026-08-11-reachability-audit.md item 2.
+apple_photos
+
+# Never moved to the desktop bridge; still the only server-side surface, and
+# still permanently reports "not configured" rather than
+# structurally_unavailable when the MCP server runs in its own Linux
+# container. tasks/2026-08-11-reachability-audit.md item 1 (the Apple
+# Reminders three-surfaces finding) documents the identical defect on the
+# sibling plugin this gate's build fixed; apple_mail carries the same
+# is_configured() shape and was not in scope for that fix.
+apple_mail

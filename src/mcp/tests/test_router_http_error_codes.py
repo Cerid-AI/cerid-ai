@@ -65,14 +65,6 @@ def test_disable_unknown_source_returns_404() -> None:
     assert resp.status_code == 404
 
 
-def test_delete_unknown_rss_feed_returns_404() -> None:
-    from app.routers.data_sources import router
-
-    with patch("app.data_sources.rss_feed.remove_feed", return_value=False):
-        resp = _client(router).delete("/data-sources/rss/__nope__")
-    assert resp.status_code == 404
-
-
 # ── custom-agents: unimplemented stream → 501 (not silent no-op) ─────────────
 
 def test_custom_agent_query_rejects_streaming() -> None:

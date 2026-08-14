@@ -45,15 +45,24 @@ router = APIRouter(prefix="/connectors", tags=["connectors"])
 # different shapes (Google's single-user OAuth callback vs Microsoft's
 # device-code vs Apple's TCC-only no-OAuth path).
 #
-# Apple Notes / Mail / iMessage are deliberately NOT listed here. Sources →
-# Connectors builds its rows by concatenating /connectors with the Electron
-# bridge rows in src/web/.../source-rows.ts (APPLE_BRIDGE_KINDS), with no
-# dedup, and those three already ingest through the bridge
-# (packages/desktop/src/main/connectors/*.ts). Adding them would render each
-# one twice in the desktop build — once working, once reporting a Swift helper
-# the container cannot see. Calendar / Photos / Reminders are the inverse: REST
-# rows here, deliberately excluded from APPLE_BRIDGE_KINDS. Keep that split;
-# test_connectors_router.py pins it.
+# Apple Notes / Mail / iMessage / Calendar / Photos / Reminders are
+# deliberately NOT listed here. Sources → Connectors builds its rows by
+# concatenating /connectors with the Electron bridge rows in
+# src/web/.../source-rows.ts (APPLE_BRIDGE_KINDS), with no dedup, and all six
+# ingest through the bridge (packages/desktop/src/main/connectors/*.ts).
+# Listing one here as well would render it twice in the desktop build — once
+# working, once reporting a Swift helper the container cannot see. Keep that
+# split; test_connectors_router.py pins it.
+#
+# Apple Calendar and Apple Photos were REMOVED from this map on 2026-08-11;
+# Apple Reminders followed the same day. Their plugins invoke `ceridek` /
+# `ceridphotos` / `ceridreminders` from the MCP server, which runs in a Linux
+# container: it cannot execute a macOS binary, the helpers are not mounted,
+# and CERID_HELPER_* is unset there — so /connectors reported
+# `data_source_configured: false` permanently and no TCC grant could change it.
+# All three now ship as desktop bridge rows (packages/desktop/src/main/
+# connectors/apple_calendar.ts, apple_photos.ts, apple_reminders.ts), joining
+# Notes / Mail / iMessage.
 class ConnectorMeta(BaseModel):
     slug: str
     display_name: str
@@ -124,45 +133,6 @@ _CONNECTORS: dict[str, ConnectorMeta] = {
         sync_semantics="On-demand lookup while connected — events are fetched when a question or a meeting capture needs them. No one-time import; your calendar is never bulk-copied.",
         lands_in="Chat answers and meeting-capture context. Nothing is written to the knowledge base.",
     ),
-    "apple_calendar": ConnectorMeta(
-        slug="apple_calendar",
-        display_name="Apple Calendar",
-        feature_flag="apple_calendar_eventkit",
-        auth_kind="tcc_only",
-        requires_env=[],
-        requires_sibling=None,
-        data_source_name="apple_calendar",
-        instruction_doc="docs/PRO_APPLE_CALENDAR.md",
-        imports_desc="Calendar events read locally via the EventKit helper.",
-        sync_semantics="On-demand local read while access is granted — events are read from this Mac when a question needs them. No import step; nothing leaves the machine.",
-        lands_in="Chat answers and meeting-capture context. Nothing is written to the knowledge base.",
-    ),
-    "apple_photos": ConnectorMeta(
-        slug="apple_photos",
-        display_name="Apple Photos",
-        feature_flag="apple_photos_reader",
-        auth_kind="tcc_only",
-        requires_env=[],
-        requires_sibling=None,
-        data_source_name="apple_photos",
-        instruction_doc="docs/PRO_APPLE_PHOTOS.md",
-        imports_desc="Photo metadata (dates, places, albums) via the PhotoKit helper — never image files.",
-        sync_semantics="On-demand local read while access is granted — metadata is read from this Mac when a question needs it. No import step; photos are not copied.",
-        lands_in="Chat answers. Nothing is written to the knowledge base.",
-    ),
-    "apple_reminders": ConnectorMeta(
-        slug="apple_reminders",
-        display_name="Apple Reminders",
-        feature_flag="reminders_eventkit",
-        auth_kind="tcc_only",
-        requires_env=[],
-        requires_sibling=None,
-        data_source_name="apple_reminders",
-        instruction_doc="docs/PRO_APPLE_REMINDERS.md",
-        imports_desc="Reminders and their due dates read locally via the EventKit helper.",
-        sync_semantics="On-demand local read while access is granted — reminders are read from this Mac when a question needs them. No import step; nothing leaves the machine.",
-        lands_in="Chat answers. Nothing is written to the knowledge base.",
-    ),
 }
 
 
@@ -184,6 +154,13 @@ class ConnectorStatus(BaseModel):
     missing_env: list[str]
     data_source_registered: bool
     data_source_configured: bool
+    # Finer-grained than data_source_configured: "not_configured" means the
+    # user can fix this by connecting; "structurally_unavailable" means the
+    # current runtime can never run this connector's host helper (e.g. a
+    # macOS-only Swift binary invoked from the Linux MCP container) — no
+    # amount of clicking Connect changes that. None when no data source is
+    # registered. See tasks/2026-08-11-consolidated-audit.md § M5.
+    data_source_state: str | None
     # Which sibling MCP this connector needs, or None for the Apple/TCC ones.
     # Without it ``sibling_reachable: null`` is ambiguous — it means both "no
     # sibling required" and "required but never contacted", and the UI was
@@ -292,6 +269,7 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
 
     data_source_registered = False
     data_source_configured = False
+    data_source_state: str | None = None
     if meta.data_source_name:
         try:
             from app.data_sources import registry
@@ -299,6 +277,21 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
             if ds is not None:
                 data_source_registered = True
                 data_source_configured = bool(ds.is_configured())
+                # configured_state() is an optional finer-grained override —
+                # see DataSource subclasses under src/mcp/plugins/. Sources
+                # that don't declare a host helper have no way to be
+                # structurally unavailable, so the boolean is enough for them.
+                # isinstance-checked, not just callable(): a test double that
+                # stubs is_configured() without stubbing configured_state()
+                # auto-vends a Mock for any attribute access, which is
+                # callable but not one of the three real state strings.
+                state_fn = getattr(ds, "configured_state", None)
+                state_result = state_fn() if callable(state_fn) else None
+                data_source_state = (
+                    state_result
+                    if isinstance(state_result, str)
+                    else ("configured" if data_source_configured else "not_configured")
+                )
         except ImportError:
             pass
 
@@ -339,6 +332,7 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
         missing_env=missing_env,
         data_source_registered=data_source_registered,
         data_source_configured=data_source_configured,
+        data_source_state=data_source_state,
         requires_sibling=meta.requires_sibling,
         sibling_reachable=sibling_reachable,
         sibling_circuit_open=sibling_circuit_open,
@@ -555,7 +549,17 @@ async def get_auth_status(slug: str) -> OAuthStatusResponse:
             detail = "OAuth incomplete or token expired."
     else:
         completed = status.feature_enabled and status.data_source_configured
-        detail = "TCC granted." if completed else "TCC denied or helper missing."
+        if status.data_source_state == "structurally_unavailable":
+            # Not "TCC denied" — no TCC prompt exists to grant. The MCP
+            # server cannot execute this connector's Swift helper on its own
+            # host, full stop; that is not a state a Settings click resolves.
+            detail = (
+                f"{meta.display_name} needs its Swift helper, which only runs "
+                "on macOS — this server cannot execute it here. Not a "
+                "permissions problem: connect from the desktop app instead."
+            )
+        else:
+            detail = "TCC granted." if completed else "TCC denied or helper missing."
 
     return OAuthStatusResponse(slug=slug, completed=completed, detail=detail)
 

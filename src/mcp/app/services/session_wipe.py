@@ -111,8 +111,14 @@ def _delete_verified_memory(driver: Any, memory_id: str) -> None:
     delete is "safer" to run first; the Chroma delete runs first here only
     because the id is already known and doesn't need to be read back from
     the Neo4j node before it disappears.
+
+    AF-096: this path deletes directly rather than through
+    ``content_lifecycle.remove_content`` (there are no chunk_ids to fan
+    out), so it must bust the query caches itself or a wiped conversation's
+    verified memories keep serving warm from C1/C2 for the remaining TTL.
     """
     from app.deps import get_chroma
+    from app.services.content_lifecycle import invalidate_caches
 
     collection = get_chroma().get_or_create_collection(
         name=config.collection_name("conversations")
@@ -124,6 +130,8 @@ def _delete_verified_memory(driver: Any, memory_id: str) -> None:
             "MATCH (m:Memory {id: $mid}) DETACH DELETE m",
             mid=memory_id,
         )
+
+    invalidate_caches(trigger=f"session_wipe.verified_memory:{memory_id}")
 
 
 def wipe_conversation_state(

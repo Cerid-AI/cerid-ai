@@ -648,3 +648,35 @@ describe("Timeline — a11y", () => {
     expect(results).toHaveNoViolations()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Focal-entity handoff (UX drive: "Open in Timeline" must land on the entity)
+// ---------------------------------------------------------------------------
+
+describe("Timeline — focal-entity handoff", () => {
+  it("auto-pins the focal entity's track once strata load", async () => {
+    mockFetchStrata.mockResolvedValue(makeStrataData())
+    render(<Timeline focalEntity="e1" />, { wrapper: createWrapper() })
+    await waitFor(() =>
+      expect(screen.getByTestId("track-detail-card")).toBeInTheDocument(),
+    )
+    expect(screen.getByTestId("track-detail-card")).toHaveTextContent("Alice")
+  })
+
+  it("pins a budget-cut focal entity and backfills its name from the track fetch", async () => {
+    mockFetchStrata.mockResolvedValue(makeStrataData())
+    mockFetchTrack.mockResolvedValue({
+      canonical_id: "e-hidden",
+      name: "Hidden Entity",
+      events: [],
+      cached: false,
+    })
+    render(<Timeline focalEntity="e-hidden" />, { wrapper: createWrapper() })
+    await waitFor(() =>
+      expect(screen.getByTestId("track-detail-card")).toBeInTheDocument(),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("track-detail-card")).toHaveTextContent("Hidden Entity"),
+    )
+  })
+})

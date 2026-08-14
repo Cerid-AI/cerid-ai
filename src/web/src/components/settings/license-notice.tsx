@@ -35,9 +35,23 @@ function snoozedUntil(): number {
 }
 
 export function LicenseNotice({ className }: { className?: string }) {
-  const { licenseState } = useEntitlements()
+  const { licenseState, isError: entitlementsError } = useEntitlements()
   const { goTo } = useNavigation()
   const [snoozed, setSnoozed] = useState(() => Date.now() < snoozedUntil())
+
+  // A failed capabilities fetch must not read as "nothing to report" — that
+  // silently hid this exact banner (and the unlicensed-Pro state it warns
+  // about) from the operator it exists for.
+  if (entitlementsError) {
+    return (
+      <Alert variant="destructive" className={className} data-testid="license-status-unavailable">
+        <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+        <AlertDescription className="text-xs">
+          Couldn&apos;t reach the license server to confirm this install&apos;s plan status.
+        </AlertDescription>
+      </Alert>
+    )
+  }
 
   if (licenseState === "unlicensed_pro") {
     return (
@@ -116,8 +130,21 @@ export function LicenseNotice({ className }: { className?: string }) {
 
 /** Compact status-bar form: presence alone is the message. */
 export function LicenseStatusBadge() {
-  const { licenseState } = useEntitlements()
+  const { licenseState, isError: entitlementsError } = useEntitlements()
   const { goTo } = useNavigation()
+
+  if (entitlementsError) {
+    return (
+      <span
+        role="alert"
+        title="Couldn't reach the license server to confirm plan status"
+        className="flex items-center gap-1 rounded bg-destructive/20 px-1.5 py-0.5 text-destructive"
+      >
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+        Plan unknown
+      </span>
+    )
+  }
 
   if (licenseState !== "unlicensed_pro") return null
 

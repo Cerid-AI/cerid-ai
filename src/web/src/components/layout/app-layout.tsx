@@ -3,9 +3,10 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
-import { clearForeignPaneParams } from "@/lib/url-state"
+import { clearForeignPaneParams, syncPanePath } from "@/lib/url-state"
 import { Sidebar, type Pane } from "./sidebar"
 import { NavigationProvider } from "@/contexts/navigation-context"
+import { DeepLinkRouter } from "./deep-link-router"
 import { StatusBar } from "./status-bar"
 import { BottomTabBar } from "./bottom-tab-bar"
 import { AgentConsole } from "@/components/console/AgentConsole"
@@ -30,10 +31,14 @@ interface AppLayoutProps {
   /** Notifies the parent of the active pane so it can gate global chrome
       (e.g. the Quick Capture FAB is hidden on Sources, which has its own). */
   onActivePaneChange?: (pane: Pane) => void
+  /** Pane to mount on. Used only as the useState initial value — DesktopSetup's
+      "Take me to Connectors" exit needs to land on Sources, and pane state
+      lives here, not in App (GUI spec MUST 1). */
+  initialPane?: Pane
 }
 
-export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChange }: AppLayoutProps) {
-  const [activePane, setActivePane] = useState<Pane>("chat")
+export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChange, initialPane }: AppLayoutProps) {
+  const [activePane, setActivePane] = useState<Pane>(initialPane ?? "chat")
 
   // F-URL-01 — Switching primary nav must strip stale per-pane URL
   // params (e.g. `?mode=wiki` left over from Subjects when the user
@@ -42,7 +47,12 @@ export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChan
   // same hygiene without each call site having to remember.
   const handlePaneChange = useCallback((next: Pane) => {
     setActivePane((prev) => {
-      if (next !== prev) clearForeignPaneParams(next)
+      if (next !== prev) {
+        clearForeignPaneParams(next)
+        // SF-7 — keep the pathname naming the active pane so reload and
+        // copied URLs land back here (cold loads read it via paneFromLocation).
+        syncPanePath(next)
+      }
       return next
     })
     onActivePaneChange?.(next)
@@ -97,12 +107,19 @@ export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChan
   return (
     <div className="cerid-content-rise flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
       <div className="vignette" aria-hidden="true" />
+      {/* Lets the frameless window be dragged. See .app-drag-region — the only
+          drag region in the repo was in a loading shell local mode never
+          loads, so the window could not be moved at all. */}
+      <div className="app-drag-region" aria-hidden="true" />
       {/* Phase E.6.6: first-query model-download notification —
           self-suppressing when both ONNX models are cached or the user
           has dismissed the banner. Sits above the main flex row so the
           layout shifts down when shown rather than overlapping. */}
       <ModelDownloadBanner />
       <NavigationProvider activePane={activePane} onPaneChange={handlePaneChange}>
+        {/* Routes cerid:// links (Spotlight results) to the artifact they name.
+            Inside the provider because it navigates; mounted once. */}
+        <DeepLinkRouter />
         <div className="flex flex-1 overflow-hidden">
           {isPhone ? (
             <Sheet open={sidebarSheetOpen} onOpenChange={setSidebarSheetOpen}>

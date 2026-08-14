@@ -25,6 +25,7 @@ const mockSettings: ServerSettings = {
   hallucination_threshold: 0.7,
   enable_auto_inject: true,
   auto_inject_threshold: 0.55,
+  auto_inject_max: 3,
   domains: [],
   taxonomy: {},
   storage_mode: "extract_only",

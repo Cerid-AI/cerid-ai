@@ -34,6 +34,8 @@ import {
   getWhisperDownloadStatus,
   cancelWhisperDownload,
   deleteWhisperModel,
+  fetchModelAssignments,
+  updateModelAssignments,
 } from "@/lib/api/settings"
 import {
   fetchOllamaStatus,
@@ -45,6 +47,7 @@ import {
 import type { WhisperModelInfo, WhisperDownloadStatus } from "@/lib/api/settings"
 import type { OllamaStatus, OllamaRecommendations } from "@/lib/types"
 import { SettingRow, AdvancedDisclosure, ConfirmActionButton } from "../settings-primitives"
+import { ApiKeySettings } from "@/components/auth/api-key-settings"
 import { getDef } from "@/lib/settings-registry"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import type { SettingsCategoryPageProps } from "./page-props"
@@ -270,6 +273,11 @@ function WhisperManagerInline() {
                 {" "}(set via <code className="font-mono">WHISPER_MODEL</code>)
               </p>
             )}
+            {modelsData.cache_dir && (
+              <p className="text-label-xs text-muted-foreground">
+                Cache dir: <code className="font-mono">{modelsData.cache_dir}</code>
+              </p>
+            )}
             {/* eslint-disable-next-line cerid/no-unsafe-array-on-query-data -- modelsData is from useState (null-guarded above), not useQuery */}
             {modelsData.models.map((m) => {
               const dl = active[m.id]
@@ -353,10 +361,102 @@ function WhisperManagerInline() {
   )
 }
 
+// ── Role → model assignments table ────────────────────────────────────────────
+//
+// RA-30: GET/PUT /models/assignments had no client, so the weekly
+// apply_latest_assignments cron job (scheduler.py) rewrote per-role routing
+// invisibly with no way to see or revert it, even though PUT /models/assignments
+// was always able to. This table makes the current per-role assignment visible
+// and gives it pin (save the typed model for that role) and revert (discard an
+// unsaved edit, back to the last-loaded value) controls.
+
+function RoleAssignmentsInline() {
+  const qc = useQueryClient()
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [rowError, setRowError] = useState<Record<string, string>>({})
+
+  const assignmentsQuery = useQuery({
+    queryKey: ["model-assignments"],
+    queryFn: fetchModelAssignments,
+  })
+
+  const pinMutation = useMutation({
+    mutationFn: (role: string) => updateModelAssignments({ [role]: drafts[role] }),
+    onSuccess: (_data, role) => {
+      setRowError((prev) => { const next = { ...prev }; delete next[role]; return next })
+      toast.success(`Pinned "${role}" to ${drafts[role]}`)
+      void qc.invalidateQueries({ queryKey: ["model-assignments"] })
+    },
+    onError: (err, role) => {
+      setRowError((prev) => ({ ...prev, [role]: err instanceof Error ? err.message : "Save failed" }))
+    },
+  })
+
+  const assignments = assignmentsQuery.data?.assignments ?? {}
+  const roles = Object.keys(assignments).sort()
+
+  const draftFor = (role: string) => drafts[role] ?? assignments[role] ?? ""
+  const isDirty = (role: string) => role in drafts && drafts[role] !== assignments[role]
+
+  const roleAssignmentsDef = getDef("models.pipelineTasks.roleAssignments")
+  if (!roleAssignmentsDef) return null
+
+  return (
+    <SettingRow def={roleAssignmentsDef}>
+      <div className="w-full space-y-1.5">
+        {assignmentsQuery.isLoading && (
+          <div className="space-y-1.5">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+        )}
+        {assignmentsQuery.isError && (
+          <p role="alert" className="text-label-xs text-destructive">
+            Failed to load role assignments.
+          </p>
+        )}
+        {roles.map((role) => {
+          const dirty = isDirty(role)
+          return (
+            <div key={role} className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5">
+              <span className="w-28 shrink-0 text-label-xs font-medium text-muted-foreground">{role}</span>
+              <Input
+                value={draftFor(role)}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, [role]: e.target.value }))}
+                aria-label={`Model for role "${role}"`}
+                className="h-8 flex-1 font-mono text-sm"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!dirty || pinMutation.isPending}
+                onClick={() => pinMutation.mutate(role)}
+              >
+                Pin
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!dirty}
+                onClick={() => setDrafts((prev) => { const next = { ...prev }; delete next[role]; return next })}
+              >
+                Revert
+              </Button>
+              {rowError[role] && (
+                <p role="alert" className="text-label-xs text-destructive">{rowError[role]}</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </SettingRow>
+  )
+}
+
 // ── Ollama / Quenchforge wizard ───────────────────────────────────────────────
 
 function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPageProps, "settings" | "onRefresh">) {
-  const { data: ollamaStatus, refetch: refetchOllama, isLoading } = useQuery<OllamaStatus>({
+  const { data: ollamaStatus, refetch: refetchOllama, isLoading, isError } = useQuery<OllamaStatus>({
     queryKey: ["ollama-status"],
     queryFn: fetchOllamaStatus,
     staleTime: 30_000,
@@ -483,6 +583,10 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
         <div className="flex items-center justify-between gap-4">
           {isLoading ? (
             <Skeleton className="h-5 w-24" />
+          ) : isError ? (
+            <Badge variant="outline" className="text-label-xs text-destructive border-destructive/30">
+              Status check failed
+            </Badge>
           ) : ollamaStatus?.reachable ? (
             <Badge variant="default" className="bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30 text-label-xs">
               Connected ({ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? "s" : ""})
@@ -494,7 +598,11 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
           ) : (
             <Badge variant="secondary" className="text-label-xs">Not installed</Badge>
           )}
-          {ollamaStatus && (
+          {isError ? (
+            <Button variant="outline" size="sm" onClick={() => void refetchOllama()}>
+              Retry
+            </Button>
+          ) : ollamaStatus && (
             <Button
               variant={isActive ? "destructive" : "outline"}
               size="sm"
@@ -511,7 +619,7 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
           <p role="alert" className="text-label-xs text-destructive">{wizardError}</p>
         )}
 
-        {((!ollamaReachable && !isActive) || wizardPhase) && (
+        {!isError && ((!ollamaReachable && !isActive) || wizardPhase) && (
           <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-2">
             {wizardPhase === "complete" ? (
               <div className="flex items-center gap-2 text-label-sm text-green-600 dark:text-green-400">
@@ -615,6 +723,12 @@ export default function ModelsCategory({ settings, patch, onRefresh }: SettingsC
         <CardContent className="pt-4 space-y-4">
           <h3 className="text-label-xs font-medium tracking-wide text-muted-foreground uppercase">Providers</h3>
           <OpenRouterKeyInline />
+          {settings.multi_user && (
+            <div className="border-t pt-3">
+              <SettingRow def={getDef("models.providers.personalOpenrouterKey")!} />
+              <ApiKeySettings />
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -658,6 +772,8 @@ export default function ModelsCategory({ settings, patch, onRefresh }: SettingsC
               </SettingRow>
             )
           })()}
+
+          <RoleAssignmentsInline />
 
           <AdvancedDisclosure category="models" group="pipelineTasks">
             {(() => {

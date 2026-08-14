@@ -12,7 +12,7 @@ import { DomainBadge } from "@/components/ui/domain-badge"
 import { SourceTypeBadge } from "./source-type-badge"
 import { QualityDot } from "./quality-dot"
 import type { KBQueryResult } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, parseTags } from "@/lib/utils"
 import { MCP_BASE, mcpHeaders } from "@/lib/api"
 
 /** Touch device detection — pointer type is static per device, so module-level is fine. */
@@ -136,6 +136,10 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const relevancePct = Math.round(result.relevance * 100)
   const showRelevance = result.relevance > 0
   const isBrowseMode = result.relevance === 0
+  // WB-67: query_agent.py never parses `keywords` before returning it — it
+  // arrives as a JSON-encoded string (e.g. "[]"), not an array. Parsing here
+  // avoids calling `.map` on a raw string, which threw and crashed the pane.
+  const keywords = parseTags(result.keywords)
   // Clean up garbled OCR/form text: collapse whitespace, strip control chars, trim trailing truncation
   const cleanContent = result.content
     // eslint-disable-next-line no-control-regex -- intentional: strip control chars from OCR/form text
@@ -375,9 +379,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         {!compact && expanded && (
           <div className="mt-3 space-y-2 border-t pt-3 transition-all duration-200">
             {/* Keyword tags */}
-            {result.keywords && result.keywords.length > 0 && (
+            {keywords.length > 0 && (
               <div className="flex flex-wrap gap-1">
-                {result.keywords.map((k: string) => (
+                {keywords.map((k) => (
                   <Badge key={k} variant="secondary" className="text-label-xs">{k}</Badge>
                 ))}
               </div>

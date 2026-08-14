@@ -25,6 +25,7 @@ const mockSettings: ServerSettings = {
   hallucination_threshold: 0.7,
   enable_auto_inject: true,
   auto_inject_threshold: 0.55,
+  auto_inject_max: 3,
   domains: [],
   taxonomy: {},
   storage_mode: "extract_only",
@@ -141,6 +142,50 @@ describe("RetrievalAnswersCategory — 4-state matrix", () => {
   })
 })
 
+describe("RetrievalAnswersCategory — Smart RAG entitlement verdicts", () => {
+  it("settled community verdict pitches the upgrade", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<RetrievalAnswersCategory {...defaultProps} />, { wrapper })
+    expect(
+      await screen.findByText(/Custom Smart RAG requires the Pro plan/i),
+    ).toBeInTheDocument()
+  })
+
+  it("locked card is suppressed while capabilities are in flight", async () => {
+    // tier defaults to "community" while the fetch is pending; the locked
+    // card is an upgrade pitch a paying customer must not see on first paint.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/billing/capabilities")) return new Promise(() => {})
+      return mockApis()(url)
+    }))
+    render(<RetrievalAnswersCategory {...defaultProps} />, { wrapper })
+    await waitFor(() => {
+      expect(screen.getAllByText(/Smart RAG/i).length).toBeGreaterThanOrEqual(1)
+    })
+    expect(screen.queryByText(/requires the Pro plan/i)).toBeNull()
+  })
+
+  it("failed capabilities fetch stays locked but reports the plan as unverified", async () => {
+    // Fail closed (the "pro" registry fallback), but say the plan couldn't be
+    // verified instead of pitching an upgrade to a user who may own the plan.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/billing/capabilities")) {
+        return Promise.resolve({
+          ok: false, status: 500,
+          json: () => Promise.reject(new Error("boom")),
+          text: () => Promise.resolve("boom"),
+        })
+      }
+      return mockApis()(url)
+    }))
+    render(<RetrievalAnswersCategory {...defaultProps} />, { wrapper })
+    expect(
+      await screen.findByText(/couldn.t be verified/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/requires the Pro plan/i)).toBeNull()
+  })
+})
+
 describe("RetrievalAnswersCategory — RAG mode vocabulary", () => {
   it("renders injection mode select with correct server vocabulary values", async () => {
     vi.stubGlobal("fetch", mockApis())
@@ -186,6 +231,19 @@ describe("RetrievalAnswersCategory — controls call patch", () => {
     expect(mockPatch).toHaveBeenCalledWith(
       expect.objectContaining({ enable_feedback_loop: expect.any(Boolean) }),
     )
+  })
+
+  it("RA-48: Max chunks control is reachable and calls patch with auto_inject_max", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<RetrievalAnswersCategory {...defaultProps} />, { wrapper })
+    await screen.findByText(/Context Injection/i)
+    // level: "advanced" — lives behind the contextInjection group's AdvancedDisclosure,
+    // the first "Advanced" disclosure in DOM order (Context Injection is the
+    // topmost card).
+    const disclosureBtns = screen.getAllByRole("button", { name: /Advanced/i })
+    await userEvent.click(disclosureBtns[0])
+    const maxChunksSlider = await screen.findByRole("slider", { name: /Max chunks/i })
+    expect(maxChunksSlider).toBeInTheDocument()
   })
 
   it("toggling sparse retrieval sets hybrid_fusion_mode to tri_rrf", async () => {

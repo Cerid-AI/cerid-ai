@@ -9,7 +9,14 @@ service after a chunk is committed, when ``RETRIEVAL_HYPE_ENABLED=true``.
 
 Payload schema
 --------------
-  {"chunk_id": str, "content": str, "collection_name": str, "artifact_id": str}
+  {"chunk_id": str, "collection_name": str, "artifact_id": str}
+
+AF-094: the payload deliberately omits chunk content — the chunk is already
+committed to Chroma by the time this job is enqueued (post Neo4j-commit +
+Chroma-flip), so the job re-fetches it from ``collection_name``/``chunk_id``
+at run time instead of persisting the full chunk text into every Redis job
+hash (mirroring the lean ``{"artifact_id", "tenant_id"}`` payload
+``EntityExtractionJob`` already uses).
 
 Token budget
 ------------
@@ -30,6 +37,7 @@ Progress checkpoints
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import Any
@@ -52,9 +60,9 @@ class HyPEIndexingJob(BaseJob):
     Parameters
     ----------
     chunk_id:
-        The primary chunk's ChromaDB ID.
-    content:
-        The chunk's text content.
+        The primary chunk's ChromaDB ID. Also used to re-fetch the chunk's
+        text content from ``collection_name`` at run time (AF-094) — the
+        payload carries no content of its own.
     collection_name:
         The primary ChromaDB collection name (e.g. ``"cerid_general"``).
     artifact_id:
@@ -68,13 +76,11 @@ class HyPEIndexingJob(BaseJob):
     def __init__(
         self,
         chunk_id: str,
-        content: str,
         collection_name: str,
         artifact_id: str,
         n: int = 5,
     ) -> None:
         self._chunk_id = chunk_id
-        self._content = content
         self._collection_name = collection_name
         self._artifact_id = artifact_id
         self._n = n
@@ -120,10 +126,16 @@ class HyPEIndexingJob(BaseJob):
             )
             raise
 
+        # AF-071: actuals must reflect whether the job actually did anything.
+        # index_chunk_with_hype returns {"enabled": False} as a pure no-op when
+        # RETRIEVAL_HYPE_ENABLED is off, and {"enabled": True, "n_prompts": 0,
+        # "total_tokens": 0} for empty content — both previously still reported
+        # the fixed _EST_TOKENS_IN/_EST_TOKENS_OUT constants regardless.
+        did_work = bool(stats.get("enabled", False)) and stats.get("n_prompts", 0) > 0
         return JobResult(
             job_id="",  # filled in by the worker after dequeue
-            actual_tokens_in=_EST_TOKENS_IN,
-            actual_tokens_out=_EST_TOKENS_OUT,
+            actual_tokens_in=_EST_TOKENS_IN if did_work else 0,
+            actual_tokens_out=_EST_TOKENS_OUT if did_work else 0,
             metadata={
                 "chunk_id": self._chunk_id,
                 "artifact_id": self._artifact_id,
@@ -137,9 +149,31 @@ class HyPEIndexingJob(BaseJob):
     # Internal pipeline (keeps run() readable)
     # ------------------------------------------------------------------
 
+    async def _fetch_content(self) -> str:
+        """Re-fetch the chunk's text from Chroma (AF-094 — the payload no
+        longer carries content, only ``chunk_id``/``collection_name``)."""
+        from app.deps import get_chroma
+
+        def _get() -> str:
+            collection = get_chroma().get_or_create_collection(name=self._collection_name)
+            fetched = collection.get(ids=[self._chunk_id], include=["documents"])
+            docs = fetched.get("documents") or []
+            return docs[0] if docs else ""
+
+        return await asyncio.to_thread(_get)
+
     async def _run_pipeline(self, progress_cb: ProgressCallback) -> dict[str, Any]:
         """Delegate to the hype_indexer service with progress callbacks."""
         from app.services.hype_indexer import index_chunk_with_hype
+
+        content = await self._fetch_content()
+        if not content:
+            logger.debug(
+                "hype_indexing.chunk_content_missing chunk_id=%s collection=%s",
+                self._chunk_id, self._collection_name,
+            )
+            await progress_cb(1.0)
+            return {"enabled": True, "n_prompts": 0, "total_tokens": 0}
 
         # 0.0 already emitted by run(); call the service which handles
         # LLM + embed + storage internally.  We emit intermediate progress
@@ -150,7 +184,7 @@ class HyPEIndexingJob(BaseJob):
         # around the full call — this is acceptable for a LOW priority job.
         result = await index_chunk_with_hype(
             self._chunk_id,
-            self._content,
+            content,
             collection_name=self._collection_name,
             artifact_id=self._artifact_id,
             n=self._n,

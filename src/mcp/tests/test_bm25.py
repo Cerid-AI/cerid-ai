@@ -4,6 +4,7 @@
 """Tests for BM25 hybrid search index (bm25s + PyStemmer)."""
 
 import json
+import time
 
 import pytest
 
@@ -535,5 +536,250 @@ class TestBM25DeferredRebuild:
             idx2 = bm25_mod.get_index("coding")
             assert idx2._dirty is False
             assert len(idx2.search("alpha", top_k=10)) == 3
+        finally:
+            bm25_mod._indexes.clear()
+
+    def test_get_index_evicts_lru_beyond_max_loaded_domains(self, tmp_path, monkeypatch):
+        """get_index() bounds the in-memory index dict at
+        BM25_MAX_LOADED_DOMAINS via LRU eviction: the least-recently-used
+        domain is dropped from memory (not from disk) once the cap is
+        exceeded, and re-fetching it transparently reloads from its
+        durable JSONL corpus."""
+        import config
+        import core.retrieval.bm25 as bm25_mod
+
+        monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
+        bm25_mod._indexes.clear()
+        try:
+            idx_a = bm25_mod.get_index("domain_a")
+            idx_a.add_documents(["c1"], ["alpha text"])
+            bm25_mod.get_index("domain_b")
+            assert list(bm25_mod._indexes.keys()) == ["domain_a", "domain_b"]
+
+            # Third distinct domain pushes the dict over the cap; the
+            # least-recently-used entry (domain_a) is evicted from memory.
+            bm25_mod.get_index("domain_c")
+            assert len(bm25_mod._indexes) == 2
+            assert "domain_a" not in bm25_mod._indexes
+            assert set(bm25_mod._indexes.keys()) == {"domain_b", "domain_c"}
+
+            # domain_a's corpus survived on disk — re-fetching reloads it.
+            idx_a_reloaded = bm25_mod.get_index("domain_a")
+            assert idx_a_reloaded is not idx_a
+            assert idx_a_reloaded.size == 1
+            assert any(
+                cid == "c1" for cid, _ in idx_a_reloaded.search("alpha", top_k=5)
+            )
+        finally:
+            bm25_mod._indexes.clear()
+
+    def test_get_index_and_rebuild_all_serialize_on_new_domain(
+        self, tmp_path, monkeypatch
+    ):
+        """get_index() and rebuild_all() both do a check-then-construct-or-
+        reuse against the same module-level `_indexes` dict, so both must be
+        guarded by the same `_indexes_lock`.
+
+        Regression guard: rebuild_all() previously performed its
+        check-then-set unlocked. If a live /admin/kb/rebuild-index call
+        (rebuild_all) races an ordinary ingestion call (get_index) for a
+        domain neither has cached yet, the unlocked path let both construct
+        their own BM25Index and the second write orphaned the first —
+        along with any documents it had already accepted in memory. With
+        both call sites serialized on `_indexes_lock`, exactly one instance
+        is ever constructed for the domain, regardless of which caller wins
+        the race.
+        """
+        import threading
+
+        import config
+        import core.retrieval.bm25 as bm25_mod
+
+        monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(config, "DOMAINS", ["race_domain"])
+        bm25_mod._indexes.clear()
+
+        construct_count = {"n": 0}
+        real_init = bm25_mod.BM25Index.__init__
+
+        def slow_init(self, *args, **kwargs):
+            construct_count["n"] += 1
+            time.sleep(0.05)
+            real_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(bm25_mod.BM25Index, "__init__", slow_init)
+
+        start_barrier = threading.Barrier(2)
+        results: dict = {}
+
+        def call_get_index():
+            start_barrier.wait(timeout=5)
+            results["get_index"] = bm25_mod.get_index("race_domain")
+
+        def call_rebuild_all():
+            start_barrier.wait(timeout=5)
+            bm25_mod.rebuild_all()
+
+        try:
+            t1 = threading.Thread(target=call_get_index)
+            t2 = threading.Thread(target=call_rebuild_all)
+            t1.start()
+            t2.start()
+            t1.join(timeout=5)
+            t2.join(timeout=5)
+
+            assert construct_count["n"] == 1, (
+                "expected exactly one BM25Index construction when "
+                "get_index() races rebuild_all() on the same new domain, "
+                f"got {construct_count['n']} — rebuild_all's unlocked "
+                "check-then-set let the second write orphan the first index"
+            )
+            assert len(bm25_mod._indexes) == 1
+            assert bm25_mod._indexes["race_domain"] is results["get_index"]
+        finally:
+            bm25_mod._indexes.clear()
+
+    def test_get_index_reuses_existing_and_marks_recently_used(self, tmp_path, monkeypatch):
+        """A repeat get_index() call for a live domain returns the same
+        instance and moves it to the MRU end, protecting it from the next
+        eviction."""
+        import config
+        import core.retrieval.bm25 as bm25_mod
+
+        monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
+        bm25_mod._indexes.clear()
+        try:
+            idx_a = bm25_mod.get_index("domain_a")
+            bm25_mod.get_index("domain_b")
+            # Touch domain_a again so it becomes MRU instead of domain_b.
+            assert bm25_mod.get_index("domain_a") is idx_a
+            assert list(bm25_mod._indexes.keys()) == ["domain_b", "domain_a"]
+
+            # domain_c pushes past the cap; domain_b (now LRU) is evicted.
+            bm25_mod.get_index("domain_c")
+            assert set(bm25_mod._indexes.keys()) == {"domain_a", "domain_c"}
+        finally:
+            bm25_mod._indexes.clear()
+
+    def test_slow_rebuild_serves_stale_snapshot_without_blocking(
+        self, tmp_path, monkeypatch,
+    ):
+        """A rebuild slower than the inline-wait cap must not stall search.
+
+        Plant-fault for kb-idle-zero: whole-corpus re-tokenization of large
+        domains ran inline on the query path and serialized into 20s+ of
+        vector_search, exhausting the retrieval budget. With the bounded
+        wait, the query is served from the previous snapshot immediately and
+        the rebuild completes on the worker thread.
+        """
+        import time as _time
+
+        import core.retrieval.bm25 as bm25_mod
+
+        idx = BM25Index("test_slow_rebuild", data_dir=str(tmp_path))
+        idx.add_documents(["c1", "c2"], ["alpha beta", "alpha gamma"])
+        assert idx.search("alpha")  # first (inline) build
+
+        monkeypatch.setattr(bm25_mod, "BM25_REBUILD_DEBOUNCE_SECONDS", 0.0)
+        monkeypatch.setattr(bm25_mod, "BM25_REBUILD_MAX_INLINE_WAIT_SECONDS", 0.05)
+
+        real_rebuild = BM25Index._rebuild_locked
+
+        def slow_rebuild(self_idx):
+            _time.sleep(0.4)
+            real_rebuild(self_idx)
+
+        monkeypatch.setattr(BM25Index, "_rebuild_locked", slow_rebuild)
+
+        idx.add_documents(["c4"], ["alpha zeta"])
+        start = _time.monotonic()
+        hits = {cid for cid, _ in idx.search("alpha", top_k=10)}
+        elapsed = _time.monotonic() - start
+
+        # Served from the stale snapshot, well under the rebuild duration.
+        assert elapsed < 0.3, f"search blocked on the rebuild ({elapsed:.2f}s)"
+        assert hits == {"c1", "c2"}
+
+        # The worker-thread rebuild lands; the new doc becomes searchable.
+        inflight = idx._rebuild_inflight
+        assert inflight is not None
+        inflight[1].wait(timeout=5.0)
+        assert "c4" in {cid for cid, _ in idx.search("alpha", top_k=10)}
+
+    def test_rebuild_single_flight(self, tmp_path, monkeypatch):
+        """Concurrent searches during a slow rebuild share one worker thread."""
+        import time as _time
+
+        import core.retrieval.bm25 as bm25_mod
+
+        idx = BM25Index("test_single_flight", data_dir=str(tmp_path))
+        idx.add_documents(["c1"], ["alpha beta"])
+        assert idx.search("alpha")
+
+        monkeypatch.setattr(bm25_mod, "BM25_REBUILD_DEBOUNCE_SECONDS", 0.0)
+        monkeypatch.setattr(bm25_mod, "BM25_REBUILD_MAX_INLINE_WAIT_SECONDS", 0.0)
+
+        rebuild_calls = {"n": 0}
+        real_rebuild = BM25Index._rebuild_locked
+
+        def slow_rebuild(self_idx):
+            rebuild_calls["n"] += 1
+            _time.sleep(0.2)
+            real_rebuild(self_idx)
+
+        monkeypatch.setattr(BM25Index, "_rebuild_locked", slow_rebuild)
+
+        idx.add_documents(["c2"], ["alpha gamma"])
+        for _ in range(5):
+            idx.search("alpha")
+        inflight = idx._rebuild_inflight
+        assert inflight is not None
+        inflight[1].wait(timeout=5.0)
+        assert rebuild_calls["n"] == 1
+
+
+class TestWarmIndexes:
+    """kb-cold-first-touch: boot pays the cold load, not the first query."""
+
+    def test_warm_indexes_materialises_domains_from_disk(
+        self, tmp_path, monkeypatch,
+    ):
+        import config
+        import core.retrieval.bm25 as bm25_mod
+
+        monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(config, "DOMAINS", ["alpha", "beta"])
+        bm25_mod._indexes.clear()
+        try:
+            # Populate two domains, then drop them from memory so the next
+            # touch is a genuine cold load off the JSONL corpus.
+            bm25_mod.get_index("alpha").add_documents(["a1"], ["alpha text"])
+            bm25_mod.get_index("beta").add_documents(
+                ["b1", "b2"], ["beta text", "more beta"],
+            )
+            bm25_mod._indexes.clear()
+
+            warmed = bm25_mod.warm_indexes()
+
+            assert warmed == {"alpha": 1, "beta": 2}
+            assert set(bm25_mod._indexes) == {"alpha", "beta"}
+        finally:
+            bm25_mod._indexes.clear()
+
+    def test_warm_indexes_stops_at_the_lru_bound(self, tmp_path, monkeypatch):
+        """Warming past the LRU cap would evict what it just warmed."""
+        import config
+        import core.retrieval.bm25 as bm25_mod
+
+        monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(config, "DOMAINS", ["d1", "d2", "d3", "d4"])
+        monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
+        bm25_mod._indexes.clear()
+        try:
+            warmed = bm25_mod.warm_indexes()
+            assert list(warmed) == ["d1", "d2"]
+            assert len(bm25_mod._indexes) == 2
         finally:
             bm25_mod._indexes.clear()

@@ -167,9 +167,14 @@ class RemovalResult:
 # Cache invalidation (query-result caches C1+C2 via the unified contract; the
 # graph serving cache C3 via a direct pattern bust — C3's job-ownership stays CL-6).
 # --------------------------------------------------------------------------- #
-def _invalidate_caches(trigger: str, redis: Any | None = None) -> None:
+def invalidate_caches(trigger: str, redis: Any | None = None) -> None:
     """Best-effort bust of the query-result caches (C1+C2) and the graph serving
     cache (C3).
+
+    Public: also called by delete paths outside this module that bypass
+    :func:`remove_content` (e.g. ``session_wipe._delete_verified_memory``,
+    which deletes a verified-memory Chroma doc + ``:Memory`` node directly
+    since neither carries ``chunk_ids`` for the fan-out path — AF-096).
 
     Cache invalidation is freshness, not correctness: the removal that calls this
     has ALREADY dropped the node + chunks from the stores, so a redis outage here
@@ -240,8 +245,8 @@ def remove_content(
     removed = _fan_out_removal(chunk_ids, domain, chroma)
 
     # Stores are now clean — the delete has succeeded. The cache bust below is
-    # best-effort freshness and cannot fail this result (see _invalidate_caches).
-    _invalidate_caches(trigger=f"lifecycle.remove:{artifact_id}", redis=redis)
+    # best-effort freshness and cannot fail this result (see invalidate_caches).
+    invalidate_caches(trigger=f"lifecycle.remove:{artifact_id}", redis=redis)
 
     return RemovalResult(
         found=True, artifact_id=artifact_id, domain=domain,
@@ -275,7 +280,7 @@ def remove_orphan_chunks(
     removed = _fan_out_removal(chunk_ids, domain, chroma)
 
     if bust_caches:
-        _invalidate_caches(trigger="lifecycle.rollback_orphan_chunks", redis=redis)
+        invalidate_caches(trigger="lifecycle.rollback_orphan_chunks", redis=redis)
 
     return RemovalResult(found=True, domain=domain, chunk_ids=list(chunk_ids), removed=removed)
 
@@ -308,6 +313,6 @@ def hide_content(
     ok = set_archived(neo4j, artifact_id, archived_at=archived_at, extra=extra_props)
     if ok:
         # Node is flagged — the hide has succeeded. The cache bust is best-effort
-        # freshness and cannot fail this result (see _invalidate_caches).
-        _invalidate_caches(trigger=f"lifecycle.hide:{artifact_id}", redis=redis)
+        # freshness and cannot fail this result (see invalidate_caches).
+        invalidate_caches(trigger=f"lifecycle.hide:{artifact_id}", redis=redis)
     return ok

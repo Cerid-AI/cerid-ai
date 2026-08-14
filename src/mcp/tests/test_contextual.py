@@ -11,27 +11,26 @@ the code is provider-agnostic and so are the tests.
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
-def _config(
+def _pin_config(
+    monkeypatch,
     *,
     enabled: bool = True,
     batch_size: int = 5,
     max_per_artifact: int = 200,
     timeout: float = 30.0,
-) -> MagicMock:
-    """A MagicMock ``config`` with the contextual knobs pinned to real values.
-
-    A bare MagicMock would hand back child mocks for the cost-guard knobs and
-    ``int()/float()`` of a mock raises — so every test sets concrete numbers.
-    """
-    cfg = MagicMock()
-    cfg.ENABLE_CONTEXTUAL_CHUNKS = enabled
-    cfg.CONTEXTUAL_CHUNK_BATCH_SIZE = batch_size
-    cfg.CONTEXTUAL_CHUNKS_MAX_PER_ARTIFACT = max_per_artifact
-    cfg.CONTEXTUAL_CHUNK_LLM_TIMEOUT = timeout
-    return cfg
+) -> None:
+    """Pin the contextual knobs on the REAL config module, per setting."""
+    settings = {
+        "ENABLE_CONTEXTUAL_CHUNKS": enabled,
+        "CONTEXTUAL_CHUNK_BATCH_SIZE": batch_size,
+        "CONTEXTUAL_CHUNKS_MAX_PER_ARTIFACT": max_per_artifact,
+        "CONTEXTUAL_CHUNK_LLM_TIMEOUT": timeout,
+    }
+    for name, value in settings.items():
+        monkeypatch.setattr(f"core.utils.contextual.config.{name}", value)
 
 
 # ---------------------------------------------------------------------------
@@ -42,10 +41,9 @@ def _config(
 class TestContextualizeChunks:
     """Tests for the main contextualize_chunks function."""
 
-    @patch("core.utils.contextual.config")
-    def test_disabled_returns_original(self, mock_config):
+    def test_disabled_returns_original(self, monkeypatch):
         """Flag OFF → chunks pass through byte-identical (regression guard)."""
-        mock_config.ENABLE_CONTEXTUAL_CHUNKS = False
+        _pin_config(monkeypatch, enabled=False)
         from core.utils.contextual import contextualize_chunks
 
         chunks = ["chunk one", "chunk two"]
@@ -54,19 +52,18 @@ class TestContextualizeChunks:
         # Same object contents, no prefixes introduced.
         assert all("[" not in c[:1] for c in result)
 
-    @patch("core.utils.contextual.config")
-    def test_empty_chunks_returns_empty(self, mock_config):
+    def test_empty_chunks_returns_empty(self, monkeypatch):
         """Empty input returns empty output."""
-        mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
+        _pin_config(monkeypatch)
         from core.utils.contextual import contextualize_chunks
 
         result = contextualize_chunks([], "full text")
         assert result == []
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_successful_enrichment(self, mock_config, mock_llm):
+    def test_successful_enrichment(self, mock_llm, monkeypatch):
         """Successful LLM call prepends context to each chunk."""
+        _pin_config(monkeypatch)
         contexts = ["revenue discussion in Q3 report", "API auth setup guide"]
         mock_llm.return_value = json.dumps(contexts)
 
@@ -80,9 +77,9 @@ class TestContextualizeChunks:
         assert result[1] == "[API auth setup guide]\nSet up API key in config.yaml"
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_batching(self, mock_config, mock_llm):
+    def test_batching(self, mock_llm, monkeypatch):
         """Chunks are processed in batches of CONTEXTUAL_CHUNK_BATCH_SIZE."""
+        _pin_config(monkeypatch)
         chunks = [f"chunk {i}" for i in range(7)]
         batch1 = [f"ctx {i}" for i in range(5)]
         batch2 = [f"ctx {i}" for i in range(5, 7)]
@@ -98,10 +95,10 @@ class TestContextualizeChunks:
 
     @patch("core.utils.contextual.log_swallowed_error")
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_llm_error_returns_originals_and_logs(self, mock_config, mock_llm, mock_log):
+    def test_llm_error_returns_originals_and_logs(self, mock_llm, mock_log, monkeypatch):
         """On LLM transport error: chunks pass through un-prefixed AND the
         swallow is recorded via log_swallowed_error (mechanical rule)."""
+        _pin_config(monkeypatch)
         import httpx as real_httpx
         mock_llm.side_effect = real_httpx.ConnectError("Connection refused")
 
@@ -114,10 +111,10 @@ class TestContextualizeChunks:
 
     @patch("core.utils.contextual.log_swallowed_error")
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config(timeout=0.05))
-    def test_per_call_timeout_skips_gracefully(self, mock_config, mock_llm, mock_log):
+    def test_per_call_timeout_skips_gracefully(self, mock_llm, mock_log, monkeypatch):
         """A call slower than CONTEXTUAL_CHUNK_LLM_TIMEOUT is abandoned; the
         affected chunks are ingested un-prefixed and the timeout is logged."""
+        _pin_config(monkeypatch, timeout=0.05)
 
         async def _slow(*_args, **_kwargs):
             await asyncio.sleep(5)
@@ -133,10 +130,10 @@ class TestContextualizeChunks:
         assert mock_log.called
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config(max_per_artifact=2))
-    def test_cost_cap_bounds_llm_calls(self, mock_config, mock_llm):
+    def test_cost_cap_bounds_llm_calls(self, mock_llm, monkeypatch):
         """Only the first CONTEXTUAL_CHUNKS_MAX_PER_ARTIFACT chunks pay an LLM
         call; the tail passes through un-prefixed (bounds ingest cost)."""
+        _pin_config(monkeypatch, max_per_artifact=2)
         mock_llm.return_value = json.dumps(["c0", "c1"])
 
         from core.utils.contextual import contextualize_chunks
@@ -153,9 +150,9 @@ class TestContextualizeChunks:
         assert result[2:] == ["chunk 2", "chunk 3", "chunk 4"]
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config(max_per_artifact=0))
-    def test_cap_disabled_enriches_all(self, mock_config, mock_llm):
+    def test_cap_disabled_enriches_all(self, mock_llm, monkeypatch):
         """max_per_artifact <= 0 disables the cap — all chunks enriched."""
+        _pin_config(monkeypatch, max_per_artifact=0)
         mock_llm.return_value = json.dumps([f"c{i}" for i in range(3)])
 
         from core.utils.contextual import contextualize_chunks
@@ -165,9 +162,9 @@ class TestContextualizeChunks:
         assert result == ["[c0]\nchunk 0", "[c1]\nchunk 1", "[c2]\nchunk 2"]
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_mismatched_count_returns_no_context(self, mock_config, mock_llm):
+    def test_mismatched_count_returns_no_context(self, mock_llm, monkeypatch):
         """When the LLM returns the wrong number of contexts, chunks pass through."""
+        _pin_config(monkeypatch)
         mock_llm.return_value = json.dumps(["only one context"])
 
         from core.utils.contextual import contextualize_chunks
@@ -177,9 +174,9 @@ class TestContextualizeChunks:
         assert result == ["chunk 1", "chunk 2", "chunk 3"]
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_markdown_code_block_stripped(self, mock_config, mock_llm):
+    def test_markdown_code_block_stripped(self, mock_llm, monkeypatch):
         """LLM responses wrapped in ```json code blocks are handled."""
+        _pin_config(monkeypatch)
         mock_llm.return_value = '```json\n["ctx for chunk 0", "ctx for chunk 1"]\n```'
 
         from core.utils.contextual import contextualize_chunks
@@ -190,9 +187,9 @@ class TestContextualizeChunks:
         assert result[1] == "[ctx for chunk 1]\nchunk 1"
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_metadata_passed_to_prompt(self, mock_config, mock_llm):
+    def test_metadata_passed_to_prompt(self, mock_llm, monkeypatch):
         """Filename and domain from metadata are included in the LLM prompt."""
+        _pin_config(monkeypatch)
         mock_llm.return_value = json.dumps(["ctx"])
 
         from core.utils.contextual import contextualize_chunks
@@ -209,9 +206,9 @@ class TestContextualizeChunks:
         assert "finance" in prompt
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_stage_breadcrumb_passed(self, mock_config, mock_llm):
+    def test_stage_breadcrumb_passed(self, mock_llm, monkeypatch):
         """The call is attributed to stage='contextual_chunks' (routing + obs)."""
+        _pin_config(monkeypatch)
         mock_llm.return_value = json.dumps(["ctx"])
 
         from core.utils.contextual import contextualize_chunks
@@ -220,9 +217,9 @@ class TestContextualizeChunks:
         assert mock_llm.call_args.kwargs["stage"] == "contextual_chunks"
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_doc_preview_truncated(self, mock_config, mock_llm):
+    def test_doc_preview_truncated(self, mock_llm, monkeypatch):
         """Full text is truncated to ~3000 chars in the LLM prompt."""
+        _pin_config(monkeypatch)
         mock_llm.return_value = json.dumps(["ctx"])
 
         from core.utils.contextual import contextualize_chunks
@@ -246,9 +243,9 @@ class TestGenerateContexts:
 
     @patch("core.utils.contextual.log_swallowed_error")
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_json_decode_error_returns_empty_and_logs(self, mock_config, mock_llm, mock_log):
+    def test_json_decode_error_returns_empty_and_logs(self, mock_llm, mock_log, monkeypatch):
         """Invalid JSON from the LLM returns empty strings AND is logged."""
+        _pin_config(monkeypatch)
         mock_llm.return_value = "not valid json at all"
 
         from core.utils.contextual import _generate_contexts
@@ -258,9 +255,9 @@ class TestGenerateContexts:
         assert mock_log.called
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.utils.contextual.config", new_callable=lambda: _config())
-    def test_chunk_preview_truncated(self, mock_config, mock_llm):
+    def test_chunk_preview_truncated(self, mock_llm, monkeypatch):
         """Individual chunk previews are truncated to 300 chars in the prompt."""
+        _pin_config(monkeypatch)
         mock_llm.return_value = json.dumps(["ctx"])
 
         from core.utils.contextual import _generate_contexts

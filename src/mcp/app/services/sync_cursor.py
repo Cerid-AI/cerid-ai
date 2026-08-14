@@ -4,10 +4,11 @@
 """Sync-cursor service — Redis-backed hot store, Neo4j durable backstop.
 
 Every connector ingestion run reads its last cursor, fetches since
-that point, and writes back the new cursor atomically. Reads come
-from Redis (sub-millisecond, no Neo4j round-trip in the hot path).
-Writes go to BOTH Redis and Neo4j so a Redis flush / restart loses
-at most the last in-flight cursor — Neo4j is the durable truth.
+that point, and writes back the new cursor. Reads come from Redis
+(sub-millisecond, no Neo4j round-trip in the hot path). Writes go to
+Neo4j (durable) first, then Redis (hot) — see :func:`set_cursor` for
+why that order matters (AF-074): it guarantees Redis is never left
+holding a cursor value that was never durably committed.
 
 See ``tasks/2026-05-24-ingestion-experience-plan.md`` §2.2 for the
 protocol contract. The cursor shape is connector-defined — this
@@ -71,26 +72,20 @@ def get_cursor(redis_client, driver, source_id: str) -> dict[str, Any]:
 
 
 def set_cursor(redis_client, driver, source_id: str, cursor: dict[str, Any]) -> None:
-    """Persist a cursor advance. Writes to BOTH Redis (hot) and Neo4j (durable).
+    """Persist a cursor advance. Writes Neo4j (durable) first, then Redis (hot).
 
-    The two writes are NOT in a transaction — if Neo4j fails, Redis
-    keeps the new cursor and the next worker reads it. If Redis fails,
-    Neo4j is the source of truth on cold start. Worst case: a
-    crash-loop between the two writes leaves Redis ahead of Neo4j by
-    one cursor; on restart the source replays one extra batch
-    (idempotent per the connector protocol).
+    AF-074: Neo4j is written first and Redis is only updated once that write
+    has succeeded — a reconciliation ordering that rules out the case where
+    a crash between the two writes leaves Redis holding a cursor value that
+    was never durably committed. If the Neo4j write fails, the Redis write
+    is skipped entirely so the two stores never diverge with Redis "ahead":
+    the in-flight advance is dropped and the next run re-fetches from the
+    last durably-committed cursor (idempotent per the connector protocol) —
+    worse case is a duplicate batch, never a skipped one. If Redis then
+    fails after a successful Neo4j write, Neo4j is ahead of a stale/missing
+    Redis entry, which :func:`get_cursor`'s Neo4j fallback already repairs
+    on the next read (it warms Redis from Neo4j on a miss).
     """
-    raw = json.dumps(cursor)
-    if redis_client is not None:
-        try:
-            redis_client.set(_REDIS_PREFIX + source_id, raw)
-        except Exception as exc:  # noqa: BLE001 — observability boundary
-            from core.utils.swallowed import log_swallowed_error
-            log_swallowed_error(
-                "app.services.sync_cursor.redis_write",
-                exc,
-                context={"source_id": source_id},
-            )
     try:
         srcdb.update_source_cursor(driver, source_id, cursor)
     except Exception as exc:  # noqa: BLE001 — observability boundary
@@ -100,6 +95,18 @@ def set_cursor(redis_client, driver, source_id: str, cursor: dict[str, Any]) -> 
             exc,
             context={"source_id": source_id},
         )
+        return
+
+    if redis_client is not None:
+        try:
+            redis_client.set(_REDIS_PREFIX + source_id, json.dumps(cursor))
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error(
+                "app.services.sync_cursor.redis_write",
+                exc,
+                context={"source_id": source_id},
+            )
 
 
 def clear_cursor(redis_client, driver, source_id: str) -> None:

@@ -14,12 +14,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import app.services.ingestion as ingestion_module
 from app.services.ingestion import (
     _content_hash,
     _rollback_chromadb,
+    ingest_batch,
     ingest_content,
     validate_file_path,
 )
+from errors import StorageLimitExceededError
 
 # ---------------------------------------------------------------------------
 # Tests: _content_hash
@@ -689,11 +692,11 @@ class TestSourceLinking:
     to a real :Source node (existence-checked), so an external-capture id can
     never create a dangling FROM_SOURCE edge or spurious counter."""
 
-    def _drive(self, filename_meta):
+    def _drive(self, filename_meta, discovered_edges: int = 0):
         with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.return_value = None
-            mock_graph.discover_relationships.return_value = 0
+            mock_graph.discover_relationships.return_value = discovered_edges
             return ingest_content("content from a source", domain="coding", metadata=filename_meta)
 
     @patch("app.db.neo4j.sources.increment_source_counters")
@@ -724,6 +727,35 @@ class TestSourceLinking:
         assert mock_link.call_args.args[2] == "src-uuid"
         mock_incr.assert_called_once()
         assert mock_incr.call_args.kwargs.get("artifacts") == 1
+        # AF-023: edges= must always be passed, even when nothing was discovered.
+        assert mock_incr.call_args.kwargs.get("edges") == 0
+
+    @patch("app.db.neo4j.sources.increment_source_counters")
+    @patch("app.db.neo4j.sources.link_artifact")
+    @patch("app.db.neo4j.sources.get_source")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_edges_counter_reflects_discovered_relationships(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_get_source, mock_link, mock_incr,
+    ):
+        """AF-023: increment_source_counters must be called with edges= set to
+        whatever discover_relationships actually found, not always 0."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+        mock_get_source.return_value = {"id": "src-uuid", "quality_floor": 0.0}
+
+        result = self._drive({"source_id": "src-uuid"}, discovered_edges=3)
+
+        assert result["status"] == "success"
+        mock_incr.assert_called_once()
+        assert mock_incr.call_args.kwargs.get("edges") == 3
 
     @patch("app.db.neo4j.sources.increment_source_counters")
     @patch("app.db.neo4j.sources.link_artifact")
@@ -776,6 +808,212 @@ class TestSourceLinking:
         assert result["status"] == "success"
         mock_get_source.assert_not_called()
         mock_link.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: ingest_content — dedup-by-external_id (AF-052)
+# ---------------------------------------------------------------------------
+
+class TestExternalIdDedup:
+    """AF-007/AF-052 — connectors pass a stable external_id (Apple Notes id,
+    Message-ID) that is NOT a :Source UUID. A re-ingest of the same
+    (source_kind, external_id) with edited content must UPDATE the existing
+    artifact in place, not create a second one — even when the payload carries
+    no `filename` (apple_notes). A genuine :Source UUID keeps flowing to the
+    quality floor."""
+
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_external_id_collision_updates_in_place(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None  # _check_duplicate: no exact hit
+
+        prev = {"id": "note-artifact-id", "content_hash": "old-hash", "chunk_ids": "[]"}
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_external_id.return_value = prev
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.update_artifact.return_value = None
+
+            result = ingest_content(
+                "edited note body",
+                domain="notes",
+                metadata={
+                    "external_id": "apple_notes:42",
+                    "source_kind": "apple_notes",
+                    "filename": "My Note",
+                },
+            )
+
+        # Routed to the edit path: same artifact, no second one created.
+        assert result["status"] == "updated"
+        assert result["artifact_id"] == "note-artifact-id"
+        mock_graph.create_artifact.assert_not_called()
+        # Looked up by the (source_kind, external_id) pair, not by content_hash.
+        mock_graph.find_artifact_by_external_id.assert_called_once()
+        assert mock_graph.find_artifact_by_external_id.call_args.args[1:] == (
+            "apple_notes", "apple_notes:42",
+        )
+
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_no_filename_repeated_external_id_dedups(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        """apple_notes posts a title, not a filename — the filename re-ingest
+        branch can never fire for it. The external_id branch must still catch
+        the edit so a second artifact is never created."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        prev = {"id": "aid", "content_hash": "old-hash", "chunk_ids": "[]"}
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_external_id.return_value = prev
+            mock_graph.update_artifact.return_value = None
+
+            result = ingest_content(
+                "new content for a note that has no filename",
+                domain="notes",
+                metadata={"external_id": "apple_notes:7", "source_kind": "apple_notes"},
+            )
+
+        assert result["status"] == "updated"
+        assert result["artifact_id"] == "aid"
+        mock_graph.create_artifact.assert_not_called()
+        # The filename branch was never even consulted (fname == "text_input").
+        mock_graph.find_artifact_by_filename.assert_not_called()
+
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_new_external_id_creates_artifact_and_stamps_it(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem,
+    ):
+        """First delivery of an external item: no prior match → fresh create,
+        and create_artifact receives external_id + source_kind so the NEXT
+        edit can find it."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_external_id.return_value = None
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+
+            result = ingest_content(
+                "brand new note",
+                domain="notes",
+                metadata={"external_id": "apple_notes:99", "source_kind": "apple_notes"},
+            )
+
+        assert result["status"] == "success"
+        create_kwargs = mock_graph.create_artifact.call_args.kwargs
+        assert create_kwargs.get("external_id") == "apple_notes:99"
+        assert create_kwargs.get("source_kind") == "apple_notes"
+
+    @patch("app.db.neo4j.sources.get_source", return_value=None)
+    @patch("app.services.quality_floors.should_drop", return_value=False)
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_source_uuid_still_flows_to_quality_floor(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem, mock_should_drop, mock_get_source,
+    ):
+        """A genuine :Source UUID in source_id (never routed to external_id)
+        still reaches should_drop, so per-source quality floors keep working."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        source_uuid = "550e8400-e29b-41d4-a716-446655440000"
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.find_artifact_by_external_id.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+
+            result = ingest_content(
+                "content from a registered source",
+                domain="coding",
+                metadata={"source_id": source_uuid, "filename": "x.txt"},
+            )
+
+        assert result["status"] == "success"
+        mock_should_drop.assert_called_once()
+        # should_drop received the :Source UUID, not None.
+        assert mock_should_drop.call_args.args[0] == source_uuid
+
+    @patch("app.db.neo4j.sources.get_source", return_value=None)
+    @patch("app.services.quality_floors.should_drop", return_value=False)
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_external_id_never_reaches_quality_floor(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem, mock_should_drop, mock_get_source,
+    ):
+        """The external-capture case: an external_id (and no source_id) means
+        should_drop is invoked with None, so the per-source floor is a no-op —
+        the external id can never be mistaken for a :Source UUID."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.find_artifact_by_external_id.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+
+            ingest_content(
+                "external capture body",
+                domain="notes",
+                metadata={"external_id": "apple_notes:5", "source_kind": "apple_notes"},
+            )
+
+        mock_should_drop.assert_called_once()
+        assert mock_should_drop.call_args.args[0] is None
 
 
 # ---------------------------------------------------------------------------
@@ -1019,3 +1257,165 @@ class TestReingestEntityReExtraction:
 
         assert result["status"] == "updated"
         mock_enqueue.assert_called_once_with(artifact_id="aid")
+
+
+# ---------------------------------------------------------------------------
+# Tests: ingest backpressure (AF-042)
+# ---------------------------------------------------------------------------
+
+class TestIngestStorageBackpressure:
+    """STORAGE_LIMIT_MB / WARN_PCT / CRITICAL_PCT wired into the ingest hot
+    path. Backpressure only: below WARN proceeds silently, WARN..CRITICAL
+    proceeds but logs once, at/above CRITICAL rejects with a 507-mapped
+    ``StorageLimitExceededError``. See app/services/storage_metrics.py for
+    the shared threshold classification tested directly.
+    """
+
+    def setup_method(self):
+        # _storage_warn_logged is module state that survives across tests.
+        ingestion_module._storage_warn_logged = False
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_storage_report")
+    def test_healthy_status_proceeds(self, mock_report, mock_chroma, mock_neo4j, mock_redis):
+        mock_report.return_value = {"status": "healthy", "usage_pct": 10, "limit_mb": 2048}
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            result = ingest_content("healthy band content", domain="coding")
+
+        assert result["status"] == "success"
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_storage_report")
+    @patch("app.services.ingestion.logger")
+    def test_warning_status_proceeds_and_logs_once(
+        self, mock_logger, mock_report, mock_chroma, mock_neo4j, mock_redis,
+    ):
+        mock_report.return_value = {
+            "status": "warning", "usage_pct": 65, "limit_mb": 2048, "warn_pct": 60,
+        }
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            r1 = ingest_content("warn band content one", domain="coding")
+            r2 = ingest_content("warn band content two", domain="coding")
+
+        assert r1["status"] == "success"
+        assert r2["status"] == "success"
+        warn_calls = [
+            c for c in mock_logger.warning.call_args_list
+            if c.args and c.args[0] == "storage_backpressure_warning usage_pct=%s limit_mb=%s warn_pct=%s"
+        ]
+        assert len(warn_calls) == 1, "warning must log once per transition into the band, not per ingest"
+
+    @patch("app.services.ingestion.get_storage_report")
+    def test_critical_status_rejects_with_507(self, mock_report):
+        mock_report.return_value = {
+            "status": "critical", "usage_pct": 85, "limit_mb": 2048, "critical_pct": 80,
+        }
+
+        with pytest.raises(StorageLimitExceededError) as exc_info:
+            ingest_content("this must never be written", domain="coding")
+
+        assert exc_info.value.http_status == 507
+
+    @patch("app.services.ingestion.get_storage_report")
+    def test_critical_status_rejects_before_any_write(self, mock_report):
+        """The reject happens before get_chroma()/get_neo4j() are ever
+        touched — a rejected ingest must not partially write."""
+        mock_report.return_value = {"status": "critical", "usage_pct": 90}
+
+        with (
+            patch("app.services.ingestion.get_chroma") as mock_chroma,
+            patch("app.services.ingestion.get_neo4j") as mock_neo4j,
+            pytest.raises(StorageLimitExceededError),
+        ):
+            ingest_content("rejected content", domain="coding")
+
+        mock_chroma.assert_not_called()
+        mock_neo4j.assert_not_called()
+
+    @patch("app.services.ingestion.get_storage_report")
+    @pytest.mark.asyncio
+    async def test_critical_status_rejects_batch_before_any_item_runs(self, mock_report):
+        mock_report.return_value = {"status": "critical", "usage_pct": 90}
+
+        with pytest.raises(StorageLimitExceededError):
+            await ingest_batch([{"content": "one"}, {"content": "two"}])
+
+    @patch("config.STORAGE_BACKPRESSURE_ENABLED", False)
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_storage_report")
+    def test_disabled_flag_skips_enforcement_even_at_critical(
+        self, mock_report, mock_chroma, mock_neo4j, mock_redis,
+    ):
+        mock_report.return_value = {"status": "critical", "usage_pct": 99}
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            result = ingest_content("flag disabled content", domain="coding")
+
+        assert result["status"] == "success"
+        mock_report.assert_not_called()
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_storage_report")
+    def test_report_failure_fails_open(self, mock_report, mock_chroma, mock_neo4j, mock_redis):
+        """A broken storage report (Chroma/Neo4j/Redis unreachable) must not
+        also take down ingest — a monitoring outage fails open."""
+        mock_report.side_effect = RuntimeError("storage report unavailable")
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            result = ingest_content("fail-open content", domain="coding")
+
+        assert result["status"] == "success"

@@ -163,6 +163,19 @@ class TestCostByStage:
         assert body["stages"][1]["stage"] == "entity_extraction"
         assert body["stages"][1]["call_count"] == 2
 
+    def test_chat_stage_is_attributed_not_other(self, client):
+        """UX-10 — chat is the biggest spender and used to record cost with
+        no tags at all, so the whole chat spend rendered as 'other' and a
+        $31 credits drop had no in-app explanation."""
+        points = [SimpleNamespace(value=0.25, tags={"stage": "chat", "model": "claude-sonnet-4.6"})]
+        with patch(
+            "utils.metrics.get_metrics_collector",
+            return_value=self._stub_collector(points),
+        ):
+            body = client.get("/analytics/cost-by-stage").json()
+        assert body["stages"][0]["stage"] == "chat"
+        assert not any(s["stage"] == "other" for s in body["stages"])
+
     def test_unknown_stage_buckets_to_other(self, client):
         points = [SimpleNamespace(value=0.03, tags={"stage": "bogus_stage"})]
         with patch(

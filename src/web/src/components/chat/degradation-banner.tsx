@@ -30,7 +30,19 @@ interface TierInfo {
   hint: string
 }
 
-const TIER_INFO: Partial<Record<DegradationTier, TierInfo>> = {
+// "unknown" is a client-side tier for when the health fetch itself fails
+// (distinct from any degradation_tier the backend reports) — see WB-18.
+type BannerTier = DegradationTier | "unknown"
+
+const TIER_INFO: Partial<Record<BannerTier, TierInfo>> = {
+  unknown: {
+    message: "Unable to reach the server — system status unknown",
+    action: "#health",
+    actionLabel: "View Health",
+    severity: "error",
+    command: "curl http://localhost:8888/health",
+    hint: "The health check itself failed to respond. Verify the server is running and reachable.",
+  },
   lite: {
     message: "Lite mode — reranking and graph features temporarily unavailable",
     action: "#health",
@@ -88,13 +100,13 @@ export function DegradationBanner() {
     }
   })
   const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const prevTierRef = useRef<DegradationTier | null>(null)
+  const prevTierRef = useRef<BannerTier | null>(null)
   const degradedSinceRef = useRef<number | null>(null)
 
   // Compute adaptive poll interval
   const pollIntervalRef = useRef(POLL_HEALTHY_MS)
 
-  const { data: health } = useQuery({
+  const { data: health, isError: isHealthFetchError } = useQuery({
     queryKey: ["health-status"],
     queryFn: fetchHealthStatus,
     refetchInterval: () => pollIntervalRef.current,
@@ -102,7 +114,10 @@ export function DegradationBanner() {
     staleTime: 5_000,
   })
 
-  const tier = (health?.degradation_tier ?? "full") as DegradationTier
+  // A failed fetch (retries exhausted) must not be read as the healthiest
+  // "full" tier — that both hides a real outage and resets the adaptive
+  // poll back to the healthy cadence. See WB-18.
+  const tier: BannerTier = isHealthFetchError ? "unknown" : ((health?.degradation_tier ?? "full") as DegradationTier)
   const info = tier !== "full" ? TIER_INFO[tier] : undefined
   const isDegraded = tier !== "full"
 

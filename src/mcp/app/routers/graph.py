@@ -292,7 +292,7 @@ async def _query_neighborhood(
         RETURN
             node.canonical_id AS id,
             node.name AS name,
-            node.type AS type,
+            coalesce(node.entity_type, node.type) AS type,
             node.community_id AS community,
             node.mention_count AS mention_count,
             node.trust_state AS trust_state,
@@ -1111,8 +1111,10 @@ async def _query_embeddings_3d(
     """Read entity 3D coords from Neo4j. Entities without umap_* fields
     are excluded — the compute_umap_3d job populates them.
 
-    When include_isolated=False (default), entities with graph degree 0
-    (no CO_MENTIONED or SIMILAR_TO edges) are excluded from the main result.
+    When include_isolated=False (default), peripheral entities — the
+    layout's own ``Entity.layout_peripheral`` marking: rim-shell (layout
+    degree 0) plus the singleton-community tail — are excluded from the
+    main result (relationship-existence fallback for unstamped entities).
     isolated_count is always computed so the caller can surface it in the UI.
 
     Returns (rows, isolated_count) where each row is a plain dict with
@@ -1131,10 +1133,16 @@ async def _query_embeddings_3d(
         where_clauses.append("e.canonical_id IN $entity_ids")
         params["entity_ids"] = entity_ids
 
-    # When not including isolated nodes, restrict to entities that have at
-    # least one CO_MENTIONED or SIMILAR_TO relationship.
+    # When not including peripheral nodes, use the layout's own predicate
+    # (Entity.layout_peripheral, stamped by compute_umap_3d) so the filter
+    # hides exactly the population the layout placed on the rim shell.
+    # Fallback for entities the layout hasn't restamped yet: the old
+    # relationship-existence check.
     if not include_isolated:
-        where_clauses.append("(e)-[:CO_MENTIONED|SIMILAR_TO]-()")
+        where_clauses.append(
+            "(e.layout_peripheral = false OR "
+            "(e.layout_peripheral IS NULL AND (e)-[:CO_MENTIONED|SIMILAR_TO]-()))"
+        )
 
     where = " AND ".join(where_clauses)
 
@@ -1158,14 +1166,16 @@ async def _query_embeddings_3d(
         LIMIT $max_entities
     """
 
-    # Sibling COUNT query for isolated_count — entities with coords but degree 0.
+    # Sibling COUNT query for isolated_count — entities with coords that the
+    # layout marked peripheral (rim shell + singleton-community tail).
     # Always computed (regardless of include_isolated) so the UI can label the toggle.
     isolated_where_clauses = [
         "e.canonical_id IS NOT NULL",
         "e.umap_x IS NOT NULL",
         "e.umap_y IS NOT NULL",
         "e.umap_z IS NOT NULL",
-        "NOT (e)-[:CO_MENTIONED|SIMILAR_TO]-()",
+        "(e.layout_peripheral = true OR "
+        "(e.layout_peripheral IS NULL AND NOT (e)-[:CO_MENTIONED|SIMILAR_TO]-()))",
     ]
     if filter:
         isolated_where_clauses.append("(e.entity_type = $filter OR e.type = $filter)")
@@ -2706,11 +2716,16 @@ class DecompositionL0Community(BaseModel):
 
 
 class DecompositionL0RollupBucket(BaseModel):
-    """Rollup bucket for L0 communities of size < 4 (contract: L0RollupBucket)."""
+    """Rollup bucket for L0 communities of size < 4 (contract: L0RollupBucket).
+
+    ``communities`` carries the rolled-up members so the client can drill
+    into them (UX-13) instead of rendering an inert count.
+    """
 
     kind: str = "rollup"
     community_count: int
     entity_count: int
+    communities: list[DecompositionL0Community] = []
 
 
 class DecompositionL1Community(BaseModel):
@@ -2784,6 +2799,30 @@ class DecompositionCommunityLeafResponse(BaseModel):
     cached: bool = False
 
 
+class DecompositionBucketLeafResponse(BaseModel):
+    """Shape returned by GET /graph/decomposition?bucket=<kind>[&domain=<id>].
+
+    Drill path for the non-community buckets (UX-13): ``unclustered`` needs
+    ``domain``; ``uncategorized`` ignores it.
+    """
+
+    bucket: str
+    domain: str | None = None
+    entities: list[DecompositionEntityLeaf]
+    cached: bool = False
+
+
+def _assemble_l0(child: dict[str, Any]) -> DecompositionL0Community:
+    return DecompositionL0Community(
+        id=child["id"],
+        size=int(child.get("size") or 0),
+        label=child.get("label") or None,
+        mode_domain=child.get("mode_domain") or "",
+        purity=float(child.get("purity") or 1.0),
+        top_hubs=[CommunityHub(**h) for h in (child.get("top_hubs") or [])],
+    )
+
+
 def _assemble_l1(l1: dict[str, Any]) -> DecompositionL1Community:
     """Build a DecompositionL1Community from a raw decomposition dict."""
     children: list[DecompositionL0Community | DecompositionL0RollupBucket] = []
@@ -2793,16 +2832,12 @@ def _assemble_l1(l1: dict[str, Any]) -> DecompositionL1Community:
                 kind="rollup",
                 community_count=int(child.get("community_count") or 0),
                 entity_count=int(child.get("entity_count") or 0),
+                communities=[
+                    _assemble_l0(c) for c in (child.get("communities") or [])
+                ],
             ))
         else:
-            children.append(DecompositionL0Community(
-                id=child["id"],
-                size=int(child.get("size") or 0),
-                label=child.get("label") or None,
-                mode_domain=child.get("mode_domain") or "",
-                purity=float(child.get("purity") or 1.0),
-                top_hubs=[CommunityHub(**h) for h in (child.get("top_hubs") or [])],
-            ))
+            children.append(_assemble_l0(child))
     return DecompositionL1Community(
         id=l1["id"],
         size=int(l1.get("size") or 0),
@@ -2814,14 +2849,29 @@ def _assemble_l1(l1: dict[str, Any]) -> DecompositionL1Community:
     )
 
 
-@router.get("/decomposition", response_model=DecompositionResponse | DecompositionCommunityLeafResponse)
+@router.get(
+    "/decomposition",
+    response_model=DecompositionResponse
+    | DecompositionCommunityLeafResponse
+    | DecompositionBucketLeafResponse,
+)
 async def get_graph_decomposition(
     community: str | None = Query(
         default=None,
         description="When provided, return entity leaves for this L0 community "
                     "each carrying path:[domain, sub?, l1, l0]. Omit for the full tree.",
     ),
-) -> DecompositionResponse | DecompositionCommunityLeafResponse:
+    bucket: str | None = Query(
+        default=None,
+        description="Drill a non-community bucket: 'unclustered' (requires "
+                    "&domain=) or 'uncategorized'. Mutually exclusive with "
+                    "?community=.",
+    ),
+    domain: str | None = Query(
+        default=None,
+        description="Domain id for bucket='unclustered'.",
+    ),
+) -> DecompositionResponse | DecompositionCommunityLeafResponse | DecompositionBucketLeafResponse:
     """STRATA decomposition tree — the Atlas icicle data source.
 
     Without ?community=: returns the full tier tree (11 domains, conditional
@@ -2870,9 +2920,81 @@ async def get_graph_decomposition(
         return _empty_tree
 
     from app.db.neo4j.decomposition import (  # noqa: PLC0415
+        get_bucket_entities,
         get_community_entities,
         get_decomposition_tree,
     )
+
+    # --- ?bucket= leaf path (UX-13: unclustered / uncategorized drill) --------
+    if bucket is not None:
+        if bucket not in ("unclustered", "uncategorized"):
+            raise HTTPException(
+                status_code=422,
+                detail="bucket must be 'unclustered' or 'uncategorized'.",
+            )
+        if bucket == "unclustered" and not domain:
+            raise HTTPException(
+                status_code=422,
+                detail="bucket='unclustered' requires &domain=.",
+            )
+        bucket_cache_key = (
+            f"cerid:graph:emb3d:v3:decomposition:bucket:{bucket}:{domain or ''}"
+        )
+        if redis:
+            try:
+                cached_raw = redis.get(bucket_cache_key)
+                if cached_raw:
+                    payload = json.loads(
+                        cached_raw if isinstance(cached_raw, str)
+                        else cached_raw.decode("utf-8"),
+                    )
+                    payload["cached"] = True
+                    return DecompositionBucketLeafResponse(**payload)
+            except (json.JSONDecodeError, ValueError, OSError) as exc:
+                logger.info(
+                    "graph.decomposition.bucket_cache_miss bucket=%s: %s", bucket, exc,
+                )
+
+        try:
+            bucket_raw = await asyncio.to_thread(
+                get_bucket_entities, driver, bucket=bucket, domain=domain,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error(
+                "app.routers.graph.decomposition_bucket_query",
+                exc,
+                context={"bucket": bucket, "domain": domain},
+            )
+            raise HTTPException(status_code=500, detail="Decomposition bucket query failed.")
+
+        if bucket_raw is None:
+            raise HTTPException(status_code=500, detail="Decomposition bucket query failed.")
+
+        bucket_response = DecompositionBucketLeafResponse(
+            bucket=bucket,
+            domain=domain,
+            entities=[
+                DecompositionEntityLeaf(
+                    id=e["id"],
+                    name=e.get("name") or e["id"],
+                    type=e.get("type") or "OTHER",
+                    trust_state=e.get("trust_state") or "unknown",
+                    path=e.get("path") or [],
+                )
+                for e in bucket_raw
+            ],
+            cached=False,
+        )
+        if redis:
+            try:
+                redis.set(
+                    bucket_cache_key,
+                    bucket_response.model_dump_json(),
+                    ex=_DECOMPOSITION_TTL_SECONDS,
+                )
+            except (OSError, ValueError) as exc:
+                logger.info("graph.decomposition.bucket_cache_write_failed: %s", exc)
+        return bucket_response
 
     # --- ?community= leaf path -------------------------------------------------
     if community is not None:
@@ -3126,12 +3248,13 @@ def _fetch_community_members(driver: Any) -> list[dict[str, Any]]:
 
 
 def _fetch_community_labels(driver: Any) -> list[dict[str, Any]]:
-    """Rows: (community_id, summary, top_terms) for the label ladder."""
+    """Rows: (community_id, name, summary, top_terms) for the label ladder."""
     if driver is None:
         return []
     cypher = """
         MATCH (c:Community)
-        RETURN c.id AS community_id, c.summary AS summary, c.top_terms AS top_terms
+        RETURN c.id AS community_id, c.name AS name,
+               c.summary AS summary, c.top_terms AS top_terms
     """
     try:
         with driver.session() as session:
@@ -3172,8 +3295,12 @@ def _community_label(
     ordinal: int,
 ) -> str:
     """Label ladder (short-first, so gap pairs stay scannable in the panel):
-    top_terms join → truncated Community.summary → "Cluster N"."""
+    Community.name → top_terms join → truncated Community.summary →
+    "Cluster N"."""
     meta = label_map.get(community_id) or {}
+    name = meta.get("name")
+    if name:
+        return str(name)
     top_terms = meta.get("top_terms")
     if top_terms:
         return " · ".join(str(t) for t in top_terms[:3])

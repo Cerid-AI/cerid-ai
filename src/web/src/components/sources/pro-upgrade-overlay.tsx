@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { useNavigation } from "@/contexts/navigation-context"
 import { descriptorFor } from "./source-kind-icons"
 
 const BULLETS = [
@@ -52,6 +53,7 @@ export function ProUpgradeOverlay({
 }: ProUpgradeOverlayProps) {
   const desc = kind ? descriptorFor(kind) : null
   const Icon = desc?.icon
+  const { goTo } = useNavigation()
 
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
@@ -89,8 +91,22 @@ export function ProUpgradeOverlay({
           ))}
         </ul>
 
+        {/* In-app route to Plan & Billing — prose that names the pane with no
+            link is the dead-end pattern PlanLink was created to kill. The
+            external pricing page stays as the primary "See Pro plans" action. */}
         <p className="text-label-xs text-muted-foreground">
-          14-day free trial, no credit card — start it in Settings → Plan &amp; Billing.
+          14-day free trial, no credit card — start it in{" "}
+          <button
+            type="button"
+            className="text-primary underline underline-offset-2 hover:opacity-80"
+            onClick={() => {
+              onClose()
+              goTo("settings", { category: "plan" })
+            }}
+          >
+            Settings → Plan &amp; Billing
+          </button>
+          .
         </p>
 
         <div className="flex items-center justify-end gap-2 pt-2">

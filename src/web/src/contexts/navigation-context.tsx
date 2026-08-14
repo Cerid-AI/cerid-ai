@@ -30,10 +30,15 @@ import {
 import type { Pane } from "@/components/layout/sidebar"
 
 /**
- * Phase A Day 9 — Subjects consolidation. The Wiki / Communities / Memories
- * panes were folded into the new Subjects pane (Atlas / Constellation /
- * Timeline / Wiki modes). Legacy callsites that still call `goTo("wiki")`
- * are transparently routed to Subjects with the right mode + URL param.
+ * Phase A Day 9 — Subjects consolidation. The Wiki / Communities panes
+ * were folded into the new Subjects pane (Atlas / Constellation /
+ * Timeline / Wiki / Communities modes). Legacy callsites that still call
+ * `goTo("wiki")` are transparently routed to Subjects with the right mode +
+ * URL param.
+ *
+ * Memories is NOT redirected: Subjects/Atlas never gained a memory-viewing
+ * UI, so the old memories → subjects entry stranded MemoriesPane (RA-08).
+ * "memories" is a first-class routable pane again.
  *
  * Map shape: legacy pane → { newPane, modeForSubjects }. The mode value is
  * written to `?mode=` so SubjectsPane lands on the right tab; the existing
@@ -41,8 +46,10 @@ import type { Pane } from "@/components/layout/sidebar"
  */
 const LEGACY_PANE_REDIRECTS: Partial<Record<Pane, { pane: Pane; mode: string }>> = {
   wiki: { pane: "subjects", mode: "wiki" },
-  communities: { pane: "subjects", mode: "atlas" },
-  memories: { pane: "subjects", mode: "atlas" },
+  // RA-11: the Leiden community explorer (GraphExplorer) was restored as its
+  // own Subjects mode — route here instead of the unrelated Atlas surface,
+  // which reads a different community-hierarchy endpoint (Constellation's).
+  communities: { pane: "subjects", mode: "communities" },
   // Phase B Day 9 — knowledge consolidates into Sources.
   knowledge: { pane: "sources", mode: "library" },
   // Phase C Day 2 — Monitoring / Audit / Agents into Settings → Diagnostics.
@@ -117,6 +124,14 @@ export interface NavigationOptions {
   /** Wiki pane: community id to open as a concept page.
       Written to `?concept=`. Consumed by wiki-pane at mount. */
   concept?: string
+  /** Knowledge pane: artifact id to open in the preview sheet.
+      Written to `?artifact=`. Consumed by knowledge-pane at mount and on every
+      navVersion bump — which is what makes a `cerid://kb/<id>` deep link land
+      on the artifact rather than just raising the window. */
+  artifact?: string
+  /** Sources pane: sub-tab to land on (e.g. "connectors", "activity").
+      Written to `?sources_mode=`. Consumed by sources-pane at mount. */
+  sourcesMode?: string
   /** Whether to add the navigation event to the history stack */
   track?: boolean
 }
@@ -173,6 +188,14 @@ function writeNavigationUrl(options: NavigationOptions) {
   if (options.concept !== undefined) {
     if (options.concept) params.set("concept", options.concept)
     else params.delete("concept")
+  }
+  if (options.artifact !== undefined) {
+    if (options.artifact) params.set("artifact", options.artifact)
+    else params.delete("artifact")
+  }
+  if (options.sourcesMode !== undefined) {
+    if (options.sourcesMode) params.set("sources_mode", options.sourcesMode)
+    else params.delete("sources_mode")
   }
   const next = params.toString()
   const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`

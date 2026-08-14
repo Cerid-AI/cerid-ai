@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import config
-from config.features import is_tier_met
+from config.features import is_feature_enabled, is_tier_met
 from errors import ConfigError
 
 logger = logging.getLogger("ai-companion.plugins")
@@ -52,6 +52,10 @@ _plugin_tool_handlers: dict[str, Any] = {}
 
 # Tool definitions registered by ToolPlugin instances (for MCP_TOOLS merge)
 _plugin_tool_definitions: list[dict[str, Any]] = []
+
+# Sync backend classes registered by SyncBackendPlugin instances
+# (backend name -> class), so a config value can select one.
+_plugin_sync_backends: dict[str, type] = {}
 
 
 class PluginLoadError(Exception):
@@ -75,6 +79,32 @@ class MissingDependencyError(PluginLoadError):
     ``blocked_reason``, so it is worth distinguishing from a generic load
     failure — "MissingDependency" is actionable, "PluginLoadError" is not.
     """
+
+
+class FeatureFlagDisabledError(PluginLoadError):
+    """A plugin's declared ``manifest.feature_flags`` includes a disabled flag.
+
+    Mirrors ``MissingDependencyError``: the plugin's tier requirement is met
+    (it is entitled) but a specific flag it depends on resolves False, so it
+    does not load. Recorded rather than silently skipped, for the same
+    reason a missing dependency is — an entitled-but-unserved feature must
+    be visible to ``/health.pro_features`` and
+    ``scripts/lint-pro-feature-health.py``, not vanish without a trace.
+    """
+
+
+def manifest_display_name(manifest: dict[str, Any]) -> str:
+    """Human-facing label: explicit ``display_name`` key, else title-cased name.
+
+    Shared by the loader record (served via ``app.routers.health``'s
+    ``GET /plugins``, which wins registration order in the real app) and
+    ``app.routers.plugins._manifest_to_info`` so both list shapes agree.
+    """
+    explicit = manifest.get("display_name")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    name = str(manifest.get("name", "unknown"))
+    return name.replace("_", " ").replace("-", " ").title()
 
 
 def _validate_manifest(manifest: dict[str, Any], plugin_dir: Path) -> None:
@@ -189,6 +219,28 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
         )
         return None
 
+    # Check declared feature flags. `feature_flags` was collected into the
+    # returned plugin info (below) for /health.pro_features reporting only —
+    # nothing ever consulted it as an admission gate, so a plugin whose
+    # declared flag was specifically disabled (independent of its tier, e.g.
+    # a future per-feature operator toggle) loaded anyway. Mirrors the
+    # dependency check immediately below: entitled (tier met) but blocked by
+    # a specific flag is recorded, not silently skipped.
+    declared_flags = manifest.get("feature_flags") or []
+    disabled_flags = [
+        f for f in declared_flags if isinstance(f, str) and not is_feature_enabled(f)
+    ]
+    if disabled_flags:
+        logger.info(
+            "Plugin '%s' requires disabled feature flag(s): %s",
+            name, disabled_flags,
+        )
+        _record_plugin_failure(
+            plugin_dir,
+            FeatureFlagDisabledError(f"disabled feature flag(s): {', '.join(disabled_flags)}"),
+        )
+        return None
+
     # Check dependencies. Only a list of pip module specs gates loading; a
     # dict-form `requires` is declarative metadata (env vars, platform,
     # sibling services, TCC grants) validated elsewhere, not importable here.
@@ -275,6 +327,7 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
 
     return {
         "name": name,
+        "display_name": manifest_display_name(manifest),
         "version": manifest["version"],
         "type": manifest["type"],
         "description": manifest.get("description", ""),
@@ -345,7 +398,7 @@ def _record_plugin_failure(entry: Path, exc: Exception) -> None:
     }
 
 
-def load_plugins(plugin_dir: str | None = None) -> list[str]:
+def load_plugins(plugin_dir: str | None = None, app: Any = None) -> list[str]:
     """
     Discover and load all plugins from the plugin directory.
 
@@ -354,6 +407,10 @@ def load_plugins(plugin_dir: str | None = None) -> list[str]:
 
     Args:
         plugin_dir: Override path to plugin directory. Defaults to config.PLUGIN_DIR.
+        app: FastAPI app instance. When provided, routers returned by any
+            loaded AgentPlugin's get_routes() are mounted via
+            app.include_router(). Optional so callers (tests, discovery-only
+            scripts) that don't have an app instance can still load plugins.
 
     Returns:
         List of successfully loaded plugin names.
@@ -398,6 +455,59 @@ def load_plugins(plugin_dir: str | None = None) -> list[str]:
             except (AttributeError, KeyError, TypeError) as e:
                 logger.error("Plugin '%s': failed to collect tools: %s", name, e)
 
+    # Collect routes from AgentPlugin instances and backend classes from
+    # SyncBackendPlugin instances. Both ABCs were declared in base.py but
+    # nothing here ever called get_routes() / get_backend_class(), so a
+    # third-party plugin needing either had to bypass CeridPlugin entirely
+    # (the in-tree metamorphic plugin does exactly this — it subclasses
+    # CeridPlugin directly instead of AgentPlugin, despite manifest.json
+    # declaring type "agent", because AgentPlugin's contract went nowhere).
+    from plugins.base import AgentPlugin, SyncBackendPlugin
+
+    for name, info in _loaded_plugins.items():
+        module = info.get("module")
+        if not module:
+            continue
+        instance = getattr(module, "_instance", None)
+        if isinstance(instance, AgentPlugin):
+            try:
+                routers = instance.get_routes()
+            except (AttributeError, TypeError) as e:
+                logger.error("Plugin '%s': failed to collect routes: %s", name, e)
+                continue
+            for router in routers:
+                if app is not None:
+                    app.include_router(router)
+            if routers:
+                logger.info(
+                    "Plugin '%s' registered %d route(s)%s",
+                    name, len(routers), "" if app is not None else " (no app to mount on)",
+                )
+        elif isinstance(instance, SyncBackendPlugin):
+            try:
+                backend_name = instance.get_backend_name()
+                _plugin_sync_backends[backend_name] = instance.get_backend_class()
+                logger.info("Plugin '%s' registered sync backend: %s", name, backend_name)
+            except (AttributeError, TypeError) as e:
+                logger.error("Plugin '%s': failed to collect sync backend: %s", name, e)
+
+    # Fire on_startup hooks now that every plugin in this pass has finished
+    # register(). Class-based plugins that need the full set loaded first
+    # (e.g. spawning a background watcher) implement CeridPlugin.on_startup
+    # instead of doing it inside register(); procedural plugins (module-level
+    # register() only, no _instance) have no hook to call and are skipped.
+    for name, info in _loaded_plugins.items():
+        module = info.get("module")
+        if not module:
+            continue
+        instance = getattr(module, "_instance", None)
+        if instance is None:
+            continue
+        try:
+            instance.on_startup()
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+            logger.error("Plugin '%s': on_startup() failed: %s", name, e)
+
     return loaded
 
 
@@ -417,6 +527,35 @@ def get_failed_plugins() -> dict[str, dict[str, Any]]:
     gate.
     """
     return {name: dict(info) for name, info in _failed_plugins.items()}
+
+
+def get_plugin_tool_definitions() -> list[dict[str, Any]]:
+    """Return tool definitions registered by ToolPlugin instances.
+
+    Consumed by ``app.tools.get_all_tools()`` so a conforming
+    ``ToolPlugin`` actually appears in ``tools/list`` (RA-63) instead of
+    being collected here and never read.
+    """
+    return list(_plugin_tool_definitions)
+
+
+def get_plugin_tool_handlers() -> dict[str, Any]:
+    """Return the tool-name -> async-handler map for plugin-registered tools.
+
+    Consumed by ``app.tools`` to route ``tools/call`` for plugin tools
+    (RA-63) — the counterpart to :func:`get_plugin_tool_definitions`.
+    """
+    return dict(_plugin_tool_handlers)
+
+
+def get_registered_sync_backends() -> dict[str, type]:
+    """Return backend classes registered by SyncBackendPlugin instances.
+
+    Keyed by the name each plugin returned from get_backend_name() (e.g.
+    's3', 'webdav') — the lookup a config value like CERID_SYNC_BACKEND
+    selects from.
+    """
+    return dict(_plugin_sync_backends)
 
 
 def discover_plugins(plugin_dir: str | None = None) -> list[dict[str, Any]]:
@@ -451,11 +590,11 @@ def discover_plugins(plugin_dir: str | None = None) -> list[dict[str, Any]]:
     return manifests
 
 
-def register_all_plugins(plugin_dir: str | None = None) -> list[str]:
+def register_all_plugins(plugin_dir: str | None = None, app: Any = None) -> list[str]:
     """
     Convenience function for startup — discovers and loads all plugins.
 
     This is the main entry point called during app lifespan startup.
     Equivalent to load_plugins() but with a clearer name for the startup path.
     """
-    return load_plugins(plugin_dir)
+    return load_plugins(plugin_dir, app=app)

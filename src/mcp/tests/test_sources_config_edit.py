@@ -79,6 +79,7 @@ def test_config_edit_reruns_connector_and_persists():
     with patch("app.routers.sources.get_neo4j", return_value=MagicMock()), \
          patch("app.routers.sources.srcdb.get_source", return_value=_RSS_SOURCE), \
          patch("app.routers.sources.srcdb.update_source_config", return_value=updated_source) as mock_update, \
+         patch("app.routers.sources.srcdb.count_artifacts_last_24h", return_value=0), \
          patch("app.routers.sources.get_connector", return_value=connector):
         r = _client().post(
             "/sources/src-rss-001/config",
@@ -105,6 +106,7 @@ def test_config_edit_drops_redaction_mask():
     with patch("app.routers.sources.get_neo4j", return_value=MagicMock()), \
          patch("app.routers.sources.srcdb.get_source", return_value=_RSS_SOURCE), \
          patch("app.routers.sources.srcdb.update_source_config", return_value=updated_source) as mock_update, \
+         patch("app.routers.sources.srcdb.count_artifacts_last_24h", return_value=0), \
          patch("app.routers.sources.get_connector", return_value=connector):
         r = _client().post(
             "/sources/src-rss-001/config",

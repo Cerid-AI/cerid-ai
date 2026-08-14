@@ -47,6 +47,7 @@ def client(tmp_path, monkeypatch):
         patch("app.routers.kb_admin.list_artifacts", return_value=[
             {"id": "a1", "filename": "note.txt", "domain": "general"},
         ]),
+        patch("app.routers.kb_admin.count_artifacts", return_value=1),
     ):
         yield TestClient(app, raise_server_exceptions=False), chroma, neo4j
 
@@ -73,6 +74,27 @@ class TestRepairEndpointDryRun:
         # Critically, no mutating calls must have fired.
         chroma.delete_collection.assert_not_called()
         chroma.get_or_create_collection.assert_not_called()
+
+    def test_dry_run_count_not_capped_by_list_artifacts_limit(self, client):
+        """AF-093: artifacts_found must come from a count-only query, not
+        ``list_artifacts(limit=10000)`` — a domain with more than 10k
+        artifacts must not be under-reported."""
+        tc, _chroma, _neo4j = client
+        with (
+            patch("core.utils.embeddings.get_embedding_dim", return_value=384),
+            patch("app.routers.kb_admin.count_artifacts", return_value=15000) as mock_count,
+            patch("app.routers.kb_admin.list_artifacts") as mock_list,
+        ):
+            res = tc.post(
+                "/admin/collections/repair",
+                json={"collection_name": "domain_general", "dry_run": True},
+            )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["artifacts_found"] == 15000
+        assert "15000 artifact" in body["message"]
+        mock_count.assert_called_once_with(_neo4j, domain="general")
+        mock_list.assert_not_called()
 
 
 class TestRepairEndpointApply:

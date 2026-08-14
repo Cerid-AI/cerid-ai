@@ -83,6 +83,14 @@ export async function queryKB(
   return res.json()
 }
 
+/** Hard client-side ceiling on an orchestrated query. The backend's retrieval
+ *  budget is 20s; anything past this is a hung request, and without a timeout
+ *  the Knowledge Console spinner ran forever on "Searching KB + memory +
+ *  external…" (UX-02). A timeout abort rejects with a TimeoutError, which
+ *  react-query records as a real error → the console's terminal error+Retry
+ *  state (its own signal aborting still reads as a cancellation). */
+const ORCHESTRATED_QUERY_TIMEOUT_MS = 45_000
+
 export async function queryKBOrchestrated(
   query: string,
   ragMode: RagMode,
@@ -93,10 +101,11 @@ export async function queryKBOrchestrated(
   contextSources?: ContextSources,
   opts: { signal?: AbortSignal } = {},
 ): Promise<AgentQueryResponse> {
+  const timeoutSignal = AbortSignal.timeout(ORCHESTRATED_QUERY_TIMEOUT_MS)
   const res = await fetch(`${MCP_BASE}/agent/query`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    signal: opts.signal,
+    signal: opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal,
     body: JSON.stringify({
       query,
       rag_mode: ragMode,
@@ -126,20 +135,66 @@ export async function recallMemories(
   return res.json()
 }
 
+/** WB-24: a fetchArtifacts page plus the backend's authoritative total, so a
+ * caller paging via `offset` can tell when it has actually reached the end
+ * instead of assuming the backend never returns a full page short of the
+ * true total. */
+export interface ArtifactsPage {
+  artifacts: Artifact[]
+  /** True total matching the filters, from the backend's X-Total-Count
+   * header — not just this page's length. Falls back to `offset + artifacts.length`
+   * (i.e. "assume this is everything") if the header is absent. */
+  total: number
+  hasMore: boolean
+}
+
 export async function fetchArtifacts(
   domain?: string,
   limit = 50,
   subCategory?: string,
-): Promise<Artifact[]> {
+  offset = 0,
+  tag?: string,
+): Promise<ArtifactsPage> {
   const params = new URLSearchParams()
   if (domain) params.set("domain", domain)
   if (subCategory) params.set("sub_category", subCategory)
+  if (tag) params.set("tag", tag)
   params.set("limit", String(limit))
+  params.set("offset", String(offset))
   const res = await fetch(`${MCP_BASE}/artifacts?${params}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Artifacts fetch failed: ${res.status}`))
   const raw = await res.json()
-  const artifacts: Artifact[] = Array.isArray(raw) ? raw : []
-  return artifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
+  const rawArtifacts: Artifact[] = Array.isArray(raw) ? raw : []
+  const artifacts = rawArtifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
+
+  const totalHeader = res.headers?.get?.("X-Total-Count")
+  const total = totalHeader != null ? Number(totalHeader) : offset + artifacts.length
+  const hasMoreHeader = res.headers?.get?.("X-Has-More")
+  const hasMore = hasMoreHeader != null ? hasMoreHeader === "true" : offset + artifacts.length < total
+
+  return { artifacts, total, hasMore }
+}
+
+/** Walk `fetchArtifacts` pages via `offset` until the backend reports no
+ * more (or `maxItems` is hit) — replaces a single hardcoded-limit fetch that
+ * silently truncated the Library pane at that cap while claiming it was the
+ * whole result set (WB-24). */
+export async function fetchAllArtifacts(
+  domain?: string,
+  subCategory?: string,
+  pageSize = 200,
+  maxItems = 5000,
+  tag?: string,
+): Promise<{ artifacts: Artifact[]; total: number }> {
+  const all: Artifact[] = []
+  let total = 0
+  while (all.length < maxItems) {
+    const page = await fetchArtifacts(domain, pageSize, subCategory, all.length, tag)
+    all.push(...page.artifacts)
+    total = page.total
+    if (!page.hasMore || page.artifacts.length === 0) break
+  }
+  return { artifacts: all, total }
 }
 
 export async function fetchRelatedArtifacts(
@@ -229,10 +284,22 @@ export interface TagInfo {
   usage_count: number
 }
 
-export async function fetchAllTags(limit = 500): Promise<TagInfo[]> {
+/** WB-23: list_tags is a bare capped list (le=500) with no total — a KB with
+ * more distinct tags than that silently reads as "500 tags total" with no
+ * indication the list was cut off. `total` comes from the backend's
+ * X-Total-Count header and falls back to `tags.length` when absent. */
+export interface TagsPage {
+  tags: TagInfo[]
+  total: number
+}
+
+export async function fetchAllTags(limit = 500): Promise<TagsPage> {
   const res = await fetch(`${MCP_BASE}/tags?limit=${limit}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to fetch tags"))
-  return res.json()
+  const tags: TagInfo[] = await res.json()
+  const totalHeader = res.headers?.get?.("X-Total-Count")
+  const total = totalHeader != null ? Number(totalHeader) : tags.length
+  return { tags, total }
 }
 
 export async function mergeTags(sourceTag: string, targetTag: string): Promise<{ status: string; artifacts_updated: number }> {
@@ -550,6 +617,64 @@ export async function adminClearDomain(domain: string): Promise<{ artifacts_dele
   return res.json()
 }
 
+export interface DomainVersionDistribution {
+  total: number
+  versions: Record<string, number>
+  current_version: string
+  mixed: boolean
+}
+
+export interface EmbeddingVersionsResponse {
+  domains: Record<string, DomainVersionDistribution>
+}
+
+export async function fetchEmbeddingVersions(domain?: string): Promise<EmbeddingVersionsResponse> {
+  const params = domain ? `?domain=${encodeURIComponent(domain)}` : ""
+  const res = await fetch(`${MCP_BASE}/admin/kb/embedding-versions${params}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch embedding versions"))
+  return res.json()
+}
+
+export interface ReembedResult {
+  status: string
+  job_id: string | null
+  domain: string | null
+  message: string
+}
+
+export async function adminReembed(domain?: string, force = false): Promise<ReembedResult> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/reembed`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ ...(domain ? { domain } : {}), force }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to enqueue re-embed job"))
+  return res.json()
+}
+
+export interface CollectionRepairResult {
+  status: string
+  collection_name: string
+  domain: string
+  actual_dim: number | null
+  expected_dim: number
+  artifacts_found: number
+  rebuilt_documents: number
+  backup_path: string | null
+  dry_run: boolean
+  message: string
+}
+
+export async function adminRepairCollection(collectionName: string, dryRun = true): Promise<CollectionRepairResult> {
+  const res = await fetch(`${MCP_BASE}/admin/collections/repair`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ collection_name: collectionName, dry_run: dryRun }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to repair collection"))
+  return res.json()
+}
+
 export async function adminDeleteArtifact(artifactId: string): Promise<{ deleted: boolean; message: string }> {
   const res = await fetch(`${MCP_BASE}/admin/artifacts/${encodeURIComponent(artifactId)}`, {
     method: "DELETE",
@@ -563,6 +688,7 @@ export async function adminDeleteArtifact(artifactId: string): Promise<{ deleted
 
 export async function fetchParserCapabilities(): Promise<{ capabilities: ParserCapability[]; tier: string }> {
   const res = await fetch(`${MCP_BASE}/admin/kb/capabilities`, { headers: mcpHeaders() })
+  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): silently downgrades tier to community on fetch failure, same shape as the use-entitlements bug
   if (!res.ok) return { capabilities: [], tier: "community" }
   return res.json()
 }
@@ -631,6 +757,29 @@ export async function getScanProgress(scanId: string): Promise<Record<string, un
   return res.json()
 }
 
+export interface ScanState {
+  files_tracked: number
+  last_scan_at: string | null
+  total_ingested: number
+  total_skipped: number
+  total_errored: number
+}
+
+export async function getScanState(): Promise<ScanState> {
+  const res = await fetch(`${MCP_BASE}/admin/scan/state`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Scan state fetch failed: ${res.status}`))
+  return res.json()
+}
+
+export async function resetScanState(): Promise<{ cleared: number }> {
+  const res = await fetch(`${MCP_BASE}/admin/scan/reset`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Scan reset failed: ${res.status}`))
+  return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // Ingestion progress polling
 // ---------------------------------------------------------------------------
@@ -655,7 +804,7 @@ export async function fetchDuplicates(): Promise<DuplicatesResponse> {
 export async function mergeDuplicates(
   keepArtifactId: string,
   removeArtifactIds: string[],
-): Promise<{ status: string; merged: number }> {
+): Promise<{ status: string; merged: number; failed: number }> {
   const res = await fetch(`${MCP_BASE}/admin/kb/duplicates/merge`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),

@@ -25,16 +25,34 @@ logger = logging.getLogger("ai-companion.community_summaries")
 
 
 SUMMARY_PROMPT = """\
-Summarise the theme of this community of related entities and supporting \
-contexts. Output 1-3 concise sentences (<=80 words total). Capture WHAT the \
-entities have in common and the broader topic — avoid listing entity names.
+You are labelling one cluster of related entities from a personal knowledge \
+base so a person can pick it out of a list of many clusters at a glance.
 
 Entities: {entities}
 
 Representative passages:
 {passages}
 
-Theme summary:"""
+Reply with exactly two lines:
+Name: a specific title for this cluster — 2-6 words, Title Case, naming the \
+actual subject (like a book chapter heading). Never generic filler such as \
+"This community", "Various topics", "Related entities", or phrases starting \
+"The theme".
+Summary: 1-3 concise sentences (<=80 words total) capturing WHAT the entities \
+have in common and the broader topic — avoid listing entity names, and start \
+with the substance itself, never with openers like "This community revolves \
+around" or "The theme centers on"."""
+
+
+# Openers the LLM habitually produces despite instructions. Used to clean
+# generated names/summaries and as the fallback-name derivation. Covers both
+# present-tense ("relates to") and participle ("related to") forms.
+_BOILERPLATE_OPENER = (
+    r"^(?:the|this|a)?\s*"
+    r"(?:theme|community|cluster|topic|content|summary)?\s*"
+    r"(?:(?:is\s+)?(?:revolv|centr|center|focus|relat)(?:es|s|ed|ing)?\s+"
+    r"(?:around|on|to)|is\s+about|covers|concerns)\s+"
+)
 
 
 # Async LLM caller signature: messages -> string content.
@@ -93,7 +111,7 @@ async def summarize_communities(
             stats["skipped_no_chunks"] += 1
             continue
         try:
-            summary = await _summarise(
+            name, summary = await _summarise(
                 target["entities"], passages, llm_caller=llm_caller,
             )
         except Exception as exc:  # noqa: BLE001 — observability boundary
@@ -103,7 +121,16 @@ async def summarize_communities(
             stats["errors"] += 1
             continue
 
-        _persist_summary(driver, target["community_id"], summary)
+        # Read the taken names fresh per community rather than snapshotting
+        # once: a second generation pass (or a concurrent one) would otherwise
+        # mint a name this run's stale snapshot never saw. Excluding the
+        # community's own current name keeps re-summarisation from suffixing a
+        # name against itself.
+        taken = _existing_names(
+            driver, level=level, exclude_id=target["community_id"],
+        )
+        name = _disambiguate_name(name, taken, target["entities"])
+        _persist_summary(driver, target["community_id"], summary, name=name)
         stats["summarised"] += 1
 
     return stats
@@ -126,7 +153,9 @@ def _list_summary_targets(
     MATCH (c:Community {level: $level})
     """
     if skip_with_existing_summary:
-        cypher += " WHERE c.summary IS NULL"
+        # `c.name IS NULL` keeps pre-name-era communities eligible so the
+        # periodic batches backfill names without a forced refresh.
+        cypher += " WHERE c.summary IS NULL OR c.name IS NULL"
     cypher += """
     MATCH (c)<-[:IN_COMMUNITY]-(e:Entity)
     OPTIONAL MATCH (e)-[r:CO_MENTIONED]-(peer:Entity)-[:IN_COMMUNITY]->(c)
@@ -188,7 +217,9 @@ async def _summarise(
     passages: list[str],
     *,
     llm_caller: LLMCaller,
-) -> str:
+) -> tuple[str, str]:
+    """Returns ``(name, summary)``. ``name`` may be "" when the model
+    ignores the format and no usable fallback can be derived."""
     entity_descriptions = ", ".join(
         f"{e['name']} ({e['entity_type']})" for e in entities
     )
@@ -200,20 +231,116 @@ async def _summarise(
         {"role": "system", "content": "You are a concise topic summariser."},
         {"role": "user", "content": prompt},
     ]
-    return (await llm_caller(messages)).strip()
+    return _parse_name_summary((await llm_caller(messages)).strip())
 
 
-def _persist_summary(driver: Any, community_id: str, summary: str) -> None:
+def _parse_name_summary(raw: str) -> tuple[str, str]:
+    """Split the two-line ``Name: … / Summary: …`` reply, tolerating models
+    that drop either label or answer in one blob."""
+    import re
+
+    name = ""
+    summary_parts: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = re.match(r"(?i)^name\s*:\s*(.*)$", stripped)
+        if m and not name:
+            name = m.group(1).strip()
+            continue
+        summary_parts.append(re.sub(r"(?i)^summary\s*:\s*", "", stripped))
+    summary = " ".join(summary_parts).strip() or raw.strip()
+    summary = re.sub(r"(?i)^name\s*:\s*", "", summary)
+    name = _clean_name(name) or _clean_name(_derive_name_from_summary(summary))
+    return name, summary
+
+
+# Name cap: titles, not sentences — the prompt asks for 2-6 words, these
+# bounds absorb model overshoot without truncating mid-word.
+_NAME_MAX_WORDS = 8
+_NAME_MAX_CHARS = 60
+
+
+def _clean_name(name: str) -> str:
+    import re
+
+    name = name.strip().strip("\"'").strip()
+    name = re.sub(_BOILERPLATE_OPENER, "", name, flags=re.IGNORECASE).strip()
+    if not name or re.match(r"^\d+(\.\d+)?$", name):
+        return ""
+    # Word-boundary cap: names are titles, not sentences.
+    words = name.split()
+    if len(words) > _NAME_MAX_WORDS:
+        name = " ".join(words[:_NAME_MAX_WORDS])
+    if len(name) > _NAME_MAX_CHARS:
+        name = name[:_NAME_MAX_CHARS].rsplit(" ", 1)[0].rstrip(",;:")
+    return name[0].upper() + name[1:] if name else ""
+
+
+def _derive_name_from_summary(summary: str) -> str:
+    """Fallback: first clause of the summary with boilerplate stripped."""
+    import re
+
+    stripped = re.sub(
+        _BOILERPLATE_OPENER, "", summary.strip(), flags=re.IGNORECASE,
+    )
+    first = re.split(r"[.:\n,;]", stripped, maxsplit=1)[0].strip()
+    return first
+
+
+def _disambiguate_name(
+    name: str, used_names: set[str], entities: list[dict[str, Any]],
+) -> str:
+    """Suffix a colliding name with its top entity so two clusters never
+    share a label ("Apache Spark" vs "Apache Spark (SparkContext)")."""
+    if not name or name.casefold() not in used_names:
+        return name
+    for ent in entities:
+        ent_name = str(ent.get("name") or "").strip()
+        if ent_name and ent_name.casefold() not in name.casefold():
+            candidate = f"{name} ({ent_name})"
+            if candidate.casefold() not in used_names:
+                return candidate
+    # Last resort: numeric suffix.
+    for i in range(2, 100):
+        candidate = f"{name} ({i})"
+        if candidate.casefold() not in used_names:
+            return candidate
+    return name
+
+
+def _existing_names(
+    driver: Any, *, level: int, exclude_id: str | None = None,
+) -> set[str]:
+    with driver.session() as session:
+        rows = session.run(
+            "MATCH (c:Community {level: $level}) "
+            "WHERE c.name IS NOT NULL AND c.id <> coalesce($exclude_id, '') "
+            "RETURN c.name AS name",
+            level=level,
+            exclude_id=exclude_id,
+        )
+        return {
+            str(r.get("name")).casefold() for r in rows if r.get("name")
+        }
+
+
+def _persist_summary(
+    driver: Any, community_id: str, summary: str, *, name: str = "",
+) -> None:
     now = utcnow_iso()
     with driver.session() as session:
         session.run(
             """
             MATCH (c:Community {id: $cid})
             SET c.summary = $summary,
+                c.name = CASE WHEN $name = '' THEN c.name ELSE $name END,
                 c.summary_generated_at = $now
             """,
             cid=community_id,
             summary=summary,
+            name=name,
             now=now,
         )
 
@@ -231,7 +358,8 @@ def list_community_summaries(
     cypher += (
         " OPTIONAL MATCH (c)<-[:IN_COMMUNITY]-(e:Entity)"
         " WITH c, count(e) AS member_count"
-        " RETURN c.id AS id, c.level AS level, c.summary AS summary,"
+        " RETURN c.id AS id, c.level AS level, c.name AS name,"
+        "        c.summary AS summary,"
         "        c.summary_generated_at AS generated_at, member_count"
         " ORDER BY member_count DESC"
     )

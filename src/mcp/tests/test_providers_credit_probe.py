@@ -16,11 +16,13 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_shared_client():
-    """Reset the module-level client between tests."""
+    """Reset the module-level client + credits cache between tests."""
     from app.routers import providers as providers_mod
     providers_mod._openrouter_http_client = None
+    providers_mod._credits_cache = None
     yield
     providers_mod._openrouter_http_client = None
+    providers_mod._credits_cache = None
 
 
 @pytest.mark.asyncio
@@ -49,13 +51,15 @@ async def test_credit_probe_reuses_single_client_across_calls(monkeypatch):
         await providers_mod.get_provider_credits()
         await providers_mod.get_provider_credits()
 
-    # Only one client should have been constructed; the 6 GETs (2 per call) all
-    # share it.
+    # Only one client should have been constructed, and only the FIRST call
+    # goes upstream (2 GETs: /credits + /auth/key) — the second and third are
+    # served from the 60s result cache (UX-10: the GUI polls at 15s+60s per
+    # tab, and every poll used to hit OpenRouter).
     assert len(created_clients) == 1, (
         f"Expected 1 shared httpx.AsyncClient across 3 probe calls, "
         f"got {len(created_clients)}"
     )
-    assert created_clients[0].get.await_count == 6
+    assert created_clients[0].get.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -170,3 +174,65 @@ async def test_status_exhausted_when_balance_zero_and_auth_key_fails(monkeypatch
 
     assert result["balance"] == 0.0
     assert result["status"] == "exhausted"
+
+
+@pytest.mark.asyncio
+async def test_credits_cache_expires_after_ttl(monkeypatch):
+    """UX-10: within the TTL the cached result is served; past it, refetch."""
+    from app.routers import providers as providers_mod
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-123")
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(providers_mod.time, "monotonic", lambda: fake_now[0])
+
+    def _fake_client_factory(**kwargs):
+        client = MagicMock()
+        client.is_closed = False
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"data": {"total_credits": 10.0, "total_usage": 1.0}}
+        client.get = AsyncMock(return_value=resp)
+        client.aclose = AsyncMock()
+        return client
+
+    with patch.object(providers_mod.httpx, "AsyncClient", side_effect=_fake_client_factory):
+        first = await providers_mod.get_provider_credits()
+        cached = await providers_mod.get_provider_credits()
+        fake_now[0] += providers_mod._CREDITS_CACHE_TTL_SECONDS + 1
+        refreshed = await providers_mod.get_provider_credits()
+
+    assert first["balance"] == 9.0
+    assert cached is first  # served from cache, no upstream call
+    assert refreshed["balance"] == 9.0
+    # 2 upstream probes total (first + post-TTL), 2 GETs each.
+    client = providers_mod._openrouter_http_client
+    assert client.get.await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_missing_key_is_never_cached(monkeypatch):
+    """Configuring a key must take effect immediately, not after a TTL."""
+    from app.routers import providers as providers_mod
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    result = await providers_mod.get_provider_credits()
+    assert result["configured"] is False
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-123")
+
+    def _fake_client_factory(**kwargs):
+        client = MagicMock()
+        client.is_closed = False
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"data": {"total_credits": 3.0, "total_usage": 0.0}}
+        client.get = AsyncMock(return_value=resp)
+        client.aclose = AsyncMock()
+        return client
+
+    with patch.object(providers_mod.httpx, "AsyncClient", side_effect=_fake_client_factory):
+        result = await providers_mod.get_provider_credits()
+
+    assert result["configured"] is True
+    assert result["balance"] == 3.0

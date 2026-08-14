@@ -236,6 +236,22 @@ class TestJunkNameGate:
     def test_rejects_empty_and_single_characters(self, name):
         assert is_junk_entity_name(name) is True
 
+    @pytest.mark.parametrize("name", [
+        "a@b",           # the observed live junk entity
+        "x@localhost",   # dotless domain — not a real address
+        "a@",            # empty domain
+    ])
+    def test_rejects_degenerate_email_fragments(self, name):
+        assert is_junk_entity_name(name) is True
+
+    @pytest.mark.parametrize("name", [
+        "john@example.com",   # a real, dotted-domain address
+        "@ceridai",           # social handle, not address-shaped
+        "R2@D2 Labs",         # contains whitespace — not address-shaped
+    ])
+    def test_admits_real_addresses_and_handles(self, name):
+        assert is_junk_entity_name(name) is False
+
     # -- admits --------------------------------------------------------------
 
     @pytest.mark.parametrize("name", [
@@ -274,6 +290,68 @@ class TestJunkNameGate:
             llm_caller=caller,
         )
         assert [e.name for e in result] == ["NASA", "gpt-4"]
+
+
+# ---------------------------------------------------------------------------
+# Example-row personal names — sample data is not a person (todo item 6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestExampleRowPersonGate:
+    """'John' from SQL VALUES examples passes every other check — the name IS
+    in the text — so the gate is contextual: drop a PERSON whose every
+    occurrence sits inside SQL example rows, keep the same name in prose."""
+
+    _PERSON_JOHN = {"entities": [{"name": "John", "type": "PERSON", "confidence": 0.9}]}
+
+    async def test_sql_values_only_person_is_dropped(self):
+        text = (
+            "The tutorial covers inserts.\n"
+            "INSERT INTO users (name, age) VALUES ('John', 25);\n"
+        )
+        result = await extract_entities_from_text(
+            text, llm_caller=_llm_caller_returning(self._PERSON_JOHN),
+        )
+        assert result == []
+
+    async def test_multiline_values_tuple_rows_are_dropped(self):
+        text = (
+            "Bulk insert example:\n"
+            "INSERT INTO users (name, age)\n"
+            "VALUES\n"
+            "  ('John', 25),\n"
+            "  ('Jane', 30);\n"
+        )
+        result = await extract_entities_from_text(
+            text, llm_caller=_llm_caller_returning(self._PERSON_JOHN),
+        )
+        assert result == []
+
+    async def test_conversational_person_is_kept(self):
+        text = "John said he'll review the migration plan on Tuesday. " * 3
+        result = await extract_entities_from_text(
+            text, llm_caller=_llm_caller_returning(self._PERSON_JOHN),
+        )
+        assert [e.name for e in result] == ["John"]
+
+    async def test_prose_mention_outweighs_sql_mention(self):
+        text = (
+            "John wrote this migration for the users table.\n"
+            "INSERT INTO users (name) VALUES ('John');\n"
+        )
+        result = await extract_entities_from_text(
+            text, llm_caller=_llm_caller_returning(self._PERSON_JOHN),
+        )
+        assert [e.name for e in result] == ["John"]
+
+    async def test_org_in_values_is_not_gated(self):
+        payload = {"entities": [{"name": "NASA", "type": "ORG", "confidence": 0.9}]}
+        text = "INSERT INTO orgs (name) VALUES ('NASA');"
+        result = await extract_entities_from_text(
+            text, llm_caller=_llm_caller_returning(payload),
+        )
+        assert [e.name for e in result] == ["NASA"]
 
 
 # ---------------------------------------------------------------------------

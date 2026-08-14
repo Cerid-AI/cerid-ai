@@ -95,9 +95,10 @@ def test_connector_health_checks(request: pytest.FixtureRequest):
     health status based on helper-binary presence."""
     from core.ingest.sources.registry import get_connector
 
+    # apple_reminders has no registered connector since 2026-08-12 — it
+    # ingests through the desktop app's main process, not the backend.
     for kind, helper in (
         ("apple_mail", "ceridmail"),
-        ("apple_reminders", "ceridreminders"),
     ):
         connector = get_connector(kind)
         if connector is None:

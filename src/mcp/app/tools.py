@@ -28,6 +28,7 @@ from app.tool_registry import (
     get_registered_schemas,
 )
 from core.utils.swallowed import log_swallowed_error
+from plugins import get_plugin_tool_definitions, get_plugin_tool_handlers
 
 # Extension hooks — populated by bootstrap (internal tools, plugins, etc.)
 _tool_dispatchers: list = []
@@ -1079,7 +1080,8 @@ async def execute_tool(name: str, arguments: dict) -> Any:
 
     Resolution order: ``TOOL_REGISTRY`` first, then legacy if/elif,
     then the trading dispatcher (only when ``CERID_TRADING_ENABLED``),
-    then the ``_tool_dispatchers`` chain (external MCPs). Typed errors
+    then the ``_tool_dispatchers`` chain (external MCPs, then
+    ToolPlugin-registered tools). Typed errors
     propagate; the SSE transport maps them onto JSON-RPC codes.
     Legacy callers that catch ``ValueError`` keep working because
     ``InvalidToolError`` derives from ``ToolError`` (not Exception
@@ -1153,6 +1155,27 @@ from app.services.external_mcp_dispatch import (  # noqa: E402
 _tool_dispatchers.append(dispatch_external_mcp_tool)
 
 
+# -- ToolPlugin tools (RA-63) -------------------------------------------------
+# Register the plugin-tool dispatcher so tools registered by a conforming
+# ToolPlugin (plugins/base.py) are routable through ``execute_tool``.
+# Definitions are merged into ``get_all_tools()`` above; this is the
+# dispatch-side counterpart — without it a plugin tool would appear in
+# tools/list but raise "Unknown tool" on tools/call.
+async def _dispatch_plugin_tool(name: str, arguments: dict) -> Any:
+    """Route a call to its ToolPlugin-registered handler.
+
+    Returns ``None`` for names no plugin has registered so the next
+    dispatcher in the chain can claim them.
+    """
+    handler = get_plugin_tool_handlers().get(name)
+    if handler is None:
+        return None
+    return await handler(arguments)
+
+
+_tool_dispatchers.append(_dispatch_plugin_tool)
+
+
 # -- Phase 1.6+ decorator-registered tools -----------------------------------
 # Importing the mcp_tools package triggers each module's @register_tool
 # decorators. ``TOOL_REGISTRY`` is populated as a side-effect. Order
@@ -1162,13 +1185,15 @@ import app.mcp_tools  # noqa: E402, F401
 
 
 def get_all_tools() -> list[dict]:
-    """Return the full tool palette: registered + legacy + external.
+    """Return the full tool palette: registered + legacy + external + plugin.
 
     Composition order:
       1. ``TOOL_REGISTRY`` entries (Phase 1.6+ decorator-registered).
       2. Legacy ``MCP_TOOLS`` entries (pre-Phase-1.6 list-of-dicts).
       3. External MCP server schemas (discovered at runtime).
-      4. Trading tools, only when ``CERID_TRADING_ENABLED`` is true
+      4. Tool definitions registered by ``ToolPlugin`` instances
+         (discovered at plugin-load time; see plugins/__init__.py).
+      5. Trading tools, only when ``CERID_TRADING_ENABLED`` is true
          (checked at call time so the flag is respected at runtime;
          empty/moot on public where ``_TRADING_TOOLS`` is always []).
 
@@ -1179,6 +1204,7 @@ def get_all_tools() -> list[dict]:
         *get_registered_schemas(),
         *MCP_TOOLS,
         *get_external_tool_schemas(),
+        *get_plugin_tool_definitions(),
     ]
     if config.settings.CERID_TRADING_ENABLED:
         tools.extend(_TRADING_TOOLS)

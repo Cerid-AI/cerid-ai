@@ -13,6 +13,8 @@
 export interface CommunitySummary {
   community_id: string
   level: number
+  /** Short curated title (UX-15); null for pre-name-era communities. */
+  name: string | null
   summary: string | null
   member_count: number
   last_summarized_at: string | null
@@ -33,6 +35,10 @@ export interface RelatedCommunity {
 
 /** Full community detail returned by GET /observability/communities/{id} */
 export interface CommunityFull extends CommunitySummary {
+  /** Capped list (top mention_count first) — see members_total for the truth. */
   members: CommunityMemberEntity[]
+  /** Uncapped member count; render "N of members_total" when truncated. */
+  members_total: number
+  members_truncated: boolean
   related_communities: RelatedCommunity[]
 }

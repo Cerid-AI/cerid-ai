@@ -19,6 +19,7 @@ import logging
 import os
 import platform
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,32 @@ class VoiceMemosPlugin(ParserPlugin):
 
     def get_parsers(self) -> dict[str, Any]:
         return {".m4a": self.parse_voice_memo}
+
+    def on_startup(self) -> None:
+        """Start the opt-in folder watcher once every plugin has registered.
+
+        VOICE_MEMOS_OPT_IN is a plain env var, read here the same way every
+        other boolean toggle in config/settings.py is (set it in .env or the
+        process environment). No-op unless the user opted in AND the process
+        is actually running on macOS (the watcher is meaningless inside a
+        Linux container; the Darwin-only recordings directory would never
+        exist there).
+        """
+        if platform.system() != "Darwin":
+            return
+        opted_in = os.getenv("VOICE_MEMOS_OPT_IN", "false").strip().lower() in (
+            "true", "1", "yes", "on",
+        )
+        if not opted_in:
+            return
+
+        threading.Thread(
+            target=watch_voice_memos_dir,
+            args=(_ingest_voice_memo,),
+            name="voice-memos-watcher",
+            daemon=True,
+        ).start()
+        logger.info("Voice Memos watcher thread started (VOICE_MEMOS_OPT_IN=true)")
 
     def parse_voice_memo(self, file_path: str) -> dict[str, Any]:
         """Run Whisper on a .m4a file → plain text transcript.
@@ -141,6 +168,22 @@ def default_voice_memos_dir() -> Path:
         return primary
     group = Path.home() / "Library" / "Group Containers" / "group.com.apple.VoiceMemos.MacOS" / "Recordings"
     return group if group.exists() else primary
+
+
+def _ingest_voice_memo(file_path: str) -> None:
+    """Sync bridge from the polling watcher thread into the async ingestion pipeline.
+
+    ``.m4a`` is already routed to ``parse_voice_memo`` via ``PARSER_REGISTRY``
+    (set up by ``ParserPlugin.register()``), so ``ingest_file`` transcribes,
+    chunks, and stores the recording the same way a manual drop-zone upload
+    would. Runs its own event loop since this executes on the watcher's
+    dedicated thread, not the app's asyncio loop.
+    """
+    import asyncio
+
+    from app.services.ingestion import ingest_file
+
+    asyncio.run(ingest_file(file_path, client_source="voice_memos_watcher"))
 
 
 def watch_voice_memos_dir(

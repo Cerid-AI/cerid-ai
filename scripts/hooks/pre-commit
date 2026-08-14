@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Pre-commit hook: verify lock files are in sync with their sources.
+# Pre-commit hook: verify lock files are in sync with their sources, plus the
+# fast local-feedback checks folded in from scripts/pre-commit.sh (RA-70) —
+# that script's documented install path (.git/hooks/pre-commit) is
+# permanently disabled once `make install-hooks` sets core.hooksPath to this
+# directory, so its checks never ran. Both gates below also run at `make
+# prepush` and in CI; this is early local feedback, not the only copy.
 # Install: git config core.hooksPath scripts/hooks
 
 set -e
 
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 staged=$(git diff --cached --name-only)
 
 # Python: if requirements.txt changed, requirements.lock must also be staged
@@ -29,6 +35,34 @@ if echo "$staged" | grep -q "src/web/package.json"; then
   if ! echo "$staged" | grep -q "src/web/package-lock.json"; then
     echo "ERROR: src/web/package.json is staged but package-lock.json is not."
     echo "Run: cd src/web && npm install"
+    exit 1
+  fi
+fi
+
+# Find the Python interpreter — prefer the project venv.
+if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+  PY="$REPO_ROOT/.venv/bin/python"
+else
+  PY="$(command -v python3)"
+fi
+
+# env-example drift — runs when settings.py or .env.example is staged
+# (CI gate: env-example-drift)
+if echo "$staged" | grep -qE '(config/settings\.py|\.env\.example)$'; then
+  if ! PYTHONPATH="$REPO_ROOT/src/mcp" "$PY" "$REPO_ROOT/scripts/gen_env_example.py" --check >/dev/null 2>&1; then
+    echo "ERROR: .env.example is out of sync with settings.py"
+    echo "Run: PYTHONPATH=src/mcp $PY scripts/gen_env_example.py"
+    exit 1
+  fi
+fi
+
+# MCP tool description style — runs when any registered-tool source is staged
+# (CI gate: mcp-tool-descriptions — blocking as of v0.95.8)
+if echo "$staged" | grep -qE '(src/mcp/app/(tools\.py|mcp_tools/.*\.py)|docs/MCP_TOOL_STYLE\.md)$'; then
+  if ! PYTHONPATH="$REPO_ROOT/src/mcp" "$PY" "$REPO_ROOT/scripts/lint-mcp-descriptions.py" >/dev/null 2>&1; then
+    echo "ERROR: MCP tool descriptions failed style check"
+    echo "Diagnose: PYTHONPATH=src/mcp $PY scripts/lint-mcp-descriptions.py"
+    echo "Style guide: docs/MCP_TOOL_STYLE.md"
     exit 1
   fi
 fi

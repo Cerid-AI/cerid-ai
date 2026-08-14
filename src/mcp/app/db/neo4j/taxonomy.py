@@ -330,6 +330,15 @@ def list_tags(driver, limit: int = 100) -> list[dict[str, Any]]:
         ]
 
 
+def count_tags(driver) -> int:
+    """Total distinct :Tag count, unbounded — WB-23: list_tags caps at
+    `limit` (router max 500) with no way to tell the page was cut off."""
+    with driver.session() as session:
+        result = session.run("MATCH (t:Tag) RETURN count(t) AS total")
+        record = result.single()
+        return record["total"] if record else 0
+
+
 def update_artifact_taxonomy(
     driver,
     artifact_id: str,

@@ -92,7 +92,7 @@ describe("SettingsOverview", () => {
       within(nav).getByRole("button", { name: /searched, ranked, and verified/i }),
     ).toBeInTheDocument()
     expect(
-      within(nav).getByRole("button", { name: /encryption, retention, and what leaves this machine/i }),
+      within(nav).getByRole("button", { name: /encryption and what leaves this machine/i }),
     ).toBeInTheDocument()
   })
 
@@ -114,7 +114,9 @@ describe("SettingsOverview", () => {
     const nav = await screen.findByRole("navigation", { name: /explore settings/i })
 
     const knowledgeRow = within(nav).getByTestId("settings-overview-knowledge")
-    expect(within(knowledgeRow).getByText(/\d+ Pro/)).toBeInTheDocument()
+    // The badge reads "Checking plan" until capabilities resolve — it must not
+    // assert a tier lock before anything has checked one (sf5-02).
+    expect(await within(knowledgeRow).findByText(/\d+ Pro/)).toBeInTheDocument()
     // Console entries never carry a lock badge.
     const diagnosticsRow = within(nav).getByTestId("settings-overview-diagnostics")
     expect(within(diagnosticsRow).queryByText(/Pro/)).not.toBeInTheDocument()

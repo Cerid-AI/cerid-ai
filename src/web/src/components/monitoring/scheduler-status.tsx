@@ -31,6 +31,15 @@ export function SchedulerStatus({ scheduler }: SchedulerStatusProps) {
   const runJob = useMutation({
     mutationFn: (jobId: string) => triggerSchedulerJob(jobId),
     onSuccess: (result) => {
+      if (result.status === "collapsed_into_pending") {
+        // Nothing new ran — saying "Running" here would repeat the false
+        // success SF-2 diagnosed. No cache busting either: the data is
+        // unchanged until the already-queued run completes.
+        toast.info(`“${result.name}” is already queued`, {
+          description: "An equivalent run is pending or running — no new run was started.",
+        })
+        return
+      }
       toast.success(`Running “${result.name}”`, {
         description: "Refreshing in the background — surfaces update when it finishes.",
       })

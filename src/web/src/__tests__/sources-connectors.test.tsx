@@ -154,6 +154,26 @@ describe("SourcesConnectors", () => {
     expect(screen.queryByTestId("email-imap-section")).not.toBeInTheDocument()
   })
 
+  it("keeps the email row visible in an explicit unknown state when the status fetch fails (WB-20)", async () => {
+    mockFetchEmailStatus.mockRejectedValue(new Error("status backend down"))
+    render(<SourcesConnectors />, { wrapper: wrap() })
+    await screen.findByText("Notes")
+    // The row is the always-present email affordance: it must not silently
+    // vanish because its status call failed. It degrades to "unknown".
+    const emailRowTitle = await screen.findByTitle("Email (IMAP)")
+    expect(emailRowTitle).toBeInTheDocument()
+    expect(screen.getByText("unknown")).toBeInTheDocument()
+    expect(screen.getByTitle("Couldn't check status — open to retry")).toBeInTheDocument()
+  })
+
+  it("mounts the browser-extension discovery card in the list column (RA-20)", async () => {
+    render(<SourcesConnectors />, { wrapper: wrap() })
+    await screen.findByText("Notes")
+    expect(screen.getByText("Browser extension")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /chrome/i })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /firefox/i })).toBeInTheDocument()
+  })
+
   // ── Apple bridge rows ────────────────────────────────────────────────────
 
   describe("Apple bridge rows (desktop-only)", () => {
@@ -161,8 +181,12 @@ describe("SourcesConnectors", () => {
     const mockMailScan = vi.fn()
     const mockIMessageScan = vi.fn()
 
-    function installBridge() {
+    // The rows are gated on app.platform() === "darwin", not on the mere
+    // presence of appleConnectors — a Windows/Linux desktop build must not
+    // offer macOS-only sources (RA-06).
+    function installBridge(platform = "darwin") {
       ;(window as unknown as { cerid: object }).cerid = {
+        app: { platform: vi.fn().mockResolvedValue(platform) },
         appleConnectors: {
           notes: {
             scan: mockNotesScan,
@@ -210,6 +234,36 @@ describe("SourcesConnectors", () => {
       render(<SourcesConnectors />, { wrapper: wrap() })
       await screen.findByText("Notes") // folder row still loads
       expect(screen.queryByTitle("Apple Notes")).not.toBeInTheDocument()
+      expect(screen.queryByTitle("Apple Mail")).not.toBeInTheDocument()
+      expect(screen.queryByTitle("iMessage")).not.toBeInTheDocument()
+    })
+
+    it("browser build advertises the desktop-only Apple connectors (UX-27)", async () => {
+      // No bridge → no rows, but a web-only user must still be able to
+      // discover the flagship feature and learn it needs the desktop app.
+      render(<SourcesConnectors />, { wrapper: wrap() })
+      await screen.findByText("Notes")
+      const card = await screen.findByTestId("apple-desktop-card")
+      expect(card).toHaveTextContent(/Apple connectors/)
+      expect(card).toHaveTextContent(/desktop app for macOS/)
+      expect(card).toHaveTextContent(/iMessage/)
+    })
+
+    it("desktop build with bridge does NOT show the discovery card", async () => {
+      installBridge()
+      render(<SourcesConnectors />, { wrapper: wrap() })
+      await screen.findByTitle("Apple Notes")
+      expect(screen.queryByTestId("apple-desktop-card")).not.toBeInTheDocument()
+    })
+
+    it("does NOT show Apple rows on a non-macOS desktop build (RA-06)", async () => {
+      installBridge("win32")
+      render(<SourcesConnectors />, { wrapper: wrap() })
+      await screen.findByText("Notes") // folder row still loads
+      // Let the platform query settle: the darwin case renders rows by then.
+      await waitFor(() => {
+        expect(screen.queryByTitle("Apple Notes")).not.toBeInTheDocument()
+      })
       expect(screen.queryByTitle("Apple Mail")).not.toBeInTheDocument()
       expect(screen.queryByTitle("iMessage")).not.toBeInTheDocument()
     })
@@ -291,6 +345,37 @@ describe("SourcesConnectors", () => {
       expect(
         screen.queryByTitle("Apple Notes requires Cerid Pro"),
       ).not.toBeInTheDocument()
+    })
+
+    it("in-flight capabilities suppress the lock — no upgrade pitch on first paint", async () => {
+      // tier defaults to "community" while the fetch is pending, so an
+      // unsuppressed verdict would wear the Pro lock (and route a paying
+      // customer to the upgrade dialog). In the gap a click opens AppleDetail,
+      // which runs its own loading-aware gate.
+      mockCapabilities.mockReturnValue(new Promise(() => {}))
+      installBridge()
+      render(<SourcesConnectors />, { wrapper: wrap() })
+
+      expect(await screen.findByTitle("Apple Mail")).toBeInTheDocument()
+      expect(
+        screen.queryByTitle("Apple Mail requires Cerid Pro"),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByTitle("iMessage requires Cerid Pro"),
+      ).not.toBeInTheDocument()
+    })
+
+    it("failed capabilities fetch fails CLOSED — rows lock rather than unlock", async () => {
+      // isLoading goes false on error, so the suppression must not survive
+      // the failure: the "pro" registry fallback keeps the gate in place
+      // exactly when the server can't be asked.
+      mockCapabilities.mockRejectedValue(new Error("network down"))
+      installBridge()
+      render(<SourcesConnectors />, { wrapper: wrap() })
+
+      expect(
+        await screen.findByTitle("Apple Mail requires Cerid Pro"),
+      ).toBeInTheDocument()
     })
   })
 })

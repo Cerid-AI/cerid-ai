@@ -19,6 +19,36 @@ const PRUNE_TRIGGER_RATIO = 0.7
 /** Target proportion of effective context window after compression. */
 const PRUNE_TARGET_RATIO = 0.5
 
+/** Fallback hard cap on auto-injected chunks per turn, mirroring the server's
+ *  AUTO_INJECT_MAX default (src/mcp/config/settings.py). Used when the caller
+ *  does not pass options.autoInjectMax. */
+const DEFAULT_AUTO_INJECT_MAX = 3
+
+/** Questions about the user's own data — the ones an LLM cannot answer
+ *  without KB grounding and will instead hallucinate a denial for
+ *  ("I don't have access to your Apple Mail"). Deliberately possessive/
+ *  first-person anchored so general-knowledge questions never match. */
+const PERSONAL_DATA_QUERY_RE =
+  /\b(my|mine|our)\b|\bin my\b|\bfrom my\b|\b(did|do|have|am|was|can) i\b|\bi (received|sent|got|paid|bought|wrote|said|saved|uploaded)\b/i
+
+/** True when the message asks about the user's personal data (mail, files,
+ *  purchases, …) rather than general knowledge. Exported for tests. */
+export function isPersonalDataQuery(content: string): boolean {
+  return PERSONAL_DATA_QUERY_RE.test(content)
+}
+
+/** Honest deferral streamed in place of an LLM answer when retrieval is
+ *  degraded and a personal-data question has zero grounding (sf-2 / UX-01):
+ *  an ungrounded model reliably fabricates "I don't have access to X". */
+export function buildDeferralMessage(): string {
+  return (
+    "I couldn't search your knowledge base for this just now, so I won't " +
+    "guess about your personal data. Please try again in a moment — or " +
+    "narrow the question to a specific domain (for example \"in my mail\") " +
+    "to lighten the search."
+  )
+}
+
 interface UseChatSendOptions {
   // Conversation
   activeId: string | null
@@ -45,6 +75,11 @@ interface UseChatSendOptions {
   // Auto-inject settings
   autoInject: boolean
   autoInjectThreshold: number
+  /** Hard cap on the number of chunks auto-injected per turn, mirroring the
+   *  server's AUTO_INJECT_MAX (config/settings.py). Independent of the token
+   *  budget below — without this the loop was bounded only by remainingBudget.
+   *  Defaults to DEFAULT_AUTO_INJECT_MAX when omitted. */
+  autoInjectMax?: number
   /** Include knowledge packs in KB retrieval (Slice 7.3). Default true;
       when false, queryKB sends exclude_packs so packs are dropped. */
   includePacks: boolean
@@ -134,8 +169,15 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         if (rec.model.id !== options.selectedModel && rec.savingsVsCurrent > 0.0001) {
           modelToUse = rec.model.id
           options.setSelectedModel(modelToUse)
-          setAutoRouteNotice(`Switched to ${rec.model.label}`)
-          setTimeout(() => setAutoRouteNotice(null), 4000)
+          // UX-03: the combobox rewrite must be explained at the moment of
+          // swap — the model name alone reads as the UI silently overriding
+          // the user's selection. rec.reasoning carries the why.
+          setAutoRouteNotice(
+            rec.reasoning
+              ? `Smart routing switched to ${rec.model.label}: ${rec.reasoning}`
+              : `Smart routing switched to ${rec.model.label}`,
+          )
+          setTimeout(() => setAutoRouteNotice(null), 8000)
         }
       }
 
@@ -176,6 +218,10 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       // connection slots immediately, preventing the chat/stream request from
       // being queued behind stale KB queries.
       let autoInjectedCount = 0
+      // Freshest degradation signal for THIS send: the panel-level
+      // degradedReason (from the orchestrated context query), superseded by
+      // the send-time KB query's own envelope when one fires below.
+      let effectiveDegradedReason = options.degradedReason ?? ""
       // Skip auto-inject on the first message of a conversation — the KB
       // queries compete for browser connection slots and backend event loop
       // time, delaying the chat/stream response.  Follow-up messages benefit
@@ -205,6 +251,9 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           ])
           if (freshKB?.results?.length) {
             freshResults = freshKB.results
+          }
+          if (freshKB?.degraded_reason) {
+            effectiveDegradedReason = freshKB.degraded_reason
           }
           // Merge memories into the candidate pool as pseudo-KB results.
           // Clone first — when the KB query returned nothing, freshResults
@@ -250,7 +299,9 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
             .filter((r) => r.relevance >= relFloor
               && !injectedIds.has(r.artifact_id)
               && !priorInjected.has(`${r.artifact_id}:${r.chunk_index}`))
+          const autoInjectMax = options.autoInjectMax ?? DEFAULT_AUTO_INJECT_MAX
           for (const c of candidates) {
+            if (autoInjectedCount >= autoInjectMax) break
             const chunkTokens = estimateTokenCount(c.content)
             if (chunkTokens > remainingBudget) break
             manuallyInjected.push(c)
@@ -332,6 +383,27 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         setLastAutoInjectCount(autoInjectedCount)
       }
 
+      // Honest degradation (sf-2 / UX-01): retrieval breached its budget, the
+      // question is about the user's own data, and ZERO grounding reached this
+      // send — streaming the LLM now can only produce a fabricated denial
+      // ("I don't have access to your Apple Mail"). Defer honestly instead.
+      // Private Mode L2+ is exempt: the user explicitly chose ungrounded chat.
+      if (
+        effectiveDegradedReason &&
+        !bypassKB &&
+        dedupedSources.length === 0 &&
+        isPersonalDataQuery(content)
+      ) {
+        options.addMessage(convoId, {
+          id: uuid(),
+          role: "assistant",
+          content: buildDeferralMessage(),
+          timestamp: Date.now(),
+          degradedReason: effectiveDegradedReason,
+        })
+        return
+      }
+
       if (import.meta.env.DEV && allMessages[0]?.role === "system") {
         console.log(`[kb-inject] System message (${allMessages[0].content.length} chars) with ${dedupedSources.length} sources`)
       }
@@ -394,7 +466,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         }
       }
 
-      options.send(convoId, allMessages, modelToUse, sourcesForAssistant, options.degradedReason)
+      options.send(convoId, allMessages, modelToUse, sourcesForAssistant, effectiveDegradedReason || undefined)
       if (modelToUse !== options.selectedModel && options.activeId) {
         options.updateModel(options.activeId, modelToUse)
       }

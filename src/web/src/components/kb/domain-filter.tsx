@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { Badge } from "@/components/ui/badge"
-import { DOMAINS } from "@/lib/types"
+import { useLiveDomains } from "@/hooks/use-live-domains"
 import { domainSlot } from "@/lib/graph/identity"
 
 interface DomainFilterProps {
@@ -11,9 +11,12 @@ interface DomainFilterProps {
 }
 
 export function DomainFilter({ activeDomains, onToggle }: DomainFilterProps) {
+  // UX-08 — chips come from the live domain aggregate (connector domains
+  // included), not a per-surface hardcoded list.
+  const domains = useLiveDomains()
   return (
     <div className="flex min-w-0 flex-wrap gap-1.5">
-      {DOMAINS.map((domain) => {
+      {domains.map((domain) => {
         const isActive = activeDomains.has(domain)
         const slot = domainSlot(domain)
         return (

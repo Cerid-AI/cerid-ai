@@ -38,6 +38,7 @@ const mockSettings: ServerSettings = {
   hallucination_threshold: 0.75,
   enable_auto_inject: false,
   auto_inject_threshold: 0.82,
+  auto_inject_max: 3,
   domains: ["code"],
   taxonomy: {},
   storage_mode: "extract_only",
@@ -76,6 +77,12 @@ const mockKBStats = {
   },
 }
 
+const mockEmbeddingVersions = {
+  domains: {
+    code: { total: 80, versions: { "v2": 60, "v1": 20 }, current_version: "v2", mixed: true },
+  },
+}
+
 function mockApis() {
   return vi.fn().mockImplementation((url: string) => {
     if (url.includes("/watched-folders")) return ok({ folders: [], total: 0 })
@@ -83,6 +90,18 @@ function mockApis() {
     if (url.includes("/briefs/settings")) return ok({ write_to_vault: false, vault_id: null, vault_folder: "_briefs" })
     if (url.includes("/billing/capabilities")) return ok({ tier: "community", features: {}, buckets: {} })
     if (url.includes("/admin/kb/stats")) return ok(mockKBStats)
+    if (url.includes("/admin/kb/embedding-versions")) return ok(mockEmbeddingVersions)
+    if (url.includes("/admin/kb/reembed")) {
+      return ok({ status: "enqueued", job_id: "job-123", domain: null, message: "Enqueued re-embed job job-123 for all domains." })
+    }
+    if (url.includes("/admin/collections/repair")) {
+      return ok({
+        status: "dry_run", collection_name: "domain_code", domain: "code",
+        actual_dim: 384, expected_dim: 768, artifacts_found: 20, rebuilt_documents: 0,
+        backup_path: null, dry_run: true,
+        message: "Dry run: would back up collection 'domain_code', delete it, recreate with dim=768, and re-ingest 20 artifact(s).",
+      })
+    }
     return ok({})
   })
 }
@@ -141,6 +160,22 @@ describe("KnowledgeCategory — 4-state matrix", () => {
     vi.stubGlobal("fetch", mockApis())
     render(<KnowledgeCategory {...propsWithBriefs} />, { wrapper })
     expect(await screen.findByText("Briefs")).toBeInTheDocument()
+  })
+
+  it("WB-12: toggling a brief setting after the settings fetch failed surfaces an error instead of a silent no-op", async () => {
+    const propsWithBriefs: SettingsCategoryPageProps = {
+      ...defaultProps,
+      settings: { ...mockSettings, feature_flags: { enable_briefs: true } },
+    }
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/briefs/settings")) return Promise.reject(new Error("network error"))
+      return mockApis()(url)
+    }))
+    const user = userEvent.setup()
+    render(<KnowledgeCategory {...propsWithBriefs} />, { wrapper })
+    await screen.findByText("Briefs")
+    await user.click(await screen.findByRole("switch", { name: /write briefs to vault/i }))
+    expect(await screen.findByText(/couldn't be loaded, so this change wasn't saved/i)).toBeInTheDocument()
   })
 
   it("success: categorize_mode patch called on select change", async () => {
@@ -219,6 +254,40 @@ describe("KnowledgeCategory — KB maintenance (relocated from System, ST12)", (
     const clearBtn = clearBtns.find((b) => !b.getAttribute("aria-label"))!
     await user.click(clearBtn)
     expect(await screen.findByText(/Clear domain.*permanently delete/i)).toBeInTheDocument()
+  })
+})
+
+describe("KnowledgeCategory — embedding diagnostics + repair (RA-38)", () => {
+  it("Check embedding versions fetches and renders the per-domain distribution", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    const user = userEvent.setup()
+    render(<KnowledgeCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("KB Maintenance")
+    await user.click(screen.getByRole("button", { name: /check embedding versions/i }))
+    expect(await screen.findByText(/80 chunks.*mixed/i)).toBeInTheDocument()
+  })
+
+  it("Re-embed corpus opens a confirm dialog and enqueues the job", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    const user = userEvent.setup()
+    render(<KnowledgeCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("KB Maintenance")
+    await user.click(screen.getByRole("button", { name: /^re-embed corpus$/i }))
+    expect(await screen.findByText("Enqueue re-embed job?")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /enqueue re-embed$/i }))
+    expect(await screen.findByText(/Enqueued re-embed job job-123/i)).toBeInTheDocument()
+  })
+
+  it("Repair collection preview runs a dry run and reports the plan without applying it", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    const user = userEvent.setup()
+    render(<KnowledgeCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("KB Maintenance")
+    await user.type(screen.getByLabelText(/collection to repair/i), "domain_code")
+    await user.click(screen.getByRole("button", { name: /^preview repair$/i }))
+    expect(await screen.findByText("Preview collection repair?")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /^preview$/i }))
+    expect(await screen.findByText(/Dry run: would back up collection/i)).toBeInTheDocument()
   })
 })
 

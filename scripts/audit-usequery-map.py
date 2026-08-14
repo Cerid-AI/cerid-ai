@@ -23,6 +23,7 @@ A line is considered safe when it has one of the SAFE markers (e.g.
 when the access is fully optional-chained (``digest?.artifacts?.count``).
 """
 from __future__ import annotations
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -76,54 +77,73 @@ def _data_names_in(text: str) -> set[str]:
 # ---------------------------------------------------------------------------
 # Walk
 # ---------------------------------------------------------------------------
-violations: list[str] = []
-for tsx in sorted(ROOT.rglob("*.tsx")):
-    text = tsx.read_text(encoding="utf-8")
-    if "useQuery" not in text:
-        continue
-    data_names = _data_names_in(text)
-    nested_patterns = [(name, _nested_numeric(name)) for name in data_names]
-    object_patterns = [(name, _object_reflection(name)) for name in data_names]
-
-    for n, line in enumerate(text.splitlines(), 1):
-        if "useQuery" in line or any(s in line for s in SAFE):
+def _find_violations() -> list[str]:
+    violations: list[str] = []
+    for tsx in sorted(ROOT.rglob("*.tsx")):
+        text = tsx.read_text(encoding="utf-8")
+        if "useQuery" not in text:
             continue
+        data_names = _data_names_in(text)
+        nested_patterns = [(name, _nested_numeric(name)) for name in data_names]
+        object_patterns = [(name, _object_reflection(name)) for name in data_names]
 
-        # (1) Broad map/filter/reduce.
-        if UNSAFE_MAP.search(line):
-            violations.append(
-                f"{tsx.relative_to(ROOT.parent.parent)}:{n}: [map/filter/reduce] {line.strip()}"
-            )
-            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            if "useQuery" in line or any(s in line for s in SAFE):
+                continue
 
-        # (2) Nested .count/.length/.size on a known data identifier.
-        flagged = False
-        for name, pattern in nested_patterns:
-            m = pattern.search(line)
-            if m and f"{name}?.{m.group(1)}" not in line:
+            # (1) Broad map/filter/reduce.
+            if UNSAFE_MAP.search(line):
                 violations.append(
-                    f"{tsx.relative_to(ROOT.parent.parent)}:{n}: "
-                    f"[nested .count/.length/.size on {name}] {line.strip()}"
+                    f"{tsx.relative_to(ROOT.parent.parent)}:{n}: [map/filter/reduce] {line.strip()}"
                 )
-                flagged = True
-                break
-        if flagged:
-            continue
+                continue
 
-        # (3) Object.keys/entries/values on a known data identifier.
-        for name, pattern in object_patterns:
-            m = pattern.search(line)
-            if m and f"{name}?.{m.group(1)}" not in line:
-                violations.append(
-                    f"{tsx.relative_to(ROOT.parent.parent)}:{n}: "
-                    f"[Object.keys/entries/values on {name}] {line.strip()}"
-                )
-                break
+            # (2) Nested .count/.length/.size on a known data identifier.
+            flagged = False
+            for name, pattern in nested_patterns:
+                m = pattern.search(line)
+                if m and f"{name}?.{m.group(1)}" not in line:
+                    violations.append(
+                        f"{tsx.relative_to(ROOT.parent.parent)}:{n}: "
+                        f"[nested .count/.length/.size on {name}] {line.strip()}"
+                    )
+                    flagged = True
+                    break
+            if flagged:
+                continue
 
-if violations:
-    print(f"\n[audit-usequery-map] {len(violations)} candidate sites:\n")
-    for v in violations:
-        print(f"  {v}")
-    sys.exit(1)
-print("[audit-usequery-map] clean.")
-sys.exit(0)
+            # (3) Object.keys/entries/values on a known data identifier.
+            for name, pattern in object_patterns:
+                m = pattern.search(line)
+                if m and f"{name}?.{m.group(1)}" not in line:
+                    violations.append(
+                        f"{tsx.relative_to(ROOT.parent.parent)}:{n}: "
+                        f"[Object.keys/entries/values on {name}] {line.strip()}"
+                    )
+                    break
+    return violations
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="CI gate mode — same scan either way; matches the sibling "
+        "lint-*.py scripts' calling convention (warn-only in gates.yaml "
+        "until the existing map/filter/reduce backlog is triaged).",
+    )
+    parser.parse_args()
+
+    violations = _find_violations()
+    if violations:
+        print(f"\n[audit-usequery-map] {len(violations)} candidate sites:\n")
+        for v in violations:
+            print(f"  {v}")
+        return 1
+    print("[audit-usequery-map] clean.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

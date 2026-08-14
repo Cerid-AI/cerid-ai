@@ -16,13 +16,18 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 import sentry_sdk
 
 import config
-from config.constants import BM25_REBUILD_DEBOUNCE_SECONDS
+from config.constants import (
+    BM25_MAX_LOADED_DOMAINS,
+    BM25_REBUILD_DEBOUNCE_SECONDS,
+    BM25_REBUILD_MAX_INLINE_WAIT_SECONDS,
+)
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.bm25")
@@ -98,6 +103,12 @@ class BM25Index:
         # results until the next rebuild drops them for real.
         self._stale_ids: set[str] = set()
         self._last_rebuild: float = 0.0
+        # Single-flight guard for the worker-thread rebuild: (thread, done
+        # event) of the in-flight rebuild, or None. Guarded by ``_lock``-free
+        # check-and-set under ``_rebuild_spawn_guard`` (``_lock`` itself is
+        # held for the whole rebuild, so it can't double as the spawn guard).
+        self._rebuild_inflight: tuple[threading.Thread, threading.Event] | None = None
+        self._rebuild_spawn_guard = threading.Lock()
 
     def add_documents(
         self,
@@ -258,15 +269,24 @@ class BM25Index:
         return len(self._doc_ids)
 
     def _maybe_rebuild(self) -> None:
-        """Rebuild the retriever from the live corpus if it has drifted.
+        """Refresh the retriever from the live corpus if it has drifted.
 
-        Called on the read (search) path. Rebuilds when the corpus is dirty
+        Called on the read (search) path. Triggers when the corpus is dirty
         AND either no retriever exists yet or the debounce cooldown
         (:data:`BM25_REBUILD_DEBOUNCE_SECONDS`) has elapsed since the last
         rebuild. This coalesces a burst of ingest ``add_documents`` calls
         into at most one rebuild per cooldown window instead of one
         whole-corpus rebuild per document. The double-checked ``_dirty``
         flag keeps the steady-state (clean) search path lock-free.
+
+        When a snapshot already exists, the whole-corpus re-tokenization runs
+        on a worker thread and this method waits at most
+        :data:`BM25_REBUILD_MAX_INLINE_WAIT_SECONDS` before serving the stale
+        snapshot (bf-f3 default: background index maintenance yields to
+        interactive use — inline rebuilds of multi-thousand-doc domains were
+        eating the entire 20s retrieval budget, kb-idle-zero). Small corpora
+        finish inside the wait, preserving next-query visibility. Only the
+        first build (nothing to serve yet) stays inline.
         """
         if not self._dirty:
             return
@@ -275,15 +295,45 @@ class BM25Index:
             time.monotonic() - self._last_rebuild
         ) < BM25_REBUILD_DEBOUNCE_SECONDS:
             return
-        with self._lock:
-            if not self._dirty:
-                return
-            retriever = self._snapshot[0]
-            if retriever is not None and (
-                time.monotonic() - self._last_rebuild
-            ) < BM25_REBUILD_DEBOUNCE_SECONDS:
-                return
-            self._rebuild_locked()
+        if retriever is None:
+            # First build: no snapshot to serve, so blocking is the only
+            # honest option (returning [] would report "no keyword matches"
+            # for a corpus that simply hasn't been indexed yet).
+            with self._lock:
+                if self._dirty:
+                    self._rebuild_locked()
+            return
+        done = self._spawn_rebuild_thread()
+        done.wait(timeout=BM25_REBUILD_MAX_INLINE_WAIT_SECONDS)
+
+    def _spawn_rebuild_thread(self) -> threading.Event:
+        """Start (or join) the single-flight worker-thread rebuild.
+
+        Returns the done-event of the in-flight rebuild so the caller can
+        apply its bounded freshness wait.
+        """
+        with self._rebuild_spawn_guard:
+            inflight = self._rebuild_inflight
+            if inflight is not None and inflight[0].is_alive():
+                return inflight[1]
+            done = threading.Event()
+
+            def _run() -> None:
+                try:
+                    with self._lock:
+                        if self._dirty:
+                            self._rebuild_locked()
+                except Exception as exc:  # noqa: BLE001 — worker thread boundary
+                    log_swallowed_error("core.retrieval.bm25.background_rebuild", exc)
+                finally:
+                    done.set()
+
+            thread = threading.Thread(
+                target=_run, name=f"bm25-rebuild-{self.domain}", daemon=True,
+            )
+            self._rebuild_inflight = (thread, done)
+            thread.start()
+            return done
 
     def _rebuild_locked(self) -> None:
         """Tokenize the whole live corpus and publish a fresh retriever.
@@ -416,14 +466,59 @@ class BM25Index:
 # Module-level index cache
 # ---------------------------------------------------------------------------
 
-_indexes: dict[str, BM25Index] = {}
+_indexes: OrderedDict[str, BM25Index] = OrderedDict()
+# Guards the lazy-construction TOCTOU on `_indexes` and the LRU
+# reordering below. Two concurrent ingest calls for the same new domain
+# (e.g., processor queue + file-watcher event) could both observe
+# `domain not in _indexes` and each construct a BM25Index; the second
+# write would orphan the first index along with any documents it had
+# already accepted in memory.
+_indexes_lock = threading.Lock()
 
 
 def get_index(domain: str) -> BM25Index:
-    """Get or create a BM25 index for the given domain."""
-    if domain not in _indexes:
-        _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
-    return _indexes[domain]
+    """Get or create a BM25 index for the given domain.
+
+    In-memory index count is bounded by ``BM25_MAX_LOADED_DOMAINS`` via LRU
+    eviction. A domain's corpus is always durable on disk (see
+    :meth:`BM25Index._append_to_disk` / :meth:`BM25Index._rewrite_disk`),
+    so evicting the least-recently-used in-memory index just means the
+    next :func:`get_index` call for that domain reloads it from its JSONL
+    corpus.
+    """
+    with _indexes_lock:
+        idx = _indexes.get(domain)
+        if idx is not None:
+            _indexes.move_to_end(domain)
+            return idx
+        idx = BM25Index(domain, config.BM25_DATA_DIR)
+        _indexes[domain] = idx
+        while len(_indexes) > BM25_MAX_LOADED_DOMAINS:
+            _indexes.popitem(last=False)
+        return idx
+
+
+def warm_indexes(domains: list[str] | None = None) -> dict[str, int]:
+    """Materialise domain indexes at boot so no user query pays the cold load.
+
+    Constructing a ``BM25Index`` parses its JSONL corpus and rebuilds the
+    retriever inline (see :meth:`BM25Index._load`). On the request path that
+    cost lands on the first query for a domain in a fresh process, where it
+    can exhaust the retrieval budget outright (kb-cold-first-touch). Called
+    from the app lifespan on a worker thread.
+
+    Returns ``{domain: doc_count}`` for the domains warmed. Capped at
+    ``BM25_MAX_LOADED_DOMAINS`` — warming past the LRU bound would evict the
+    indexes warmed first and accomplish nothing.
+    """
+    targets = list(domains if domains is not None else config.DOMAINS)
+    warmed: dict[str, int] = {}
+    for domain in targets[:BM25_MAX_LOADED_DOMAINS]:
+        try:
+            warmed[domain] = get_index(domain).size
+        except Exception as exc:  # noqa: BLE001 — boot must never wedge
+            log_swallowed_error("core.retrieval.bm25.warm_indexes", exc)
+    return warmed
 
 
 def index_chunks(
@@ -476,8 +571,22 @@ def rebuild_all() -> int:
     """Reload all BM25 indexes from disk (including newly synced domains)."""
     rebuilt = 0
     for domain in config.DOMAINS:
-        if domain in _indexes:
-            idx = _indexes[domain]
+        # Same check-then-set/replace pattern as get_index(), guarded by the
+        # same lock: a concurrent get_index() for this domain (e.g. from the
+        # live /admin/kb/rebuild-index endpoint racing ordinary ingestion)
+        # must never observe a half-updated `_indexes` dict or clobber the
+        # instance this function is about to reload in place.
+        with _indexes_lock:
+            idx = _indexes.get(domain)
+            is_new = idx is None
+            if is_new:
+                idx = BM25Index(domain, config.BM25_DATA_DIR)
+                _indexes[domain] = idx
+            else:
+                _indexes.move_to_end(domain)
+
+        if not is_new:
+            assert idx is not None
             with idx._lock:
                 idx._texts.clear()
                 idx._doc_ids.clear()
@@ -485,8 +594,6 @@ def rebuild_all() -> int:
                 idx._doc_tenant.clear()
                 idx._reset_index_state()
                 idx._load()
-        else:
-            _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
         rebuilt += 1
     return rebuilt
 

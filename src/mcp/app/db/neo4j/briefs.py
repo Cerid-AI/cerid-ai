@@ -279,6 +279,39 @@ def get_brief(driver: Any, brief_id: str) -> "BriefRecord | None":
         )
 
 
+def count_artifacts_since_generation(
+    driver: Any, specs: list[dict[str, str]]
+) -> dict[str, int]:
+    """Count artifacts ingested after each brief was generated (UX-18).
+
+    ``specs`` entries carry ``brief_id``, ``generated_at`` and
+    ``window_end`` (both ISO-8601 UTC strings). The count is bounded to
+    the brief's own window so an old brief's count is a fixed fact ("N
+    items landed later that day"), not an ever-growing number.
+
+    Timestamps compare as strings: both ``Brief.generated_at`` and
+    ``Artifact.ingested_at`` are written via ``utcnow_iso()`` (same
+    format, same offset), so lexicographic order equals temporal order —
+    and a malformed legacy value degrades to "not counted" instead of a
+    ``datetime()`` coercion aborting the whole query.
+    """
+    if not specs:
+        return {}
+
+    with driver.session() as session:
+        result = session.run(
+            """
+            UNWIND $specs AS spec
+            OPTIONAL MATCH (a:Artifact)
+            WHERE a.ingested_at > spec.generated_at
+              AND a.ingested_at < spec.window_end
+            RETURN spec.brief_id AS brief_id, count(a) AS n
+            """,
+            specs=specs,
+        )
+        return {row["brief_id"]: int(row["n"] or 0) for row in result}
+
+
 def hydrate_claims(driver: Any, brief_id: str) -> list[dict[str, Any]]:
     """Return per-claim detail for every claim a brief cites.
 

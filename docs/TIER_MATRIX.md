@@ -2,7 +2,7 @@
 
 > GENERATED FILE — do not edit by hand. Regenerate with `python scripts/gen_tier_matrix.py`.
 > Source of truth: `config/features.py` (`_get_feature_tier` + `FEATURE_BUCKETS`); enforced by `tests/test_tier_matrix_drift.py`.
-> 53 feature flags across 9 sections.
+> 50 feature flags across 9 sections.
 
 ## Tiers
 
@@ -60,19 +60,18 @@
 | iMessage reader | — | ✓ | ✓ | `imessage_reader` |
 | Apple Reminders (EventKit) | — | ✓ | ✓ | `reminders_eventkit` |
 
+> `apple_notes_reader`, `apple_mail_reader`, and `imessage_reader` are enforced client-side only (Settings → Sources locks the row behind `ProUpgradeOverlay`). The backend `/ingest/structured` endpoint the desktop bridge posts to performs no server-side tier check for these three flags — deliberate, matching the "annoying, not DRM" posture, pending AF-043.
+
 ### macOS Native — Community
 
 | Feature | Core | Pro | Enterprise | Gate |
 |---------|------|-----|------------|------|
-| Apple Silicon ML acceleration | ✓ | ✓ | ✓ | `apple_silicon_ml` |
 | Keychain secrets | ✓ | ✓ | ✓ | `keychain_secrets` |
 | Menu-bar mode | ✓ | ✓ | ✓ | `menu_bar_mode` |
 | QuickLook preview | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `quicklook_preview` |
-| Safari Reading List | ✓ | ✓ | ✓ | `safari_reading_list` |
 | Share Sheet | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `share_sheet` |
 | Shortcuts actions | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `shortcuts_actions` |
 | Sparkle auto-updates | ✓ | ✓ | ✓ | `sparkle_updates` |
-| Spotlight integration | ✓ | ✓ | ✓ | `spotlight_integration` |
 | TCC permissions wizard | ✓ | ✓ | ✓ | `tcc_wizard` |
 | Universal binary | ✓ | ✓ | ✓ | `universal_binary` |
 | Voice Memos watcher | ✓ | ✓ | ✓ | `voice_memos_watch` |
@@ -103,7 +102,7 @@
 | Docling document parser | ✓ | ✓ | ✓ | `docling_parser` |
 | Encryption at rest | ✓ | ✓ | ✓ | `encryption_at_rest` |
 | File upload (GUI) | ✓ | ✓ | ✓ | `file_upload_gui` |
-| Hierarchical taxonomy | ✓ | ✓ | ✓ | `hierarchical_taxonomy` |
+| Hierarchical taxonomy | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `hierarchical_taxonomy` |
 | Image understanding | ✓ | ✓ | ✓ | `image_understanding` |
 | Live metrics | ✓ | ✓ | ✓ | `live_metrics` |
 | OCR (scanned PDFs) | ✓ | ✓ | ✓ | `ocr_parsing` |

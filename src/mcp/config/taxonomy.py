@@ -20,7 +20,7 @@ TAXONOMY = {
         "description": "Financial documents, tax records, budgets",
         "icon": "dollar-sign",
         # `trading` (Phase 5.2): trade logs / signals / positions are a finance
-        # sub_category, NOT a new top-level domain — the 22-domain graph
+        # sub_category, NOT a new top-level domain — the 12-domain graph
         # backbone + per-domain Chroma collections assume the existing set.
         "sub_categories": ["tax", "investments", "budgets", "receipts", "trading", "general"],
     },

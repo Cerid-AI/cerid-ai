@@ -66,6 +66,14 @@ class QueryEnvelope:
     degraded_reason: str = ""
     token_budget_used: int = 0  # characters; renamed "context_char_count" in Wave 2
     graph_results: int = 0
+    # Informational keys the envelope does not model (domains_searched,
+    # surface_route, _timings, execution_time_ms, rag_mode, …) — carried
+    # through a from_legacy_result → to_dict round trip verbatim. Before
+    # this field existed, the CRAG external merge rebuilt the envelope and
+    # silently DROPPED them, so every low-confidence /agent/query response
+    # reported domains_searched=[] even after searching every domain
+    # (kb-idle-zero / UX-07 diagnosis).
+    extras: dict[str, Any] = field(default_factory=dict)
 
     def mark_degraded(self, *, budget_seconds: float, reason: str) -> None:
         self.budget_exceeded = True
@@ -95,7 +103,9 @@ class QueryEnvelope:
         flat = [i.to_dict() for i in (self.kb + self.memory + self.external)]
         # Internal kb/memory/external status fields still drive mark_degraded;
         # they are not serialized (E1 CR-032).
+        # Extras first so a stray extra can never shadow an envelope-owned key.
         return {
+            **self.extras,
             "results": flat,
             "sources": flat,
             "source_breakdown": {
@@ -133,6 +143,18 @@ class QueryEnvelope:
                 for s in sb.get(key, [])
             ]
 
+        # Every key the envelope does not own is an informational passthrough
+        # (domains_searched, surface_route, _timings, …) — keep it so the
+        # round trip is lossless. "timestamp" regenerates on to_dict;
+        # "source_status"/"results"/"sources" are re-derived.
+        _owned = {
+            "results", "sources", "source_breakdown", "context", "answer",
+            "strategy", "total_results", "confidence", "budget_exceeded",
+            "budget_seconds", "degraded_reason", "timestamp",
+            "token_budget_used", "graph_results", "source_status",
+        }
+        extras = {k: v for k, v in result.items() if k not in _owned}
+
         env = cls(
             kb=_items("kb"),
             memory=_items("memory"),
@@ -148,5 +170,6 @@ class QueryEnvelope:
             degraded_reason=result.get("degraded_reason", ""),
             token_budget_used=int(result.get("token_budget_used", 0)),
             graph_results=int(result.get("graph_results", 0)),
+            extras=extras,
         )
         return env

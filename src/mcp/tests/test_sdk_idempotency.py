@@ -163,7 +163,7 @@ class TestSdkIdempotencyUnits:
         h = {"Idempotency-Key": "mk", "X-Client-ID": "c1"}
         body = {"response_text": "hi", "conversation_id": "conv-1"}
         with patch(_IDEM, return_value=fake), \
-             patch("app.routers.sdk.is_memory_async_mode", return_value=False), \
+             patch("app.routers.sdk._memory_async_enabled", return_value=False), \
              patch("app.routers.sdk.memory_extract_endpoint", new=AsyncMock(return_value={"ok": True})) as m:
             r1 = c.post("/sdk/v1/memory/extract", json=body, headers=h)
             r2 = c.post("/sdk/v1/memory/extract", json=body, headers=h)

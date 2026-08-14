@@ -5308,7 +5308,7 @@ Audit-driven reliability, data-wiring, UX, and LLM-integration fixes across 32 c
 ### Phase 3 (P2 — Backlog)
 - **External Enrichment** — Enrich button on chat messages (Globe icon)
 - **Console Consistency** — Read-only RAG mode display, pulse animation on unread badge
-- **Custom API Wizard** — CustomApiSource backend (3 auth modes), CustomApiDialog frontend
+- **Custom API Wizard** — CustomApiSource backend (3 auth modes); CustomApiDialog frontend built but its trigger stays hidden pending the `external_adapter` backend endpoint (RA-26)
 
 ### New Files
 - `src/web/src/components/setup/optional-features-step.tsx`

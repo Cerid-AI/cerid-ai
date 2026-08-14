@@ -49,7 +49,12 @@ CHUNKING_MODE = os.getenv("CHUNKING_MODE", "semantic")  # "token" or "semantic"
 
 # Contextual chunking — LLM-generated situational summaries prepended to each chunk.
 # Uses a lightweight model via Bifrost during ingestion.  Toggle: ENABLE_CONTEXTUAL_CHUNKS.
-CONTEXTUAL_CHUNKS_MODEL = os.getenv("CONTEXTUAL_CHUNKS_MODEL", "openrouter/meta-llama/llama-3.3-70b-instruct:free")
+# Model choice is routed through call_internal_llm(stage="contextual_chunks") —
+# see core/utils/contextual.py — not through a hardcoded vendor model name here.
+# The operator-facing lever is PROVIDER_STAGE_CONTEXTUAL_CHUNKS (per-stage
+# override pattern documented near PROVIDER_STAGE_LONGMEMEVAL_SCORE below).
+# Declared here under its own name so it surfaces in .env.example.
+_PROVIDER_STAGE_CONTEXTUAL_CHUNKS_EXAMPLE = os.getenv("PROVIDER_STAGE_CONTEXTUAL_CHUNKS", "")
 
 # ---------------------------------------------------------------------------
 # Categorization tiers
@@ -224,7 +229,10 @@ WEBHOOK_DRAIN_MAX_PER_RUN = int(os.getenv("WEBHOOK_DRAIN_MAX_PER_RUN", "200"))
 
 # Connector polling: drives SourceConnector.fetch_since on a cadence for active
 # pollable sources (rss, url_watch, …), advancing the sync cursor only after a
-# successful ingest (crash-safe resume). Empty disables.
+# successful ingest (crash-safe resume). Empty disables. This cron (consumed by
+# scheduler.py's _run_source_poll) is the ONLY real cadence lever across all
+# connector kinds — no per-source interval field is wired to anything; every
+# source polls on this single global tick.
 SCHEDULE_SOURCE_POLL = os.getenv("SCHEDULE_SOURCE_POLL", "*/15 * * * *")
 SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE = int(os.getenv("SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE", "50"))
 
@@ -232,16 +240,6 @@ SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE = int(os.getenv("SOURCE_POLL_MAX_ARTIFACTS_
 # mail. Self-skips when no mailbox is configured (legacy /data-sources/email).
 # Empty disables.
 SCHEDULE_EMAIL_POLL = os.getenv("SCHEDULE_EMAIL_POLL", "*/15 * * * *")
-
-# Contextual retrieval per-tenant monthly USD budget (Workstream E
-# Phase 3). Advisory only — no enforcement currently reads this value;
-# breaching it does not trip a circuit breaker or disable contextual
-# generation. Configurable; default $50 aligns with the
-# Anthropic-published cost model (~$1.02/M ingested tokens with
-# prompt-cache hits).
-CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH = float(
-    os.getenv("CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH", "50.0"),
-)
 
 # CRAG-style retrieval quality gate — if top result relevance is below this
 # threshold after initial retrieval, supplement with external sources before
@@ -307,6 +305,12 @@ STORAGE_WARN_PCT = int(os.getenv("CERID_STORAGE_WARN_PCT", "60"))
 STORAGE_CRITICAL_PCT = int(os.getenv("CERID_STORAGE_CRITICAL_PCT", "80"))
 STORAGE_LIMIT_MB = int(os.getenv("CERID_STORAGE_LIMIT_MB", "2048"))
 INGEST_HISTORY_RETENTION_DAYS = int(os.getenv("CERID_INGEST_HISTORY_DAYS", "7"))
+
+# AF-042: gates the ingest backpressure check in app/services/ingestion.py
+# (reject new ingest once STORAGE_CRITICAL_PCT is reached). The read-only
+# GET /system/storage report above is unaffected by this flag either way —
+# this only controls whether ingest itself is allowed to enforce it.
+STORAGE_BACKPRESSURE_ENABLED = os.getenv("CERID_STORAGE_BACKPRESSURE_ENABLED", "true").lower() == "true"
 
 QUERY_CONTEXT_MAX_CHARS = 40_000    # default max chars assembled for LLM context
 
@@ -410,21 +414,7 @@ NLI_GATE_EXEMPT_TOP_K = int(os.getenv("NLI_GATE_EXEMPT_TOP_K", "3"))
 # v0.95.5 sliding-window scorer scored at sentence granularity; multi-fact
 # sentences hide partial-support failures behind a single entailment label.
 FAITHFULNESS_DECOMPOSE_CLAIMS = os.getenv("FAITHFULNESS_DECOMPOSE_CLAIMS", "true").lower() == "true"
-FAITHFULNESS_DECOMPOSE_MAX_SUBCLAIMS = int(os.getenv("FAITHFULNESS_DECOMPOSE_MAX_SUBCLAIMS", "6"))
-# Atomic sub-claims are shorter and lose surrounding context; deberta-v3-mnli
-# under-confidences them at the sentence-tuned 0.7 threshold. A lower bar
-# is empirically required to make decomposition a positive lift.
-NLI_ATOMIC_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ATOMIC_ENTAILMENT_THRESHOLD", "0.5"))
 
-# v0.96.0 Phase 5 — opt-in upgrade for faithfulness scoring.
-# When enabled, ragas_metrics.faithfulness() calls _extract_claims_llm()
-# instead of the regex heuristic. Catches sub-claims in multi-clause
-# sentences the regex misses, at the cost of one LLM call per scored
-# answer. Disabled by default to keep the RAGAS gate cost-bounded.
-FAITHFULNESS_LLM_CLAIM_EXTRACTION = os.getenv(
-    "FAITHFULNESS_LLM_CLAIM_EXTRACTION", "false",
-).lower() == "true"
-FAITHFULNESS_LLM_MAX_CLAIMS = int(os.getenv("FAITHFULNESS_LLM_MAX_CLAIMS", "12"))
 
 # ---------------------------------------------------------------------------
 # Verified Memory Promotion
@@ -467,7 +457,13 @@ GRAPH_MIN_KEYWORD_OVERLAP = 2                 # min shared keywords to create RE
 
 GRAPH_RELATIONSHIP_TYPES = [
     "RELATES_TO",       # shared metadata / same directory
-    "DEPENDS_ON",       # import / reference detected in content
+    # AF-065: DEPENDS_ON was declared here and traversed by the graph-
+    # corroboration boost (core/agents/hallucination/verification.py) but no
+    # writer ever produced it — imports/references detected in content are
+    # written as REFERENCES (see relationships.py's Strategy 3). Removed
+    # rather than left as a dead promise; re-add alongside a real writer if
+    # import-specific edges (distinct from generic file-mention REFERENCES)
+    # are ever wanted.
     "SUPERSEDES",       # re-ingested file replacing an older version
     "REFERENCES",       # explicit filename mention in content
     "WIKILINKS_TO",     # Obsidian-style [[wikilink]] in markdown body (C2.1)
@@ -703,12 +699,9 @@ CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 5  # max chunks from same artifact in assemble
 # ---------------------------------------------------------------------------
 # Quality Scoring
 # ---------------------------------------------------------------------------
-QUALITY_WEIGHT_SUMMARY = 0.30       # weight for summary quality dimension
-QUALITY_WEIGHT_KEYWORDS = 0.25      # weight for keyword quality dimension
 # QUALITY_WEIGHT_FRESHNESS lives in config/constants.py — the v2 scorer
 # (core/utils/quality.py) imports it from there; this module must not
 # shadow it with a divergent value.
-QUALITY_WEIGHT_COMPLETENESS = 0.25  # weight for metadata completeness dimension
 QUALITY_SUMMARY_MIN_CHARS = 50      # below this: linear ramp to 0
 QUALITY_SUMMARY_MAX_CHARS = 500     # above this: gentle penalty
 QUALITY_KEYWORDS_OPTIMAL = 5        # keyword count for max score
@@ -820,9 +813,9 @@ MEMORY_TYPE_STABILITY: dict[str, float] = {
     "temporal": 0.0,                 # "Meeting on Tuesday" — event-based step function
     "conversational": 3.0,           # Casual chat, small talk — very fast exponential
 }
-# Power-law decay types get long-tail preservation; exponential types fade fast.
+# Power-law decay types get long-tail preservation; all other types fall
+# through to exponential decay in calculate_memory_score.
 MEMORY_POWER_LAW_TYPES = {"empirical", "decision", "preference"}
-MEMORY_EXPONENTIAL_TYPES = {"project_context", "temporal", "conversational"}
 
 # Source authority weights — how much to trust different memory sources.
 SOURCE_AUTHORITY_WEIGHTS: dict[str, float] = {
@@ -845,8 +838,6 @@ MEMORY_TYPE_MIGRATION: dict[str, str] = {
     # "decision" and "preference" remain unchanged
 }
 
-# Max access log entries stored per memory node (for recency-weighted counting).
-MEMORY_ACCESS_LOG_MAX = 50
 
 # ---------------------------------------------------------------------------
 # Memory Recall
@@ -862,6 +853,12 @@ SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
 SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * sun")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
+# UX-14/20 — weekly purge of crashed test runs' leftovers (e2e-marker-*,
+# preservation-probe-* etc., namespace in core/utils/test_residue.py). The
+# sweep skips anything written in the last hour so an in-flight live-stack
+# test run keeps its probes. Empty string disables the cron; the manual
+# trigger is POST /admin/kb/purge-test-residue.
+SCHEDULE_TEST_RESIDUE_SWEEP = os.getenv("SCHEDULE_TEST_RESIDUE_SWEEP", "15 4 * * sun")
 # AF-030 (CL-8) — background KB quality re-scoring. curate() in audit mode is
 # cheap (local scoring + one graph write per artifact, NO LLM calls; synopsis
 # generation stays off), but it is never re-run after ingest, so quality scores
@@ -947,7 +944,6 @@ SCAN_PATHS = os.getenv("SCAN_PATHS", ARCHIVE_PATH)  # colon-separated directorie
 # watched-folders store bypass these two filters entirely.
 SCAN_MIN_QUALITY = float(os.getenv("SCAN_MIN_QUALITY", "0.4"))  # min quality score (0-1)
 SCAN_MAX_FILE_SIZE_MB = int(os.getenv("SCAN_MAX_FILE_SIZE_MB", "50"))
-SCAN_EXCLUDE_PATTERNS = [p for p in os.getenv("SCAN_EXCLUDE_PATTERNS", "").split(",") if p]
 SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty=disabled
 # Phase J — inbox triage cadence. Default every 15 minutes; empty disables.
 # Also gated by CERID_INBOX_TRIAGE_ENABLED so the operator opts in
@@ -966,12 +962,6 @@ SCHEDULE_DAILY_DIGEST = os.getenv("SCHEDULE_DAILY_DIGEST", "0 7 * * *")
 SCHEDULE_BACKFILL_ENRICHMENT = os.getenv("SCHEDULE_BACKFILL_ENRICHMENT", "0 3 * * *")  # 3 AM UTC
 BACKFILL_ENRICHMENT_BATCH = int(os.getenv("BACKFILL_ENRICHMENT_BATCH", "100"))
 BACKFILL_ENRICHMENT_PACE_S = float(os.getenv("BACKFILL_ENRICHMENT_PACE_S", "0.5"))
-ENABLE_AI_TRIAGE = os.getenv("ENABLE_AI_TRIAGE", "").lower() in ("true", "1", "yes")  # Ollama content triage scoring
-
-# ---------------------------------------------------------------------------
-# RSS/Atom Feed Polling
-# ---------------------------------------------------------------------------
-CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "1800"))  # seconds, default 30 min
 
 # ---------------------------------------------------------------------------
 # Pipeline Tuning — latency vs quality trade-offs
@@ -987,7 +977,9 @@ RERANK_PREFER_LOCAL = os.getenv("RERANK_PREFER_LOCAL", "true").lower() == "true"
 # Ingestion control plane (Workstream E Phase 0)
 # ---------------------------------------------------------------------------
 # Concurrent ingestion limit (semaphore). Replaces hardcoded `Semaphore(3)`
-# in app/routers/ingestion.py. Increase when scaling ingestion workers; keep
+# in both app/routers/ingestion.py (single-item endpoints, and now the
+# /ingest_batch admission gate too) and app/services/ingestion.py's internal
+# batch limiter. Increase when scaling ingestion workers; keep
 # low on memory-constrained hosts (each in-flight ingest holds parser +
 # embedder + Neo4j + ChromaDB connections).
 INGEST_CONCURRENCY = int(os.getenv("INGEST_CONCURRENCY", "3"))
@@ -1017,34 +1009,27 @@ ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv(
 # core/ingest/parsers/ + chunker registry — each CSV row, Markdown
 # section, and Python function/class becomes its own chunk with
 # structural metadata (column_headers, heading_path,
-# file:start_line:end_line) stamped on the chunk. NOTE (AF-059): only
-# ``heading_path`` is consumed (by markdown_strategy during chunking);
-# the rest are stamped for provenance/future use but have no store-side
-# reader today — they are preserved, not yet consumed.
+# file:start_line:end_line) stamped on the chunk. Consumers (AF-059):
+# ``heading_path`` is read by markdown_strategy during chunking; the
+# table fields (``sheet_name``/``row_idx``/``column_headers``) are read
+# back at answer time by ``query_agent.assemble_context``, which renders
+# them as a provenance header on the chunk text and threads them onto
+# ``sources[]``. The code fields (``language``/``start_line``/
+# ``end_line``) remain provenance-only — stamped, no store-side reader.
 # Set ENABLE_LAYOUT_AWARE_PARSING=false to revert to the legacy
 # flat-text chunker.
 ENABLE_LAYOUT_AWARE_PARSING = os.getenv(
     "ENABLE_LAYOUT_AWARE_PARSING", "true",
 ).lower() in ("true", "1", "yes")
 
-# Ingestion mode (Workstream E Phase 5a). "sync" (default — no behavior
-# change for desktop or existing server deployments) processes ingestion
-# inline within the request semaphore. "async" enqueues onto the RQ
-# queue for processing by the cerid-ingest-worker (must run separately
-# via `python -m app.queue.worker` or as a compose service). The
-# /ingest/progress contract is preserved across both modes via a Redis
-# hash that both the router and worker write to.
-INGEST_QUEUE_MODE = os.getenv("INGEST_QUEUE_MODE", "sync").lower()
-
-# Memory-extract mode (Workstream A interface issue A close-out). "sync"
-# (default — preserves the existing response envelope inline) runs the
-# full extract → consolidate → store pipeline on the request thread.
-# "async" enqueues onto the RQ memory queue, returning 202 + job_id
-# immediately and exposing the result via
-# ``GET /sdk/v1/memory/extract/jobs/{job_id}``. Worker config: same
-# ``python -m app.queue.worker`` process drains both the ingest and
-# memory queues — it subscribes to whichever queues have ``*_QUEUE_MODE
-# =async`` set. Independent of INGEST_QUEUE_MODE.
+# Memory-extract mode. "sync" (default — preserves the existing response
+# envelope inline) runs the full extract → consolidate → store pipeline on the
+# request thread. "async" hands the work to the canonical background processor
+# (``app.processor`` / RedisJobQueue, always running with the app), returning
+# 202 + job_id immediately and exposing the result via
+# ``GET /sdk/v1/memory/extract/jobs/{job_id}``. Also auto-enables on
+# local-inference installs where inline extraction blows the interactive SLO
+# (see ``app.routers.sdk._memory_async_enabled``).
 MEMORY_QUEUE_MODE = os.getenv("MEMORY_QUEUE_MODE", "sync").lower()
 
 # Embedding model version stamp — written to chunk metadata at ingest time
@@ -1289,7 +1274,6 @@ CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  #
 
 # Trading config — public-safe stubs (overridden at runtime when enabled)
 CERID_TRADING_ENABLED: bool = False
-TRADING_AGENT_URL: str = ""
 
 # ---------------------------------------------------------------------------
 # Webhooks
@@ -1374,9 +1358,11 @@ SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"
 _SYNC_DIR_HOST_FOR_ENV_EXAMPLE = os.getenv("CERID_SYNC_DIR_HOST", "~/Dropbox/cerid-sync")
 MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])
 SYNC_BACKEND = os.getenv("CERID_SYNC_BACKEND", "local")
-SCHEDULE_SYNC_EXPORT = os.getenv("SCHEDULE_SYNC_EXPORT", "")  # cron string, empty = disabled
-SYNC_EXPORT_ON_INGEST = os.getenv("SYNC_EXPORT_ON_INGEST", "false").lower() == "true"
-SYNC_CONFLICT_STRATEGY = os.getenv("CERID_CONFLICT_STRATEGY", "remote_wins")
+SCHEDULE_SYNC_EXPORT = os.getenv("SCHEDULE_SYNC_EXPORT", "")  # cron string, empty = disabled; the only sync-export trigger (RA-54)
+# CERID_CONFLICT_STRATEGY was removed (RA-52): conflict strategy is chosen
+# per-call via ImportRequest.conflict_strategy (UI: system settings sync
+# panel) or the CLI's --conflict-strategy flag (scripts/cerid-sync.py); the
+# env var was never read by either path.
 TOMBSTONE_TTL_DAYS = int(os.getenv("TOMBSTONE_TTL_DAYS", "90"))
 TOMBSTONE_LOG_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "tombstones.jsonl")
 
@@ -1478,6 +1464,24 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": None,     # Webhooks can target any domain
         "strict_domains": False,
     },
+    # Desktop Apple bridge connectors (X-Client-ID sent by ingest-client.ts).
+    # Unregistered they collapsed onto _default's 10/min ingest budget, so the
+    # first real Mail sync (443 readable bodies, per-message POSTs) 429'd
+    # 433 of them — found live in the 2026-08-12 beta the moment the parser
+    # fix made bodies readable at scale. Bulk local sync like folder_scanner,
+    # but a first sync arrives as one click: 120/min, paired with client-side
+    # 429 backoff in ingest-client.ts.
+    **{
+        _kind: {
+            "rate_limits": {"/ingest": (120, 60)},
+            "allowed_domains": None,
+            "strict_domains": False,
+        }
+        for _kind in (
+            "apple_mail", "apple_notes", "imessage",
+            "apple_calendar", "apple_photos", "apple_reminders",
+        )
+    },
     "_default": {
         "rate_limits": {
             "/agent/": (120, 60),
@@ -1511,29 +1515,48 @@ ALERT_MAX_PER_METRIC: int = 5
 ALERT_WEBHOOK_TIMEOUT_S: int = 10
 ALERT_EVENTS_MAX: int = 1000  # Max stored alert events
 
-# ---------------------------------------------------------------------------
-# Eval Harness
-# ---------------------------------------------------------------------------
-EVAL_RAGAS_MODEL: str = os.getenv("CERID_EVAL_RAGAS_MODEL", "")
-EVAL_LEADERBOARD_MAX: int = 50
-EVAL_DEFAULT_BENCHMARK: str = "beir_subset.jsonl"
 
 # ---------------------------------------------------------------------------
 # Enterprise Features (public-safe stubs only; forbidden wiring lives below
 # the "-- Internal settings" hook marker so it's stripped from the public repo)
 # ---------------------------------------------------------------------------
-CERID_ENTERPRISE = os.getenv("CERID_ENTERPRISE", "false").lower() in ("1", "true")
 CLASSIFICATION_ENABLED = os.getenv("CERID_CLASSIFICATION", "false").lower() in ("1", "true")
-AUDIT_STREAM_KEY = "cerid:audit:stream"
-AUDIT_RETENTION_DAYS = int(os.getenv("CERID_AUDIT_RETENTION_DAYS", "365"))
+
+# SAML 2.0 SP (sso_saml). Every field is required to serve the flow; the router
+# refuses with 503 rather than half-configuring, because a blank IdP cert makes
+# every signature fail in a way that reads as "SSO is broken" and a blank entity
+# id makes the audience check compare against "" and pass for anything.
+# The cert is PEM; an env var cannot hold real newlines, so a pasted PEM arrives
+# with literal backslash-n and is unescaped at use.
+SAML_SP_ENTITY_ID = os.getenv("CERID_SAML_SP_ENTITY_ID", "")
+SAML_SP_ACS_URL = os.getenv("CERID_SAML_SP_ACS_URL", "")
+SAML_IDP_ENTITY_ID = os.getenv("CERID_SAML_IDP_ENTITY_ID", "")
+SAML_IDP_SSO_URL = os.getenv("CERID_SAML_IDP_SSO_URL", "")
+SAML_IDP_X509_CERT = os.getenv("CERID_SAML_IDP_X509_CERT", "")
+SAML_CLOCK_SKEW_SECONDS = int(os.getenv("CERID_SAML_CLOCK_SKEW_SECONDS", "60"))
+# `AUDIT_STREAM_KEY = "cerid:audit:stream"` and
+# `AUDIT_RETENTION_DAYS = CERID_AUDIT_RETENTION_DAYS` were removed on
+# 2026-08-11. They were scaffolding for a Redis-stream audit log with
+# time-based expiry that was never built, and nothing in the repo read either
+# of them — but `CERID_AUDIT_RETENTION_DAYS=365` was in `.env.example`, so an
+# operator reading it saw a retention policy that was enforced by nothing.
+# The audit log that now exists (`core/utils/audit_log.py`) is an append-only
+# hash-chained file that rotates by size and never auto-deletes; its one knob
+# is CERID_AUDIT_LOG_MAX_SEGMENT_BYTES.
 
 # ---------------------------------------------------------------------------
 # WebSocket Sync
 # ---------------------------------------------------------------------------
-WS_SYNC_ENABLED = os.getenv("CERID_WS_SYNC", "false").lower() in ("1", "true")
+# WS_SYNC_ENABLED (CERID_WS_SYNC) removed — the /ws/sync router it gated
+# (app/routers/ws_sync.py) was deleted (RA-39): single-user GA, collaborative
+# sync not planned. WS_HEARTBEAT_INTERVAL_S, WS_PRESENCE_TIMEOUT_S,
+# WS_PRESENCE_TIMEOUT_S / WS_HEARTBEAT_INTERVAL_S are still read by
+# app/sync/presence.py — itself now unreachable after the ws_sync router (RA-39)
+# and the useLiveSync/usePresence clients (RA-14) were removed; presence.py is a
+# tracked follow-up deletion. WS_MAX_CONNECTIONS was read ONLY by the deleted
+# ws_sync router, so it is removed here.
 WS_HEARTBEAT_INTERVAL_S = 30
 WS_PRESENCE_TIMEOUT_S = 90
-WS_MAX_CONNECTIONS = 50
 SYNC_CRDT_ENABLED = True
 
 # ---------------------------------------------------------------------------
@@ -1565,7 +1588,6 @@ GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
 # Microsoft / Outlook OAuth. ``MICROSOFT_OAUTH_TENANT`` is ``common``
 # for personal MSA accounts or a specific tenant GUID for org-only flows.
 MICROSOFT_OAUTH_CLIENT_ID = os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "")
-MICROSOFT_OAUTH_CLIENT_SECRET = os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET", "")
 MICROSOFT_OAUTH_TENANT = os.getenv("MICROSOFT_OAUTH_TENANT", "common")
 
 # ---------------------------------------------------------------------------
@@ -1575,6 +1597,10 @@ PROCESSOR_MODE = os.getenv("PROCESSOR_MODE", "local")  # local | hybrid | disabl
 PROCESSOR_API_THRESHOLD_TOKENS = int(os.getenv("PROCESSOR_API_THRESHOLD_TOKENS", "4000"))
 PROCESSOR_MONTHLY_CAP_USD = float(os.getenv("PROCESSOR_MONTHLY_CAP_USD", "5"))
 PROCESSOR_API_CAP_FALLBACK = os.getenv("PROCESSOR_API_CAP_FALLBACK", "local")  # local | hold
+# A pending job older than this is treated as an orphaned marker (e.g. left
+# behind by a container restart) and is superseded rather than counted as an
+# "already pending" duplicate (SF-2). Must be far below JOB_RECORD_TTL_S.
+PROCESSOR_PENDING_STALE_TTL_S = int(os.getenv("PROCESSOR_PENDING_STALE_TTL_S", "21600"))
 WORKER_LOAD_CEILING = os.getenv("WORKER_LOAD_CEILING", "auto")  # auto | <float>
 
 if not NEO4J_PASSWORD:

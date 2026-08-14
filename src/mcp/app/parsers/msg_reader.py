@@ -105,6 +105,20 @@ def _substg_name(prop_id: int, prop_type: int) -> str:
     return f"{_SUBSTG_PREFIX}{prop_id:04X}{prop_type:04X}"
 
 
+def _decode_8bit_text(raw: bytes) -> str:
+    """Decode codepage-dependent 8-bit text, never raising on malformed bytes.
+
+    Nothing in this reader reads ``PidTagInternetCodepage``, so there is no
+    declared charset to consult — cp1252 is the practical default for
+    Outlook-authored messages and is a superset of latin-1 for the printable
+    range; utf-8 is tried first since modern exporters use it.
+    """
+    try:
+        return raw.decode("utf-8").rstrip("\x00")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace").rstrip("\x00")
+
+
 def _decode_string(raw: bytes, prop_type: int) -> str:
     """Decode a string property, never raising on malformed bytes.
 
@@ -114,13 +128,7 @@ def _decode_string(raw: bytes, prop_type: int) -> str:
     """
     if prop_type == PT_UNICODE:
         return raw.decode("utf-16-le", errors="replace").rstrip("\x00")
-    # PT_STRING8 has no codepage in the stream itself. cp1252 is the practical
-    # default for Outlook-authored messages and is a superset of latin-1 for
-    # the printable range; utf-8 is tried first since modern exporters use it.
-    try:
-        return raw.decode("utf-8").rstrip("\x00")
-    except UnicodeDecodeError:
-        return raw.decode("cp1252", errors="replace").rstrip("\x00")
+    return _decode_8bit_text(raw)
 
 
 def _read_string(streams: Mapping[str, bytes], prop_id: int) -> str | None:
@@ -214,7 +222,10 @@ def read_message(
     html_raw = _read_binary(streams, PID_HTML)
     html_body: str | None = None
     if html_raw:
-        html_body = html_raw.decode("utf-8", errors="replace")
+        # PidTagHtml carries no charset of its own — it's codepage-dependent
+        # 8-bit text like PT_STRING8, so it gets the same decode heuristic
+        # instead of a blind forced-UTF-8 that mangles anything non-ASCII.
+        html_body = _decode_8bit_text(html_raw)
     else:
         # Some producers store the HTML body as a string property instead.
         html_body = _read_string(streams, PID_HTML)

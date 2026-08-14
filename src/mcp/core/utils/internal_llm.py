@@ -24,6 +24,7 @@ import json as _json
 import logging
 import os
 import threading
+import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -100,6 +101,86 @@ async def close_ollama_client() -> None:
         await _ollama_client.aclose()
     _ollama_client = None
     _ollama_client_loop = None
+
+
+# ── Local-backend pacing (bf-f3 default) ───────────────────────────────────
+# The local chat slot serves 1-2 sequences; every extra concurrent request
+# queues server-side until the client's timeout fires, and each timed-out
+# call used to retry into the same saturated backend (18 "Quenchforge
+# timeout (attempt 1/3)" lines in ~50 min of community summarisation —
+# qf-pacing). Two levers, both client-side:
+#
+#   1. A bounded concurrency cap (``INTERNAL_LLM_MAX_CONCURRENCY``, default
+#      2) on non-streaming local calls, so background enrichment queues in
+#      the client instead of timing out in the server. The user-facing
+#      streaming path (``_stream_ollama``) is deliberately NOT capped —
+#      background work yields to interactive use.
+#   2. A shared cooldown armed on timeout: after a local call times out,
+#      subsequent local calls wait out the cooldown before issuing
+#      (doubling per consecutive timeout up to a max; reset on success) —
+#      backoff-on-timeout, never immediate retry pile-on.
+#
+# The semaphore is per-event-loop (asyncio primitives bind to a loop on
+# first use — same hazard as the shared httpx client above); the cooldown
+# clock is process-wide because the backend saturation it models is.
+_pacing_sem: asyncio.Semaphore | None = None
+_pacing_sem_loop: asyncio.AbstractEventLoop | None = None
+_pacing_guard = threading.Lock()
+_pacing_cooldown_until: float = 0.0
+_pacing_cooldown_seconds: float = 0.0
+
+
+def _pacing_max_concurrency() -> int:
+    return max(1, int(os.environ.get("INTERNAL_LLM_MAX_CONCURRENCY", "2")))
+
+
+def _get_pacing_semaphore() -> asyncio.Semaphore:
+    global _pacing_sem, _pacing_sem_loop
+    loop = asyncio.get_running_loop()
+    with _pacing_guard:
+        if _pacing_sem is None or _pacing_sem_loop is not loop:
+            _pacing_sem = asyncio.Semaphore(_pacing_max_concurrency())
+            _pacing_sem_loop = loop
+        return _pacing_sem
+
+
+def _record_pacing_timeout() -> None:
+    """Arm (or extend) the shared cooldown after a local-backend timeout."""
+    global _pacing_cooldown_until, _pacing_cooldown_seconds
+    initial = float(os.environ.get("INTERNAL_LLM_TIMEOUT_COOLDOWN", "2.0"))
+    maximum = float(os.environ.get("INTERNAL_LLM_TIMEOUT_COOLDOWN_MAX", "30.0"))
+    with _pacing_guard:
+        _pacing_cooldown_seconds = min(
+            maximum, (_pacing_cooldown_seconds * 2) or initial,
+        )
+        _pacing_cooldown_until = time.monotonic() + _pacing_cooldown_seconds
+
+
+def _record_pacing_success() -> None:
+    global _pacing_cooldown_until, _pacing_cooldown_seconds
+    with _pacing_guard:
+        _pacing_cooldown_until = 0.0
+        _pacing_cooldown_seconds = 0.0
+
+
+def _reset_pacing_state() -> None:
+    """Test hook: drop the semaphore and disarm the cooldown."""
+    global _pacing_sem, _pacing_sem_loop
+    with _pacing_guard:
+        _pacing_sem = None
+        _pacing_sem_loop = None
+    _record_pacing_success()
+
+
+async def _wait_pacing_cooldown() -> None:
+    with _pacing_guard:
+        remaining = _pacing_cooldown_until - time.monotonic()
+    if remaining > 0:
+        logger.info(
+            "local LLM cooldown after timeout — pacing %.2fs before next call",
+            remaining,
+        )
+        await asyncio.sleep(remaining)
 
 
 def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
@@ -386,7 +467,12 @@ async def _call_ollama(
         inner_exc: Exception | None = None
         for attempt in range(max_retries):
             try:
-                return await _do_call()
+                # bf-f3 pacing: honor the shared timeout cooldown, then take a
+                # bounded-concurrency slot for the duration of the attempt only
+                # (backoff sleeps below never hold a slot).
+                await _wait_pacing_cooldown()
+                async with _get_pacing_semaphore():
+                    return await _do_call()
             except httpx.ConnectError as exc:
                 inner_exc = exc
                 if attempt + 1 < max_retries:
@@ -404,6 +490,10 @@ async def _call_ollama(
                 raise
             except httpx.TimeoutException as exc:
                 inner_exc = exc
+                # Arm the shared cooldown so CONCURRENT callers back off too —
+                # per-call retry backoff alone let N in-flight calls each
+                # retry into the already-saturated backend (qf-pacing).
+                _record_pacing_timeout()
                 if attempt + 1 < max_retries:
                     delay = backoff_base * (2 ** attempt)
                     logger.info(
@@ -444,6 +534,7 @@ async def _call_ollama(
     try:
         result = await breaker.call(_do_call_with_retries)
         inference_health.record_success("llm", provider=provider)
+        _record_pacing_success()
         return result
     except CircuitOpenError as exc:
         logger.warning("%s circuit breaker open — falling back to OpenRouter", label)

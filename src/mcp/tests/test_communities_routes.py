@@ -71,6 +71,8 @@ def _make_full(community_id: str = "0:7") -> CommunityFull:
                 entity_type="PERSON",
             ),
         ],
+        members_total=25,
+        members_truncated=True,
         related_communities=[
             RelatedCommunity(community_id="0:4", co_mention_count=38),
         ],
@@ -220,3 +222,22 @@ class TestGetCommunityRoute:
         assert "related_communities" in data
         assert isinstance(data["members"], list)
         assert isinstance(data["related_communities"], list)
+
+    def test_detail_discloses_member_truncation(self, client: TestClient):
+        """UX-16: the capped members list must never masquerade as the total —
+        members_total carries the uncapped count and members_truncated is
+        derivable as len(members) < members_total."""
+        full = _make_full()
+        with (
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch(
+                "app.services.community_pages.get_community",
+                return_value=full,
+            ),
+        ):
+            resp = client.get("/observability/communities/0:7")
+
+        data = resp.json()
+        assert data["members_total"] == data["member_count"] == 25
+        assert data["members_truncated"] is True
+        assert len(data["members"]) < data["members_total"]

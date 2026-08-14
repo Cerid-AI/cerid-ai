@@ -17,7 +17,11 @@ import {
 } from "@/components/ui/dialog"
 import { Tag, Loader2, Merge, X } from "lucide-react"
 import { fetchAllTags, mergeTags } from "@/lib/api"
-import type { TagInfo } from "@/lib/api"
+import type { TagInfo, TagsPage } from "@/lib/api"
+
+/** WB-23: the /tags endpoint caps at 500 rows — showing that as "500 tags
+ * total" implies completeness that isn't there. */
+const TAGS_PAGE_CAP = 500
 
 interface TagManagerProps {
   open: boolean
@@ -34,12 +38,13 @@ export function TagManager({ open, onOpenChange, localTags }: TagManagerProps) {
   const [merging, setMerging] = useState(false)
   const [result, setResult] = useState("")
 
-  const { data: tags, isLoading, isError } = useQuery({
+  const { data: tagsPage, isLoading, isError } = useQuery({
     queryKey: ["all-tags"],
-    queryFn: (): Promise<TagInfo[]> => fetchAllTags(),
+    queryFn: (): Promise<TagsPage> => fetchAllTags(),
     enabled: open,
     staleTime: 30_000,
   })
+  const tags = tagsPage?.tags
 
   // Merge API tags with local fallback tags (local tags fill gaps when API returns empty)
   const mergedTags: TagInfo[] = (() => {
@@ -173,7 +178,10 @@ export function TagManager({ open, onOpenChange, localTags }: TagManagerProps) {
 
         <DialogFooter>
           <p className="text-xs text-muted-foreground">
-            {mergedTags.length > 0 ? `${mergedTags.length} tags total` : ""}
+            {mergedTags.length > 0 &&
+              ((tags?.length ?? 0) >= TAGS_PAGE_CAP && tagsPage
+                ? `Showing ${tags?.length} of ${tagsPage.total} tags`
+                : `${mergedTags.length} tags total`)}
             {mergedTags.length > 0 && (!tags || tags.length === 0) && " (from artifacts)"}
           </p>
         </DialogFooter>

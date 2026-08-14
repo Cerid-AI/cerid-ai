@@ -1,4 +1,5 @@
-.PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
+.PHONY: lock-python lock-python-dev lock-all install-hooks install-macos-integration \
+       deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
        test test-all test-eval eval-live-retrieval eval-chat-faithfulness \
        eval-verdict bench-nli-aggrefact \
@@ -18,6 +19,10 @@ lock-all: lock-python lock-python-dev
 install-hooks:
 	git config core.hooksPath scripts/hooks
 	@echo "Git hooks installed from scripts/hooks/"
+
+# -- macOS integration --
+install-macos-integration: ## Install Finder Quick Actions + Services menu (macOS; requires a running stack)
+	bash scripts/install-macos-integration.sh
 
 push: ## Validate FIRST, then push (avoids the hook holding the remote connection open)
 	@bash scripts/safe-push.sh $(ARGS)
@@ -173,6 +178,30 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-dts-basename-collision.py
 	@echo "[drift] product-story"
 	.venv/bin/python scripts/lint-product-story.py
+	@echo "[drift] web-reachability"
+	@if [ -f scripts/web_reachability_allowlist.txt ]; then \
+	  .venv/bin/python scripts/lint-web-reachability.py --check; \
+	else \
+	  echo "  (internal-only allowlist — not present in this checkout, skipped)"; \
+	fi
+	@echo "[drift] env-has-reader"
+	.venv/bin/python scripts/lint-env-has-reader.py --check
+	@echo "[drift] success-status-literal"
+	.venv/bin/python scripts/lint-success-status-literal.py --check
+	@echo "[drift] key-contract"
+	.venv/bin/python scripts/lint-key-contract.py --check
+	@echo "[drift] route-has-client"
+	@if [ -f scripts/route_has_client_allowlist.txt ]; then \
+	  .venv/bin/python scripts/lint-route-has-client.py --check; \
+	else \
+	  echo "  (internal-only allowlist — not present in this checkout, skipped)"; \
+	fi
+	@echo "[drift] real-fixture"
+	@if [ -f scripts/lint-real-fixture.py ]; then \
+	  .venv/bin/python scripts/lint-real-fixture.py --check; \
+	else echo "  (skipped — internal-only gate absent)"; fi
+	@echo "[drift] host-capability"
+	.venv/bin/python scripts/lint-host-capability.py --check
 	@echo "[drift] mcp-descriptions"
 	.venv/bin/python scripts/lint-mcp-descriptions.py
 	@echo "[drift] no-hardcoded-models"
@@ -333,6 +362,7 @@ help:
 	@echo "  lock-python-dev    Regenerate requirements-dev.lock"
 	@echo "  lock-all           Regenerate both lock files"
 	@echo "  install-hooks      Install git hooks from scripts/hooks/"
+	@echo "  install-macos-integration  Install Finder Quick Actions + Services menu (macOS)"
 	@echo "  deps-check         Verify lock files and npm deps are current"
 	@echo "  lint-frontend      Run ESLint on src/web/"
 	@echo "  test-frontend      Run Vitest on src/web/"

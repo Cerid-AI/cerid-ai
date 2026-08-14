@@ -10,7 +10,7 @@ function is detected and run automatically without explicit markers.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import fakeredis
@@ -555,3 +555,194 @@ def test_find_active_job_id_fails_open_on_broken_client():
     """A broken Redis client must read as 'no duplicate' — the dedupe check
     can never be allowed to block real work."""
     assert find_active_job_id(None, "ingest_recovery", payload={}) is None
+
+
+# ---------------------------------------------------------------------------
+# Stale pending markers (SF-2) — a pending marker orphaned by a container
+# restart must not absorb new enqueues forever. Older than
+# PROCESSOR_PENDING_STALE_TTL_S ⇒ pruned and superseded, not "already pending".
+# ---------------------------------------------------------------------------
+
+
+def _make_stale_record(job_type: str = "compute_umap_3d") -> JobRecord:
+    import config
+
+    record = _make_record(job_type=job_type)
+    record.payload = {}
+    record.enqueued_at = datetime.now(tz=timezone.utc) - timedelta(
+        seconds=config.PROCESSOR_PENDING_STALE_TTL_S + 60
+    )
+    return record
+
+
+async def test_enqueue_if_absent_supersedes_stale_pending_marker(queue, redis_client):
+    stale = _make_stale_record()
+    await queue.enqueue(stale)
+
+    fresh = _make_record(job_type="compute_umap_3d")
+    fresh.payload = {}
+    assert await queue.enqueue_if_absent(fresh) == fresh.id
+
+    # The stale marker is gone from the pending list; only the fresh id remains.
+    pending = redis_client.lrange("cerid:proc:queue:low", 0, -1)
+    assert stale.id not in pending
+    assert fresh.id in pending
+
+
+async def test_stale_marker_is_marked_failed_when_pruned(queue, redis_client):
+    stale = _make_stale_record()
+    await queue.enqueue(stale)
+
+    fresh = _make_record(job_type="compute_umap_3d")
+    fresh.payload = {}
+    await queue.enqueue_if_absent(fresh)
+
+    mapping = redis_client.hgetall(f"cerid:proc:job:{stale.id}")
+    assert mapping["state"] == JobState.FAILED.value
+    assert "stale" in mapping["error_message"]
+
+
+async def test_fresh_pending_duplicate_still_collapses(queue):
+    fresh_marker = _make_record(job_type="compute_umap_3d")
+    fresh_marker.payload = {}
+    await queue.enqueue(fresh_marker)
+
+    duplicate = _make_record(job_type="compute_umap_3d")
+    duplicate.payload = {}
+    assert await queue.enqueue_if_absent(duplicate) is None
+
+
+async def test_stale_running_job_is_not_pruned(queue, redis_client):
+    """Staleness applies to PENDING markers only — long-running jobs are
+    legitimate, and running-set ghosts are owned by recover_orphaned_running."""
+    stale = _make_stale_record()
+    await queue.enqueue(stale)
+    popped = await queue.dequeue([Priority.LOW])
+    await queue.mark_running(popped.id)
+
+    duplicate = _make_record(job_type="compute_umap_3d")
+    duplicate.payload = {}
+    assert await queue.enqueue_if_absent(duplicate) is None
+
+
+# ---------------------------------------------------------------------------
+# Recent-index retention + de-noising (processor-record-hygiene).
+# Two faces of one problem: cerid:proc:recent grew without bound (job hashes
+# expire after JOB_RECORD_TTL_S but their index entries never did), and
+# wiki_refresh flooded /processor/recent — 88 of the 100 most recent records
+# live — displacing every other job type.
+# ---------------------------------------------------------------------------
+
+
+def _seed_completed(
+    redis_client,
+    *,
+    job_type: str,
+    score: float,
+    job_id: str | None = None,
+) -> str:
+    """Write a COMPLETED job hash + recent-index entry directly (read-path tests)."""
+    from app.db.redis.processor_queue import _record_to_mapping
+
+    record = _make_record(job_type=job_type, job_id=job_id)
+    record.state = JobState.COMPLETED
+    record.completed_at = datetime.fromtimestamp(score, tz=timezone.utc)
+    redis_client.hset(f"cerid:proc:job:{record.id}", mapping=_record_to_mapping(record))
+    redis_client.zadd("cerid:proc:recent", {record.id: score})
+    return record.id
+
+
+async def _complete_one(queue, job_type: str = "test_job") -> str:
+    record = _make_record(job_type=job_type)
+    await queue.enqueue(record)
+    dequeued = await queue.dequeue(priority_order())
+    assert dequeued is not None
+    await queue.mark_running(dequeued.id)
+    result = JobResult(job_id=dequeued.id, actual_tokens_in=0, actual_tokens_out=0)
+    await queue.mark_completed(dequeued.id, result)
+    return record.id
+
+
+async def test_recent_index_membership_is_bounded(queue, redis_client, monkeypatch):
+    import app.db.redis.processor_queue as pq
+
+    monkeypatch.setattr(pq, "RECENT_INDEX_MAX", 10)
+    for _ in range(15):
+        await _complete_one(queue)
+    assert redis_client.zcard("cerid:proc:recent") <= 10
+
+
+async def test_recent_index_drops_entries_older_than_record_ttl(queue, redis_client):
+    from app.db.redis.processor_queue import JOB_RECORD_TTL_S
+
+    now = datetime.now(tz=timezone.utc).timestamp()
+    redis_client.zadd("cerid:proc:recent", {"ghost-old": now - JOB_RECORD_TTL_S - 60})
+
+    await _complete_one(queue)
+
+    assert redis_client.zscore("cerid:proc:recent", "ghost-old") is None
+
+
+async def test_list_recent_self_heals_index_entries_without_hashes(queue, redis_client):
+    """An index entry whose job hash expired must not shrink the response
+    below ``limit`` forever — it is dropped from the index on read."""
+    now = datetime.now(tz=timezone.utc).timestamp()
+    redis_client.zadd("cerid:proc:recent", {"ghost-recent": now})
+    real_id = _seed_completed(redis_client, job_type="test_job", score=now - 1)
+
+    recent = await queue.list_recent(10)
+
+    assert [r.id for r in recent] == [real_id]
+    assert redis_client.zscore("cerid:proc:recent", "ghost-recent") is None
+
+
+async def test_list_recent_job_type_filter(queue, redis_client):
+    now = datetime.now(tz=timezone.utc).timestamp()
+    for i in range(4):
+        _seed_completed(redis_client, job_type="wiki_refresh", score=now - i)
+    mail_id = _seed_completed(redis_client, job_type="mail_poll", score=now - 10)
+
+    only_mail = await queue.list_recent(10, job_type="mail_poll")
+    assert [r.id for r in only_mail] == [mail_id]
+
+    only_wiki = await queue.list_recent(10, job_type="wiki_refresh")
+    assert len(only_wiki) == 4
+    assert all(r.job_type == "wiki_refresh" for r in only_wiki)
+
+
+async def test_list_recent_per_type_cap_keeps_other_jobs_visible(queue, redis_client):
+    """The live symptom: 88 wiki_refresh in the 100 most recent records drown
+    everything else. With a per-type cap the response is a mix — the cap's
+    worth of wiki_refresh plus every other job type."""
+    now = datetime.now(tz=timezone.utc).timestamp()
+    # 88 wiki_refresh records, all newer than every other job type.
+    for i in range(88):
+        _seed_completed(redis_client, job_type="wiki_refresh", score=now - i)
+    other_ids = {
+        _seed_completed(redis_client, job_type=jt, score=now - 100 - i)
+        for i, jt in enumerate(
+            ["mail_poll", "digest_run", "ingest_recovery", "pack_install", "memory_promote"]
+        )
+    }
+
+    recent = await queue.list_recent(20, per_type_cap=5)
+
+    by_type: dict[str, int] = {}
+    for r in recent:
+        by_type[r.job_type] = by_type.get(r.job_type, 0) + 1
+    assert by_type.get("wiki_refresh", 0) == 5
+    # Every other job type survives the flood.
+    returned_ids = {r.id for r in recent}
+    assert other_ids <= returned_ids
+    # Newest first is preserved across the mix.
+    timestamps = [r.completed_at for r in recent]
+    assert timestamps == sorted(timestamps, reverse=True)
+
+
+async def test_list_recent_per_type_cap_zero_disables_capping(queue, redis_client):
+    now = datetime.now(tz=timezone.utc).timestamp()
+    for i in range(6):
+        _seed_completed(redis_client, job_type="wiki_refresh", score=now - i)
+
+    recent = await queue.list_recent(10, per_type_cap=0)
+    assert len(recent) == 6

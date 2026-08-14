@@ -619,6 +619,16 @@ def _resolve_community_label(neo4j_driver: Any, community_id: Any) -> str | None
         )
     try:
         with neo4j_driver.session() as session:
+            # Curated short name — covers small communities absent from the
+            # hull-worthy artifact. Entity.community_id carries the scalar
+            # native id; Community.id is "{level}:{native}", so try both.
+            row = session.run(
+                "MATCH (c:Community) WHERE c.id IN [$cid, '0:' + $cid] "
+                "AND c.name IS NOT NULL RETURN c.name AS name LIMIT 1",
+                cid=cid,
+            ).single()
+            if row and row.get("name"):
+                return str(row["name"])
             row = session.run(
                 "MATCH (e:Entity {community_id: $cid}) "
                 "RETURN e.name AS name ORDER BY e.mention_count DESC LIMIT 1",

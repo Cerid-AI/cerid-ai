@@ -192,3 +192,26 @@ describe("KnowledgeConsole — data-source indicator (P0-C.4)", () => {
     expect(mockGoTo).toHaveBeenCalledWith("settings", expect.objectContaining({ category: "extensions" }))
   })
 })
+
+describe("KnowledgeConsole honest degradation (UX-01/UX-02)", () => {
+  it("renders the degraded banner when the envelope carries degraded_reason", () => {
+    render(
+      <KnowledgeConsole
+        {...baseProps({
+          hasQueried: true,
+          degradedReason: "Retrieval took longer than the configured budget.",
+        })}
+      />,
+      { wrapper },
+    )
+    expect(screen.getByText(/retrieval budget exceeded/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/took longer than the configured budget/i),
+    ).toBeInTheDocument()
+  })
+
+  it("renders no banner when retrieval was not degraded", () => {
+    render(<KnowledgeConsole {...baseProps({ hasQueried: true })} />, { wrapper })
+    expect(screen.queryByText(/retrieval budget exceeded/i)).toBeNull()
+  })
+})

@@ -45,11 +45,18 @@ const makeResult = (overrides: Partial<KBQueryResult> = {}): KBQueryResult => ({
   ...overrides,
 })
 
+// WB-59: the real backend response carries the tag list as `tags_json`
+// (a JSON-encoded string, per query_agent.py's ChromaDB metadata pass-through)
+// rather than a parsed `tags` array — mocking the parsed shape directly hid
+// the bug where the hook read a `tags` field that never arrives on the wire.
+const withTagsJson = (overrides: Partial<KBQueryResult>, tags: string[]) =>
+  ({ ...makeResult(overrides), tags_json: JSON.stringify(tags) }) as KBQueryResult
+
 const mockResponse = {
   results: [
-    makeResult({ artifact_id: "a1", filename: "file1.py", tags: ["python", "fastapi"] }),
-    makeResult({ artifact_id: "a2", filename: "file2.py", tags: ["python", "django"] }),
-    makeResult({ artifact_id: "a3", filename: "budget.xlsx", domain: "finance", tags: ["budget"] }),
+    withTagsJson({ artifact_id: "a1", filename: "file1.py" }, ["python", "fastapi"]),
+    withTagsJson({ artifact_id: "a2", filename: "file2.py" }, ["python", "django"]),
+    withTagsJson({ artifact_id: "a3", filename: "budget.xlsx", domain: "finance" }, ["budget"]),
   ],
   confidence: 0.8,
   total_results: 3,

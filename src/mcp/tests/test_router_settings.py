@@ -51,6 +51,7 @@ class TestGetSettings:
         assert "taxonomy" in data
         assert "memory_config" in data
         assert "enable_self_rag" in data
+        assert "auto_inject_max" in data
 
     def test_includes_storage_and_sync(self):
         client = TestClient(_make_app())
@@ -147,6 +148,32 @@ class TestPatchSettings:
 
         # Valid low threshold (0.5) — minimum accepted value
         response = client.patch("/settings", json={"auto_inject_threshold": 0.5})
+        assert response.status_code == 200
+
+    def test_update_auto_inject_max(self):
+        client = TestClient(_make_app())
+        response = client.patch("/settings", json={"auto_inject_max": 5})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"]["auto_inject_max"] == 5
+
+        import config
+
+        assert config.AUTO_INJECT_MAX == 5
+
+    def test_auto_inject_max_bounds(self):
+        client = TestClient(_make_app())
+
+        # Below minimum (1) — zero and negative are rejected
+        response = client.patch("/settings", json={"auto_inject_max": 0})
+        assert response.status_code == 422  # Pydantic validation
+
+        response = client.patch("/settings", json={"auto_inject_max": -1})
+        assert response.status_code == 422
+
+        # Valid minimum value
+        response = client.patch("/settings", json={"auto_inject_max": 1})
         assert response.status_code == 200
 
 

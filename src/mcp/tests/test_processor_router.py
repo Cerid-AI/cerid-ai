@@ -329,9 +329,25 @@ def test_processor_recent_returns_list(client):
 
 
 def test_processor_recent_passes_limit(client, mock_queue):
-    """GET /processor/recent passes limit to queue.list_recent."""
+    """GET /processor/recent passes limit + default de-noise cap to list_recent."""
     client.get("/processor/recent?limit=7")
-    mock_queue.list_recent.assert_awaited_once_with(7)
+    mock_queue.list_recent.assert_awaited_once_with(7, job_type=None, per_type_cap=5)
+
+
+def test_processor_recent_passes_job_type_filter(client, mock_queue):
+    """?job_type= drills into one type; the cap still forwards as given."""
+    client.get("/processor/recent?limit=7&job_type=wiki_refresh&per_type_cap=0")
+    mock_queue.list_recent.assert_awaited_once_with(
+        7, job_type="wiki_refresh", per_type_cap=0
+    )
+
+
+def test_processor_recent_rejects_negative_cap(client, mock_queue):
+    """A negative cap would make every ``count >= per_type_cap`` check true and
+    silently empty the listing — reject it at the boundary instead."""
+    resp = client.get("/processor/recent?per_type_cap=-1")
+    assert resp.status_code == 422
+    mock_queue.list_recent.assert_not_awaited()
 
 
 def test_processor_recent_no_queue(test_app):

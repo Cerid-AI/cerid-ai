@@ -17,6 +17,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 import config
+from config.features import require_feature
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -36,6 +37,7 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/upload")  # response-model-allowed: dynamic response (shape varies)
+@require_feature("file_upload_gui")
 async def upload_file_endpoint(
     file: UploadFile = File(...),
     domain: str = Query("", description="Target domain (empty = auto-detect)"),
@@ -127,6 +129,7 @@ async def upload_file_endpoint(
         # an empty `domain` genuinely triggers auto-detect instead of being
         # silently coerced to the default. An explicit domain always wins —
         # there's nothing to categorize once the caller already chose one.
+        domain_was_explicit = bool(domain)
         mode = categorize_mode or (
             "manual" if domain and domain in config.DOMAINS else config.CATEGORIZE_MODE
         )
@@ -188,7 +191,10 @@ async def upload_file_endpoint(
             metadata,
             skip_quality=skip_quality,
         )
-        result["categorize_mode"] = mode
+        # AF-025: when an explicit domain skipped the ai_categorize tier run
+        # above, echo "manual" — the declared tier never actually executed,
+        # and the domain was resolved manually (by the caller), not by it.
+        result["categorize_mode"] = "manual" if domain_was_explicit else mode
         result["metadata"] = metadata
 
         # Override filename in result with the original upload name

@@ -10,7 +10,7 @@ vi.stubEnv("VITE_CERID_API_KEY", "test-key-123")
 
 // Must import after env stubbing
 const {
-  fetchHealth, fetchArtifacts, queryKB, fetchSettings,
+  fetchHealth, fetchArtifacts, fetchAllArtifacts, queryKB, fetchSettings,
   fetchSyncStatus, triggerSyncExport, triggerSyncImport, fetchArchiveFiles,
 } = await import("@/lib/api")
 
@@ -65,7 +65,7 @@ describe("fetchHealth", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchArtifacts", () => {
-  it("calls /artifacts with default limit", async () => {
+  it("calls /artifacts with default limit and offset", async () => {
     vi.stubGlobal("fetch", mockFetch([]))
 
     await fetchArtifacts()
@@ -75,6 +75,7 @@ describe("fetchArtifacts", () => {
     )
     const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
     expect(url).toContain("limit=50")
+    expect(url).toContain("offset=0")
   })
 
   it("includes domain filter", async () => {
@@ -103,6 +104,14 @@ describe("fetchArtifacts", () => {
     expect(url).not.toContain("sub_category")
   })
 
+  it("includes the offset param for pagination", async () => {
+    vi.stubGlobal("fetch", mockFetch([]))
+
+    await fetchArtifacts("coding", 100, undefined, 200)
+    const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(url).toContain("offset=200")
+  })
+
   it("normalizes string tags to arrays", async () => {
     const artifacts = [
       { id: "1", filename: "test.py", domain: "coding", tags: '["python", "api"]', keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" },
@@ -110,7 +119,7 @@ describe("fetchArtifacts", () => {
     vi.stubGlobal("fetch", mockFetch(artifacts))
 
     const result = await fetchArtifacts()
-    expect(result[0].tags).toEqual(["python", "api"])
+    expect(result.artifacts[0].tags).toEqual(["python", "api"])
   })
 
   it("passes through array tags unchanged", async () => {
@@ -120,7 +129,7 @@ describe("fetchArtifacts", () => {
     vi.stubGlobal("fetch", mockFetch(artifacts))
 
     const result = await fetchArtifacts()
-    expect(result[0].tags).toEqual(["js", "react"])
+    expect(result.artifacts[0].tags).toEqual(["js", "react"])
   })
 
   it("handles missing tags gracefully", async () => {
@@ -130,7 +139,7 @@ describe("fetchArtifacts", () => {
     vi.stubGlobal("fetch", mockFetch(artifacts))
 
     const result = await fetchArtifacts()
-    expect(result[0].tags).toEqual([])
+    expect(result.artifacts[0].tags).toEqual([])
   })
 
   it("handles invalid JSON tags string", async () => {
@@ -140,12 +149,95 @@ describe("fetchArtifacts", () => {
     vi.stubGlobal("fetch", mockFetch(artifacts))
 
     const result = await fetchArtifacts()
-    expect(result[0].tags).toEqual([])
+    expect(result.artifacts[0].tags).toEqual([])
   })
 
   it("throws on non-OK response", async () => {
     vi.stubGlobal("fetch", mockFetch({}, 503))
     await expect(fetchArtifacts()).rejects.toThrow("Artifacts fetch failed: 503")
+  })
+
+  it("falls back to offset+length as total when X-Total-Count header is absent", async () => {
+    const artifacts = [
+      { id: "1", filename: "a.md", domain: "general", keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" },
+    ]
+    vi.stubGlobal("fetch", mockFetch(artifacts))
+
+    const result = await fetchArtifacts("general", 50, undefined, 0)
+    expect(result.total).toBe(1)
+    expect(result.hasMore).toBe(false)
+  })
+
+  it("reads total and hasMore from response headers when present", async () => {
+    const artifacts = [
+      { id: "1", filename: "a.md", domain: "general", keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" },
+    ]
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(artifacts),
+      text: () => Promise.resolve(JSON.stringify(artifacts)),
+      headers: new Headers({ "X-Total-Count": "350", "X-Has-More": "true" }),
+    }))
+
+    const result = await fetchArtifacts("general", 1, undefined, 0)
+    expect(result.total).toBe(350)
+    expect(result.hasMore).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// fetchAllArtifacts — WB-24: walks pages via offset until hasMore is false,
+// instead of the removed single hardcoded-limit=200 fetch.
+// ---------------------------------------------------------------------------
+
+describe("fetchAllArtifacts", () => {
+  function pagedFetch(pages: unknown[][], total: number) {
+    let call = 0
+    return vi.fn().mockImplementation(() => {
+      const page = pages[call] ?? []
+      call += 1
+      const offset = pages.slice(0, call - 1).reduce((n, p) => n + p.length, 0)
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(page),
+        text: () => Promise.resolve(JSON.stringify(page)),
+        headers: new Headers({
+          "X-Total-Count": String(total),
+          "X-Has-More": String(offset + page.length < total),
+        }),
+      })
+    })
+  }
+
+  it("stops after one page when hasMore is false", async () => {
+    const items = [{ id: "1", filename: "a.md", domain: "general", keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" }]
+    vi.stubGlobal("fetch", pagedFetch([items], 1))
+
+    const result = await fetchAllArtifacts("general", undefined, 200)
+    expect(result.artifacts).toHaveLength(1)
+    expect(result.total).toBe(1)
+  })
+
+  it("walks multiple pages until the backend total is reached", async () => {
+    const page1 = Array.from({ length: 200 }, (_, i) => ({ id: `p1-${i}`, filename: `f${i}.md`, domain: "general", keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" }))
+    const page2 = Array.from({ length: 50 }, (_, i) => ({ id: `p2-${i}`, filename: `g${i}.md`, domain: "general", keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" }))
+    vi.stubGlobal("fetch", pagedFetch([page1, page2], 250))
+
+    const result = await fetchAllArtifacts("general", undefined, 200)
+    expect(result.artifacts).toHaveLength(250)
+    expect(result.total).toBe(250)
+  })
+
+  it("stops at maxItems even if the backend still reports hasMore", async () => {
+    const page = Array.from({ length: 200 }, (_, i) => ({ id: `x-${i}`, filename: `x${i}.md`, domain: "general", keywords: "[]", summary: "", chunk_count: 1, chunk_ids: "[]", ingested_at: "2026-01-01" }))
+    // Every page reports a huge total so hasMore never flips false — the
+    // maxItems safety cap must still terminate the loop.
+    vi.stubGlobal("fetch", pagedFetch([page, page, page], 1_000_000))
+
+    const result = await fetchAllArtifacts("general", undefined, 200, 400)
+    expect(result.artifacts.length).toBeLessThanOrEqual(400)
   })
 })
 

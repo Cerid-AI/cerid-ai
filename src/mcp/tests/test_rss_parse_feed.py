@@ -10,7 +10,7 @@ _parse_feed returns NEW entries oldest-first and the advanced cursor.
 
 from __future__ import annotations
 
-from core.ingest.sources.connectors.rss import _parse_feed
+from core.ingest.sources.connectors.rss import _html_to_text, _parse_feed
 
 _RSS = """<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -90,6 +90,26 @@ def test_doctype_entity_feed_is_refused() -> None:
     )
     entries, cursor = _parse_feed(malicious, {})
     assert entries == []  # refused, not parsed
+
+
+# --- _html_to_text (WB-06) — feed bodies are frequently HTML/CDATA, not
+#     plain text; fetch_since must sanitize before handing content to
+#     ingest_fn. ---
+
+
+def test_html_to_text_strips_tags_and_decodes_entities() -> None:
+    html = "<p>Hello &amp; welcome</p><div>to &lt;RSS&gt;</div>"
+    assert _html_to_text(html) == "Hello & welcome to <RSS>"
+
+
+def test_html_to_text_drops_script_and_style_blocks() -> None:
+    html = "<style>.x{color:red}</style><script>alert(1)</script><p>real text</p>"
+    assert _html_to_text(html) == "real text"
+
+
+def test_html_to_text_collapses_whitespace() -> None:
+    html = "<p>line one</p>\n\n<p>line   two</p>"
+    assert _html_to_text(html) == "line one line two"
 
 
 # --- SSRF guard (_assert_fetchable / _is_blocked_ip) — IP literals + localhost

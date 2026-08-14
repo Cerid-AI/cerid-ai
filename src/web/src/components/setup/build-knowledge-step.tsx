@@ -118,7 +118,27 @@ export function BuildKnowledgeStep({ state, onChange }: BuildKnowledgeStepProps)
           </div>
         )}
 
-        {!registryQuery.isLoading && sortedDomains.length === 0 && (
+        {/* WB-13: a failed registry fetch (common while containers are still
+            starting during onboarding) must not masquerade as an empty
+            registry — surface it with a retry instead. */}
+        {registryQuery.isError && (
+          <div className="flex flex-col items-center gap-2 py-8 text-center text-sm">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            <p className="text-destructive">
+              Couldn&apos;t load the pack registry
+              {registryQuery.error instanceof Error ? ` — ${registryQuery.error.message}` : ""}.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void registryQuery.refetch()}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {!registryQuery.isLoading && !registryQuery.isError && sortedDomains.length === 0 && (
           <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground">
             <Info className="h-5 w-5" />
             <p>No packs in registry. You can add packs later from the Knowledge Library.</p>

@@ -223,14 +223,24 @@ class TestQueryRetrievalPipeline:
         import asyncio
         return asyncio.run(coro)
 
-    @patch("core.agents.query_agent.config")
-    def test_query_returns_relevant_chunks(self, mock_config):
-        mock_config.DOMAINS = ["coding", "general"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
-        mock_config.HYBRID_VECTOR_WEIGHT = 0.6
-        mock_config.HYBRID_KEYWORD_WEIGHT = 0.4
-        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.0
-        mock_config.DOMAIN_AFFINITY = {}
+    @staticmethod
+    def _configure(monkeypatch, domains):
+        """Pin the retrieval-relevant settings on the REAL config module.
+
+        The real ``config.collection_name`` already maps d -> "domain_<d>",
+        so the tests' Chroma stubs keep working without a canned lambda.
+        """
+        for name, value in {
+            "DOMAINS": domains,
+            "HYBRID_VECTOR_WEIGHT": 0.6,
+            "HYBRID_KEYWORD_WEIGHT": 0.4,
+            "CROSS_DOMAIN_DEFAULT_AFFINITY": 0.0,
+            "DOMAIN_AFFINITY": {},
+        }.items():
+            monkeypatch.setattr(f"core.agents.query_agent.config.{name}", value)
+
+    def test_query_returns_relevant_chunks(self, monkeypatch):
+        self._configure(monkeypatch, ["coding", "general"])
 
         collection = MagicMock()
         collection.query.return_value = _chroma_query_result(
@@ -254,14 +264,8 @@ class TestQueryRetrievalPipeline:
         assert results[0]["content"] == "PostgreSQL uses MVCC"
         assert results[0]["relevance"] > results[1]["relevance"]
 
-    @patch("core.agents.query_agent.config")
-    def test_query_hybrid_search(self, mock_config):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
-        mock_config.HYBRID_VECTOR_WEIGHT = 0.6
-        mock_config.HYBRID_KEYWORD_WEIGHT = 0.4
-        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.0
-        mock_config.DOMAIN_AFFINITY = {}
+    def test_query_hybrid_search(self, monkeypatch):
+        self._configure(monkeypatch, ["coding"])
 
         collection = MagicMock()
         collection.query.return_value = _chroma_query_result(
@@ -344,14 +348,8 @@ class TestQueryRetrievalPipeline:
         assert result["context"] == "" and result["sources"] == []
         assert result["confidence"] == 0.0
 
-    @patch("core.agents.query_agent.config")
-    def test_query_empty_collection(self, mock_config):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
-        mock_config.HYBRID_VECTOR_WEIGHT = 0.6
-        mock_config.HYBRID_KEYWORD_WEIGHT = 0.4
-        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.0
-        mock_config.DOMAIN_AFFINITY = {}
+    def test_query_empty_collection(self, monkeypatch):
+        self._configure(monkeypatch, ["coding"])
 
         collection = MagicMock()
         collection.query.return_value = _chroma_query_result([], [], [], [])
@@ -365,14 +363,8 @@ class TestQueryRetrievalPipeline:
                 "anything", domains=["coding"], chroma_client=chroma_client))
         assert results == []
 
-    @patch("core.agents.query_agent.config")
-    def test_query_domain_filtering(self, mock_config):
-        mock_config.DOMAINS = ["coding", "finance"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
-        mock_config.HYBRID_VECTOR_WEIGHT = 0.6
-        mock_config.HYBRID_KEYWORD_WEIGHT = 0.4
-        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.0
-        mock_config.DOMAIN_AFFINITY = {}
+    def test_query_domain_filtering(self, monkeypatch):
+        self._configure(monkeypatch, ["coding", "finance"])
 
         coding_coll = MagicMock()
         coding_coll.query.return_value = _chroma_query_result(

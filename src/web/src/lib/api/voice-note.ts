@@ -9,12 +9,17 @@
 
 import { mcpUrl, mcpHeaders } from "./common"
 
+export type VoiceNoteStatus = "success" | "duplicate" | "dropped" | "error"
+
 export interface VoiceNoteResponse {
-  status: "ingested"
+  status: VoiceNoteStatus
   artifact_id: string
   transcript: string
   transcribe_ms: number
   word_count: number
+  reason?: string | null
+  duplicate_of?: string | null
+  error?: string | null
 }
 
 export async function ingestVoiceNote(blob: Blob): Promise<VoiceNoteResponse> {

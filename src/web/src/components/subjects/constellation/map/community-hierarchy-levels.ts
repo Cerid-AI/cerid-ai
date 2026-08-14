@@ -52,7 +52,15 @@ export function buildAncestorIndex(hierarchy: CommunityHierarchy): AncestorIndex
 // repetitive prefix every summary shares. Returns null when no usable summary
 // remains — caller falls back to the dominant child's crisp label.
 const _SUMMARY_BOILERPLATE =
-  /^(the|this)\s+(theme|community|cluster|group|topic|content|document(s)?|section)\s+(revolves?\s+around|centers?\s+on|focuses?\s+on|is\s+about|relates?\s+to|concerns?|covers?|describes?|deals?\s+with)\s*/i
+  /^(the|this)\s+(theme|community|cluster|group|topic|content|document(s)?|section)\s+((is\s+)?(revolv|center|focus|relat)(es?|ed|ing)?\s+(around|on|to)|is\s+about|concerns?|covers?|describes?|deals?\s+with)\s*/i
+
+/** Truncate at a word boundary with an ellipsis — never mid-word (UX-15). */
+function wordCap(text: string, max: number): string {
+  if (text.length <= max) return text
+  let cut = text.slice(0, max - 1)
+  if (cut.includes(" ")) cut = cut.slice(0, cut.lastIndexOf(" "))
+  return cut.replace(/[,;:]+$/, "") + "…"
+}
 
 export function cleanSummaryLabel(summary: string | null): string | null {
   if (!summary) return null
@@ -63,14 +71,14 @@ export function cleanSummaryLabel(summary: string | null): string | null {
   // Drop a trailing dangling article/preposition left by the strip.
   clause = clause.replace(/\s+(the|a|an|of|for|to|in|on)$/i, "").trim()
   if (clause.length === 0) return null
-  return clause.slice(0, 36)
+  return wordCap(clause, 36)
 }
 
 /** Join the top c-TF-IDF keywords into a compact "a · b · c" label (A3). */
 export function topTermsLabel(terms: string[] | null | undefined): string | null {
   if (!terms || terms.length === 0) return null
   const chip = terms.slice(0, 3).join(" · ").trim()
-  return chip.length > 0 ? chip.slice(0, 36) : null
+  return chip.length > 0 ? wordCap(chip, 36) : null
 }
 
 export function buildLevelCommunities(
@@ -110,10 +118,12 @@ export function buildLevelCommunities(
         for (const p of h.hull) hullPts.push(p)
         if (h.count > dominant.count) dominant = h
       }
-      // Label source order (A3): de-boilerplated LLM summary → c-TF-IDF
-      // top_terms chip → biggest sub-community's crisp L0 label → generic id.
+      // Label source order (A3 + UX-15): curated Community.name →
+      // de-boilerplated LLM summary → c-TF-IDF top_terms chip → biggest
+      // sub-community's crisp L0 label → generic id.
       const nid = node.community_id.split(":")[1] ?? node.community_id
       const label =
+        node.name ??
         cleanSummaryLabel(node.summary) ??
         topTermsLabel(node.top_terms) ??
         dominant.label ??

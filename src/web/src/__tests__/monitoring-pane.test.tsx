@@ -40,10 +40,13 @@ vi.mock("@/lib/api", () => ({
   }),
 }))
 
-import { fetchMaintenance } from "@/lib/api"
+import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
 import { MonitoringPane } from "@/components/monitoring/monitoring-pane"
 
 const mockFetchMaintenance = fetchMaintenance as ReturnType<typeof vi.fn>
+const mockFetchIngestLog = fetchIngestLog as ReturnType<typeof vi.fn>
+const mockFetchSchedulerStatus = fetchSchedulerStatus as ReturnType<typeof vi.fn>
+const mockFetchDigest = fetchDigest as ReturnType<typeof vi.fn>
 
 function makeWrapper() {
   const queryClient = new QueryClient({
@@ -61,6 +64,9 @@ beforeEach(() => {
     health: { neo4j: "healthy", chroma: "healthy", redis: "healthy", bifrost: "healthy" },
     collections: [],
   })
+  mockFetchIngestLog.mockResolvedValue({ entries: [] })
+  mockFetchSchedulerStatus.mockResolvedValue({ jobs: [], running: false })
+  mockFetchDigest.mockResolvedValue({ summary: "", stats: {}, period_hours: 24 })
 })
 
 // ---------------------------------------------------------------------------
@@ -94,6 +100,36 @@ describe("MonitoringPane — four-state matrix (D.2)", () => {
       expect(screen.getByText(/Failed to load system status/)).toBeInTheDocument()
     })
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WB-16: per-card isError gating for the ingest-log, scheduler, and digest
+// queries — a fetch failure must not fall through to the child component's
+// undefined-data empty state, which asserts a false cause ("service is
+// running", "no activity").
+// ---------------------------------------------------------------------------
+
+describe("MonitoringPane — per-card isError gating (WB-16)", () => {
+  it("scheduler fetch failure shows a retry alert, not the misleading empty state", async () => {
+    mockFetchSchedulerStatus.mockRejectedValue(new Error("Connection refused"))
+    render(<MonitoringPane />, { wrapper: makeWrapper() })
+    expect(await screen.findByText("Failed to load scheduler status")).toBeInTheDocument()
+    expect(screen.queryByText(/Scheduler status appears when the service is running/)).not.toBeInTheDocument()
+  })
+
+  it("ingest-log fetch failure shows a retry alert, not the misleading empty state", async () => {
+    mockFetchIngestLog.mockRejectedValue(new Error("Connection refused"))
+    render(<MonitoringPane />, { wrapper: makeWrapper() })
+    expect(await screen.findByText("Failed to load ingestion activity")).toBeInTheDocument()
+    expect(screen.queryByText(/Ingest files to see activity here/)).not.toBeInTheDocument()
+  })
+
+  it("digest fetch failure shows a retry alert, not the misleading empty state", async () => {
+    mockFetchDigest.mockRejectedValue(new Error("Connection refused"))
+    render(<MonitoringPane />, { wrapper: makeWrapper() })
+    expect(await screen.findByText("Failed to load knowledge digest")).toBeInTheDocument()
+    expect(screen.queryByText(/No activity in the last/)).not.toBeInTheDocument()
   })
 })
 

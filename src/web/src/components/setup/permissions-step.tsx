@@ -99,7 +99,6 @@ const NEEDS_SETTINGS_DEEP_LINK: Record<Category, string> = {
 interface CeridPermissionsBridge {
   permissions: {
     getAll: () => Promise<PermissionState[]>
-    get: (category: string) => Promise<PermissionState>
     request: (category: string) => Promise<PermissionState>
   }
   app: {
@@ -107,7 +106,8 @@ interface CeridPermissionsBridge {
   }
 }
 
-function getCeridBridge(): CeridPermissionsBridge | null {
+// eslint-disable-next-line react-refresh/only-export-components -- bridge probe exported alongside the component so Settings → System can desktop-gate its permissions section
+export function getCeridBridge(): CeridPermissionsBridge | null {
   if (typeof window === "undefined") return null
   const bridge = (window as Window & { cerid?: unknown }).cerid as
     | (CeridPermissionsBridge & Record<string, unknown>)
@@ -119,9 +119,12 @@ function getCeridBridge(): CeridPermissionsBridge | null {
 interface PermissionsStepProps {
   onContinue?: () => void
   onSkip?: () => void
+  /** Suppress the internal heading when a host surface (Settings → System)
+      already provides its own section title. */
+  hideIntro?: boolean
 }
 
-export function PermissionsStep({ onContinue, onSkip }: PermissionsStepProps) {
+export function PermissionsStep({ onContinue, onSkip, hideIntro }: PermissionsStepProps) {
   const [states, setStates] = useState<PermissionState[] | null>(null)
   const [loading, setLoading] = useState<Category | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -139,6 +142,11 @@ export function PermissionsStep({ onContinue, onSkip }: PermissionsStepProps) {
       setStates(list)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to read permissions")
+      // A null `states` early-returns into the loading spinner before the
+      // error banner ever renders — settle to an empty list so the banner
+      // is reachable (GUI spec MUST 2 / observed defect #2). Keep existing
+      // rows when a later focus-triggered refresh fails.
+      setStates((prev) => prev ?? [])
     }
   }, [bridge])
 
@@ -213,13 +221,15 @@ export function PermissionsStep({ onContinue, onSkip }: PermissionsStepProps) {
 
   return (
     <div className="space-y-4" data-testid="permissions-step">
-      <div>
-        <h2 className="text-xl font-semibold">macOS Permissions</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Cerid only requests permissions for features you intend to use.
-          You can grant or revoke any of these later in System Settings.
-        </p>
-      </div>
+      {!hideIntro && (
+        <div>
+          <h2 className="text-xl font-semibold">macOS Permissions</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Cerid only requests permissions for features you intend to use.
+            You can grant or revoke any of these later in System Settings.
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="text-sm text-red-500 p-2 rounded border border-red-500/30 bg-red-500/5" role="alert">

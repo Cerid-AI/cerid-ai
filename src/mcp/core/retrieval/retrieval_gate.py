@@ -33,6 +33,10 @@ _SKIP_PATTERNS = [
     re.compile(r"^(what|who) are you\b", re.IGNORECASE),
     re.compile(r"^(yes|no|sure|nope|yep|nah)\s*[.!?]*$", re.IGNORECASE),
     re.compile(r"^(good|great|nice|cool|awesome|perfect|excellent)\s*[.!?]*$", re.IGNORECASE),
+    # Short conversational acknowledgments that carry no retrievable content.
+    # These used to be caught by the blanket <=2-word skip; now that short
+    # keyword queries retrieve (see below), the filler forms are enumerated.
+    re.compile(r"^(got it|will do|sounds good|makes sense|no problem|my bad|never mind|nevermind|all good|you too|me too|same here|why not|go ahead|carry on|do it|of course|fair enough|good job|well done|love it|understood|indeed|exactly|right|correct|agreed|done|noted)\s*[.!?]*$", re.IGNORECASE),
 ]
 
 # Patterns that indicate a simple/light retrieval
@@ -88,10 +92,17 @@ def classify_retrieval_need(query: str) -> RetrievalDecision:
         if pattern.search(q):
             return RetrievalDecision(action="skip", top_k=0, reason="conversational")
 
-    # Very short queries (< 3 words, no question mark) likely conversational
+    # Short queries that survived the conversational patterns are keyword
+    # lookups ("invoice receipt", "tax form"), not filler — the classic
+    # search-box shape. The old blanket skip here returned kb:0 for every
+    # 1-2-word probe against a populated corpus (UX-07 / kb-idle-zero).
     word_count = len(q.split())
     if word_count <= 2 and "?" not in q:
-        return RetrievalDecision(action="skip", top_k=0, reason="too_short")
+        return RetrievalDecision(
+            action="light",
+            top_k=ADAPTIVE_RETRIEVAL_LIGHT_TOP_K,
+            reason="short_keyword",
+        )
 
     # Full retrieval patterns: complex, multi-part, analytical
     for pattern in _FULL_PATTERNS:

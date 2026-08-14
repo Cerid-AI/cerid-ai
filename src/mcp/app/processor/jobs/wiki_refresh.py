@@ -17,9 +17,9 @@ Payload schema
   {"entity_slug": str}
 
 The job is enqueued by the background processor (WikiRefreshJob.job_type =
-"wiki_refresh") whenever an entity's evidence shifts — specifically when
-its edge count grows past a threshold or its summary embedding drifts > τ.
-Both trigger points live in the processor's event hooks (Phase P.5).
+"wiki_refresh") whenever an entity's evidence shifts — specifically on the
+``entities_added`` and ``contradiction_detected`` events, both registered
+in ``app.processor.subscribers.wiki_refresh.register()`` (Phase P.5).
 
 Feature flag
 ------------
@@ -39,6 +39,7 @@ from core.agents.entity_extraction import is_junk_entity_name
 from core.agents.summary_quality import (
     INSUFFICIENT_SENTINEL,
     is_insufficient_summary,
+    is_wrong_entity_summary,
 )
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
@@ -271,6 +272,18 @@ class WikiRefreshJob(BaseJob):
                 len(summary_text),
             )
             return {"skipped": "insufficient_excerpts"}
+
+        # Backstop for the wrong-entity shape (the shape BTC had): a summary
+        # that opens by redirecting its own subject ("the entity in question
+        # is not X but rather Y") is worse than no summary — same
+        # keep-the-previous-page semantics as the insufficiency skip above.
+        if is_wrong_entity_summary(summary_text):
+            logger.info(
+                "wiki_refresh.wrong_entity_summary entity=%s chars=%d",
+                self._entity_slug,
+                len(summary_text),
+            )
+            return {"skipped": "wrong_entity_summary"}
 
         await progress_cb(0.6)
 

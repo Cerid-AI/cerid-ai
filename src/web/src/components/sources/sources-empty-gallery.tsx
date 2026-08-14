@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils"
 import { DataState } from "@/components/ui/data-state"
 import { listSourceKinds } from "@/lib/api/sources"
 import { useEntitlements } from "@/hooks/use-entitlements"
+import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
 import type { SourceKindMetaExt } from "./source-kind-meta"
 import { descriptorFor } from "./source-kind-icons"
 
@@ -40,9 +41,17 @@ export function SourcesEmptyGallery({
   onOpenConnector,
   onProLocked,
 }: SourcesEmptyGalleryProps) {
-  const { tier } = useEntitlements()
-  // Enterprise inherits Pro, so gate on "not community" rather than == pro.
-  const proLocked = tier === "community"
+  // Per-FLAG resolution: /sources/kinds carries the FEATURE_FLAGS key gating
+  // each kind, so the verdict comes from the server's own flag detail rather
+  // than a guessed tier mapping. The "pro" fallback keeps Pro kinds failing
+  // CLOSED while capabilities are unknown (flag missing, fetch failed) —
+  // same decision the add-source wizard pins in its Pro-gate tests. The
+  // loading gate below keeps that fallback from painting a paying customer
+  // an upgrade pitch on first paint; the server 403 stays authoritative.
+  const { forFlag, isLoading: entLoading, isError: entitlementsError } = useEntitlements()
+  const kindLocked = (k: SourceKindMetaExt) =>
+    k.tier === "pro" &&
+    forFlag(k.feature_flag ?? undefined, "pro").state === "locked"
   const { data: kinds, isLoading, isError, refetch } = useQuery<SourceKindMetaExt[]>({
     queryKey: ["source-kinds"],
     queryFn: listSourceKinds,
@@ -58,11 +67,16 @@ export function SourcesEmptyGallery({
   // failed fetch left "Loading sources…" on screen forever — the exact stuck-
   // spinner case DataState exists to prevent. This is a new user's first
   // screen; an unrecoverable spinner reads as a broken product.
-  if (isLoading || isError || !kinds) {
+  // `entLoading` is folded in so a paying customer never sees the Pro-locked
+  // interception while capabilities are still in flight (tier defaults to
+  // "community" until they load). A FAILED capabilities fetch does not block
+  // the gallery — entLoading goes false and the tiles render with the
+  // fail-closed fallback above.
+  if (isLoading || entLoading || isError || !kinds) {
     return (
       <DataState
-        loading={isLoading}
-        error={isError || (!kinds && !isLoading)}
+        loading={isLoading || entLoading}
+        error={isError || (!kinds && !isLoading && !entLoading)}
         onRetry={() => void refetch()}
         loadingLabel="Loading sources…"
       />
@@ -88,21 +102,40 @@ export function SourcesEmptyGallery({
         ))}
       </div>
 
-      <SectionTitle label="Pro" subtitle={`${pro.length} unlock with upgrade`} className="mt-8" />
+      {/* On a failed capabilities fetch every Pro kind wears the fail-closed
+          registry fallback, so the section-level note is accurate whenever the
+          fetch errored — the locks shown are unverified, not a plan verdict. */}
+      <SectionTitle
+        label="Pro"
+        subtitle={
+          entitlementsError
+            ? "plan status unavailable"
+            : `${pro.length} unlock with upgrade`
+        }
+        className="mt-8"
+      />
+      {entitlementsError && <EntitlementsUnavailableNote className="mb-2" />}
       <div className="cerid-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {pro.map((k) => (
-          <Tile
-            key={k.kind}
-            meta={k}
-            onClick={() =>
-              proLocked && onProLocked ? onProLocked(k.kind) : onSelectKind(k.kind)
-            }
-            // A locked tile must reach the upgrade path even for kinds whose
-            // normal route is the connector flow, so suppress that handoff.
-            onOpenConnector={proLocked && onProLocked ? undefined : onOpenConnector}
-            forceSelectable={proLocked && !!onProLocked}
-          />
-        ))}
+        {pro.map((k) => {
+          // "locked" is the only state an upgrade fixes; an entitled tier
+          // whose flag is off (or on) takes the normal route and the server
+          // answers. Resolved per kind so one disabled flag never locks the
+          // whole Pro section.
+          const locked = kindLocked(k)
+          return (
+            <Tile
+              key={k.kind}
+              meta={k}
+              onClick={() =>
+                locked && onProLocked ? onProLocked(k.kind) : onSelectKind(k.kind)
+              }
+              // A locked tile must reach the upgrade path even for kinds whose
+              // normal route is the connector flow, so suppress that handoff.
+              onOpenConnector={locked && onProLocked ? undefined : onOpenConnector}
+              forceSelectable={locked && !!onProLocked}
+            />
+          )
+        })}
       </div>
     </div>
   )

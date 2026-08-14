@@ -3,7 +3,7 @@
 """Apple Mail DataSource — Phase 4.1.
 
 Wraps the ``ceridmail`` Swift helper via subprocess + JSON-over-stdout, mirroring
-the AppleRemindersDataSource pattern. The helper is an ``.emlx`` walker over
+the AppleCalendarDataSource pattern. The helper is an ``.emlx`` walker over
 ``~/Library/Mail``; it inherits TCC grants from the Electron parent app's signed
 bundle (Mail requires **Full Disk Access**, a System Settings toggle — not a
 per-app usage-description key).

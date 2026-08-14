@@ -96,6 +96,18 @@ class JobQueueProtocol(Protocol):
         """Return current queue depth for each priority level."""
         ...
 
-    async def list_recent(self, limit: int) -> list[JobRecord]:
-        """Return up to ``limit`` most recently completed or failed jobs."""
+    async def list_recent(
+        self,
+        limit: int,
+        *,
+        job_type: str | None = None,
+        per_type_cap: int | None = None,
+    ) -> list[JobRecord]:
+        """Return up to ``limit`` most recent terminal jobs, newest first.
+
+        ``job_type`` restricts the listing to one type (uncapped).
+        ``per_type_cap`` bounds how many records any single type may occupy
+        in the default mix, so a high-frequency job (wiki_refresh) cannot
+        displace every other type. ``None``/``0`` disables the cap.
+        """
         ...

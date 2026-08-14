@@ -293,6 +293,104 @@ class TestResolvedOnFirstIngest:
             )
 
 
+class TestDeleteRevertsInboundWikilinksToPending:
+    """AF-068 — deleting a wikilink target must revert inbound edges to a
+    PendingArtifact placeholder, so a later re-ingest of a same-named note
+    can re-resolve them via resolve_pending_artifacts instead of the links
+    being silently lost."""
+
+    def test_delete_target_creates_pending_and_repoints_edge(self, neo4j_driver):
+        target_id = _make_artifact(neo4j_driver, filename="Reverted.md")
+        src_id = _make_artifact(neo4j_driver, filename="srcE.md")
+        try:
+            write_wikilink_edge(
+                neo4j_driver,
+                source_artifact_id=src_id,
+                target_name="Reverted",
+                is_embed=False,
+                source_chunk_id=f"{src_id}_chunk_0",
+                alias="Reverted",
+            )
+            # Resolved directly — no placeholder yet.
+            assert _get_pending(neo4j_driver, "Reverted") is None
+            edge = _get_inbound_edge(neo4j_driver, src_id, target_id, "WIKILINKS_TO")
+            assert edge is not None and edge["pending"] is False
+
+            delete_artifact(neo4j_driver, target_id)
+
+            # A PendingArtifact keyed by the deleted artifact's filename
+            # stem now stands in for it.
+            pending = _get_pending(neo4j_driver, "Reverted")
+            assert pending is not None
+
+            with neo4j_driver.session() as session:
+                record = session.run(
+                    "MATCH (s:Artifact {id: $sid})-[r:WIKILINKS_TO]->(p:PendingArtifact {name: $name}) "
+                    "RETURN r.pending AS pending, r.source_chunk_id AS chunk_id, r.alias AS alias",
+                    sid=src_id,
+                    name="Reverted",
+                ).single()
+            assert record is not None
+            assert record["pending"] is True
+            assert record["chunk_id"] == f"{src_id}_chunk_0"
+            assert record["alias"] == "Reverted"
+
+            # The deleted artifact itself is gone.
+            assert _get_inbound_edge(neo4j_driver, src_id, target_id, "WIKILINKS_TO") is None
+        finally:
+            _cleanup(
+                neo4j_driver,
+                artifact_ids=[src_id, target_id],
+                pending_names=["Reverted"],
+            )
+
+    def test_reingesting_same_name_resolves_the_reverted_edge(self, neo4j_driver):
+        """Round-trip: delete the target, then re-ingest a same-named note —
+        the reverted edge must promote exactly like a never-resolved one."""
+        target_id = _make_artifact(neo4j_driver, filename="RoundTrip.md")
+        src_id = _make_artifact(neo4j_driver, filename="srcF.md")
+        new_target_id = None
+        try:
+            write_wikilink_edge(
+                neo4j_driver,
+                source_artifact_id=src_id,
+                target_name="RoundTrip",
+                is_embed=False,
+                source_chunk_id=f"{src_id}_chunk_0",
+            )
+            delete_artifact(neo4j_driver, target_id)
+            assert _get_pending(neo4j_driver, "RoundTrip") is not None
+
+            new_target_id = _make_artifact(neo4j_driver, filename="RoundTrip.md")
+            promoted = resolve_pending_artifacts(
+                neo4j_driver,
+                artifact_id=new_target_id,
+                filename="RoundTrip.md",
+            )
+            assert promoted >= 1
+            assert _get_pending(neo4j_driver, "RoundTrip") is None
+
+            edge = _get_inbound_edge(neo4j_driver, src_id, new_target_id, "WIKILINKS_TO")
+            assert edge is not None
+            assert edge["pending"] is False
+            assert edge["chunk_id"] == f"{src_id}_chunk_0"
+        finally:
+            ids = [src_id]
+            if new_target_id:
+                ids.append(new_target_id)
+            _cleanup(neo4j_driver, artifact_ids=ids, pending_names=["RoundTrip"])
+
+    def test_delete_with_no_inbound_wikilinks_creates_no_pending(self, neo4j_driver):
+        """An artifact with no inbound WIKILINKS_TO/EMBEDS edges must not
+        spuriously create a PendingArtifact on delete."""
+        lonely_id = _make_artifact(neo4j_driver, filename="Lonely.md")
+        try:
+            delete_artifact(neo4j_driver, lonely_id)
+            assert _get_pending(neo4j_driver, "Lonely") is None
+        finally:
+            _cleanup(neo4j_driver, artifact_ids=[], pending_names=["Lonely"])
+
+
 class TestEmbedRelationship:
     def test_embed_writes_embeds_edge_type(self, neo4j_driver):
         """``![[…]]`` writes an ``EMBEDS`` edge, not ``WIKILINKS_TO``."""

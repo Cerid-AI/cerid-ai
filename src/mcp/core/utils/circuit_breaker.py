@@ -284,7 +284,6 @@ _datasource_openlibrary = AsyncCircuitBreaker("datasource-openlibrary", failure_
 _datasource_pubchem = AsyncCircuitBreaker("datasource-pubchem", failure_threshold=3, recovery_timeout=30)
 _datasource_bookmarks = AsyncCircuitBreaker("datasource-bookmarks", failure_threshold=3, recovery_timeout=30)
 _datasource_email_imap = AsyncCircuitBreaker("datasource-email-imap", failure_threshold=3, recovery_timeout=30)
-_datasource_rss_feeds = AsyncCircuitBreaker("datasource-rss_feeds", failure_threshold=3, recovery_timeout=30)
 
 # Quenchforge local-GPU breakers — one PER WORKLOAD, never shared. The chat,
 # embed, and rerank slots have very different latency/failure profiles (the
@@ -314,7 +313,6 @@ _BREAKER_REGISTRY: dict[str, AsyncCircuitBreaker] = {
     "datasource-pubchem": _datasource_pubchem,
     "datasource-bookmarks": _datasource_bookmarks,
     "datasource-email-imap": _datasource_email_imap,
-    "datasource-rss_feeds": _datasource_rss_feeds,
     "bifrost-rerank": _bifrost_rerank,
     "bifrost-claims": _bifrost_claims,
     "bifrost-verify": _bifrost_verify,

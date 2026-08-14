@@ -45,6 +45,7 @@ import { useEntitlements } from "@/hooks/use-entitlements"
 import type { FeatureTier } from "@/lib/api/billing"
 import type { ProviderCredits, ServerSettings, SettingsUpdate } from "@/lib/types"
 import { FOCUS_RING, InfoTip, TierLockBadge } from "./settings-primitives"
+import { EntitlementsUnavailableBanner } from "@/components/shared/entitlements-error-notice"
 import { RecommendationBanner } from "./recommendation-banner"
 import type { PatchResult } from "./categories/page-props"
 
@@ -72,8 +73,8 @@ const CATEGORY_BLURBS: Record<CategoryId, string> = {
   models: "Choose the chat, embedding, and reranking models Cerid runs, and optionally connect an API provider.",
   knowledge: "Ingest documents, watch folders, and organize the domains Cerid answers from.",
   retrieval: "Tune how answers are searched, ranked, and verified against your sources.",
-  privacy: "Set the boundaries for encryption, retention, and what leaves this machine.",
-  extensions: "Govern MCP servers, agents, and external API access.",
+  privacy: "Set the boundaries for encryption and what leaves this machine. Retention defaults to keeping everything — configure it per source under Knowledge.",
+  extensions: "Install server plugins, govern MCP servers and external providers, and schedule Pro automations. (Connect personal data in Sources → Connectors.)",
   appearance: "Theme, density, and motion preferences for this device.",
   plan: "See your current tier and the features it unlocks.",
   system: "Storage, sync, backup, and server maintenance operations.",
@@ -124,7 +125,7 @@ const OVERVIEW_GROUPS: OverviewGroup[] = [
     label: "Privacy & Data",
     blurb: "Your data stays local by default — these controls keep it that way.",
     info:
-      "Cerid is self-hosted and local-first. These settings govern encryption at rest, retention, and exactly what context is shared with any model provider you enable.",
+      "Cerid is self-hosted and local-first. These settings govern encryption at rest and exactly what context is shared with any model provider you enable. Data retention is opt-in per source (default: keep everything) and is configured from a source's detail pane under Knowledge, not here.",
     targets: ["privacy"],
   },
   {
@@ -212,7 +213,7 @@ export function SettingsOverview({
   onRevealSetting,
   onSelectCategory,
 }: SettingsOverviewProps) {
-  const { forDef } = useEntitlements()
+  const { forDef, isError: entitlementsError } = useEntitlements()
 
   const modified = modifiedSettings(settings as unknown as Record<string, unknown>, { tier })
   const byCategory = new Map<CategoryId, ModifiedSetting[]>()
@@ -252,6 +253,7 @@ export function SettingsOverview({
 
   return (
     <div className="density-stack">
+      {entitlementsError && <EntitlementsUnavailableBanner />}
       <RecommendationBanner patch={patch} />
 
       <Card>

@@ -235,6 +235,75 @@ describe("Auto-RAG Ephemeral Injection", () => {
     expect(result.current.lastAutoInjectCount).toBe(2)
   })
 
+  it("RA-48: caps auto-injected chunks at the default AUTO_INJECT_MAX even when the token budget allows more", async () => {
+    // Five small, distinct, above-threshold candidates with ample token budget —
+    // only the token budget bounded this loop before RA-48; the count must now
+    // stop at the default cap (3) regardless of remaining budget. Content is
+    // topically distinct per chunk so deduplicateChunks' Jaccard-similarity
+    // filter (word-overlap based) does not collapse them.
+    const bodies = [
+      "Authentication logic lives in the login handler module.",
+      "Database migrations run automatically during container startup.",
+      "The job scheduler retries failed tasks with exponential backoff.",
+      "Frontend routing uses a nested layout composition system.",
+      "The logging pipeline batches outbound events every few seconds.",
+    ]
+    const results = bodies.map((content, i) =>
+      makeKBResult({
+        artifact_id: `a${i}`,
+        relevance: 0.9,
+        filename: `chunk${i}.py`,
+        content,
+      }))
+    mockQueryKB.mockResolvedValue({ results })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("query with many eligible candidates")
+    })
+
+    expect(result.current.lastAutoInjectCount).toBe(3)
+    const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    expect(sysMsg!.content).toContain("chunk0.py")
+    expect(sysMsg!.content).toContain("chunk1.py")
+    expect(sysMsg!.content).toContain("chunk2.py")
+    expect(sysMsg!.content).not.toContain("chunk3.py")
+    expect(sysMsg!.content).not.toContain("chunk4.py")
+  })
+
+  it("RA-48: honors a caller-supplied autoInjectMax below the default cap", async () => {
+    const bodies = [
+      "Authentication logic lives in the login handler module.",
+      "Database migrations run automatically during container startup.",
+      "The job scheduler retries failed tasks with exponential backoff.",
+    ]
+    const results = bodies.map((content, i) =>
+      makeKBResult({
+        artifact_id: `a${i}`,
+        relevance: 0.9,
+        filename: `chunk${i}.py`,
+        content,
+      }))
+    mockQueryKB.mockResolvedValue({ results })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5, autoInjectMax: 1 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("query with a caller-supplied cap")
+    })
+
+    expect(result.current.lastAutoInjectCount).toBe(1)
+    const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
+    expect(sysMsg).toBeDefined()
+    expect(sysMsg!.content).toContain("chunk0.py")
+    expect(sysMsg!.content).not.toContain("chunk1.py")
+    expect(sysMsg!.content).not.toContain("chunk2.py")
+  })
+
   it("prefers orchestrated results over basic KB results when passed as kbResults (smart mode simulation)", async () => {
     // In chat-panel.tsx, when ragMode="smart", orchestrated results are passed as kbResults.
     // We simulate this by passing orchestrated results directly as the kbResults prop.

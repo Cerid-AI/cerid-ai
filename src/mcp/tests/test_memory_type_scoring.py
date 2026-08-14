@@ -289,3 +289,55 @@ class TestMemoryNliGate:
         # NLI failed but score is above threshold → kept
         assert len(results) == 1
         assert results[0]["memory_id"] == "mem-4"
+
+    @pytest.mark.asyncio
+    async def test_recall_decrypts_encrypted_summary(self):
+        """AF-082: recall_memories must decrypt Chroma's ``summary`` metadata
+        before returning it, matching the pattern used in kb_admin.py /
+        fundamentals.py — otherwise callers receive raw enc:v1: ciphertext.
+        """
+        import os
+
+        try:
+            from cryptography.fernet import Fernet
+        except ImportError:
+            pytest.skip("cryptography not installed")
+        from utils.encryption import encrypt_field, reset_encryptor
+
+        mock_nli_fn = MagicMock(return_value={
+            "entailment": 0.8,
+            "neutral": 0.15,
+            "contradiction": 0.05,
+        })
+
+        key = Fernet.generate_key().decode()
+        reset_encryptor()
+        original_summary = "a private memory summary"
+
+        try:
+            with patch.dict(os.environ, {"CERID_ENCRYPTION_KEY": key}):
+                encrypted_summary = encrypt_field(original_summary)
+                assert encrypted_summary.startswith("enc:v1:")
+
+                metadatas = [{
+                    "artifact_id": "mem-5",
+                    "memory_type": "empirical",
+                    "valid_from": "2025-01-01T00:00:00Z",
+                    "access_count": "0",
+                    "summary": encrypted_summary,
+                }]
+                chroma = _make_chroma_mock(
+                    ids=["mem-5"],
+                    documents=["Python uses a Global Interpreter Lock"],
+                    distances=[0.2],
+                    metadatas=metadatas,
+                )
+
+                with patch("core.utils.nli.nli_score", mock_nli_fn), \
+                     patch("core.agents.memory.l2_distance_to_relevance", return_value=0.9):
+                    results = await recall_memories("What is the Python GIL?", chroma, None)
+        finally:
+            reset_encryptor()
+
+        assert len(results) == 1
+        assert results[0]["summary"] == original_summary

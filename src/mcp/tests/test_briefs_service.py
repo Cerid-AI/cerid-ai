@@ -500,3 +500,66 @@ class TestGenerateWeekly:
 
         # No exception raised; kind is correct
         assert record.kind == "weekly"
+
+
+class TestNothingNewDaily:
+    """UX-18 — an empty delta produces one honest 'nothing new' line, not
+    LLM filler synthesized from 'no new information'."""
+
+    @pytest.mark.asyncio
+    async def test_empty_corpus_skips_llm_and_emits_one_line(self):
+        from app.services.briefs.service import (
+            NOTHING_NEW_BODY,
+            NOTHING_NEW_SECTION,
+            BriefService,
+        )
+
+        service = BriefService()
+        with patch(
+            "app.services.briefs.service.call_internal_llm",
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            record = await service.generate_daily("", "")
+
+        mock_llm.assert_not_called()
+        assert record.kind == "daily"
+        assert record.status == "generated"
+        assert record.sections == {NOTHING_NEW_SECTION: NOTHING_NEW_BODY}
+        assert "\n" not in NOTHING_NEW_BODY  # one line, honestly
+
+    @pytest.mark.asyncio
+    async def test_explicit_no_new_data_beats_stale_notes_context(self):
+        """The 7-day notes window still has old content on a quiet day; the
+        caller's delta verdict (has_new_data=False) must win — otherwise
+        consecutive briefs re-synthesize insight from the same old notes."""
+        from app.services.briefs.service import NOTHING_NEW_SECTION, BriefService
+
+        service = BriefService()
+        with patch(
+            "app.services.briefs.service.call_internal_llm",
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            record = await service.generate_daily(
+                "", "[note B] Async patterns in Python.", has_new_data=False,
+            )
+
+        mock_llm.assert_not_called()
+        assert NOTHING_NEW_SECTION in record.sections
+
+    @pytest.mark.asyncio
+    async def test_explicit_new_data_generates_normally(self):
+        from app.services.briefs.service import BriefService
+
+        service = BriefService()
+        with patch(
+            "app.services.briefs.service.call_internal_llm",
+            new_callable=AsyncMock,
+            return_value=_MOCK_DAILY_LLM_RESPONSE,
+        ) as mock_llm:
+            record = await service.generate_daily(
+                "[item A] new mail", "notes", has_new_data=True,
+            )
+
+        mock_llm.assert_called_once()
+        assert record.status == "generated"
+        assert "CONNECTIONS" in record.sections

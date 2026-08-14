@@ -87,9 +87,16 @@ def test_settings_exposes_phase_f_env_vars():
 
 
 def test_calendar_stitch_fallback_chain_includes_outlook():
-    """match_to_event must check google_calendar → outlook_calendar →
-    apple_calendar_eventkit in that order. A regression in the fallback
-    chain would silently disable Outlook calendar stitching."""
+    """match_to_event must check google_calendar → outlook_calendar in
+    that order. A regression in the fallback chain would silently disable
+    Outlook calendar stitching.
+
+    Apple Calendar moved to the desktop bridge (commit 5bac09e92): its
+    Swift EventKit helper cannot execute from the Linux MCP container
+    this module runs in, so an 'apple_calendar' / 'apple_calendar_eventkit'
+    branch here could never produce a real match. Those branches were
+    removed as dead code rather than kept as a fallback that never fires.
+    """
     import inspect
 
     from plugins.meeting_capture import calendar_stitch
@@ -98,7 +105,7 @@ def test_calendar_stitch_fallback_chain_includes_outlook():
     # Crude but stable — check the calendar registry lookups by name
     assert 'registry.get("google_calendar")' in source
     assert 'registry.get("outlook_calendar")' in source
-    # Phase G.4 added the Swift-helper-backed apple_calendar; the legacy
-    # apple_calendar_eventkit key remains as a tail fallback.
-    assert 'registry.get("apple_calendar")' in source
-    assert 'registry.get("apple_calendar_eventkit")' in source
+    # Apple Calendar is desktop-bridge-only server-side; must not be
+    # reintroduced as an unreachable server-side fallback branch.
+    assert 'registry.get("apple_calendar")' not in source
+    assert 'registry.get("apple_calendar_eventkit")' not in source

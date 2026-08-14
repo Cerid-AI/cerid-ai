@@ -205,7 +205,7 @@ class TestClaimVerificationBestEffort:
             ),
             patch(
                 "app.processor.jobs.brief_generation._assemble_corpus",
-                return_value=("inbox text", "notes text"),
+                return_value=("inbox text", "notes text", 3),
             ),
             patch(
                 "app.processor.jobs.brief_generation._get_chroma",
@@ -264,7 +264,7 @@ class TestClaimVerificationBestEffort:
             ),
             patch(
                 "app.processor.jobs.brief_generation._assemble_corpus",
-                return_value=("inbox text", "notes text"),
+                return_value=("inbox text", "notes text", 3),
             ),
             patch(
                 "app.processor.jobs.brief_generation._get_chroma",
@@ -381,7 +381,7 @@ def _patch_neo4j_and_corpus():
     stack.enter_context(
         patch(
             "app.processor.jobs.brief_generation._assemble_corpus",
-            return_value=("inbox text", "notes text"),
+            return_value=("inbox text", "notes text", 3),
         )
     )
     stack.enter_context(_patch_verification_deps())
@@ -413,3 +413,77 @@ def _patch_verification_deps():
         )
     )
     return stack
+
+
+# ---------------------------------------------------------------------------
+# UX-18 — empty-delta days flow has_new_data=False through the pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyDeltaDay:
+    async def test_no_new_items_passes_has_new_data_false(self):
+        job = _make_job()
+        record = _make_brief_record()
+
+        mock_service = AsyncMock()
+        mock_service.generate_daily.return_value = record
+        mock_service.store.return_value = None
+
+        with (
+            _patch_service_factory(mock_service),
+            patch(
+                "app.processor.jobs.brief_generation._get_neo4j",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._assemble_corpus",
+                return_value=("", "old notes still in the 7-day window", 0),
+            ),
+            _patch_verification_deps(),
+        ):
+            await job.run(_noop_progress)
+
+        assert mock_service.generate_daily.call_args.kwargs["has_new_data"] is False
+
+    async def test_no_new_items_skips_claim_verification(self):
+        """A one-line 'nothing new' brief has nothing to verify — running
+        claim extraction over it would only manufacture noise."""
+        job = _make_job()
+        record = _make_brief_record()
+
+        mock_service = AsyncMock()
+        mock_service.generate_daily.return_value = record
+        mock_service.store.return_value = None
+
+        mock_verify = AsyncMock(return_value=[])
+        with (
+            _patch_service_factory(mock_service),
+            patch(
+                "app.processor.jobs.brief_generation._get_neo4j",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._assemble_corpus",
+                return_value=("", "", 0),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._verify_and_persist_claims",
+                new=mock_verify,
+            ),
+        ):
+            await job.run(_noop_progress)
+
+        mock_verify.assert_not_awaited()
+
+    async def test_new_items_pass_has_new_data_true(self):
+        job = _make_job()
+        record = _make_brief_record()
+
+        mock_service = AsyncMock()
+        mock_service.generate_daily.return_value = record
+        mock_service.store.return_value = None
+
+        with _patch_service_factory(mock_service), _patch_neo4j_and_corpus():
+            await job.run(_noop_progress)
+
+        assert mock_service.generate_daily.call_args.kwargs["has_new_data"] is True

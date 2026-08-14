@@ -480,6 +480,27 @@
 
 /* Page vignette overlay — dark mode only */
 .vignette { pointer-events: none; position: fixed; inset: 0; z-index: 1; }
+
+/* Frameless-window drag strip (Electron titleBarStyle: hiddenInset).
+   The desktop window had NO draggable region at all: the only
+   `-webkit-app-region: drag` in the repo lives in
+   packages/desktop/src/renderer/index.html, which is the desktop's own loading
+   shell and is never what local mode loads — that loads this bundle. So the
+   window could not be moved.
+   Height matches the inset traffic lights. `left` clears them so the buttons
+   stay clickable; a drag region swallows clicks, which is also why anything
+   interactive placed in this strip must opt out with .app-no-drag. Harmless in
+   a browser, where -webkit-app-region is ignored. */
+.app-drag-region {
+  position: fixed;
+  top: 0;
+  left: 78px;
+  right: 0;
+  height: 28px;
+  z-index: 2;
+  -webkit-app-region: drag;
+}
+.app-no-drag { -webkit-app-region: no-drag; }
 .dark .vignette {
   background: radial-gradient(ellipse 80% 70% at 50% 50%, transparent 50%, rgba(10, 31, 61, 0.18) 100%);
 }

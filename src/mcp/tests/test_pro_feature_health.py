@@ -229,19 +229,48 @@ def test_an_undeclared_paid_flag_degrades(plugin_state, monkeypatch):
     assert "brand_new_paid_thing" in report["degraded"]
 
 
-def test_a_flag_declared_unimplemented_degrades_when_entitled(plugin_state):
-    """`audit_logging` and `sso_saml` are ✓ Enterprise in TIER_MATRIX.md, are
-    not PLANNED, and a repo-wide search finds no gate or call site for either.
-    Recorded truthfully so an Enterprise install reports them, rather than
-    hidden in a bucket that reads as fine."""
+def test_a_flag_declared_unimplemented_degrades_when_entitled(plugin_state, monkeypatch):
+    """A flag recorded as `unimplemented` must surface as degraded when entitled.
+
+    Uses a SYNTHETIC flag. It used to assert on `sso_saml`, which was the real
+    example until it was built on 2026-08-11 — at which point the test failed
+    for the best possible reason, and the fix was not to find another
+    unimplemented flag to point at but to stop depending on one existing. The
+    `unimplemented` bucket is empty now, and this must keep working when it is.
+    """
     import config.features as features
 
     features.set_tier("enterprise")
+    orig_tier = features._get_feature_tier
+    monkeypatch.setitem(features.FEATURE_FLAGS, "sold_but_unbuilt", True)
+    monkeypatch.setitem(features.NON_PLUGIN_IMPLEMENTATIONS, "sold_but_unbuilt", "unimplemented")
+    monkeypatch.setattr(
+        features, "_get_feature_tier",
+        lambda f: "enterprise" if f == "sold_but_unbuilt" else orig_tier(f),
+    )
     health = plugin_state(loaded={}, failed={})
     report = health._pro_feature_health()
 
-    assert report["features"]["sso_saml"]["implementation"] == "unimplemented"
-    assert "sso_saml" in report["degraded"]
+    assert report["features"]["sold_but_unbuilt"]["implementation"] == "unimplemented"
+    assert "sold_but_unbuilt" in report["degraded"]
+
+
+def test_the_unimplemented_bucket_is_empty(plugin_state):
+    """Nothing is currently sold and unbuilt — and this says so out loud.
+
+    A green run of the suite above would otherwise be equally consistent with
+    "the bucket is empty" and "the bucket is full and nobody looked".
+    """
+    import config.features as features
+
+    unimplemented = sorted(
+        flag
+        for flag, kind in features.NON_PLUGIN_IMPLEMENTATIONS.items()
+        if kind == "unimplemented"
+    )
+    assert unimplemented == [], (
+        f"these are entitled and have no implementation: {unimplemented}"
+    )
 
 
 # --- Sprint 2: the residual bucket, and the gates that could not fail --------
@@ -339,3 +368,39 @@ class TestManifestTierMatchesItsFlags:
         assert not mismatched, (
             f"plugin gated above the tier of the flag it supplies: {mismatched}"
         )
+
+
+# --- Conditionally-mounted implementations -----------------------------------
+
+
+def test_sso_saml_degrades_when_multi_user_is_off(plugin_state, monkeypatch):
+    """`in_process` is a claim about a router that is MOUNTED.
+
+    app/routers/saml.py is registered only under CERID_MULTI_USER, so on a
+    single-user Enterprise install the flag was entitled, declared
+    implemented, and served by nothing — the residual-bucket substitution, one
+    flag wide. Caught live: the gate reported "none degraded" on a stack whose
+    /openapi.json contained no /auth/saml path at all.
+    """
+    import config.features as features
+
+    monkeypatch.setattr(features, "CERID_MULTI_USER", False)
+    features.set_tier("enterprise")
+    health = plugin_state(loaded={}, failed={})
+    report = health._pro_feature_health()
+
+    assert report["features"]["sso_saml"]["loaded"] is False
+    assert "CERID_MULTI_USER" in report["features"]["sso_saml"]["blocked_reason"]
+    assert "sso_saml" in report["degraded"]
+
+
+def test_sso_saml_is_healthy_when_multi_user_is_on(plugin_state, monkeypatch):
+    import config.features as features
+
+    monkeypatch.setattr(features, "CERID_MULTI_USER", True)
+    features.set_tier("enterprise")
+    health = plugin_state(loaded={}, failed={})
+    report = health._pro_feature_health()
+
+    assert report["features"]["sso_saml"]["implementation"] == "in_process"
+    assert "sso_saml" not in report["degraded"]

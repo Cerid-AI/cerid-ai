@@ -80,7 +80,6 @@ cerid-ai-internal/
 │   │   │                    # @register_tool in tool_registry.py + mcp_tools/
 │   │   │                    # (55 tools; 60 with the optional trading module)
 │   │   └── internal_modules.py  # /health.invariants.internal_modules flags
-│   ├── enterprise/          # Enterprise overlay (ABAC, SSO, classification, immutable audit)
 │   ├── config/              # settings.py, taxonomy.py, features.py, providers.py
 │   ├── routers/             # billing.py ONLY (internal-only; whole dir stripped from public)
 │   ├── utils/               # 35 standalone utility modules (post-Sprint-E bridges retired)
@@ -128,11 +127,6 @@ Three layers, one rule: **core must not import app.**
 - FastAPI routers, store adapters (`ChromaVectorStore`, `Neo4jGraphStore`, `RedisCacheStore`), parsers, middleware, sync, eval, entry point.
 - Free to import from `core` and bring in framework code (FastAPI, httpx, Pydantic).
 - Houses orchestration wrappers that stitch core algorithms into runtime flows (`app/agents/assembler.py` etc.).
-
-### `enterprise/` — optional overlay
-- ABAC, SSO, classification, immutable audit.
-- Scaffolded, not wired by default.
-- Internal-only per `.sync-manifest.yaml`.
 
 ### `import-linter` gate
 - Declared in `src/mcp/.importlinter` and `pyproject.toml`.
@@ -402,6 +396,11 @@ Each source carries:
 - `retention_policy: { mode: "keep_all" | "days" | "count", … }`
   applied nightly by `SCHEDULE_RETENTION_ENFORCE` via
   `core.ingest.retention.plan_for_source` + `app.services.retention.apply_retention_plan`.
+  **Retention is opt-in.** `create_source()` defaults every new source to
+  `mode: "keep_all"`, and `enforce_all_retention()` skips `keep_all`
+  sources entirely — nothing is purged unless an operator explicitly
+  sets a `"days"` or `"count"` policy via `POST /sources/{id}/policy`.
+  The nightly pass logs how many sources it skipped for this reason.
 - `quality_floor: float [0.0, 1.0]` — artifacts with a computed
   quality_score below the floor are dropped before chunking +
   embedding. Lookup is memoized per-source in
@@ -473,6 +472,23 @@ driven from the desktop main process instead
 CoreSpotlight indexes the host, not the container. TCC grants inherit
 from the parent Electron app's signed bundle — load-bearing contract
 documented in `packages/desktop/swift/README.md`.
+
+**Spotlight retention.** A donated item is knowledge-base content living in a
+macOS index outside the app, so it needs a way out. Two, in fact: every item
+carries an `expirationDate` (`expiration_days`, operator-configurable in
+Settings → Extensions → Spotlight, 90 days by default, `0` for never), and the
+main process sweeps the whole domain at launch when `spotlight_donation` is no
+longer entitled (`purgeIfUnentitled`). The expiry window is also the only answer
+to uninstall — dragging an `.app` to the Trash runs no code, so nothing can
+purge on the way out. Until 2026-08-11 neither existed: the field was in the
+helper's input schema from the day it was written and the donor never sent it,
+and `purgeSpotlight` had one call site, a button in Settings.
+
+The sweep distinguishes three states, not two. A capabilities response that
+cannot be read is `skipped`, never folded into either answer: read as
+"entitled" it leaves a lapsed customer's knowledge base searchable forever;
+read as "unentitled" a backend that is merely still booting wipes a working
+index on every launch.
 
 Until 2026-08-10 this section said "three" and pointed at
 `plugins/apple_calendar` / `plugins/apple_photos`. The count predates

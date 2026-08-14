@@ -3,7 +3,7 @@
 
 """Expanded tests for db/neo4j/ package — CRUD, relationships, taxonomy, schema."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,6 +23,7 @@ from app.db.neo4j.relationships import (
 )
 from app.db.neo4j.schema import init_schema
 from app.db.neo4j.taxonomy import (
+    count_tags,
     create_domain,
     create_sub_category,
     get_taxonomy,
@@ -71,12 +72,11 @@ class TestInitSchema:
         index_calls = [c for c in calls if "INDEX" in c and "CONSTRAINT" not in c]
         assert len(index_calls) >= 3  # domain, filename, sub_category
 
-    @patch("app.db.neo4j.schema.config")
-    def test_seeds_domains_from_taxonomy(self, mock_config):
-        mock_config.TAXONOMY = {
+    def test_seeds_domains_from_taxonomy(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.schema.config.TAXONOMY", {
             "coding": {"description": "Code", "icon": "code", "sub_categories": ["general", "scripts"]},
             "finance": {"description": "Money", "icon": "dollar"},
-        }
+        })
         driver, session = _mock_driver()
         init_schema(driver)
         # Check MERGE Domain calls
@@ -84,11 +84,10 @@ class TestInitSchema:
         domain_merges = [c for c in calls if "MERGE (d:Domain" in c]
         assert len(domain_merges) >= 2
 
-    @patch("app.db.neo4j.schema.config")
-    def test_seeds_subcategories(self, mock_config):
-        mock_config.TAXONOMY = {
+    def test_seeds_subcategories(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.schema.config.TAXONOMY", {
             "coding": {"sub_categories": ["general", "scripts"]},
-        }
+        })
         driver, session = _mock_driver()
         init_schema(driver)
         calls = [str(c) for c in session.run.call_args_list]
@@ -145,9 +144,8 @@ class TestCreateArtifact:
         calls = [str(c) for c in session.run.call_args_list]
         assert any("CATEGORIZED_AS" in c for c in calls)
 
-    @patch("app.db.neo4j.artifacts.config")
-    def test_default_subcategory(self, mock_config):
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+    def test_default_subcategory(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.artifacts.config.DEFAULT_SUB_CATEGORY", "general")
         driver, session = _mock_driver()
         record = _mock_record(id="art-1")
         session.run.return_value.single.return_value = record
@@ -255,9 +253,8 @@ class TestGetArtifact:
         result = get_artifact(driver, "nonexistent")
         assert result is None
 
-    @patch("app.db.neo4j.artifacts.config")
-    def test_default_subcategory_fallback(self, mock_config):
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+    def test_default_subcategory_fallback(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.artifacts.config.DEFAULT_SUB_CATEGORY", "general")
         driver, session = _mock_driver()
         record = _mock_record(
             id="art-1", filename="test.py", domain="coding",
@@ -288,9 +285,8 @@ class TestListArtifacts:
         result = list_artifacts(driver)
         assert result == []
 
-    @patch("app.db.neo4j.artifacts.config")
-    def test_returns_artifacts(self, mock_config):
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+    def test_returns_artifacts(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.artifacts.config.DEFAULT_SUB_CATEGORY", "general")
         driver, session = _mock_driver()
         record = _mock_record(
             id="art-1", filename="test.py", domain="coding",
@@ -350,9 +346,8 @@ class TestRecategorizeArtifact:
 # ---------------------------------------------------------------------------
 
 class TestCreateRelationship:
-    @patch("app.db.neo4j.relationships.config")
-    def test_valid_relationship(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
+    def test_valid_relationship(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO", "REFERENCES"])
         driver, session = _mock_driver()
         record = _mock_record(ok=True, is_new=True)
         session.run.return_value.single.return_value = record
@@ -360,26 +355,23 @@ class TestCreateRelationship:
         result = create_relationship(driver, "a1", "a2", "RELATES_TO")
         assert result is True
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_invalid_rel_type_returns_false(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_invalid_rel_type_returns_false(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
         driver, session = _mock_driver()
 
         result = create_relationship(driver, "a1", "a2", "INVALID_TYPE")
         assert result is False
         session.run.assert_not_called()
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_self_reference_returns_false(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_self_reference_returns_false(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
         driver, session = _mock_driver()
 
         result = create_relationship(driver, "same-id", "same-id", "RELATES_TO")
         assert result is False
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_existing_relationship_returns_false(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_existing_relationship_returns_false(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
         driver, session = _mock_driver()
         # is_new=False means MERGE found existing
         record = _mock_record(ok=True, is_new=False)
@@ -388,9 +380,8 @@ class TestCreateRelationship:
         result = create_relationship(driver, "a1", "a2", "RELATES_TO")
         assert result is False
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_properties_merged(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_properties_merged(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
         driver, session = _mock_driver()
         record = _mock_record(ok=True, is_new=True)
         session.run.return_value.single.return_value = record
@@ -412,11 +403,10 @@ class TestFindRelatedArtifacts:
         result = find_related_artifacts(driver, [])
         assert result == []
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_returns_related(self, mock_config):
-        mock_config.GRAPH_TRAVERSAL_DEPTH = 2
-        mock_config.GRAPH_MAX_RELATED = 10
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_returns_related(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_TRAVERSAL_DEPTH", 2)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MAX_RELATED", 10)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
 
         driver, session = _mock_driver()
         record = _mock_record(
@@ -431,11 +421,10 @@ class TestFindRelatedArtifacts:
         assert len(result) == 1
         assert result[0]["id"] == "related-1"
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_depth_clamped(self, mock_config):
-        mock_config.GRAPH_TRAVERSAL_DEPTH = 2
-        mock_config.GRAPH_MAX_RELATED = 10
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_depth_clamped(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_TRAVERSAL_DEPTH", 2)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MAX_RELATED", 10)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
 
         driver, session = _mock_driver()
         session.run.return_value = iter([])
@@ -445,9 +434,8 @@ class TestFindRelatedArtifacts:
         # Depth should be clamped to max 4
         assert "*1..4" in call_args.args[0]
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_invalid_rel_types_returns_empty(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_invalid_rel_types_returns_empty(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
 
         driver, _ = _mock_driver()
         result = find_related_artifacts(driver, ["art-1"], rel_types=["INVALID"])
@@ -467,10 +455,9 @@ def _batch_result(new_count):
 
 
 class TestDiscoverRelationships:
-    @patch("app.db.neo4j.relationships.config")
-    def test_same_directory_discovery(self, mock_config):
-        mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
+    def test_same_directory_discovery(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MIN_KEYWORD_OVERLAP", 2)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO", "REFERENCES"])
 
         driver, session = _mock_driver()
         neighbor = _mock_record(id="neighbor-1")
@@ -486,9 +473,8 @@ class TestDiscoverRelationships:
         write_cypher = session.run.call_args_list[1].args[0]
         assert "UNWIND" in write_cypher and "MERGE" in write_cypher
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_root_file_skips_directory_strategy(self, mock_config):
-        mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
+    def test_root_file_skips_directory_strategy(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MIN_KEYWORD_OVERLAP", 2)
 
         driver, session = _mock_driver()
         session.run.return_value = iter([])
@@ -499,10 +485,9 @@ class TestDiscoverRelationships:
         # Root file has no parent_dir — should skip directory strategy
         assert count == 0
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_keyword_overlap_discovery(self, mock_config):
-        mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
+    def test_keyword_overlap_discovery(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MIN_KEYWORD_OVERLAP", 2)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO", "REFERENCES"])
 
         driver, session = _mock_driver()
         other = _mock_record(id="other-1", keywords='["python", "fastapi", "rest"]')
@@ -516,10 +501,9 @@ class TestDiscoverRelationships:
         # python + fastapi overlap >= 2 → should create relationship
         assert count == 1
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_keyword_below_threshold_creates_nothing(self, mock_config):
-        mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
+    def test_keyword_below_threshold_creates_nothing(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MIN_KEYWORD_OVERLAP", 2)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO", "REFERENCES"])
 
         driver, session = _mock_driver()
         # Only 1 shared keyword ("python") — below the overlap threshold, so no
@@ -533,10 +517,10 @@ class TestDiscoverRelationships:
         assert count == 0
         assert session.run.call_count == 1  # read only, no batch write
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_content_reference_discovery(self, mock_config):
-        mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 100  # Disable keyword strategy
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
+    def test_content_reference_discovery(self, monkeypatch):
+        # Disable keyword strategy
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MIN_KEYWORD_OVERLAP", 100)
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO", "REFERENCES"])
 
         driver, session = _mock_driver()
         ref_match = _mock_record(id="ref-1", filename="config.py")
@@ -548,9 +532,8 @@ class TestDiscoverRelationships:
         )
         assert count == 1
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_no_content_skips_reference_strategy(self, mock_config):
-        mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 100
+    def test_no_content_skips_reference_strategy(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_MIN_KEYWORD_OVERLAP", 100)
 
         driver, session = _mock_driver()
         session.run.return_value = iter([])
@@ -566,9 +549,8 @@ class TestDiscoverRelationships:
 # ---------------------------------------------------------------------------
 
 class TestBatchMergeRelationships:
-    @patch("app.db.neo4j.relationships.config")
-    def test_invalid_rel_type_returns_zero_without_query(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_invalid_rel_type_returns_zero_without_query(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
         driver, session = _mock_driver()
 
         n = _batch_merge_relationships(
@@ -577,18 +559,16 @@ class TestBatchMergeRelationships:
         assert n == 0
         session.run.assert_not_called()
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_empty_edges_returns_zero_without_query(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_empty_edges_returns_zero_without_query(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
         driver, session = _mock_driver()
 
         n = _batch_merge_relationships(driver, "a1", [], "RELATES_TO")
         assert n == 0
         session.run.assert_not_called()
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_dedups_by_target_first_wins_and_drops_self(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
+    def test_dedups_by_target_first_wins_and_drops_self(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["RELATES_TO"])
         driver, session = _mock_driver()
         session.run.return_value = _batch_result(2)
 
@@ -609,9 +589,8 @@ class TestBatchMergeRelationships:
         # The write is a single batched UNWIND MERGE.
         assert "UNWIND" in session.run.call_args.args[0]
 
-    @patch("app.db.neo4j.relationships.config")
-    def test_returns_query_new_count(self, mock_config):
-        mock_config.GRAPH_RELATIONSHIP_TYPES = ["REFERENCES"]
+    def test_returns_query_new_count(self, monkeypatch):
+        monkeypatch.setattr("app.db.neo4j.relationships.config.GRAPH_RELATIONSHIP_TYPES", ["REFERENCES"])
         driver, session = _mock_driver()
         session.run.return_value = _batch_result(0)  # all edges pre-existed
 
@@ -735,6 +714,25 @@ class TestListTags:
         list_tags(driver, limit=25)
         call_kwargs = session.run.call_args.kwargs
         assert call_kwargs["limit"] == 25
+
+
+# ---------------------------------------------------------------------------
+# Tests: count_tags — WB-23: the true distinct-tag total, unbounded by
+# list_tags' `limit` cap.
+# ---------------------------------------------------------------------------
+
+class TestCountTags:
+    def test_returns_total(self):
+        driver, session = _mock_driver()
+        session.run.return_value.single.return_value = _mock_record(total=842)
+
+        assert count_tags(driver) == 842
+
+    def test_no_record_returns_zero(self):
+        driver, session = _mock_driver()
+        session.run.return_value.single.return_value = None
+
+        assert count_tags(driver) == 0
 
 
 # ---------------------------------------------------------------------------

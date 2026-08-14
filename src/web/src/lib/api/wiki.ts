@@ -421,10 +421,14 @@ function normalizeBacklinkItem(raw: Record<string, unknown>): BacklinkItem {
  * POST /wiki/entities/{slug}/refresh
  *
  * Enqueues a background refresh for the entity. The backend responds 202
- * Accepted; callers invalidate the entity query key to pick up the new
- * refresh_status field as it transitions.
+ * Accepted whether or not a new job was actually enqueued — ``enqueued:
+ * false`` means an equivalent refresh is already pending/running (queue-
+ * level duplicate collapse) or the per-entity debounce is still active.
+ * Callers must branch on the returned flag (WB-44) rather than assume a
+ * 202 always means "queued"; they invalidate the entity query key either
+ * way to pick up the new refresh_status field as it transitions.
  */
-export async function refreshEntity(slug: string): Promise<void> {
+export async function refreshEntity(slug: string): Promise<boolean> {
   const res = await fetch(`${MCP_BASE}/wiki/entities/${encodeURIComponent(slug)}/refresh`, {
     method: "POST",
     headers: mcpHeaders(),
@@ -432,6 +436,8 @@ export async function refreshEntity(slug: string): Promise<void> {
   if (!res.ok) {
     throw new Error(await extractError(res, `Refresh failed (${res.status})`))
   }
+  const data = (await res.json()) as { enqueued?: boolean }
+  return data.enqueued === true
 }
 
 /**

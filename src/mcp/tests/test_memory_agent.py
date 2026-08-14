@@ -135,23 +135,21 @@ class TestExtractMemories:
 
 class TestExtractAndStoreMemories:
     @pytest.mark.asyncio
-    @patch("core.agents.memory.config")
-    async def test_disabled_returns_skipped(self, mock_config):
+    async def test_disabled_returns_skipped(self, monkeypatch):
         """Should skip when ENABLE_MEMORY_EXTRACTION is False."""
         from app.agents.memory import extract_and_store_memories
 
-        mock_config.ENABLE_MEMORY_EXTRACTION = False
+        monkeypatch.setattr("core.agents.memory.config.ENABLE_MEMORY_EXTRACTION", False)
         result = await extract_and_store_memories("text", "conv-123")
         assert result["status"] == "skipped"
 
     @pytest.mark.asyncio
-    @patch("core.agents.memory.config")
     @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
-    async def test_no_memories_extracted(self, mock_extract, mock_config):
+    async def test_no_memories_extracted(self, mock_extract, monkeypatch):
         """When no memories are extracted, should report zero."""
         from app.agents.memory import extract_and_store_memories
 
-        mock_config.ENABLE_MEMORY_EXTRACTION = True
+        monkeypatch.setattr("core.agents.memory.config.ENABLE_MEMORY_EXTRACTION", True)
         mock_extract.return_value = []
 
         result = await extract_and_store_memories("x" * 200, "conv-123")

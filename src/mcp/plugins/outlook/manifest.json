@@ -1,5 +1,6 @@
 {
   "name": "outlook",
+  "display_name": "Outlook Mail",
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",

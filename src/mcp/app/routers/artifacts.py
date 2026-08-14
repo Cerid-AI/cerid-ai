@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
 import config
@@ -81,6 +81,16 @@ def recategorize(
     dest_collection = chroma.get_or_create_collection(
         name=config.collection_name(new_domain)
     )
+    # AF-064: build tags_json here (the key the retrieval tag-boost actually
+    # reads — query_agent.py's metadata.get("tags_json")) instead of stamping
+    # the raw comma-string under "tags", which no reader consumes.
+    tags_json: str | None = None
+    if tags:
+        if tags.startswith("["):
+            tags_json = tags
+        else:
+            tags_json = json.dumps([t.strip().lower() for t in tags.split(",") if t.strip()])
+
     updated_metadatas = []
     for meta in fetched["metadatas"]:
         meta = dict(meta)
@@ -88,8 +98,8 @@ def recategorize(
         meta["recategorized_at"] = utcnow_iso()
         if sub_category:
             meta["sub_category"] = sub_category
-        if tags:
-            meta["tags"] = tags
+        if tags_json:
+            meta["tags_json"] = tags_json
         updated_metadatas.append(meta)
 
     # Move the chunks in ChromaDB FIRST — the failure-prone cross-collection
@@ -114,14 +124,9 @@ def recategorize(
     # Stores moved and verified — now flip Neo4j last.
     domains = graph.recategorize_artifact(driver, artifact_id, new_domain)
 
-    # Update taxonomy if sub_category or tags provided
+    # Update taxonomy if sub_category or tags provided (tags_json built above,
+    # alongside the Chroma metadata write, so both stores agree).
     if sub_category or tags:
-        tags_json = None
-        if tags:
-            if tags.startswith("["):
-                tags_json = tags
-            else:
-                tags_json = json.dumps([t.strip().lower() for t in tags.split(",") if t.strip()])
         graph.update_artifact_taxonomy(
             driver,
             artifact_id,
@@ -271,6 +276,7 @@ async def artifact_detail_endpoint(artifact_id: str):
 
 @router.get("/artifacts")  # response-model-allowed: dynamic response (shape varies)
 async def list_artifacts_endpoint(
+    response: Response,
     domain: str | None = Query(None, description="Filter by domain"),
     sub_category: str | None = Query(None, description="Filter by sub-category"),
     tag: str | None = Query(None, description="Filter by tag"),
@@ -278,12 +284,13 @@ async def list_artifacts_endpoint(
     since: str | None = Query(None, description="ISO date — only return artifacts ingested after this date"),
     min_quality: float | None = Query(None, ge=0, le=1, description="Minimum quality score (0-1)"),
     search: str | None = Query(None, min_length=1, max_length=200, description="Case-insensitive substring match over filename and summary"),
+    include_machine: bool = Query(False, description="Include machine-named artifacts (extracted memories, audit transcripts, hex/content-hash names) — excluded from the default Library view (UX-26)"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(50, ge=1, le=500),
 ):
     try:
         driver = get_neo4j()
-        return graph.list_artifacts(
+        items = graph.list_artifacts(
             driver,
             domain=domain,
             sub_category=sub_category,
@@ -294,7 +301,25 @@ async def list_artifacts_endpoint(
             search=search,
             offset=offset,
             limit=limit,
+            include_machine=include_machine,
         )
+        # WB-24: expose the true total (not the page's length) so a client
+        # paging via `offset` can tell when it has fetched everything, instead
+        # of assuming a returned page shorter than `limit` never happens.
+        total = graph.count_artifacts(
+            driver,
+            domain=domain,
+            sub_category=sub_category,
+            tag=tag,
+            client_source=client_source,
+            since=since,
+            min_quality=min_quality,
+            search=search,
+            include_machine=include_machine,
+        )
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Has-More"] = "true" if offset + len(items) < total else "false"
+        return items
     except Exception as e:
         logger.error(f"List artifacts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

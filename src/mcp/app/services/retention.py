@@ -83,17 +83,20 @@ def enforce_all_retention() -> dict[str, Any]:
     sources = srcdb.list_sources(driver)
     total_purged = 0
     per_source: list[dict[str, Any]] = []
+    keep_all_skipped = 0
 
     for src in sources:
-        # Retention is opt-in: only sources with an explicit dict policy whose
-        # mode is not "keep_all" are ever enforced. keep_all is the intentional
-        # default set by create_source(), so an operator must deliberately
-        # configure a concrete policy before any artifact is purged. Non-dict /
+        # AF-041 (DECIDED): retention stays opt-in — only sources with an
+        # explicit dict policy whose mode is not "keep_all" are ever
+        # enforced. keep_all is the intentional default set by
+        # create_source(), so an operator must deliberately configure a
+        # concrete policy before any artifact is purged. Non-dict /
         # malformed policies are skipped for the same fail-safe reason.
         policy = src.get("retention_policy") or {}
         if not isinstance(policy, dict):
             continue
         if policy.get("mode") == "keep_all":
+            keep_all_skipped += 1
             continue
 
         artifacts = _fetch_artifacts_for_source(driver, src["id"])
@@ -110,6 +113,16 @@ def enforce_all_retention() -> dict[str, Any]:
             "kept": decision.keep_count,
         })
 
+    # AF-041 (DECIDED): surface that retention is inert on keep_all sources
+    # once per run — an operator watching logs should be able to see why a
+    # source they expect to be enforced never shows up in per_source.
+    if keep_all_skipped:
+        logger.info(
+            "Retention pass: %d source(s) skipped (keep_all — retention is "
+            "opt-in; configure a retention policy to enable enforcement)",
+            keep_all_skipped,
+        )
+
     logger.info(
         "Retention pass complete: %d artifacts purged across %d sources",
         total_purged,
@@ -119,4 +132,5 @@ def enforce_all_retention() -> dict[str, Any]:
         "total_purged": total_purged,
         "sources_affected": len(per_source),
         "per_source": per_source,
+        "keep_all_skipped": keep_all_skipped,
     }

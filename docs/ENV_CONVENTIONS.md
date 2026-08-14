@@ -24,7 +24,6 @@ These exist for historical reasons and should **not** be renamed (would break ex
 | `TOMBSTONE_TTL_DAYS` | Bare | Should be `CERID_TOMBSTONE_TTL_DAYS` | Added with sync feature |
 | `ENABLE_*` flags | `ENABLE_` | Could be `CERID_ENABLE_*` | Matches common convention without prefix |
 | `CERID_STORAGE_MODE` | `CERID_` | Consistent | Correct |
-| `CERID_CONFLICT_STRATEGY` | `CERID_` | Consistent | Correct |
 
 **Rule:** Do not rename existing variables. For new variables, follow the patterns above.
 
@@ -170,10 +169,16 @@ opts in independently via its `*_PROVIDER` toggle.
 | `CERID_SYNC_DIR` | `~/Dropbox/cerid-sync` | Sync directory path |
 | `CERID_MACHINE_ID` | *(hostname)* | Machine identifier for sync |
 | `CERID_SYNC_BACKEND` | `local` | Sync backend type |
-| `CERID_CONFLICT_STRATEGY` | `remote_wins` | Default conflict resolution |
 | `CERID_STORAGE_MODE` | `extract_only` | Storage mode: extract_only or archive |
-| `SYNC_EXPORT_ON_INGEST` | `false` | Auto-export after each ingest |
+| `SCHEDULE_SYNC_EXPORT` | *(disabled)* | Cron string for the sync-export job — the only export trigger; there is no per-ingest export (RA-54) |
 | `TOMBSTONE_TTL_DAYS` | `90` | Days before tombstones expire |
+
+**Conflict strategy is not an env var.** There is no `.env` route to set the
+default conflict-resolution strategy — `CERID_CONFLICT_STRATEGY` was removed
+(RA-52) because nothing ever read it; the sync importer's default was a Python
+literal, not the env var. Choose the strategy per-import via the sync panel
+in Settings (persisted to `localStorage`) or the CLI's `--conflict-strategy`
+flag (`scripts/cerid-sync.py import --conflict-strategy local_wins`).
 
 ### Paths & Storage (optional)
 

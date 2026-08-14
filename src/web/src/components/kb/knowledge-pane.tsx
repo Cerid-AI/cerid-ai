@@ -31,13 +31,31 @@ import { KnowledgeLibraryDialog } from "./knowledge-library-dialog"
 import { ActivityFeed } from "./ActivityFeed"
 import { TagManager } from "./tag-manager"
 import { DuplicateDetector } from "./duplicate-detector"
-import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
+import { fetchAllArtifacts, fetchAllTags, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
+import type { TagsPage } from "@/lib/api"
 import { notifyError } from "@/lib/query-client"
 import { useKBInjection } from "@/contexts/kb-injection-context"
+import { useNavigation } from "@/contexts/navigation-context"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { KBQueryResult, Artifact } from "@/lib/types"
 
 const ArtifactPreview = lazy(() => import("./artifact-preview"))
+
+/** Drop `?artifact=` once the preview it opened is dismissed. Left in place it
+    would re-open on the next navigation that bumps navVersion, for reasons the
+    user could not connect to anything they did. */
+function clearArtifactParam(): void {
+  if (typeof window === "undefined") return
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has("artifact")) return
+  params.delete("artifact")
+  const next = params.toString()
+  window.history.replaceState(
+    {},
+    "",
+    `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`,
+  )
+}
 
 const UPLOAD_STATUS_RESET_MS = 4000
 const PAGE_SIZE = 50
@@ -176,6 +194,17 @@ export function KnowledgePane() {
   const [sortBy, setSortBy] = useState<"relevance" | "quality" | "date" | "name">("relevance")
   const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null)
   const [tagManagerOpen, setTagManagerOpen] = useState(false)
+  // `?artifact=` — written by goTo("knowledge", { artifact }) and, at mount, by
+  // whatever the app was launched with. This is what turns a cerid://kb/<id>
+  // Spotlight result into the artifact rather than just a raised window.
+  // navVersion covers the same-pane case: navigating to knowledge while already
+  // on knowledge changes no state React would otherwise re-render for.
+  const { navVersion } = useNavigation()
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const id = new URLSearchParams(window.location.search).get("artifact")
+    if (id) setPreviewArtifactId(id)
+  }, [navVersion])
   const [tagBrowseMode, setTagBrowseMode] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
@@ -323,19 +352,28 @@ export function KnowledgePane() {
   }, [pendingFiles, activeDomain, queryClient, addToIngestionLog])
 
   const {
-    data: artifacts,
+    data: artifactsResult,
     isLoading: browsing,
     isError: browseError,
     error: browseErrorDetail,
     refetch: refetchArtifacts,
   } = useQuery({
-    queryKey: ["artifacts", activeDomain ?? "all", taxonomyFilter.subCategory ?? "all"],
+    queryKey: ["artifacts", activeDomain ?? "all", taxonomyFilter.subCategory ?? "all", activeTag ?? "all"],
+    // WB-24: page through the backend via offset instead of a single
+    // hardcoded limit=200 fetch, which silently capped the Library pane and
+    // made "Showing 200 of 200" a lie whenever more than 200 existed.
+    // WB-27: forward the active tag to the server-side `tag` filter
+    // (artifacts.py) instead of filtering the fetched page client-side —
+    // the client-side filter matched against each artifact's own `tags`
+    // field, which is empty for artifacts whose only display tags are
+    // derived keyword fallbacks, and silently dropped them from the result.
     queryFn: () =>
-      fetchArtifacts(activeDomain ?? undefined, 200, taxonomyFilter.subCategory ?? undefined),
+      fetchAllArtifacts(activeDomain ?? undefined, taxonomyFilter.subCategory ?? undefined, 200, 5000, activeTag ?? undefined),
     enabled: !activeSearch,
     staleTime: 30_000,
     retry: 1,
   })
+  const artifacts = artifactsResult?.artifacts
 
   const {
     data: searchResults,
@@ -344,9 +382,13 @@ export function KnowledgePane() {
     error: searchErrorDetail,
     refetch: refetchSearch,
   } = useQuery({
-    queryKey: ["kb-search", activeSearch, activeDomain ?? "all"],
+    // WB-25: topK tracks displayLimit so the existing "Load more" affordance
+    // can widen the rerank window instead of being silently stuck at the
+    // default topK=10 — which made the reported count read as if it were
+    // the true match count rather than a fixed 10-item window.
+    queryKey: ["kb-search", activeSearch, activeDomain ?? "all", displayLimit],
     queryFn: () =>
-      queryKB(activeSearch, activeDomain ? [activeDomain] : undefined),
+      queryKB(activeSearch, activeDomain ? [activeDomain] : undefined, displayLimit),
     enabled: !!activeSearch && activeSearch.length > 2,
     staleTime: 60_000,
     retry: 1,
@@ -445,19 +487,32 @@ export function KnowledgePane() {
     }
   }, [queryClient])
 
-  const availableTags = useMemo(() => {
-    const tagCounts = new Map<string, number>()
-    for (const r of dateFiltered) {
-      for (const tag of r.tags ?? []) {
-        tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
-      }
-    }
-    return [...tagCounts.entries()].sort((a, b) => b[1] - a[1])
-  }, [dateFiltered])
+  // WB-27: tag chips and the "All (N)" count must reflect the KB-wide
+  // usage_count from GET /tags, not a count derived from the capped
+  // browse/search page — a tag used across hundreds of artifacts should not
+  // read "(3)" just because only 3 of its holders landed on the current page.
+  // Shares its query key with TagManager's own fetchAllTags query so opening
+  // that dialog doesn't duplicate the round trip.
+  const { data: allTagsPage } = useQuery({
+    queryKey: ["all-tags"],
+    queryFn: (): Promise<TagsPage> => fetchAllTags(),
+    staleTime: 30_000,
+  })
+
+  const availableTags = useMemo<Array<[string, number]>>(
+    () => (allTagsPage?.tags ?? []).map((t) => [t.name, t.usage_count]),
+    [allTagsPage],
+  )
 
   const displayedTags = tagBrowseMode ? availableTags : availableTags.slice(0, 12)
 
-  const filteredByTag = activeTag
+  // WB-27: browse mode sends `tag` to the server (fetchAllArtifacts above),
+  // which already filters the artifact set — re-filtering here on each
+  // artifact's own `tags` field would wrongly drop matches whose display
+  // tags are derived keyword fallbacks rather than real tags. Search mode's
+  // window is small enough that filtering client-side is fine and avoids a
+  // second round trip.
+  const filteredByTag = activeTag && activeSearch
     ? dateFiltered.filter((r) => r.tags?.includes(activeTag))
     : dateFiltered
 
@@ -486,10 +541,29 @@ export function KnowledgePane() {
     return sorted
   }, [filteredByTag, sortBy, activeSearch])
 
+  // WB-25: the backend has no true-total signal for search (total_results is
+  // just len(results), i.e. the window size) — when the raw fetched window
+  // comes back exactly as large as what was asked for, more matches may
+  // still exist beyond it, so "Load more" must stay offered and the count
+  // must not be presented as if it were the total.
+  const searchWindowFull = !!activeSearch && (searchResults?.results?.length ?? 0) >= displayLimit
+
   // Pagination
   const totalCount = results.length
   const paginatedResults = results.slice(0, displayLimit)
-  const hasMore = displayLimit < totalCount
+  const hasMore = activeSearch ? searchWindowFull : displayLimit < totalCount
+  // UX-28: name the scope the count describes. An unlabeled "Showing 50 of
+  // 94 artifacts" beside a corpus-wide hero count ("744 artifacts") read as
+  // a contradiction; the 94 was a filtered subset all along.
+  const scopeParts = [
+    activeDomain,
+    taxonomyFilter.subCategory,
+    activeTag ? `#${activeTag}` : null,
+  ].filter((p): p is string => !!p)
+  const scopeLabel = scopeParts.length > 0 ? ` in ${scopeParts.join(" › ")}` : ""
+  const showingLabel = activeSearch
+    ? `Showing ${totalCount}${searchWindowFull ? "+" : ""} results${scopeLabel}`
+    : `Showing ${paginatedResults.length} of ${totalCount} artifacts${scopeLabel}`
 
   const executeSearch = useCallback(() => {
     if (searchInput.trim().length > 2) {
@@ -541,8 +615,8 @@ export function KnowledgePane() {
         </div>
         <p className="text-xs text-muted-foreground">
           {activeSearch
-            ? `${results.length} results for "${activeSearch}"`
-            : `Showing ${paginatedResults.length} of ${totalCount} artifacts`}
+            ? `${results.length}${searchWindowFull ? "+" : ""} results for "${activeSearch}"`
+            : showingLabel}
           {taxonomyFilter.subCategory && (
             <span className="ml-1 text-primary">
               in {taxonomyFilter.subCategory}
@@ -971,7 +1045,7 @@ export function KnowledgePane() {
                     Load more
                   </Button>
                   <span className="text-label-xs text-muted-foreground">
-                    Showing {paginatedResults.length} of {totalCount} artifacts
+                    {showingLabel}
                   </span>
                 </div>
               )}
@@ -999,7 +1073,10 @@ export function KnowledgePane() {
           <ArtifactPreview
             artifactId={previewArtifactId}
             open={!!previewArtifactId}
-            onClose={() => setPreviewArtifactId(null)}
+            onClose={() => {
+              setPreviewArtifactId(null)
+              clearArtifactParam()
+            }}
           />
         </Suspense>
       )}

@@ -6,11 +6,17 @@
 // and Cycle 4 click-contract behavior.
 
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import SubjectsPane from "@/components/subjects/subjects-pane"
 import { NavigationProvider } from "@/contexts/navigation-context"
+
+const mockListAtlasViews = vi.fn()
+
+vi.mock("@/lib/api/atlas-views", () => ({
+  listAtlasViews: (...a: unknown[]) => mockListAtlasViews(...a),
+}))
 
 // Stub Atlas (sigma) to avoid WebGL in jsdom.
 vi.mock("@/components/subjects/atlas/Atlas", () => ({
@@ -49,6 +55,11 @@ vi.mock("@/components/wiki/wiki-pane", () => ({
   default: () => <div data-testid="wiki-stub">Wiki mode</div>,
 }))
 
+// Stub GraphExplorer (RA-11) — avoids the real useCommunities fetch cascade.
+vi.mock("@/components/kb/graph-explorer", () => ({
+  GraphExplorer: () => <div data-testid="communities-stub">Communities mode</div>,
+}))
+
 function renderSubjects(initialSearch = "") {
   window.history.replaceState({}, "", `/${initialSearch}`)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -63,6 +74,8 @@ function renderSubjects(initialSearch = "") {
 
 beforeEach(() => {
   window.history.replaceState({}, "", "/")
+  mockListAtlasViews.mockReset()
+  mockListAtlasViews.mockResolvedValue([])
 })
 
 // ---------------------------------------------------------------------------
@@ -70,12 +83,13 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("SubjectsPane — mode switcher", () => {
-  it("renders all four mode tabs in the segmented control", () => {
+  it("renders all five mode tabs in the segmented control", () => {
     renderSubjects()
     expect(screen.getByRole("tab", { name: /atlas/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /constellation/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /timeline/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /wiki/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /communities/i })).toBeInTheDocument()
   })
 
   it("defaults to Atlas mode when no ?mode= present", () => {
@@ -110,6 +124,21 @@ describe("SubjectsPane — mode switcher", () => {
     renderSubjects("?mode=wiki")
     fireEvent.click(screen.getByRole("tab", { name: /atlas/i }))
     expect(new URLSearchParams(window.location.search).get("mode")).toBeNull()
+  })
+
+  // RA-11: GraphExplorer (Leiden community explorer, Phase R.2) was shipped
+  // but reachable only from its own test — restored here as a Subjects mode.
+  it("switching to communities mode writes ?mode=communities and mounts GraphExplorer", async () => {
+    renderSubjects()
+    fireEvent.click(screen.getByRole("tab", { name: /communities/i }))
+    expect(new URLSearchParams(window.location.search).get("mode")).toBe("communities")
+    expect(await screen.findByTestId("communities-stub")).toBeInTheDocument()
+  })
+
+  it("starts on communities mode when ?mode=communities", async () => {
+    renderSubjects("?mode=communities")
+    expect(screen.getByRole("tab", { name: /communities/i })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByTestId("communities-stub")).toBeInTheDocument()
   })
 })
 
@@ -190,6 +219,40 @@ describe("SubjectsPane — Cycle 4 click contract", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Saved-views badge (WB-21) — unknown count must never render as "0".
+// ---------------------------------------------------------------------------
+
+describe("SubjectsPane — saved-views badge", () => {
+  it("shows the resolved count once the views query succeeds", async () => {
+    mockListAtlasViews.mockResolvedValue([
+      { view_id: "v1", name: "a" },
+      { view_id: "v2", name: "b" },
+    ])
+    renderSubjects()
+    const button = await screen.findByRole("button", { name: "Saved views (2)" })
+    expect(button).toBeInTheDocument()
+    expect(screen.getByText("2")).toBeInTheDocument()
+  })
+
+  it("suppresses the numeric badge and aria-label count while the views query is pending", () => {
+    mockListAtlasViews.mockReturnValue(new Promise(() => {})) // never resolves
+    renderSubjects()
+    expect(screen.getByRole("button", { name: "Saved views" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Saved views \(/ })).not.toBeInTheDocument()
+  })
+
+  it("suppresses the numeric badge and aria-label count when the views query fails, rather than reporting 0", async () => {
+    mockListAtlasViews.mockRejectedValue(new Error("fail"))
+    renderSubjects()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Saved views" })).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole("button", { name: /Saved views \(0\)/ })).not.toBeInTheDocument()
+    expect(screen.queryByText("0")).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // axe-clean — one assertion per visually-distinct mode/sub-mode this pane
 // exercises elsewhere in this suite (mode switcher, not a fetch/loading/
 // error/empty pane). Constellation/Timeline are excluded — they mount real
@@ -212,6 +275,12 @@ describe("SubjectsPane — axe-clean", () => {
   it("is axe-clean in Wiki mode", async () => {
     const { container } = renderSubjects("?mode=wiki")
     await screen.findByTestId("wiki-stub")
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean in Communities mode", async () => {
+    const { container } = renderSubjects("?mode=communities")
+    await screen.findByTestId("communities-stub")
     expect(await axe(container)).toHaveNoViolations()
   })
 })

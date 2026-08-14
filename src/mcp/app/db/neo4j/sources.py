@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("ai-companion.db.sources")
@@ -163,21 +163,48 @@ def increment_source_counters(
     chunks: int = 0,
     edges: int = 0,
 ) -> None:
-    """Apply a delta to the running counters. Atomic Cypher SET +=."""
+    """Apply a delta to the running lifetime counters. Atomic Cypher SET +=.
+
+    ``total_artifacts_24h`` (AF-023) is deliberately NOT touched here — it
+    used to accumulate the same delta as ``total_artifacts`` with nothing
+    ever decrementing it, making it a mislabeled lifetime total. The 24h
+    figure is now computed at read time by :func:`count_artifacts_last_24h`.
+    """
     with driver.session() as session:
         session.run(
             """
             MATCH (s:Source {id: $id})
             SET s.total_artifacts = coalesce(s.total_artifacts, 0) + $artifacts,
                 s.total_chunks = coalesce(s.total_chunks, 0) + $chunks,
-                s.total_edges = coalesce(s.total_edges, 0) + $edges,
-                s.total_artifacts_24h = coalesce(s.total_artifacts_24h, 0) + $artifacts
+                s.total_edges = coalesce(s.total_edges, 0) + $edges
             """,
             id=source_id,
             artifacts=artifacts,
             chunks=chunks,
             edges=edges,
         )
+
+
+def count_artifacts_last_24h(driver, source_id: str) -> int:
+    """Count FROM_SOURCE-linked artifacts ingested in the last 24 hours.
+
+    AF-023: replaces the old write-time accumulator on ``total_artifacts_24h``,
+    which only ever grew (nothing ever decremented it) and was in truth a
+    lifetime total. Computing the window at read time keeps it accurate
+    regardless of how long it's been since the last ingest.
+    """
+    since = (datetime.now(tz=timezone.utc) - timedelta(hours=24)).isoformat()
+    with driver.session() as session:
+        record = session.run(
+            """
+            MATCH (a:Artifact)-[:FROM_SOURCE]->(s:Source {id: $id})
+            WHERE a.ingested_at >= $since
+            RETURN count(a) AS c
+            """,
+            id=source_id,
+            since=since,
+        ).single()
+    return int(record["c"]) if record is not None else 0
 
 
 def delete_source(driver, source_id: str, *, cascade: bool = False) -> None:

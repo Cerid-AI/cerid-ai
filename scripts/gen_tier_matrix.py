@@ -41,7 +41,6 @@ LABELS = {
     "apple_mail_reader": "Apple Mail reader",
     "apple_notes_reader": "Apple Notes reader",
     "apple_photos_reader": "Apple Photos reader",
-    "apple_silicon_ml": "Apple Silicon ML acceleration",
     "audio_transcription": "Audio transcription",
     "audio_transcription_plain": "Audio transcription (plain)",
     "audit_logging": "Audit logging",
@@ -77,13 +76,11 @@ LABELS = {
     "pro_visualization_tour": "Guided graph tour",
     "quicklook_preview": "QuickLook preview",
     "reminders_eventkit": "Apple Reminders (EventKit)",
-    "safari_reading_list": "Safari Reading List",
     "semantic_dedup": "Semantic deduplication",
     "share_sheet": "Share Sheet",
     "shortcuts_actions": "Shortcuts actions",
     "sparkle_updates": "Sparkle auto-updates",
     "spotlight_donation": "Spotlight donation",
-    "spotlight_integration": "Spotlight integration",
     "sso_saml": "SSO / SAML",
     "tcc_wizard": "TCC permissions wizard",
     "truth_audit": "Truth audit",
@@ -105,6 +102,20 @@ _TICK = {  # tier -> (Core, Pro, Enterprise)
     "community": ("✓", "✓", "✓"),
     "pro": ("—", "✓", "✓"),
     "enterprise": ("—", "—", "✓"),
+}
+
+# Section-level footnotes for gates whose enforcement point diverges from what
+# the tier column implies. No per-flag note mechanism exists yet (one section
+# needs it so far) — add one if a second section needs a footnote.
+_SECTION_FOOTNOTES = {
+    "Apple Connectors — Pro": (
+        "`apple_notes_reader`, `apple_mail_reader`, and `imessage_reader` are "
+        "enforced client-side only (Settings → Sources locks the row behind "
+        "`ProUpgradeOverlay`). The backend `/ingest/structured` endpoint the "
+        "desktop bridge posts to performs no server-side tier check for these "
+        "three flags — deliberate, matching the \"annoying, not DRM\" posture, "
+        "pending AF-043."
+    ),
 }
 
 
@@ -201,6 +212,10 @@ def _render(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
             core, pro, ent = _TICK[tier]
             out.append(f"| {_label(flag)} | {core} | {pro} | {ent} | `{flag}` |")
         out.append("")
+        footnote = _SECTION_FOOTNOTES.get(title)
+        if footnote:
+            out.append(f"> {footnote}")
+            out.append("")
     return "\n".join(out) + "\n"
 
 

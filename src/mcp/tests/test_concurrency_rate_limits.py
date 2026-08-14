@@ -10,8 +10,6 @@ import uuid
 import httpx
 import pytest
 
-from core.utils.swallowed import log_swallowed_error
-
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 MCP = "http://127.0.0.1:8888"
@@ -49,51 +47,9 @@ async def test_six_concurrent_agent_query_all_succeed():
     )
 
 
-@pytest.mark.integration
-async def test_health_p95_under_agent_load():
-    """F-PERF-04: /health stays < 100ms while /agent/query runs concurrently.
-
-    Asserted on the worst of 6 samples — see the comment at the assertion for
-    why that, and not a "p95", is the honest statistic at this sample count.
-    """
-    import time
-    client_id = f"test-hol-{uuid.uuid4().hex[:8]}"
-    headers = {"X-Client-ID": client_id, "Content-Type": "application/json", **_auth_headers()}
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        bg = [
-            asyncio.create_task(client.post(
-                f"{MCP}/agent/query",
-                json={"query": f"hol probe {i}", "domains": ["general"]},
-                headers=headers,
-            ))
-            for i in range(3)
-        ]
-        await asyncio.sleep(0.3)
-        health_times = []
-        for _ in range(6):
-            t0 = time.perf_counter()
-            r = await client.get(f"{MCP}/health")
-            health_times.append(time.perf_counter() - t0)
-            assert r.status_code == 200
-            await asyncio.sleep(1.0)
-        for t in bg:
-            try:
-                await t
-            except Exception as exc:
-                log_swallowed_error("tests.test_concurrency_rate_limits", exc)
-    # 6 samples cannot support a p95. Nearest-rank p95 indexes off
-    # ``len - 1`` (``values[min(n - 1, int(round(pct * (n - 1))))]``, the form
-    # used by app/processor/metrics.py::_percentile), and for n <= 11 that
-    # lands on the last element — so the p95 of 6 samples IS the max. The old
-    # ``sorted(...)[int(0.95 * len(...))]`` indexed off ``n``, which is the
-    # same off-by-one fixed in utils/metrics.py::_aggregate; it returned max
-    # here too, just by accident rather than by definition. Assert on the max
-    # and say so, instead of labelling it a percentile it cannot be.
-    worst = max(health_times)
-    assert worst < 0.1, (
-        f"/health worst-of-{len(health_times)}={worst:.3f}s under load "
-        "(threshold 100ms; n too small for a p95, so max is the statistic)"
-    )
+# F-PERF-04 (/health < 100ms under /agent/query load) moved to
+# tests/integration/test_preservation_health_gate.py so CI's preservation
+# job actually runs it — here it was excluded by both CI and ci-local.
 
 
 @pytest.mark.integration

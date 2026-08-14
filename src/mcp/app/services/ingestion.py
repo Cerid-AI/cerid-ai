@@ -12,7 +12,7 @@ Two-phase write (Phase O.1)
 Every new ingest now follows a two-phase commit protocol:
 
 1. **Stage** — write Chroma chunks with ``cerid_state="pending"`` and
-   ``cerid_pending_at=<iso>``.  An ``idempotency_key`` (SHA-256 of
+   ``cerid_pending_at=<iso>``.  A ``recovery_correlation_key`` (SHA-256 of
    ``content + source_uri + tenant``) is stamped on each row purely as a
    recovery/deadletter correlation tag (AF-062: nothing queries Chroma by it
    — actual write-idempotency comes from the content-addressed
@@ -55,11 +55,13 @@ import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
+from app.services.storage_metrics import get_storage_report
 from core.context.identity import get_tenant_id
 from core.utils import cache
 from core.utils.embeddings import embedding_stamp
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
+from errors import StorageLimitExceededError
 from utils.chunker import (
     chunk_text,
     chunk_with_parents,
@@ -253,15 +255,16 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _idempotency_key(content: str, source_uri: str, tenant: str) -> str:
+def _recovery_correlation_key(content: str, source_uri: str, tenant: str) -> str:
     """Stable correlation key for the two-phase ingest boundary.
 
     SHA-256 of (content + source_uri + tenant), stamped on each chunk as
-    ``cerid_idempotency_key`` in Chroma metadata. It is a recovery/deadletter
-    correlation tag ONLY — no path queries Chroma by this key (AF-062).
-    Write-idempotency instead comes from the content-addressed
-    ``artifact_id = content_hash`` + ``collection.upsert`` overwriting the same
-    per-chunk ids, so re-delivery of identical content is naturally idempotent.
+    ``cerid_recovery_correlation_key`` in Chroma metadata. It is a
+    recovery/deadletter correlation tag ONLY — no path queries Chroma by
+    this key (AF-062). Write-idempotency instead comes from the
+    content-addressed ``artifact_id = content_hash`` + ``collection.upsert``
+    overwriting the same per-chunk ids, so re-delivery of identical content
+    is naturally idempotent.
     """
     blob = "\x00".join([content, source_uri, tenant])
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -270,7 +273,7 @@ def _idempotency_key(content: str, source_uri: str, tenant: str) -> str:
 def _stage_chunks_pending(
     collection: Any,
     chunk_ids: list[str],
-    idempotency_key: str,
+    recovery_correlation_key: str,
 ) -> None:
     """Stamp cerid_state=pending on the chunks just written.
 
@@ -283,7 +286,7 @@ def _stage_chunks_pending(
         {
             "cerid_state": "pending",
             "cerid_pending_at": pending_at,
-            "cerid_idempotency_key": idempotency_key,
+            "cerid_recovery_correlation_key": recovery_correlation_key,
         }
         for _ in chunk_ids
     ]
@@ -351,7 +354,6 @@ def _enqueue_entity_extraction_if_enabled(artifact_id: str) -> None:
 
 def _enqueue_hype_jobs_if_enabled(
     chunk_ids: list[str],
-    chunks: list[str],
     coll_name: str,
     artifact_id: str,
 ) -> None:
@@ -360,6 +362,12 @@ def _enqueue_hype_jobs_if_enabled(
     Phase R.3.  Called inside ``ingest_content`` after Neo4j commit and
     Chroma flip succeed.  Non-blocking — each job is enqueued at LOW priority
     and executed asynchronously by the background processor.
+
+    AF-094: the payload carries only ``chunk_id``/``collection_name``/
+    ``artifact_id`` — no chunk text. The chunk is already committed to
+    Chroma by this point, so ``HyPEIndexingJob`` re-fetches its content
+    from ``collection_name`` at run time instead of every enqueue writing
+    the full chunk text into a Redis job hash.
 
     Lazy-imports HyPEIndexingJob so there is zero import-time cost when the
     flag is off (the default).  Silently skips if the processor queue is
@@ -371,22 +379,25 @@ def _enqueue_hype_jobs_if_enabled(
         return
 
     try:
-        from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+        from app.db.redis.processor_queue import enqueue_job_if_absent  # noqa: PLC0415
         from app.processor.jobs.hype_indexing import HyPEIndexingJob  # noqa: PLC0415
     except ImportError as e:
         logger.debug("hype_indexer.enqueue: import failed (non-fatal): %s", e)
         return
 
-    for chunk_id, content in zip(chunk_ids, chunks):
+    for chunk_id in chunk_ids:
         try:
             payload: dict[str, Any] = {
                 "chunk_id": chunk_id,
-                "content": content,
                 "collection_name": coll_name,
                 "artifact_id": artifact_id,
             }
             job = HyPEIndexingJob(**payload)
-            enqueue_job(job, payload=payload)
+            # AF-071: enqueue_job_if_absent (not plain enqueue_job), mirroring
+            # the entity-extraction collapse guard above — a re-ingest that
+            # re-fires this hook for the same chunk before an earlier HyPE job
+            # drains collapses onto it instead of stacking a duplicate.
+            enqueue_job_if_absent(job, payload=payload)
             logger.debug(
                 "hype_indexer.enqueued chunk_id=%s artifact_id=%s",
                 chunk_id, artifact_id,
@@ -647,8 +658,8 @@ def _reingest_artifact(
     # could never heal the resulting divergence.
     _reingest_source_uri = base_meta.get("source_uri") or base_meta.get("filename") or ""
     _reingest_tenant = base_meta.get("tenant_id") or ""
-    _reingest_idem_key = _idempotency_key(content, _reingest_source_uri, _reingest_tenant)
-    _stage_chunks_pending(collection, chunk_ids, _reingest_idem_key)
+    _reingest_recovery_key = _recovery_correlation_key(content, _reingest_source_uri, _reingest_tenant)
+    _stage_chunks_pending(collection, chunk_ids, _reingest_recovery_key)
 
     bm25_ids = [r["id"] for r in chunk_records if r["retrieve_eligible"]]
     bm25_texts = [r["text"] for r in chunk_records if r["retrieve_eligible"]]
@@ -766,11 +777,77 @@ def _reingest_artifact(
         "artifact_id": artifact_id,
         "domain": domain,
         "chunks": len(chunks),
+        "quality_score": quality_score,
         "timestamp": utcnow_iso(),
     }
 
 
 # ── Public service functions ───────────────────────────────────────────────────
+
+# AF-042: tracks whether the last-seen storage status was "warning" so the
+# structured warning log fires once per transition into the band rather than
+# once per ingest call while the corpus sits in the warning range.
+_storage_warn_logged = False
+
+
+def _check_storage_backpressure() -> None:
+    """Ingest backpressure gate (AF-042).
+
+    Reads the same cached storage report ``GET /system/storage`` serves
+    (``app/services/storage_metrics.py``) and enforces
+    ``STORAGE_WARN_PCT`` / ``STORAGE_CRITICAL_PCT``:
+
+    - below WARN: proceed silently.
+    - WARN..CRITICAL: proceed, but log a structured warning once per
+      transition into the band (not once per ingest call).
+    - at/above CRITICAL: raise :class:`StorageLimitExceededError` (rendered
+      as HTTP 507 by the app-wide CeridError handler) so the corpus cannot
+      grow unbounded.
+
+    Backpressure only — this never deletes or evicts existing content.
+    Eviction is a separate, destructive policy decision that needs its own
+    design; see the AF-042 finding note. Gated by
+    ``STORAGE_BACKPRESSURE_ENABLED`` (default True) so an operator can
+    disable enforcement while keeping the read-only report unaffected.
+    A broken storage report (Chroma/Neo4j/Redis unreachable) fails OPEN —
+    a monitoring outage must not also take down ingest.
+    """
+    global _storage_warn_logged
+    if not config.STORAGE_BACKPRESSURE_ENABLED:
+        return
+    try:
+        # Pass this module's own (test-mockable) connection getters through
+        # rather than letting storage_metrics open a second, independent
+        # connection path — see the module docstring in storage_metrics.py.
+        report = get_storage_report(
+            get_chroma_fn=get_chroma, get_neo4j_fn=get_neo4j, get_redis_fn=get_redis,
+        )
+    except Exception as e:  # noqa: BLE001 — fail-open boundary
+        log_swallowed_error("app.services.ingestion.storage_backpressure", e)
+        return
+
+    status = report.get("status", "healthy")
+    if status == "critical":
+        raise StorageLimitExceededError(
+            f"Corpus storage at {report.get('usage_pct')}% of "
+            f"{report.get('limit_mb')}MB (critical threshold "
+            f"{report.get('critical_pct')}%) — ingest rejected until usage drops",
+            details={
+                "usage_pct": report.get("usage_pct"),
+                "limit_mb": report.get("limit_mb"),
+                "critical_pct": report.get("critical_pct"),
+            },
+        )
+    if status == "warning":
+        if not _storage_warn_logged:
+            logger.warning(
+                "storage_backpressure_warning usage_pct=%s limit_mb=%s warn_pct=%s",
+                report.get("usage_pct"), report.get("limit_mb"), report.get("warn_pct"),
+            )
+            _storage_warn_logged = True
+    else:
+        _storage_warn_logged = False
+
 
 def ingest_content(
     content: str,
@@ -819,6 +896,8 @@ def ingest_content(
     (Track B), never here. Classifier failure logs + proceeds untagged;
     ingest never blocks on it.
     """
+    _check_storage_backpressure()
+
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
@@ -868,6 +947,32 @@ def ingest_content(
         log_swallowed_error(
             "app.services.ingestion.semantic_dedup", e,
         )
+
+    # AF-052 — re-ingestion check by external identifier. Connectors
+    # (Apple Notes/Mail/…) assign a stable external_id that is NOT a :Source
+    # UUID (the /ingest/structured handler routes it here). A re-ingest of the
+    # same (source_kind, external_id) with edited content is an EDIT of the
+    # existing artifact, not a second one. This runs BEFORE the filename check
+    # because those connectors carry no stable `filename` (apple_notes posts a
+    # title, not a filename) — the filename branch below can never fire for
+    # them, so without this an edited note always produced a duplicate.
+    # Migration-safe: find_artifact_by_external_id never matches artifacts that
+    # predate the external_id property.
+    _external_id = (metadata or {}).get("external_id")
+    if _external_id:
+        try:
+            _source_kind = (metadata or {}).get("source_kind", "")
+            prev = graph.find_artifact_by_external_id(
+                get_neo4j(), _source_kind, _external_id,
+            )
+            if prev and (force_reindex or prev["content_hash"] != content_hash):
+                return _reingest_artifact(
+                    prev, content, domain, metadata, content_hash,
+                    pre_chunked=pre_chunked,
+                )
+        except Exception as e:
+            log_swallowed_error("app.services.ingestion.external_id_reingest", e)
+            logger.warning(f"external_id re-ingest check failed (proceeding): {e}")
 
     # Re-ingestion check: same filename, different content
     fname = (metadata or {}).get("filename", "text_input")
@@ -1025,9 +1130,33 @@ def ingest_content(
     }
     if metadata:
         base_meta.update(metadata)
+        # AF-088: coerce list/dict/set/tuple caller-metadata values into
+        # ChromaDB-compatible primitives right away. Previously this only
+        # happened in the pre_chunked extras-merge loop (:1148 below) and
+        # the reingest path's equivalent — a caller passing e.g. a raw list
+        # in `metadata` on this (non-pre_chunked) main path spread an
+        # unsupported type straight into every chunk's Chroma metadata.
+        base_meta = {k: _coerce_chroma_meta(v) for k, v in base_meta.items()}
     # Caller-supplied metadata cannot override tenant_id — that would let
     # an upload escape its own tenant scope at retrieval time.
     base_meta["tenant_id"] = get_tenant_id()
+
+    # Todo item 6 — artifacts ingested without a filename were all stored as
+    # the literal name "text_input" (provenance unrecoverable, citations
+    # useless). Derive a display title instead: caller-supplied title first
+    # (connectors pass e.g. the mail subject), then the content's own heading
+    # or opening line. Runs AFTER the filename-keyed re-ingest check above,
+    # which reads the raw caller metadata — a derived title never becomes a
+    # re-ingest key for this call, so two inputs opening with the same line
+    # cannot clobber each other.
+    _raw_fname = str(base_meta.get("filename") or "").strip()
+    if _raw_fname in ("", "text_input"):
+        from core.utils.title_derivation import derive_title
+
+        _derived = str(base_meta.get("title") or "").strip() or derive_title(content)
+        if _derived:
+            base_meta["filename"] = _derived
+            base_meta["title_derived"] = "true"
 
     # Phase 4.4 — stamp every chunk with the embedding model that will
     # actually compute its vector. Caller-supplied metadata cannot
@@ -1082,10 +1211,10 @@ def ingest_content(
             frontmatter["updated"],
         )
 
-    # Tag near-duplicate in metadata
-    if near_dup:
-        base_meta["near_duplicate_of"] = near_dup["artifact_id"]
-        base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
+    # AF-056: near_dup is already surfaced to the caller via the ingest
+    # response's near_duplicate_of (below) — no reader consumes a
+    # near_duplicate_of/near_duplicate_similarity stamp on the Chroma chunk
+    # metadata itself, so it is not written here.
 
     # Phase 5.1 — enrichment seam. Fill sub_category + tags via the classifier
     # when the caller supplied neither (memory / connector / digest /
@@ -1121,11 +1250,11 @@ def ingest_content(
             except Exception as exc:  # noqa: BLE001 — enrichment is best-effort; ingest never blocks on it
                 log_swallowed_error("app.services.ingestion.enrich", exc)
 
-    # Phase O.1 — idempotency key: SHA-256(content + source_uri + tenant).
+    # Phase O.1 — recovery correlation key: SHA-256(content + source_uri + tenant).
     # source_uri comes from metadata["filename"] if available.
     _source_uri = base_meta.get("filename", base_meta.get("source_uri", ""))
     _tenant = base_meta["tenant_id"]
-    idempotency_key = _idempotency_key(content, _source_uri, _tenant)
+    recovery_correlation_key = _recovery_correlation_key(content, _source_uri, _tenant)
 
     chunk_ids = [r["id"] for r in chunk_records]
     chunk_documents = [r["text"] for r in chunk_records]
@@ -1196,6 +1325,7 @@ def ingest_content(
             )
             return {
                 "status": "dropped",
+                "artifact_id": artifact_id,
                 "reason": "below_source_quality_floor",
                 "quality_score": quality_score,
                 "domain": domain,
@@ -1217,7 +1347,7 @@ def ingest_content(
 
     # Phase O.1 — stage: mark all chunks as pending so the retrieval gate
     # excludes them until the Neo4j commit confirms the write.
-    _stage_chunks_pending(collection, chunk_ids, idempotency_key)
+    _stage_chunks_pending(collection, chunk_ids, recovery_correlation_key)
 
     # RAG C2.6 — BM25 indexes only retrieve-eligible chunks (children in
     # parent-child mode, every chunk otherwise). Parents are read-time
@@ -1271,6 +1401,8 @@ def ingest_content(
             tags_json=base_meta.get("tags_json", "[]"),
             quality_score=quality_score,
             client_source=base_meta.get("client_source", ""),
+            external_id=base_meta.get("external_id", ""),
+            source_kind=base_meta.get("source_kind", ""),
         )
         artifact_created = True
         # Phase O.1 — commit: flip Chroma chunks from pending → committed.
@@ -1279,26 +1411,23 @@ def ingest_content(
 
         # CL-1 — fund the :Source economy. When this artifact came from a
         # registered :Source (metadata carries its UUID and the node exists),
-        # create the FROM_SOURCE edge and bump the source's counters — the write
-        # path that the per-source quality floor, retention, counters, and
-        # cascade-delete readers were all built against but nothing ever called.
-        # Existence-checked via get_source so an external-capture id (which now
-        # belongs in external_id, not source_id) can never create a dangling
-        # edge or spurious counter. Non-fatal to the ingest.
+        # create the FROM_SOURCE edge — the write path that the per-source
+        # quality floor, retention, counters, and cascade-delete readers were
+        # all built against but nothing ever called. Existence-checked via
+        # get_source so an external-capture id (which now belongs in
+        # external_id, not source_id) can never create a dangling edge or
+        # spurious counter. The counter bump itself is deferred until after
+        # relationship discovery runs below (AF-023), so total_edges reflects
+        # what discover_relationships actually found instead of always
+        # advancing by zero. Non-fatal to the ingest.
         _source_id = base_meta.get("source_id")
+        _source_linked = False
         if _source_id:
             try:
-                from app.db.neo4j.sources import (
-                    get_source,
-                    increment_source_counters,
-                    link_artifact,
-                )
+                from app.db.neo4j.sources import get_source, link_artifact
                 if get_source(driver, _source_id) is not None:
                     link_artifact(driver, artifact_id, _source_id)
-                    increment_source_counters(
-                        driver, _source_id,
-                        artifacts=1, chunks=len(child_chunk_ids),
-                    )
+                    _source_linked = True
             except Exception as e:  # noqa: BLE001 — source linkage is non-fatal
                 log_swallowed_error("app.services.ingestion.source_link", e)
 
@@ -1364,7 +1493,6 @@ def ingest_content(
         # ranking precision. Parent chunks are read-time only.
         _enqueue_hype_jobs_if_enabled(
             chunk_ids=child_chunk_ids,
-            chunks=child_chunk_texts,
             coll_name=coll_name,
             artifact_id=artifact_id,
         )
@@ -1430,6 +1558,20 @@ def ingest_content(
         except Exception as e:
             log_swallowed_error('app.services.ingestion', e)
             logger.warning(f"Relationship discovery failed (non-blocking): {e}")
+
+    # CL-1 (cont.) — bump the :Source counters now that discover_relationships
+    # has run, so total_edges (AF-023) advances by what was actually created
+    # instead of always being +0. Non-fatal to the ingest.
+    if artifact_created and _source_linked and _source_id:
+        try:
+            from app.db.neo4j.sources import increment_source_counters
+            increment_source_counters(
+                driver, _source_id,
+                artifacts=1, chunks=len(child_chunk_ids),
+                edges=relationships_created,
+            )
+        except Exception as e:  # noqa: BLE001 — source linkage is non-fatal
+            log_swallowed_error("app.services.ingestion.source_link", e)
 
     # RAG Cycle C2.1 — wikilink edge commits (mirror of the
     # EmailThreadEdge → REPLIES_TO contract). For each zero-text
@@ -1538,6 +1680,7 @@ def ingest_content(
         "artifact_id": artifact_id,
         "domain": domain,
         "chunks": len(chunks),
+        "quality_score": quality_score,
         "relationships_created": relationships_created,
         "related": related,
         "timestamp": utcnow_iso(),
@@ -2001,8 +2144,9 @@ async def ingest_file(
 # ── Batch ingestion ──────────────────────────────────────────────────────────
 
 # Concurrency limiter shared with single-file ingestion — prevents overloading
-# ChromaDB / Neo4j with too many parallel writes.
-_ingest_semaphore = asyncio.Semaphore(3)
+# ChromaDB / Neo4j with too many parallel writes. AF-072: reads
+# config.INGEST_CONCURRENCY (default 3) instead of hardcoding the limit.
+_ingest_semaphore = asyncio.Semaphore(config.INGEST_CONCURRENCY)
 
 BATCH_MAX_ITEMS = 20
 
@@ -2020,6 +2164,14 @@ async def ingest_batch(
         raise ValueError(
             f"Batch size {len(items)} exceeds maximum ({BATCH_MAX_ITEMS})"
         )
+
+    # AF-042: check once for the whole batch, before spawning per-item work.
+    # ``_ingest_one`` below catches per-item exceptions into an error dict
+    # rather than propagating them, so a per-item ``ingest_content()`` call
+    # raising here would degrade into a partial-failure batch instead of the
+    # clean reject the caller expects at CRITICAL — checking at the entry of
+    # the batch path is what actually stops the batch.
+    _check_storage_backpressure()
 
     async def _ingest_one(item: dict[str, Any]) -> dict[str, Any]:
         """Ingest a single item under the shared semaphore."""

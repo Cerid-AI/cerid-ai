@@ -82,19 +82,6 @@ services:
         aliases:
           - cerid-web
 
-  # Added with the service itself (2026-07-30). Any non-profile-gated service in
-  # the base compose that pins container_name needs an entry here, or `up`
-  # collides with the dev stack's container on this shared daemon and the whole
-  # CI stack fails to boot — which is how this job reported "Stack did not reach
-  # /health/ping within 180s" with no test ever running.
-  # Enforced by scripts/lint-ci-compose-namespacing.py.
-  memory-worker:
-    container_name: ai-companion-memory-worker-ci
-    networks:
-      llm-network:
-        aliases:
-          - ai-companion-memory-worker
-
 networks:
   # Own bridge so the CI stack never shares the dev stack's external
   # llm-network. Name pinned so repeated up/down cycles don't churn it.

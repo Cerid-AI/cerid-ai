@@ -59,6 +59,11 @@ export interface L0RollupBucket {
   community_count: number
   /** Total entities across collapsed communities. */
   entity_count: number
+  /**
+   * The rolled-up member communities (UX-13). Render as drillable rows —
+   * the bucket must never be an inert count.
+   */
+  communities: L0Community[]
 }
 
 /** A single L1 (coarser) community node, parent of a set of L0 communities. */
@@ -161,6 +166,17 @@ export interface EntityLeaf {
 
 export interface DecompositionCommunityPayload {
   community_id: string
+  entities: EntityLeaf[]
+}
+
+/**
+ * GET /graph/decomposition?bucket=<kind>[&domain=<id>] payload (UX-13).
+ * Drill path for the non-community buckets: "unclustered" (per domain)
+ * and "uncategorized" (global).
+ */
+export interface DecompositionBucketPayload {
+  bucket: "unclustered" | "uncategorized"
+  domain: string | null
   entities: EntityLeaf[]
 }
 

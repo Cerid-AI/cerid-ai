@@ -15,7 +15,15 @@
  * Priority within a provider is cheapest-capable-first — the user can
  * upgrade to a heavier model manually, but the default shouldn't torch their
  * credits.
+ *
+ * The concrete OpenRouter default id is no longer pinned here: when the live
+ * model registry (GET /providers/routing) is available it supplies the current
+ * cheap-tier id, which the weekly `model_auto_update` catalog overlay keeps
+ * fresh. The static PROVIDER_DEFAULTS table below is a FALLBACK only, used when
+ * that endpoint is unavailable or a non-OpenRouter provider is selected.
  */
+
+import type { ModelRegistry } from "./api/routing"
 
 export interface ProviderStatus {
   /** Provider slug: "openrouter" | "openai" | "anthropic" | "xai" | "ollama" */
@@ -26,9 +34,13 @@ export interface ProviderStatus {
 }
 
 /**
- * Priority table: first entry in each provider list is the default when
- * that provider is selected. Models here must also exist in MODELS (types.ts)
- * so the chat model selector can find + display them.
+ * FALLBACK priority table — used only when the live model registry
+ * (GET /providers/routing) is unavailable. First entry in each provider list
+ * is the default when that provider is selected. Models here must also exist
+ * in MODELS (types.ts) so the chat model selector can find + display them.
+ *
+ * For the OpenRouter default the registry's cheap tier is authoritative; this
+ * table's `openrouter` first entry is the stale-but-safe backstop.
  */
 const PROVIDER_DEFAULTS: Record<string, string[]> = {
   // OpenRouter is preferred because it fans out to everything; within
@@ -67,16 +79,45 @@ const PROVIDER_PREFERENCE: readonly string[] = [
 ]
 
 /**
+ * The cheap tier is the default capability level. Its first slot is the
+ * cheapest — object insertion order mirrors the backend's tier dict, which is
+ * declared cheapest-first. Returns null when the registry has no cheap tier.
+ */
+export function pickCheapTierDefault(
+  registry: ModelRegistry | null | undefined,
+): string | null {
+  const ids = registry?.cheap ? Object.values(registry.cheap) : []
+  return ids.length > 0 ? ids[0] : null
+}
+
+/**
  * Pick the best default chat model for a user given their configured
  * providers. Returns null when the user has nothing configured so the
  * caller can render an "add a provider" hint instead of silently picking
  * a model that will fail.
+ *
+ * Resolution order: live registry (cheap tier, first slot) → static
+ * PROVIDER_DEFAULTS table. The registry is authoritative for OpenRouter — its
+ * ids already carry the `openrouter/` prefix and are catalog-refreshed — so
+ * when OpenRouter is configured and the registry is present, the default is
+ * the current cheap-tier id rather than the pinned fallback. Every other case
+ * (registry absent, or a non-OpenRouter provider selected) uses the table.
  */
-export function deriveDefaultModel(providers: ProviderStatus[]): string | null {
+export function deriveDefaultModel(
+  providers: ProviderStatus[],
+  registry?: ModelRegistry | null,
+): string | null {
   const configured = new Set(
     providers.filter((p) => p.configured).map((p) => p.id),
   )
   if (configured.size === 0) return null
+
+  // Registry path: OpenRouter is the top-preference provider, so when it's
+  // configured the tier-resolved cheap id is the future-proof default.
+  if (configured.has("openrouter")) {
+    const cheapDefault = pickCheapTierDefault(registry)
+    if (cheapDefault) return cheapDefault
+  }
 
   for (const provider of PROVIDER_PREFERENCE) {
     if (!configured.has(provider)) continue

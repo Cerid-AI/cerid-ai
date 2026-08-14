@@ -67,3 +67,48 @@ export function clearForeignPaneParams(newPane: Pane): void {
   const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
   window.history.replaceState({}, "", url)
 }
+
+// SF-7 — SPA cold-load routing. The panes App.tsx actually mounts; legacy
+// pane names (wiki / knowledge / …) are goTo()-only targets that
+// NavigationProvider rewrites and are never written as pathnames.
+const PANE_PATHS: readonly Pane[] = [
+  "chat",
+  "settings",
+  "subjects",
+  "sources",
+  "briefs",
+  "workflows",
+  "memories",
+  "automations",
+]
+
+/**
+ * Resolve a cold-load pathname to the pane it names, or null when the
+ * path is unknown (root, API routes, Electron file:// bundle paths) —
+ * callers fall back to the chat pane.
+ */
+export function paneFromLocation(pathname: string): Pane | null {
+  const segments = pathname.split("/").filter(Boolean)
+  if (segments.length !== 1) return null
+  const segment = segments[0]
+  return (PANE_PATHS as readonly string[]).includes(segment) ? (segment as Pane) : null
+}
+
+/**
+ * Keep the pathname truthful as the active pane changes, so a reload or
+ * a copied URL lands back on the same pane. Chat is the canonical home
+ * (`/`). Skipped under file:// (packaged Electron loadFile) where
+ * rewriting the path would point at a nonexistent file.
+ */
+export function syncPanePath(pane: Pane): void {
+  if (typeof window === "undefined") return
+  const proto = window.location.protocol
+  if (proto !== "http:" && proto !== "https:") return
+  const path = pane === "chat" ? "/" : `/${pane}`
+  if (window.location.pathname === path) return
+  window.history.replaceState(
+    {},
+    "",
+    `${path}${window.location.search}${window.location.hash}`,
+  )
+}

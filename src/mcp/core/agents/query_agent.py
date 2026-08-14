@@ -119,6 +119,17 @@ def _format_chroma_result(
         # before reranking. Empty string when the row is not a child.
         "chunk_level": metadata.get("chunk_level", ""),
         "parent_chunk_id": metadata.get("parent_chunk_id", ""),
+        # AF-057 — sentence-window strategy stamps the ±N-sentence window at
+        # ingest; assemble_context substitutes it for the bare matched
+        # sentence so generation reads the window while ranking stays on the
+        # sentence. Empty when the chunk wasn't sentence-window chunked.
+        "window_text": metadata.get("window_text", ""),
+        # AF-059 — tabular provenance from the csv/xlsx parsers. row_idx is
+        # None (not 0) when absent so row 0 survives; column_headers arrives
+        # as a JSON string (lists are JSON-coerced into Chroma metadata).
+        "sheet_name": metadata.get("sheet_name", ""),
+        "row_idx": metadata.get("row_idx"),
+        "column_headers": metadata.get("column_headers", ""),
     }
 
 
@@ -1701,6 +1712,56 @@ async def _apply_quality_and_summaries(
 # Context assembly
 # ---------------------------------------------------------------------------
 
+def _table_provenance_fields(result: dict[str, Any]) -> dict[str, Any]:
+    """Extract tabular provenance stamped by the csv/xlsx parsers (AF-059).
+
+    Returns ``{}`` when the chunk carries no table metadata, so non-tabular
+    sources stay shape-stable. ``column_headers`` is decoded from the JSON
+    string form Chroma metadata coercion stores lists as; ``row_idx`` uses a
+    None sentinel so row 0 is preserved.
+    """
+    fields: dict[str, Any] = {}
+    sheet_name = result.get("sheet_name") or ""
+    if sheet_name:
+        fields["sheet_name"] = sheet_name
+    row_idx = result.get("row_idx")
+    if isinstance(row_idx, int) and not isinstance(row_idx, bool):
+        fields["row_idx"] = row_idx
+    headers_raw = result.get("column_headers")
+    headers: list[str] = []
+    if isinstance(headers_raw, list):
+        headers = [str(h) for h in headers_raw]
+    elif isinstance(headers_raw, str) and headers_raw.startswith("["):
+        try:
+            decoded = json.loads(headers_raw)
+            if isinstance(decoded, list):
+                headers = [str(h) for h in decoded]
+        except (json.JSONDecodeError, ValueError):
+            headers = []
+    if headers:
+        fields["column_headers"] = headers
+    return fields
+
+
+def _format_table_provenance(fields: dict[str, Any]) -> str:
+    """Render AF-059 table fields as a one-line provenance header.
+
+    e.g. ``[sheet: Q3 | row: 4 | columns: date, amount]`` — prefixed onto the
+    chunk text so tabular origin reaches the model alongside the cell values.
+    Empty string when there is nothing to render.
+    """
+    if not fields:
+        return ""
+    parts: list[str] = []
+    if "sheet_name" in fields:
+        parts.append(f"sheet: {fields['sheet_name']}")
+    if "row_idx" in fields:
+        parts.append(f"row: {fields['row_idx']}")
+    if "column_headers" in fields:
+        parts.append("columns: " + ", ".join(fields["column_headers"]))
+    return "[" + " | ".join(parts) + "]"
+
+
 def assemble_context(
     results: list[dict[str, Any]],
     max_chars: int = 14000,
@@ -1710,6 +1771,13 @@ def assemble_context(
 
     Limits chunks per artifact to promote source diversity.  A value of 0
     for *max_chunks_per_artifact* means use the global config default.
+
+    This is also the read-site for two ingest-time metadata stamps:
+    ``window_text`` (AF-057 — substituted for the bare matched sentence)
+    and the csv/xlsx table fields ``sheet_name``/``row_idx``/
+    ``column_headers`` (AF-059 — rendered as a provenance header and
+    threaded onto ``sources[]``). The char budget is charged against the
+    text actually assembled, post-substitution.
     """
     if max_chunks_per_artifact <= 0:
         max_chunks_per_artifact = config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT
@@ -1730,6 +1798,19 @@ def assemble_context(
             continue
 
         content = result.get("content", "")
+        # AF-057 — sentence-window metadata replacement: the embedded/ranked
+        # text of a sentence-window chunk is a single sentence; window_text
+        # carries the ±N-sentence window stamped at ingest. Generation reads
+        # the window (retrieval precision already came from the sentence).
+        window_text = result.get("window_text") or ""
+        if window_text:
+            content = window_text
+        # AF-059 — prefix tabular provenance (sheet/row/columns) so the
+        # model sees where the cells came from, not just their values.
+        table_fields = _table_provenance_fields(result)
+        provenance = _format_table_provenance(table_fields)
+        if provenance:
+            content = f"{provenance}\n{content}"
         content_len = len(content)
 
         if char_count + content_len > max_chars:
@@ -1749,6 +1830,9 @@ def assemble_context(
             "source_type": result.get("source_type", "kb"),
             "created_at": result.get("created_at"),
             "pack_id": result.get("pack_id", ""),
+            # AF-059 — tabular provenance onto citations; absent (not
+            # defaulted) for non-tabular sources so the shape stays honest.
+            **table_fields,
         })
         char_count += content_len
         artifact_counts[artifact_id] += 1
@@ -1831,6 +1915,10 @@ async def agent_query(
         )
         from core.models.query_envelope import QueryEnvelope
         env = QueryEnvelope()
+        # Report the domains the timed-out search was launched over — the
+        # consumer-facing signal was a permanent [] on every degraded
+        # envelope, which read as "nothing was searched" (kb-idle-zero).
+        env.extras["domains_searched"] = list(domains) if domains else list(config.DOMAINS)
         env.mark_degraded(
             budget_seconds=budget,
             reason=(
@@ -2326,6 +2414,13 @@ async def _agent_query_impl(
                     )
                     if cached is not None:
                         cached["semantic_cache_hit"] = True
+                        # UX-11 tail: the cached envelope carries the ORIGINAL
+                        # run's execution_time_ms; report this request's real
+                        # elapsed instead (a cache hit is milliseconds, not
+                        # somebody else's multi-second retrieval).
+                        cached["execution_time_ms"] = round(
+                            (time.monotonic() - _wall_start) * 1000
+                        )
                         return cached
             except Exception as e:  # noqa: BLE001 — observability boundary
                 log_swallowed_error(

@@ -10,8 +10,8 @@ Covers two surfaces that landed/changed most recently:
   error-code mapping, the supported-extensions + archive-listing helpers,
   and the typed ``models/upload.py`` responses).
 * The content-addressed / idempotent ingest contracts that back the
-  no-duplicate-chunk behaviour — ``_content_hash`` and ``_idempotency_key``
-  in ``app/services/ingestion.py``.
+  no-duplicate-chunk behaviour — ``_content_hash`` and
+  ``_recovery_correlation_key`` in ``app/services/ingestion.py``.
 
 The router tests mock the service layer (``ingest_content``), the parser,
 the magic-byte validator, the metadata extractors, and the cache
@@ -124,6 +124,21 @@ class TestUploadEndpoint:
         resp = client.post("/upload", files={"file": ("x.txt", b"way too many bytes", "text/plain")})
         assert resp.status_code == 413
         assert "too large" in resp.json()["detail"].lower()
+
+    def test_gated_behind_file_upload_gui_flag(self, mocks):
+        # AF-081: the endpoint had zero require_feature/is_feature_enabled/
+        # check_feature call — disabling file_upload_gui had no effect.
+        from app.error_handlers import register_cerid_error_handler
+
+        gated_app = FastAPI()
+        gated_app.include_router(upload_router)
+        register_cerid_error_handler(gated_app)  # so require_feature's FeatureGateError -> 403
+        gated_client = TestClient(gated_app)
+
+        with patch("config.features.is_feature_enabled", return_value=False):
+            resp = gated_client.post("/upload", files={"file": _FILE})
+        assert resp.status_code == 403
+        mocks.ingest.assert_not_called()
 
     def test_happy_path_returns_200_and_result_shape(self, mocks):
         resp = client.post("/upload", files={"file": _FILE})
@@ -250,6 +265,19 @@ class TestUploadEndpoint:
         mocks.ai_categorize.assert_not_called()
         domain_arg = mocks.ingest.call_args.args[1]
         assert domain_arg == "finance"
+
+    def test_explicit_domain_with_smart_mode_reports_manual_not_smart(self, mocks):
+        # AF-025: an explicit domain skips the tier run regardless of the
+        # requested categorize_mode — the response must not echo "smart" as
+        # though the declared tier actually evaluated the document.
+        resp = client.post(
+            "/upload",
+            files={"file": _FILE},
+            params={"domain": "finance", "categorize_mode": "smart"},
+        )
+        assert resp.status_code == 200
+        mocks.ai_categorize.assert_not_called()
+        assert resp.json()["categorize_mode"] == "manual"
 
     def test_auto_detect_failure_falls_back_to_default_domain(self, mocks):
         # ai_categorize's graceful-failure return ({}) must not 500 the
@@ -386,33 +414,33 @@ class TestContentAddressedIngest:
 
 
 class TestIdempotencyKey:
-    def test_idempotency_key_stable(self):
-        from app.services.ingestion import _idempotency_key
+    def test_recovery_correlation_key_stable(self):
+        from app.services.ingestion import _recovery_correlation_key
 
-        a = _idempotency_key("body", "imap://inbox/42", "default")
-        b = _idempotency_key("body", "imap://inbox/42", "default")
+        a = _recovery_correlation_key("body", "imap://inbox/42", "default")
+        b = _recovery_correlation_key("body", "imap://inbox/42", "default")
         assert a == b
         assert len(a) == 64
 
-    def test_idempotency_key_changes_with_content(self):
-        from app.services.ingestion import _idempotency_key
+    def test_recovery_correlation_key_changes_with_content(self):
+        from app.services.ingestion import _recovery_correlation_key
 
-        assert _idempotency_key("body", "uri", "t") != _idempotency_key("BODY", "uri", "t")
+        assert _recovery_correlation_key("body", "uri", "t") != _recovery_correlation_key("BODY", "uri", "t")
 
-    def test_idempotency_key_changes_with_source_uri(self):
-        from app.services.ingestion import _idempotency_key
+    def test_recovery_correlation_key_changes_with_source_uri(self):
+        from app.services.ingestion import _recovery_correlation_key
 
-        assert _idempotency_key("body", "uri-a", "t") != _idempotency_key("body", "uri-b", "t")
+        assert _recovery_correlation_key("body", "uri-a", "t") != _recovery_correlation_key("body", "uri-b", "t")
 
-    def test_idempotency_key_changes_with_tenant(self):
-        from app.services.ingestion import _idempotency_key
+    def test_recovery_correlation_key_changes_with_tenant(self):
+        from app.services.ingestion import _recovery_correlation_key
 
-        assert _idempotency_key("body", "uri", "tenant-a") != _idempotency_key("body", "uri", "tenant-b")
+        assert _recovery_correlation_key("body", "uri", "tenant-a") != _recovery_correlation_key("body", "uri", "tenant-b")
 
-    def test_idempotency_key_separator_prevents_collision(self):
+    def test_recovery_correlation_key_separator_prevents_collision(self):
         # NUL-joining the three fields means a field boundary can't be forged by
         # smuggling the separator into one field: ("a\x00b", "", "t") must not
         # collide with ("a", "b", "t").
-        from app.services.ingestion import _idempotency_key
+        from app.services.ingestion import _recovery_correlation_key
 
-        assert _idempotency_key("a\x00b", "", "t") != _idempotency_key("a", "b", "t")
+        assert _recovery_correlation_key("a\x00b", "", "t") != _recovery_correlation_key("a", "b", "t")

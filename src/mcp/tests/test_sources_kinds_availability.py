@@ -65,13 +65,16 @@ def test_every_source_kind_classified():
             assert _kind_availability(k, oauth) in valid
 
 
-# --- desktop-helper-backed kinds (apple_mail / apple_reminders / clipboard) ---
+# --- desktop-helper-backed kinds (apple_mail / clipboard) ---
 
 
 def test_helper_kinds_flagged_requires_desktop():
     assert _kind_requires_desktop("apple_mail") is True
-    assert _kind_requires_desktop("apple_reminders") is True
     assert _kind_requires_desktop("clipboard") is True
+    # apple_reminders has NO backend connector since 2026-08-12 — it is a
+    # desktop-APP kind (ingestion in packages/desktop/src/main/connectors/
+    # apple_reminders.ts), so the connector-derived probe must say False.
+    assert _kind_requires_desktop("apple_reminders") is False
     assert _kind_requires_desktop("rss") is False
     assert _kind_requires_desktop("folder") is False
 
@@ -82,7 +85,6 @@ def test_helper_kind_requires_desktop_when_helper_missing(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
     oauth = oauth_connector_kinds()
     assert _kind_availability("apple_mail", oauth) == "requires_desktop"
-    assert _kind_availability("apple_reminders", oauth) == "requires_desktop"
 
 
 def test_helper_kind_available_when_helper_present(monkeypatch):
@@ -91,7 +93,6 @@ def test_helper_kind_available_when_helper_present(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda *a, **k: "/usr/local/bin/helper")
     oauth = oauth_connector_kinds()
     assert _kind_availability("apple_mail", oauth) == "available"
-    assert _kind_availability("apple_reminders", oauth) == "available"
 
 
 def test_clipboard_requires_desktop_when_daemon_heartbeat_absent():
@@ -130,9 +131,15 @@ def test_kinds_endpoint_reports_requires_desktop_and_allowed_roots(monkeypatch):
     assert r.status_code == 200
     by_kind = {k["kind"]: k for k in r.json()}
 
-    for kind in ("apple_mail", "apple_reminders", "clipboard"):
+    for kind in ("apple_mail", "clipboard"):
         assert by_kind[kind]["requires_desktop"] is True
         assert by_kind[kind]["availability"] == "requires_desktop"
+
+    # Desktop-app kind: no backend connector (requires_desktop derives from
+    # the connector, so it is False) but the availability still routes the
+    # wizard to the desktop app rather than falling through to coming_soon.
+    assert by_kind["apple_reminders"]["requires_desktop"] is False
+    assert by_kind["apple_reminders"]["availability"] == "requires_desktop"
 
     assert by_kind["rss"]["requires_desktop"] is False
     assert by_kind["rss"]["availability"] == "available"
@@ -141,6 +148,20 @@ def test_kinds_endpoint_reports_requires_desktop_and_allowed_roots(monkeypatch):
     # folder metadata carries the container-side allowed roots for the wizard.
     assert by_kind["folder"]["allowed_roots"]
     assert by_kind["folder"]["availability"] == "available"
+
+
+# --- desktop-app-backed kinds (no backend SourceConnector; ingestion lives
+# entirely in packages/desktop/src/main/connectors/*.ts) ---
+
+
+def test_apple_calendar_photos_reminders_flagged_requires_desktop():
+    # Shipped via the desktop app's own connectors, not a backend SourceConnector,
+    # so they must resolve to requires_desktop rather than falling through to
+    # coming_soon on a build that ships them.
+    oauth = oauth_connector_kinds()
+    assert _kind_availability("apple_calendar", oauth) == "requires_desktop"
+    assert _kind_availability("apple_photos", oauth) == "requires_desktop"
+    assert _kind_availability("apple_reminders", oauth) == "requires_desktop"
 
 
 # --- webhook-backed kinds (chat_capture / dev_events) ---

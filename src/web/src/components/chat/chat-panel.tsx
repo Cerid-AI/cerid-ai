@@ -34,6 +34,7 @@ import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrat
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
 import { fetchSetupStatus } from "@/lib/api/settings"
+import { fetchRoutingInfo } from "@/lib/api/routing"
 import { deriveDefaultModel } from "@/lib/derive-defaults"
 import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices, MCP_BASE, mcpHeaders } from "@/lib/api"
 import { findInstalledModel, isModelInstalled } from "@/lib/model-alias"
@@ -100,6 +101,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     ragMode, setRagMode,
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
+    autoInjectMax,
     includePacks, toggleIncludePacks,
     costSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
@@ -143,10 +145,20 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     queryFn: fetchSetupStatus,
     staleTime: 60_000,
   })
+  // Live tier registry — supplies the current cheap-tier id so the OpenRouter
+  // default tracks the weekly catalog overlay instead of a pinned literal.
+  // A failed fetch leaves `registry` undefined and deriveDefaultModel falls
+  // back to the static PROVIDER_DEFAULTS table.
+  const { data: routingInfo } = useQuery({
+    queryKey: ["providers-routing"],
+    queryFn: fetchRoutingInfo,
+    staleTime: 300_000,
+    retry: 1,
+  })
   const [selectedModel, setSelectedModel] = useState(() => {
     const configuredProviders = setupStatusForDefault?.configured_providers ?? []
     const providers = configuredProviders.map((id) => ({ id, configured: true }))
-    const derived = deriveDefaultModel(providers)
+    const derived = deriveDefaultModel(providers, routingInfo?.model_registry)
     return derived ?? MODELS[0].id
   })
   // Track whether the user has manually picked a model — if so, never
@@ -157,12 +169,12 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     if (!setupStatusForDefault) return
     const configuredProviders = setupStatusForDefault.configured_providers ?? []
     const providers = configuredProviders.map((id) => ({ id, configured: true }))
-    const derived = deriveDefaultModel(providers)
+    const derived = deriveDefaultModel(providers, routingInfo?.model_registry)
     if (derived && derived !== selectedModel) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
       setSelectedModel(derived)
     }
-  }, [setupStatusForDefault, selectedModel])
+  }, [setupStatusForDefault, routingInfo, selectedModel])
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
   const [pendingChatFiles, setPendingChatFiles] = useState<File[]>([])
   const [focusedClaimIndex, setFocusedClaimIndex] = useState<number | null>(null)
@@ -423,6 +435,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     costSensitivity,
     autoInject,
     autoInjectThreshold,
+    autoInjectMax,
     includePacks,
     injectedContext,
     kbResults: effectiveKBResults,

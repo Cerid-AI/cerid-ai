@@ -612,3 +612,32 @@ describe("useChatSend — KB query deduplication (Task 3)", () => {
     expect(callerKbResults).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// UX-03 — smart routing must explain the swap at the moment it happens
+// ---------------------------------------------------------------------------
+
+describe("useChatSend — auto-routing explanation (UX-03)", () => {
+  it("notice names the model AND carries the router's reasoning", async () => {
+    const { recommendModel } = await import("@/lib/model-router")
+    vi.mocked(recommendModel).mockReturnValue({
+      model: { id: "openrouter/meta-llama/llama-3.3-70b", label: "Llama 3.3 70B" },
+      estimatedCost: 0.0001,
+      reasoning: "Llama 3.3 70B scores 82 for this coding task — saves ~$0.01/turn",
+      savingsVsCurrent: 0.01,
+    } as ReturnType<typeof recommendModel>)
+
+    const opts = makeOptions({ routingMode: "auto" })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("implement a parser")
+    })
+
+    expect(opts.setSelectedModel).toHaveBeenCalledWith("openrouter/meta-llama/llama-3.3-70b")
+    // The combobox rewrite must be explained inline at swap time — the model
+    // name alone reads as the UI silently overriding the user's selection.
+    expect(result.current.autoRouteNotice).toContain("Llama 3.3 70B")
+    expect(result.current.autoRouteNotice).toContain("saves ~$0.01/turn")
+  })
+})

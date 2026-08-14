@@ -9,7 +9,7 @@
  * caller of VerifiedResponse outside the chat/audit surfaces.
  */
 
-import { ArrowLeft, MessageSquare } from "lucide-react"
+import { ArrowLeft, MessageSquare, TriangleAlert } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Button } from "@/components/ui/button"
@@ -56,6 +56,12 @@ export function BriefDetail({ brief, onBack }: BriefDetailProps) {
       <div>
         <h2 className="text-2xl font-semibold capitalize text-foreground">{brief.kind} brief</h2>
         <p className="mt-1 text-sm text-muted-foreground">{dateLabel}</p>
+        {brief.stale && (
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-600 dark:text-amber-400">
+            <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+            Stale — {brief.new_items_since_generation ?? "new"} items landed after this brief was generated
+          </p>
+        )}
       </div>
 
       <div className="space-y-8">

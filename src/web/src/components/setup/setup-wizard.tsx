@@ -13,8 +13,10 @@ import {
 } from "lucide-react"
 import { ApiKeyInput } from "@/components/setup/api-key-input"
 import { CustomProviderInput } from "@/components/setup/custom-provider-input"
+import { HFTokenStep } from "@/components/setup/hf-token-step"
 import { HealthDashboard } from "@/components/setup/health-dashboard"
 import { SystemCheckCard } from "@/components/setup/system-check-card"
+import { ServerConnectionForm } from "@/components/settings/server-connection-form"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
 import { LocalLLMStep } from "@/components/setup/local-llm-step"
 import { FirstDocumentStep, type FirstDocState } from "@/components/setup/first-document-step"
@@ -616,6 +618,19 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 Welcome to Cerid <span className="text-brand-gradient">AI</span>
               </h3>
 
+              {/* Desktop only, and FIRST: every later step talks to the server,
+                  so nothing here can succeed until this is right. Onboarding
+                  used to skip it entirely — the system check below would 401
+                  against a healthy stack and report "is Docker running?", with
+                  no way to supply a key anywhere in the wizard. Renders null in
+                  the browser build, where the backend is fixed. */}
+              <ServerConnectionForm saveLabel="Connect">
+                <p className="text-xs text-muted-foreground">
+                  Cerid runs as a service on this Mac or on another machine. Point this app at it,
+                  and give it the server's API key if the server requires one.
+                </p>
+              </ServerConnectionForm>
+
               <SystemCheckCard onCheckComplete={handleSystemCheckComplete} />
 
               {/* Backend recommendation immediately follows the system-check
@@ -808,6 +823,13 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                     />
                     <CustomProviderInput onValidated={(cp) => dispatch({ type: "SET_CUSTOM_PROVIDER", provider: cp })} />
                   </div>
+                </div>
+
+                {/* RA-10: the only in-product HuggingFace token UI. Optional —
+                    gates meeting transcription with speaker diarization; GUI-only
+                    users previously had no way to supply HF_TOKEN at all. */}
+                <div className="border-t pt-3">
+                  <HFTokenStep mode="wizard" />
                 </div>
 
                 {/* Provider warnings */}

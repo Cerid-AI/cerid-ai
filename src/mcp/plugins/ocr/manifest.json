@@ -1,5 +1,6 @@
 {
     "name": "ocr",
+    "display_name": "OCR",
     "version": "1.0.0",
     "type": "parser",
     "tier": "community",

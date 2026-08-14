@@ -350,15 +350,32 @@ async def scan_folder(
                         )
                     except (OSError, ValueError) as _ingest_exc:
                         # AF-022: ingest_file failed (e.g. Path.resolve on a
-                        # read-only overlay mount). The parse+ingest_content
-                        # fallback loses layout-aware pre_chunked output, so log
-                        # the degrade instead of silently downgrading it.
+                        # read-only overlay mount). Rebuild the layout-aware
+                        # pre_chunked path and attachment recursion here too
+                        # (matching ingestion.py:1867-2001) instead of
+                        # degrading to flat text.
                         from core.utils.swallowed import log_swallowed_error
                         log_swallowed_error(
                             "app.services.folder_scanner.ingest_file_fallback",
                             _ingest_exc,
                         )
                         # Fallback: parse file content, then ingest as text
+                        pre_chunked: list[dict[str, Any]] | None = None
+                        if config.ENABLE_LAYOUT_AWARE_PARSING:
+                            from core.ingest.dispatch import layout_aware_parse
+                            try:
+                                layout_result = await asyncio.to_thread(
+                                    layout_aware_parse, file_path
+                                )
+                            except Exception as _layout_exc:  # noqa: BLE001 — fallback best-effort
+                                log_swallowed_error(
+                                    "app.services.folder_scanner.layout_aware_fallback",
+                                    _layout_exc,
+                                )
+                                layout_result = None
+                            if layout_result is not None:
+                                _raw_text, pre_chunked = layout_result
+
                         parsed = await asyncio.to_thread(_parse_file, file_path)
                         text = parsed.get("text", "")
                         if not text.strip():
@@ -366,16 +383,45 @@ async def scan_folder(
                             yield ScanResult(path=file_path, status="low_quality", domain=domain, file_size_bytes=file_size)
                             continue
                         filename = Path(file_path).name
+                        fallback_meta = {
+                            "filename": filename,
+                            "sub_category": sub_cat,
+                            "client_source": "folder_scanner",
+                        }
                         result = await asyncio.to_thread(
                             ingest_content,
                             text,
                             domain or "general",
-                            {"filename": filename, "sub_category": sub_cat, "client_source": "folder_scanner"},
+                            fallback_meta,
+                            pre_chunked=pre_chunked,
                         )
+                        # AF-022: recurse into email attachments too, mirroring
+                        # ingest_file's HAS_ATTACHMENT wiring (ingestion.py
+                        # :1972-2001) instead of silently dropping them here.
+                        attachments = parsed.get("_attachments") or []
+                        parent_artifact_id = result.get("artifact_id")
+                        if attachments and parent_artifact_id and result.get("status") in (
+                            "success", "updated", "duplicate"
+                        ):
+                            from app.services.ingestion import _ingest_email_attachments
+                            attachment_summaries = await _ingest_email_attachments(
+                                attachments=attachments,
+                                parent_artifact_id=str(parent_artifact_id),
+                                parent_domain=domain or "general",
+                                parent_meta=fallback_meta,
+                            )
+                            if attachment_summaries:
+                                result["attachments_ingested"] = attachment_summaries
                     artifact_id = result.get("artifact_id", "")
                     quality = result.get("quality_score", 0.0)
 
-                    if result.get("duplicate"):
+                    # AF-015: ingest_content/ingest_file signal a duplicate via
+                    # status="duplicate", never a "duplicate" key — reading the
+                    # latter always evaluated falsy, so real duplicates fell
+                    # through to the quality check (and, before quality_score
+                    # was threaded into the return dicts, every fresh success
+                    # was misclassified low_quality too).
+                    if result.get("status") == "duplicate":
                         _record_file_scanned(redis, content_hash, file_path, "duplicate")
                         yield ScanResult(
                             path=file_path,
@@ -474,8 +520,11 @@ async def preview_folder(
         except PermissionError:
             continue
 
-    # Rough chunk estimate: ~500 tokens per chunk, ~4 chars per token, ~2000 chars per chunk
-    estimated_chunks = int((total_size / 2000) * 1.2) if total_size else 0  # 20% overlap
+    # Rough chunk estimate: ~4 chars per token, chars/chunk derived from the
+    # configured CHUNK_MAX_TOKENS (AF-073) so retuning chunk size updates
+    # this preview instead of leaving it pinned at the old ~2000 char default.
+    chars_per_chunk = config.CHUNK_MAX_TOKENS * 4
+    estimated_chunks = int((total_size / chars_per_chunk) * 1.2) if total_size else 0  # 20% overlap
 
     return {
         "total_files": total_files,

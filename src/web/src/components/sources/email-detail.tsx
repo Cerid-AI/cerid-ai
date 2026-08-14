@@ -231,8 +231,13 @@ function EmailDetailInner() {
                   id="email-interval"
                   type="number"
                   value={form.poll_interval}
-                  onChange={(e) => update("poll_interval", Number(e.target.value) || 15)}
+                  disabled
+                  readOnly
+                  aria-describedby="email-interval-hint"
                 />
+                <p id="email-interval-hint" className="text-xs text-muted-foreground">
+                  Fixed by the server's polling schedule — not configurable per mailbox.
+                </p>
               </div>
             </div>
 

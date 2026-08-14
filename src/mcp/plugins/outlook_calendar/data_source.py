@@ -115,17 +115,26 @@ class OutlookCalendarDataSource(DataSource):
             title = ev.get("title", "(no title)")
             start = ev.get("start")
             end = ev.get("end")
+            attendees = ev.get("attendees", [])
+            # parse_events extracts location and attendees; dropping them here
+            # left "where is my meeting?" unanswerable while the answer sat in
+            # the parsed dict — the google_calendar sf5-04 defect, again.
+            location = ev.get("location")
             body = (
                 f"Title: {title}\n"
                 f"Start: {start.isoformat() if isinstance(start, datetime) else start}\n"
                 f"End: {end.isoformat() if isinstance(end, datetime) else end}\n"
+                + (f"Location: {location}\n" if location else "")
+                + f"Attendees: {', '.join(attendees) if attendees else '(none)'}\n"
                 f"{ev.get('description', '')}"
             )
             out.append(
                 DataSourceResult(
                     title=title,
                     content=body,
-                    source_url="https://outlook.live.com/calendar/0/",
+                    # Deep-link to the event when Graph carried one, so a
+                    # citation lands on the event, not the calendar home.
+                    source_url=ev.get("html_link") or "https://outlook.live.com/calendar/0/",
                     source_name="Outlook Calendar",
                     confidence=0.65,
                 ),
@@ -202,6 +211,10 @@ def parse_events(raw: Any) -> list[CalendarEvent]:
                 ev["location"] = str(loc.get("displayName") or "")
             else:
                 ev["location"] = str(loc)
+        # Graph events carry a per-event webLink; without it every citation
+        # points at the calendar's front page instead of the event.
+        if isinstance(link := e.get("webLink"), str) and link:
+            ev["html_link"] = link
         out.append(ev)
     return out
 

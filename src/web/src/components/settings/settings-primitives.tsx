@@ -24,6 +24,7 @@ import { AlertTriangle, ChevronRight, Info, Loader2, Lock, RotateCcw } from "luc
 import { useNavigation } from "@/contexts/navigation-context"
 import type { FeatureTier } from "@/lib/api/billing"
 import { useEntitlements, type EntitlementInfo } from "@/hooks/use-entitlements"
+import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
 import { defsForGroup, type SettingDef } from "@/lib/settings-registry"
 import { useSettingsMode } from "@/lib/settings-mode"
 import { useSettingsReveal } from "./reveal-context"
@@ -85,11 +86,15 @@ export function TierLockBadge({
   requiredTier?: FeatureTier
   count?: number
 }) {
+  // Callers derive `requiredTier` from `useEntitlements`, which falls back to
+  // the registry tier until capabilities resolve — so a Pro user would briefly
+  // see a settled "Pro" lock nothing had checked yet (sf5-02).
+  const { isLoading } = useEntitlements()
   const label = requiredTier === "enterprise" ? "Enterprise" : "Pro"
   return (
     <Badge variant="outline" className="gap-1 text-label-xs">
       <Lock className="h-2.5 w-2.5" aria-hidden="true" />
-      {count !== undefined ? `${count} ${label}` : label}
+      {isLoading ? "Checking plan" : count !== undefined ? `${count} ${label}` : label}
     </Badge>
   )
 }
@@ -307,7 +312,11 @@ export function SettingRow({
   renderControl?: (entitlement: EntitlementInfo) => ReactNode
   className?: string
 }) {
-  const { forDef } = useEntitlements()
+  const {
+    forDef,
+    isError: entitlementsError,
+    isLoading: entitlementsLoading,
+  } = useEntitlements()
   const { goTo } = useNavigation()
   const reveal = useSettingsReveal()
   const ref = useRef<HTMLDivElement>(null)
@@ -315,6 +324,11 @@ export function SettingRow({
 
   const entitlement = forDef(def)
   const locked = entitlement.state === "locked"
+  // Until capabilities resolve, `forDef` falls back to the registry tier, so a
+  // Pro user's row would claim "Requires the Pro plan" — a verdict nothing has
+  // checked yet (sf5-02). The row stays inert (locked), but says it is still
+  // checking rather than asserting the lock.
+  const lockPending = locked && entitlementsLoading
   const flagOff = entitlement.state === "flag-off"
   const isTarget = reveal?.id === def.id
   const modified = useIsModified(def.id)
@@ -353,21 +367,43 @@ export function SettingRow({
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    aria-label={`${def.label} requires the ${entitlement.requiredTier} plan`}
+                    aria-label={
+                      lockPending
+                        ? `${def.label} plan status loading`
+                        : entitlementsError
+                          ? `${def.label} plan status unavailable`
+                          : `${def.label} requires the ${entitlement.requiredTier} plan`
+                    }
                     className={cn("inline-flex min-h-6 items-center focus-visible:rounded-sm", FOCUS_RING)}
                   >
                     <Badge variant="outline" className="gap-1 text-label-xs">
-                      <Lock className="h-2.5 w-2.5" aria-hidden="true" />
-                      {entitlement.requiredTier === "enterprise" ? "Enterprise" : "Pro"}
+                      {entitlementsError ? (
+                        <AlertTriangle className="h-2.5 w-2.5" aria-hidden="true" />
+                      ) : (
+                        <Lock className="h-2.5 w-2.5" aria-hidden="true" />
+                      )}
+                      {lockPending
+                        ? "Checking plan"
+                        : entitlementsError
+                          ? "Plan unknown"
+                          : entitlement.requiredTier === "enterprise" ? "Enterprise" : "Pro"}
                     </Badge>
                   </button>
                 </PopoverTrigger>
                 <PopoverContent side="top" className="w-72 space-y-2">
                   <p className="text-sm font-medium">{def.label}</p>
                   <p className="text-sm text-muted-foreground">{def.helpText}</p>
-                  <p className="text-label-sm text-muted-foreground">
-                    Requires the {entitlement.requiredTier === "enterprise" ? "Enterprise" : "Pro"} plan.
-                  </p>
+                  {lockPending ? (
+                    <p className="text-label-sm text-muted-foreground">
+                      Checking your plan…
+                    </p>
+                  ) : entitlementsError ? (
+                    <EntitlementsUnavailableNote />
+                  ) : (
+                    <p className="text-label-sm text-muted-foreground">
+                      Requires the {entitlement.requiredTier === "enterprise" ? "Enterprise" : "Pro"} plan.
+                    </p>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"

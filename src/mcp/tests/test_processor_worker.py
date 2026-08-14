@@ -435,6 +435,50 @@ def test_build_default_registry_covers_every_job_module():
 
 
 # ---------------------------------------------------------------------------
+# AF-089: the real auto-discovered registry, exercised with a real job
+# ---------------------------------------------------------------------------
+#
+# Every ProcessorWorker in this file up to here is built with a hand-rolled
+# registry ({"stub_job": _StubJob, ...}) — that proves the worker's own
+# dequeue/dispatch/mark_completed machinery, but never proves that a class
+# build_default_registry() actually discovers is dispatchable end-to-end
+# through that machinery. The membership tests above only assert a string is
+# a dict key; they never call .run() on what that key maps to.
+
+
+async def test_worker_dispatches_a_real_job_through_the_real_registry():
+    """A real BaseJob subclass, discovered by the real build_default_registry(),
+    is executed to completion through the worker's actual dequeue/dispatch path.
+
+    Uses ComputeTrustStateJob's designed "neo4j unavailable" skip branch so the
+    real .run() body executes deterministically without a live Neo4j driver —
+    the queue is still the lightweight mock every other test in this file uses
+    (that boundary is legitimate to fake); the registry and the job class are not.
+    """
+    registry = build_default_registry()
+    assert "compute_trust_state" in registry  # sanity: real discovery found it
+
+    record = _make_record(job_type="compute_trust_state")
+    record.payload = {}  # ComputeTrustStateJob() takes no required args
+    queue = _mock_queue(record)
+    worker = ProcessorWorker(
+        queue, registry, concurrency=1, poll_interval=0.01, load_ceiling=99999.0,
+    )
+
+    with patch("app.deps.get_neo4j", return_value=None):
+        await worker.start()
+        await asyncio.sleep(0.05)
+        await worker.stop()
+
+    queue.mark_running.assert_called_once_with(record.id)
+    queue.mark_completed.assert_called_once()
+    result = queue.mark_completed.call_args[0][1]
+    # This is ComputeTrustStateJob.run()'s own real branch, not a stub's fixed
+    # JobResult — it can only appear if the actual class ran.
+    assert result.metadata == {"status": "skipped", "reason": "neo4j unavailable"}
+
+
+# ---------------------------------------------------------------------------
 # _effective_cpu_count — cgroup-aware load ceiling (2026-07-12 triage:
 # os.cpu_count() reported the HOST's cores inside a 2-CPU cgroup, giving a
 # ceiling of 16.8 that could never throttle)

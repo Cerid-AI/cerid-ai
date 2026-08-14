@@ -38,7 +38,7 @@ describe("NavigationProvider — legacy redirects", () => {
     expect(params.get("mode")).toBe("wiki")
   })
 
-  it("routes goTo('communities') to subjects pane and sets ?mode=atlas", () => {
+  it("routes goTo('communities') to subjects pane and sets ?mode=communities", () => {
     const onPaneChange = vi.fn()
     render(
       <NavigationProvider activePane="chat" onPaneChange={onPaneChange}>
@@ -46,18 +46,21 @@ describe("NavigationProvider — legacy redirects", () => {
       </NavigationProvider>,
     )
     expect(onPaneChange).toHaveBeenCalledWith("subjects")
-    expect(new URLSearchParams(window.location.search).get("mode")).toBe("atlas")
+    // RA-11: GraphExplorer (the Leiden community explorer) was restored as
+    // its own Subjects mode instead of stranding at the unrelated Atlas
+    // surface.
+    expect(new URLSearchParams(window.location.search).get("mode")).toBe("communities")
   })
 
-  it("routes goTo('memories') to subjects pane and sets ?mode=atlas", () => {
+  it("passes goTo('memories') through unchanged — MemoriesPane is a first-class pane again (RA-08)", () => {
     const onPaneChange = vi.fn()
     render(
       <NavigationProvider activePane="chat" onPaneChange={onPaneChange}>
         <Caller target="memories" />
       </NavigationProvider>,
     )
-    expect(onPaneChange).toHaveBeenCalledWith("subjects")
-    expect(new URLSearchParams(window.location.search).get("mode")).toBe("atlas")
+    expect(onPaneChange).toHaveBeenCalledWith("memories")
+    expect(new URLSearchParams(window.location.search).get("mode")).toBeNull()
   })
 
   it("routes goTo('knowledge') to sources pane and sets ?sources_mode=library", () => {

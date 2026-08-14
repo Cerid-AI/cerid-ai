@@ -4,7 +4,11 @@
 // TanStack Query hook for the /graph/decomposition payload.
 
 import { useQuery, keepPreviousData } from "@tanstack/react-query"
-import { fetchDecomposition, fetchCommunityEntities } from "@/lib/api/decomposition"
+import {
+  fetchDecomposition,
+  fetchCommunityEntities,
+  fetchBucketEntities,
+} from "@/lib/api/decomposition"
 
 export function useDecomposition() {
   return useQuery({
@@ -21,6 +25,22 @@ export function useCommunityEntities(communityId: string | null) {
     queryFn: ({ signal }) => fetchCommunityEntities(communityId!, { signal }),
     staleTime: 60_000,
     enabled: Boolean(communityId),
+    placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * Entity leaves for a non-community bucket (UX-13). Pass a null key to
+ * keep the query idle until the bucket row is expanded.
+ */
+export function useBucketEntities(
+  key: { bucket: "unclustered" | "uncategorized"; domain: string | null } | null,
+) {
+  return useQuery({
+    queryKey: ["graph-decomposition-bucket", key?.bucket, key?.domain],
+    queryFn: ({ signal }) => fetchBucketEntities(key!.bucket, key!.domain, { signal }),
+    staleTime: 60_000,
+    enabled: Boolean(key),
     placeholderData: keepPreviousData,
   })
 }

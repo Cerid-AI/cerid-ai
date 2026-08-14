@@ -14,6 +14,10 @@ export interface SourceKindMeta {
   kind: string
   family: string
   tier: "core" | "pro"
+  // FEATURE_FLAGS key gating this kind (KIND_FEATURE_FLAG in sources.py).
+  // null/absent for ungated Core kinds — resolve entitlement per-flag via
+  // useEntitlements().forFlag rather than guessing from `tier`.
+  feature_flag?: string | null
   // Whether this kind is connectable via the add-source wizard. "available" →
   // has a SourceConnector (or webhook); "oauth" → connect via Settings →
   // Connectors; "coming_soon" → declared but not yet implemented. Backend

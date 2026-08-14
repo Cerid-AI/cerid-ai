@@ -187,9 +187,17 @@ class TestFeatureFlags:
         """Community features are always enabled."""
         from utils.features import is_feature_enabled
 
-        assert is_feature_enabled("hierarchical_taxonomy") is True
         assert is_feature_enabled("file_upload_gui") is True
         assert is_feature_enabled("encryption_at_rest") is True
+
+    def test_hierarchical_taxonomy_is_planned_not_shipped(self):
+        """AF-081: taxonomy.py is single-level (domain -> flat sub_categories);
+        the marketed nested tree was never built, so the flag is PLANNED."""
+        from config.features import PLANNED_FEATURES
+        from utils.features import is_feature_enabled
+
+        assert is_feature_enabled("hierarchical_taxonomy") is False
+        assert "hierarchical_taxonomy" in PLANNED_FEATURES
 
     def test_is_feature_enabled_unknown_defaults_disabled(self):
         """Unknown feature names default to disabled (fail-closed for safety)."""

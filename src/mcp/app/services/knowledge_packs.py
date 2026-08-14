@@ -307,6 +307,24 @@ async def uninstall_pack(
             "Pack %s uninstalled: %d artifacts removed, %d missing",
             pack_id, removed, missing,
         )
+
+        # AF-055: mirror install_pack's post-install recompute — removing a
+        # pack's artifacts changes the same layout (compute_umap_3d, which
+        # also busts the /graph/map serving cache) and trust
+        # (compute_trust_state) state that installing one does, so an
+        # uninstall must trigger the same recompute. Best-effort: a queue
+        # hiccup must never fail an otherwise-successful uninstall.
+        try:
+            from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+            from app.processor.jobs.compute_trust_state import ComputeTrustStateJob  # noqa: PLC0415
+            from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob  # noqa: PLC0415
+
+            enqueue_job(ComputeTrustStateJob(), payload={})
+            enqueue_job(ComputeUmap3DJob(), payload={})
+            logger.info("uninstall_pack.recompute_enqueued pack=%s", pack_id)
+        except Exception as exc:  # noqa: BLE001 — recompute is best-effort
+            log_swallowed_error("services.knowledge_packs.uninstall_recompute", exc)
+
         return {
             "removed": removed,
             "missing": missing,

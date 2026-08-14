@@ -42,10 +42,22 @@ class TestClassifyRetrievalNeed:
         d = classify_retrieval_need("can you rephrase that?")
         assert d.action == "skip"
 
-    def test_short_two_word_no_question_mark_returns_skip(self):
-        d = classify_retrieval_need("got it")
-        assert d.action == "skip"
-        assert d.reason == "too_short"
+    def test_short_conversational_filler_returns_skip(self):
+        for phrase in ["got it", "will do", "sounds good", "makes sense"]:
+            d = classify_retrieval_need(phrase)
+            assert d.action == "skip", f"Expected skip for {phrase!r}"
+            assert d.reason == "conversational"
+
+    def test_short_keyword_query_returns_light(self):
+        # UX-07 / kb-idle-zero: "invoice receipt" against a populated mail
+        # corpus returned kb:0 because the blanket <=2-word skip treated a
+        # keyword lookup as conversational filler. Short content-bearing
+        # queries must retrieve.
+        for phrase in ["invoice receipt", "tax form", "quarterly report"]:
+            d = classify_retrieval_need(phrase)
+            assert d.action == "light", f"Expected light for {phrase!r}"
+            assert d.reason == "short_keyword"
+            assert d.top_k > 0
 
     def test_simple_lookup_returns_light(self):
         d = classify_retrieval_need("what is kubernetes?")

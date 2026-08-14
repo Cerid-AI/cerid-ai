@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 """Calendar-aware meeting stitching.
 
-When a calendar connector is registered (Google Calendar via MCP or
-Apple Calendar via EventKit), this module matches the recording's
-timestamp window against scheduled events. A match produces:
+When a calendar connector is registered (Google Calendar or Outlook
+Calendar via the sibling Pro-connector MCP), this module matches the
+recording's timestamp window against scheduled events. A match produces:
 
   - calendar_event_id          — for back-linking from the KB artifact
   - attendees                  — list of names/emails (feeds pyannote's
@@ -77,18 +77,16 @@ async def match_to_event(file_path: str, duration_seconds: float) -> dict[str, A
     # Protocol (app/data_sources/calendar_protocol.py). Typed as Any here
     # because the registry returns the base DataSource type — the runtime
     # check below verifies list_events exists before invoking it.
-    # Fallback chain (most-specific to least): Google → Outlook →
-    # Apple (Swift helper) → legacy Apple key. The 'apple_calendar' key
-    # is registered by plugins/apple_calendar (Phase G.4); the legacy
-    # 'apple_calendar_eventkit' key was reserved earlier in the plan
-    # before the helper landed — kept as a tail entry so any
-    # ephemeral references in tests resolve without an extra
-    # migration.
+    # Fallback chain: Google → Outlook. Apple Calendar moved to the desktop
+    # bridge (commit 5bac09e92) — plugins/apple_calendar's Swift EventKit
+    # helper cannot execute from the Linux MCP container this module runs
+    # in, so an 'apple_calendar' branch here can never produce a real
+    # match. Bridging calendar_stitch itself to the desktop process is a
+    # larger architectural change, deferred; this fallback chain stays
+    # server-side-only until that lands.
     calendar_source: Any = (
         registry.get("google_calendar")
         or registry.get("outlook_calendar")
-        or registry.get("apple_calendar")
-        or registry.get("apple_calendar_eventkit")
     )
     if calendar_source is None:
         return None  # no calendar connected — clean no-op

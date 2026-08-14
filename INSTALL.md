@@ -82,6 +82,19 @@ The script will:
 
 When it finishes, open <http://localhost:3000> in your browser.
 
+### Optional: Finder Quick Actions & Services menu (macOS)
+
+With the stack running, install a Finder right-click action and a
+Services-menu item that send files and selected text straight to the KB:
+
+```bash
+make install-macos-integration
+# or directly:
+bash scripts/install-macos-integration.sh
+```
+
+Uninstall with `bash scripts/install-macos-integration.sh --uninstall`.
+
 ---
 
 ## Linux Installation (Ubuntu/Debian)

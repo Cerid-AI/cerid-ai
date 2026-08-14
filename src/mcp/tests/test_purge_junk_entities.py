@@ -64,6 +64,8 @@ class TestClassifyJunkEntityRejects:
             ("CHARSETS", "shouty_acronym"),  # 8 chars
             ("euc-jp", "codec_alias"),
             ("iso-2022-jp", "codec_alias"),
+            ("a@b", "degenerate_email"),      # observed live junk entity
+            ("x@localhost", "degenerate_email"),
         ],
     )
     def test_classifies_junk(self, mod, name, expected_class):
@@ -81,6 +83,7 @@ class TestClassifyJunkEntityKeepers:
             "BTC/USD",  # has a slash but no doc extension
             "UNESCO",  # 6 chars — at the acronym-length boundary, admitted
             "2024",  # bare number, no separator — admitted (could be a year)
+            "john@example.com",  # real dotted-domain address, admitted
         ],
     )
     def test_keepers_are_not_junk(self, mod, name):

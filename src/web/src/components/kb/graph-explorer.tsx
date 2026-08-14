@@ -78,7 +78,7 @@ function CommunityCard({
       role="button"
       tabIndex={0}
       aria-pressed={isSelected}
-      aria-label={`Community ${community.community_id}, ${community.member_count} members`}
+      aria-label={`Community ${community.name ?? community.community_id}, ${community.member_count} members`}
       className={[
         "cursor-pointer rounded-lg border p-3 text-sm transition-colors",
         "hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -95,10 +95,16 @@ function CommunityCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1 space-y-1">
           <p className="truncate text-xs font-medium text-foreground">
-            {community.summary
-              ? community.summary.slice(0, 72) + (community.summary.length > 72 ? "…" : "")
-              : `Community ${community.community_id}`}
+            {community.name ??
+              (community.summary
+                ? community.summary.slice(0, 72) + (community.summary.length > 72 ? "…" : "")
+                : `Community ${community.community_id}`)}
           </p>
+          {community.name && community.summary && (
+            <p className="line-clamp-2 text-label-xs text-muted-foreground">
+              {community.summary}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="secondary" className="gap-1 text-label-xs">
               <Users className="h-2.5 w-2.5" aria-hidden="true" />
@@ -120,14 +126,16 @@ function CommunityCard({
 
 function MemberEntityList({
   members,
+  membersTotal,
   onEntityClick,
 }: {
   members: CommunityFull["members"]
+  membersTotal: number
   onEntityClick?: (canonical_id: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const visible = expanded ? members : members.slice(0, 6)
-  const hasMore = members.length > 6
+  const truncated = members.length < membersTotal
 
   return (
     <section aria-labelledby="community-members-heading">
@@ -142,7 +150,9 @@ function MemberEntityList({
           id="community-members-heading"
           className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
         >
-          Entities ({members.length})
+          {truncated
+            ? `Entities (${members.length} of ${membersTotal})`
+            : `Entities (${members.length})`}
         </h2>
         {expanded ? (
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -165,9 +175,9 @@ function MemberEntityList({
               {m.name}
             </Button>
           ))}
-          {hasMore && !expanded && (
+          {truncated && (
             <span className="self-center text-label-xs text-muted-foreground">
-              +{members.length - 6} more
+              showing top {members.length} of {membersTotal}
             </span>
           )}
         </div>
@@ -229,7 +239,7 @@ function CommunityDetailPanel({
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-base font-semibold text-foreground">
-              Community {data.community_id}
+              {data.name ?? `Community ${data.community_id}`}
             </h1>
             <Badge variant="secondary" className="gap-1 text-label-xs">
               <Users className="h-2.5 w-2.5" aria-hidden="true" />
@@ -265,7 +275,11 @@ function CommunityDetailPanel({
 
         {/* Member entities (lazy-collapsed) */}
         {data.members.length > 0 && (
-          <MemberEntityList members={data.members} onEntityClick={onEntityClick} />
+          <MemberEntityList
+            members={data.members}
+            membersTotal={data.members_total}
+            onEntityClick={onEntityClick}
+          />
         )}
 
         {/* Ask about this community CTA */}

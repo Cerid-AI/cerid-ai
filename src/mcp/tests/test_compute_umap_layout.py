@@ -666,3 +666,67 @@ from app.processor.jobs.compute_umap_3d import (  # noqa: E402
     _NOVERLAP_BASE_RADIUS,
     _NOVERLAP_DEGREE_COEFF,
 )
+
+# ---------------------------------------------------------------------------
+# Periphery predicate (UX-12 ring): one marking shared by layout + serving
+# ---------------------------------------------------------------------------
+
+
+def test_peripheral_flags_cover_shell_and_singleton_tail():
+    """Degree-0, no-community, 'isolated'-sentinel and size<=2 communities are
+    peripheral; members of real communities with edges are not."""
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    entities = [
+        {"id": "core1", "community": "0:1"},
+        {"id": "core2", "community": "0:1"},
+        {"id": "core3", "community": "0:1"},
+        {"id": "solo", "community": "0:9"},          # singleton community
+        {"id": "sentinel", "community": "isolated"},  # sentinel
+        {"id": "nocomm", "community": None},
+        {"id": "shell", "community": "0:1"},          # no edges → shell
+    ]
+    edges = [
+        ("core1", "core2", 1.0),
+        ("core2", "core3", 1.0),
+        ("core1", "core3", 1.0),
+        ("solo", "core1", 1.0),
+        ("sentinel", "core1", 1.0),
+        ("nocomm", "core2", 1.0),
+    ]
+    flags = ComputeUmap3DJob._peripheral_flags(entities, edges)
+    assert flags["core1"] is False
+    assert flags["core2"] is False
+    assert flags["core3"] is False
+    assert flags["solo"] is True       # tiny community despite having an edge
+    assert flags["sentinel"] is True
+    assert flags["nocomm"] is True
+    assert flags["shell"] is True      # degree 0 → the exact-circle shell
+
+
+def test_write_coords_persists_peripheral_flag():
+    from unittest.mock import MagicMock
+
+    from app.processor.jobs.compute_umap_3d import ComputeUmap3DJob
+
+    calls: list[tuple[str, dict]] = []
+    session = MagicMock()
+    session.__enter__ = MagicMock(return_value=session)
+    session.__exit__ = MagicMock(return_value=False)
+
+    def _run(query, **kwargs):
+        calls.append((query, kwargs))
+        return MagicMock()
+
+    session.run = _run
+    driver = MagicMock()
+    driver.session.return_value = session
+
+    ComputeUmap3DJob()._write_coords(driver, [
+        {"id": "a", "x": 1.0, "y": 2.0, "z": 0.0, "method": "force", "peripheral": True},
+    ])
+
+    assert len(calls) == 1
+    query, kwargs = calls[0]
+    assert "layout_peripheral" in query
+    assert kwargs["rows"][0]["peripheral"] is True

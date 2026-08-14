@@ -67,7 +67,10 @@ class BookmarksConnector(SourceConnector):
         matches = _BOOKMARK_RE.findall(html)
         bookmarks = []
         for url, title_raw in matches[:_MAX_BOOKMARKS]:
-            url = url.strip()
+            # WB-03: the HREF attribute is HTML-escaped same as any other
+            # attribute value (e.g. "?a=1&amp;b=2") — unescape it the same
+            # way the title text already is, or the stored URL is corrupt.
+            url = unescape(url).strip()
             if not url:
                 continue
             # Strip nested HTML inside the title text (Firefox occasionally

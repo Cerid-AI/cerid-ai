@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""The 21 valid Source kinds + their tier + family mappings.
+"""The 22 valid Source kinds + their tier + family mappings.
 
 This is the single source of truth referenced by:
 

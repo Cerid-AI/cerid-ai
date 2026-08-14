@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 import config
 from app.agents.curator import curate
 from app.db.neo4j.artifacts import (
+    count_artifacts,
     delete_artifacts_by_domain,
     domain_artifact_stats,
     get_artifact,
@@ -26,6 +27,7 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from config.features import CERID_MULTI_USER
 from core.retrieval.bm25 import rebuild_all as rebuild_bm25_all
 from core.retrieval.semantic_cache import invalidate_cache as invalidate_semantic_cache
+from core.utils import audit_log
 from core.utils.swallowed import log_swallowed_error
 from utils.encryption import decrypt_field
 from utils.query_cache import invalidate_cache_non_blocking
@@ -42,6 +44,7 @@ class ClearDomainResponse(BaseModel):
 class MergeDuplicatesResponse(BaseModel):
     status: str
     merged: Any
+    failed: Any
 
 
 class DismissDuplicatesResponse(BaseModel):
@@ -113,6 +116,23 @@ class RegenerateSummariesResponse(BaseModel):
 
 class ClearDomainRequest(BaseModel):
     confirm: bool = Field(False, description="Must be true to proceed with clearing")
+
+
+class PurgeTestResidueRequest(BaseModel):
+    confirm: bool = Field(
+        False,
+        description="False = dry-run report; true = purge the residue",
+    )
+
+
+class PurgeTestResidueResponse(BaseModel):
+    dry_run: bool
+    artifacts_found: int
+    artifacts_purged: int
+    entities_found: int
+    entities_purged: int
+    skipped_in_grace: int
+    samples: list[str]
 
 
 class DeleteArtifactResponse(BaseModel):
@@ -743,6 +763,11 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         await invalidate_cache_non_blocking()
         _invalidate_semantic_cache_safe("kb_admin.clear_domain")
 
+        audit_log.audit(
+            "kb.clear_domain",
+            target=domain,
+            detail={"artifacts_deleted": deleted_count, "chunks_removed": chunks_removed},
+        )
         return {
             "domain": domain,
             "artifacts_deleted": deleted_count,
@@ -754,6 +779,30 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
     except Exception as e:
         logger.error("Failed to clear domain %s: %s", domain, e)
         raise HTTPException(status_code=500, detail=f"Failed to clear domain: {e}")
+
+
+@router.post("/admin/kb/purge-test-residue", response_model=PurgeTestResidueResponse)
+async def purge_test_residue(req: PurgeTestResidueRequest | None = None):
+    """Purge test-residue artifacts/entities from the production KB (UX-14/20).
+
+    Dry-run by default: reports what the sweep would remove. ``confirm=true``
+    deletes through the multi-store lifecycle coordinator. The same sweep runs
+    weekly from the scheduler; this endpoint is the on-demand trigger.
+    """
+    apply = bool(req and req.confirm)
+    try:
+        from app.services.kb_hygiene import sweep_test_residue
+
+        summary = await asyncio.to_thread(
+            sweep_test_residue, get_neo4j(), get_chroma(), apply=apply,
+        )
+        if apply and (summary["artifacts_purged"] or summary["entities_purged"]):
+            await invalidate_cache_non_blocking()
+            _invalidate_semantic_cache_safe("kb_admin.purge_test_residue")
+        return PurgeTestResidueResponse(dry_run=not apply, **summary)
+    except Exception as e:
+        logger.error("Failed to purge test residue: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to purge test residue: {e}")
 
 
 @router.delete("/admin/artifacts/{artifact_id}", response_model=DeleteArtifactResponse)
@@ -770,6 +819,11 @@ async def delete_single_artifact(artifact_id: str):
 
         chunks_removed = len(removal.chunk_ids or [])
         filename = ""
+        audit_log.audit(
+            "artifact.delete",
+            target=artifact_id,
+            detail={"chunks_removed": chunks_removed},
+        )
         return DeleteArtifactResponse(
             deleted=True,
             artifact_id=artifact_id,
@@ -888,8 +942,10 @@ async def repair_collection(req: CollectionRepairRequest):
         log_swallowed_error('app.routers.kb_admin', exc)
         actual_dim = None
 
-    # Find artifacts that would be re-ingested
-    artifacts = list_artifacts(neo4j, domain=domain, limit=10000)
+    # Find artifacts that would be re-ingested. AF-093: a count-only query
+    # (not list_artifacts(limit=10000)) so domains over 10k artifacts don't
+    # under-report artifacts_found.
+    artifacts_count = count_artifacts(neo4j, domain=domain)
 
     if req.dry_run:
         return CollectionRepairResponse(
@@ -898,13 +954,13 @@ async def repair_collection(req: CollectionRepairRequest):
             domain=domain,
             actual_dim=actual_dim,
             expected_dim=expected_dim,
-            artifacts_found=len(artifacts),
+            artifacts_found=artifacts_count,
             rebuilt_documents=0,
             backup_path=None,
             dry_run=True,
             message=(
                 f"Dry run: would back up collection {coll_name!r}, delete it, recreate "
-                f"with dim={expected_dim}, and re-ingest {len(artifacts)} artifact(s)."
+                f"with dim={expected_dim}, and re-ingest {artifacts_count} artifact(s)."
             ),
         )
 
@@ -997,7 +1053,7 @@ async def repair_collection(req: CollectionRepairRequest):
         domain=domain,
         actual_dim=actual_dim,
         expected_dim=expected_dim,
-        artifacts_found=len(artifacts),
+        artifacts_found=artifacts_count,
         rebuilt_documents=rebuilt,
         backup_path=backup_path,
         dry_run=False,
@@ -1050,17 +1106,19 @@ _DISMISSED_DUPLICATES_KEY = "cerid:kb:dismissed_duplicate_hashes"
 
 
 async def _dismissed_duplicate_hashes() -> set[str]:
-    """Content-hashes the operator has dismissed (empty when Redis is absent)."""
+    """Content-hashes the operator has dismissed.
+
+    Returns an empty set only when Redis is not configured at all — a real
+    read failure (Redis configured but unreachable) propagates instead of
+    being swallowed into an empty set, which would silently let previously
+    -dismissed groups reappear in ``list_duplicates`` (WB-42).
+    """
     import asyncio
 
     redis = get_redis()
     if redis is None:
         return set()
-    try:
-        raw = await asyncio.to_thread(redis.smembers, _DISMISSED_DUPLICATES_KEY)
-    except Exception as exc:  # noqa: BLE001 — best-effort filter, never fail the list
-        log_swallowed_error("app.routers.kb_admin.dismissed_duplicate_hashes", exc)
-        return set()
+    raw = await asyncio.to_thread(redis.smembers, _DISMISSED_DUPLICATES_KEY)
     return {h.decode() if isinstance(h, bytes) else str(h) for h in (raw or set())}
 
 
@@ -1116,6 +1174,7 @@ async def merge_duplicates(req: MergeDuplicatesRequest):
 
     neo4j = get_neo4j()
     merged = 0
+    failed = 0
     for art_id in req.remove_ids:
         if art_id == req.keep_id:
             continue
@@ -1127,7 +1186,8 @@ async def merge_duplicates(req: MergeDuplicatesRequest):
             merged += 1
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("app.routers.kb_admin.merge_duplicates", exc)
-    return {"status": "ok", "merged": merged}
+            failed += 1
+    return {"status": "ok", "merged": merged, "failed": failed}
 
 
 @router.post("/admin/kb/duplicates/dismiss", response_model=DismissDuplicatesResponse)
@@ -1150,16 +1210,21 @@ async def dismiss_duplicates(req: DismissDuplicatesRequest):
         if r.get("id") in ids and r.get("content_hash")
     }
 
+    dismissed_count = 0
     redis = get_redis()
     if redis is not None and hashes:
         try:
-            await asyncio.to_thread(
+            dismissed_count = await asyncio.to_thread(
                 redis.sadd, _DISMISSED_DUPLICATES_KEY, *hashes
             )
-        except Exception as exc:  # noqa: BLE001 — persistence best-effort
+        except Exception as exc:
             log_swallowed_error("app.routers.kb_admin.dismiss_duplicates", exc)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to persist dismissed duplicate group(s): {exc}",
+            ) from exc
 
-    return {"status": "ok", "dismissed": len(req.artifact_ids)}
+    return {"status": "ok", "dismissed": int(dismissed_count)}
 
 
 @router.get("/admin/kb/stats", response_model=KBStatsResponse)

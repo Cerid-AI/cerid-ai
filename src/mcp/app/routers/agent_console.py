@@ -8,8 +8,18 @@ Provides:
 - ``GET /agent-console/recent``  — last N events for initial hydration
 - ``DELETE /agent-console/clear`` — clear the event stream
 
-The same SSE stream is also exposed at ``GET /agents/activity/stream`` as the
-stable client-facing URL used by the React Agents pane and the public API.
+The same three endpoints are mirrored under ``/agents/activity/*`` (see
+``activity_router`` below), but the two prefixes are not interchangeable in
+practice — two distinct React components each pin to one prefix.
+``/agent-console/*`` (all three verbs) backs the "Agent Communication
+Console" overlay (``src/web/src/components/console/AgentConsole.tsx`` via
+``use-agent-console.ts``, mounted from ``app-layout.tsx``).
+``/agents/activity/stream`` — and only the stream verb — backs the "Agent
+Activity Console" panel in Settings -> Diagnostics -> Agents
+(``src/web/src/components/agents/agent-console.tsx`` via
+``use-agent-activity-stream.ts``). ``/agents/activity/recent`` and
+``/agents/activity/clear`` have no client at all. Don't assume parity
+across the mirror when changing one side.
 """
 
 from __future__ import annotations
@@ -54,10 +64,13 @@ logger = logging.getLogger("ai-companion.agent_console")
 
 router = APIRouter(prefix="/agent-console", tags=["agent-console"])
 
-# Second router for the client-facing ``/agents/activity/*`` URL space.
+# Second router mirroring the same endpoints under ``/agents/activity/*``.
 # Registered alongside ``router`` in ``app/main.py`` so both paths serve the
-# same underlying Redis Stream — ``/agent-console/*`` is the legacy/internal
-# path, ``/agents/activity/*`` is the documented public URL.
+# same underlying Redis Stream. Only ``stream`` has a live client here (the
+# Settings -> Diagnostics -> Agents pane, via use-agent-activity-stream.ts);
+# ``recent`` and ``clear`` are unused twins of the ``/agent-console/*``
+# verbs the "Agent Communication Console" overlay actually calls — see
+# use-agent-console.ts.
 activity_router = APIRouter(prefix="/agents/activity", tags=["agent-console"])
 
 
@@ -148,16 +161,26 @@ def clear():
 
 
 # ---------------------------------------------------------------------------
-# Public ``/agents/activity/*`` aliases — same handlers, canonical client URL
+# ``/agents/activity/*`` aliases — same handlers as ``/agent-console/*``.
+# ``stream`` has a live client (Settings -> Diagnostics -> Agents pane, see
+# use-agent-activity-stream.ts); ``recent`` and ``clear`` are unused twins of
+# the ``/agent-console/*`` verbs the "Agent Communication Console" overlay
+# actually calls (use-agent-console.ts). Kept as the documented public URL
+# for external API consumers.
 # ---------------------------------------------------------------------------
 
 
 @activity_router.get("/stream")
 async def activity_stream():
-    """SSE stream of real-time agent activity events (public client URL).
+    """SSE stream of real-time agent activity events (documented public URL).
 
     Emits ``{agent, message, level, timestamp, metadata, id}`` JSON envelopes
-    matching the shape already consumed by ``AgentConsole`` in the React GUI.
+    in the same shape as ``/agent-console/stream``. Consumed directly by the
+    Settings -> Diagnostics -> Agents pane's ``AgentConsole`` component
+    (``src/web/src/components/agents/agent-console.tsx``, via
+    ``use-agent-activity-stream.ts``) — a distinct component, despite the
+    matching name, from the one that consumes ``/agent-console/stream``
+    (``src/web/src/components/console/AgentConsole.tsx``).
     Heartbeats fire every 5 s to keep proxies (nginx, Cloudflare) from
     severing the connection during idle periods.
     """

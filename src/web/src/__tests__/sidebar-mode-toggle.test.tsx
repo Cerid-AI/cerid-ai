@@ -20,6 +20,7 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/lib/api/settings", () => ({
   fetchHealth: vi.fn().mockResolvedValue({ version: "1.0.0" }),
+  applyModelUpdates: vi.fn(),
 }))
 
 const noop = () => {}

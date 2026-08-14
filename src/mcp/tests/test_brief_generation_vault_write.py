@@ -65,7 +65,7 @@ def _patch_pipeline_internals(record: MagicMock):
     stack.enter_context(
         patch(
             "app.processor.jobs.brief_generation._assemble_corpus",
-            return_value=("inbox text", "notes text"),
+            return_value=("inbox text", "notes text", 3),
         )
     )
     # Task 2.1b claim-verification deps — stubbed out here since these

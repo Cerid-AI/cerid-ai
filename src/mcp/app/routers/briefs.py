@@ -18,6 +18,7 @@ never fabricated as ``"verified"``.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -62,6 +63,11 @@ class BriefView(BaseModel):
     generated_at: str
     sections: list[BriefSection]
     claims: list[ClaimView]
+    # UX-18 — a brief generated before a large ingest must say so. Both
+    # fields are computed at read time from artifacts ingested after
+    # generation, inside the brief's own window (P1D daily / P7D weekly).
+    stale: bool = False
+    new_items_since_generation: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +112,7 @@ def _claim_view(raw: dict, *, brief_id: str) -> ClaimView:
     )
 
 
-def _brief_view(record, claims: list[dict]) -> BriefView:
+def _brief_view(record, claims: list[dict], *, new_items: int = 0) -> BriefView:
     return BriefView(
         id=record.brief_id,
         kind=record.kind,
@@ -116,7 +122,44 @@ def _brief_view(record, claims: list[dict]) -> BriefView:
             for title, body in record.sections.items()
         ],
         claims=[_claim_view(c, brief_id=record.brief_id) for c in claims],
+        stale=new_items >= _STALE_MIN_NEW_ITEMS,
+        new_items_since_generation=new_items,
     )
+
+
+# UX-18 — "materially changed": below this many post-generation artifacts a
+# brief is merely a little behind; at or above it, the brief is describing a
+# different day than the one that happened (the motivating case was 443 mail
+# messages landing after a 6am "empty inbox" brief).
+_STALE_MIN_NEW_ITEMS = 5
+
+# How long after generation new data still belongs to the brief's window.
+_WINDOW_BY_KIND = {"daily": timedelta(days=1), "weekly": timedelta(days=7)}
+
+
+def _new_item_counts(driver, records) -> dict[str, int]:
+    """Post-generation artifact counts per brief, {} on any failure.
+
+    Isolated so a staleness-count crash degrades to "not stale" instead of
+    taking the whole brief list down with it.
+    """
+    from app.db.neo4j.briefs import count_artifacts_since_generation
+
+    specs = []
+    for record in records:
+        window = _WINDOW_BY_KIND.get(record.kind, timedelta(days=1))
+        specs.append(
+            {
+                "brief_id": record.brief_id,
+                "generated_at": record.generated_at.isoformat(),
+                "window_end": (record.generated_at + window).isoformat(),
+            }
+        )
+    try:
+        return count_artifacts_since_generation(driver, specs)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error("briefs.api.new_item_counts", exc)
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +184,13 @@ async def list_briefs_endpoint(
         claims_by_brief_id = hydrate_claims_for_briefs(
             driver, [record.brief_id for record in records]
         )
+        new_item_counts = _new_item_counts(driver, records)
         return [
-            _brief_view(record, claims_by_brief_id.get(record.brief_id, []))
+            _brief_view(
+                record,
+                claims_by_brief_id.get(record.brief_id, []),
+                new_items=new_item_counts.get(record.brief_id, 0),
+            )
             for record in records
         ]
     except Exception as exc:  # noqa: BLE001
@@ -180,4 +228,7 @@ async def get_brief_endpoint(brief_id: str) -> BriefView:
         # that shape is reserved for a brief that genuinely cites nothing.
         raise HTTPException(status_code=500, detail="Failed to fetch brief") from exc
 
-    return _brief_view(record, claims)
+    new_item_counts = _new_item_counts(driver, [record])
+    return _brief_view(
+        record, claims, new_items=new_item_counts.get(record.brief_id, 0)
+    )

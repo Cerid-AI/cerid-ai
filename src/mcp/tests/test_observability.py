@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from unittest.mock import MagicMock
@@ -555,3 +556,95 @@ class TestVerificationRatesEndpoint:
         result = get_verification_rates_endpoint()
         assert result["today"]["claims_total"] == 0
         assert result["today"]["timeout_rate"] is None
+
+
+# ---------------------------------------------------------------------------
+# GET /observability/source-activity (RA-35) — Redis pubsub → SSE forwarding.
+# ---------------------------------------------------------------------------
+
+
+class _FakePubSub:
+    """Replays a fixed sequence of get_message() results, then raises
+    CancelledError so the SSE generator's for-loop terminates cleanly
+    (mirrors a client disconnect)."""
+
+    def __init__(self, results: list):
+        self._results = list(results)
+        self.subscribed_to: str | None = None
+        self.unsubscribed = False
+        self.closed = False
+
+    async def subscribe(self, channel):
+        self.subscribed_to = channel
+
+    async def get_message(self, ignore_subscribe_messages=True, timeout=15.0):
+        if not self._results:
+            raise asyncio.CancelledError()
+        return self._results.pop(0)
+
+    async def unsubscribe(self, channel):
+        self.unsubscribed = True
+
+    async def close(self):
+        self.closed = True
+
+
+class _FakeAsyncRedis:
+    def __init__(self, pubsub: _FakePubSub):
+        self._pubsub = pubsub
+        self.closed = False
+
+    def pubsub(self):
+        return self._pubsub
+
+    async def close(self):
+        self.closed = True
+
+
+class TestSourceActivityStream:
+    @pytest.mark.asyncio
+    async def test_forwards_a_pubsub_message_as_sse(self, monkeypatch):
+        from app.routers.observability import source_activity_stream
+
+        event = {"type": "artifact", "source_id": "s1", "artifact_id": "a1"}
+        fake_pubsub = _FakePubSub([{"type": "message", "data": json.dumps(event)}])
+        fake_client = _FakeAsyncRedis(fake_pubsub)
+        monkeypatch.setattr("redis.asyncio.from_url", lambda *a, **k: fake_client)
+
+        resp = await source_activity_stream(source_id=None)
+        chunks = [c async for c in resp.body_iterator]
+
+        assert any(b'"type": "connected"' in c or b'"type":"connected"' in c for c in chunks)
+        assert any(b"a1" in c for c in chunks[1:])
+        assert fake_pubsub.subscribed_to == "cerid:source-activity"
+        assert fake_pubsub.unsubscribed is True
+        assert fake_client.closed is True
+
+    @pytest.mark.asyncio
+    async def test_filters_out_events_for_a_different_source(self, monkeypatch):
+        from app.routers.observability import source_activity_stream
+
+        other = {"type": "artifact", "source_id": "other-source", "artifact_id": "a1"}
+        fake_pubsub = _FakePubSub([{"type": "message", "data": json.dumps(other)}])
+        monkeypatch.setattr(
+            "redis.asyncio.from_url", lambda *a, **k: _FakeAsyncRedis(fake_pubsub),
+        )
+
+        resp = await source_activity_stream(source_id="my-source")
+        chunks = [c async for c in resp.body_iterator]
+
+        assert not any(b"other-source" in c for c in chunks)
+
+    @pytest.mark.asyncio
+    async def test_idle_timeout_emits_keepalive(self, monkeypatch):
+        from app.routers.observability import source_activity_stream
+
+        fake_pubsub = _FakePubSub([None])  # get_message() timeout -> None
+        monkeypatch.setattr(
+            "redis.asyncio.from_url", lambda *a, **k: _FakeAsyncRedis(fake_pubsub),
+        )
+
+        resp = await source_activity_stream(source_id=None)
+        chunks = [c async for c in resp.body_iterator]
+
+        assert any(c == b": keepalive\n\n" for c in chunks)

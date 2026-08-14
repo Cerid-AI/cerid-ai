@@ -406,3 +406,16 @@ class TestInsufficientExcerptsAreNotStored:
         result, writes = self._pipeline_with(summary)
         assert result.get("skipped") is None, f"unexpected skip: {result}"
         assert len(writes) == 1
+
+    def test_wrong_entity_summary_skips_the_write(self):
+        """Backstop for the shape BTC had: the page redirects its own subject.
+
+        Invisible to the insufficiency check — nothing here denies grounding,
+        the summary asserts the subject is something else entirely.
+        """
+        result, writes = self._pipeline_with(
+            "The entity in question is not Acme Corp but rather a general "
+            "discussion of industrial procurement contracts in the excerpts."
+        )
+        assert result == {"skipped": "wrong_entity_summary"}
+        assert writes == [], "a subject-redirecting summary must not be stored"

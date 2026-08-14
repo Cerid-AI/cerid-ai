@@ -152,6 +152,21 @@ def _fake_driver_decomp(
         elif "count(c) AS cnt" in query and "cid" in query:
             # community existence check for 404
             return _FakeResult([], single_row={"cnt": 0})
+        elif (
+            "community_id IS NULL" in query or "primary_domain IS NULL" in query
+        ) and "entity_id" in query:
+            # bucket leaf query (unclustered / uncategorized)
+            return _FakeResult([
+                {
+                    "entity_id": "e9",
+                    "name": "Orphan",
+                    "entity_type": "OTHER",
+                    "domain": kwargs.get("domain") or "",
+                    "sub": None,
+                    "trust_state": "unknown",
+                    "degree": 0,
+                }
+            ])
         else:
             return _FakeResult([])
 
@@ -348,6 +363,100 @@ def test_decomposition_community_not_found_returns_404(mock_redis):
         r = TestClient(app).get("/graph/decomposition?community=0:99999")
 
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# UX-13: bucket drill paths + rollup children
+# ---------------------------------------------------------------------------
+
+
+def test_decomposition_bucket_unclustered_returns_entities(mock_redis):
+    """?bucket=unclustered&domain=X → entity leaves for drill-down."""
+    from app.routers import graph as graph_router
+
+    driver = _fake_driver_decomp()
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=driver):
+        r = TestClient(app).get("/graph/decomposition?bucket=unclustered&domain=mail")
+
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["bucket"] == "unclustered"
+    assert payload["domain"] == "mail"
+    assert len(payload["entities"]) == 1
+    assert payload["entities"][0]["id"] == "e9"
+    assert payload["entities"][0]["path"] == ["mail"]
+
+
+def test_decomposition_bucket_uncategorized_returns_entities(mock_redis):
+    """?bucket=uncategorized → leaves for entities with no primary_domain."""
+    from app.routers import graph as graph_router
+
+    driver = _fake_driver_decomp()
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=driver):
+        r = TestClient(app).get("/graph/decomposition?bucket=uncategorized")
+
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["bucket"] == "uncategorized"
+    assert len(payload["entities"]) == 1
+
+
+def test_decomposition_bucket_unclustered_requires_domain(mock_redis):
+    from app.routers import graph as graph_router
+
+    driver = _fake_driver_decomp()
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=driver):
+        r = TestClient(app).get("/graph/decomposition?bucket=unclustered")
+
+    assert r.status_code == 422
+
+
+def test_decomposition_bucket_unknown_rejected(mock_redis):
+    from app.routers import graph as graph_router
+
+    driver = _fake_driver_decomp()
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=driver):
+        r = TestClient(app).get("/graph/decomposition?bucket=bogus")
+
+    assert r.status_code == 422
+
+
+def test_decomposition_rollup_bucket_carries_communities(mock_redis):
+    """UX-13: the rollup bucket lists its member communities so the client
+    can drill into them — an inert count is no longer the contract."""
+    from app.routers import graph as graph_router
+
+    driver = _fake_driver_decomp()
+    app = FastAPI()
+    app.include_router(graph_router.router)
+    with patch("app.routers.graph.get_redis", return_value=mock_redis), \
+         patch("app.routers.graph.get_neo4j", return_value=driver):
+        r = TestClient(app).get("/graph/decomposition")
+
+    assert r.status_code == 200
+    rollups = [
+        child
+        for d in r.json()["domains"]
+        for l1 in (d.get("communities") or [])
+        for child in (l1.get("children") or [])
+        if child.get("kind") == "rollup"
+    ]
+    assert rollups, "expected at least one rollup bucket in the fake tree"
+    for bucket in rollups:
+        assert len(bucket["communities"]) == bucket["community_count"]
+        assert all(c.get("id") for c in bucket["communities"])
 
 
 # ---------------------------------------------------------------------------

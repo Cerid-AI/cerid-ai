@@ -626,6 +626,29 @@ def _load_recommendations(
     return out
 
 
+def _saml_unavailable_reason() -> str:
+    """Why ``sso_saml`` cannot serve on this install, or "" when it can."""
+    import config.features as _features
+
+    if not _features.CERID_MULTI_USER:
+        return (
+            "app/routers/saml.py is registered only when CERID_MULTI_USER=true; "
+            "SSO issues a session for an IdP-attested user and single-user mode "
+            "has none"
+        )
+    return ""
+
+
+#: Flags whose in-process implementation is mounted CONDITIONALLY. Each entry
+#: answers "why can this not serve right now", and an empty string means it can.
+#: Without this, `implementation: "in_process"` is a claim no runtime state can
+#: contradict — which is exactly how a paid flag ends up entitled and served by
+#: nothing.
+_CONDITIONAL_IMPLEMENTATIONS: dict[str, Any] = {
+    "sso_saml": _saml_unavailable_reason,
+}
+
+
 def _pro_feature_health() -> dict:
     """Per-Pro-flag liveness: entitled, implemented, and why not if not.
 
@@ -693,6 +716,19 @@ def _pro_feature_health() -> dict:
                     "no backend plugin supplies this flag and it is not declared "
                     "in config.features.NON_PLUGIN_IMPLEMENTATIONS"
                 )
+        # An in_process declaration is a claim about a router that is mounted.
+        # `sso_saml` names app/routers/saml.py, which is registered only under
+        # CERID_MULTI_USER — so on a single-user Enterprise install the flag was
+        # entitled, declared implemented, and served by nothing. That is the
+        # same substitution as a residual bucket, one flag wide: a declaration
+        # that cannot be false is not a declaration.
+        if flag in _CONDITIONAL_IMPLEMENTATIONS:
+            reason = _CONDITIONAL_IMPLEMENTATIONS[flag]()
+            if reason:
+                entry["blocked_reason"] = reason
+                entry["loaded"] = False
+                if entitled:
+                    degraded.append(flag)
         out[flag] = entry
 
     # The tier the flags above were computed at. Reported so a caller can tell
@@ -729,6 +765,19 @@ def _build_health_payload() -> dict:
         result["pro_features"] = _pro_feature_health()
     except Exception as _exc:  # noqa: BLE001 — observability augmentation only
         log_swallowed_error("app.routers.health.pro_features", _exc)
+    # Audit-log write failures. `audit_log.audit()` deliberately does not raise
+    # — an unwritable log must not brick a self-hosted install — so this is the
+    # surface that keeps "the log stopped recording" from being indistinguishable
+    # from "nothing happened worth recording".
+    try:
+        from core.utils import audit_log as _audit_log
+
+        result["audit_log"] = {
+            "write_failures": _audit_log.write_failure_count(),
+            "segments": len(_audit_log.segments()),
+        }
+    except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.audit_log", _exc)
     # Phase E.5 (v0.92): trust-score summary alongside core invariants.
     # Pure metadata — not part of the healthy/degraded gate. Failures
     # here must never affect the /health response code.

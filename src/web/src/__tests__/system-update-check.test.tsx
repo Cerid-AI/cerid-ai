@@ -28,6 +28,11 @@ vi.mock("@/lib/api", () => ({
   }),
   triggerSyncExport: vi.fn(),
   triggerSyncImport: vi.fn(),
+  // AuditLogGroup renders unconditionally on the System page (RA-32); the
+  // settings-registry mock below strips the def's `entitlement`, so it
+  // always reports unlocked and reaches these calls.
+  verifyAuditChain: vi.fn().mockResolvedValue({ ok: true, checked: 0 }),
+  fetchAuditRecords: vi.fn().mockResolvedValue({ records: [], total: 0 }),
 }))
 
 vi.mock("@/lib/api/updates", () => ({
@@ -160,8 +165,11 @@ describe("UpdateCheckButton — web path", () => {
 describe("UpdateCheckButton — desktop path", () => {
   it("calls window.cerid.app.checkUpdate on desktop and shows up-to-date", async () => {
     const mockCheckUpdate = vi.fn().mockResolvedValue({ success: true })
-    ;(window as unknown as { cerid: { app: { checkUpdate: typeof mockCheckUpdate } } }).cerid = {
-      app: { checkUpdate: mockCheckUpdate },
+    const mockOnCheckUpdate = vi.fn().mockReturnValue(() => {})
+    ;(window as unknown as {
+      cerid: { app: { checkUpdate: typeof mockCheckUpdate; onCheckUpdate: typeof mockOnCheckUpdate } }
+    }).cerid = {
+      app: { checkUpdate: mockCheckUpdate, onCheckUpdate: mockOnCheckUpdate },
     }
     render(<SystemCategory settings={mockSettings} patch={noopPatch} onRefresh={noop} />, { wrapper })
     await userEvent.click(screen.getByRole("button", { name: /check for updates/i }))
@@ -171,6 +179,47 @@ describe("UpdateCheckButton — desktop path", () => {
     })
     // checkForUpdates web API should NOT have been called
     expect(checkForUpdates).not.toHaveBeenCalled()
+  })
+})
+
+describe("UpdateCheckButton — tray-triggered check", () => {
+  it("subscribes to app:check-update via the bridge and runs the same check on tray click", async () => {
+    const mockCheckUpdate = vi.fn().mockResolvedValue({ success: true })
+    let trayHandler: (() => void) | undefined
+    const mockOnCheckUpdate = vi.fn((cb: () => void) => {
+      trayHandler = cb
+      return () => {}
+    })
+    ;(window as unknown as {
+      cerid: { app: { checkUpdate: typeof mockCheckUpdate; onCheckUpdate: typeof mockOnCheckUpdate } }
+    }).cerid = {
+      app: { checkUpdate: mockCheckUpdate, onCheckUpdate: mockOnCheckUpdate },
+    }
+    render(<SystemCategory settings={mockSettings} patch={noopPatch} onRefresh={noop} />, { wrapper })
+
+    await waitFor(() => expect(mockOnCheckUpdate).toHaveBeenCalledOnce())
+    expect(trayHandler).toBeTypeOf("function")
+
+    trayHandler?.()
+
+    await waitFor(() => {
+      expect(mockCheckUpdate).toHaveBeenCalledOnce()
+      expect(screen.getByText("Up to date")).toBeInTheDocument()
+    })
+  })
+
+  it("unsubscribes on unmount", () => {
+    const unsubscribe = vi.fn()
+    const mockOnCheckUpdate = vi.fn().mockReturnValue(unsubscribe)
+    ;(window as unknown as {
+      cerid: { app: { checkUpdate: () => Promise<{ success: boolean }>; onCheckUpdate: typeof mockOnCheckUpdate } }
+    }).cerid = {
+      app: { checkUpdate: vi.fn().mockResolvedValue({ success: true }), onCheckUpdate: mockOnCheckUpdate },
+    }
+    const { unmount } = render(<SystemCategory settings={mockSettings} patch={noopPatch} onRefresh={noop} />, { wrapper })
+    expect(mockOnCheckUpdate).toHaveBeenCalledOnce()
+    unmount()
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
 })
 

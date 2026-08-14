@@ -83,6 +83,38 @@ def test_envelope_round_trip_legacy():
     assert d1 == d2
 
 
+def test_envelope_round_trip_preserves_informational_keys():
+    """from_legacy_result → to_dict must not drop keys it does not model.
+
+    kb-idle-zero diagnosis: the CRAG external merge rebuilt the envelope via
+    this round trip and every informational key vanished — the response
+    reported domains_searched=[] after searching all 22 domains, and the
+    Knowledge Console lost its timing chip (_timings / execution_time_ms).
+    """
+    legacy = {
+        "context": "ctx",
+        "sources": [],
+        "results": [],
+        "confidence": 0.7,
+        "domains_searched": ["mail", "general"],
+        "surface_route": {"intent": "personal_context"},
+        "_timings": {"vector_search": 1.2},
+        "execution_time_ms": 1234,
+        "total_results": 0,
+        "token_budget_used": 10,
+        "graph_results": 0,
+    }
+    out = QueryEnvelope.from_legacy_result(legacy).to_dict()
+    assert out["domains_searched"] == ["mail", "general"]
+    assert out["surface_route"] == {"intent": "personal_context"}
+    assert out["_timings"] == {"vector_search": 1.2}
+    assert out["execution_time_ms"] == 1234
+    # Extras can never shadow envelope-owned keys (confidence is recomputed
+    # from the result pool by the envelope, so it is owned, not passed through).
+    assert out["context"] == "ctx"
+    assert out["confidence"] == 0.0
+
+
 # ---------------------------------------------------------------------------
 # RAG Phase 1.1 — provenance spine on the KB vector path
 # ---------------------------------------------------------------------------

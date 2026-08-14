@@ -44,11 +44,20 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, CapabilityDescriptor> = {
     tier: "vault",
   },
   sso_saml: {
-    description: "SAML 2.0 single sign-on for enterprise identity providers (Okta, Azure AD, etc.).",
+    // The multi-user caveat is load-bearing, not a footnote: SSO issues a
+    // session for an IdP-attested user, and single-user mode has one operator
+    // on an API key with nobody for an IdP to distinguish. A buyer who reads
+    // this as "works on my install" would be wrong by default.
+    description: "SAML 2.0 single sign-on for enterprise identity providers (Okta, Azure AD, etc.). Requires multi-user mode.",
     tier: "vault",
   },
   audit_logging: {
-    description: "Tamper-evident audit log of every read/write/admin action, exported to compliance-grade storage.",
+    // Was "…of every read/write/admin action, exported to compliance-grade
+    // storage" while nothing at all was implemented. Both halves of that were
+    // wrong once it was: reads are not logged (recording every query against a
+    // personal knowledge base is a privacy cost, not a feature), and there is
+    // no export — the log is a local append-only file. Says what it does.
+    description: "Tamper-evident, append-only log of administrative and security actions — license changes, plugin toggles, deletions — hash-chained so any alteration is detectable. Readable in Settings → System or over the API.",
     tier: "vault",
   },
   priority_support: {
@@ -83,9 +92,12 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, CapabilityDescriptor> = {
     description: "Use IBM's Docling for high-fidelity PDF + DOCX parsing (tables, layout). Heavier than the default parser.",
     tier: "pro",
   },
-  hierarchical_taxonomy: {
-    description: "Allow nested sub-categories under each top-level domain (e.g. finance/treasury/invoices).",
-  },
+  // `hierarchical_taxonomy` intentionally has no entry here (AF-081,
+  // 2026-08-12): config/taxonomy.py is single-level (domain -> flat
+  // sub_categories list, no nesting beneath a sub_category), so the flag
+  // moved to config.features.PLANNED_FEATURES. Same precedent as
+  // share_sheet/shortcuts_actions/quicklook_preview — planned-but-unbuilt
+  // capabilities are omitted here rather than described as shipping.
   file_upload_gui: {
     description: "Drag-and-drop file upload from the Knowledge tab. When off, ingest is API-only.",
   },

@@ -22,7 +22,7 @@ import type { SourceKindMetaExt } from "@/components/sources/source-kind-meta"
 
 const KINDS: SourceKindMetaExt[] = [
   { kind: "rss", family: "feeds", tier: "core", availability: "available" },
-  { kind: "gmail", family: "mail", tier: "pro", availability: "available" },
+  { kind: "gmail", family: "mail", tier: "pro", availability: "available", feature_flag: "gmail_connector" },
 ]
 
 vi.mock("@/lib/api/sources", async (orig) => ({
@@ -43,9 +43,9 @@ const mockCreate = createSource as ReturnType<typeof vi.fn>
 const mockCapabilities = fetchCapabilities as ReturnType<typeof vi.fn>
 
 /** Realistic capabilities payload — `features` carries the per-flag detail the
-    hook resolves. /sources/kinds ships no feature_flag, so the wizard's own
-    verdict comes from the registry-tier fallback; the map is populated anyway
-    so the fixture matches what a real server sends. */
+    hook resolves. /sources/kinds ships `feature_flag` per kind, so the wizard
+    resolves each kind's own flag; the registry-tier fallback still fails
+    CLOSED when the flag is missing or capabilities are unreachable. */
 function capabilities(tier: "community" | "pro" | "enterprise") {
   return {
     tier,
@@ -122,13 +122,39 @@ describe("SourceAddWizard — Pro gate", () => {
     expect(screen.queryByRole("button", { name: /^connect$/i })).not.toBeInTheDocument()
   })
 
+  it("resolves per FLAG: a granted flag opens the configure step even below Pro tier", async () => {
+    // The distinguishing case for per-tier resolution: the server has granted
+    // gmail_connector to this account despite the community tier, so the tile
+    // must take the normal route — "locked" is the only state an upgrade fixes.
+    const user = userEvent.setup()
+    mockCapabilities.mockResolvedValue({
+      tier: "community",
+      features: {
+        gmail_connector: { enabled: true, tier_required: "community" },
+        ocr_parsing: { enabled: true, tier_required: "community" },
+      },
+      buckets: {},
+    })
+    renderWizard()
+
+    const tile = await screen.findByRole("button", { name: /add gmail/i })
+    await user.click(tile)
+
+    expect(await screen.findByLabelText(/display name/i)).toBeInTheDocument()
+    expect(screen.queryByText(/requires Cerid Pro/i)).not.toBeInTheDocument()
+  })
+
   it("fails CLOSED when capabilities cannot be loaded", async () => {
     // forFlag's second argument is the registry-tier fallback: without it an
     // unresolvable entitlement returns AVAILABLE, so the gate would disappear
-    // exactly when the server can't be asked.
+    // exactly when the server can't be asked. WB-09: the gate must still say
+    // WHY — "is part of Cerid Pro" is a wrong, confident claim about a paying
+    // customer's tier when the truth is "couldn't check".
     mockCapabilities.mockRejectedValue(new Error("network down"))
     renderWizard({ initialKind: "gmail" })
 
-    expect(await screen.findByText(/Gmail is part of Cerid Pro/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Couldn.t confirm your plan/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Gmail is part of Cerid Pro/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^connect$/i })).not.toBeInTheDocument()
   })
 })

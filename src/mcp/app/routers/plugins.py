@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 import config
 from app.deps import get_redis
 from config.features import is_tier_met
+from core.utils import audit_log
 
 router = APIRouter(tags=["plugins"])
 logger = logging.getLogger("ai-companion.plugins")
@@ -31,8 +32,14 @@ class PluginInfo(BaseModel):
     """Public-facing plugin metadata."""
 
     name: str
+    # Human-facing label — the manifest's ``display_name`` key, falling back to
+    # a title-cased transform of ``name`` (``apple_mail`` → "Apple Mail").
+    display_name: str
     version: str
     description: str = ""
+    # Manifest ``type`` (connector | parser | agent | …). Lets clients
+    # distinguish connector-backing packs from capability packs.
+    plugin_type: str = "tool"
     tier_required: str = "community"
     enabled: bool = False
     status: str = Field(
@@ -150,13 +157,17 @@ def _resolve_status(manifest: dict[str, Any], enabled: bool) -> str:
 
 def _manifest_to_info(manifest: dict[str, Any], enabled: bool) -> PluginInfo:
     """Convert a raw manifest + enabled flag to PluginInfo."""
+    from plugins import manifest_display_name
+
     name = manifest.get("name", "unknown")
     tier_required = manifest.get("tier_required", manifest.get("tier", "community"))
     status = _resolve_status(manifest, enabled)
     return PluginInfo(
         name=name,
+        display_name=manifest_display_name(manifest),
         version=manifest.get("version", "0.0.0"),
         description=manifest.get("description", ""),
+        plugin_type=manifest.get("type", "tool"),
         tier_required=tier_required,
         enabled=enabled,
         status=status,
@@ -209,6 +220,7 @@ def enable_plugin(name: str) -> PluginInfo:
         )
     _set_plugin_enabled_redis(name, True)
     logger.info("Plugin '%s' enabled", name)
+    audit_log.audit("plugin.enable", target=name, detail={"tier_required": tier_required})
     return _manifest_to_info(manifest, True)
 
 
@@ -220,6 +232,7 @@ def disable_plugin(name: str) -> PluginInfo:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")
     _set_plugin_enabled_redis(name, False)
     logger.info("Plugin '%s' disabled", name)
+    audit_log.audit("plugin.disable", target=name)
     return _manifest_to_info(manifests[name], False)
 
 

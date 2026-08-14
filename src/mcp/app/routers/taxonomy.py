@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
 import config
@@ -132,12 +132,18 @@ async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
 
 @router.get("/tags")  # response-model-allowed: dynamic response (shape varies)
 async def list_tags_endpoint(
+    response: Response,
     limit: int = Query(100, ge=1, le=500),
 ):
     """List all tags with usage counts, sorted by popularity."""
     try:
         driver = get_neo4j()
-        return graph.list_tags(driver, limit=limit)
+        tags = graph.list_tags(driver, limit=limit)
+        # WB-23: expose the true distinct-tag total (not the page's length) so
+        # a client can tell a 500-row page was capped instead of assuming a
+        # returned page at the limit is the whole tag set.
+        response.headers["X-Total-Count"] = str(graph.count_tags(driver))
+        return tags
     except Exception as e:
         logger.error(f"List tags error: {e}")
         raise HTTPException(status_code=500, detail="Internal error processing taxonomy request")

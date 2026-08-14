@@ -76,6 +76,23 @@ describe("WorkflowsPane — list <-> editor navigation", () => {
     await waitFor(() => expect(mockFetchWorkflows).toHaveBeenCalledTimes(1))
   })
 
+  it("Save stays in the builder instead of exiting to the list (UX-21)", async () => {
+    const { updateWorkflow } = await import("@/lib/api")
+    vi.mocked(updateWorkflow).mockResolvedValue({ ...mockWorkflow, name: "Ingestion Pipeline" })
+
+    render(<WorkflowsPane />, { wrapper: makeWrapper() })
+    await screen.findByText("Ingestion Pipeline")
+    fireEvent.click(screen.getByRole("button", { name: "Edit workflow" }))
+    await screen.findByDisplayValue("Ingestion Pipeline")
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    // Still in the builder: the canvas toolbar is present, the list header is not.
+    await waitFor(() => expect(updateWorkflow).toHaveBeenCalled())
+    expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /new workflow/i })).not.toBeInTheDocument()
+  })
+
   it("New Workflow opens a blank editor", async () => {
     render(<WorkflowsPane />, { wrapper: makeWrapper() })
     await screen.findByText("Ingestion Pipeline")

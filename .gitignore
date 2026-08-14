@@ -83,6 +83,9 @@ htmlcov/
 env/
 venv/
 .venv/
+# no trailing slash: also match a .venv SYMLINK (a worktree pointing at the
+# main checkout venv), which ".venv/" does not cover
+.venv
 src/mcp/VERSION
 
 # macOS / temp

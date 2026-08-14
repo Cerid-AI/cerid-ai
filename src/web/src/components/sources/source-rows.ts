@@ -31,7 +31,9 @@ export interface DisplayRow {
   rowType: "source" | "connector" | "email" | "apple"
   kind: string
   displayName: string
-  status: "connected" | "paused" | "available" | "error"
+  /** "unknown" = the status check itself failed; the row stays visible so the
+      affordance doesn't silently vanish on a backend outage. */
+  status: "connected" | "paused" | "available" | "error" | "unknown"
   /** Optional secondary line for the list row (e.g. a connector's sync semantics). */
   detail?: string
   /** Row is visible but behind the Pro gate — selecting it opens the upgrade
@@ -51,6 +53,23 @@ export function emailToRow(status: EmailStatus): DisplayRow {
     displayName: "Email (IMAP)",
     status: hasActivity ? "connected" : "available",
     backing: status,
+  }
+}
+
+/** The email row when /data-sources/email/status itself failed. The row is the
+    always-present email affordance — its existence must not depend on the
+    status call succeeding, so a fetch error renders it in an explicit
+    "couldn't check" state instead of dropping it from the list. The backing
+    snapshot is a placeholder; EmailDetail fetches its own status on open. */
+export function emailUnknownRow(): DisplayRow {
+  return {
+    id: "email:imap",
+    rowType: "email",
+    kind: "email",
+    displayName: "Email (IMAP)",
+    status: "unknown",
+    detail: "Couldn't check status — open to retry",
+    backing: { last_poll: null, messages_ingested: 0, errors: [] },
   }
 }
 
@@ -95,10 +114,13 @@ export function connectorToRow(c: ConnectorStatusExt): DisplayRow {
 }
 
 // ---------------------------------------------------------------------------
-// Apple bridge rows (desktop-only)
+// Apple bridge rows (desktop-only, macOS-only)
 //
-// Returns rows for the three Electron-bridge kinds (notes / mail / imessage).
-// Returns [] in browser builds (no window.cerid.appleConnectors).
+// Returns rows for the Electron-bridge kinds. Returns [] in browser builds
+// (no window.cerid.appleConnectors) and on non-macOS desktop builds (the
+// bridge helpers are macOS binaries; rendering the rows elsewhere would offer
+// sources that can never work). The platform comes from the async
+// window.cerid.app.platform() bridge call, resolved by the caller.
 //
 // Status is always "available" — we don't lift per-scan state to the row level;
 // that state lives inside AppleDetail (scanned on dialog open). Keeping the
@@ -116,14 +138,28 @@ const APPLE_BRIDGE_KINDS: Array<{ kind: AppleBridgeKind; displayName: string }> 
   { kind: "notes", displayName: "Apple Notes" },
   { kind: "mail", displayName: "Apple Mail" },
   { kind: "imessage", displayName: "iMessage" },
+  // Joined the bridge 2026-08-11. Their REST plugins run in the MCP server —
+  // a Linux container that cannot execute a macOS helper — so they could never
+  // configure there. Removed from _CONNECTORS at the same time so each renders
+  // exactly one surface; Sources concatenates both feeds without dedup.
+  { kind: "calendar", displayName: "Apple Calendar" },
+  { kind: "photos", displayName: "Apple Photos" },
+  { kind: "reminders", displayName: "Apple Reminders" },
 ]
 
-// `isLocked` is required, not defaulted: a call site that forgets it should
-// fail the build rather than silently ship the connectors unlocked again. It
-// is resolved per kind, not per tier, so a server with one of the three flags
-// switched off locks that one row and leaves the others alone.
-export function appleRows(isLocked: (kind: AppleBridgeKind) => boolean): DisplayRow[] {
+// Both params are required, not defaulted: a call site that forgets `isLocked`
+// should fail the build rather than silently ship the connectors unlocked
+// again (it is resolved per kind, not per tier, so a server with one of the
+// flags switched off locks that one row and leaves the others alone), and a
+// call site that forgets `platform` would re-ship the rows on Windows/Linux
+// desktop builds. `platform` is the resolved app.platform() value; pass null
+// while it is still resolving — the rows stay hidden until it proves "darwin".
+export function appleRows(
+  isLocked: (kind: AppleBridgeKind) => boolean,
+  platform: string | null,
+): DisplayRow[] {
   if (typeof window === "undefined" || !window.cerid?.appleConnectors) return []
+  if (platform !== "darwin") return []
   return APPLE_BRIDGE_KINDS.map(({ kind, displayName }) => ({
     id: `apple:${kind}`,
     rowType: "apple" as const,

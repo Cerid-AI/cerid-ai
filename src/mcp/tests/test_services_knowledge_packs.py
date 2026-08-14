@@ -444,6 +444,89 @@ async def test_uninstall_pack_when_not_installed_returns_no_op(tmp_path):
     assert summary["removed"] == 0
 
 
+# ── Post-uninstall recompute trigger (AF-055) ─────────────────────────────
+# Mirrors install_pack's "Post-install recompute trigger" tests above —
+# uninstall changes the same layout/trust state an install does and must
+# enqueue the same two jobs.
+
+@pytest.mark.asyncio
+async def test_uninstall_pack_enqueues_trust_and_umap_jobs(tmp_path):
+    """A successful uninstall must enqueue ComputeTrustStateJob + ComputeUmap3DJob,
+    symmetric with install_pack (AF-055)."""
+    state_path = tmp_path / "state.json"
+    record = InstalledPack(
+        pack_id="cerid-starter",
+        version="1.0.0",
+        installed_at="2026-05-10T00:00:00+00:00",
+        domain="general",
+        sha256="a" * 64,
+        artifact_ids=("a",),
+    )
+    from core.knowledge.packs import save_install_state
+    save_install_state(state_path, [record])
+
+    async def _delete(artifact_id: str):
+        return {"deleted": True, "artifact_id": artifact_id}
+
+    mock_enqueue = MagicMock()
+    fake_trust_job = MagicMock()
+    fake_umap_job = MagicMock()
+    fake_trust_cls = MagicMock(return_value=fake_trust_job)
+    fake_umap_cls = MagicMock(return_value=fake_umap_job)
+
+    with patch.dict("sys.modules", {
+        "app.db.redis.processor_queue": MagicMock(enqueue_job=mock_enqueue),
+        "app.processor.jobs.compute_trust_state": MagicMock(ComputeTrustStateJob=fake_trust_cls),
+        "app.processor.jobs.compute_umap_3d": MagicMock(ComputeUmap3DJob=fake_umap_cls),
+    }):
+        summary = await uninstall_pack(
+            "cerid-starter", state_path=state_path, delete=_delete,
+        )
+
+    assert summary["status"] == "uninstalled"
+    assert mock_enqueue.call_count == 2
+    enqueued_jobs = [c[0][0] for c in mock_enqueue.call_args_list]
+    assert fake_trust_job in enqueued_jobs, "ComputeTrustStateJob must be enqueued"
+    assert fake_umap_job in enqueued_jobs, "ComputeUmap3DJob must be enqueued"
+
+
+@pytest.mark.asyncio
+async def test_uninstall_pack_recompute_queue_failure_does_not_raise(tmp_path):
+    """A failure in the recompute enqueue block must not abort a successful uninstall."""
+    state_path = tmp_path / "state.json"
+    record = InstalledPack(
+        pack_id="cerid-starter",
+        version="1.0.0",
+        installed_at="2026-05-10T00:00:00+00:00",
+        domain="general",
+        sha256="a" * 64,
+        artifact_ids=("a",),
+    )
+    from core.knowledge.packs import save_install_state
+    save_install_state(state_path, [record])
+
+    async def _delete(artifact_id: str):
+        return {"deleted": True, "artifact_id": artifact_id}
+
+    exploding_module = MagicMock()
+    exploding_module.enqueue_job.side_effect = RuntimeError("Redis unavailable")
+    trust_module = MagicMock()
+    umap_module = MagicMock()
+
+    with patch.dict("sys.modules", {
+        "app.db.redis.processor_queue": exploding_module,
+        "app.processor.jobs.compute_trust_state": trust_module,
+        "app.processor.jobs.compute_umap_3d": umap_module,
+    }):
+        summary = await uninstall_pack(
+            "cerid-starter", state_path=state_path, delete=_delete,
+        )
+
+    assert summary["status"] == "uninstalled", (
+        "uninstall_pack must succeed even when the recompute enqueue fails"
+    )
+
+
 # ── _default_download file:// support ──────────────────────────────────
 
 @pytest.mark.asyncio

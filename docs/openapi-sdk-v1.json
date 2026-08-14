@@ -743,7 +743,7 @@
             "type": "string"
           },
           "job_id": {
-            "description": "RQ job identifier \u2014 opaque to callers, use as-is in the status URL",
+            "description": "Background job identifier \u2014 opaque to callers, use as-is in the status URL",
             "title": "Job Id",
             "type": "string"
           },
@@ -807,7 +807,7 @@
             "title": "Error"
           },
           "job_id": {
-            "description": "RQ job identifier",
+            "description": "Background job identifier",
             "title": "Job Id",
             "type": "string"
           },
@@ -1037,6 +1037,15 @@
         "properties": {
           "artifact_id": {
             "title": "Artifact Id"
+          },
+          "duplicate_of": {
+            "title": "Duplicate Of"
+          },
+          "error": {
+            "title": "Error"
+          },
+          "reason": {
+            "title": "Reason"
           },
           "status": {
             "title": "Status",

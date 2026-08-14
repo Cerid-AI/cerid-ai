@@ -298,23 +298,33 @@ export async function fetchSyncedConversations(): Promise<Conversation[]> {
   const res = await fetch(`${MCP_BASE}/user-state/conversations`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to fetch conversations"))
   const data = await res.json()
+  // The backend returns a bare JSON array (app.routers.user_state.
+  // list_conversations). Reading `.conversations` off it yielded undefined →
+  // [] on every hydration, so the sidebar said "No conversations yet"
+  // despite prior-session chats syncing fine (UX-06). Accept both shapes.
+  if (Array.isArray(data)) return data
   return data.conversations ?? []
 }
 
 export async function syncConversation(conversation: Conversation): Promise<void> {
-  await fetch(`${MCP_BASE}/user-state/conversations`, {
+  const res = await fetch(`${MCP_BASE}/user-state/conversations`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(conversation),
   })
+  // Reject on a non-2xx like deleteConversationSync's check below — a swallowed
+  // failure here is how a conversation the caller believes is synced silently
+  // never reaches the server (E1 CR-092).
+  if (!res.ok) throw new Error(await extractError(res, `Conversation sync failed: ${res.status}`))
 }
 
 export async function syncConversationsBulk(conversations: Conversation[]): Promise<void> {
-  await fetch(`${MCP_BASE}/user-state/conversations/bulk`, {
+  const res = await fetch(`${MCP_BASE}/user-state/conversations/bulk`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(conversations),
   })
+  if (!res.ok) throw new Error(await extractError(res, `Bulk conversation sync failed: ${res.status}`))
 }
 
 export async function deleteConversationSync(convId: string): Promise<void> {
@@ -329,9 +339,10 @@ export async function deleteConversationSync(convId: string): Promise<void> {
 }
 
 export async function syncPreferences(prefs: Record<string, unknown>): Promise<void> {
-  await fetch(`${MCP_BASE}/user-state/preferences`, {
+  const res = await fetch(`${MCP_BASE}/user-state/preferences`, {
     method: "PATCH",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(prefs),
   })
+  if (!res.ok) throw new Error(await extractError(res, `Preferences sync failed: ${res.status}`))
 }

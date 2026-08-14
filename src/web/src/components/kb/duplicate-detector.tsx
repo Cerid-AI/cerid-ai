@@ -190,8 +190,20 @@ export function DuplicateDetector({ open, onClose }: DuplicateDetectorProps) {
     staleTime: 30_000,
   })
 
+  const [mergeStatus, setMergeStatus] = useState<string | null>(null)
+
+  // WB-43: bind and surface the merge result — previously the mutation's
+  // return value was discarded, so per-item delete failures (logged only via
+  // log_swallowed_error server-side) were invisible; the group just vanished
+  // from the list on refetch whether every member merged or not.
   const handleMerge = async (keepId: string, removeIds: string[]) => {
-    await mergeDuplicates(keepId, removeIds)
+    setMergeStatus(null)
+    const result = await mergeDuplicates(keepId, removeIds)
+    setMergeStatus(
+      result.failed > 0
+        ? `Merged ${result.merged} of ${removeIds.length} — ${result.failed} failed`
+        : `Merged ${result.merged} of ${removeIds.length}`,
+    )
     queryClient.invalidateQueries({ queryKey: ["kb-duplicates"] })
     queryClient.invalidateQueries({ queryKey: ["artifacts"] })
   }
@@ -222,6 +234,10 @@ export function DuplicateDetector({ open, onClose }: DuplicateDetectorProps) {
               : "Scanning for duplicate content in your knowledge base."}
           </DialogDescription>
         </DialogHeader>
+
+        {mergeStatus && (
+          <p className="px-1 text-xs text-muted-foreground" role="status">{mergeStatus}</p>
+        )}
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-3 p-1">

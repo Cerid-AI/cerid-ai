@@ -8,9 +8,14 @@ import { mcpUrl, mcpHeaders, extractError } from "./common"
 import type {
   DecompositionPayload,
   DecompositionCommunityPayload,
+  DecompositionBucketPayload,
 } from "@/lib/graph/cycle4-contracts"
 
-export type { DecompositionPayload, DecompositionCommunityPayload }
+export type {
+  DecompositionPayload,
+  DecompositionCommunityPayload,
+  DecompositionBucketPayload,
+}
 
 export async function fetchDecomposition(
   options: { signal?: AbortSignal } = {},
@@ -35,4 +40,20 @@ export async function fetchCommunityEntities(
   })
   if (!res.ok) throw new Error(await extractError(res, "Community entity fetch failed"))
   return res.json() as Promise<DecompositionCommunityPayload>
+}
+
+export async function fetchBucketEntities(
+  bucket: "unclustered" | "uncategorized",
+  domain: string | null,
+  options: { signal?: AbortSignal } = {},
+): Promise<DecompositionBucketPayload> {
+  const params: Record<string, string> = { bucket }
+  if (domain) params.domain = domain
+  const url = mcpUrl("/graph/decomposition", params)
+  const res = await fetch(url.toString(), {
+    headers: mcpHeaders(),
+    signal: options.signal,
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Bucket entity fetch failed"))
+  return res.json() as Promise<DecompositionBucketPayload>
 }

@@ -176,8 +176,8 @@ class TestTwoPhaseWrite:
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_idempotency_key_written_to_metadata(self, mock_chroma, mock_neo4j, mock_redis):
-        """cerid_idempotency_key is present in Chroma chunk metadata."""
+    def test_recovery_correlation_key_written_to_metadata(self, mock_chroma, mock_neo4j, mock_redis):
+        """cerid_recovery_correlation_key is present in Chroma chunk metadata."""
         collection = _make_collection_mock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
 
@@ -192,8 +192,8 @@ class TestTwoPhaseWrite:
             _call_ingest_content("idempotent content", "coding", "idem.txt")
 
         for meta in collection._stored.values():
-            assert "cerid_idempotency_key" in meta
-            assert len(meta["cerid_idempotency_key"]) == 64  # SHA-256 hex
+            assert "cerid_recovery_correlation_key" in meta
+            assert len(meta["cerid_recovery_correlation_key"]) == 64  # SHA-256 hex
 
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -294,12 +294,12 @@ class TestRetrievalGatePendingFilter:
             result = _exclude_pending({"domain": "coding"})
         assert result == {"domain": "coding"}
 
-    def test_idempotency_key_helper(self):
-        """_idempotency_key is deterministic and changes on any input change."""
-        from app.services.ingestion import _idempotency_key
-        key1 = _idempotency_key("content", "uri", "tenant")
-        key2 = _idempotency_key("content", "uri", "tenant")
-        key3 = _idempotency_key("content2", "uri", "tenant")
+    def test_recovery_correlation_key_helper(self):
+        """_recovery_correlation_key is deterministic and changes on any input change."""
+        from app.services.ingestion import _recovery_correlation_key
+        key1 = _recovery_correlation_key("content", "uri", "tenant")
+        key2 = _recovery_correlation_key("content", "uri", "tenant")
+        key3 = _recovery_correlation_key("content2", "uri", "tenant")
         assert key1 == key2
         assert key1 != key3
         assert len(key1) == 64  # SHA-256 hex
@@ -367,7 +367,7 @@ class TestIngestRecoveryService:
             artifact_id="art1",
             domain="coding",
             collection_name="coll-coding",
-            idempotency_key="abc",
+            recovery_correlation_key="abc",
             pending_at=old_ts,
             document="doc text",
             metadata={"filename": "f.txt", "quality_score": "0.5"},
@@ -419,7 +419,7 @@ class TestIngestRecoveryService:
                 artifact_id="art1",
                 domain="coding",
                 collection_name="coll-coding",
-                idempotency_key="abc",
+                recovery_correlation_key="abc",
                 pending_at=old_ts,
                 document="doc text",
                 metadata={"filename": "f.txt", "quality_score": "0.5"},
@@ -486,7 +486,7 @@ class TestIngestRecoveryService:
                     artifact_id="art-enc",
                     domain="coding",
                     collection_name="coll-coding",
-                    idempotency_key="enc1",
+                    recovery_correlation_key="enc1",
                     pending_at=old_ts,
                     document="doc text",
                     metadata={"filename": "f.txt", "summary": encrypted_summary},
@@ -524,7 +524,7 @@ class TestIngestRecoveryService:
             artifact_id="art2",
             domain="coding",
             collection_name="coll-coding",
-            idempotency_key="def",
+            recovery_correlation_key="def",
             pending_at=old_ts,
             document="doc",
             metadata={},
@@ -563,7 +563,7 @@ class TestIngestRecoveryService:
             artifact_id="art3",
             domain="coding",
             collection_name="coll-coding",
-            idempotency_key="ghi",
+            recovery_correlation_key="ghi",
             pending_at=old_ts,
             document="doc",
             metadata={},
@@ -598,7 +598,7 @@ class TestIngestRecoveryService:
             artifact_id="art4",
             domain="coding",
             collection_name="coll-coding",
-            idempotency_key="xyz",
+            recovery_correlation_key="xyz",
             pending_at=old_ts,
             document="doc",
             metadata={},

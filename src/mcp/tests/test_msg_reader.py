@@ -198,6 +198,16 @@ def test_html_body_read_from_the_binary_property():
     assert read_message(streams).html_body == "<p>Hi</p>"
 
 
+def test_html_body_decodes_non_utf8_bytes_instead_of_mojibake():
+    """WB-07: PidTagHtml is codepage-dependent 8-bit text (Outlook's message
+    codepage), not necessarily UTF-8. Forcing UTF-8 turned every non-ASCII
+    byte into U+FFFD; this must fall back to the same cp1252 heuristic
+    ``_decode_string`` already uses for PT_STRING8 properties."""
+    html = "<p>Café naïve</p>".encode("cp1252")
+    streams = dict([binary_prop(PID_HTML, html)])
+    assert read_message(streams).html_body == "<p>Café naïve</p>"
+
+
 def test_plain_body_and_html_body_are_independent():
     streams = dict([unicode_prop(PID_BODY, "plain"), binary_prop(PID_HTML, b"<p>rich</p>")])
     msg = read_message(streams)

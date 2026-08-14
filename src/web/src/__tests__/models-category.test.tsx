@@ -27,6 +27,7 @@ const mockSettings: ServerSettings = {
   hallucination_threshold: 0.7,
   enable_auto_inject: true,
   auto_inject_threshold: 0.55,
+  auto_inject_max: 3,
   domains: [],
   taxonomy: {},
   storage_mode: "extract_only",
@@ -194,6 +195,24 @@ describe("ModelsCategory — Ollama wizard", () => {
     expect(await screen.findByText(/Ollama is not running/i)).toBeInTheDocument()
   })
 
+  it("WB-11: shows 'Status check failed' + Retry (not 'Not installed' + install wizard) when the status fetch errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/providers/ollama/status")) {
+        return Promise.resolve({
+          ok: false, status: 500,
+          json: () => Promise.reject(new Error("boom")),
+          text: () => Promise.resolve("boom"),
+        })
+      }
+      return mockApis()(url)
+    }))
+    render(<ModelsCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText(/Status check failed/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument()
+    expect(screen.queryByText(/Not installed/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Ollama is not running/i)).not.toBeInTheDocument()
+  })
+
   it("shows connected badge when Ollama is reachable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
       if (url.includes("/providers/ollama/status")) {
@@ -207,6 +226,77 @@ describe("ModelsCategory — Ollama wizard", () => {
     }))
     render(<ModelsCategory {...defaultProps} />, { wrapper })
     expect(await screen.findByText(/Connected/i)).toBeInTheDocument()
+  })
+})
+
+describe("ModelsCategory — role assignments table (RA-30)", () => {
+  function mockApisWithAssignments(assignments: Record<string, string>) {
+    return vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/models/assignments")) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({ assignments, source: "user_config" }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      return mockApis()(url)
+    })
+  }
+
+  it("renders the current per-role assignment from GET /models/assignments", async () => {
+    vi.stubGlobal("fetch", mockApisWithAssignments({ coding: "anthropic/claude-sonnet-4.6" }))
+    render(<ModelsCategory {...defaultProps} />, { wrapper })
+    expect(await screen.findByText("coding")).toBeInTheDocument()
+    expect(screen.getByLabelText('Model for role "coding"')).toHaveValue("anthropic/claude-sonnet-4.6")
+  })
+
+  it("Pin is disabled until the field is edited, then calls PUT /models/assignments", async () => {
+    const user = userEvent.setup()
+    const putSpy = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: () => Promise.resolve({ success: true, restart_required: false, message: "ok" }),
+      text: () => Promise.resolve("{}"),
+    })
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/models/assignments") && init?.method === "PUT") return putSpy(url, init)
+      if (url.includes("/models/assignments")) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({ assignments: { coding: "old/model" }, source: "user_config" }),
+          text: () => Promise.resolve("{}"),
+        })
+      }
+      return mockApis()(url)
+    }))
+    render(<ModelsCategory {...defaultProps} />, { wrapper })
+    const input = await screen.findByLabelText('Model for role "coding"')
+    const row = input.closest("div") as HTMLElement
+    const pinButton = within(row).getByRole("button", { name: /pin/i })
+    expect(pinButton).toBeDisabled()
+
+    await user.clear(input)
+    await user.type(input, "new/model")
+    expect(pinButton).toBeEnabled()
+    await user.click(pinButton)
+
+    await waitFor(() => expect(putSpy).toHaveBeenCalled())
+    const [, init] = putSpy.mock.calls[0]
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ assignments: { coding: "new/model" } })
+  })
+
+  it("Revert discards the unsaved edit without calling the API", async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal("fetch", mockApisWithAssignments({ coding: "old/model" }))
+    render(<ModelsCategory {...defaultProps} />, { wrapper })
+    const input = await screen.findByLabelText('Model for role "coding"')
+    const row = input.closest("div") as HTMLElement
+
+    await user.clear(input)
+    await user.type(input, "scratch/edit")
+    expect(input).toHaveValue("scratch/edit")
+
+    await user.click(within(row).getByRole("button", { name: /revert/i }))
+    expect(input).toHaveValue("old/model")
   })
 })
 

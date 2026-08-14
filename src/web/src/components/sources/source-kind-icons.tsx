@@ -71,6 +71,8 @@ export const KIND_DESCRIPTORS: Record<string, SourceKindDescriptor> = {
   // "notes" — including in the Pro upgrade dialog's title.
   notes: { kind: "notes", label: "Apple Notes", icon: Notebook, blurb: "Sync from local Notes.app" },
   mail: { kind: "mail", label: "Apple Mail", icon: Inbox, blurb: "Local Mail.app archive" },
+  calendar: { kind: "calendar", label: "Apple Calendar", icon: Calendar, blurb: "Local EventKit calendar" },
+  photos: { kind: "photos", label: "Apple Photos", icon: Image, blurb: "Local PhotoKit library" },
 }
 
 export function descriptorFor(kind: string): SourceKindDescriptor {

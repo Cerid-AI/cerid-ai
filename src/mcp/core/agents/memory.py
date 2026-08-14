@@ -31,6 +31,7 @@ from core.utils.internal_llm import call_internal_llm
 from core.utils.llm_parsing import parse_llm_json
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow, utcnow_iso
+from utils.encryption import decrypt_field
 
 logger = logging.getLogger("ai-companion.memory")
 
@@ -801,7 +802,6 @@ def calculate_memory_score(
     *,
     memory_type: str = "decision",
     source_authority: float = 1.0,
-    access_ages: list[float] | None = None,
     half_life_days: float | None = None,
 ) -> float:
     """Calculate memory relevance score with per-type decay and reinforcement.
@@ -817,8 +817,6 @@ def calculate_memory_score(
     - Unknown types fall through to exponential.
 
     Reinforcement: ``min(1 + log2(1 + access_count), 5)`` — capped at 5x.
-    When *access_ages* is provided, recent accesses contribute more via
-    exponential weighting.
 
     *source_authority* scales the final result (default 1.0).
 
@@ -854,10 +852,6 @@ def calculate_memory_score(
     # --- Reinforcement ---
     if memory_type == "empirical":
         reinforcement = 1.0
-    elif access_ages is not None and len(access_ages) > 0:
-        # Recency-weighted: recent accesses matter more
-        weights = [2.0 ** (-a / 30.0) for a in access_ages]
-        reinforcement = min(1.0 + math.log2(1.0 + sum(weights)), 5.0)
     else:
         reinforcement = min(1.0 + math.log2(1.0 + max(0, access_count)), 5.0)
 
@@ -884,6 +878,9 @@ async def recall_memories(
     4. Sort by adjusted score
     5. Return top_k above min_score
     """
+    if not config.ENABLE_MEMORY_RECALL:
+        return []
+
     if min_score is None:
         min_score = config.MEMORY_MIN_RECALL_SCORE
 
@@ -989,7 +986,13 @@ async def recall_memories(
                 "age_days": round(age_days, 1),
                 "access_count": access_count,
                 "memory_type": metadata.get("memory_type", "fact"),
-                "summary": metadata.get("summary", ""),
+                # metadata is the raw Chroma dump — "summary" may carry the
+                # enc:v1: Chroma-only ciphertext (see CHROMA_ENCRYPTED_FIELDS).
+                # decrypt_field no-ops on plaintext, so legacy/keyless rows
+                # are unaffected.
+                "summary": decrypt_field(str(metadata.get("summary", "")))
+                if metadata.get("summary")
+                else "",
                 # Bi-temporal valid-time end: "" (OPEN_INTERVAL) = still true;
                 # a non-empty value marks a closed interval (Phase D). Captured
                 # here so the read-side admission filter below can drop closed

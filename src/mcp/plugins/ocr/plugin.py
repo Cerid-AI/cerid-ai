@@ -42,6 +42,21 @@ OCR_ENGINE = os.getenv("OCR_ENGINE", "docling")  # env-capture-allowed: OCR engi
 _MAX_TEXT_CHARS = 2_000_000
 
 
+def _docling_entitled() -> bool:
+    """Whether the current tier entitles use of the Docling engine.
+
+    AF-081: ``docling_parser`` (config/features.py) was hardcoded True with
+    no functional reader anywhere — this is that reader. Currently the flag
+    is community-tier and always True, so this is a no-op today, but it
+    makes the flag load-bearing: disabling it (or a future re-tiering)
+    actually stops Docling from being invoked instead of silently doing
+    nothing.
+    """
+    from config.features import is_feature_enabled
+
+    return is_feature_enabled("docling_parser")
+
+
 def _ocr_with_docling(file_path: str) -> str:
     """Run OCR using IBM Docling document AI library."""
     try:
@@ -141,7 +156,9 @@ def parse_pdf_with_ocr(file_path: str) -> dict[str, Any]:
     )
 
     try:
-        if OCR_ENGINE == "tesseract":
+        if OCR_ENGINE == "tesseract" or not _docling_entitled():
+            if OCR_ENGINE != "tesseract":
+                logger.info("docling_parser feature disabled — using Tesseract fallback")
             ocr_text = _ocr_with_tesseract(file_path)
         else:
             try:

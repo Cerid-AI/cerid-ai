@@ -36,25 +36,62 @@ import {
 import { MCP_BASE } from "@/lib/api/common"
 import type { Plugin, PluginConfig } from "@/lib/types"
 import { useEntitlements } from "@/hooks/use-entitlements"
-import { useNavigation } from "@/contexts/navigation-context"
+import { useNavigation, type NavigationOptions } from "@/contexts/navigation-context"
+import type { Pane } from "@/components/layout/sidebar"
 import { LicenseNotice } from "@/components/settings/license-notice"
 
-/** Inline route to the plan pane. These spots used to name "Plan & Billing"
-    in prose with no way to get there — an upgrade prompt that cannot be
-    acted on is just a complaint. */
-function PlanLink({ children }: { children: React.ReactNode }) {
+/** Inline cross-pane route. Naming a destination in prose with no way to get
+    there is just a complaint — every seam this page draws links across. */
+function InlineNavLink({
+  pane,
+  options,
+  children,
+}: {
+  pane: Pane
+  options?: NavigationOptions
+  children: React.ReactNode
+}) {
   const { goTo } = useNavigation()
   return (
     <button
       type="button"
-      onClick={() => goTo("settings", { category: "plan" })}
+      onClick={() => goTo(pane, options)}
       className="font-medium underline underline-offset-2 hover:no-underline"
     >
       {children}
     </button>
   )
 }
+
+/** Inline route to the plan pane. */
+function PlanLink({ children }: { children: React.ReactNode }) {
+  return (
+    <InlineNavLink pane="settings" options={{ category: "plan" }}>
+      {children}
+    </InlineNavLink>
+  )
+}
 import { logSwallowedError } from "@/lib/log-swallowed"
+
+/** Locked-state footnote. When the capabilities fetch FAILED the lock is a
+    fail-closed fallback, not a settled verdict — say so instead of pitching
+    an upgrade to a user who may already own the plan. */
+function PlanGateNote({ tier = "Pro", unverified }: { tier?: string; unverified: boolean }) {
+  if (unverified) {
+    return (
+      <p className="text-label-xs text-muted-foreground">
+        Couldn&apos;t verify your plan, so this stays locked. Check your
+        connection or retry from <PlanLink>Plan &amp; Billing</PlanLink>.
+      </p>
+    )
+  }
+  return (
+    <p className="text-label-xs text-muted-foreground">
+      Requires {tier} plan —{" "}
+      <PlanLink>see plans or start a free trial</PlanLink>.
+    </p>
+  )
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,17 +130,39 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
   const [toggleError, setToggleError] = useState("")
   const [savingConfig, setSavingConfig] = useState(false)
 
+  // Older servers predate display_name/plugin_type — fall back to the raw id.
+  const displayName = plugin.display_name ?? plugin.name
+  const backsConnector = plugin.plugin_type === "connector"
+
   const tierRequired = (plugin.tier_required ?? "").toLowerCase()
   const needsEnterprise = tierRequired === "enterprise"
-  const needsPro = tierRequired === "pro" || needsEnterprise
+  const fallbackTier = needsEnterprise
+    ? ("enterprise" as const)
+    : tierRequired === "pro"
+      ? ("pro" as const)
+      : undefined
 
-  const entInfo = needsEnterprise
-    ? ent.forFlag(undefined, "enterprise")
-    : needsPro
-    ? ent.forFlag(undefined, "pro")
-    : { state: "available" as const }
+  // Per-FLAG resolution off the manifest's own feature_flags (carried on the
+  // /plugins payload) instead of the coarse tier_required. The plugin is
+  // usable when ANY of its flags is available; otherwise "locked" wins over
+  // "flag-off" so the row can name the tier an upgrade would actually fix.
+  // Flagless manifests keep the tier_required fallback, which also makes a
+  // paid plugin fail CLOSED while capabilities are unknown.
+  const flagInfos = (
+    plugin.feature_flags?.length ? plugin.feature_flags : [undefined]
+  ).map((flag) => ent.forFlag(flag, fallbackTier))
+  const entInfo =
+    flagInfos.find((i) => i.state === "available")
+    ?? flagInfos.find((i) => i.state === "locked")
+    ?? flagInfos[0]
 
-  const isLocked = entInfo.state === "locked"
+  // Verdict suppressed while capabilities load — tier defaults to "community"
+  // in flight, and a paying customer must not see a lock on first paint. A
+  // FAILED fetch keeps the fail-closed fallback; the enable call's own 403
+  // stays authoritative and surfaces in toggleError.
+  const isLocked = !ent.isLoading && entInfo.state === "locked"
+  const requiredTierLabel =
+    entInfo.requiredTier === "enterprise" || needsEnterprise ? "Enterprise" : "Pro"
 
   const handleToggle = async (checked: boolean) => {
     setToggleError("")
@@ -148,9 +207,12 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium">{plugin.name}</span>
+            <span className="text-sm font-medium">{displayName}</span>
             {plugin.version && (
               <Badge variant="outline" className="text-label-xs font-mono">{plugin.version}</Badge>
+            )}
+            {displayName !== plugin.name && (
+              <Badge variant="outline" className="text-label-xs font-mono">{plugin.name}</Badge>
             )}
             {tierRequired && tierRequired !== "community" && (
               <Badge
@@ -167,12 +229,20 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
           {plugin.description && (
             <p className="text-label-xs text-muted-foreground mt-0.5">{plugin.description}</p>
           )}
+          {backsConnector && (
+            <p className="text-label-xs text-muted-foreground mt-0.5">
+              Backs the {displayName} connector — connect and sync it in{" "}
+              <InlineNavLink pane="sources" options={{ sourcesMode: "connectors" }}>
+                Sources → Connectors
+              </InlineNavLink>.
+            </p>
+          )}
         </div>
         <Switch
           checked={plugin.enabled}
           onCheckedChange={handleToggle}
-          disabled={isLocked}
-          aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.name}`}
+          disabled={ent.isLoading || isLocked}
+          aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${displayName}`}
           className="shrink-0"
         />
       </div>
@@ -181,12 +251,7 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
           <AlertDescription className="text-label-xs">{toggleError}</AlertDescription>
         </Alert>
       )}
-      {isLocked && (
-        <p className="text-label-xs text-muted-foreground">
-          Requires {needsEnterprise ? "Enterprise" : "Pro"} plan —{" "}
-          <PlanLink>see plans or start a free trial</PlanLink>.
-        </p>
-      )}
+      {isLocked && <PlanGateNote tier={requiredTierLabel} unverified={ent.isError} />}
       {plugin.config_schema && Object.keys(plugin.config_schema).length > 0 && (
         <AdvancedDisclosure category="extensions" group="plugins">
           <div className="density-stack">
@@ -789,8 +854,11 @@ function KnowledgeProvidersSection() {
 function AutomationRow({ automation, onChanged }: { automation: AutomationState; onChanged: () => void }) {
   const ent = useEntitlements()
   const entInfo = ent.forFlag("pro_meeting_capture", "pro")
-  const isLocked = entInfo.state === "locked"
-  const isFlagOff = entInfo.state === "flag-off"
+  // Verdicts suppressed while capabilities load (tier defaults "community" in
+  // flight); a FAILED fetch keeps the fail-closed fallback and the note below
+  // says the plan is unverified instead of pitching an upgrade.
+  const isLocked = !ent.isLoading && entInfo.state === "locked"
+  const isFlagOff = !ent.isLoading && entInfo.state === "flag-off"
   const [runError, setRunError] = useState("")
   const [running, setRunning] = useState(false)
 
@@ -842,7 +910,7 @@ function AutomationRow({ automation, onChanged }: { automation: AutomationState;
         <Switch
           checked={automation.enabled}
           onCheckedChange={handleToggle}
-          disabled={isLocked || isFlagOff}
+          disabled={ent.isLoading || isLocked || isFlagOff}
           aria-label={`${automation.enabled ? "Disable" : "Enable"} ${automation.display_name}`}
           className="shrink-0"
         />
@@ -871,12 +939,7 @@ function AutomationRow({ automation, onChanged }: { automation: AutomationState;
           </Button>
         </div>
       )}
-      {isLocked && (
-        <p className="text-label-xs text-muted-foreground">
-          Requires Pro plan —{" "}
-          <PlanLink>see plans or start a free trial</PlanLink>.
-        </p>
-      )}
+      {isLocked && <PlanGateNote unverified={ent.isError} />}
       {runError && (
         <Alert variant="destructive">
           <AlertDescription className="text-label-xs">{runError}</AlertDescription>
@@ -903,12 +966,20 @@ function AutomationsSection() {
       title="Pro Automations"
       description="Scheduled background tasks (inbox triage, daily digest) that run on a cadence you set."
     >
-      {entInfo.state === "locked" && (
+      {!ent.isLoading && entInfo.state === "locked" && (
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription className="text-xs">
-            Scheduled automations are a Pro feature.{" "}
-            <PlanLink>See plans or start a free trial</PlanLink>.
+            {ent.isError ? (
+              // Fail-closed fallback, not a settled verdict — don't pitch an
+              // upgrade to a user whose plan simply couldn't be fetched.
+              <>Couldn&apos;t verify your plan — automations stay locked until it can be checked.</>
+            ) : (
+              <>
+                Scheduled automations are a Pro feature.{" "}
+                <PlanLink>See plans or start a free trial</PlanLink>.
+              </>
+            )}
           </AlertDescription>
         </Alert>
       )}
@@ -950,25 +1021,80 @@ function spotlightBridge() {
   return window.cerid?.appleConnectors?.spotlight ?? null
 }
 
+/** Retention windows offered for donated Spotlight items. "Never" is 0, which
+    is what the helper reads as "set no expirationDate". */
+const SPOTLIGHT_RETENTION_KEY = "cerid-spotlight-retention-days"
+const SPOTLIGHT_RETENTION_DEFAULT = "90"
+const SPOTLIGHT_RETENTION_OPTIONS = [
+  { value: "30", label: "30 days" },
+  { value: "90", label: "90 days" },
+  { value: "365", label: "1 year" },
+  { value: "0", label: "Never expire" },
+] as const
+
+/** A stored value that is no longer an offered option falls back to the
+    default. Anything else would apply a window the operator cannot see in the
+    control — including, if the key were ever set to junk, an unbounded one. */
+function readSpotlightRetention(): string {
+  try {
+    const raw = localStorage.getItem(SPOTLIGHT_RETENTION_KEY)
+    return SPOTLIGHT_RETENTION_OPTIONS.some((o) => o.value === raw)
+      ? (raw as string)
+      : SPOTLIGHT_RETENTION_DEFAULT
+  } catch {
+    return SPOTLIGHT_RETENTION_DEFAULT
+  }
+}
+
 function SpotlightSection() {
   const ent = useEntitlements()
   const entInfo = ent.forFlag("spotlight_donation", "pro")
-  const isLocked = entInfo.state === "locked"
+  // Suppressed while capabilities load; fail-closed fallback survives a
+  // failed fetch (the note below says unverified instead of pitching Pro).
+  const isLocked = !ent.isLoading && entInfo.state === "locked"
   const bridge = spotlightBridge()
   const [busy, setBusy] = useState<"donating" | "purging" | null>(null)
   const [result, setResult] = useState<string>("")
   const [error, setError] = useState("")
+  const [retention, setRetention] = useState<string>(readSpotlightRetention)
 
   if (bridge === null) return null
+
+  const handleRetentionChange = (value: string) => {
+    setRetention(value)
+    try {
+      localStorage.setItem(SPOTLIGHT_RETENTION_KEY, value)
+    } catch (err) {
+      logSwallowedError(err, "localStorage.setItem", { key: SPOTLIGHT_RETENTION_KEY })
+    }
+  }
 
   const handleDonate = async () => {
     setBusy("donating")
     setError("")
     setResult("")
     try {
-      const r = await bridge.donate({ mcp_base_url: MCP_BASE })
+      const r = await bridge.donate({
+        mcp_base_url: MCP_BASE,
+        expiration_days: Number(retention),
+      })
       if (r.ok) {
-        setResult(`Donated ${r.donated} of ${r.scanned} artifacts to Spotlight.`)
+        // Report the window the main process applied, not the one requested —
+        // it normalises the value, so those can differ.
+        const applied = r.expiration_days
+        const window_ =
+          applied === undefined
+            ? ""
+            : applied === 0
+              ? " They will not expire."
+              : ` They expire after ${applied} days.`
+        // `truncated` means the knowledge-base read hit its cap: `scanned` is
+        // the cap, not the KB's size, and without the label the number reads
+        // as a census of everything donated.
+        const cap = r.truncated
+          ? ` (truncated at ${r.scanned.toLocaleString()} — the knowledge base holds more)`
+          : ""
+        setResult(`Donated ${r.donated} of ${r.scanned} artifacts to Spotlight${cap}.${window_}`)
       } else {
         setError(r.error ?? "Donation failed")
       }
@@ -1001,33 +1127,52 @@ function SpotlightSection() {
       title="Spotlight"
       description="Make your knowledge base searchable from Cmd-Space. Titles and summaries are indexed by macOS on this machine; nothing is sent anywhere."
     >
-      {isLocked ? (
-        <p className="text-label-xs text-muted-foreground">
-          Requires Pro plan — <PlanLink>see plans or start a free trial</PlanLink>.
-        </p>
+      {ent.isLoading ? null : isLocked ? (
+        <PlanGateNote unverified={ent.isError} />
       ) : (
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDonate}
-            disabled={busy !== null}
-            className="h-7 text-xs"
-          >
-            {busy === "donating" ? "Donating…" : "Donate to Spotlight"}
-          </Button>
-          <ConfirmActionButton
-            danger="confirm"
-            title="Remove Cerid's Spotlight entries?"
-            description="Your knowledge base is untouched — this only clears the macOS search-index entries Cerid donated."
-            actionLabel="Remove"
-            onConfirm={handlePurge}
-            disabled={busy !== null}
-            variant="outline"
-            className="h-7 text-xs"
-          >
-            {busy === "purging" ? "Removing…" : "Remove from Spotlight"}
-          </ConfirmActionButton>
+        <div className="density-stack">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs shrink-0">Keep entries for</Label>
+            <Select value={retention} onValueChange={handleRetentionChange}>
+              <SelectTrigger className="h-7 text-xs w-44" aria-label="Spotlight retention">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SPOTLIGHT_RETENTION_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-label-xs text-muted-foreground">
+            Applied when you donate. macOS drops the entries itself once the window
+            passes, which is also what cleans up if you uninstall Cerid — removing an
+            app runs no code, so nothing else can. Entries already donated keep the
+            window they were given until you donate again.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDonate}
+              disabled={busy !== null}
+              className="h-7 text-xs"
+            >
+              {busy === "donating" ? "Donating…" : "Donate to Spotlight"}
+            </Button>
+            <ConfirmActionButton
+              danger="confirm"
+              title="Remove Cerid's Spotlight entries?"
+              description="Your knowledge base is untouched — this only clears the macOS search-index entries Cerid donated."
+              actionLabel="Remove"
+              onConfirm={handlePurge}
+              disabled={busy !== null}
+              variant="outline"
+              className="h-7 text-xs"
+            >
+              {busy === "purging" ? "Removing…" : "Remove from Spotlight"}
+            </ConfirmActionButton>
+          </div>
         </div>
       )}
       {result && <p className="text-label-xs text-muted-foreground">{result}</p>}
@@ -1049,9 +1194,17 @@ export default function ExtensionsCategory() {
       <Card>
         <CardContent className="py-3">
           <p className="text-label-sm leading-relaxed text-muted-foreground">
-            Extend Cerid four ways — local capability packs installed on the server,
-            external tool providers connected over MCP for agents to call, read-only
-            knowledge providers (enrichment + chat lookup), and scheduled
+            Plugins are capability packs installed on the server. To connect your
+            own data — Apple apps, email, calendars, cloud accounts — go to{" "}
+            <InlineNavLink pane="sources" options={{ sourcesMode: "connectors" }}>
+              Sources → Connectors
+            </InlineNavLink>
+            .
+          </p>
+          <p className="mt-1.5 text-label-sm leading-relaxed text-muted-foreground">
+            This page covers four things — local capability packs installed on the
+            server, external tool providers connected over MCP for agents to call,
+            read-only knowledge providers (enrichment + chat lookup), and scheduled
             background automations. Each has its own section below.
           </p>
         </CardContent>

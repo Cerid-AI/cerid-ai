@@ -57,6 +57,18 @@ class MemoryExtractRequest(BaseModel):
     messages: list[dict]
 
 
+class MemoryDedupRequest(BaseModel):
+    confirm: bool = False
+
+
+class MemoryDedupResponse(BaseModel):
+    dry_run: bool
+    memories_scanned: int
+    duplicate_groups: int
+    memories_superseded: int
+    groups: list[list[dict]]
+
+
 # ---------------------------------------------------------------------------
 # GET /memories — list memories with filtering
 # ---------------------------------------------------------------------------
@@ -274,6 +286,62 @@ async def delete_memory(memory_id: str):
         raise
     except Exception as e:
         logger.error(f"Delete memory error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /memories/dedup — retroactive near-duplicate merge pass (UX-17)
+# ---------------------------------------------------------------------------
+
+@router.post("/memories/dedup", response_model=MemoryDedupResponse)
+async def dedup_memories(req: MemoryDedupRequest | None = None):
+    """Find (and with ``confirm=true`` merge) near-duplicate memories.
+
+    Write-time consolidation misses rephrasings of the same fluctuating
+    metric ("SOL price down 1.38%" / "SOL is down 1.23% today"); this pass
+    clusters what is already stored by normalised text similarity — no LLM
+    calls — and marks every older member of a group superseded by the
+    newest, which recall already filters out. Dry-run by default.
+    """
+    apply = bool(req and req.confirm)
+    try:
+        from core.agents.memory_dedup import find_duplicate_groups
+
+        driver = get_neo4j()
+        with driver.session() as session:
+            rows = session.run(
+                "MATCH (a:Artifact)-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
+                "WHERE a.filename STARTS WITH 'memory_' "
+                "AND a.superseded_by IS NULL "
+                "RETURN a.id AS id, coalesce(a.summary, '') AS text, "
+                "a.ingested_at AS created_at",
+            )
+            memories = [dict(r) for r in rows]
+
+        groups = find_duplicate_groups(memories)
+
+        superseded = 0
+        if apply and groups:
+            from core.agents.memory_consolidation import mark_superseded
+
+            for group in groups:
+                keeper = group[0]
+                for dup in group[1:]:
+                    mark_superseded(driver, str(dup["id"]), str(keeper["id"]))
+                    superseded += 1
+
+        return {
+            "dry_run": not apply,
+            "memories_scanned": len(memories),
+            "duplicate_groups": len(groups),
+            "memories_superseded": superseded,
+            "groups": [
+                [{"id": m["id"], "text": m["text"]} for m in group]
+                for group in groups
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Memory dedup error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

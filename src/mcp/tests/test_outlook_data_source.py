@@ -58,6 +58,8 @@ GRAPH_EVENTS = {
             "start": {"dateTime": "2026-08-12T14:00:00.0000000", "timeZone": "UTC"},
             "end": {"dateTime": "2026-08-12T15:00:00.0000000", "timeZone": "UTC"},
             "attendees": [{"emailAddress": {"address": "bob@example.com"}}],
+            "location": {"displayName": "221B Baker St"},
+            "webLink": "https://outlook.office365.com/calendar/item/EVT-1",
         },
     ],
 }
@@ -167,6 +169,51 @@ class TestCalendarContract:
     def test_unreadable_input_is_empty_not_a_crash(self):
         assert parse_events(None) == []
         assert parse_events(_result("<html>gateway error</html>")) == []
+
+    def test_the_per_event_weblink_is_captured(self):
+        """Graph events carry ``webLink``; dropping it forces every citation
+        to the calendar's front page — the google_calendar defect, again."""
+        events = parse_events(_result(GRAPH_EVENTS))
+        assert events[0]["html_link"] == "https://outlook.office365.com/calendar/item/EVT-1"
+
+
+class TestCalendarResultsCarryWhatWasParsed:
+    """The query() body dropped fields parse_events had already extracted —
+    the same parsed-then-thrown-away class as google_calendar's sf5-04."""
+
+    async def _results(self, payload=GRAPH_EVENTS):
+        ds = OutlookCalendarDataSource()
+        with patch.object(ds, "_call_mcp", AsyncMock(return_value=_result(payload))):
+            return await ds.query("design review")
+
+    @pytest.mark.asyncio
+    async def test_location_reaches_the_answer(self):
+        results = await self._results()
+        assert "221B Baker St" in results[0].content
+
+    @pytest.mark.asyncio
+    async def test_attendees_reach_the_answer(self):
+        results = await self._results()
+        assert "bob@example.com" in results[0].content
+
+    @pytest.mark.asyncio
+    async def test_a_location_free_event_does_not_emit_an_empty_field(self):
+        stripped = {"value": [{k: v for k, v in GRAPH_EVENTS["value"][0].items()
+                               if k != "location"}]}
+        results = await self._results(stripped)
+        assert "Location:" not in results[0].content
+
+    @pytest.mark.asyncio
+    async def test_the_citation_deep_links_to_the_event(self):
+        results = await self._results()
+        assert results[0].source_url == "https://outlook.office365.com/calendar/item/EVT-1"
+
+    @pytest.mark.asyncio
+    async def test_it_falls_back_to_the_calendar_home_without_a_link(self):
+        stripped = {"value": [{k: v for k, v in GRAPH_EVENTS["value"][0].items()
+                               if k != "webLink"}]}
+        results = await self._results(stripped)
+        assert results[0].source_url == "https://outlook.live.com/calendar/0/"
 
 
 class TestToResults:

@@ -1,5 +1,6 @@
 {
   "name": "gmail",
+  "display_name": "Gmail",
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",

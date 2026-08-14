@@ -156,10 +156,8 @@ class TestFindStaleArtifacts:
 # ---------------------------------------------------------------------------
 
 class TestFindOrphanedChunks:
-    @patch("core.agents.rectify.config")
-    def test_finds_orphans(self, mock_config, mock_neo4j, mock_chroma):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_finds_orphans(self, monkeypatch, mock_neo4j, mock_chroma):
+        monkeypatch.setattr("core.agents.rectify.config.DOMAINS", ["coding"])
 
         driver, session = mock_neo4j
         # Neo4j has artifact a1
@@ -180,10 +178,8 @@ class TestFindOrphanedChunks:
         assert len(result["coding"]) == 1
         assert result["coding"][0]["artifact_id"] == "a2"
 
-    @patch("core.agents.rectify.config")
-    def test_no_orphans(self, mock_config, mock_neo4j, mock_chroma):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_no_orphans(self, monkeypatch, mock_neo4j, mock_chroma):
+        monkeypatch.setattr("core.agents.rectify.config.DOMAINS", ["coding"])
 
         driver, session = mock_neo4j
         session.run.return_value = iter([{"id": "a1"}])
@@ -196,6 +192,40 @@ class TestFindOrphanedChunks:
 
         result = find_orphaned_chunks(driver, client)
         assert result == {}
+
+    def test_pages_through_large_collections(self, monkeypatch, mock_neo4j, mock_chroma):
+        """WB-35: a domain with more chunks than one page must not stop at
+        the first ``collection.get`` call — the orphan on page 2 must
+        still be found, and the pagination offsets must be correct.
+        """
+        monkeypatch.setattr("config.DOMAINS", ["coding"])
+
+        driver, session = mock_neo4j
+        session.run.return_value = iter([{"id": "a1"}])
+
+        client, collection = mock_chroma
+        page_1_ids = [f"chunk_{i}" for i in range(1000)]
+        page_1_meta = [{"artifact_id": "a1"} for _ in range(1000)]
+        page_2 = {
+            "ids": ["chunk_orphan"],
+            "metadatas": [{"artifact_id": "a2", "filename": "orphan.py"}],
+        }
+        collection.get.side_effect = [
+            {"ids": page_1_ids, "metadatas": page_1_meta},
+            page_2,
+        ]
+
+        result = find_orphaned_chunks(driver, client)
+
+        assert collection.get.call_count == 2
+        first_call, second_call = collection.get.call_args_list
+        assert first_call.kwargs["offset"] == 0
+        assert first_call.kwargs["limit"] == 1000
+        assert second_call.kwargs["offset"] == 1000
+        assert "coding" in result
+        assert result["coding"] == [
+            {"chunk_id": "chunk_orphan", "artifact_id": "a2", "filename": "orphan.py"}
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -265,9 +295,7 @@ class TestResolveDuplicates:
 # ---------------------------------------------------------------------------
 
 class TestCleanupOrphanedChunks:
-    @patch("core.agents.rectify.config")
-    def test_cleans_orphans(self, mock_config, mock_chroma):
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_cleans_orphans(self, mock_chroma):
         client, collection = mock_chroma
 
         orphaned = {
@@ -286,9 +314,7 @@ class TestCleanupOrphanedChunks:
         result = cleanup_orphaned_chunks(client, {})
         assert result == {}
 
-    @patch("core.agents.rectify.config")
-    def test_error_returns_zero(self, mock_config, mock_chroma):
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_error_returns_zero(self, mock_chroma):
         client, collection = mock_chroma
         collection.delete.side_effect = RuntimeError("ChromaDB error")
 
@@ -302,9 +328,8 @@ class TestCleanupOrphanedChunks:
 # ---------------------------------------------------------------------------
 
 class TestAnalyzeDomainDistribution:
-    @patch("core.agents.rectify.config")
-    def test_basic_distribution(self, mock_config, mock_neo4j):
-        mock_config.DOMAINS = ["coding", "general"]
+    def test_basic_distribution(self, monkeypatch, mock_neo4j):
+        monkeypatch.setattr("core.agents.rectify.config.DOMAINS", ["coding", "general"])
         driver, session = mock_neo4j
 
         records = [
@@ -318,9 +343,10 @@ class TestAnalyzeDomainDistribution:
         assert result["total_chunks"] == 70
         assert result["distribution"]["coding"]["artifacts"] == 10
 
-    @patch("core.agents.rectify.config")
-    def test_missing_domain_padded_with_zeros(self, mock_config, mock_neo4j):
-        mock_config.DOMAINS = ["coding", "general", "finance"]
+    def test_missing_domain_padded_with_zeros(self, monkeypatch, mock_neo4j):
+        monkeypatch.setattr(
+            "core.agents.rectify.config.DOMAINS", ["coding", "general", "finance"]
+        )
         driver, session = mock_neo4j
 
         records = [
@@ -332,9 +358,8 @@ class TestAnalyzeDomainDistribution:
         assert result["distribution"]["finance"] == {"artifacts": 0, "chunks": 0}
         assert result["distribution"]["general"] == {"artifacts": 0, "chunks": 0}
 
-    @patch("core.agents.rectify.config")
-    def test_null_chunk_count(self, mock_config, mock_neo4j):
-        mock_config.DOMAINS = ["coding"]
+    def test_null_chunk_count(self, monkeypatch, mock_neo4j):
+        monkeypatch.setattr("core.agents.rectify.config.DOMAINS", ["coding"])
         driver, session = mock_neo4j
 
         records = [{"domain": "coding", "count": 3, "total_chunks": None}]

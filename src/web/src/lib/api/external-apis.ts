@@ -52,6 +52,7 @@ export async function fetchExternalAPIHealth(slug: string): Promise<ExternalAPIH
   )
   if (!res.ok) {
     const msg = await extractError(res, `Health check failed for ${slug}`)
+    // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): deliberate Result-type return with an explicit `status: "error"` discriminator (see docblock above), not a masked failure; grandfathered under the blunt structural match
     return { status: "error", detail: msg }
   }
   const data = (await res.json()) as { slug: string; status: string; detail?: string | null }

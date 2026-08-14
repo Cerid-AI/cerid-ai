@@ -248,7 +248,7 @@ class TestChromaDBCircuitBreaker:
         assert breaker.name == "chromadb"
 
     @pytest.mark.asyncio
-    async def test_query_domain_degrades_on_circuit_open(self):
+    async def test_query_domain_degrades_on_circuit_open(self, monkeypatch):
         """When the chromadb breaker is OPEN, multi_domain_query degrades gracefully
         — the per-domain CircuitOpenError is caught and that domain returns empty —
         rather than propagating it. E1 CR-056: the deleted app/agents/decomposer
@@ -268,12 +268,13 @@ class TestChromaDBCircuitBreaker:
 
         from core.agents.query_agent import multi_domain_query
 
-        with patch("core.agents.query_agent.config") as mock_config:
-            mock_config.DOMAINS = ["general"]
-            mock_config.collection_name = lambda d: f"kb_{d}"
-            results = await multi_domain_query("test query", domains=["general"],
-                                               chroma_client=mock_chroma)
-            assert results == []
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["general"])
+        monkeypatch.setattr(
+            "core.agents.query_agent.config.collection_name", lambda d: f"kb_{d}"
+        )
+        results = await multi_domain_query("test query", domains=["general"],
+                                           chroma_client=mock_chroma)
+        assert results == []
 
         breaker.reset()
 
@@ -385,7 +386,7 @@ class TestParallelExecution:
         assert len(tasks_created) >= 2, f"Expected >=2 tasks, got {len(tasks_created)}"
 
     @pytest.mark.asyncio
-    async def test_bm25_timeout_returns_gracefully(self):
+    async def test_bm25_timeout_returns_gracefully(self, monkeypatch):
         """BM25 timeout (2s) doesn't block vector-only results."""
         mock_collection = MagicMock()
         mock_collection.query.return_value = {
@@ -406,18 +407,18 @@ class TestParallelExecution:
         breaker = get_breaker("chromadb")
         breaker.reset()
 
-        with patch("core.agents.query_agent.config") as mock_config:
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["general"])
+        monkeypatch.setattr(
+            "core.agents.query_agent.config.collection_name", lambda d: f"kb_{d}"
+        )
+        monkeypatch.setattr("core.agents.query_agent.config.HYBRID_VECTOR_WEIGHT", 0.7)
+        monkeypatch.setattr("core.agents.query_agent.config.HYBRID_KEYWORD_WEIGHT", 0.3)
 
-            mock_config.DOMAINS = ["general"]
-            mock_config.collection_name = lambda d: f"kb_{d}"
-            mock_config.HYBRID_VECTOR_WEIGHT = 0.7
-            mock_config.HYBRID_KEYWORD_WEIGHT = 0.3
-
-            start = time.monotonic()
-            results = await multi_domain_query(
-                "test query", domains=["general"], chroma_client=mock_chroma,
-            )
-            elapsed = time.monotonic() - start
+        start = time.monotonic()
+        results = await multi_domain_query(
+            "test query", domains=["general"], chroma_client=mock_chroma,
+        )
+        elapsed = time.monotonic() - start
 
         assert elapsed < 3.0, f"Query took {elapsed:.3f}s (expected <3s)"
         assert len(results) >= 1

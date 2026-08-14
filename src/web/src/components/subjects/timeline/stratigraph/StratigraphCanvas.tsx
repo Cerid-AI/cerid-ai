@@ -1234,22 +1234,32 @@ export function StratigraphCanvas({
       />
 
       {/* Marker labels (DOM, above canvas) — MARKER_KIND_META registry replaces hardcoded kinds */}
-      {markersVisible && markersRef.current.map((m, i) => {
-        const mDate = new Date(m.date)
-        const mx = xScale(mDate)
-        if (mx < GUTTER_W || mx > dims.w) return null
-        const meta = MARKER_KIND_META[m.kind]
-        const shortLabel = m.shortLabel ?? (meta?.shortLabel ?? m.kind)
-        return (
-          <div
-            key={i}
-            className="pointer-events-none absolute text-label-xxs font-medium uppercase tracking-wider text-muted-foreground"
-            style={{ left: mx + 2, top: AXIS_H + 2 }} // drift-allowed: runtime marker position
-          >
-            {shortLabel}
-          </div>
-        )
-      })}
+      {markersVisible && (() => {
+        // Collision stagger: labels closer than one label-width drop to a
+        // second row instead of overprinting (two INGEST bursts a week
+        // apart rendered as one illegible smear).
+        const LABEL_W = 52
+        let prevX = -Infinity
+        let row = 0
+        return markersRef.current.map((m, i) => {
+          const mDate = new Date(m.date)
+          const mx = xScale(mDate)
+          if (mx < GUTTER_W || mx > dims.w) return null
+          row = mx - prevX < LABEL_W ? (row + 1) % 2 : 0
+          prevX = mx
+          const meta = MARKER_KIND_META[m.kind]
+          const shortLabel = m.shortLabel ?? (meta?.shortLabel ?? m.kind)
+          return (
+            <div
+              key={i}
+              className="pointer-events-none absolute text-label-xxs font-medium uppercase tracking-wider text-muted-foreground"
+              style={{ left: mx + 2, top: AXIS_H + 2 + row * 12 }} // drift-allowed: runtime marker position
+            >
+              {shortLabel}
+            </div>
+          )
+        })
+      })()}
 
       {/* Pre-ledger hairline tooltip — DOM label only; the canvas hairline is above */}
       {ledgerStartDate && (() => {

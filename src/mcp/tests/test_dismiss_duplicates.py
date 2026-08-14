@@ -72,7 +72,9 @@ async def test_dismiss_persists_group_content_hash():
         patch("app.routers.kb_admin.list_duplicate_artifacts", return_value=_ROWS),
     ):
         resp = await dismiss_duplicates(DismissDuplicatesRequest(artifact_ids=["a1", "a2"]))
-    assert resp["dismissed"] == 2
+    # WB-42: "dismissed" is the number of content_hashes actually written by
+    # sadd, not the requested artifact_id count — a1 and a2 share one hash.
+    assert resp["dismissed"] == 1
     # The group's shared hash is persisted (not the individual artifact ids).
     assert redis.smembers("cerid:kb:dismissed_duplicate_hashes") == {"hashA"}
 
@@ -102,3 +104,37 @@ async def test_list_no_redis_returns_all_groups():
     ):
         resp = await list_duplicates()
     assert resp.total_groups == 2
+
+
+@pytest.mark.asyncio
+async def test_dismiss_raises_when_sadd_fails():
+    """WB-42: a Redis write failure must not be swallowed into a fake
+    success — the operator would believe the group was dismissed when it
+    was not, and it would silently reappear."""
+    from fastapi import HTTPException
+
+    redis = _FakeRedis()
+    redis.sadd = MagicMock(side_effect=RuntimeError("redis unreachable"))
+    with (
+        patch("app.routers.kb_admin.get_neo4j", return_value=MagicMock()),
+        patch("app.routers.kb_admin.get_redis", return_value=redis),
+        patch("app.routers.kb_admin.list_duplicate_artifacts", return_value=_ROWS),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await dismiss_duplicates(DismissDuplicatesRequest(artifact_ids=["a1", "a2"]))
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_list_raises_when_smembers_fails():
+    """WB-42: a Redis read failure must not be swallowed into an empty
+    dismissed-set — that would make previously-dismissed groups reappear."""
+    redis = _FakeRedis()
+    redis.smembers = MagicMock(side_effect=RuntimeError("redis unreachable"))
+    with (
+        patch("app.routers.kb_admin.get_neo4j", return_value=MagicMock()),
+        patch("app.routers.kb_admin.get_redis", return_value=redis),
+        patch("app.routers.kb_admin.list_duplicate_artifacts", return_value=_ROWS),
+    ):
+        with pytest.raises(RuntimeError):
+            await list_duplicates()

@@ -12,10 +12,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from datetime import datetime
+from http import HTTPStatus
 from typing import Any
+
+import httpx
 
 import config
 from core.agents.hallucination.enums import VerificationStatus
@@ -72,6 +76,83 @@ class CreditExhaustedError(NonTransientError):
         super().__init__(f"{provider} credits exhausted (HTTP 402)")
 
 logger = logging.getLogger("ai-companion.hallucination")
+
+
+def _resolve_verification_date() -> str:
+    """Resolve the date to tell the verifier is "today".
+
+    WB-58: the MCP container runs UTC-only unless the operator sets the
+    standard ``TZ`` env var (e.g. ``TZ=America/Los_Angeles``) in ``.env`` —
+    docker-compose's ``env_file: .env`` passes it straight through, no
+    compose wiring required. Without ``TZ`` we fall back to naive UTC,
+    which is wrong for part of every evening in timezones behind UTC (a
+    claim about "today" gets judged against tomorrow's UTC date).
+    """
+    tz_name = os.getenv("TZ")
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo
+            return datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d")
+        except Exception as exc:
+            log_swallowed_error("core.agents.hallucination.verification.resolve_date", exc)
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+async def _call_external_verify_llm(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    timeout: float | None,
+    breaker_name: str,
+) -> dict:
+    """Call the external verification LLM with bounded exponential backoff.
+
+    RA-57: EXTERNAL_VERIFY_RETRY_ATTEMPTS / EXTERNAL_VERIFY_RETRY_BASE_DELAY
+    were computed in settings.py but never reached this call site — a
+    transient 5xx/429/timeout from OpenRouter fell straight through to the
+    generic exception handler as an "uncertain" verdict instead of getting
+    the short retry ``call_internal_llm`` already applies to its own
+    transient failures.
+    """
+    from core.utils.llm_client import call_llm_raw
+
+    max_retries = max(1, config.EXTERNAL_VERIFY_RETRY_ATTEMPTS)
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            return await call_llm_raw(
+                messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                breaker_name=breaker_name,
+            )
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            last_exc = exc
+            if attempt + 1 >= max_retries:
+                raise
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            retryable = (
+                HTTPStatus.INTERNAL_SERVER_ERROR <= status < 600
+                or status == HTTPStatus.TOO_MANY_REQUESTS
+            )
+            if not retryable or attempt + 1 >= max_retries:
+                raise
+            last_exc = exc
+        delay = config.EXTERNAL_VERIFY_RETRY_BASE_DELAY * (2 ** attempt)
+        logger.info(
+            "External verify call failed (attempt %d/%d) — retry in %.2fs: %s",
+            attempt + 1, max_retries, delay, last_exc,
+        )
+        await asyncio.sleep(delay)
+    # Unreachable — every iteration above returns or raises.
+    raise last_exc if last_exc is not None else RuntimeError(
+        "external verify retry loop fell through without a result"
+    )
 
 # Deadline geometry for per-claim verification. The streaming caller wraps
 # each claim in wait_for(claim_timeout); every LLM/fetch budget inside the
@@ -1296,9 +1377,13 @@ async def _verify_claim_externally(
         else:
             system_prompt = _SYSTEM_CURRENT_EVENT_VERIFICATION
         verification_method = "web_search"
-        # Inject current date into system prompt (was baked in at import time — stale after midnight)
-        system_prompt = system_prompt.replace("{current_date}", datetime.now().strftime("%Y-%m-%d"))
+        # Inject current date into system prompt (was baked in at import time —
+        # stale after midnight; WB-58: also honours TZ so it's the user's
+        # local date, not the container's naive UTC one).
+        assumed_date = _resolve_verification_date()
+        system_prompt = system_prompt.replace("{current_date}", assumed_date)
     else:
+        assumed_date = None
         # Complex claims (causal, comparative, multi-hop) use a stronger
         # model for more reliable verdicts.  Simple factual claims use the
         # lightweight cross-model pool for cost efficiency.
@@ -1309,6 +1394,15 @@ async def _verify_claim_externally(
             verify_model = _pick_verification_model(generating_model)
             verification_method = "cross_model"
         system_prompt = _SYSTEM_DIRECT_VERIFICATION
+
+    # RA-57: EXTERNAL_VERIFY_MODEL lets an operator pin external verification
+    # to one model independent of the current_event/complex/pool routing
+    # above. Checked via the raw env var, not config.EXTERNAL_VERIFY_MODEL —
+    # that attribute always resolves to a computed default, so reading it
+    # unconditionally would silently override the routing even when the
+    # operator never set anything.
+    if os.getenv("EXTERNAL_VERIFY_MODEL"):
+        verify_model = config.EXTERNAL_VERIFY_MODEL
 
     # Expert mode: override model selection with the expert-tier model
     # AND gather authoritative external evidence before sending to LLM
@@ -1465,8 +1559,7 @@ async def _verify_claim_externally(
                     _MIN_EXTERNAL_CALL_BUDGET_S,
                 )
 
-            from core.utils.llm_client import call_llm_raw
-            data = await call_llm_raw(
+            data = await _call_external_verify_llm(
                 messages,
                 model=verify_model,
                 temperature=config.EXTERNAL_VERIFY_TEMPERATURE,
@@ -1561,6 +1654,10 @@ async def _verify_claim_externally(
                 "verification_model": verify_model,
                 "verification_answer": raw_answer,
                 "source_urls": source_urls,
+                # WB-58: surface the date the verifier was told is "today" so
+                # a mis-assumed date is visible alongside the verdict instead
+                # of only affecting it invisibly.
+                **({"assumed_date": assumed_date} if assumed_date else {}),
                 **(
                     {
                         "authoritative_sources": _authoritative_result.get("authoritative_sources", []),
@@ -1744,6 +1841,14 @@ async def verify_claims_batch_external(
     if timeout is None:
         timeout = config.BIFROST_TIMEOUT * 3
 
+    # RA-57: same override _verify_claim_externally applies — an operator
+    # who pins EXTERNAL_VERIFY_MODEL must get it here too, not just on the
+    # single-claim path. Checked via the raw env var, not
+    # config.EXTERNAL_VERIFY_MODEL, which always resolves to a computed
+    # default and would silently override routing even when unset.
+    if os.getenv("EXTERNAL_VERIFY_MODEL"):
+        model = config.EXTERNAL_VERIFY_MODEL
+
     context_line = (
         f"\nContext: these claims are from a response about: {response_context}\n"
         if response_context else ""
@@ -1765,8 +1870,11 @@ async def verify_claims_batch_external(
     results: dict[int, dict[str, Any]] = {}
 
     try:
-        from core.utils.llm_client import call_llm_raw
-        data = await call_llm_raw(
+        # RA-57: route through the same retry-on-transient-failure wrapper
+        # the single-claim path uses, instead of calling call_llm_raw
+        # directly — a transient 5xx/429/timeout from OpenRouter otherwise
+        # fell straight through to the except below as a swallowed failure.
+        data = await _call_external_verify_llm(
             messages,
             model=model,
             temperature=0.1,
@@ -2099,7 +2207,7 @@ async def _score_kb_grounding(
         try:
             with neo4j_driver.session() as _gs:
                 _graph_count = _gs.run(
-                    "MATCH (a:Artifact {id: $aid})-[:RELATES_TO|DEPENDS_ON|REFERENCES]-(b:Artifact) "
+                    "MATCH (a:Artifact {id: $aid})-[:RELATES_TO|REFERENCES]-(b:Artifact) "
                     "WHERE EXISTS { MATCH (b)<-[:RELATES_TO]-(m:Memory)-[:VERIFIED_BY]->(r:VerificationReport) } "
                     "RETURN count(b) AS verified_neighbors",
                     aid=top_result["artifact_id"],

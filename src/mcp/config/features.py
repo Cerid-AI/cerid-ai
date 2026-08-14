@@ -104,7 +104,13 @@ FEATURE_FLAGS = {
     "parent_child_retrieval":    True,  # RAG quality plumbing (demoted 2026-05-20)
     "docling_parser":            True,  # high-fidelity parsing (demoted 2026-05-20)
     "audio_transcription_plain": True,  # Whisper transcription without diarization (community)
-    "hierarchical_taxonomy":     True,
+    # AF-081 honesty gate (2026-08-12): TAXONOMY (config/taxonomy.py) is
+    # single-level — domain -> flat sub_categories list, no nesting beneath a
+    # sub_category. The marketed "domain/sub-category/sub-sub-category"
+    # 3-level tree has never been built. False + PLANNED_FEATURES, same
+    # pattern as share_sheet/shortcuts_actions/quicklook_preview, so the
+    # tier matrix renders "Coming in 1.0.x" instead of claiming it ships.
+    "hierarchical_taxonomy":     False,
     "file_upload_gui":           True,
     "encryption_at_rest":        True,
     "truth_audit":               True,
@@ -115,7 +121,6 @@ FEATURE_FLAGS = {
     # ---- Mac-native community features (`mac_native` bucket) ----
     # All True if platform supports them; runtime macOS check at use-site
     "voice_memos_watch":         True,
-    "spotlight_integration":     True,
     # Honesty gate (V1 Task 5.3, 2026-07-10): these three ship in the
     # tier matrix but were never built — they need Xcode .appex/App
     # Intents infrastructure SPM cannot produce (docs/PHASE_G_DEFERRED.md).
@@ -125,13 +130,31 @@ FEATURE_FLAGS = {
     "share_sheet":               False,
     "shortcuts_actions":         False,
     "quicklook_preview":         False,
-    "safari_reading_list":       True,
     "menu_bar_mode":             True,
     "keychain_secrets":          True,
     "tcc_wizard":                True,
     "sparkle_updates":           True,
     "universal_binary":          True,
-    "apple_silicon_ml":          True,
+    # RA-60 (2026-08-11): `spotlight_integration`, `safari_reading_list`,
+    # and `apple_silicon_ml` were removed here — a repo-wide search found
+    # no backend, desktop, or frontend code implementing any of them
+    # (spotlight's real, shipped implementation is the distinct
+    # `spotlight_donation` Pro flag; see NON_PLUGIN_IMPLEMENTATIONS below).
+    # They had shipped in TIER_MATRIX.md as ✓ available with nothing behind
+    # them. The five flags kept above (menu_bar_mode, keychain_secrets,
+    # tcc_wizard, sparkle_updates, universal_binary) DO have real desktop
+    # implementations (packages/desktop/src/main/{tray,secrets,permissions,
+    # updater}.ts, electron-builder's `universal` mac target) — they are
+    # unconditional app behavior, not something to remove. Backend capability
+    # reporting is already wired generically: get_feature_status() (below)
+    # walks every FEATURE_FLAGS entry, so GET /license/capabilities already
+    # reports each of these five with its real enabled state, same mechanism
+    # packages/desktop/src/main/connectors/spotlight.ts already reads for
+    # spotlight_donation. What's still missing is the packages/desktop
+    # consumer side: nothing in tray/secrets/permissions/updater.ts checks
+    # that response before running, so flipping a flag still disables
+    # nothing client-side. That consumer wiring is out of this package's
+    # scope (packages/desktop).
 
     # ---- Pro features (require pro or enterprise tier) ----
     # Pro meeting capture bucket
@@ -172,8 +195,8 @@ FEATURE_FLAGS = {
 
     # ---- Enterprise features ----
     "multi_user":                CERID_MULTI_USER or _enterprise_level(),
-    "sso_saml":                  _enterprise_level(),  # Scaffolded — no impl yet
-    "audit_logging":             _enterprise_level(),
+    "sso_saml":                  _enterprise_level(),  # app/routers/saml.py
+    "audit_logging":             _enterprise_level(),  # app/routers/audit_log.py
     "priority_support":          _enterprise_level(),
 
     # ---- Back-compat aliases ----
@@ -231,17 +254,14 @@ FEATURE_BUCKETS: dict[str, list[str]] = {
     ],
     "mac_native": [
         "voice_memos_watch",
-        "spotlight_integration",
         "share_sheet",
         "shortcuts_actions",
         "quicklook_preview",
-        "safari_reading_list",
         "menu_bar_mode",
         "keychain_secrets",
         "tcc_wizard",
         "sparkle_updates",
         "universal_binary",
-        "apple_silicon_ml",
     ],
 }
 
@@ -578,6 +598,7 @@ PLANNED_FEATURES: frozenset[str] = frozenset({
     "share_sheet",
     "shortcuts_actions",
     "quicklook_preview",
+    "hierarchical_taxonomy",
 })
 
 
@@ -595,6 +616,8 @@ PLANNED_FEATURES: frozenset[str] = frozenset({
 NON_PLUGIN_IMPLEMENTATIONS: dict[str, str] = {
     # --- served by a router or agent in this process ---
     "advanced_analytics":          "in_process",  # app/routers/analytics.py
+    "audit_logging":               "in_process",  # app/routers/audit_log.py
+    "sso_saml":                    "in_process",  # app/routers/saml.py
     "calendar_sync":               "in_process",  # app/routers/connectors.py
     "custom_smart_rag":            "in_process",  # app/routers/rag_weights.py
     "daily_digest":                "in_process",  # app/routers/digests.py
@@ -606,22 +629,29 @@ NON_PLUGIN_IMPLEMENTATIONS: dict[str, str] = {
 
     # --- implemented in the Electron app; a container can never supply these ---
     "apple_notes_reader":          "desktop",     # packages/desktop/.../apple_notes.ts
+    "imessage_reader":             "desktop",     # packages/desktop/.../imessage.ts
     "spotlight_donation":          "desktop",     # packages/desktop/.../spotlight.ts
+    # The reminders backend plugin was removed 2026-08-12: it shelled out to
+    # `ceridreminders` from the Linux MCP container, which can never execute a
+    # macOS binary, so it could never configure. Same route as spotlight_donor.
+    "reminders_eventkit":          "desktop",     # packages/desktop/.../apple_reminders.ts
 
     # --- not code at all: a support commitment, nothing to load or gate ---
     "priority_support":            "entitlement_only",
 
-    # --- SOLD, ADVERTISED, AND NOT IMPLEMENTED ---
-    # Both are ✓ for Enterprise in docs/TIER_MATRIX.md and neither is in
-    # PLANNED_FEATURES, yet a repo-wide search on 2026-08-10 found them ONLY in
-    # this file, the UI capability copy, and the tier-matrix generator's label
-    # map — no gate, no call site, no implementation. They are recorded
-    # truthfully here rather than hidden in a residual bucket: on an Enterprise
-    # install they are entitled, so they will surface as `degraded`, which is
-    # the correct and actionable answer. Resolve by implementing them or by
-    # moving them to PLANNED_FEATURES — not by adding them to the list above.
-    "audit_logging":               "unimplemented",
-    "sso_saml":                    "unimplemented",
+    # --- WAS SOLD, ADVERTISED, AND NOT IMPLEMENTED ---
+    # Both `audit_logging` and `sso_saml` were ✓ for Enterprise in
+    # docs/TIER_MATRIX.md with neither in PLANNED_FEATURES, yet a repo-wide
+    # search on 2026-08-10 found them ONLY in this file, the UI capability copy,
+    # and the tier-matrix generator's label map — no gate, no call site, no
+    # implementation. They were recorded here as "unimplemented" rather than
+    # hidden in a residual bucket: on an Enterprise install they are entitled,
+    # so they surfaced as `degraded`, which is the correct and actionable
+    # answer. Both were built on 2026-08-11 and have moved to the in_process
+    # group above.
+    #
+    # The bucket stays. It is the honest place for the next feature that is
+    # sold before it is built, and an empty one is the point.
 }
 
 
@@ -749,10 +779,10 @@ _COMMUNITY_FLAGS: frozenset[str] = frozenset({
     "audio_transcription",  # back-compat alias
     "hierarchical_taxonomy", "file_upload_gui", "encryption_at_rest",
     "truth_audit", "live_metrics", "private_mode", "basic_workflows",
-    "voice_memos_watch", "spotlight_integration", "share_sheet",
-    "shortcuts_actions", "quicklook_preview", "safari_reading_list",
+    "voice_memos_watch", "share_sheet",
+    "shortcuts_actions", "quicklook_preview",
     "menu_bar_mode", "keychain_secrets", "tcc_wizard", "sparkle_updates",
-    "universal_binary", "apple_silicon_ml",
+    "universal_binary",
 })
 
 

@@ -303,6 +303,54 @@ class TestOCRPluginManifest:
             assert result is None
 
 
+class TestDoclingParserGate:
+    """AF-081: docling_parser was hardcoded True with no functional reader.
+
+    _docling_entitled() is that reader — verify it actually gates the OCR
+    engine branch, not just that it exists.
+    """
+
+    def _fake_scanned_pdf(self):
+        """A pdfplumber handle whose pages extract near-zero text, so
+        parse_pdf_with_ocr's needs_ocr check trips and reaches the engine
+        branch under test."""
+        page = MagicMock()
+        page.extract_text.return_value = ""
+        pdf = MagicMock()
+        pdf.pages = [page]
+        return pdf
+
+    def test_docling_skipped_when_flag_disabled(self):
+        import plugins.ocr.plugin as ocr_plugin
+
+        with (
+            patch("pdfplumber.open", return_value=self._fake_scanned_pdf()),
+            patch.object(ocr_plugin, "_docling_entitled", return_value=False),
+            patch.object(ocr_plugin, "_ocr_with_docling") as mock_docling,
+            patch.object(ocr_plugin, "_ocr_with_tesseract", return_value="tesseract text") as mock_tesseract,
+        ):
+            result = ocr_plugin.parse_pdf_with_ocr("fake.pdf")
+
+        mock_docling.assert_not_called()
+        mock_tesseract.assert_called_once()
+        assert result["text"] == "tesseract text"
+
+    def test_docling_used_when_flag_enabled(self):
+        import plugins.ocr.plugin as ocr_plugin
+
+        with (
+            patch("pdfplumber.open", return_value=self._fake_scanned_pdf()),
+            patch.object(ocr_plugin, "_docling_entitled", return_value=True),
+            patch.object(ocr_plugin, "_ocr_with_docling", return_value="docling text") as mock_docling,
+            patch.object(ocr_plugin, "_ocr_with_tesseract") as mock_tesseract,
+        ):
+            result = ocr_plugin.parse_pdf_with_ocr("fake.pdf")
+
+        mock_docling.assert_called_once()
+        mock_tesseract.assert_not_called()
+        assert result["text"] == "docling text"
+
+
 class TestFeatureFlagIntegration:
     """Test that Pro features are properly gated."""
 

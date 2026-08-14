@@ -90,6 +90,10 @@ class QualityTimelineResponse(BaseModel):
 # Keeps the visualization stable even as new stages get added — unknown
 # stages bucket into "other".
 _STAGE_PROVIDER = {
+    # Interactive chat (UX-10) — recorded by app.routers.chat's stream
+    # generators; previously untagged, which dumped the largest spender
+    # into "other".
+    "chat": "chat",
     # Ingest-time stages
     "entity_extraction": "ingest",
     "claim_extraction": "ingest",

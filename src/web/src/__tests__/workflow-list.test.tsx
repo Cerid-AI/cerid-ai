@@ -12,9 +12,10 @@ vi.mock("@/lib/api", () => ({
   fetchWorkflows: vi.fn(),
   deleteWorkflow: vi.fn(),
   fetchWorkflowRuns: vi.fn().mockResolvedValue([]),
+  runWorkflow: vi.fn(),
 }))
 
-import { fetchWorkflows } from "@/lib/api"
+import { fetchWorkflows, runWorkflow } from "@/lib/api"
 import WorkflowList from "@/components/workflows/workflow-list"
 import type { Workflow } from "@/lib/types"
 
@@ -78,6 +79,47 @@ describe("WorkflowList", () => {
     renderWithQuery(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
     await screen.findByText("Ingestion Pipeline")
     expect(screen.getByText("disabled")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// UX-21 — Run affordance on the list card (no editor round-trip)
+// ---------------------------------------------------------------------------
+
+describe("WorkflowList — card Run affordance (UX-21)", () => {
+  it("each card offers Run without reopening the editor", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue({ workflows: mockWorkflows, total: 2 })
+    renderWithQuery(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await screen.findByText("Ingestion Pipeline")
+
+    expect(screen.getAllByRole("button", { name: /run workflow/i })).toHaveLength(2)
+  })
+
+  it("Run asks for the query input, then executes and shows the run status", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue({ workflows: mockWorkflows, total: 2 })
+    vi.mocked(runWorkflow).mockResolvedValue({
+      id: "run-9f3e164e",
+      workflow_id: "wf-1",
+      status: "completed",
+      results: {},
+      error: null,
+      started_at: "2026-08-13T00:00:00Z",
+      finished_at: "2026-08-13T00:00:03Z",
+    })
+    const user = userEvent.setup()
+    renderWithQuery(<WorkflowList onEdit={noop} onCreate={noop} onDuplicate={noop} />)
+    await screen.findByText("Ingestion Pipeline")
+
+    await user.click(screen.getAllByRole("button", { name: /run workflow/i })[0])
+    // The input appears — a query pipeline must never run on a made-up input.
+    const input = await screen.findByLabelText(/query input/i)
+    await user.type(input, "summarize new mail")
+    await user.click(screen.getByRole("button", { name: /^start run$/i }))
+
+    await waitFor(() =>
+      expect(runWorkflow).toHaveBeenCalledWith("wf-1", { query: "summarize new mail" }),
+    )
+    expect(await screen.findByText("Completed")).toBeInTheDocument()
   })
 })
 

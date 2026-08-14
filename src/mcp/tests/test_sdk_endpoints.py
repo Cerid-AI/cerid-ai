@@ -175,8 +175,7 @@ class TestSDKHealth:
     """GET /sdk/v1/health returns version, tier, services, and features."""
 
     @patch("app.routers.sdk.health_check")
-    @patch("app.routers.sdk.config")
-    def test_health_response_shape(self, mock_config, mock_health):
+    def test_health_response_shape(self, mock_health, monkeypatch):
         mock_health.return_value = {
             "status": "healthy",
             "tier": "community",
@@ -186,9 +185,9 @@ class TestSDKHealth:
                 "neo4j": "connected",
             },
         }
-        mock_config.INTERNAL_LLM_PROVIDER = "openrouter"
-        mock_config.INTERNAL_LLM_MODEL = "anthropic/claude-sonnet-4"
-        mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
+        monkeypatch.setattr("app.routers.sdk.config.INTERNAL_LLM_PROVIDER", "openrouter")
+        monkeypatch.setattr("app.routers.sdk.config.INTERNAL_LLM_MODEL", "anthropic/claude-sonnet-4")
+        monkeypatch.setattr("app.routers.sdk.config.OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
 
         with patch("config.features.FEATURE_TOGGLES", {
             "enable_hallucination_check": True,
@@ -207,16 +206,15 @@ class TestSDKHealth:
         assert isinstance(data["services"], dict)
 
     @patch("app.routers.sdk.health_check")
-    @patch("app.routers.sdk.config")
-    def test_health_includes_internal_llm(self, mock_config, mock_health):
+    def test_health_includes_internal_llm(self, mock_health, monkeypatch):
         mock_health.return_value = {
             "status": "healthy",
             "tier": "community",
             "services": {},
         }
-        mock_config.INTERNAL_LLM_PROVIDER = "ollama"
-        mock_config.INTERNAL_LLM_MODEL = ""
-        mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
+        monkeypatch.setattr("app.routers.sdk.config.INTERNAL_LLM_PROVIDER", "ollama")
+        monkeypatch.setattr("app.routers.sdk.config.INTERNAL_LLM_MODEL", "")
+        monkeypatch.setattr("app.routers.sdk.config.OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
 
         with patch("config.features.FEATURE_TOGGLES", {}):
             client = TestClient(_make_app())

@@ -96,6 +96,26 @@ describe("BuildKnowledgeStep", () => {
     expect(screen.getByText(/Build Knowledge/i)).toBeInTheDocument()
   })
 
+  it("renders an error state with Retry when the registry fetch fails — not the empty-registry copy (WB-13)", async () => {
+    vi.mocked(fetchKnowledgePackRegistry).mockRejectedValueOnce(new Error("stack still starting"))
+    renderStep()
+
+    expect(await screen.findByText(/couldn't load the pack registry/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+    expect(screen.queryByText(/no packs in registry/i)).not.toBeInTheDocument()
+  })
+
+  it("recovers from a failed registry fetch when Retry is clicked", async () => {
+    vi.mocked(fetchKnowledgePackRegistry).mockRejectedValueOnce(new Error("stack still starting"))
+    const user = userEvent.setup()
+    renderStep()
+
+    await user.click(await screen.findByRole("button", { name: /retry/i }))
+
+    expect(await screen.findByText("Python Standard Library Documentation")).toBeInTheDocument()
+    expect(screen.queryByText(/couldn't load the pack registry/i)).not.toBeInTheDocument()
+  })
+
   it("renders packs grouped by domain after registry loads", async () => {
     renderStep()
     // Domain headers — use getAllByText since DomainBadge + description may both match

@@ -179,7 +179,6 @@ def test_external_datasource_breakers_are_tolerant():
         "datasource-pubchem",
         "datasource-bookmarks",
         "datasource-email-imap",
-        "datasource-rss_feeds",
     ):
         cb = get_breaker(name)
         assert cb.failure_threshold == 3, f"{name} threshold={cb.failure_threshold}"

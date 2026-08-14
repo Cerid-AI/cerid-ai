@@ -42,6 +42,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.deps import get_redis
+from core.utils import audit_log
 from utils.license import mask_license_key, validate_license_key
 
 logger = logging.getLogger("ai-companion.license")
@@ -369,6 +370,14 @@ async def activate_license(req: ActivateRequest) -> LicenseStatusResponse:
     key = req.key.strip()
     result = validate_license_key(key)
     if not result.get("valid"):
+        # A rejected key is the interesting event, not the accepted one: a run
+        # of these is someone trying keys. Never record the key itself — the
+        # audit log is readable by anyone entitled to read it.
+        audit_log.audit(
+            "license.activate",
+            outcome="denied",
+            detail={"reason": str(result.get("error") or "invalid")[:200]},
+        )
         raise HTTPException(
             status_code=400,
             detail=result.get("error") or "Invalid or expired license key.",
@@ -376,6 +385,9 @@ async def activate_license(req: ActivateRequest) -> LicenseStatusResponse:
 
     tier = str(result.get("tier") or "pro")
     if tier not in _PAID_TIERS:
+        audit_log.audit(
+            "license.activate", outcome="denied", detail={"reason": "no paid tier", "tier": tier}
+        )
         raise HTTPException(status_code=400, detail=f"Key grants no paid tier (got {tier!r}).")
 
     # The community validator reports no expiry; the commercial one does.
@@ -398,6 +410,11 @@ async def activate_license(req: ActivateRequest) -> LicenseStatusResponse:
 
     reconcile_license_state(redis)
     logger.info("License activated — tier %r", tier)
+    audit_log.audit(
+        "license.activate",
+        target=tier,
+        detail={"tier": tier, "expires_at": expires_at, "watermark": current_license_watermark()},
+    )
     return await license_status()
 
 
@@ -408,6 +425,7 @@ async def deactivate_license() -> DeactivateResponse:
     _clear_license(redis)
     tier = reconcile_license_state(redis)
     logger.info("License deactivated — tier now %r", tier)
+    audit_log.audit("license.deactivate", target=tier, detail={"tier_after": tier})
     return DeactivateResponse(status="deactivated", tier=tier)
 
 

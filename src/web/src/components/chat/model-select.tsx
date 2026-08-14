@@ -4,7 +4,7 @@
 import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select"
-import { MODELS } from "@/lib/types"
+import { MODELS, deriveModelLabel } from "@/lib/types"
 import type { ModelCapabilities, ModelOption } from "@/lib/types"
 import { fetchModelCatalog } from "@/lib/api/settings"
 import { formatCost } from "@/lib/utils"
@@ -68,6 +68,13 @@ function routingProvider(id: string): string {
 
 export function ModelSelect({ value, onChange, configuredProviders }: ModelSelectProps) {
   const selectedModel = MODELS.find((m) => m.id === value)
+  // The current value can be a tier-resolved registry id that isn't in the
+  // static MODELS list (e.g. a catalog-refreshed cheap-tier slot). Derive a
+  // readable label from its tail so the trigger never falls back to the
+  // "Select model" placeholder for a genuinely-selected model, and surface it
+  // as its own selectable row so Radix keeps the value in the list.
+  const unknownSelected = value && !selectedModel
+  const triggerLabel = selectedModel?.label ?? (value ? deriveModelLabel(value) : "Select model")
 
   // Lowercased lookup set so callers can pass either casing.
   const configuredSet = useMemo(() => {
@@ -109,9 +116,18 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="w-48">
-        <span className="truncate">{selectedModel?.label ?? "Select model"}</span>
+        <span className="truncate">{triggerLabel}</span>
       </SelectTrigger>
       <SelectContent position="popper" className="min-w-[20rem]"> {/* drift-allowed: pinned popper min-width so model rows and their availability hints align */}
+        {unknownSelected && (
+          <SelectGroup>
+            <SelectLabel>Current</SelectLabel>
+            <SelectItem value={value}>
+              <span className="truncate">{triggerLabel}</span>
+            </SelectItem>
+            <SelectSeparator />
+          </SelectGroup>
+        )}
         {grouped.map(([provider, models], groupIdx) => {
           const groupConfigured = models.some(isModelConfigured)
           return (

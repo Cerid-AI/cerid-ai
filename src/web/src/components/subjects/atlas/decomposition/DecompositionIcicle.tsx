@@ -22,7 +22,6 @@ import {
   ChevronDown,
   Network,
   Layers,
-  FolderOpen,
   Clock,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -42,7 +41,11 @@ import {
 } from "@/lib/graph/cycle4-contracts"
 import { domainColor } from "@/lib/graph/identity"
 import { resolveMapTokens } from "@/components/subjects/constellation/map/community-layer"
-import { useDecomposition, useCommunityEntities } from "./use-decomposition"
+import {
+  useDecomposition,
+  useCommunityEntities,
+  useBucketEntities,
+} from "./use-decomposition"
 import type { OnInspect, OnFocusEntity } from "@/lib/graph/cycle4-contracts"
 
 // ---------------------------------------------------------------------------
@@ -356,6 +359,8 @@ interface L0RowProps {
   onOpenNeighborhood?: (entityId: string) => void
   dimmed: boolean
   pulse: boolean
+  /** Tier depth for indenting — 3 as an L1 child, 4 inside a rollup bucket. */
+  depth?: number
 }
 
 function L0Row({
@@ -370,6 +375,7 @@ function L0Row({
   onOpenNeighborhood,
   dimmed,
   pulse,
+  depth = 3,
 }: L0RowProps) {
   const label = effectiveLabel(l0.label, l0.size, l0.top_hubs)
   const isMixed = l0.purity < 0.7
@@ -386,7 +392,7 @@ function L0Row({
       label={label}
       count={l0.size}
       expanded={expanded}
-      depth={3}
+      depth={depth}
       colorDot={color}
       dimmed={dimmed}
       pulse={pulse}
@@ -405,7 +411,7 @@ function L0Row({
             value={entityFilter}
             onChange={onEntityFilterChange}
             placeholder="Filter entities…"
-            depth={4}
+            depth={depth + 1}
           />
           {entLoading ? (
             <div className="px-4 py-2">
@@ -418,6 +424,74 @@ function L0Row({
               filter={entityFilter}
               pulseEntityId={pulseEntityId}
               domainId={l0.mode_domain}
+              onInspect={onInspect}
+              onOpenNeighborhood={onOpenNeighborhood}
+            />
+          ) : null}
+        </div>
+      )}
+    </TierRow>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Bucket tier — drillable "Unclustered" / "Uncategorized" rows (UX-13).
+// Previously inert text; every entity is now reachable.
+// ---------------------------------------------------------------------------
+
+interface BucketSectionProps {
+  bucket: "unclustered" | "uncategorized"
+  domainId: string | null
+  label: string
+  count: number
+  depth: number
+  onInspect?: OnInspect
+  onOpenNeighborhood?: (entityId: string) => void
+}
+
+function BucketSection({
+  bucket,
+  domainId,
+  label,
+  count,
+  depth,
+  onInspect,
+  onOpenNeighborhood,
+}: BucketSectionProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [filter, setFilter] = useState("")
+  const { data, isLoading } = useBucketEntities(
+    expanded ? { bucket, domain: domainId } : null,
+  )
+
+  return (
+    <TierRow
+      label={label}
+      count={count}
+      expanded={expanded}
+      depth={depth}
+      ariaLabel={`${label}, ${count} entities`}
+      onClick={() => setExpanded((v) => !v)}
+      testId={`bucket-row-${bucket}-${domainId ?? "all"}`}
+    >
+      {expanded && (
+        <div className="pb-1">
+          <FilterInput
+            value={filter}
+            onChange={setFilter}
+            placeholder="Filter entities…"
+            depth={depth + 1}
+          />
+          {isLoading ? (
+            <div className="px-4 py-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="mt-1 h-4 w-3/4" />
+            </div>
+          ) : data ? (
+            <VirtualEntityList
+              entities={data.entities}
+              filter={filter}
+              domainId={domainId ?? ""}
               onInspect={onInspect}
               onOpenNeighborhood={onOpenNeighborhood}
             />
@@ -526,18 +600,89 @@ function L1Section({
             />
           ))}
           {rollup && (
-            <div
-              className="flex h-8 items-center gap-2 px-2 text-sm text-muted-foreground/70"
-              style={{ paddingLeft: `${8 + 3 * 16}px` }} // drift-allowed: dynamic indent for rollup row at depth 3
-            >
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
-              <span className="flex-1 truncate italic">
-                Smaller clusters ({rollup.community_count} · {rollup.entity_count} entities)
-              </span>
-            </div>
+            <RollupSection
+              rollup={rollup}
+              domainId={domainId}
+              l1Id={l1.id}
+              expandedL0Id={expandedL0Id}
+              pulseEntityId={pulseEntityId}
+              entityFilter={entityFilter}
+              onEntityFilterChange={onEntityFilterChange}
+              tokens={tokens}
+              onExpandL0={onExpandL0}
+              onInspect={onInspect}
+              onOpenNeighborhood={onOpenNeighborhood}
+            />
           )}
         </div>
       )}
+    </TierRow>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Rollup tier — drillable "Smaller clusters" bucket (UX-13).
+// Expands into its member L0 communities, which drill on to entities.
+// ---------------------------------------------------------------------------
+
+interface RollupSectionProps {
+  rollup: L0RollupBucket
+  domainId: string
+  l1Id: string
+  expandedL0Id: string | null
+  pulseEntityId?: string | null
+  entityFilter: string
+  onEntityFilterChange: (v: string) => void
+  tokens: ReturnType<typeof resolveMapTokens>
+  onExpandL0: (l0Id: string) => void
+  onInspect?: OnInspect
+  onOpenNeighborhood?: (entityId: string) => void
+}
+
+function RollupSection({
+  rollup,
+  domainId,
+  l1Id,
+  expandedL0Id,
+  pulseEntityId,
+  entityFilter,
+  onEntityFilterChange,
+  tokens,
+  onExpandL0,
+  onInspect,
+  onOpenNeighborhood,
+}: RollupSectionProps) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <TierRow
+      label={`Smaller clusters (${rollup.community_count})`}
+      count={rollup.entity_count}
+      expanded={expanded}
+      depth={3}
+      ariaLabel={`Smaller clusters, ${rollup.community_count} clusters, ${rollup.entity_count} entities`}
+      onClick={() => setExpanded((v) => !v)}
+      testId={`rollup-row-${l1Id}`}
+    >
+      {expanded &&
+        rollup.communities.map((l0) => (
+          <L0Row
+            key={l0.id}
+            l0={l0}
+            domainId={domainId}
+            l1Id={l1Id}
+            expanded={expandedL0Id === l0.id}
+            pulseEntityId={pulseEntityId}
+            entityFilter={expandedL0Id === l0.id ? entityFilter : ""}
+            onEntityFilterChange={onEntityFilterChange}
+            tokens={tokens}
+            onExpand={() => onExpandL0(l0.id)}
+            onInspect={onInspect}
+            onOpenNeighborhood={onOpenNeighborhood}
+            dimmed={false}
+            pulse={false}
+            depth={4}
+          />
+        ))}
     </TierRow>
   )
 }
@@ -654,15 +799,15 @@ function DomainSection({
                 />
               ))}
               {domain.unclustered.count > 0 && (
-                <div
-                  className="flex h-8 items-center gap-2 px-2 text-sm text-muted-foreground/70"
-                  style={{ paddingLeft: `${8 + 1 * 16}px` }} // drift-allowed: dynamic indent for unclustered bucket at depth 1
-                >
-                  <span className="flex-1 truncate italic">
-                    Unclustered ({domain.unclustered.count})
-                    {domain.id === "digests" && " — no communities yet"}
-                  </span>
-                </div>
+                <BucketSection
+                  bucket="unclustered"
+                  domainId={domain.id}
+                  label={`Unclustered${domain.id === "digests" ? " — no communities yet" : ""}`}
+                  count={domain.unclustered.count}
+                  depth={1}
+                  onInspect={onInspect}
+                  onOpenNeighborhood={onOpenNeighborhood}
+                />
               )}
             </>
           )}
@@ -1017,13 +1162,18 @@ export function DecompositionIcicle({
           />
         ))}
 
-        {/* Uncategorized strip */}
+        {/* Uncategorized strip — drillable (UX-13) */}
         {data.uncategorized_count > 0 && (
-          <div className="flex h-8 items-center gap-2 px-2 text-sm text-muted-foreground/70 mt-1 border-t border-border/20 pt-2">
-            <FolderOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="flex-1 truncate">
-              Uncategorized ({data.uncategorized_count})
-            </span>
+          <div className="mt-1 border-t border-border/20 pt-2">
+            <BucketSection
+              bucket="uncategorized"
+              domainId={null}
+              label="Uncategorized"
+              count={data.uncategorized_count}
+              depth={0}
+              onInspect={onInspect}
+              onOpenNeighborhood={onOpenNeighborhood}
+            />
           </div>
         )}
       </div>

@@ -152,19 +152,6 @@ class TestReinforcement:
         score = calculate_memory_score(1.0, 100000, 0.0, stability_days=90.0, memory_type="decision")
         assert score <= 5.0
 
-    def test_recency_weighted_access(self):
-        """Recent accesses should matter more than old ones."""
-        # 5 accesses yesterday vs 5 accesses 100 days ago
-        recent_ages = [1.0] * 5
-        old_ages = [100.0] * 5
-        score_recent = calculate_memory_score(
-            1.0, 5, 0.0, stability_days=90.0, memory_type="decision", access_ages=recent_ages,
-        )
-        score_old = calculate_memory_score(
-            1.0, 5, 0.0, stability_days=90.0, memory_type="decision", access_ages=old_ages,
-        )
-        assert score_recent > score_old
-
 
 # ---------------------------------------------------------------------------
 # Source authority weighting

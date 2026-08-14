@@ -12,6 +12,7 @@ Existing Community node shape (from community_detection.py + community_summaries
         id,                     # "{level}:{native_id}"  (unique constraint)
         level,                  # int — Leiden hierarchy depth; 0 = finest
         native_id,              # int — GDS-assigned community id
+        name,                   # str | None — short LLM-generated title (UX-15)
         summary,                # str | None — LLM-generated theme summary
         summary_generated_at,   # ISO str | None — when summary was written
         top_terms,              # list[str] | None — c-TF-IDF fallback labels (compute_umap_3d A3)
@@ -55,6 +56,7 @@ class CommunitySummary(BaseModel):
 
     community_id: str
     level: int
+    name: str | None = None
     summary: str | None = None
     member_count: int
     last_summarized_at: str | None = None
@@ -76,9 +78,17 @@ class RelatedCommunity(BaseModel):
 
 
 class CommunityFull(CommunitySummary):
-    """Full community page: adds member entities and related communities."""
+    """Full community page: adds member entities and related communities.
+
+    ``members`` is capped (default 50) — ``members_total`` always carries the
+    uncapped count and ``members_truncated`` says whether the list was cut,
+    so the UI can render "50 of 104" instead of passing the cap off as the
+    total (UX-16).
+    """
 
     members: list[MemberEntity] = []
+    members_total: int = 0
+    members_truncated: bool = False
     related_communities: list[RelatedCommunity] = []
 
 
@@ -120,6 +130,7 @@ def list_communities(
     RETURN
         c.id                   AS community_id,
         c.level                AS level,
+        c.name                 AS name,
         c.summary              AS summary,
         member_count,
         c.summary_generated_at AS last_summarized_at
@@ -142,6 +153,7 @@ def list_communities(
                         CommunitySummary(
                             community_id=str(r.get("community_id", "")),
                             level=int(r.get("level", 0)),
+                            name=r.get("name"),
                             summary=r.get("summary"),
                             member_count=int(r.get("member_count", 0)),
                             last_summarized_at=r.get("last_summarized_at"),
@@ -164,10 +176,14 @@ def list_communities(
 # ---------------------------------------------------------------------------
 
 
-def get_community(driver: Any, community_id: str) -> CommunityFull | None:
+def get_community(
+    driver: Any, community_id: str, *, members_limit: int = 50,
+) -> CommunityFull | None:
     """Fetch the full community record.
 
     Returns ``None`` when no Community with the given id exists.
+    ``members_limit`` caps the member list (top mention_count first); the
+    uncapped total is always reported via ``members_total``.
 
     Assembly:
     1. Core community node (summary, member_count, level, etc.).
@@ -200,6 +216,7 @@ def get_community(driver: Any, community_id: str) -> CommunityFull | None:
                 RETURN
                     c.id                   AS community_id,
                     c.level                AS level,
+                    c.name                 AS name,
                     c.summary              AS summary,
                     member_count,
                     c.summary_generated_at AS last_summarized_at
@@ -221,9 +238,10 @@ def get_community(driver: Any, community_id: str) -> CommunityFull | None:
                     e.name         AS name,
                     e.entity_type  AS entity_type
                 ORDER BY coalesce(e.mention_count, 0) DESC
-                LIMIT 50
+                LIMIT $members_limit
                 """,
                 cid=community_id,
+                members_limit=max(1, int(members_limit)),
             )
             members = [
                 MemberEntity(
@@ -256,13 +274,17 @@ def get_community(driver: Any, community_id: str) -> CommunityFull | None:
                 for r in related_result
             ]
 
+        member_count = int(core.get("member_count", 0))
         return CommunityFull(
             community_id=str(core.get("community_id", "")),
             level=int(core.get("level", 0)),
+            name=core.get("name"),
             summary=core.get("summary"),
-            member_count=int(core.get("member_count", 0)),
+            member_count=member_count,
             last_summarized_at=core.get("last_summarized_at"),
             members=members,
+            members_total=member_count,
+            members_truncated=len(members) < member_count,
             related_communities=related,
         )
 
@@ -283,6 +305,7 @@ class CommunityHierarchyNode(BaseModel):
     level: int
     parent_id: str | None = None
     member_count: int
+    name: str | None = None
     summary: str | None = None
     top_terms: list[str] | None = None
 
@@ -323,6 +346,7 @@ def community_hierarchy(
         c.level     AS level,
         parent_id   AS parent_id,
         member_count,
+        c.name      AS name,
         c.summary   AS summary,
         c.top_terms AS top_terms
     ORDER BY c.level ASC, member_count DESC
@@ -342,6 +366,7 @@ def community_hierarchy(
                         level=lvl,
                         parent_id=r.get("parent_id"),
                         member_count=int(r.get("member_count", 0)),
+                        name=r.get("name"),
                         summary=r.get("summary"),
                         top_terms=r.get("top_terms"),
                     )

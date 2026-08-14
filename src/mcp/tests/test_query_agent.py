@@ -20,6 +20,7 @@ if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
 from core.agents.query_agent import (  # noqa: E402  # noqa: E402
     _apply_quality_and_summaries,
     _enrich_query,
+    _format_chroma_result,
     _get_adjacent_domains,
     agent_query,
     apply_metadata_boost,
@@ -190,6 +191,145 @@ class TestAssembleContext:
 
 
 # ---------------------------------------------------------------------------
+# Tests: assemble_context — AF-057 (window_text) + AF-059 (table provenance)
+# retrieval-side readers
+# ---------------------------------------------------------------------------
+
+class TestAssembleContextWindowText:
+    """AF-057 — sentence-window metadata replacement at context assembly."""
+
+    def test_window_text_substitutes_bare_sentence(self):
+        window = "Prev sentence. The matched sentence. Next sentence."
+        results = [_make_result(
+            content="The matched sentence.", window_text=window,
+        )]
+        context, sources, chars = assemble_context(results)
+        assert context == window
+        assert chars == len(window)
+
+    def test_chunk_without_window_text_uses_content_unchanged(self):
+        results = [_make_result(content="The matched sentence.")]
+        context, _, chars = assemble_context(results)
+        assert context == "The matched sentence."
+        assert chars == len("The matched sentence.")
+
+    def test_windowed_and_bare_chunks_render_differently(self):
+        bare = _make_result(content="Same sentence.", artifact_id="a1")
+        windowed = _make_result(
+            content="Same sentence.",
+            window_text="Before. Same sentence. After.",
+            artifact_id="a2",
+        )
+        bare_ctx, _, _ = assemble_context([bare])
+        windowed_ctx, _, _ = assemble_context([windowed])
+        assert bare_ctx != windowed_ctx
+        assert "Before." in windowed_ctx
+        assert "Before." not in bare_ctx
+
+    def test_char_budget_charged_against_window_not_sentence(self):
+        # The sentence alone fits the budget; the substituted window does
+        # not — the chunk must be excluded, proving the budget is applied
+        # post-substitution.
+        results = [_make_result(
+            content="tiny.", window_text="w" * 200,
+        )]
+        context, sources, chars = assemble_context(results, max_chars=100)
+        assert context == ""
+        assert sources == []
+        assert chars == 0
+
+
+class TestAssembleContextTableProvenance:
+    """AF-059 — csv/xlsx table metadata read back at answer time."""
+
+    def test_table_metadata_renders_provenance_header(self):
+        results = [_make_result(
+            content="2026-01-05, 41.20",
+            sheet_name="Q3",
+            row_idx=4,
+            column_headers='["date", "amount"]',  # JSON-coerced Chroma form
+        )]
+        context, sources, _ = assemble_context(results)
+        assert context.startswith("[sheet: Q3 | row: 4 | columns: date, amount]\n")
+        assert "2026-01-05, 41.20" in context
+        assert sources[0]["sheet_name"] == "Q3"
+        assert sources[0]["row_idx"] == 4
+        assert sources[0]["column_headers"] == ["date", "amount"]
+
+    def test_csv_chunk_without_sheet_renders_row_and_columns(self):
+        results = [_make_result(
+            content="a, b",
+            row_idx=0,  # row 0 must survive the absent-vs-zero distinction
+            column_headers='["x", "y"]',
+        )]
+        context, sources, _ = assemble_context(results)
+        assert context.startswith("[row: 0 | columns: x, y]\n")
+        assert sources[0]["row_idx"] == 0
+        assert "sheet_name" not in sources[0]
+
+    def test_tabular_and_plain_chunks_render_differently(self):
+        plain = _make_result(content="a, b", artifact_id="a1")
+        tabular = _make_result(
+            content="a, b",
+            artifact_id="a2",
+            row_idx=1,
+            column_headers='["x", "y"]',
+        )
+        plain_ctx, plain_sources, _ = assemble_context([plain])
+        tabular_ctx, tabular_sources, _ = assemble_context([tabular])
+        assert plain_ctx != tabular_ctx
+        assert plain_ctx == "a, b"
+        assert "row_idx" not in plain_sources[0]
+        assert "column_headers" not in plain_sources[0]
+        assert tabular_sources[0]["row_idx"] == 1
+
+    def test_malformed_column_headers_json_ignored(self):
+        results = [_make_result(
+            content="cells", row_idx=2, column_headers="[not json",
+        )]
+        context, sources, _ = assemble_context(results)
+        assert context.startswith("[row: 2]\n")
+        assert "column_headers" not in sources[0]
+
+
+class TestFormatChromaResultMetadataProjection:
+    """_format_chroma_result must project the AF-057/AF-059 stamps so
+    assemble_context can read them."""
+
+    def test_projects_window_and_table_fields(self):
+        result = _format_chroma_result(
+            content="sentence.",
+            relevance=0.9,
+            chunk_id="c1",
+            domain="finance",
+            metadata={
+                "artifact_id": "a1",
+                "window_text": "prev. sentence. next.",
+                "sheet_name": "Sheet1",
+                "row_idx": 7,
+                "column_headers": '["h1", "h2"]',
+            },
+        )
+        assert result["window_text"] == "prev. sentence. next."
+        assert result["sheet_name"] == "Sheet1"
+        assert result["row_idx"] == 7
+        assert result["column_headers"] == '["h1", "h2"]'
+
+    def test_defaults_when_stamps_absent(self):
+        result = _format_chroma_result(
+            content="sentence.",
+            relevance=0.9,
+            chunk_id="c1",
+            domain="finance",
+            metadata={"artifact_id": "a1"},
+        )
+        assert result["window_text"] == ""
+        assert result["sheet_name"] == ""
+        assert result["row_idx"] is None  # None sentinel — row 0 is valid
+        assert result["column_headers"] == ""
+
+
+# ---------------------------------------------------------------------------
 # Tests: multi_domain_query
 # ---------------------------------------------------------------------------
 
@@ -231,12 +371,10 @@ class TestMultiDomainQuery:
         assert results[0]["domain"] == "my_client_domain"
         assert results[0]["content"] == "client content"
 
-    @patch("core.agents.query_agent.config")
-    def test_query_single_domain(self, mock_config):
-        mock_config.DOMAINS = ["coding", "general"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
-        mock_config.HYBRID_VECTOR_WEIGHT = 0.6
-        mock_config.HYBRID_KEYWORD_WEIGHT = 0.4
+    def test_query_single_domain(self, monkeypatch):
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["coding", "general"])
+        monkeypatch.setattr("core.agents.query_agent.config.HYBRID_VECTOR_WEIGHT", 0.6)
+        monkeypatch.setattr("core.agents.query_agent.config.HYBRID_KEYWORD_WEIGHT", 0.4)
 
         collection = MagicMock()
         collection.query.return_value = {
@@ -260,10 +398,8 @@ class TestMultiDomainQuery:
         assert results[0]["content"] == "test content"
         assert results[0]["relevance"] == 0.98  # l2_distance_to_relevance(0.2) = 1 - 0.04/2
 
-    @patch("core.agents.query_agent.config")
-    def test_domain_error_returns_empty(self, mock_config):
-        mock_config.DOMAINS = ["coding", "general"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_domain_error_returns_empty(self, monkeypatch):
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["coding", "general"])
 
         chroma_client = MagicMock()
         chroma_client.get_collection.side_effect = Exception("Collection not found")
@@ -308,11 +444,10 @@ class TestRerankResults:
         assert reranked[0]["relevance"] == 0.5
 
     @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("core.agents.query_agent.config")
-    def test_llm_rerank_fallback_on_error(self, mock_config, mock_call_llm):
+    def test_llm_rerank_fallback_on_error(self, mock_call_llm, monkeypatch):
         """When LLM reranking fails, falls back to embedding sort."""
-        mock_config.RERANK_MODE = "llm"
-        mock_config.QUERY_RERANK_CANDIDATES = 15
+        monkeypatch.setattr("core.agents.query_agent.config.RERANK_MODE", "llm")
+        monkeypatch.setattr("core.agents.query_agent.config.QUERY_RERANK_CANDIDATES", 15)
 
         # Make the LLM call raise
         mock_call_llm.side_effect = httpx.HTTPStatusError(
@@ -329,13 +464,12 @@ class TestRerankResults:
         # Fallback: sorted by relevance descending
         assert reranked[0]["relevance"] >= reranked[1]["relevance"]
 
-    @patch("core.agents.query_agent.config")
-    def test_cross_encoder_rerank(self, mock_config):
+    def test_cross_encoder_rerank(self, monkeypatch):
         """Cross-encoder mode dispatches to core.retrieval.reranker and blends scores."""
-        mock_config.RERANK_MODE = "cross_encoder"
-        mock_config.QUERY_RERANK_CANDIDATES = 15
-        mock_config.RERANK_CE_WEIGHT = 0.6
-        mock_config.RERANK_ORIGINAL_WEIGHT = 0.4
+        monkeypatch.setattr("core.agents.query_agent.config.RERANK_MODE", "cross_encoder")
+        monkeypatch.setattr("core.agents.query_agent.config.QUERY_RERANK_CANDIDATES", 15)
+        monkeypatch.setattr("core.agents.query_agent.config.RERANK_CE_WEIGHT", 0.6)
+        monkeypatch.setattr("core.agents.query_agent.config.RERANK_ORIGINAL_WEIGHT", 0.4)
 
         results = [
             _make_result(relevance=0.3, artifact_id="a1", content="Python tutorial"),
@@ -364,8 +498,7 @@ class TestRerankResults:
         # Python content should rank higher despite lower original score
         assert reranked[0]["artifact_id"] in ("a1", "a3")
 
-    @patch("core.agents.query_agent.config")
-    def test_cross_encoder_fallback_to_llm(self, mock_config):
+    def test_cross_encoder_fallback_to_llm(self, monkeypatch):
         """Task 27: cross-encoder failure returns input order + status tag.
 
         The former LLM fallback was removed after Bifrost retirement
@@ -375,8 +508,8 @@ class TestRerankResults:
         ``reranker_status = 'onnx_failed_no_fallback'`` so callers can
         surface the degraded state.
         """
-        mock_config.RERANK_MODE = "cross_encoder"
-        mock_config.QUERY_RERANK_CANDIDATES = 15
+        monkeypatch.setattr("core.agents.query_agent.config.RERANK_MODE", "cross_encoder")
+        monkeypatch.setattr("core.agents.query_agent.config.QUERY_RERANK_CANDIDATES", 15)
 
         results = [
             _make_result(relevance=0.3, artifact_id="a1"),
@@ -402,18 +535,17 @@ class TestRerankResults:
             r.get("reranker_status") == "onnx_failed_no_fallback" for r in reranked
         )
 
-    def test_rerank_mode_none_skips_reranking(self):
+    def test_rerank_mode_none_skips_reranking(self, monkeypatch):
         """RERANK_MODE=none returns results in original sorted order."""
         results = [
             _make_result(relevance=0.3, artifact_id="a1"),
             _make_result(relevance=0.9, artifact_id="a2"),
         ]
 
-        with patch("core.agents.query_agent.config") as mock_config:
-            mock_config.RERANK_MODE = "none"
-            reranked = asyncio.run(
-                rerank_results(results, "test", use_reranking=True)
-            )
+        monkeypatch.setattr("core.agents.query_agent.config.RERANK_MODE", "none")
+        reranked = asyncio.run(
+            rerank_results(results, "test", use_reranking=True)
+        )
         # mode=none: pre-sorted by relevance but no reranking applied
         assert reranked[0]["relevance"] == 0.9
         assert reranked[1]["relevance"] == 0.3
@@ -497,35 +629,44 @@ class TestRerankerModule:
 # between instances of 'MagicMock' and 'int'``.
 
 
+AGENT_QUERY_CONFIG = {
+    "DOMAIN_AFFINITY": {},
+    "CROSS_DOMAIN_DEFAULT_AFFINITY": 0.2,
+    "QUERY_CONTEXT_MAX_CHARS": 14000,
+    "QUALITY_BOOST_BASE": 0.8,
+    "QUALITY_BOOST_FACTOR": 0.2,
+    "QUALITY_METADATA_TAG_BOOST": 0.05,
+    "QUALITY_METADATA_SUBCAT_BOOST": 0.08,
+    "QUALITY_METADATA_MAX_BOOST": 0.15,
+    "QUALITY_MIN_RELEVANCE_THRESHOLD": 0.15,
+    "TEMPORAL_HALF_LIFE_DAYS": 30,
+    "TEMPORAL_RECENCY_WEIGHT": 0.1,
+    "CONTEXT_MAX_CHUNKS_PER_ARTIFACT": 2,
+    "QUERY_CONTEXT_MESSAGES": 5,
+    # Task 1 commit be79457 wraps agent_query in ``asyncio.wait_for`` which
+    # needs a numeric timeout — a bare MagicMock used to raise ``TypeError:
+    # '<=' not supported between instances of 'MagicMock' and 'int'``.
+    "AGENT_QUERY_BUDGET_SECONDS": 30.0,
+}
+
+
+def _pin_agent_query_config(monkeypatch, domains):
+    """Pin the retrieval settings agent_query reads on the REAL config module."""
+    monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", domains)
+    for name, value in AGENT_QUERY_CONFIG.items():
+        monkeypatch.setattr(f"core.agents.query_agent.config.{name}", value)
+
+
 class TestAgentQuery:
     @patch("core.agents.query_agent.log_event")
     @patch("core.agents.query_agent.rerank_results")
     @patch("core.agents.query_agent.graph_expand_results")
     @patch("core.agents.query_agent.multi_domain_query")
-    @patch("core.agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
     def test_basic_query_response_shape(
-        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+        self, mock_mdq, mock_graph, mock_rerank, mock_log, monkeypatch
     ):
-        mock_config.DOMAINS = ["coding", "general"]
-        mock_config.DOMAIN_AFFINITY = {}
-        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
-        mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
-        mock_config.QUALITY_BOOST_BASE = 0.8
-        mock_config.QUALITY_BOOST_FACTOR = 0.2
-        mock_config.QUALITY_METADATA_TAG_BOOST = 0.05
-        mock_config.QUALITY_METADATA_SUBCAT_BOOST = 0.08
-        mock_config.QUALITY_METADATA_MAX_BOOST = 0.15
-        mock_config.QUALITY_MIN_RELEVANCE_THRESHOLD = 0.15
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
-        mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
-        mock_config.QUERY_CONTEXT_MESSAGES = 5
-        # Task 1 commit be79457 wraps agent_query in ``asyncio.wait_for``
-        # which needs a numeric timeout — otherwise a bare MagicMock raises
-        # ``TypeError: '<=' not supported between instances of 'MagicMock'
-        # and 'int'`` before the test body runs.
-        mock_config.AGENT_QUERY_BUDGET_SECONDS = 30.0
+        _pin_agent_query_config(monkeypatch, ["coding", "general"])
 
         result_item = _make_result(content="test content", relevance=0.8)
         # Use side_effect to return fresh lists (avoids aliasing when extend() mutates)
@@ -553,31 +694,62 @@ class TestAgentQuery:
         assert isinstance(response["execution_time_ms"], int)
         assert response["execution_time_ms"] >= 0
 
+    @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
+    @patch("config.features.ENABLE_SEMANTIC_CACHE", True)
+    def test_cache_hit_reports_this_requests_elapsed_not_the_cached_one(self):
+        """UX-11 tail — a semantic-cache hit used to return the ORIGINAL
+        run's execution_time_ms (e.g. 5000ms) as this request's elapsed.
+        The chip must show real elapsed for the request it describes.
+
+        Uses the REAL config module (the cache hit returns before any
+        config-dependent retrieval work) — patching the whole module with
+        a MagicMock is the TA003 vacuous-test shape."""
+        import numpy as np
+
+        cached_envelope = {
+            "context": "cached",
+            "sources": [],
+            "confidence": 0.5,
+            "results": [],
+            "total_results": 0,
+            "execution_time_ms": 5000,
+        }
+
+        fake_ef = lambda texts: [np.zeros(3) for _ in texts]  # noqa: E731
+        with (
+            patch(
+                "core.utils.embeddings.get_embedding_function",
+                return_value=fake_ef,
+            ),
+            patch(
+                "core.retrieval.semantic_cache.cache_lookup",
+                return_value=cached_envelope,
+            ),
+        ):
+            response = asyncio.run(
+                agent_query(
+                    "test query",
+                    domains=["coding"],
+                    chroma_client=MagicMock(),
+                    redis_client=MagicMock(),
+                )
+            )
+
+        assert response["semantic_cache_hit"] is True
+        # A cache hit takes milliseconds; 5 seconds of somebody else's
+        # retrieval is not this request's elapsed.
+        assert response["execution_time_ms"] < 5000
+
     @patch("core.agents.query_agent.log_event")
     @patch("core.agents.query_agent.rerank_results")
     @patch("core.agents.query_agent.graph_expand_results")
     @patch("core.agents.query_agent.multi_domain_query")
-    @patch("core.agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
     @patch("config.features.ENABLE_SEMANTIC_CACHE", False)
     def test_logs_to_redis_when_client_provided(
-        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+        self, mock_mdq, mock_graph, mock_rerank, mock_log, monkeypatch
     ):
-        mock_config.DOMAINS = ["coding", "general"]
-        mock_config.DOMAIN_AFFINITY = {}
-        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
-        mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
-        mock_config.QUALITY_BOOST_BASE = 0.8
-        mock_config.QUALITY_BOOST_FACTOR = 0.2
-        mock_config.QUALITY_METADATA_TAG_BOOST = 0.05
-        mock_config.QUALITY_METADATA_SUBCAT_BOOST = 0.08
-        mock_config.QUALITY_METADATA_MAX_BOOST = 0.15
-        mock_config.QUALITY_MIN_RELEVANCE_THRESHOLD = 0.15
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
-        mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
-        mock_config.QUERY_CONTEXT_MESSAGES = 5
-        mock_config.AGENT_QUERY_BUDGET_SECONDS = 30.0
+        _pin_agent_query_config(monkeypatch, ["coding", "general"])
 
         mock_mdq.return_value = []
         mock_graph.return_value = []
@@ -596,25 +768,10 @@ class TestAgentQuery:
     @patch("core.agents.query_agent.rerank_results")
     @patch("core.agents.query_agent.graph_expand_results")
     @patch("core.agents.query_agent.multi_domain_query")
-    @patch("core.agents.query_agent.config")
     def test_no_results_returns_zero_confidence(
-        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+        self, mock_mdq, mock_graph, mock_rerank, mock_log, monkeypatch
     ):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.DOMAIN_AFFINITY = {}
-        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
-        mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
-        mock_config.QUALITY_BOOST_BASE = 0.8
-        mock_config.QUALITY_BOOST_FACTOR = 0.2
-        mock_config.QUALITY_METADATA_TAG_BOOST = 0.05
-        mock_config.QUALITY_METADATA_SUBCAT_BOOST = 0.08
-        mock_config.QUALITY_METADATA_MAX_BOOST = 0.15
-        mock_config.QUALITY_MIN_RELEVANCE_THRESHOLD = 0.15
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
-        mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
-        mock_config.QUERY_CONTEXT_MESSAGES = 5
-        mock_config.AGENT_QUERY_BUDGET_SECONDS = 30.0
+        _pin_agent_query_config(monkeypatch, ["coding"])
 
         mock_mdq.return_value = []
         mock_graph.return_value = []

@@ -341,6 +341,11 @@ export interface CartographerMapProps {
   search?: string
   /** Structural-gaps highlight (C2): when set, communities NOT in this set recede so the two bridged hulls stand out. */
   highlightCommunities?: ReadonlySet<string>
+  /**
+   * Guided-tour focus (map-tour.tsx): each stop re-frames the camera on
+   * this entity. nonce retriggers when the same entity repeats.
+   */
+  tourFocus?: { entityId: string; nonce: number } | null
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +374,7 @@ export function CartographerMap({
   onPinnedNodesChange,
   search,
   highlightCommunities,
+  tourFocus,
 }: CartographerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
@@ -1498,6 +1504,14 @@ export function CartographerMap({
   }, [reducedMotion])
   // Keep ref current so the sigma rebuild closure can call it.
   focusCameraOnRef.current = focusCameraOn
+
+  // Guided-tour stop: frame the camera on the stop's entity. Keyed on the
+  // nonce so consecutive stops on the same entity still re-frame.
+  useEffect(() => {
+    if (!tourFocus) return
+    focusCameraOn(tourFocus.entityId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tourFocus?.nonce])
 
   /** Ease the camera to (re-center on) a set of GRAPH-space points (hull zoom). */
   const focusCameraOnPoints = useCallback((pts: [number, number][]) => {

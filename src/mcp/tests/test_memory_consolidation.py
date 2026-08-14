@@ -338,17 +338,16 @@ class TestMemoryConsolidationIntegration:
     """Test consolidation integration in extract_and_store_memories."""
 
     @pytest.mark.asyncio
-    @patch("core.agents.memory.config")
     @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
     })
     @patch("core.agents.memory_consolidation.classify_memory", new_callable=AsyncMock)
     async def test_noop_skips_storage(
-        self, mock_classify, mock_extract, mock_config, mock_chroma
+        self, mock_classify, mock_extract, monkeypatch, mock_chroma
     ):
         """NOOP classification should skip storage and count as skipped."""
-        mock_config.ENABLE_MEMORY_EXTRACTION = True
+        monkeypatch.setattr("core.agents.memory.config.ENABLE_MEMORY_EXTRACTION", True)
         mock_extract.return_value = [
             {"content": "duplicate fact", "memory_type": "fact", "summary": "dup"},
         ]
@@ -369,7 +368,6 @@ class TestMemoryConsolidationIntegration:
         mock_ingest.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("core.agents.memory.config")
     @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
@@ -377,11 +375,11 @@ class TestMemoryConsolidationIntegration:
     @patch("core.agents.memory_consolidation.classify_memory", new_callable=AsyncMock)
     @patch("core.agents.memory_consolidation.mark_superseded")
     async def test_update_stores_and_marks_superseded(
-        self, mock_mark, mock_classify, mock_extract, mock_config,
+        self, mock_mark, mock_classify, mock_extract, monkeypatch,
         mock_chroma, mock_neo4j,
     ):
         """UPDATE should store new memory and mark old one superseded."""
-        mock_config.ENABLE_MEMORY_EXTRACTION = True
+        monkeypatch.setattr("core.agents.memory.config.ENABLE_MEMORY_EXTRACTION", True)
         mock_extract.return_value = [
             {"content": "updated pref", "memory_type": "preference", "summary": "pref update"},
         ]
@@ -402,16 +400,15 @@ class TestMemoryConsolidationIntegration:
         mock_mark.assert_called_once_with(mock_neo4j[0], "art-old", "art-new")
 
     @pytest.mark.asyncio
-    @patch("core.agents.memory.config")
     @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": False,
     })
     async def test_consolidation_disabled_skips_classification(
-        self, mock_extract, mock_config, mock_chroma,
+        self, mock_extract, monkeypatch, mock_chroma,
     ):
         """When consolidation is disabled, should proceed directly to storage."""
-        mock_config.ENABLE_MEMORY_EXTRACTION = True
+        monkeypatch.setattr("core.agents.memory.config.ENABLE_MEMORY_EXTRACTION", True)
         mock_extract.return_value = [
             {"content": "some fact", "memory_type": "fact", "summary": "fact"},
         ]

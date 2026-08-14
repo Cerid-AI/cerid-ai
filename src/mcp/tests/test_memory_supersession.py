@@ -97,6 +97,14 @@ async def test_recall_unaffected_without_neo4j() -> None:
     assert {m["memory_id"] for m in results} == {"a", "b"}
 
 
+@pytest.mark.asyncio
+async def test_recall_disabled_by_toggle(monkeypatch) -> None:
+    monkeypatch.setattr("config.ENABLE_MEMORY_RECALL", False)
+    chroma = _chroma(["a", "b"])
+    results = await recall_memories("q", chroma, None, top_k=10)
+    assert results == []
+
+
 # ---------------------------------------------------------------------------
 # Interval admission (bi-temporal :Fact layer, plan D3) — dark behind
 # ENABLE_FACT_INVALIDATION_FILTER (default off). A CLOSED interval (non-empty

@@ -1,5 +1,6 @@
 {
   "name": "outlook_calendar",
+  "display_name": "Outlook Calendar",
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",

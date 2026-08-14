@@ -200,9 +200,12 @@ export function EntityDetailView({
 
   const refreshMutation = useMutation({
     mutationFn: () => refreshEntity(slug),
-    onSuccess: () => {
+    onSuccess: (enqueued) => {
       void queryClient.invalidateQueries({ queryKey: ["wiki-entity", slug] })
-      toast.success("Refresh queued")
+      // WB-44: a 202 no longer always means a new job was queued — `enqueued`
+      // is false when an equivalent refresh is already pending/running or the
+      // debounce window is still active, so a truthful toast has to branch.
+      toast.success(enqueued ? "Refresh queued" : "Refresh already in progress")
     },
     onError: () => {
       toast.error("Refresh failed")

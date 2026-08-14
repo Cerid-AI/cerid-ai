@@ -3,9 +3,14 @@
 
 """Daily digest REST surface — Phase K Day 2.
 
-Three endpoints for the chat UI + notification surfaces:
+Four endpoints, API-only by design — there is no dedicated in-app digest
+view or "Run now" button. A user reads generated digest text as a raw
+artifact under the "digests" domain in the Knowledge pane instead; this
+surface exists for external/SDK consumers and for triggering a pass outside
+the scheduled cadence:
 
   GET    /digests/latest         → most recent digest as JSON
+  GET    /digests/recent         → last N digest summaries
   GET    /digests/{date}         → digest for a specific ISO date
   POST   /digests/run-now        → queue a fresh digest pass (202)
 

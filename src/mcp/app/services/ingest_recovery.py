@@ -90,8 +90,8 @@ class OrphanRecord:
         The domain the collection belongs to.
     collection_name
         Chroma collection name.
-    idempotency_key
-        SHA-256 key from ``cerid_idempotency_key`` metadata, if present.
+    recovery_correlation_key
+        SHA-256 key from ``cerid_recovery_correlation_key`` metadata, if present.
     pending_at
         ISO-8601 string from ``cerid_pending_at`` metadata.
     document
@@ -108,7 +108,7 @@ class OrphanRecord:
     artifact_id: str
     domain: str
     collection_name: str
-    idempotency_key: str
+    recovery_correlation_key: str
     pending_at: str
     document: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -191,7 +191,7 @@ def _fetch_pending_chunks(
             continue
         artifact_id = meta.get("artifact_id", "")
         domain = meta.get("domain", "")
-        idempotency_key = meta.get("cerid_idempotency_key", "")
+        recovery_correlation_key = meta.get("cerid_recovery_correlation_key", "")
         retry_count = int(meta.get("cerid_recovery_attempts", 0))
         orphans.append(
             OrphanRecord(
@@ -199,7 +199,7 @@ def _fetch_pending_chunks(
                 artifact_id=artifact_id,
                 domain=domain,
                 collection_name=collection_name,
-                idempotency_key=idempotency_key,
+                recovery_correlation_key=recovery_correlation_key,
                 pending_at=pending_at or "",
                 document=doc,
                 metadata=dict(meta),
@@ -447,7 +447,7 @@ async def _deadletter_orphan(orphan: OrphanRecord, attempt_count: int) -> None:
         "artifact_id": orphan.artifact_id,
         "domain": orphan.domain,
         "collection_name": orphan.collection_name,
-        "idempotency_key": orphan.idempotency_key,
+        "recovery_correlation_key": orphan.recovery_correlation_key,
         "pending_at": orphan.pending_at,
         "attempt_count": attempt_count,
         "document": orphan.document,
@@ -481,7 +481,7 @@ def _escalate_orphan(orphan: OrphanRecord, attempt_count: int) -> None:
                 "chunk_id": orphan.chunk_id,
                 "artifact_id": orphan.artifact_id,
                 "domain": orphan.domain,
-                "idempotency_key": orphan.idempotency_key,
+                "recovery_correlation_key": orphan.recovery_correlation_key,
                 "pending_at": orphan.pending_at,
                 "attempt_count": attempt_count,
             },

@@ -99,11 +99,14 @@ class TestTriggerJob:
 
 class TestSourcePollGatesProKinds:
     """`_run_source_poll` walked `_POLLABLE_KINDS` with no feature check, and
-    that tuple includes `apple_mail` and `apple_reminders`. The job is
-    registered unconditionally at */15, so a community install with either
-    source on record kept ingesting mail and reminders indefinitely — unlike
-    `_run_daily_digest` and `_run_inbox_triage`, which both gate before doing
-    any work.
+    that tuple includes `apple_mail`. The job is registered unconditionally at
+    */15, so a community install with such a source on record kept ingesting
+    mail indefinitely — unlike `_run_daily_digest` and `_run_inbox_triage`,
+    which both gate before doing any work.
+
+    (`apple_reminders` was in the tuple too until its container-side connector
+    was removed 2026-08-12 — it now ingests through the desktop app and has no
+    pollable backend at all.)
 
     POST /sources now refuses to CREATE them, which does nothing for sources
     created before that landed — and those are exactly the rows this loop
@@ -117,7 +120,18 @@ class TestSourcePollGatesProKinds:
         from core.ingest.sources.kinds import KIND_TIER
 
         pro = [k for k in _POLLABLE_KINDS if KIND_TIER.get(k) == "pro"]
-        assert set(pro) == {"apple_mail", "apple_reminders"}
+        assert set(pro) == {"apple_mail"}
+
+    def test_desktop_app_kinds_are_not_pollable(self):
+        """A kind whose ingestion lives in the desktop app has no backend
+        connector; polling it would be a poll of nothing. apple_reminders
+        regressing INTO this tuple would resurrect the dead container-side
+        surface RA-03 removed."""
+        from app.routers.sources import _DESKTOP_APP_KINDS
+        from app.scheduler import _POLLABLE_KINDS
+
+        overlap = set(_POLLABLE_KINDS) & _DESKTOP_APP_KINDS
+        assert not overlap, f"desktop-app kinds must not be polled: {sorted(overlap)}"
 
     def test_core_kinds_are_never_gated(self):
         """rss and url_watch are core; gating the whole JOB instead of each
@@ -164,3 +178,127 @@ class TestSourcePollGatesProKinds:
         )
         assert "apple_mail" not in asked, "Pro kind polled at community tier"
         assert "apple_reminders" not in asked, "Pro kind polled at community tier"
+
+
+class TestTriggerJobDuplicateHonesty:
+    """SF-2 — run-now must never silently no-op against a pending duplicate.
+
+    A restart-orphaned (stale) marker must be superseded so the trigger runs
+    for real; a genuinely live duplicate must be reported as collapsed, not
+    'started', and no success execution record may be written without a run.
+    """
+
+    @staticmethod
+    def _fake_redis():
+        import fakeredis
+
+        server = fakeredis.FakeServer()
+        return fakeredis.FakeRedis(server=server, decode_responses=True)
+
+    @staticmethod
+    def _seed_pending(redis_client, *, stale: bool):
+        import uuid
+        from datetime import datetime, timedelta, timezone
+
+        import config
+        from app.db.redis.processor_queue import _record_to_mapping
+        from core.processor.job import JobRecord, JobState
+        from core.processor.priority import Priority
+
+        enqueued_at = datetime.now(tz=timezone.utc)
+        if stale:
+            enqueued_at -= timedelta(seconds=config.PROCESSOR_PENDING_STALE_TTL_S + 60)
+        record = JobRecord(
+            id=str(uuid.uuid4()),
+            job_type="compute_umap_3d",
+            state=JobState.PENDING,
+            priority=Priority.LOW,
+            payload={},
+            enqueued_at=enqueued_at,
+        )
+        redis_client.hset(f"cerid:proc:job:{record.id}", mapping=_record_to_mapping(record))
+        redis_client.lpush("cerid:proc:queue:low", record.id)
+        return record
+
+    def _trigger_with_marker(self, monkeypatch, *, stale: bool):
+        from app import scheduler as sched
+
+        redis_client = self._fake_redis()
+        self._seed_pending(redis_client, stale=stale)
+
+        job = MagicMock()
+        job.name = "Constellation 3D coordinate compute"
+
+        async def _fake_job():
+            return None
+
+        job.func = _fake_job
+        job.args = ()
+        job.kwargs = {}
+        fake_scheduler = MagicMock()
+        fake_scheduler.get_job.return_value = job
+        monkeypatch.setattr(sched, "_scheduler", fake_scheduler)
+        monkeypatch.setattr(sched, "_manual_running", set())
+        monkeypatch.setattr(sched, "get_redis", lambda: redis_client)
+        monkeypatch.setattr(sched.asyncio, "create_task", lambda coro: coro.close())
+        return sched.trigger_job("compute_umap_3d"), redis_client
+
+    def test_live_pending_duplicate_reports_collapsed_not_started(self, monkeypatch):
+        result, _redis = self._trigger_with_marker(monkeypatch, stale=False)
+        assert result["status"] == "collapsed_into_pending"
+        assert result["id"] == "compute_umap_3d"
+        assert "existing_job_id" in result
+        assert "no new run was started" in result["detail"]
+
+    def test_stale_orphaned_marker_does_not_absorb_run_now(self, monkeypatch):
+        result, redis_client = self._trigger_with_marker(monkeypatch, stale=True)
+        assert result["status"] == "started"
+        # The orphaned marker was pruned, not left to absorb the next tick too.
+        assert redis_client.llen("cerid:proc:queue:low") == 0
+
+    @pytest.mark.asyncio
+    async def test_collapsed_manual_run_logs_no_success(self, monkeypatch):
+        """Backstop: even when the collapse happens inside the job body (race
+        past the pre-check), the manual wrapper must not log success."""
+        from app import scheduler as sched
+
+        logged: list[tuple[str, str, str]] = []
+        monkeypatch.setattr(
+            sched, "_log_execution",
+            lambda name, status, duration, detail="": logged.append((name, status, detail)),
+        )
+        monkeypatch.setattr(sched, "_manual_running", set())
+
+        class _CollapsingQueue:
+            async def enqueue_if_absent(self, record):
+                return None
+
+        class _StubJob:
+            def new_record(self, *, payload=None):
+                return MagicMock()
+
+        async def _body():
+            await sched._enqueue_periodic(_CollapsingQueue(), _StubJob(), "compute_umap_3d", 0.0)
+
+        await sched._run_and_invalidate("compute_umap_3d", _body, (), {})
+        statuses = [status for (_n, status, _d) in logged]
+        assert "success" not in statuses
+        assert "skipped" in statuses
+
+    @pytest.mark.asyncio
+    async def test_real_manual_run_still_logs_success(self, monkeypatch):
+        from app import scheduler as sched
+
+        logged: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            sched, "_log_execution",
+            lambda name, status, duration, detail="": logged.append((name, status)),
+        )
+        monkeypatch.setattr(sched, "_manual_running", set())
+        monkeypatch.setattr(sched, "_bust_job_caches", lambda _job_id: 0)
+
+        async def _body():
+            return None
+
+        await sched._run_and_invalidate("rectify", _body, (), {})
+        assert ("rectify", "success") in logged

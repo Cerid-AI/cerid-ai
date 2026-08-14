@@ -7,6 +7,8 @@ export interface CommunityHierarchyNode {
   level: number
   parent_id: string | null
   member_count: number
+  /** Short curated title (UX-15); preferred label source when present. */
+  name?: string | null
   summary: string | null
   /**
    * c-TF-IDF keywords for the community (A3). Fallback label source when the

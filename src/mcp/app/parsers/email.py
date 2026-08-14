@@ -75,6 +75,24 @@ def _anonymize_header(value: str) -> str:
     )
 
 
+def _decode_text_part(part: Any, payload: bytes) -> str:
+    """Decode a text/plain or text/html leaf using its own declared charset.
+
+    ``part.get_content()`` — available because every message this module
+    parses is built with ``email.policy.default`` — decodes with the
+    charset the part's ``Content-Type`` actually declares, instead of
+    forcing UTF-8 onto every message regardless of what it says about
+    itself. Falls back to the old forced-UTF-8-with-replace decode only
+    when the declared charset name itself doesn't resolve to a real codec
+    (a malformed message, not typical mail) — matching the "never raise
+    on a parseable file" contract the callers rely on.
+    """
+    try:
+        return str(part.get_content())
+    except (LookupError, UnicodeError):
+        return payload.decode("utf-8", errors="replace")
+
+
 def _extract_attachment_bytes(part: Any) -> tuple[bytes, str, str] | None:
     """Pull raw decoded bytes from one ``email.message.EmailMessage`` part.
 
@@ -274,17 +292,17 @@ def _parse_eml_bytes(
             if content_type == "text/plain" and not body:
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
-                    body = payload.decode("utf-8", errors="replace")
+                    body = _decode_text_part(part, payload)
             elif content_type == "text/html" and not body:
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
-                    html = payload.decode("utf-8", errors="replace")
+                    html = _decode_text_part(part, payload)
                     body = _strip_html_tags(html)
     else:
         content_type = msg.get_content_type()
         payload = msg.get_payload(decode=True)
         if isinstance(payload, bytes):
-            raw_text = payload.decode("utf-8", errors="replace")
+            raw_text = _decode_text_part(msg, payload)
             if content_type == "text/html":
                 body = _strip_html_tags(raw_text)
             else:
@@ -362,11 +380,21 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
     The ingest service surfaces these on the response so the UI can
     warn the user instead of silently losing 99% of the archive.
     """
+    import email
+    import email.policy
     import mailbox
+    from email import message_from_binary_file
+
+    def _policy_default_factory(fileobj: Any) -> Any:
+        # mailbox's own message classes (mboxMessage etc.) are built on the
+        # legacy compat32 policy and don't expose get_content() — building
+        # each message with policy.default instead is what lets the body
+        # decode below use the part's own declared charset.
+        return message_from_binary_file(fileobj, policy=email.policy.default)
 
     path = Path(file_path)
     try:
-        mbox = mailbox.mbox(file_path)
+        mbox = mailbox.mbox(file_path, factory=_policy_default_factory)
     except Exception as e:
         raise ValueError(
             f"Failed to parse mbox '{path.name}': {e}. "
@@ -400,12 +428,12 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
                 if part.get_content_type() == "text/plain":
                     payload = part.get_payload(decode=True)
                     if isinstance(payload, bytes):
-                        body = payload.decode("utf-8", errors="replace")
+                        body = _decode_text_part(part, payload)
                         break
         else:
             payload = msg.get_payload(decode=True)
             if isinstance(payload, bytes):
-                body = payload.decode("utf-8", errors="replace")
+                body = _decode_text_part(msg, payload)
 
         # C2.4 — pull attachment bytes off this message and pool them
         # for the service layer. The body-text listing per message

@@ -40,6 +40,7 @@ vi.mock("@/lib/api/wiki", () => ({
   updateEntitySummary: (...args: unknown[]) => mockUpdateEntitySummary(...args),
 }))
 
+import { toast } from "sonner"
 import { useWikiEntity } from "@/hooks/use-wiki-entities"
 import { EntityDetailView } from "@/components/wiki/entity-detail-view"
 
@@ -414,7 +415,8 @@ describe("EntityDetailView — axe-clean", () => {
 
 describe("EntityDetailView — WK4 Refresh button", () => {
   beforeEach(() => {
-    mockRefreshEntity.mockResolvedValue(undefined)
+    mockRefreshEntity.mockResolvedValue(true)
+    vi.mocked(toast.success).mockClear()
   })
 
   it("renders a Refresh button in the settled state", () => {
@@ -434,8 +436,8 @@ describe("EntityDetailView — WK4 Refresh button", () => {
   })
 
   it("disables the Refresh button while the mutation is pending", async () => {
-    let resolveRefresh!: () => void
-    mockRefreshEntity.mockReturnValue(new Promise<void>((res) => { resolveRefresh = res }))
+    let resolveRefresh!: (enqueued: boolean) => void
+    mockRefreshEntity.mockReturnValue(new Promise<boolean>((res) => { resolveRefresh = res }))
     const user = userEvent.setup()
     mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
     render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
@@ -444,7 +446,30 @@ describe("EntityDetailView — WK4 Refresh button", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Refresh queued/i })).toBeTruthy()
     })
-    resolveRefresh()
+    resolveRefresh(true)
+  })
+
+  // WB-44: a 202 no longer always means a new job was actually queued.
+  it("toasts 'Refresh queued' when the backend enqueued a new job", async () => {
+    mockRefreshEntity.mockResolvedValue(true)
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    await user.click(screen.getByRole("button", { name: /Refresh/i }))
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refresh queued")
+    })
+  })
+
+  it("toasts 'Refresh already in progress' when the backend collapsed onto a pending/running job", async () => {
+    mockRefreshEntity.mockResolvedValue(false)
+    const user = userEvent.setup()
+    mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
+    render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
+    await user.click(screen.getByRole("button", { name: /Refresh/i }))
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refresh already in progress")
+    })
   })
 })
 

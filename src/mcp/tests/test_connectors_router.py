@@ -36,7 +36,16 @@ def test_every_connector_instruction_doc_exists() -> None:
 # (src/web/src/components/sources/source-rows.ts :: APPLE_BRIDGE_KINDS) rather
 # than /connectors. Sources → Connectors concatenates both feeds with no dedup,
 # so a connector belongs to exactly one of them or it renders twice.
-_BRIDGE_ROW_CONNECTORS = {"apple_mail", "apple_imessage"}
+_BRIDGE_ROW_CONNECTORS = {"apple_mail", "apple_calendar", "apple_photos", "apple_reminders"}
+
+# Every kind the desktop bridge serves, INDEPENDENT of whether a REST plugin
+# exists for it. Deliberately not derived from plugin manifests: `notes` has
+# never had one and `imessage`'s was deleted on 2026-08-11 (its `ceridimessage`
+# helper had never existed, so the data source could not configure on any
+# machine). A manifest-driven population drops the guarantee for exactly the
+# connectors with no backend to point at — the ones most likely to be
+# forgotten. Only `mail` is in both sets, which is why both checks exist.
+_DESKTOP_BRIDGE_KINDS = {"notes", "mail", "imessage", "calendar", "photos", "reminders"}
 
 
 def test_every_connector_plugin_reaches_a_ui_surface() -> None:
@@ -68,24 +77,37 @@ def test_every_connector_plugin_reaches_a_ui_surface() -> None:
     )
 
 
-def test_bridge_row_connectors_are_actually_in_the_bridge_row_list() -> None:
-    """The exemption above is only honest if the bridge really renders them.
-
-    Without this, dropping a kind from APPLE_BRIDGE_KINDS would leave the
-    connector reaching *no* surface while the gate above stayed green.
-    """
+def _bridge_kinds_block() -> str:
     rows_ts = (
         REPO_ROOT / "src/web/src/components/sources/source-rows.ts"
     ).read_text()
-    bridge_block = rows_ts.split("APPLE_BRIDGE_KINDS", 1)[-1].split("]", 1)[0]
+    return rows_ts.split("APPLE_BRIDGE_KINDS", 1)[-1].split("]", 1)[0]
 
-    # Manifest name `apple_mail` → bridge kind `mail`; `apple_imessage` → `imessage`.
-    for plugin_name in sorted(_BRIDGE_ROW_CONNECTORS):
-        kind = plugin_name.removeprefix("apple_")
-        assert f'kind: "{kind}"' in bridge_block, (
-            f"{plugin_name} is exempted from /connectors but "
-            f'kind: "{kind}" is not in APPLE_BRIDGE_KINDS'
-        )
+
+def test_desktop_bridge_kinds_are_actually_rendered() -> None:
+    """Each bridge-served connector really is in APPLE_BRIDGE_KINDS.
+
+    Dropping a kind from that list removes the row silently: the connector has
+    no REST entry to fall back to, so it reaches no surface at all while every
+    backend check stays green. `notes` and `imessage` have no plugin, which is
+    precisely why this is keyed off the kinds and not off the manifests.
+    """
+    block = _bridge_kinds_block()
+    missing = [k for k in sorted(_DESKTOP_BRIDGE_KINDS) if f'kind: "{k}"' not in block]
+    assert not missing, f"bridge kinds missing from APPLE_BRIDGE_KINDS: {missing}"
+
+
+def test_desktop_bridge_kinds_are_not_also_rest_rows() -> None:
+    """A connector in both feeds renders twice — once working, once not.
+
+    Sources → Connectors concatenates /connectors with the bridge rows and does
+    not dedup, so the second copy would report a Swift helper the container
+    cannot see.
+    """
+    from app.routers.connectors import _CONNECTORS
+
+    doubled = [k for k in sorted(_DESKTOP_BRIDGE_KINDS) if f"apple_{k}" in _CONNECTORS]
+    assert not doubled, f"bridge kinds also listed as REST connectors: {doubled}"
 
 
 def _make_app() -> FastAPI:
@@ -113,13 +135,16 @@ class TestListConnectors:
         assert "google_calendar" in slugs
         assert "outlook" in slugs
         assert "outlook_calendar" in slugs
-        assert "apple_calendar" in slugs
-        assert "apple_photos" in slugs
-        assert "apple_reminders" in slugs
+        # Calendar, Photos, and Reminders moved to the desktop bridge on
+        # 2026-08-11 — their helpers cannot run in the Linux MCP container.
+        # See _DESKTOP_BRIDGE_KINDS.
+        assert "apple_calendar" not in slugs
+        assert "apple_photos" not in slugs
+        assert "apple_reminders" not in slugs
         # Mail / iMessage / Notes are bridge rows, not REST rows — see
         # _BRIDGE_ROW_CONNECTORS above.
         assert "apple_mail" not in slugs
-        assert "apple_imessage" not in slugs
+        assert "apple_imessage" not in slugs  # plugin deleted 2026-08-11; still never a REST row
 
     def test_each_carries_required_fields(self, client):
         connectors = client.get("/connectors").json()["connectors"]
@@ -158,13 +183,6 @@ class TestListConnectors:
         assert "CERID_CONNECTORS_BEARER" in gmail["missing_env"]
         assert "GOOGLE_OAUTH_CLIENT_ID" in gmail["missing_env"]
         assert gmail["env_complete"] is False
-
-    def test_apple_connectors_have_no_env_requirements(self, client):
-        connectors = client.get("/connectors").json()["connectors"]
-        apple_cal = next(c for c in connectors if c["slug"] == "apple_calendar")
-        assert apple_cal["missing_env"] == []
-        assert apple_cal["env_complete"] is True
-        assert apple_cal["auth_kind"] == "tcc_only"
 
 
 class TestSiblingReachability:
@@ -219,16 +237,6 @@ class TestSiblingReachability:
             if c["slug"] == "outlook"
         )
         assert outlook["sibling_reachable"] is False
-
-    def test_apple_connectors_declare_no_sibling(self, client):
-        cal = next(
-            c for c in client.get("/connectors").json()["connectors"]
-            if c["slug"] == "apple_calendar"
-        )
-        # Same null as "not contacted yet" — requires_sibling is what tells the
-        # UI which of the two it is looking at.
-        assert cal["requires_sibling"] is None
-        assert cal["sibling_reachable"] is None
 
     def test_auth_status_separates_unknown_from_unreachable(self, client, monkeypatch):
         # The env check comes first in the detail ladder; this test is about
@@ -321,12 +329,6 @@ class TestStartAuth:
         body = client.post("/connectors/gmail/auth/start").json()
         assert body["auth_url"] is None
         assert "connection refused" in body["instructions"]
-
-    def test_apple_returns_system_settings_link(self, client):
-        resp = client.post("/connectors/apple_calendar/auth/start")
-        body = resp.json()
-        assert body["auth_kind"] == "tcc_only"
-        assert body["settings_url"].startswith("x-apple.systempreferences:")
 
     def test_unknown_slug_404s(self, client):
         resp = client.post("/connectors/nope/auth/start")
@@ -548,21 +550,28 @@ class TestAuthStatus:
         assert body["completed"] is False
         assert "env" in body["detail"].lower() or "missing" in body["detail"].lower()
 
-    def test_apple_complete_when_data_source_configured(self, client):
-        # Stub the registry so it returns a "configured" data source.
+
+class TestDataSourceStateFallback:
+    """``configured_state()`` is an optional override on DataSource
+    subclasses (see tasks/2026-08-11-consolidated-audit.md § M5) — a
+    connector whose data source never opted in (every non-Apple connector,
+    and any test double patched with a MagicMock) must still get a valid
+    ``data_source_state``, derived from ``is_configured()`` rather than
+    leaking a Mock into the response.
+    """
+
+    def test_data_source_without_configured_state_falls_back_to_boolean(
+        self, client,
+    ):
         from unittest.mock import MagicMock
 
-        mock_ds = MagicMock()
+        mock_ds = MagicMock(spec=["is_configured"])
         mock_ds.is_configured.return_value = True
 
-        with (
-            patch("app.data_sources.registry.get", return_value=mock_ds),
-            patch("config.features.is_feature_enabled", return_value=True),
-        ):
-            resp = client.get("/connectors/apple_calendar/auth/status")
+        with patch("app.data_sources.registry.get", return_value=mock_ds):
+            resp = client.get("/connectors/gmail")
         body = resp.json()
-        assert body["slug"] == "apple_calendar"
-        assert body["completed"] is True
+        assert body["data_source_state"] == "configured"
 
 
 class TestDisconnect:
@@ -598,11 +607,6 @@ class TestDisconnect:
         detail = client.post(f"/connectors/{slug}/disconnect").json()["detail"]
         assert "-f docker-compose.yml" in detail
         assert "--profile pro" in detail
-
-    def test_apple_returns_settings_revocation(self, client):
-        resp = client.post("/connectors/apple_calendar/disconnect")
-        body = resp.json()
-        assert "System Settings" in body["detail"]
 
 
 class TestStartAuthIsGated:
@@ -704,7 +708,9 @@ class TestBridgeOnlyConnectorsAreStillGuarded:
         block = self._bridge_block()
         missing = []
         for flag in sorted(bridge_flags):
-            kind = flag.removeprefix("apple_").removesuffix("_reader")
+            # apple_notes_reader → notes, imessage_reader → imessage,
+            # reminders_eventkit → reminders.
+            kind = flag.removeprefix("apple_").removesuffix("_reader").removesuffix("_eventkit")
             if f'kind: "{kind}"' not in block:
                 missing.append((flag, kind))
         assert not missing, (

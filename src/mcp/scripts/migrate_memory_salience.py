@@ -7,7 +7,6 @@ Updates both Neo4j and ChromaDB for existing conversation-domain memories:
 - memory_type: maps legacy ``fact`` → ``empirical``, ``action_item`` → ``project_context``
 - stability_days: per-type default from config
 - source_authority: defaults to 0.7 (llm_extracted)
-- access_log: initialised to empty list in Neo4j
 
 Usage (run inside Docker MCP container):
     python -m scripts.migrate_memory_salience [--dry-run]

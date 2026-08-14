@@ -7,6 +7,18 @@ import { queryKB } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import type { ChatMessage, KBQueryResult, AgentQueryResponse } from "@/lib/types"
 
+// Search results carry the tag list as a JSON-encoded string (`tags_json`,
+// mirroring the ChromaDB metadata field query_agent.py reads it from) rather
+// than a parsed array — knowledge-pane.tsx's Browse-mode path already parses
+// the same shape via its own `parseJsonArray` helper.
+function parseJsonArray(json: string | undefined): string[] {
+  if (!json) return []
+  try {
+    const arr = JSON.parse(json)
+    return Array.isArray(arr) ? arr.filter((s): s is string => typeof s === "string" && s.trim().length > 0) : []
+  } catch { return [] }
+}
+
 export interface UseKBContextReturn {
   // Query state
   results: KBQueryResult[]
@@ -116,7 +128,15 @@ export function useKBContext(
   // backend already fixed server-side — dropping correct chunks that scored
   // ~0.28 on the ordinal scale (CR-010).
   const filteredResults = useMemo(() => {
-    const results = data?.results ?? []
+    const raw = data?.results ?? []
+    // WB-59: the backend emits the tag list as `tags_json` (a JSON-encoded
+    // string), not a parsed `tags` array. Normalize before filtering so both
+    // the tag filter below and any downstream renderer see real tags.
+    const results = raw.map((r) => {
+      if (r.tags && r.tags.length > 0) return r
+      const tagsJson = (r as unknown as { tags_json?: string }).tags_json
+      return tagsJson ? { ...r, tags: parseJsonArray(tagsJson) } : r
+    })
     if (activeTags.length === 0) return results
     return results.filter((r) => {
       const rTags = r.tags ?? []

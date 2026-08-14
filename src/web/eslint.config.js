@@ -13,11 +13,12 @@ import { createRequire } from 'module'
 const require = createRequire(import.meta.url)
 const noUnsafeArrayOnQueryData = require('./eslint-rules/no-unsafe-array-on-query-data.cjs')
 const noQueryErrorAsEmpty = require('./eslint-rules/no-query-error-as-empty.cjs')
+const noErrorAsEmptyResponse = require('./eslint-rules/no-error-as-empty-response.cjs')
 
 export default defineConfig([
   globalIgnores(['dist']),
   {
-    files: ['**/*.{ts,tsx}'],
+    files: ['**/*.{ts,tsx,mts,cts}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -34,6 +35,7 @@ export default defineConfig([
         rules: {
           'no-unsafe-array-on-query-data': noUnsafeArrayOnQueryData,
           'no-query-error-as-empty': noQueryErrorAsEmpty,
+          'no-error-as-empty-response': noErrorAsEmptyResponse,
         },
       },
     },
@@ -44,6 +46,16 @@ export default defineConfig([
       // Warn-only at introduction per repo convention; ambient widgets where
       // silence is deliberate opt out inline with a reason.
       'cerid/no-query-error-as-empty': 'warn',
+      // Gate 3 (2026-08-11 consolidated audit, mechanism M4): the API-layer
+      // sibling of the rule above. A fetch wrapper that returns `[]`/`{}`/
+      // `null` on a failed HTTP response, or a `useEntitlements()`
+      // destructuring that takes derived data without `isError`/`error`,
+      // renders a backend failure indistinguishable from a legitimate
+      // empty/default state. Blocking (not warn-only) — this is a gate, not
+      // an introduction sweep. Every current violation is grandfathered with
+      // an inline eslint-disable-next-line citing the audit; a NEW site must
+      // throw/propagate the error or disable with its own reason.
+      'cerid/no-error-as-empty-response': 'error',
       // EC1 guard: never fetch() a bare API path. A relative MCP_BASE makes
       // `new URL(path)` throw, and a missing /api/mcp prefix falls through nginx
       // to the SPA shell (HTTP 200 text/html) and explodes on `.json()`. Route
@@ -87,6 +99,40 @@ export default defineConfig([
       'jsx-a11y/no-static-element-interactions': 'warn',
       'jsx-a11y/no-noninteractive-element-interactions': 'warn',
       'jsx-a11y/anchor-is-valid': 'warn',
+    },
+  },
+  {
+    // Gate 3 coverage gap (2026-08-11 adversarial review): the block above
+    // now covers `**/*.{ts,tsx,mts,cts}`, but a violation written in plain
+    // .js/.jsx would still parse and lint under zero rules without this
+    // block. src/web/src is all-TypeScript today, but this closes the gap
+    // rather than leaving it implicit. Deliberately minimal: just the one
+    // rule, not the full TS-oriented `extends` chain above (which assumes
+    // a TS parser project).
+    //
+    // .mjs/.cjs added (2026-08-11 error-not-empty audit): the glob above
+    // never matched .mjs/.cjs either, so a fetch wrapper written as e.g.
+    // `src/lib/api/x.mjs` carried the exact error-as-empty defect this
+    // rule exists to catch, invisibly. The new extension pair is scoped to
+    // `src/**` (app source) rather than repo-root so it doesn't reach root
+    // tooling files like `eslint-rules/*.cjs` (CommonJS rule modules, not
+    // app source) or root config files; `**/*.{js,jsx}` is left as-is so
+    // existing coverage (e.g. `public/sw.js`) doesn't shrink.
+    files: ['**/*.{js,jsx}', 'src/**/*.{mjs,cjs}'],
+    plugins: {
+      cerid: {
+        rules: {
+          'no-error-as-empty-response': noErrorAsEmptyResponse,
+        },
+      },
+    },
+    languageOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'module',
+      globals: globals.browser,
+    },
+    rules: {
+      'cerid/no-error-as-empty-response': 'error',
     },
   },
 ])

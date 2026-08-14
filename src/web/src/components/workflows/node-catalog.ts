@@ -91,3 +91,20 @@ export function describeNode(
     configSummary: typeInfo?.config_schema_summary ?? null,
   }
 }
+
+// UX-21: agents whose node handler reads the workflow input's query text
+// (see AGENT_CATALOG in src/mcp/app/routers/workflows.py). A pipeline
+// containing one must never run on a made-up input — Run affordances
+// (editor toolbar + list card) prompt for the query first.
+const QUERY_CONSUMING_AGENTS = new Set([
+  "query",
+  "curator",
+  "hallucination",
+  "memory",
+  "self_rag",
+])
+
+/** Does this pipeline consume the run's query input? */
+export function consumesQueryInput(nodes: Pick<WorkflowNode, "type" | "name">[]): boolean {
+  return nodes.some((n) => n.type === "agent" && QUERY_CONSUMING_AGENTS.has(n.name))
+}

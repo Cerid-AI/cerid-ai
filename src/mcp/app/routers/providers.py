@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from http import HTTPStatus
 from typing import Any
 
@@ -434,12 +435,27 @@ async def get_ollama_recommendations():
     }
 
 
+# UX-10 — the GUI polls this endpoint at 15s (status bar) + 60s (settings)
+# per tab, and every poll used to hit OpenRouter upstream. One TTL'd result
+# collapses all tabs/cadences to at most one upstream probe per minute.
+# Error results are cached too: hammering a failing upstream faster than the
+# TTL cannot help. The unconfigured (no-key) response is never cached so a
+# freshly-entered key takes effect immediately.
+_CREDITS_CACHE_TTL_SECONDS = 60.0
+_credits_cache: tuple[float, dict] | None = None
+
+
 @router.get("/credits", response_model=dict[str, Any])
 async def get_provider_credits():
-    """Get OpenRouter credit balance and usage stats."""
+    """Get OpenRouter credit balance and usage stats (cached ~60s)."""
+    global _credits_cache
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
         return {"configured": False, "message": "No OpenRouter API key configured"}
+
+    now = time.monotonic()
+    if _credits_cache is not None and now - _credits_cache[0] < _CREDITS_CACHE_TTL_SECONDS:
+        return _credits_cache[1]
 
     result: dict = {
         "configured": True,
@@ -496,6 +512,7 @@ async def get_provider_credits():
         result["error"] = str(e)
         result["status"] = "error"
 
+    _credits_cache = (now, result)
     return result
 
 

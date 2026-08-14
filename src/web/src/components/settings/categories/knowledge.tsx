@@ -22,13 +22,16 @@ import {
   SettingRow, AdvancedDisclosure, ConfirmActionButton, ToggleRow,
 } from "@/components/settings/settings-primitives"
 import { getDef } from "@/lib/settings-registry"
+import { cn } from "@/lib/utils"
 import { useNavigation } from "@/contexts/navigation-context"
 import {
   fetchWatchedFolders, addWatchedFolder, removeWatchedFolder, scanWatchedFolder,
   updateWatchedFolder,
   fetchBriefSettings, updateBriefSettings,
   fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain,
-  type WatchedFolder, type VaultConfig,
+  fetchEmbeddingVersions, adminReembed, adminRepairCollection,
+  getScanState, resetScanState,
+  type WatchedFolder, type VaultConfig, type EmbeddingVersionsResponse,
 } from "@/lib/api"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import type { SettingsCategoryPageProps } from "./page-props"
@@ -514,7 +517,10 @@ function BriefsGroup() {
   const [error, setError] = useState("")
 
   const saveField = async (update: Partial<{ write_to_vault: boolean; vault_id: string | null; vault_folder: string }>) => {
-    if (!briefSettings) return
+    if (!briefSettings) {
+      setError("Brief settings couldn't be loaded, so this change wasn't saved. Reload and try again.")
+      return
+    }
     setError("")
     try {
       await updateBriefSettings({ ...briefSettings, ...update })
@@ -605,10 +611,20 @@ function KBMaintenanceGroup() {
   const rescoreDef = getDef("knowledge.maintenance.rescore")!
   const regenDef = getDef("knowledge.maintenance.regenerateSummaries")!
   const clearDomainDef = getDef("knowledge.maintenance.clearDomain")!
+  const scanResetDef = getDef("knowledge.maintenance.scanResetDedup")!
+  const embeddingVersionsDef = getDef("knowledge.maintenance.embeddingVersions")!
+  const reembedDef = getDef("knowledge.maintenance.reembed")!
+  const repairCollectionDef = getDef("knowledge.maintenance.repairCollection")!
 
   const { data: kbStats, isLoading: statsLoading, isError: statsError, refetch: refetchStats } = useQuery({
     queryKey: ["kb-stats"],
     queryFn: fetchKBStats,
+    staleTime: 30_000,
+  })
+
+  const { data: scanState, isLoading: scanStateLoading, refetch: refetchScanState } = useQuery({
+    queryKey: ["folder-scan-state"],
+    queryFn: getScanState,
     staleTime: 30_000,
   })
 
@@ -617,6 +633,32 @@ function KBMaintenanceGroup() {
   const [regenResult, setRegenResult] = useState<string | null>(null)
   const [clearDomainInput, setClearDomainInput] = useState("")
   const [clearError, setClearError] = useState("")
+  const [scanResetResult, setScanResetResult] = useState<string | null>(null)
+
+  const [embeddingVersions, setEmbeddingVersions] = useState<EmbeddingVersionsResponse | null>(null)
+  const [embeddingVersionsLoading, setEmbeddingVersionsLoading] = useState(false)
+  const [embeddingVersionsError, setEmbeddingVersionsError] = useState("")
+  const [reembedDomain, setReembedDomain] = useState("")
+  const [reembedForce, setReembedForce] = useState(false)
+  const [reembedResult, setReembedResult] = useState<string | null>(null)
+  const [repairCollectionName, setRepairCollectionName] = useState("")
+  const [repairDryRun, setRepairDryRun] = useState(true)
+  const [repairResult, setRepairResult] = useState<string | null>(null)
+  const [repairError, setRepairError] = useState("")
+
+  const handleCheckEmbeddingVersions = async () => {
+    setEmbeddingVersionsLoading(true)
+    setEmbeddingVersionsError("")
+    try {
+      const result = await fetchEmbeddingVersions()
+      setEmbeddingVersions(result)
+    } catch (err) {
+      setEmbeddingVersionsError(err instanceof Error ? err.message : "Failed to fetch embedding versions")
+      logSwallowedError(err, "knowledge.fetchEmbeddingVersions")
+    } finally {
+      setEmbeddingVersionsLoading(false)
+    }
+  }
 
   return (
     <SectionCard title="KB Maintenance" className="border-red-500/30">
@@ -764,6 +806,157 @@ function KBMaintenanceGroup() {
             aria-label="Domain to clear"
           />
           {clearError && <p className="text-xs text-destructive">{clearError}</p>}
+        </div>
+      </SettingRow>
+
+      <SettingRow def={scanResetDef}>
+        <div className="density-stack w-full">
+          {scanStateLoading && <Skeleton className="h-10 w-full" />}
+          {scanState && (
+            <div className="rounded-md border p-3 text-xs text-muted-foreground density-stack">
+              <div className="flex gap-4">
+                <span><strong>{scanState.files_tracked}</strong> files tracked</span>
+                <span><strong>{scanState.total_ingested}</strong> ingested</span>
+                <span><strong>{scanState.total_skipped}</strong> skipped</span>
+                <span><strong>{scanState.total_errored}</strong> errored</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <span>
+                  Last scan: {scanState.last_scan_at ?? "never"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void refetchScanState()}
+                  className="h-6 text-xs ml-auto gap-1"
+                  aria-label="Refresh scan state"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+          )}
+          <ConfirmActionButton
+            danger="confirm"
+            title="Reset folder scan dedup?"
+            description="Clears the seen-files dedup set for folder scans. Already-ingested files will be treated as new and re-ingested on the next scan."
+            actionLabel="Reset Scan State"
+            onConfirm={async () => {
+              const result = await resetScanState()
+              setScanResetResult(`Cleared ${result.cleared} tracked keys`)
+              await qc.invalidateQueries({ queryKey: ["folder-scan-state"] })
+            }}
+            variant="outline"
+            size="sm"
+          >
+            Reset Scan State
+          </ConfirmActionButton>
+          {scanResetResult && <p className="text-xs text-muted-foreground">{scanResetResult}</p>}
+        </div>
+      </SettingRow>
+
+      <SettingRow def={embeddingVersionsDef}>
+        <div className="density-stack w-full">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleCheckEmbeddingVersions()}
+            disabled={embeddingVersionsLoading}
+            className="gap-1.5 w-fit"
+          >
+            <RefreshCw className={cn("h-4 w-4", embeddingVersionsLoading && "animate-spin")} />
+            {embeddingVersionsLoading ? "Checking…" : "Check embedding versions"}
+          </Button>
+          {embeddingVersionsError && <p className="text-xs text-destructive">{embeddingVersionsError}</p>}
+          {embeddingVersions && (
+            <div className="divide-y divide-border rounded border text-xs">
+              {Object.entries(embeddingVersions.domains).map(([domain, dist]) => (
+                <div key={domain} className="flex items-center justify-between gap-2 px-2 py-1">
+                  <span className="font-medium">{domain}</span>
+                  <span className="text-muted-foreground">
+                    {dist.total} chunks
+                    {dist.mixed
+                      ? ` · mixed (current ${dist.current_version}: ${dist.versions[dist.current_version] ?? 0})`
+                      : " · uniform"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </SettingRow>
+
+      <SettingRow def={reembedDef}>
+        <div className="density-stack w-full">
+          <div className="flex items-center gap-2">
+            <Input
+              value={reembedDomain}
+              onChange={(e) => setReembedDomain(e.target.value)}
+              placeholder="Domain (blank = all)"
+              className="h-8 max-w-48 text-sm"
+              aria-label="Domain to re-embed"
+            />
+            <ToggleRow label="Force" enabled={reembedForce} onToggle={setReembedForce} />
+          </div>
+          <ConfirmActionButton
+            danger="confirm"
+            title="Enqueue re-embed job?"
+            description={`Re-embeds ${reembedDomain.trim() || "every domain"}'s chunks whose embedding version is stale${reembedForce ? " — Force is on, so every chunk is re-embedded regardless of version" : ""}. Runs as a background job.`}
+            actionLabel="Enqueue Re-embed"
+            onConfirm={async () => {
+              const result = await adminReembed(reembedDomain.trim() || undefined, reembedForce)
+              setReembedResult(result.message)
+            }}
+            variant="outline"
+            size="sm"
+          >
+            Re-embed corpus
+          </ConfirmActionButton>
+          {reembedResult && <p className="text-xs text-muted-foreground">{reembedResult}</p>}
+        </div>
+      </SettingRow>
+
+      <SettingRow def={repairCollectionDef}>
+        <div className="density-stack w-full">
+          <div className="flex items-center gap-2">
+            <Input
+              value={repairCollectionName}
+              onChange={(e) => setRepairCollectionName(e.target.value)}
+              placeholder="Chroma collection name"
+              className="h-8 max-w-56 text-sm"
+              aria-label="Collection to repair"
+            />
+            <ToggleRow label="Dry run" enabled={repairDryRun} onToggle={setRepairDryRun} />
+          </div>
+          <ConfirmActionButton
+            danger="confirm"
+            title={repairDryRun ? "Preview collection repair?" : "Repair collection?"}
+            description={
+              repairDryRun
+                ? "Reports what a repair would do without touching anything."
+                : "Backs up the collection, deletes and recreates it at the current embedding dimension, then replays every document from the backup. The backup path is reported on completion."
+            }
+            actionLabel={repairDryRun ? "Preview" : "Repair"}
+            onConfirm={async () => {
+              if (!repairCollectionName.trim()) throw new Error("Enter a collection name")
+              setRepairError("")
+              try {
+                const result = await adminRepairCollection(repairCollectionName.trim(), repairDryRun)
+                setRepairResult(result.message)
+              } catch (err) {
+                setRepairError(err instanceof Error ? err.message : "Repair failed")
+                logSwallowedError(err, "knowledge.repairCollection")
+                throw err
+              }
+            }}
+            variant={repairDryRun ? "outline" : "destructive"}
+            size="sm"
+          >
+            {repairDryRun ? "Preview repair" : "Repair collection"}
+          </ConfirmActionButton>
+          {repairResult && <p className="text-xs text-muted-foreground">{repairResult}</p>}
+          {repairError && <p className="text-xs text-destructive">{repairError}</p>}
         </div>
       </SettingRow>
     </SectionCard>

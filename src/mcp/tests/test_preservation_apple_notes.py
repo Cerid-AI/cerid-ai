@@ -326,6 +326,10 @@ class TestTheIngestPathIsReachable:
             return {"status": "ok", "artifact_id": "art:apple-notes-1"}
 
         monkeypatch.setattr("app.routers.ingestion.ingest_content", _fake_ingest)
+        # AF-043: this test pins the payload-shape contract, not the Pro
+        # entitlement gate — entitle apple_notes_reader so the shape assertions
+        # below still exercise the ingest path.
+        monkeypatch.setattr("config.features.is_feature_enabled", lambda _flag: True)
         resp = client.post(
             "/ingest/structured",
             json={
@@ -364,8 +368,13 @@ class TestTheIngestPathIsReachable:
         assert metadata["folder_path"] == "Personal/Recipes"
         assert metadata["account"] == "iCloud"
         assert metadata["modified_at"] == "2026-08-10T00:00:00Z"
-        # Promoted by the endpoint, not sent under these names by the client.
-        assert metadata["source_id"] == "x-coredata://note/p42"
+        # AF-007: a non-UUID connector identifier is an external id, not a
+        # :Source reference. The endpoint reclassifies the ``source_id`` the
+        # connector sends into ``external_id`` (and scopes it with a
+        # ``source_kind``) so it never reaches the per-source quality floor.
+        assert metadata["external_id"] == "x-coredata://note/p42"
+        assert metadata["source_kind"] == "apple_notes"
+        assert "source_id" not in metadata
         assert metadata["client_source"] == "apple_notes"
 
 

@@ -62,6 +62,13 @@ class SourceArtifactEvent:
     domain: str = ""
 
 
+# Redis pubsub channel the poller (app/scheduler.py::_run_source_poll)
+# publishes each SourceArtifactEvent to; the SSE endpoint
+# (app/routers/observability.py::source_activity_stream) subscribes and
+# forwards matching events to connected clients.
+SOURCE_ACTIVITY_CHANNEL = "cerid:source-activity"
+
+
 @runtime_checkable
 class SourceConnector(Protocol):
     """Every ingestion connector implements this protocol.

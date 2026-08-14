@@ -5,9 +5,9 @@
 
 Decouples the entity extraction job from the wiki refresh subscriber.
 Events: ``entities_added`` (``{artifact_id, entity_slugs, tenant_id}``),
-``contradiction_detected`` (``{finding_id, entity_slug, severity}``),
-``summary_drift`` (``{entity_slug, drift}``). Subscriber exceptions are
-swallowed by the dispatcher so one broken handler can't break others.
+``contradiction_detected`` (``{finding_id, entity_slug, severity}``).
+Subscriber exceptions are swallowed by the dispatcher so one broken
+handler can't break others.
 """
 from __future__ import annotations
 

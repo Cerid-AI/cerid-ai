@@ -3,31 +3,21 @@
 //
 // Constellation — dual-mode knowledge-graph view.
 //   "map" (default): flat 2D Cartographer map (sigma.js v3, no physics)
-//   "3d" (retained): the existing React Three Fiber cinematic scene
+//   "live": cosmos.gl self-organizing GPU force layout
+// (The R3F "3d" mode was cut 2026-08-13 — same layout as the map with
+// recency as z, it added a 1.2 MB vendor chunk for an occluded sphere
+// cloud. The guided tour now runs on the 2D map: map/map-tour.tsx.)
 //
 // View mode persists in localStorage "cerid-constellation-mode", default "map".
 // Both modes share the same server x/y layout so the mental map is stable.
 
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react"
-import { Canvas } from "@react-three/fiber"
-import { AdaptiveDpr, OrbitControls, PerformanceMonitor } from "@react-three/drei"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2, Minimize2, Maximize2, Play, Pause, Shuffle, GitMerge } from "lucide-react"
 import { PaneError } from "@/components/ui/pane-error"
 import { Slider } from "@/components/ui/slider"
 import { fetchEmbeddings3D } from "@/lib/api/embeddings-3d"
-import type { Vec3 } from "./drag-plane"
-import { InstancedNodes } from "./instanced-nodes"
-import { NeuralLinks } from "./neural-links"
-import { HubLabels } from "./hub-labels"
-import { AmbientParticles } from "./ambient-particles"
-import { ParallaxStarfield } from "./starfield"
-import { NebulaBackdrop } from "./nebula-backdrop"
-import { SimilarNeighborsPanel } from "./similar-neighbors-panel"
-import { rankSimilarNeighbors } from "./similar-neighbors"
-import { TourCameraAnimator, TourControlPanel, useTourState, FocusCameraAnimator, FocusExitSampler } from "./tour-controller"
-import { QUALITY_SETTINGS, QUALITY_TIERS, degradeTier, upgradeTier, loadQuality, saveQuality, type QualityTier } from "./quality"
-import { communityRgb, trustRgb, typeRgb, domainRgb, nodeBaseAlpha } from "./palette"
+import { communityRgb, trustRgb, typeRgb, domainRgb } from "./palette"
 import { CartographerMap } from "./map/CartographerMap"
 import { useGraphMap } from "./map/use-graph-map"
 import { loadMapConfig, saveMapConfig, type MapConfig } from "./map/map-config"
@@ -35,30 +25,25 @@ import { Timebar } from "./map/timebar"
 import { buildTimeHistogram } from "./map/time-window"
 import { StructuralGapsPanel } from "./map/structural-gaps-panel"
 import { fetchStructuralGaps, type StructuralGap } from "@/lib/api/graph-structural-gaps"
-import { useCommunityHierarchy } from "./map/use-community-hierarchy"
-import { buildAncestorIndex } from "./map/community-hierarchy-levels"
-import { buildSuperNodes3D } from "./supernodes-3d"
-import { CollapseLOD, SuperNodes3D } from "./supernodes-layer"
-import { boundingSphere, framingDistanceFor } from "./camera-focus-3d"
+import { MapTourPanel, useMapTour } from "./map/map-tour"
 import type { CommunityHull } from "@/lib/api/graph-map"
 import { useNavigation } from "@/contexts/navigation-context"
-import { useTheme } from "@/hooks/use-theme"
 import { resolveMapTokens, type MapTokens } from "./map/community-layer"
 import type { MapLayoutV2 as MapLayout } from "@/lib/graph/cycle4-contracts"
-import { TRUST_HALO_HEX, SURFACE_HEX } from "@/theme/shader-tokens"
 
 // ---------------------------------------------------------------------------
 // View-mode persistence
 // ---------------------------------------------------------------------------
 
-type ViewMode = "map" | "3d" | "live"
+type ViewMode = "map" | "live"
 const VIEW_MODE_KEY = "cerid-constellation-mode"
-const VIEW_MODE_LABEL: Record<ViewMode, string> = { map: "Map", "3d": "3D", live: "Live" }
+const VIEW_MODE_LABEL: Record<ViewMode, string> = { map: "Map", live: "Live" }
 
 function loadViewMode(): ViewMode {
   try {
     const stored = localStorage.getItem(VIEW_MODE_KEY)
-    if (stored === "map" || stored === "3d" || stored === "live") return stored
+    // Migration: persisted "3d" (retired mode) lands on the default map.
+    if (stored === "map" || stored === "live") return stored
   } catch {
     // storage unavailable
   }
@@ -74,8 +59,8 @@ function saveViewMode(mode: ViewMode): void {
 }
 
 type ColorLens = "cluster" | "trust" | "type" | "domain" | "bridges"
-// mapOnly lenses need the 2D graph structure (e.g. betweenness) and aren't
-// offered in the 3D toolbar, which has no graphology graph to compute over.
+// mapOnly lenses need the 2D graph structure (e.g. betweenness); the Live
+// scene has no graphology graph to compute over.
 const COLOR_LENSES: { id: ColorLens; label: string; hint: string; mapOnly?: boolean }[] = [
   { id: "cluster", label: "Clusters", hint: "Color by knowledge community" },
   { id: "trust", label: "Trust", hint: "Verification bands: green verified · amber partial · red unverified" },
@@ -84,18 +69,9 @@ const COLOR_LENSES: { id: ColorLens; label: string; hint: string; mapOnly?: bool
   { id: "bridges", label: "Bridges", hint: "Betweenness centrality — highlights the connector entities that bridge otherwise-separate clusters", mapOnly: true },
 ]
 
-// Postprocessing only loads for Ultra — nobody else pays for the bundle.
-const UltraEffects = lazy(() => import("./ultra-effects"))
-
 // cosmos.gl "Live" mode (B8) is its own lazy chunk (vendor-cosmos) — only
 // loaded when the user switches to the self-organizing scene.
 const CosmosLive = lazy(() => import("./cosmos-live"))
-
-// Community drill-down (B4.4): alpha applied to every entity outside the
-// focused community once a super-node is clicked. Reuses the same
-// `visibility` channel instanced-nodes.tsx/neural-links.tsx already consume
-// for lens/type-filter fading — no new per-entity alpha mechanism.
-const FOCUS_FADE_ALPHA = 0.12
 
 export interface ConstellationProps {
   /** Initial focal entity (optional — UMAP shows global view by default) */
@@ -241,16 +217,19 @@ function MapConfigPanel({
               Collapse communities
             </label>
 
-            {/* Show isolated toggle — hidden when count is 0 */}
+            {/* Periphery toggle — rim shell + singleton tail; hidden when count is 0 */}
             {isolatedCount > 0 && (
-              <label className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground">
+              <label
+                className="flex cursor-pointer items-center gap-2 text-label-xs text-muted-foreground"
+                title="Entities the map can’t integrate yet — unlinked or in sub-scale clusters; rendered on the outer rim when shown"
+              >
                 <input
                   type="checkbox"
                   checked={includeIsolated}
                   onChange={(e) => onIncludeIsolatedChange(e.target.checked)}
                   className="rounded border-border/60"
                 />
-                Show isolated ({isolatedCount})
+                Periphery ({isolatedCount})
               </label>
             )}
           </div>
@@ -261,16 +240,14 @@ function MapConfigPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Main component — InstancedMesh-backed (Phase B Day 5). All entities
-// share one geometry + material; positions and colors are uploaded to
-// the GPU once and stay there until the entity list changes.
+// Main component
 // ---------------------------------------------------------------------------
 
 export default function Constellation({ focalEntity, filter, onNodeClick }: ConstellationProps) {
-  const { goTo, composeChat } = useNavigation()
+  const { composeChat } = useNavigation()
 
   // ---------------------------------------------------------------------------
-  // View mode: "map" (Cartographer 2D) | "3d" (R3F scene)
+  // View mode: "map" (Cartographer 2D) | "live" (cosmos.gl)
   // ---------------------------------------------------------------------------
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode)
   const handleViewMode = useCallback((mode: ViewMode) => {
@@ -300,9 +277,6 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   // Isolated-node toggle — off by default (graph shows connected core)
   // ---------------------------------------------------------------------------
   const [includeIsolated, setIncludeIsolated] = useState(false)
-
-  // Ambient toggle — opt-in glow/neon mode, forced off under reduced-motion
-  const [ambientMode, setAmbientMode] = useState(false)
 
   // ---------------------------------------------------------------------------
   // Cartographer map data (only fetches when in "map" mode to save bandwidth)
@@ -380,7 +354,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   )
 
   // ---------------------------------------------------------------------------
-  // 3D mode: existing R3F data query (still needed when viewMode === "3d")
+  // Embeddings payload for the cosmos "Live" scene.
   // ---------------------------------------------------------------------------
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["constellation-embeddings-3d", focalEntity ?? null, filter ?? null, includeIsolated],
@@ -392,144 +366,14 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     staleTime: 60 * 1000,
     refetchInterval: 75 * 1000,
     placeholderData: (prev) => prev,
-    // Fetch for the 3D scene and the cosmos "Live" scene (both consume the
-    // same embeddings + links payload).
-    enabled: viewMode === "3d" || viewMode === "live",
+    enabled: viewMode === "live",
   })
 
-  // ---------------------------------------------------------------------------
-  // 3D community collapse (B4.3): same hierarchy endpoint the 2D map's
-  // useSuperNodeLayer consumes (map/use-community-hierarchy.ts), gated to 3D
-  // mode. collapsedLevel is driven by camera distance (see <CollapseLOD>
-  // inside the Canvas below) — null means members are shown.
-  // ---------------------------------------------------------------------------
-  const hierarchyQuery = useCommunityHierarchy({ enabled: viewMode === "3d" })
-  const ancestorIx = useMemo(
-    () =>
-      hierarchyQuery.data && hierarchyQuery.data.nodes.length > 0
-        ? buildAncestorIndex(hierarchyQuery.data)
-        : null,
-    [hierarchyQuery.data],
-  )
-  const [collapsedLevel, setCollapsedLevel] = useState<number | null>(null)
+  // Guided tour on the 2D map (Pro): generates the backend arc and frames
+  // each stop by animating the sigma camera via CartographerMap.tourFocus.
+  const mapTour = useMapTour()
 
-  // ---------------------------------------------------------------------------
-  // 3D community drill-down (B4.4): click a super-node -> ease the camera to
-  // that community's bounding sphere and fade the rest of the corpus via the
-  // existing `visibility` alpha channel. `level` pins the Leiden level the
-  // clicked super-node was built at (buildSuperNodes3D's own id scheme), so
-  // membership resolves consistently even as collapsedLevel keeps changing
-  // (CollapseLOD samples camera distance every frame, independent of focus).
-  // ---------------------------------------------------------------------------
-  const [focus, setFocus] = useState<{ communityId: string; level: number } | null>(null)
-  const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null)
-
-  const handleSuperNodeSelect = useCallback(
-    (communityId: string) => {
-      if (collapsedLevel === null) return // stray event after supers unmounted
-      setFocus({ communityId, level: collapsedLevel })
-    },
-    [collapsedLevel],
-  )
-
-  // Secondary exit path: zooming back out past COLLAPSE_IN re-collapses the
-  // graph (CollapseLOD drives collapsedLevel from actual camera distance from
-  // the world ORIGIN every frame, unaware of `focus`). The first null->non-null
-  // transition *after* a focus began is the signal — collapsedLevel is
-  // already non-null the instant a super-node is clicked (that's how it got
-  // rendered), so a bare "collapsedLevel !== null" check would clear focus
-  // immediately; watching for a transition avoids that.
-  //
-  // This path is unreliable on its own: it only crosses back through null for
-  // communities near the origin. A community centroid far from the origin
-  // (the "wells" layout pushes centroids apart) can keep the camera's
-  // distance-from-origin >= COLLAPSE_OUT for the whole focus session, so this
-  // never fires. <FocusExitSampler> below (focus-RELATIVE — measures distance
-  // from the community's own centroid) is the reliable exit path; this one is
-  // kept as a cheap fallback for the near-origin case where it still helps.
-  const prevCollapsedRef = useRef<number | null>(collapsedLevel)
-  useEffect(() => {
-    if (focus !== null && prevCollapsedRef.current === null && collapsedLevel !== null) {
-      setFocus(null)
-    }
-    prevCollapsedRef.current = collapsedLevel
-  }, [collapsedLevel, focus])
-
-  // Escape key is a guaranteed exit regardless of camera position — good UX,
-  // and a fallback in case both camera-distance heuristics above miss.
-  useEffect(() => {
-    if (focus === null) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFocus(null)
-    }
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [focus])
-
-  // Leaving 3D mode drops a stale focus so returning doesn't fade/re-tween
-  // toward a community the user never re-selected this visit. It also
-  // unmounts <NeuralLinks>/<InstancedNodes> (the whole Canvas swaps out
-  // for the 2D map below), so any drag pin must be cleared here too — see
-  // the showMembers effect below for the same cleanup on a same-mode
-  // collapse-to-supernodes.
-  useEffect(() => {
-    if (viewMode !== "3d") {
-      setFocus(null)
-      if (pinnedPositionsRef.current.size > 0) {
-        pinnedPositionsRef.current.clear()
-        setPinVersion((v) => v + 1)
-      }
-    }
-  }, [viewMode])
-
-  const tour = useTourState()
-
-  // Hover state for the Obsidian-style neighborhood focus + tooltip.
-  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
-  const handleHover = useCallback((index: number | null, clientX?: number, clientY?: number) => {
-    if (index === null) {
-      setHover(null)
-    } else {
-      setHover({ index, x: clientX ?? 0, y: clientY ?? 0 })
-    }
-  }, [])
-
-  // 3D node drag (B2.2): OrbitControls must be suspended while a node is
-  // being dragged, so the camera doesn't orbit under the pointer.
-  const [dragging, setDragging] = useState(false)
-  // Transient per-node drag-pin overrides, threaded down to NeuralLinks so
-  // the dragged node's edges follow it. A ref (not state) holds the Map —
-  // it's mutated in place on every drag-move; pinVersion is the state bump
-  // that tells NeuralLinks' effect a patch is due, without re-rendering the
-  // whole scene tree on every pointer-move.
-  const pinnedPositionsRef = useRef<Map<string, Vec3>>(new Map())
-  const [pinVersion, setPinVersion] = useState(0)
-  const handleNodeMoved = useCallback((entityId: string, pos: Vec3) => {
-    pinnedPositionsRef.current.set(entityId, pos)
-    setPinVersion((v) => v + 1)
-  }, [])
-
-  // Adjacency + degree from the link triples — powers neighborhood
-  // focus (hover), node sizing (centrality), label ranking, and the
-  // tooltip's connection count.
-  const neighbors = useMemo(() => {
-    const map = new Map<number, Set<number>>()
-    for (const [s, t] of data?.links ?? []) {
-      if (!map.has(s)) map.set(s, new Set())
-      if (!map.has(t)) map.set(t, new Set())
-      map.get(s)!.add(t)
-      map.get(t)!.add(s)
-    }
-    return map
-  }, [data?.links])
-
-  const degrees = useMemo(() => {
-    const arr = new Float32Array(data?.entities.length ?? 0)
-    for (const [idx, set] of neighbors) arr[idx] = set.size
-    return arr
-  }, [neighbors, data?.entities.length])
-
-  // Resolved tokens for the domain lens 3D path (domainRgb needs hex resolved from CSS vars).
+  // Resolved tokens for the Live scene (domainRgb needs hex resolved from CSS vars).
   // Lazy-init from DOM; re-resolves on theme change (same pattern as CartographerMap/Atlas).
   const [tokens3D, setTokens3D] = useState<MapTokens>(() =>
     typeof document !== "undefined" ? resolveMapTokens(document.documentElement) : {
@@ -550,10 +394,10 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     }
   )
 
-  // Re-resolve domain tokens when theme changes (3D mode only — map mode
+  // Re-resolve domain tokens when theme changes (Live mode only — map mode
   // has its own token observer inside CartographerMap/Atlas).
   useEffect(() => {
-    if (viewMode !== "3d") return
+    if (viewMode !== "live") return
     const observer = new MutationObserver(() => {
       setTokens3D(resolveMapTokens(document.documentElement))
     })
@@ -561,26 +405,22 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     return () => observer.disconnect()
   }, [viewMode])
 
-  // --- Exploration tools: lens recoloring, type filter, pin-to-focus ---
+  // --- Exploration tools: lens recoloring, type filter ---
   const [lens, setLens] = useState<ColorLens>("cluster")
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
-  const [pinned, setPinned] = useState<number | null>(null)
   const [search, setSearch] = useState("")
 
-  // Top entity types by frequency — shared between map and 3D modes.
-  // Map mode uses mapData?.entities; 3D mode uses data?.entities.
+  // Top entity types by frequency (map toolbar chips).
   const typeChips = useMemo(() => {
     const counts = new Map<string, number>()
-    const source = viewMode === "map" ? (mapData?.entities ?? []) : (data?.entities ?? [])
-    for (const e of source) {
+    for (const e of mapData?.entities ?? []) {
       counts.set(e.type, (counts.get(e.type) ?? 0) + 1)
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
-  }, [viewMode, mapData?.entities, data?.entities])
+  }, [mapData?.entities])
 
-  // Lens colors: cluster = community palette, trust = verification bands,
-  // type = per-type hue, domain = token-routed domain hue (first token-derived
-  // 3D color — sets the Cycle-4 precedent for demoting COMMUNITY_PALETTE_RGB).
+  // Lens colors for the Live scene: cluster = community palette, trust =
+  // verification bands, type = per-type hue, domain = token-routed domain hue.
   // One Float32Array upload, GPU does the rest.
   const nodeColors = useMemo(() => {
     const ents = data?.entities ?? []
@@ -609,55 +449,16 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     })
   }, [])
 
-  // Pinned focus wins over transient hover for the neighborhood dimming.
-  const focusIndex = pinned ?? hover?.index ?? null
-  const pinnedEntity = pinned !== null ? data?.entities[pinned] : undefined
-
-  // kNN neighbors panel (B5): the pinned node's strongest SIMILAR_TO neighbors,
-  // ranked client-side from the links already in hand. The pinned node's
-  // incident edges (similar included) already brighten via focusIndex → the
-  // neural-links aDim channel, so the panel only needs to surface the ranking.
-  const similarNeighbors = useMemo(() => {
-    if (pinned === null || !data) return []
-    return rankSimilarNeighbors(pinned, data.links ?? [], data.entities, 10)
-  }, [pinned, data])
-
-  // One-shot camera fly-to a picked neighbor (B5). Fed to a dedicated
-  // FocusCameraAnimator; cleared on unpin so it never re-fires.
-  const [flyToNode, setFlyToNode] = useState<Vec3 | null>(null)
-  useEffect(() => {
-    if (pinned === null) setFlyToNode(null)
-  }, [pinned])
-  const handlePickNeighbor = useCallback(
-    (index: number) => {
-      const ent = data?.entities[index]
-      setPinned(index)
-      // A node fly-to supersedes any community drill-down focus.
-      setFocus(null)
-      if (ent) setFlyToNode([ent.x, ent.y, ent.z])
-    },
-    [data],
-  )
-
   // Reduced motion collapses growth, pulses, breathing, and auto-rotate.
   const animate = useMemo(
     () => !(typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches),
     [],
   )
 
-  // Resolved theme drives the cinema pass (B1): dark → bloom + vignette;
-  // light → ambient occlusion, no bloom. Also gates the dark-only nebula (B4)
-  // and picks the label palette (B2). Reactive via useTheme's external store.
-  const { theme } = useTheme()
-  const isDark = theme === "dark"
-
   // cosmos.gl "Live" mode controls (B8). Starts frozen under reduced motion.
   const [liveRunning, setLiveRunning] = useState(() => animate)
   const [liveRepulsion, setLiveRepulsion] = useState(1.0)
   const [liveBigBang, setLiveBigBang] = useState(0)
-
-  // Ambient mode = opt-in glow/neon; forced off under reduced-motion (Cycle 4 §5).
-  const effectiveAmbient = ambientMode && animate
 
   // Timelapse playback (A8): step a growth cursor over the entity birth span
   // in discrete frames (~48 over 12s) so nodes appear in creation order.
@@ -689,121 +490,6 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
     }, STEP_MS)
     return () => clearInterval(id)
   }, [playing, mapData])
-
-  // Quality tier — Low (flat 2D) → Ultra (AAA bloom). Persisted per machine.
-  const [quality, setQuality] = useState<QualityTier>(loadQuality)
-  // Effective (runtime) quality: starts at the persisted tier and is
-  // auto-adjusted per-session by PerformanceMonitor. Never touches
-  // localStorage — a reload restores the user's chosen tier.
-  const [effectiveQuality, setEffectiveQuality] = useState<QualityTier>(loadQuality)
-  const settings = QUALITY_SETTINGS[effectiveQuality]
-  const pickQuality = useCallback((tier: QualityTier) => {
-    saveQuality(tier)
-    setQuality(tier)
-    // When the user manually picks a tier, also snap the effective quality to it
-    // so the selection is immediately visible (PerformanceMonitor may later
-    // auto-degrade from the new ceiling if the GPU can't sustain it).
-    setEffectiveQuality(tier)
-  }, [])
-
-  // Low tier reads the same force layout as a flat 2D knowledge graph.
-  const sceneEntities = useMemo(() => {
-    if (!data) return []
-    return settings.flat ? data.entities.map((e) => ({ ...e, z: 0 })) : data.entities
-  }, [data, settings.flat])
-
-  const hoveredEntity = hover ? sceneEntities[hover.index] : undefined
-
-  // Community super-nodes for the collapsed overview — 3D centroids of each
-  // community's members at the active Leiden level. Empty (and unrendered)
-  // while expanded (collapsedLevel === null) or before the hierarchy loads.
-  const supers = useMemo(() => {
-    if (collapsedLevel === null || !ancestorIx) return []
-    return buildSuperNodes3D(sceneEntities, ancestorIx.ancestorAt, collapsedLevel)
-  }, [sceneEntities, ancestorIx, collapsedLevel])
-
-  // Members of the focused community + their bounding sphere (B4.4) — drives
-  // both the camera tween (FocusCameraAnimator, below) and the corpus fade
-  // (visibility, below). Mirrors buildSuperNodes3D's own id scheme (level <= 0
-  // uses the raw community; deeper levels walk to that ancestor) so
-  // membership is consistent with whatever level the clicked super-node was
-  // built at.
-  const focusMembers = useMemo(() => {
-    if (!focus || !ancestorIx) return null
-    const { communityId, level } = focus
-    return sceneEntities.filter((e) => {
-      if (!e.community) return false
-      const cid = level <= 0 ? e.community : ancestorIx.ancestorAt(e.community, level)
-      return cid === communityId
-    })
-  }, [focus, ancestorIx, sceneEntities])
-
-  const focusSphere = useMemo(() => {
-    if (!focusMembers || focusMembers.length === 0) return null
-    return boundingSphere(focusMembers.map((m): Vec3 => [m.x, m.y, m.z]))
-  }, [focusMembers])
-
-  // Distance the camera was framed at for the current focus sphere — the
-  // exit threshold below (FOCUS_EXIT_MULTIPLIER * this) is relative to it,
-  // not to the world origin. Purely radius-derived (see framingDistanceFor),
-  // so it needs no camera position and can be computed outside <Canvas>.
-  const focusFramingDistance = useMemo(
-    () => (focusSphere ? framingDistanceFor(focusSphere.radius) : 0),
-    [focusSphere],
-  )
-
-  // Reliable drill-down exit (B4.4 fix): fires when the camera dollies back
-  // out past the focused community's own framed view — see FocusExitSampler
-  // in tour-controller.tsx for why this must be focus-relative, not
-  // origin-relative.
-  const handleFocusExit = useCallback(() => setFocus(null), [])
-
-  // Bypasses collapsedLevel while a community is focused: the camera tween
-  // takes real frames to arrive at the community, and CollapseLOD's own
-  // hysteresis (driven by actual camera distance, not this component's
-  // intent) would otherwise keep rendering the super-node view until the
-  // camera physically gets there.
-  const showMembers = collapsedLevel === null || focus !== null
-
-  // showMembers -> false unmounts <NeuralLinks>/<InstancedNodes> (collapsed
-  // to super-nodes). InstancedNodes' own dragOverrides ref is discarded on
-  // that unmount, but pinnedPositionsRef here is owned by this component and
-  // survives — left uncleared, it re-bakes edges from a stale drag position
-  // on the next expand/drill-down with no matching sphere override, so the
-  // edge dangles to empty space. Keyed on showMembers alone (not on data
-  // changes) so a routine corpus refetch that leaves members mounted never
-  // clears an in-progress pin.
-  useEffect(() => {
-    if (showMembers) return
-    if (pinnedPositionsRef.current.size === 0) return
-    pinnedPositionsRef.current.clear()
-    setPinVersion((v) => v + 1)
-  }, [showMembers])
-
-  // Type filter fades (not hides) non-matching nodes — fade keeps the
-  // structural context visible (yWorks KG-demo pattern).
-  // Confidence alpha (nodeBaseAlpha) is applied as a base multiplier so
-  // low-mention nodes render softer even before type-filter dimming. The
-  // type-filter 0.06 replaces the base alpha entirely (it is the dominant
-  // visual signal when active), while the base alpha is used on all nodes
-  // that pass the filter, giving meaning to node transparency. Community
-  // drill-down (B4.4) outranks both when active: the focused community's
-  // members render at full alpha, everything else fades to FOCUS_FADE_ALPHA
-  // — reuses this exact `visibility` channel, no new per-entity alpha path.
-  const visibility = useMemo(() => {
-    const ents = data?.entities ?? []
-    const arr = new Float32Array(ents.length)
-    const focusMemberIds = focusMembers ? new Set(focusMembers.map((m) => m.id)) : null
-    for (let i = 0; i < ents.length; i++) {
-      if (focusMemberIds) {
-        arr[i] = focusMemberIds.has(ents[i].id) ? 1 : FOCUS_FADE_ALPHA
-        continue
-      }
-      const filtered = typeFilter.size > 0 && !typeFilter.has(ents[i].type)
-      arr[i] = filtered ? 0.06 : nodeBaseAlpha(ents[i].mention_count ?? 1)
-    }
-    return arr
-  }, [data?.entities, typeFilter, focusMembers])
 
   // ---------------------------------------------------------------------------
   // Map mode renders CartographerMap — return early with the full map layout.
@@ -903,7 +589,15 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           layoutFallback={mapData?.layout_fallback}
           search={search}
           highlightCommunities={gapHighlight}
+          tourFocus={mapTour.focus}
         />
+
+        {/* Guided tour (Pro) — button top-center; narration panel while playing */}
+        <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex -translate-x-1/2 justify-center">
+          <div className="pointer-events-auto">
+            <MapTourPanel tour={mapTour} />
+          </div>
+        </div>
 
         {/* Structural-gaps advisory panel (C2) — top-left, over the map */}
         {showGaps && (
@@ -1072,7 +766,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             role="radiogroup"
             aria-label="View mode"
           >
-            {(["map", "3d", "live"] as ViewMode[]).map((m) => (
+            {(["map", "live"] as ViewMode[]).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -1095,11 +789,10 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
   }
 
   // ---------------------------------------------------------------------------
-  // Live mode (B8) — cosmos.gl self-organizing GPU force layout. Shares the 3D
-  // embeddings query; its own canvas/WebGL context (never shared with sigma/R3F).
+  // Live mode (B8) — cosmos.gl self-organizing GPU force layout. Its own
+  // canvas/WebGL context (never shared with sigma).
   // ---------------------------------------------------------------------------
-  if (viewMode === "live") {
-    return (
+  return (
       <div
         className="relative h-full w-full"
         style={{ background: tokens3D.background }} // drift-allowed: token-routed runtime value
@@ -1198,7 +891,7 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
             role="radiogroup"
             aria-label="View mode"
           >
-            {(["map", "3d", "live"] as ViewMode[]).map((m) => (
+            {(["map", "live"] as ViewMode[]).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -1215,459 +908,5 @@ export default function Constellation({ focalEntity, filter, onNodeClick }: Cons
           </div>
         </div>
       </div>
-    )
-  }
-
-  // ---------------------------------------------------------------------------
-  // 3D mode — existing R3F scene (unchanged). Guard loading/error/empty here.
-  // ---------------------------------------------------------------------------
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        Loading 3D projection…
-      </div>
-    )
-  }
-  if (isError) {
-    return (
-      <PaneError
-        fullPage
-        title="Failed to load the 3D projection"
-        description={error instanceof Error ? error.message : undefined}
-        onRetry={() => void refetch()}
-      />
-    )
-  }
-  if (!data || data.entities.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center p-12">
-        <div className="max-w-md rounded-xl border border-dashed border-border bg-card/40 p-8 text-center">
-          <h2 className="text-lg font-semibold text-foreground">No 3D projection yet</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            The constellation grows as your knowledge base does. Ingest a
-            document and the projection recomputes within a few minutes — or
-            run "Constellation 3D coordinate compute" now from Settings →
-            Diagnostics → Scheduled Jobs.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className="cerid-stagger-fast relative h-full w-full"
-      style={{ ["--i" as string]: 0, background: tokens3D.background }} // drift-allowed: token-routed runtime value
-      role="application"
-      aria-roledescription="3D knowledge graph"
-      aria-label={`Constellation view of ${data.count} entities`}
-    >
-      <Canvas
-        // Remount on persisted tier change: dpr/antialias are GL-context options.
-        // effectiveQuality drives rendering; key uses quality (persisted) so a
-        // manual tier switch still remounts the context, but auto-degradation
-        // adjusts rendering without a remount.
-        key={quality}
-        // Start outside the structure (force layout spans ~±10 units)
-        // so the whole cathedral is in frame on load; users orbit in.
-        // Low/2D looks straight down the z-axis at the flattened graph.
-        camera={{
-          position: settings.flat ? [0, 0, 30] : [0, 6, 28],
-          fov: 55,
-          near: 0.1,
-          far: 1000,
-        }}
-        gl={{ antialias: settings.antialias, alpha: false }}
-        // Set the ceiling DPR from the persisted quality tier; AdaptiveDpr
-        // will reduce it under load and restore it when the GPU has headroom.
-        dpr={settings.dpr}
-      >
-        {/*
-          AdaptiveDpr drops the pixel ratio under sustained GPU load and
-          restores it when the frame budget recovers. The tier's dpr range
-          acts as the ceiling; the minimum is always 1.
-        */}
-        <AdaptiveDpr pixelated />
-
-        {/*
-          PerformanceMonitor tracks rolling FPS and fires onDecline after
-          `flipflops` consecutive below-threshold windows and onIncline after
-          consecutive above-threshold windows. It steps the EFFECTIVE quality
-          tier (not localStorage) so a reload restores the user's chosen tier.
-          Adaptation is purely per-session and introduces no new motion.
-        */}
-        <PerformanceMonitor
-          ms={500}
-          iterations={5}
-          threshold={0.9}
-          flipflops={3}
-          onDecline={() =>
-            setEffectiveQuality((prev) => degradeTier(prev))
-          }
-          onIncline={() =>
-            setEffectiveQuality((prev) => upgradeTier(prev, quality))
-          }
-        />
-
-        <color attach="background" args={[tokens3D.background]} />
-        {/* Fog starts past the structure at the default viewing distance —
-            it should swallow the starfield's depth, not the graph itself.
-            Dark: tight fog (34→95) so the nebula/starfield fade into the void.
-            Light: pushed out (44→150) so ambient-occluded spheres stay crisp
-            against the bright background instead of muddying into the fog. */}
-        {!settings.flat && (
-          <fog attach="fog" args={isDark ? [tokens3D.background, 34, 95] : [tokens3D.background, 44, 150]} />
-        )}
-
-        {/* Ambient + key lights for material visibility */}
-        <ambientLight intensity={0.35} />
-        <directionalLight position={[5, 5, 5]} intensity={0.6} color={TRUST_HALO_HEX.verified} />
-        <directionalLight position={[-5, -5, -5]} intensity={0.3} color={SURFACE_HEX.brandGold} />
-
-        {/* Parallax starfield backdrop (B4) — 2-3 drei Stars shells at
-            differing radius/speed for real depth; budget from the tier. */}
-        {settings.starCount > 0 && (
-          <ParallaxStarfield count={settings.starCount} animate={animate} ultra={effectiveQuality === "ultra"} />
-        )}
-
-        {/* Brand nebula (B4) — faint procedural gas clouds behind the graph.
-            Dark-theme only; additive low-alpha color is invisible on light. */}
-        {!settings.flat && isDark && settings.starCount > 0 && <NebulaBackdrop />}
-
-        <Suspense fallback={null}>
-          {settings.particles && showMembers && (
-            <AmbientParticles count={Math.min(800, sceneEntities.length * 4)} radius={18} />
-          )}
-          {showMembers ? (
-            <>
-              <NeuralLinks
-                entities={sceneEntities}
-                links={data.links ?? []}
-                animate={animate}
-                pulses={settings.pulses && effectiveAmbient}
-                float={settings.float && effectiveAmbient}
-                hoveredIndex={focusIndex}
-                colors={nodeColors}
-                visibility={visibility}
-                pinnedPositions={pinnedPositionsRef.current}
-                pinVersion={pinVersion}
-              />
-              <InstancedNodes
-                entities={sceneEntities}
-                animate={animate}
-                glow={settings.glow && effectiveAmbient}
-                pulses={settings.pulses && effectiveAmbient}
-                float={settings.float && effectiveAmbient}
-                hoveredIndex={focusIndex}
-                neighbors={neighbors}
-                degrees={degrees}
-                colors={nodeColors}
-                visibility={visibility}
-                onHover={handleHover}
-                onSelect={(id) => {
-                  // Click pins the neighborhood (inspection card opens);
-                  // the card's "Open in Wiki" action navigates.
-                  const idx = sceneEntities.findIndex((e) => e.id === id)
-                  setPinned(idx >= 0 ? idx : null)
-                }}
-                onDragStateChange={setDragging}
-                onNodeMoved={handleNodeMoved}
-              />
-              <HubLabels entities={sceneEntities} degrees={degrees} hoveredIndex={focusIndex} pinnedIndex={pinned} dark={isDark} />
-            </>
-          ) : (
-            // Zoomed-out overview: individual members + links are hidden;
-            // one instanced sphere per community, sized by member count.
-            // Click a super-node to drill in (B4.4). Super-edges are
-            // deferred to a follow-up — see task report.
-            <SuperNodes3D supers={supers} onSelect={handleSuperNodeSelect} />
-          )}
-          {/* Camera-distance LOD sampler — drives collapsedLevel with
-              hysteresis (COLLAPSE_IN/COLLAPSE_OUT in supernodes-3d.ts).
-              Re-renders React only when the collapsed level actually
-              changes, mirroring hub-labels.tsx's bucketed sampler. */}
-          <CollapseLOD maxLevel={ancestorIx?.maxLevel ?? -1} onLevelChange={setCollapsedLevel} />
-          {/* TourCameraAnimator must be inside <Canvas> — it uses useFrame/useThree */}
-          <TourCameraAnimator
-            state={tour.state}
-            onStopAdvance={tour.advance}
-            onComplete={tour.complete}
-          />
-          {/* Community drill-down camera tween (B4.4) — must be inside
-              <Canvas> for useFrame/useThree; idles (center === null) when
-              nothing is focused. Reduced motion snaps instead of tweening. */}
-          <FocusCameraAnimator
-            center={focusSphere?.center ?? null}
-            radius={focusSphere?.radius ?? 0}
-            instant={!animate}
-            controlsRef={controlsRef}
-          />
-          {/* Reliable focus-relative exit (B4.4 fix) — see FocusExitSampler
-              in tour-controller.tsx. Idles (center === null) when nothing is
-              focused. */}
-          <FocusExitSampler
-            center={focusSphere?.center ?? null}
-            framingDistance={focusFramingDistance}
-            onExit={handleFocusExit}
-          />
-          {/* Node fly-to (B5): eases the camera to a neighbor picked from the
-              kNN panel. Idles (center === null) otherwise. Small radius frames
-              the single node close-up; reduced motion snaps. */}
-          <FocusCameraAnimator
-            center={flyToNode}
-            radius={2.5}
-            instant={!animate}
-            controlsRef={controlsRef}
-          />
-          {settings.postprocessing && <UltraEffects dark={isDark} />}
-        </Suspense>
-
-        <OrbitControls
-          ref={controlsRef}
-          // Suspended for the duration of a node drag so the camera
-          // doesn't orbit under the pointer; re-enabled on drop.
-          enabled={!dragging}
-          enablePan
-          enableZoom
-          // Low/2D locks orbit to pan + zoom — a flat knowledge graph.
-          enableRotate={!settings.flat}
-          zoomSpeed={0.6}
-          rotateSpeed={0.4}
-          minDistance={2}
-          maxDistance={60}
-          // Cinematic idle — the cathedral turns slowly until the user
-          // takes the controls (drei pauses auto-rotate during interaction
-          // and resumes after). Disabled under reduced motion, in 2D,
-          // while hovering, while a tour drives the camera, and while
-          // dragging a node — three's OrbitControls.update() applies
-          // autoRotate regardless of `enabled`, so it needs its own guard.
-          autoRotate={animate && settings.autoRotate && tour.state.kind === "idle" && !hover && pinned === null && !dragging}
-          autoRotateSpeed={0.35}
-        />
-      </Canvas>
-
-      {/* kNN neighbors panel (B5) — top-right when a node is pinned. */}
-      {pinned !== null && pinnedEntity && (
-        <SimilarNeighborsPanel
-          pinnedName={pinnedEntity.name}
-          neighbors={similarNeighbors}
-          onPick={handlePickNeighbor}
-          onClose={() => setPinned(null)}
-        />
-      )}
-
-      {/* Exploration toolbar — lens + type filter (top-left) */}
-      <div className="absolute left-3 top-3 flex flex-col gap-1.5">
-        <div
-          className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/80 p-0.5 backdrop-blur"
-          role="radiogroup"
-          aria-label="Color lens"
-        >
-          {COLOR_LENSES.filter((l) => !l.mapOnly).map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              role="radio"
-              aria-checked={lens === l.id}
-              onClick={() => setLens(l.id)}
-              title={l.hint}
-              className={`rounded-md px-2 py-1 text-label-xs transition-colors ${
-                lens === l.id ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/40"
-              }`}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
-        {typeChips.length > 1 && (
-          <div className="flex max-w-md flex-wrap items-center gap-1" role="group" aria-label="Filter by entity type">
-            {typeChips.map(([t, n]) => (
-              <button
-                key={t}
-                type="button"
-                aria-pressed={typeFilter.has(t)}
-                onClick={() => toggleType(t)}
-                className={`rounded-full border px-2 py-0.5 text-label-xs transition-colors ${
-                  typeFilter.has(t)
-                    ? "border-accent bg-accent/30 text-accent-foreground"
-                    : "border-border/60 bg-card/70 text-muted-foreground hover:bg-accent/20"
-                }`}
-              >
-                {t} <span className="opacity-60">{n}</span>
-              </button>
-            ))}
-            {typeFilter.size > 0 && (
-              <button
-                type="button"
-                onClick={() => setTypeFilter(new Set())}
-                className="rounded-full px-2 py-0.5 text-label-xs text-muted-foreground underline-offset-2 hover:underline"
-              >
-                clear
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Pinned-entity inspection card (click a node to pin its neighborhood) */}
-      {pinned !== null && pinnedEntity && (
-        <div className="absolute bottom-3 left-3 w-72 rounded-lg border border-border/60 bg-card/95 p-3 shadow-xl backdrop-blur">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-foreground">{pinnedEntity.name}</div>
-              <div className="mt-0.5 text-label-xs text-muted-foreground">
-                <span className="uppercase">{pinnedEntity.type}</span>
-                {" · "}{pinnedEntity.mention_count} mentions
-                {" · "}{neighbors.get(pinned)?.size ?? 0} connections
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPinned(null)}
-              aria-label="Clear focus"
-              className="rounded p-1 text-muted-foreground hover:bg-accent/40"
-            >
-              ✕
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => goTo("subjects", { mode: "wiki", entity: pinnedEntity.id })}
-            className="mt-2 w-full rounded-md bg-accent px-2 py-1.5 text-label-xs font-medium text-accent-foreground hover:bg-accent/80"
-          >
-            Open in Wiki
-          </button>
-        </div>
-      )}
-
-      {/* Cached/projection-method overlay */}
-      <div className="pointer-events-none absolute right-3 top-3 rounded-md bg-card/80 px-3 py-1.5 text-label-xs text-muted-foreground backdrop-blur">
-        {data.count} entities · {(data.links ?? []).length.toLocaleString()} connections
-        {data.cached && " · cached"}
-      </div>
-
-      {/* Bottom-right controls: quality tier + view mode toggle */}
-      <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
-        {/* Quality tier control — Low (2D) → Ultra (AAA) */}
-        <div
-          className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/80 p-0.5 backdrop-blur"
-          role="radiogroup"
-          aria-label="Render quality"
-        >
-          {QUALITY_TIERS.map((tier) => (
-            <button
-              key={tier}
-              type="button"
-              role="radio"
-              aria-checked={quality === tier}
-              onClick={() => pickQuality(tier)}
-              className={`rounded-md px-2 py-1 text-label-xs capitalize transition-colors ${
-                quality === tier
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/40"
-              }`}
-              title={tier === "low" ? "Flat 2D knowledge graph" : tier === "ultra" ? "AAA: HDR bloom postprocessing" : undefined}
-            >
-              {tier === "low" ? "2D" : tier}
-            </button>
-          ))}
-        </div>
-
-        {/* Ambient toggle — opt-in glow/neon; disabled under prefers-reduced-motion */}
-        <button
-          type="button"
-          aria-pressed={effectiveAmbient}
-          disabled={!animate}
-          title={
-            !animate
-              ? "Ambient effects disabled (prefers-reduced-motion)"
-              : effectiveAmbient
-                ? "Ambient on — click to turn off neon/glow"
-                : "Ambient off — click to enable neon/glow"
-          }
-          onClick={() => setAmbientMode((v) => !v)}
-          className={`rounded-lg border border-border/60 bg-card/80 px-2 py-1 text-label-xs backdrop-blur transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-            effectiveAmbient
-              ? "text-accent-foreground bg-accent/30 border-accent/60"
-              : "text-muted-foreground hover:bg-accent/40"
-          }`}
-        >
-          Ambient
-        </button>
-
-        {/* Isolated toggle — shown only when isolated entities exist */}
-        {(data?.isolated_count ?? 0) > 0 && (
-          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border/60 bg-card/80 px-2 py-1 text-label-xs text-muted-foreground backdrop-blur hover:bg-accent/40">
-            <input
-              type="checkbox"
-              checked={includeIsolated}
-              onChange={(e) => setIncludeIsolated(e.target.checked)}
-              className="rounded border-border/60"
-            />
-            Show isolated ({data?.isolated_count})
-          </label>
-        )}
-
-        {/* View mode toggle */}
-        <div
-          className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/80 p-0.5 backdrop-blur"
-          role="radiogroup"
-          aria-label="View mode"
-        >
-          {(["map", "3d", "live"] as ViewMode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              role="radio"
-              aria-checked={viewMode === m}
-              onClick={() => handleViewMode(m)}
-              className={`rounded-md px-2 py-1 text-label-xs transition-colors ${
-                viewMode === m
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/40"
-              }`}
-            >
-              {VIEW_MODE_LABEL[m]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Hover tooltip — entity card for corpus exploration */}
-      {hover && hoveredEntity && (
-        <div
-          className="pointer-events-none fixed z-50 max-w-xs rounded-lg border border-border/60 bg-card/95 px-3 py-2 shadow-xl backdrop-blur"
-          // Runtime-derived position must be inline (drift-allowlisted class
-          // of style: popover absolute positioning).
-          style={{ left: hover.x + 14, top: hover.y + 14 }} // drift-allowed: popover position derived from live hover coordinates
-        >
-          <div className="truncate text-sm font-semibold text-foreground">{hoveredEntity.name}</div>
-          <div className="mt-0.5 flex items-center gap-2 text-label-xs text-muted-foreground">
-            <span className="uppercase">{hoveredEntity.type}</span>
-            <span>·</span>
-            <span>{hoveredEntity.mention_count} mentions</span>
-            <span>·</span>
-            <span>{neighbors.get(hover.index)?.size ?? 0} connections</span>
-          </div>
-          {hoveredEntity.trust_state !== "unknown" && (
-            <div className="mt-0.5 flex items-center gap-2 text-label-xs text-muted-foreground">
-              <span>{hoveredEntity.trust_state}</span>
-            </div>
-          )}
-          <div className="mt-1 text-label-xs text-muted-foreground/80">Click to open in Wiki</div>
-        </div>
-      )}
-
-      {/* Tour controls + subtitle overlay */}
-      <TourControlPanel
-        focalEntity={focalEntity}
-        state={tour.state}
-        onStart={tour.startTour}
-        onPause={tour.pause}
-        onResume={tour.resume}
-        onStop={tour.stop}
-      />
-    </div>
   )
 }

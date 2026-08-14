@@ -381,10 +381,18 @@ async def ingest_external(
             if item.tags:
                 import json
                 metadata["tags_json"] = json.dumps(item.tags)
-            if item.external_id:
-                metadata["external_id"] = item.external_id
             if item.title:
                 metadata["title"] = item.title
+            # AF-052 — thread the external identifier through so the ingest
+            # service can dedup a re-delivered item (same external_id, edited
+            # content) into the existing artifact instead of a second one.
+            # source_kind (the free-form source_type) scopes the dedup so two
+            # external sources can't collide on a shared id. Absent an
+            # external_id the item derives its own — nothing to key on, so it
+            # simply flows through as a fresh (content-addressed) ingest.
+            if item.external_id:
+                metadata["external_id"] = item.external_id
+                metadata["source_kind"] = item.source_type
 
             ingest_result = await asyncio.to_thread(
                 ingest_content,

@@ -121,23 +121,28 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
     # ---- 1. Check if Leiden has ever run (A3) --------------------------------
     no_communities_computed = _check_no_communities(driver)
 
-    # ---- 2. Load Community nodes: id, level, summary (for labels) -----------
+    # ---- 2. Load Community nodes: id, level, name + summary (for labels) ----
     community_summaries: dict[str, str] = {}  # community_id → summary text
+    community_names: dict[str, str] = {}  # community_id → curated short name
     community_ids_by_level: dict[int, list[str]] = {}  # level → [ids]
     if not no_communities_computed:
         try:
             with driver.session() as s:
                 rows = s.run(
                     "MATCH (c:Community) WHERE c.level IN [0, 1] "
-                    "RETURN c.id AS cid, c.level AS level, c.summary AS summary"
+                    "RETURN c.id AS cid, c.level AS level, "
+                    "       c.name AS name, c.summary AS summary"
                 )
                 for row in rows:
                     cid = str(row["cid"] or "")
                     level = int(row["level"] or 0)
                     summary = str(row["summary"] or "") if row["summary"] else ""
+                    name = str(row["name"] or "") if row.get("name") else ""
                     if cid:
                         if summary:
                             community_summaries[cid] = summary
+                        if name:
+                            community_names[cid] = name
                         community_ids_by_level.setdefault(level, []).append(cid)
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("decomposition.load_communities", exc)
@@ -233,7 +238,7 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
     l0_meta: dict[str, dict[str, Any]] = {}
     for l0_cid, members in entity_by_community.items():
         l0_meta[l0_cid] = _build_community_meta(
-            l0_cid, members, community_summaries, level=0
+            l0_cid, members, community_summaries, community_names, level=0
         )
 
     # ---- 7. Assemble per-L1 community metadata --------------------------------
@@ -247,7 +252,7 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
             l1_members.extend(entity_by_community.get(l0_cid, []))
         if l1_members or l1_cid in community_summaries:
             l1_meta[l1_cid] = _build_community_meta(
-                l1_cid, l1_members, community_summaries, level=1
+                l1_cid, l1_members, community_summaries, community_names, level=1
             )
 
     # ---- 8. Build the domain tree ---------------------------------------------
@@ -288,36 +293,41 @@ def get_decomposition_tree(driver: Any) -> dict[str, Any]:
             children_ids = l1_children.get(l1_cid, [])
 
             l0_nodes_full: list[dict[str, Any]] = []
-            rollup_community_count = 0
+            rollup_children: list[dict[str, Any]] = []
             rollup_entity_count = 0
 
             for l0_cid in sorted(children_ids):
                 l0m = l0_meta.get(l0_cid, {})
                 if not l0m:
                     continue
+                l0_node = {
+                    "id": l0_cid,
+                    "size": l0m.get("size", 0),
+                    "label": l0m.get("label") or None,
+                    "mode_domain": l0m.get("mode_domain", domain),
+                    "purity": l0m.get("purity", 1.0),
+                    "top_hubs": l0m.get("top_hubs", []),
+                }
                 if l0m.get("size", 0) < _L0_ROLLUP_THRESHOLD:
-                    rollup_community_count += 1
+                    rollup_children.append(l0_node)
                     rollup_entity_count += l0m.get("size", 0)
                 else:
-                    l0_nodes_full.append({
-                        "id": l0_cid,
-                        "size": l0m.get("size", 0),
-                        "label": l0m.get("label") or None,
-                        "mode_domain": l0m.get("mode_domain", domain),
-                        "purity": l0m.get("purity", 1.0),
-                        "top_hubs": l0m.get("top_hubs", []),
-                    })
+                    l0_nodes_full.append(l0_node)
 
             # Sort L0 by size desc
             l0_nodes_full.sort(key=lambda n: -n["size"])
+            rollup_children.sort(key=lambda n: -n["size"])
 
-            # Append rollup bucket at the end if any small communities exist
+            # Append rollup bucket at the end if any small communities exist.
+            # The bucket carries its member communities (UX-13) so the client
+            # can drill into them instead of rendering an inert count.
             l1_children_list: list[dict[str, Any]] = list(l0_nodes_full)
-            if rollup_community_count > 0:
+            if rollup_children:
                 l1_children_list.append({
                     "kind": "rollup",
-                    "community_count": rollup_community_count,
+                    "community_count": len(rollup_children),
                     "entity_count": rollup_entity_count,
+                    "communities": rollup_children,
                 })
 
             l1_size = meta.get("size", 0)
@@ -460,6 +470,78 @@ def get_community_entities(
     return entities
 
 
+def get_bucket_entities(
+    driver: Any,
+    *,
+    bucket: str,
+    domain: str | None = None,
+) -> list[dict[str, Any]] | None:
+    """Entity leaves for a non-community bucket (UX-13 drill paths).
+
+    ``bucket="unclustered"`` — entities in ``domain`` with no community
+    membership (``domain`` required).
+    ``bucket="uncategorized"`` — entities with no primary_domain at all
+    (``domain`` ignored).
+
+    Returns None for an unknown bucket / missing required domain; the leaf
+    shape matches ``get_community_entities``.
+    """
+    if bucket == "unclustered":
+        if not domain:
+            return None
+        where = "e.primary_domain = $domain AND e.community_id IS NULL"
+    elif bucket == "uncategorized":
+        where = "e.primary_domain IS NULL"
+    else:
+        return None
+
+    try:
+        with driver.session() as s:
+            rows = s.run(
+                "MATCH (e:Entity) "
+                f"WHERE {where} "
+                "OPTIONAL MATCH (e)-[:CO_MENTIONED]-() "
+                "WITH e, count(*) AS degree "
+                "RETURN "
+                "  e.canonical_id AS entity_id, "
+                "  e.name AS name, "
+                "  e.entity_type AS entity_type, "
+                "  e.primary_domain AS domain, "
+                "  e.primary_subcategory AS sub, "
+                "  coalesce(e.trust_state, 'unknown') AS trust_state, "
+                "  degree "
+                "ORDER BY degree DESC",
+                domain=domain,
+            )
+            data = list(rows.data())
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error(
+            "decomposition.get_bucket_entities",
+            exc,
+            context={"bucket": bucket, "domain": domain},
+        )
+        return None
+
+    entities: list[dict[str, Any]] = []
+    for row in data:
+        eid = str(row.get("entity_id") or "")
+        if not eid:
+            continue
+        row_domain = str(row.get("domain") or "")
+        sub = str(row.get("sub") or "") if row.get("sub") else None
+        path: list[str] = [row_domain] if row_domain else []
+        if sub:
+            path.append(sub)
+        entities.append({
+            "id": eid,
+            "name": str(row.get("name") or eid),
+            "type": str(row.get("entity_type") or "OTHER"),
+            "trust_state": str(row.get("trust_state") or "unknown"),
+            "path": path,
+        })
+    return entities
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -555,12 +637,14 @@ def _build_community_meta(
     community_id: str,
     members: list[dict[str, Any]],
     summaries: dict[str, str],
+    names: dict[str, str] | None = None,
     *,
     level: int,
 ) -> dict[str, Any]:
     """Compute label, mode_domain, purity, size, top_hubs for a community.
 
     Field names match the TypeScript contract (id/size/top_hubs).
+    Label ladder: curated Community.name → summary first clause → A6 fallback.
     """
     size = len(members)
 
@@ -589,18 +673,27 @@ def _build_community_meta(
         if m.get("id") or m.get("name")
     ]
 
-    # Label: from Community.summary first-clause, else fallback (A6)
-    summary_text = summaries.get(community_id, "")
-    if not summary_text:
-        # Try bare native_id as alternative key
-        bare = _bare_community_id(community_id)
-        summary_text = summaries.get(bare, "") or summaries.get(f"{level}:{bare}", "")
-
+    # Label ladder: curated Community.name → summary first-clause → A6 fallback
+    bare = _bare_community_id(community_id)
     label: str | None = None
-    if summary_text:
-        first = _first_clause_safe(summary_text)
-        if first:
-            label = first
+    if names:
+        label = (
+            names.get(community_id)
+            or names.get(bare)
+            or names.get(f"{level}:{bare}")
+            or None
+        )
+
+    if not label:
+        summary_text = (
+            summaries.get(community_id, "")
+            or summaries.get(bare, "")
+            or summaries.get(f"{level}:{bare}", "")
+        )
+        if summary_text:
+            first = _first_clause_safe(summary_text)
+            if first:
+                label = first
 
     if not label:
         # A6: deterministic fallback label — also None-safe for optional field
@@ -620,19 +713,14 @@ def _first_clause_safe(text: str, max_chars: int = 48) -> str:
     """Extract first clause from a summary, guard against numeric garbage.
 
     Returns empty string if the result would be numeric garbage (A6 guard).
+    Truncates at a word boundary with an ellipsis — never mid-word (UX-15).
     """
     if not text:
         return ""
+    from app.db.neo4j.community_summaries import _BOILERPLATE_OPENER  # noqa: PLC0415
+
     # Strip LLM boilerplate lead-ins
-    stripped = re.sub(
-        r"^(?:the|this|a)?\s*"
-        r"(?:theme|community|cluster|topic|content|summary)?\s*"
-        r"(?:revolves?\s+around|centers?\s+(?:on|around)|focuses?\s+on|"
-        r"is\s+(?:about|centered\s+(?:on|around))|covers|concerns|relates\s+to)\s+",
-        "",
-        text.strip(),
-        flags=re.IGNORECASE,
-    )
+    stripped = re.sub(_BOILERPLATE_OPENER, "", text.strip(), flags=re.IGNORECASE)
     parts = re.split(r"[.:\n,]", stripped, maxsplit=1)
     first = parts[0].strip()
     if not first:
@@ -641,7 +729,12 @@ def _first_clause_safe(text: str, max_chars: int = 48) -> str:
     if _is_numeric_garbage(first):
         return ""
     first = first[0].upper() + first[1:]
-    return first[:max_chars]
+    if len(first) <= max_chars:
+        return first
+    cut = first[: max_chars - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(",;:") + "…"
 
 
 def _fallback_label(

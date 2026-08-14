@@ -4,7 +4,7 @@
 """SSRF guard — reject URLs whose host resolves to private / loopback / metadata addresses.
 
 Used by any outbound-HTTP code path that accepts user-supplied URLs:
-  - app/data_sources/rss_feed.py  (custom RSS feeds added by the user)
+  - core/ingest/sources/connectors/rss.py  (RSS/Atom/RDF feed fetch)
   - app/data_sources/custom.py    (user-defined API data sources)
   - utils/webhooks.py               (user-configured webhook endpoints)
 

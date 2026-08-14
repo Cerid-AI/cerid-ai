@@ -1,5 +1,6 @@
 {
   "name": "apple_mail",
+  "display_name": "Apple Mail",
   "version": "0.1.0",
   "type": "connector",
   "tier": "pro",

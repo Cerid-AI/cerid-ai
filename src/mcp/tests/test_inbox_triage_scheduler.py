@@ -13,8 +13,11 @@ import pytest
 async def test_no_op_when_feature_off(monkeypatch):
     """Even with the env toggle set, the scheduler job must not run
     inbox_triage when the feature flag is off (community tier)."""
+    from app import scheduler as sched
     from app.scheduler import _run_inbox_triage
 
+    calls: list[tuple] = []
+    monkeypatch.setattr(sched, "_log_execution", lambda *a, **k: calls.append(a))
     monkeypatch.setenv("CERID_INBOX_TRIAGE_ENABLED", "true")
     with (
         patch("config.features.is_feature_enabled", return_value=False),
@@ -24,13 +27,18 @@ async def test_no_op_when_feature_off(monkeypatch):
         await _run_inbox_triage()
 
     mock_triage.assert_not_called()
+    # AF-039: an early-return skip must still leave an execution-log trace.
+    assert calls and calls[0][0] == "inbox_triage" and calls[0][1] == "skipped"
 
 
 @pytest.mark.asyncio
 async def test_no_op_when_env_toggle_off(monkeypatch):
     """Feature flag on but operator hasn't set CERID_INBOX_TRIAGE_ENABLED."""
+    from app import scheduler as sched
     from app.scheduler import _run_inbox_triage
 
+    calls: list[tuple] = []
+    monkeypatch.setattr(sched, "_log_execution", lambda *a, **k: calls.append(a))
     monkeypatch.delenv("CERID_INBOX_TRIAGE_ENABLED", raising=False)
     with (
         patch("config.features.is_feature_enabled", return_value=True),
@@ -40,6 +48,7 @@ async def test_no_op_when_env_toggle_off(monkeypatch):
         await _run_inbox_triage()
 
     mock_triage.assert_not_called()
+    assert calls and calls[0][0] == "inbox_triage" and calls[0][1] == "skipped"
 
 
 @pytest.mark.asyncio

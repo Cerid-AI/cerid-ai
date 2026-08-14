@@ -62,9 +62,6 @@ PyStemmer>=3.0.0
 # Scheduling
 apscheduler>=3.10,<4
 
-# Queue (Workstream E Phase 5a — opt-in via INGEST_QUEUE_MODE=async; reuses Redis already in stack)
-rq>=2.0,<3
-
 # Markdown header-hierarchy chunker (Workstream E Phase 2b.2). Bumped
 # 2026-05-24 to clear PYSEC-2026-77; the only call site is
 # MarkdownHeaderTextSplitter (core/ingest/parsers/markdown_header.py)
@@ -135,3 +132,11 @@ filetype>=1.2,<2
 # Security — hardened XML parsing for untrusted feeds (billion-laughs / XXE
 # guard; see core/utils/safe_xml.py). RSS/Atom never declares entities.
 defusedxml>=0.7.1,<1
+
+# Security — XML-DSig verification for the Enterprise SAML SP (sso_saml).
+# NOT hand-rolled: signature-wrapping and transform handling are where
+# home-grown SAML verification gets broken, and it looks finished either way.
+# signxml is Apache-2.0 and pure Python — it builds on lxml + cryptography,
+# which are already resolved here, so no native library and no Dockerfile
+# change. (python3-saml would have needed the xmlsec1 native lib.)
+signxml>=4.0,<5

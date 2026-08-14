@@ -263,6 +263,50 @@ INABILITY_ADMISSION_PATTERNS = [
     ),
 ]
 
+# Meta / self-referential statements — the assistant talking about ITSELF
+# (identity, its access to the user's private data). Unlike the ignorance
+# admissions above, these have no external referent a verifier could check:
+# web search cannot confirm whether "I" am a language model or whether "I"
+# can reach *your* Apple Mail. Verifying one "supported" produced the UX-09
+# lie — an ungrounded denial ("I don't have access to your Apple Mail")
+# stamped "1/1 verified, 100% accuracy". Extraction must surface ZERO claims
+# from these sentences; world-facing ignorance ("I don't have information
+# about the 2031 census") deliberately does NOT match and keeps flowing to
+# the ignorance-verdict path.
+META_SELF_REFERENTIAL_PATTERNS = [
+    # Identity: "I'm a large language model", "I am an AI assistant", ...
+    re.compile(
+        r"\bI(?:'m| am)(?: just| only| simply)?(?: a| an)\s*"
+        r"(?:large language model|language model|LLM|AI(?: model| assistant| system| language model)?|"
+        r"artificial intelligence|chatbot|virtual assistant|digital assistant)\b",
+        re.I,
+    ),
+    # "As an AI / assistant / language model, ..."
+    re.compile(r"\bas an? (?:AI|assistant|language model|large language model|LLM)\b", re.I),
+    # Access denial aimed at the USER'S data: "I don't have access to your
+    # Apple Mail", "I cannot access your personal information", ...
+    re.compile(
+        r"\bI (?:don'?t|do not|cannot|can'?t|could not|couldn'?t|am unable to|'m unable to)\s+"
+        r"(?:have\s+)?(?:direct\s+)?access(?:ed)?\s*(?:to\s+)?(?:your|the user'?s)\b",
+        re.I,
+    ),
+    # "... read/see/view your emails/messages/files/personal data"
+    re.compile(
+        r"\bI (?:don'?t|do not|cannot|can'?t|am unable to|'m unable to)\s+"
+        r"(?:read|see|view|browse|open)\s+your\b",
+        re.I,
+    ),
+    re.compile(r"\byour personal (?:data|information|files|messages)\b.{0,40}\b(?:access|private)\b", re.I),
+]
+
+
+def is_meta_self_referential(text: str) -> bool:
+    """True when *text* is the assistant talking about itself (identity or
+    access to the user's data) — a statement with no verifiable external
+    referent, which must never become a verification claim."""
+    return any(p.search(text) for p in META_SELF_REFERENTIAL_PATTERNS)
+
+
 # ---------------------------------------------------------------------------
 # Evasion patterns
 # ---------------------------------------------------------------------------

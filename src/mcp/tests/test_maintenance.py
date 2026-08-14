@@ -19,9 +19,8 @@ from core.agents.maintenance import (
 # ---------------------------------------------------------------------------
 
 class TestCheckSystemHealth:
-    @patch("core.agents.maintenance.config")
-    def test_all_services_healthy(self, mock_config, mock_neo4j, mock_chroma, mock_redis):
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+    def test_all_services_healthy(self, monkeypatch, mock_neo4j, mock_chroma, mock_redis):
+        monkeypatch.setattr("core.agents.maintenance.config.REDIS_INGEST_LOG", "ingest:log")
         driver, session = mock_neo4j
         client, collection = mock_chroma
         redis = mock_redis
@@ -49,8 +48,7 @@ class TestCheckSystemHealth:
         assert health["data"]["total_chunks"] == 50
         assert health["data"]["artifacts"] == 10
 
-    @patch("core.agents.maintenance.config")
-    def test_chromadb_error(self, mock_config, mock_neo4j, mock_redis):
+    def test_chromadb_error(self, monkeypatch, mock_neo4j, mock_redis):
         driver, session = mock_neo4j
         redis = mock_redis
 
@@ -60,15 +58,14 @@ class TestCheckSystemHealth:
         session.run.return_value.single.side_effect = [{"artifact_count": 0}, {"domain_count": 0}]
         redis.ping.return_value = True
         redis.llen.return_value = 0
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+        monkeypatch.setattr("core.agents.maintenance.config.REDIS_INGEST_LOG", "ingest:log")
 
         health = check_system_health(driver, chroma, redis)
         assert "error" in health["services"]["chromadb"]
         assert health["overall"] == "degraded"
 
-    @patch("core.agents.maintenance.config")
-    def test_neo4j_error(self, mock_config, mock_chroma, mock_redis):
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+    def test_neo4j_error(self, monkeypatch, mock_chroma, mock_redis):
+        monkeypatch.setattr("core.agents.maintenance.config.REDIS_INGEST_LOG", "ingest:log")
         client, collection = mock_chroma
         redis = mock_redis
 
@@ -83,9 +80,8 @@ class TestCheckSystemHealth:
         assert "error" in health["services"]["neo4j"]
         assert health["overall"] == "degraded"
 
-    @patch("core.agents.maintenance.config")
-    def test_redis_error(self, mock_config, mock_neo4j, mock_chroma):
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+    def test_redis_error(self, monkeypatch, mock_neo4j, mock_chroma):
+        monkeypatch.setattr("core.agents.maintenance.config.REDIS_INGEST_LOG", "ingest:log")
         driver, session = mock_neo4j
         client, collection = mock_chroma
 
@@ -99,9 +95,8 @@ class TestCheckSystemHealth:
         assert "error" in health["services"]["redis"]
         assert health["overall"] == "degraded"
 
-    @patch("core.agents.maintenance.config")
-    def test_has_timestamp(self, mock_config, mock_neo4j, mock_chroma, mock_redis):
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+    def test_has_timestamp(self, monkeypatch, mock_neo4j, mock_chroma, mock_redis):
+        monkeypatch.setattr("core.agents.maintenance.config.REDIS_INGEST_LOG", "ingest:log")
         driver, session = mock_neo4j
         client, collection = mock_chroma
         redis = mock_redis
@@ -114,9 +109,8 @@ class TestCheckSystemHealth:
         health = check_system_health(driver, client, redis)
         assert "timestamp" in health
 
-    @patch("core.agents.maintenance.config")
-    def test_collection_sizes_tracked(self, mock_config, mock_neo4j, mock_chroma, mock_redis):
-        mock_config.REDIS_INGEST_LOG = "ingest:log"
+    def test_collection_sizes_tracked(self, monkeypatch, mock_neo4j, mock_chroma, mock_redis):
+        monkeypatch.setattr("core.agents.maintenance.config.REDIS_INGEST_LOG", "ingest:log")
         driver, session = mock_neo4j
         client, collection = mock_chroma
         redis = mock_redis
@@ -170,9 +164,7 @@ class TestCheckLLMHealth:
 # ---------------------------------------------------------------------------
 
 class TestPurgeArtifacts:
-    @patch("core.agents.maintenance.config")
-    def test_purge_single_artifact(self, mock_config, mock_neo4j, mock_chroma):
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_purge_single_artifact(self, monkeypatch, mock_neo4j, mock_chroma):
         driver, session = mock_neo4j
         client, collection = mock_chroma
 
@@ -203,9 +195,7 @@ class TestPurgeArtifacts:
         assert result["error_count"] == 1
         assert result["errors"][0]["error"] == "not found"
 
-    @patch("core.agents.maintenance.config")
-    def test_partial_error(self, mock_config, mock_neo4j, mock_chroma):
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_partial_error(self, monkeypatch, mock_neo4j, mock_chroma):
         driver, session = mock_neo4j
         client, collection = mock_chroma
 
@@ -226,9 +216,7 @@ class TestPurgeArtifacts:
         assert result["error_count"] == 1
 
     @patch("core.agents.maintenance.log_event")
-    @patch("core.agents.maintenance.config")
-    def test_logs_purge_to_redis(self, mock_config, mock_log, mock_neo4j, mock_chroma):
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_logs_purge_to_redis(self, mock_log, mock_neo4j, mock_chroma):
         driver, session = mock_neo4j
         client, collection = mock_chroma
         redis = MagicMock()
@@ -251,10 +239,8 @@ class TestPurgeArtifacts:
 # ---------------------------------------------------------------------------
 
 class TestAnalyzeCollections:
-    @patch("core.agents.maintenance.config")
-    def test_basic_analysis(self, mock_config):
-        mock_config.DOMAINS = ["coding", "general"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_basic_analysis(self, monkeypatch):
+        monkeypatch.setattr("core.agents.maintenance.config.DOMAINS", ["coding", "general"])
 
         col1 = MagicMock()
         col1.name = "domain_coding"
@@ -272,10 +258,8 @@ class TestAnalyzeCollections:
         assert result["empty_collections"] == []
         assert result["missing_collections"] == []
 
-    @patch("core.agents.maintenance.config")
-    def test_detects_empty_collections(self, mock_config):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_detects_empty_collections(self, monkeypatch):
+        monkeypatch.setattr("core.agents.maintenance.config.DOMAINS", ["coding"])
 
         col = MagicMock()
         col.name = "domain_coding"
@@ -288,10 +272,8 @@ class TestAnalyzeCollections:
         assert "domain_coding" in result["empty_collections"]
         assert len(result["recommendations"]) > 0
 
-    @patch("core.agents.maintenance.config")
-    def test_detects_missing_collections(self, mock_config):
-        mock_config.DOMAINS = ["coding", "finance"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_detects_missing_collections(self, monkeypatch):
+        monkeypatch.setattr("core.agents.maintenance.config.DOMAINS", ["coding", "finance"])
 
         col = MagicMock()
         col.name = "domain_coding"
@@ -303,10 +285,8 @@ class TestAnalyzeCollections:
         result = analyze_collections(client)
         assert "domain_finance" in result["missing_collections"]
 
-    @patch("core.agents.maintenance.config")
-    def test_detects_extra_collections(self, mock_config):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_detects_extra_collections(self, monkeypatch):
+        monkeypatch.setattr("core.agents.maintenance.config.DOMAINS", ["coding"])
 
         col1 = MagicMock()
         col1.name = "domain_coding"
@@ -321,10 +301,8 @@ class TestAnalyzeCollections:
         result = analyze_collections(client)
         assert "domain_legacy" in result["extra_collections"]
 
-    @patch("core.agents.maintenance.config")
-    def test_no_collections(self, mock_config):
-        mock_config.DOMAINS = ["coding"]
-        mock_config.collection_name = lambda d: f"domain_{d}"
+    def test_no_collections(self, monkeypatch):
+        monkeypatch.setattr("core.agents.maintenance.config.DOMAINS", ["coding"])
 
         client = MagicMock()
         client.list_collections.return_value = []

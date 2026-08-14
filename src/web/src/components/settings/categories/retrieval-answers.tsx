@@ -38,11 +38,16 @@ import type { SettingsUpdate } from "@/lib/types"
 // ── Smart RAG weights panel ───────────────────────────────────────────────────
 
 function SmartRagPanel() {
-  const { forFlag } = useEntitlements()
+  const { forFlag, isLoading: entitlementsLoading, isError: entitlementsError } = useEntitlements()
   const { goTo } = useNavigation()
   const entitlement = forFlag("custom_smart_rag", "pro")
-  const locked = entitlement.state === "locked"
-  const flagOff = entitlement.state === "flag-off"
+  // Verdicts suppressed while capabilities load — tier defaults "community"
+  // in flight, and the locked card is an upgrade pitch a paying customer
+  // must not see on first paint. A FAILED fetch keeps the fail-closed "pro"
+  // fallback; the card then reports the plan as unverified instead of
+  // pitching an upgrade. Saves stay server-enforced either way.
+  const locked = !entitlementsLoading && entitlement.state === "locked"
+  const flagOff = !entitlementsLoading && entitlement.state === "flag-off"
 
   const [sources, setSources] = useState<RagSource[] | null>(null)
   const [overrides, setOverrides] = useState<Record<string, number>>({})
@@ -118,10 +123,21 @@ function SmartRagPanel() {
 
       {locked && (
         <div className="rounded-md border p-3 space-y-1.5">
-          <p className="text-label-sm font-medium">Custom Smart RAG requires the Pro plan</p>
-          <p className="text-label-xs text-muted-foreground">
-            Upgrade to fine-tune per-source retrieval weights.
-          </p>
+          {entitlementsError ? (
+            <>
+              <p className="text-label-sm font-medium">Custom Smart RAG is locked</p>
+              <p className="text-label-xs text-muted-foreground">
+                Your plan couldn&apos;t be verified — weights stay read-only until it can be.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-label-sm font-medium">Custom Smart RAG requires the Pro plan</p>
+              <p className="text-label-xs text-muted-foreground">
+                Upgrade to fine-tune per-source retrieval weights.
+              </p>
+            </>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -380,6 +396,28 @@ export default function RetrievalAnswersCategory({ settings, patch }: SettingsCa
               </SettingRow>
             )
           })()}
+
+          {(settings.enable_auto_inject ?? true) && (
+            <AdvancedDisclosure category="retrieval" group="contextInjection">
+              {(() => {
+                const def = getDef("retrieval.contextInjection.maxChunks")
+                if (!def) return null
+                return (
+                  <SettingRow def={def}>
+                    <SliderRow
+                      label="Max chunks"
+                      value={settings.auto_inject_max ?? 3}
+                      onChange={(v) => void patch({ auto_inject_max: Math.round(v) })}
+                      min={1}
+                      max={10}
+                      step={1}
+                      info={def.helpText}
+                    />
+                  </SettingRow>
+                )
+              })()}
+            </AdvancedDisclosure>
+          )}
         </CardContent>
       </Card>
 

@@ -9,9 +9,12 @@ Covers:
 - _reembed_domain(): stale-stamp detection (mismatched or missing version),
   force=True re-embeds everything, collection.update() called with NO
   ``embeddings=`` kwarg (lets ChromaDB recompute via the bound embedder).
+  AF-037: a page-read failure logs, skips past the failed offset, and is
+  reported via ``failed_offsets`` instead of silently truncating the scan.
 - run(): iterates config.DOMAINS when domain=None, a single domain when
   given; semantic-cache invalidation fires only when something was
-  actually re-embedded; JobResult.metadata shape.
+  actually re-embedded; JobResult.metadata shape, including the AF-037
+  ``truncated``/``truncated_domains`` failure signal.
 """
 from __future__ import annotations
 
@@ -70,11 +73,12 @@ class TestReembedDomain:
         async def _test():
             return await job._reembed_domain(chroma, "coding")
 
-        processed, reembedded, skipped = asyncio.run(_test())
+        processed, reembedded, skipped, failed_offsets = asyncio.run(_test())
 
         assert processed == 3
         assert reembedded == 2
         assert skipped == 1
+        assert failed_offsets == []
 
         collection.update.assert_called_once()
         call = collection.update.call_args
@@ -100,11 +104,12 @@ class TestReembedDomain:
         async def _test():
             return await job._reembed_domain(chroma, "coding")
 
-        processed, reembedded, skipped = asyncio.run(_test())
+        processed, reembedded, skipped, failed_offsets = asyncio.run(_test())
 
         assert processed == 1
         assert reembedded == 1
         assert skipped == 0
+        assert failed_offsets == []
         collection.update.assert_called_once()
 
     def test_no_stale_chunks_skips_update_call(self):
@@ -123,11 +128,12 @@ class TestReembedDomain:
         async def _test():
             return await job._reembed_domain(chroma, "coding")
 
-        processed, reembedded, skipped = asyncio.run(_test())
+        processed, reembedded, skipped, failed_offsets = asyncio.run(_test())
 
         assert processed == 1
         assert reembedded == 0
         assert skipped == 1
+        assert failed_offsets == []
         collection.update.assert_not_called()
 
     def test_missing_collection_returns_zero_without_raising(self):
@@ -138,8 +144,8 @@ class TestReembedDomain:
         async def _test():
             return await job._reembed_domain(chroma, "ghost-domain")
 
-        processed, reembedded, skipped = asyncio.run(_test())
-        assert (processed, reembedded, skipped) == (0, 0, 0)
+        processed, reembedded, skipped, failed_offsets = asyncio.run(_test())
+        assert (processed, reembedded, skipped, failed_offsets) == (0, 0, 0, [])
 
     def test_pagination_across_two_batches(self):
         """batch_size=1 forces two collection.get() calls before exhaustion."""
@@ -156,10 +162,59 @@ class TestReembedDomain:
         async def _test():
             return await job._reembed_domain(chroma, "coding")
 
-        processed, reembedded, skipped = asyncio.run(_test())
+        processed, reembedded, skipped, failed_offsets = asyncio.run(_test())
         assert processed == 2
         assert reembedded == 2
+        assert failed_offsets == []
         assert collection.get.call_count == 3
+
+    def test_one_bad_page_does_not_abort_the_scan(self):
+        """AF-037: a transient failure on one page must not truncate the
+        domain scan — the loop advances past the failed offset and keeps
+        reading subsequent pages, reporting the failure instead of hiding it."""
+        job = _make_job(domain="coding", batch_size=1)
+        collection = MagicMock()
+        collection.get.side_effect = [
+            {"ids": ["c1"], "documents": ["d1"], "metadatas": [{}]},
+            RuntimeError("transient chroma read error"),
+            {"ids": ["c3"], "documents": ["d3"], "metadatas": [{}]},
+            {"ids": [], "documents": [], "metadatas": []},
+        ]
+        chroma = MagicMock()
+        chroma.get_collection.return_value = collection
+
+        async def _test():
+            return await job._reembed_domain(chroma, "coding")
+
+        with patch("core.utils.swallowed.log_swallowed_error"):
+            processed, reembedded, skipped, failed_offsets = asyncio.run(_test())
+
+        # c1 and c3 were both reachable and processed despite the failure at
+        # offset=1 sitting between them — the scan did not stop early.
+        assert processed == 2
+        assert reembedded == 2
+        assert failed_offsets == [1]
+
+    def test_every_page_failing_aborts_after_max_consecutive_failures(self):
+        """A collection that fails on EVERY page must not spin forever."""
+        from app.processor.jobs.reembed_chunks import _MAX_CONSECUTIVE_BATCH_FAILURES
+
+        job = _make_job(domain="coding", batch_size=1)
+        collection = MagicMock()
+        collection.get.side_effect = RuntimeError("collection unreachable")
+        chroma = MagicMock()
+        chroma.get_collection.return_value = collection
+
+        async def _test():
+            return await job._reembed_domain(chroma, "coding")
+
+        with patch("core.utils.swallowed.log_swallowed_error"):
+            processed, reembedded, skipped, failed_offsets = asyncio.run(_test())
+
+        assert processed == 0
+        assert reembedded == 0
+        assert len(failed_offsets) == _MAX_CONSECUTIVE_BATCH_FAILURES
+        assert collection.get.call_count == _MAX_CONSECUTIVE_BATCH_FAILURES
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +235,7 @@ class TestRunMethod:
             with (
                 patch("app.deps.get_chroma", return_value=MagicMock()),
                 patch("app.deps.get_redis", return_value=MagicMock()),
-                patch.object(job, "_reembed_domain", return_value=(5, 2, 3)) as mock_reembed,
+                patch.object(job, "_reembed_domain", return_value=(5, 2, 3, [])) as mock_reembed,
                 patch(
                     "utils.query_cache.invalidate_query_caches_non_blocking",
                     new_callable=AsyncMock,
@@ -194,8 +249,12 @@ class TestRunMethod:
             assert result.metadata["reembedded"] == 2
             assert result.metadata["skipped"] == 3
             assert result.metadata["by_domain"] == {
-                "coding": {"processed": 5, "reembedded": 2, "skipped": 3}
+                "coding": {
+                    "processed": 5, "reembedded": 2, "skipped": 3, "failed_offsets": [],
+                }
             }
+            assert result.metadata["truncated"] is False
+            assert result.metadata["truncated_domains"] == []
             mock_invalidate.assert_called_once()
             assert mock_invalidate.call_args.kwargs["trigger"] == "processor.reembed_chunks"
             assert progress_calls[-1] == 1.0
@@ -214,7 +273,7 @@ class TestRunMethod:
             with (
                 patch("app.deps.get_chroma", return_value=MagicMock()),
                 patch("app.deps.get_redis", return_value=MagicMock()),
-                patch.object(job, "_reembed_domain", return_value=(0, 0, 0)) as mock_reembed,
+                patch.object(job, "_reembed_domain", return_value=(0, 0, 0, [])) as mock_reembed,
                 patch(
                     "utils.query_cache.invalidate_query_caches_non_blocking",
                     new_callable=AsyncMock,
@@ -237,7 +296,7 @@ class TestRunMethod:
             with (
                 patch("app.deps.get_chroma", return_value=MagicMock()),
                 patch("app.deps.get_redis", return_value=MagicMock()),
-                patch.object(job, "_reembed_domain", return_value=(4, 0, 4)),
+                patch.object(job, "_reembed_domain", return_value=(4, 0, 4, [])),
                 patch(
                     "utils.query_cache.invalidate_query_caches_non_blocking",
                     new_callable=AsyncMock,
@@ -259,7 +318,7 @@ class TestRunMethod:
             with (
                 patch("app.deps.get_chroma", return_value=MagicMock()),
                 patch("app.deps.get_redis", return_value=MagicMock()),
-                patch.object(job, "_reembed_domain", return_value=(1, 1, 0)),
+                patch.object(job, "_reembed_domain", return_value=(1, 1, 0, [])),
                 patch(
                     "utils.query_cache.invalidate_query_caches_non_blocking",
                     new_callable=AsyncMock,
@@ -268,5 +327,31 @@ class TestRunMethod:
                 result = await job.run(_noop)
 
             assert result.metadata["force"] is True
+
+        asyncio.run(_test())
+
+    def test_run_reports_truncated_when_a_domain_had_failed_pages(self):
+        """AF-037: a domain that hit unreadable pages must surface as
+        truncated on the JobResult, not silently reported as a clean run."""
+        job = _make_job(domain="coding")
+
+        async def _test():
+            async def _noop(_pct: float) -> None:
+                return None
+
+            with (
+                patch("app.deps.get_chroma", return_value=MagicMock()),
+                patch("app.deps.get_redis", return_value=MagicMock()),
+                patch.object(job, "_reembed_domain", return_value=(2, 1, 1, [1])),
+                patch(
+                    "utils.query_cache.invalidate_query_caches_non_blocking",
+                    new_callable=AsyncMock,
+                ),
+            ):
+                result = await job.run(_noop)
+
+            assert result.metadata["truncated"] is True
+            assert result.metadata["truncated_domains"] == ["coding"]
+            assert result.metadata["by_domain"]["coding"]["failed_offsets"] == [1]
 
         asyncio.run(_test())

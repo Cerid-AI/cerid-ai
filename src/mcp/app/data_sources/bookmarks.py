@@ -21,6 +21,7 @@ import glob
 import hashlib
 import json
 import logging
+import platform
 import plistlib
 import re
 import sqlite3
@@ -282,7 +283,23 @@ _READERS: dict[str, Any] = {
 
 
 def detect_browsers() -> dict[str, dict[str, Any]]:
-    """Detect installed browsers and return bookmark counts."""
+    """Detect installed browsers and return bookmark counts.
+
+    The bookmark stores this module reads (``~/Library/...``) are macOS
+    paths. When the MCP server is not running on macOS — the standard
+    deployment is a Linux container — those paths can never resolve to
+    anything, so checking ``.exists()`` per browser would silently report
+    ``installed: False`` for every browser, indistinguishable from "this
+    machine genuinely has no browsers installed". Report the true state
+    (this runtime structurally cannot read browser bookmarks) instead of
+    resolving container-local paths that can never match.
+    """
+    if platform.system() != "Darwin":
+        return {
+            browser: {"installed": False, "bookmark_count": 0, "state": "structurally_unavailable"}
+            for browser in _READERS
+        }
+
     detected: dict[str, dict[str, Any]] = {}
 
     if _CHROME_BOOKMARKS_PATH.exists():
@@ -496,5 +513,12 @@ class BookmarksSource(DataSource):
         return []
 
     def is_configured(self) -> bool:
-        """Always configured — reads local files, no API key needed."""
-        return True
+        """Not configured off macOS — the bookmark stores this reads live
+        under ``~/Library`` and the MCP server's standard deployment is a
+        Linux container that can never see that path. Mirrors the
+        ``platform.system() == "Darwin"`` check
+        ``plugins.apple_calendar.data_source.AppleCalendarDataSource`` uses
+        for the same structurally-unavailable-off-macOS reason (desktop
+        bridging is deferred; this connector stays server-side and reports
+        honestly instead)."""
+        return platform.system() == "Darwin"

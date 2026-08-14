@@ -21,6 +21,7 @@ import { useEntitlements } from "@/hooks/use-entitlements"
 import { categoryLabel, type SearchMatch, type SettingDef } from "@/lib/settings-registry"
 import { cn } from "@/lib/utils"
 import { FOCUS_RING, TierLockBadge } from "./settings-primitives"
+import { EntitlementsUnavailableBanner } from "@/components/shared/entitlements-error-notice"
 
 export function SettingsSearchInput({
   value,
@@ -92,7 +93,7 @@ export function SettingsSearchResults({
   onSelect: (def: SettingDef) => void
   onClear: () => void
 }) {
-  const { forDef } = useEntitlements()
+  const { forDef, isError: entitlementsError } = useEntitlements()
 
   if (matches.length === 0) {
     return (
@@ -113,6 +114,7 @@ export function SettingsSearchResults({
 
   return (
     <div className="density-stack">
+      {entitlementsError && <EntitlementsUnavailableBanner />}
       <p className="text-label-sm text-muted-foreground">
         {matches.length} result{matches.length === 1 ? "" : "s"} for “{query}”
       </p>

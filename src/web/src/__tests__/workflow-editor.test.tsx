@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { axe } from "jest-axe"
 import WorkflowEditor from "@/components/workflows/workflow-editor"
 
@@ -133,5 +133,43 @@ describe("WorkflowEditor — legend and node details", () => {
     const { container } = render(<WorkflowEditor workflow={mockWorkflow} onSave={noop} onBack={noop} />)
     fireEvent.click(screen.getByRole("button", { name: "query (Agent node)" }))
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe("WorkflowEditor — run input (UX-21)", () => {
+  it("refuses to run a query pipeline without its input", async () => {
+    const { runWorkflow } = await import("@/lib/api")
+    render(<WorkflowEditor workflow={mockWorkflow} onSave={noop} onBack={noop} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /^run$/i }))
+
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(screen.getByText(/enter the query/i)).toBeInTheDocument()
+  })
+
+  it("runs with the input the user typed, not a hardcoded 'test'", async () => {
+    const { runWorkflow } = await import("@/lib/api")
+    vi.mocked(runWorkflow).mockResolvedValue({
+      id: "run-1",
+      workflow_id: "wf-1",
+      status: "completed",
+      results: { query_abc: { status: "completed", output: { results: [] } } },
+      error: null,
+      started_at: "2026-08-13T00:00:00Z",
+      finished_at: "2026-08-13T00:00:05Z",
+    })
+
+    render(<WorkflowEditor workflow={mockWorkflow} onSave={noop} onBack={noop} />)
+    fireEvent.change(screen.getByLabelText(/run input/i), {
+      target: { value: "what changed this week?" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^run$/i }))
+
+    await waitFor(() =>
+      expect(runWorkflow).toHaveBeenCalledWith("wf-1", { query: "what changed this week?" }),
+    )
+    // The summary tells the user node results are inspectable — the green
+    // dots alone left them undiscoverable.
+    expect(await screen.findByText(/select a node to inspect its result/i)).toBeInTheDocument()
   })
 })
