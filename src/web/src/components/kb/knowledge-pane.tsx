@@ -30,6 +30,7 @@ import { ImportDialog } from "./import-dialog"
 import { KnowledgeLibraryDialog } from "./knowledge-library-dialog"
 import { ActivityFeed } from "./ActivityFeed"
 import { TagManager } from "./tag-manager"
+import { TAGS_TRUSTED } from "@/lib/tag-trust"
 import { DuplicateDetector } from "./duplicate-detector"
 import { fetchAllArtifacts, fetchAllTags, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
 import type { TagsPage } from "@/lib/api"
@@ -782,7 +783,7 @@ export function KnowledgePane() {
         </div>
 
         {/* Tag section */}
-        {availableTags.length > 0 && (
+        {TAGS_TRUSTED && availableTags.length > 0 && (
           <div className="space-y-1.5">
             {/* Active tag highlight */}
             {activeTag && (

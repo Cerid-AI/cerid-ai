@@ -14,6 +14,7 @@ import { QualityDot } from "./quality-dot"
 import type { KBQueryResult } from "@/lib/types"
 import { cn, parseTags } from "@/lib/utils"
 import { MCP_BASE, mcpHeaders } from "@/lib/api"
+import { TAGS_TRUSTED } from "@/lib/tag-trust"
 
 /** Touch device detection — pointer type is static per device, so module-level is fine. */
 const isTouchDevice = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches
@@ -295,7 +296,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                 </Badge>
               )}
             </div>
-            {result.tags && result.tags.length > 0 && (
+            {TAGS_TRUSTED && result.tags && result.tags.length > 0 && (
               <div className="mt-1 flex min-w-0 flex-wrap gap-1">
                 {result.tags.slice(0, 4).map((tag) => {
                   const isAuto = tag.startsWith("~")

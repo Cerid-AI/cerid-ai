@@ -6,6 +6,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ArtifactCard } from "@/components/kb/artifact-card"
 import type { KBQueryResult } from "@/lib/types"
+import { TAGS_TRUSTED } from "@/lib/tag-trust"
 
 // jsdom doesn't implement scrollIntoView
 Element.prototype.scrollIntoView = vi.fn()
@@ -51,7 +52,10 @@ describe("ArtifactCard", () => {
     expect(screen.getByText("python")).toBeInTheDocument()
   })
 
-  it("shows tags when present", () => {
+  it("does not assert tags on the card while they are untrusted", () => {
+    // Tags are LLM-extracted and measured ~34% accurate (2026-08-14 eval), so
+    // the at-a-glance chips are suppressed via TAGS_TRUSTED. The card must not
+    // present a tag as a settled fact until that flips.
     render(
       <ArtifactCard
         result={makeResult({ tags: ["fastapi", "auth", "middleware"] })}
@@ -60,9 +64,10 @@ describe("ArtifactCard", () => {
         onInject={vi.fn()}
       />,
     )
-    expect(screen.getByText("fastapi")).toBeInTheDocument()
-    expect(screen.getByText("auth")).toBeInTheDocument()
-    expect(screen.getByText("middleware")).toBeInTheDocument()
+    expect(TAGS_TRUSTED).toBe(false)
+    expect(screen.queryByText("fastapi")).not.toBeInTheDocument()
+    expect(screen.queryByText("auth")).not.toBeInTheDocument()
+    expect(screen.queryByText("middleware")).not.toBeInTheDocument()
   })
 
   // WB-67: query_agent.py never parses `keywords` before returning it — it

@@ -12,7 +12,7 @@ if [ ! -d dist/assets ]; then
 fi
 
 main_max=$((800 * 1024))
-lazy3d_max=$((1300 * 1024))
+lazy_max=$((1300 * 1024))
 fail=0
 
 for file in dist/assets/*.js; do
@@ -22,11 +22,14 @@ for file in dist/assets/*.js; do
   base=$(basename "$file")
   cap=$main_max
   cap_name="800KB"
-  # The lazy 3D chunks are route-split and never in the initial payload.
+  # Route-split chunks, never in the initial payload: the 2D constellation map
+  # and the cosmos.gl "Live" scene. vendor-r3f and vendor-three were dropped
+  # with the 3D render stack on 2026-08-13 — a cap naming chunks that can no
+  # longer be emitted checks nothing.
   case "$base" in
-    vendor-r3f-*|vendor-three-*|Constellation-*|vendor-cosmos-*)
-      cap=$lazy3d_max
-      cap_name="1.3MB (lazy 3D)" ;;
+    Constellation-*|vendor-cosmos-*)
+      cap=$lazy_max
+      cap_name="1.3MB (lazy route chunk)" ;;
   esac
   echo "  $file: ${size_kb}KB (cap ${cap_name})"
   if [ "$size" -gt "$cap" ]; then

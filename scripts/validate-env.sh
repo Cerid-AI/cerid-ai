@@ -52,6 +52,21 @@ resolve_link() {
 echo "=== Cerid AI Environment Validation ==="
 echo ""
 
+# ── Check 0: disk headroom ────────────────────────────────────────────────────
+# On 2026-08-14 the boot volume reached 100% (990 MB free of 808 GB) and Docker
+# Desktop responded by shutting its VM down GRACEFULLY — no crash, no OOM, just
+# a stack that was gone and a build that hung for 14 hours against a dead
+# engine. Docker.raw living on an external volume does not help; the engine
+# still writes its own state to the boot disk. Cheap to check, expensive to miss.
+DISK_FREE_GB=$(df -g / 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "$DISK_FREE_GB" ]; then
+    if [ "$DISK_FREE_GB" -lt 20 ]; then
+        fail "Boot volume has ${DISK_FREE_GB}GB free (<20GB) — Docker shuts its VM down on ENOSPC; reclaim before starting the stack"
+    else
+        pass "Boot volume has ${DISK_FREE_GB}GB free"
+    fi
+fi
+
 # ── Check 1: Docker daemon ────────────────────────────────────────────────────
 if docker info > /dev/null 2>&1; then
     pass "Docker daemon is running"

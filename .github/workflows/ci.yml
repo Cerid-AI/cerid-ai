@@ -267,9 +267,11 @@ jobs:
     if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: src/web
+    # No job-level working-directory: scripts/ci/frontend.sh runs from the repo
+    # root and cd's where each command belongs, so the Linux path here and the
+    # canonical repo's containerised path run ONE definition. The old split
+    # (npm in src/web, check-bundle-size.sh overridden back to the root) is
+    # exactly the per-step cwd difference that hid a bug once already.
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -277,61 +279,11 @@ jobs:
           node-version-file: src/web/.nvmrc
           cache: npm
           cache-dependency-path: src/web/package-lock.json
-      - run: npm ci
-      - name: TypeScript type check
-        run: npx tsc -b
-      - name: ESLint
-        run: npm run lint
-      - name: Vitest
-        run: npm test
-      - name: Vite build
-        run: npx vite build
-      - name: Check bundle size (fail if any chunk exceeds caps)
-        # 800KB main cap protects the initial-load surface. Constellation's
-        # lazy 3D stack (three + R3F + drei + postprocessing incl. N8AO ambient
-        # occlusion) needs ~1.2MB minified on its own chunk — that's the cost of
-        # a WebGL2 3D engine + effects and is fine because it only loads when the
-        # user picks Constellation mode (lazy import). The cosmos.gl "Live" scene
-        # (vendor-cosmos, ~733KB) is likewise lazy — only loaded in Live mode.
-        # Allowlist any chunk whose name starts with the known-large lazy entry
-        # markers up to 1.3MB.
-        run: |
-          main_max=$((800 * 1024))
-          lazy3d_max=$((1300 * 1024))
-          fail=0
-          for file in dist/assets/*.js; do
-            size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
-            size_kb=$((size / 1024))
-            base=$(basename "$file")
-            echo "$file: ${size_kb}KB"
-            cap=$main_max
-            cap_name="800KB"
-            if [[ "$base" == vendor-r3f-* || "$base" == vendor-three-* || "$base" == Constellation-* || "$base" == vendor-cosmos-* ]]; then
-              cap=$lazy3d_max
-              cap_name="1.3MB (lazy 3D)"
-            fi
-            if [ "$size" -gt "$cap" ]; then
-              echo "::error::Bundle chunk $file exceeds $cap_name limit: ${size_kb}KB"
-              fail=1
-            fi
-          done
-          if [ "$fail" -eq 1 ]; then exit 1; fi
-      # Blocking gate covers what actually ships to users. The dev toolchain is
-      # audited too, but advisory-only: since 2026-07 the eslint 9.x tree pulls
-      # minimatch@3 -> brace-expansion@1 (GHSA-mh99-v99m-4gvg), whose sole fix is
-      # brace-expansion@5 — an ESM-first package whose CJS build exports an
-      # object, so an override breaks every v3-era `require()` consumer. npm's
-      # own remediation is `eslint@10`, a breaking major. Blocking on an
-      # unreachable DoS in the linter (it would require attacker control of our
-      # eslint config) bought nothing and hid the production result.
-      # Revisit when the repo moves to eslint 10 — then drop the split.
-      # Mirrors the same split in cerid-ai-internal; this workflow is
-      # hand-maintained, so sync-repos.py cannot propagate it.
-      - name: NPM dependency audit (production — blocking)
-        run: npm audit --audit-level=high --omit=dev
-      - name: NPM dependency audit (dev toolchain — advisory)
-        continue-on-error: true
-        run: npm audit --audit-level=high
+      # tsc -b, eslint, vitest, vite build, bundle caps, and the
+      # blocking-production / advisory-dev npm audit split all live in the
+      # script. The dev-toolchain audit stays advisory INSIDE it; do not
+      # "simplify" it to a bare command under `set -e`.
+      - run: bash scripts/ci/frontend.sh
 
   # ---------------------------------------------------------------------------
   # License denylist. Replaces the two inline `--fail-on` / `--failOn` audits

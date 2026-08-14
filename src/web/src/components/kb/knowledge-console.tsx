@@ -522,14 +522,12 @@ export function KnowledgeConsole({
                 )}
                 <DataSourceIndicator />
                 {/*
-                  "Add Custom API" is hidden until a backend exists. The dialog
-                  is fully built and its Test Connection really fires, but no
-                  source kind accepts a custom API definition — the nearest,
-                  `external_adapter`, is availability "coming_soon" (declared in
-                  SOURCE_KINDS, not implemented — app/routers/sources.py:148).
-                  The prior wiring passed onSave={() => setCustomApiOpen(false)},
-                  silently discarding a 7-field form as if it had saved.
-                  Restore the button in the same commit that lands the endpoint.
+                  "Add Custom API" was dropped on 2026-08-14 (RA-26). The dialog was
+                  fully built and its Test Connection really fired, but no source kind
+                  ever accepted a custom API definition — the nearest, `external_adapter`,
+                  is still availability "coming_soon". Rather than keep an unmounted
+                  component and a restore-condition indefinitely, the component was
+                  deleted; git history holds it if the endpoint is ever built.
                 */}
               </SourceSection>
             </>

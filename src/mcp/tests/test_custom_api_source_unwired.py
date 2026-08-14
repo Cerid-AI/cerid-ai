@@ -5,18 +5,20 @@
 
 ``app/data_sources/custom.py`` ships a working, tested ``CustomApiSource``
 (WP13's Custom API wizard backend), but no production code constructs one —
-there is no endpoint that accepts a custom-source definition. The frontend
-half handles this honestly: ``knowledge-console.tsx`` hides the "Add Custom
-API" button behind a comment that says to restore it *in the same commit that
-lands the endpoint* (the prior wiring silently discarded the form).
+there is no endpoint that accepts a custom-source definition.
 
-This test is the interlock on that comment contract, in the
+The frontend half USED to be a hidden button plus a restore-condition comment.
+On 2026-08-14 (RA-26) the dialog component was deleted outright rather than
+kept unmounted indefinitely, and the comment records that. Git history holds
+the component if the endpoint is ever built.
+
+This test is the interlock on that contract, in the
 ``test_usage_metering_wired`` style. It fails in both directions:
 
-* someone lands a production construction site and forgets to restore the
-  frontend button (feature exists, users can't reach it)
-* someone restores the button without a backend (7-field form silently
-  discarded again)
+* someone lands a production construction site and leaves no frontend at all
+  (feature exists, users cannot reach it)
+* someone restores a Custom API surface without a backend (the 7-field form
+  would silently discard again, which is why it was removed)
 """
 from __future__ import annotations
 
@@ -28,7 +30,9 @@ _SRC = Path(__file__).resolve().parent.parent
 # The frontend half of the contract. The marker sentence must match the
 # comment in knowledge-console.tsx that documents why the button is hidden.
 _CONSOLE = _SRC.parent / "web" / "src" / "components" / "kb" / "knowledge-console.tsx"
-_HIDDEN_MARKER = '"Add Custom API" is hidden until a backend exists'
+_DROPPED_MARKER = '"Add Custom API" was dropped on 2026-08-14 (RA-26)'
+# The component itself must stay gone while the backend is dormant.
+_DIALOG = _SRC.parent / "web" / "src" / "components" / "kb" / "custom-api-dialog.tsx"
 
 # The definition itself is not a call site.
 _EXEMPT = {_SRC / "app" / "data_sources" / "custom.py"}
@@ -63,20 +67,25 @@ def test_custom_api_dormancy_matches_frontend():
         f"{_CONSOLE} not found — the interlock can no longer see the "
         "frontend half of the Custom API contract. Update the path here."
     )
-    button_hidden = _HIDDEN_MARKER in _CONSOLE.read_text(encoding="utf-8")
+    surface_dropped = _DROPPED_MARKER in _CONSOLE.read_text(encoding="utf-8")
     sites = _production_construction_sites()
 
     if sites:
-        assert not button_hidden, (
+        assert not surface_dropped, (
             f"CustomApiSource now has production construction sites "
-            f"({sorted(sites)}) but knowledge-console.tsx still hides the "
-            "'Add Custom API' button. Restore the button in the same commit "
-            "that landed the endpoint — see the comment in the tsx."
+            f"({sorted(sites)}) but knowledge-console.tsx still records the "
+            "Custom API surface as dropped. Restore a surface in the same "
+            "commit that landed the endpoint — the component is in git "
+            "history at src/web/src/components/kb/custom-api-dialog.tsx."
         )
     else:
-        assert button_hidden, (
-            "The 'Add Custom API' hidden-button comment is gone from "
-            "knowledge-console.tsx but no production code constructs "
-            "CustomApiSource — a restored button would silently discard the "
-            "form again. Land the endpoint first, or keep the button hidden."
+        assert surface_dropped, (
+            "The RA-26 drop note is gone from knowledge-console.tsx but no "
+            "production code constructs CustomApiSource — a restored surface "
+            "would silently discard the form again. Land the endpoint first."
+        )
+        assert not _DIALOG.exists(), (
+            "custom-api-dialog.tsx is back while CustomApiSource still has no "
+            "production construction site. That is the unmounted-orphan state "
+            "RA-26 removed; land the endpoint before restoring the component."
         )
