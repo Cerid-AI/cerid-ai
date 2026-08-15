@@ -86,8 +86,11 @@ fi
 
 # -- 2. Did safe-push already validate this exact commit? ---------------------
 STAMP=".git/prepush-validated"
+# The record may hold several shas: the validated commit plus any annotated tag
+# objects pointing at it (a tag push presents the TAG object's sha, not the
+# commit's). Match any line, not the whole file.
 if ! $VALIDATE_ONLY && [ -n "$PUSHING_SHA" ] && [ -f "$STAMP" ] \
-   && [ "$(cat "$STAMP" 2>/dev/null)" = "$PUSHING_SHA" ]; then
+   && grep -qxF "$PUSHING_SHA" "$STAMP" 2>/dev/null; then
   echo "── pre-push: ✓ $(printf '%.12s' "$PUSHING_SHA") already validated by safe-push — pushing ──"
   exit 0
 fi

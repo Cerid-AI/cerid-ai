@@ -2,6 +2,96 @@
 
 All notable changes to cerid-ai are documented here.
 
+## [1.0.2] — 2026-08-15
+
+164 commits. Four audits and their remediation, two features that were sold
+before they existed, a graph sprint that removed more than it added, and a
+findings workflow that closed 67 triaged items. The through-line is honesty:
+most of this release is the product no longer claiming things it cannot back.
+
+### Removed — read this first
+
+- **The 3D constellation mode is gone.** It rendered an occluded ball of
+  translucent spheres with no legible edges or labels, its z axis was recency
+  rather than structure, and its vendor chunk was the largest in the build. The
+  Pro "Guided graph tour" it hosted now replays the same waypoints as camera
+  moves on the 2D map, so the sold capability survives the deletion. Mode
+  toggle is Map | Live.
+- **Artifact tags are no longer displayed.** Judged blind against document
+  content, only about a third of tag instances accurately describe their
+  artifact — `invoice` scored 0 of 11, `receipt` 0 of 8. The at-a-glance chips
+  and the tag filter are suppressed; the artifact preview keeps its tag section,
+  because that is where a wrong tag can be corrected. Ingest still writes tags,
+  so nothing is lost and no backfill is needed.
+- The Custom API dialog, which was fully built and mounted nowhere, waiting on
+  an endpoint still marked `coming_soon`.
+
+### Retrieval tells the truth about itself
+
+Degraded retrieval now says so instead of fabricating a denial: a personal-data
+question with no grounding gets an honest deferral, not a confident "I don't
+have that." The defects behind the idle zero-results reports are fixed at the
+root — the retrieval gate no longer skips short keyword queries, whole-corpus
+BM25 rebuilds moved off the interactive path behind a stale snapshot and
+single-flight, and informational envelope keys survive the CRAG rebuild.
+
+Indexes are pre-warmed at boot. The first query for a domain used to pay the
+corpus parse inline and could exhaust the retrieval budget outright; measured
+on a real restart, the same mail query went from 0 sources with the budget
+exceeded to 8 sources with no degradation.
+
+### One source of truth for sync status
+
+Per-connector sync and ingest state is now served from one place and consumed
+by every surface that used to guess — the Sources ticker, the Apple connector
+cards, and the tray. Desktop bulk sync moved into a resumable main-process
+queue with a persisted cursor, so closing the window no longer kills it.
+Scheduler run-now reports a collapsed duplicate honestly instead of logging
+success in under a second without running.
+
+### Enterprise features that were sold and did not exist
+
+`audit_logging` and `sso_saml` were both marked available for Enterprise with
+no implementation behind either. Both are built. SAML registers only when
+`CERID_MULTI_USER=true`, which is itself experimental — the tier matrix says
+Enterprise, and that remains accurate only for an engagement that enables it.
+
+### Data hygiene
+
+Apple Mail bodies decode per their MIME charset rather than producing mojibake;
+degenerate email fragments and SQL example-row names are rejected at
+extraction; machine-named artifacts leave the default Library view and the
+count matches the filtered population. Test residue is purged from the
+production KB with a guard against recurrence, and a retroactive pass merges
+near-duplicate memories under a negation-flip veto.
+
+### Graph
+
+Communities carry generated names instead of truncated summary prose, with
+collision disambiguation. The constellation opens on its connected core with
+the periphery behind a counted toggle, unified under one persisted predicate
+rather than two queries that disagreed. Every Atlas bucket drills to its
+entities — no entity is unreachable. "Open in Timeline" lands on the entity it
+was opened for.
+
+### Gates
+
+Eight audit-class gates shipped and were adversarially verified. The TA003
+test-antipattern burned down 120 to 0 with the baseline reseeded. `/health`
+gained a gate CI actually runs. The built web app reports a real version to
+Sentry instead of "dev", pinned by a consistency gate. And the sync script's
+`--track-deletions` now asks git what the mirror tracks rather than walking the
+filesystem — as written it would have deleted a sandbox's live databases.
+
+### Desktop
+
+The blank window (the GUI was not inside `app.asar`), the drag region that
+lived in a file local mode never loads, onboarding that could not configure a
+server, and a permissions step nobody could reach. Calendar and Photos reach
+the bridge where a helper can run. The non-breaking half of the dependency
+debt is taken; the `electron-builder` and `electron` majors are deliberately
+left for a packaging drive.
+
 ## [1.0.1] — 2026-08-07
 
 Closes the remainder of the 1.0 release audit's open findings, plus the

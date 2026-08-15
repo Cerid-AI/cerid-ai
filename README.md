@@ -43,7 +43,7 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 | **Specialist agents**          | ✅ Query, Triage, Rectify, Audit, Hallucination, Memory, etc. | Limited           | None             | None             |
 | **Tiered local inference**     | ✅ Ollama + GPU sidecar + auto-fallback | Basic             | None             | Basic            |
 | **Graph + vector + BM25**      | ✅ Full hybrid with Neo4j relationships | Vector only       | Vector only      | Vector only      |
-| **Clean architecture (v1.0.1)** | ✅ Preservation harness of integration invariants + canonical models | Growing           | Growing          | Older            |
+| **Clean architecture (v1.0.2)** | ✅ Preservation harness of integration invariants + canonical models | Growing           | Growing          | Older            |
 | **5-min Docker start**         | ✅ One-command                    | ✅                   | ✅                | ✅                |
 | **Multi-domain KB**            | ✅ coding / finance / projects / personal | ✅                | Limited          | ✅                |
 

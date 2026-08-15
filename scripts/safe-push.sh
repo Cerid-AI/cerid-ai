@@ -78,6 +78,21 @@ if ! bash "$HOOK" --validate-only; then
 fi
 
 echo "$SHA" > "$STAMP"
+
+# An ANNOTATED TAG pushes the tag OBJECT's sha, not the commit's, so a record
+# holding only the commit can never match and the hook falls through to
+# validating inside itself — the path that holds the connection open and dies
+# with SIGPIPE. Cutting v1.0.2 hit exactly that. Record every tag object that
+# points at the validated commit alongside it; the supply-chain guard still
+# runs on every push regardless, since it is consulted before the record.
+for _tag in $(git tag --points-at "$SHA"); do
+  _tag_obj="$(git rev-parse "$_tag")"
+  if [ "$_tag_obj" != "$SHA" ]; then
+    echo "$_tag_obj" >> "$STAMP"
+    echo "── safe-push: also recording annotated tag $_tag ──"
+  fi
+done
+
 echo "── safe-push: ✓ validated — pushing ──"
 
 if [ "$#" -gt 0 ]; then

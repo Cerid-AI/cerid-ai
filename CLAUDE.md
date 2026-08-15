@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Licensed FSL-1.1-ALv2 (source-available, becomes Apache-2.0 at two years); the SDKs and client integrations are Apache-2.0 and the plugin trees are BUSL-1.1 — see [`CONTRIBUTING.md`](CONTRIBUTING.md#license) for the per-path table.
 
-**Version:** 1.0.1 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
+**Version:** 1.0.2 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
 
 ## Quick Start
 
