@@ -37,7 +37,8 @@ export async function initSentry(): Promise<SentryShape | null> {
     | undefined
   const dsn = runtimeEnv?.VITE_SENTRY_DSN_WEB || import.meta.env.VITE_SENTRY_DSN_WEB
   if (!dsn) return null
-  const release = runtimeEnv?.VITE_APP_VERSION || import.meta.env.VITE_APP_VERSION || "dev"
+  const release =
+    runtimeEnv?.VITE_APP_VERSION || import.meta.env.VITE_APP_VERSION || __APP_VERSION__ || "dev"
 
   try {
     // Plain dynamic import so Vite resolves and code-splits it. It carried a

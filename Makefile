@@ -124,6 +124,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-route-response-model.py --check
 	@echo "[drift] retrieval-import-boundary"
 	.venv/bin/python scripts/lint-retrieval-import-boundary.py --check
+	@echo "[drift] version-consistency"
+	.venv/bin/python scripts/lint-version-consistency.py --check
 	@echo "[drift] magic-numbers"
 	.venv/bin/python scripts/lint-magic-numbers.py --check
 	@echo "[drift] test-antipatterns"

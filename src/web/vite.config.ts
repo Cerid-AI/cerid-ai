@@ -5,8 +5,16 @@ import path from "path"
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
+import pkg from "./package.json"
 
 export default defineConfig({
+  // The version the built app reports to Sentry. VITE_APP_VERSION is passed
+  // through docker-compose as ${VITE_APP_VERSION:-} and nothing ever set it, so
+  // every production release tagged itself "dev". Baking package.json's version
+  // makes the release real by default; the runtime env still wins when set.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   // Relative, not the "/" default. The desktop app loads this same bundle from
   // disk via `loadFile`, and under file:// a root-absolute `/assets/index.js`
   // resolves to the FILESYSTEM root — so every script and stylesheet 404s and

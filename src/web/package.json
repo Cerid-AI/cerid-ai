@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.93.10",
+  "version": "1.0.1",
   "author": "Cerid AI",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
