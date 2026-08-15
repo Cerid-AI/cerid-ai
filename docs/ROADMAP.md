@@ -4,7 +4,8 @@
 > [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md).
 > Prior: 2026-07-24 Tier A audit + remediation T0–T4; 2026-06-13 RAG Quality Program
 > close-out; 2026-06-02 Commercial-GA Track 1).
-> **Shipped:** `v1.0.0` + `v1.0.1` tagged 2026-08-07 (both repos); `v1.0.1-desktop`
+> **Shipped:** `v1.0.2` tagged 2026-08-15 (both repos) with `v1.0.2-desktop`
+> signed + notarized; previously `v1.0.0` + `v1.0.1` 2026-08-07, `v1.0.1-desktop`
 > signed + notarized 2026-08-08 (public-repo release, working auto-update channel);
 > SDKs live on PyPI (`cerid-sdk`) + npm (`@cerid-ai/sdk`), trusted publishing verified
 > 2026-08-09. Forward focus: Electron runtime refresh, Sentry go-live (web DSN + alert

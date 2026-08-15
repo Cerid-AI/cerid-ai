@@ -28,7 +28,7 @@ Open http://localhost:3000 — the React GUI is ready. Drop files into `~/cerid-
 
 **It's working when** the status bar shows green dots for ChromaDB, Neo4j, and Redis.
 
-Prefer an app? Signed builds for macOS and Windows: [desktop release v1.0.1](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.1-desktop).
+Prefer an app? Signed builds for macOS and Windows: [desktop release v1.0.2](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.2-desktop).
 
 ---
 
@@ -162,7 +162,7 @@ See [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md) for quickstarts and the full endpoint
 - **Verified answers by default** — claim extraction + NLI entailment gating verifies LLM responses against your knowledge base, with source attribution and streaming verification reports.
 - **55 MCP tools** (60 with the optional trading module) plus a full MCP server, so Claude and other MCP-native clients drive Cerid directly.
 - **Four retrieval surfaces, one query path** — vector, BM25/sparse hybrid, knowledge graph, and a self-refreshing wiki, routed per query intent.
-- **Signed & notarized desktop apps** — macOS universal DMG and Windows installer on the [v1.0.1 desktop release](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.1-desktop).
+- **Signed & notarized desktop apps** — macOS universal DMG and Windows installer on the [v1.0.2 desktop release](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.2-desktop).
 - **Python + TypeScript SDKs live** — [`cerid-sdk` on PyPI](https://pypi.org/project/cerid-sdk/) and [`@cerid-ai/sdk` on npm](https://www.npmjs.com/package/@cerid-ai/sdk) against the stable `/sdk/v1/` contract.
 - **FSL-1.1-ALv2 source-available licensing** — the core converts to Apache-2.0 on each version's second anniversary; SDKs and client integrations stay Apache-2.0.
 
