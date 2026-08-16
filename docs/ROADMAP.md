@@ -5,8 +5,9 @@
 > Prior: 2026-07-24 Tier A audit + remediation T0–T4; 2026-06-13 RAG Quality Program
 > close-out; 2026-06-02 Commercial-GA Track 1).
 > **Shipped:** `v1.0.2` tagged 2026-08-15 (both repos) with `v1.0.2-desktop`
-> signed + notarized; previously `v1.0.0` + `v1.0.1` 2026-08-07, `v1.0.1-desktop`
-> signed + notarized 2026-08-08 (public-repo release, working auto-update channel);
+> signed + notarized; previously `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop`
+> was WITHDRAWN 2026-08-16 — its binaries could not launch (restricted
+> entitlements, no provisioning profile); the tag remains, the release does not.
 > SDKs live on PyPI (`cerid-sdk`) + npm (`@cerid-ai/sdk`), trusted publishing verified
 > 2026-08-09. Forward focus: Electron runtime refresh, Sentry go-live (web DSN + alert
 > thresholds), the soak/beta validation program, and multi-user.
