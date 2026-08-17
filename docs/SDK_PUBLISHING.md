@@ -225,28 +225,34 @@ workflow's `dry-run` target never touches the npm registry — it runs
 `npm pack` locally and uploads no artifact — so it needs no separate
 environment or trusted-publisher binding.
 
-### 2. Configure the npm Trusted Publisher
+### 2. Configure publish auth (`NPM_TOKEN`)
 
-npmjs.com → sign in → the `@cerid-ai/sdk` package page (or org
-settings, for the first-ever publish) → "Trusted Publishers" → add a
-GitHub Actions publisher:
+npm **no longer accepts classic tokens that bypass 2FA**. CI must use a
+**granular access token** (or package automation token) with publish rights
+on `@cerid-ai/sdk`, stored as a GitHub Actions secret — never in git.
 
-| Field | Value |
-|---|---|
-| npm package name | `@cerid-ai/sdk` |
-| Organization / user | `Cerid-AI` (or current org/user) |
-| Repository name | `cerid-ai` |
-| Workflow filename | `release-sdk-typescript.yml` |
-| Environment name | `npm` |
+**Create the token (npmjs.com):**
+1. Account → Access Tokens → Generate new token → **Granular Access Token**
+2. Permissions: **Read and write** for packages (scope `@cerid-ai` or
+   specifically `@cerid-ai/sdk`)
+3. Expiration: set deliberately (rotate before it expires; calendar the date)
+4. Do **not** use “bypass 2FA” classic tokens — they are rejected
 
-npm's trusted-publisher UI requires the package to already exist for
-most flows; `@cerid-ai/sdk` was bootstrapped with one manual
-`npm publish --access public` from an authenticated maintainer
-account, and every subsequent release goes through OIDC.
+**Store the secret (GitHub):**
+```bash
+# Repo secret (fallback) and environment secret used by the publish job
+printf '%s' "$NEW_TOKEN" | gh secret set NPM_TOKEN -R Cerid-AI/cerid-ai
+printf '%s' "$NEW_TOKEN" | gh secret set NPM_TOKEN -R Cerid-AI/cerid-ai --env npm
+```
 
-**Requirement:** npm OIDC trusted publishing requires **npm >= 11.5.1**;
-the workflow upgrades npm before publishing. Node 22 bundles npm 10,
-which silently publishes unauthenticated and gets a masked 404.
+The publish job sets `NODE_AUTH_TOKEN` from `secrets.NPM_TOKEN` and runs
+`npm publish --access public` (tries `--provenance` first when the runner
+can attest; falls back without provenance if the registry rejects it).
+
+**Optional:** npm Trusted Publishing (OIDC) can still be configured as a
+future dual-path (package page → Trusted Publishers → this workflow +
+environment `npm`). Token auth is the supported path while 2FA / GAT
+rules block classic bypass tokens.
 
 ### 3. Smoke-test the dry-run path
 

@@ -9,10 +9,11 @@ name: Release / cerid-sdk (TypeScript)
 #     (``dry-run`` for a local `npm pack` sanity check, ``npm`` for the
 #     real release).
 #
-# Auth: npm Trusted Publishing (OIDC). No long-lived NPM_TOKEN. The
-# package must be configured on npmjs.com as a trusted publisher
-# referencing this repo + workflow filename + environment name. See
-# docs/SDK_PUBLISHING.md for the one-time setup runbook.
+# Auth: npm granular access token via GitHub secret ``NPM_TOKEN``
+# (repo + environment ``npm``). Classic tokens that "bypass 2FA" are no
+# longer accepted by npm — use a granular token with publish rights on
+# ``@cerid-ai/sdk`` (and optional OIDC trusted publisher as a future
+# dual-path). See docs/SDK_PUBLISHING.md.
 #
 # GitHub Environments: only the publish job binds ``npm``. Dry-runs never
 # create Deployments. Re-dispatch with target=npm on an already-published
@@ -40,8 +41,10 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  id-token: write   # required for npm Trusted Publishing OIDC
   contents: read
+  # Provenance attestation still uses OIDC when the runner supports it;
+  # publish auth itself is the NPM_TOKEN (granular / automation).
+  id-token: write
 
 jobs:
   build:
@@ -60,11 +63,6 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: npm
           cache-dependency-path: packages/sdk/typescript/package-lock.json
-
-      - name: Upgrade npm for OIDC trusted publishing
-        run: |
-          npm install -g npm@latest
-          npm --version
 
       - name: Assert tag matches package.json version (tag-triggered only)
         if: github.event_name == 'push'
@@ -117,11 +115,18 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: npm
           cache-dependency-path: packages/sdk/typescript/package-lock.json
+          # Writes .npmrc with //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+          # setup-node reads NODE_AUTH_TOKEN from the env below at publish time.
 
-      - name: Upgrade npm for OIDC trusted publishing
+      - name: Require NPM_TOKEN
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm install -g npm@latest
-          npm --version
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN secret is empty. Set it on the repo and/or the npm environment (granular access token with publish on @cerid-ai/sdk)."
+            exit 1
+          fi
+          echo "NPM_TOKEN is present (length ${#NODE_AUTH_TOKEN})"
 
       - name: Skip if version already on npm
         id: already
@@ -152,6 +157,20 @@ jobs:
         if: steps.already.outputs.published != 'true'
         run: npm run build
 
+      # Granular tokens + account 2FA: do not use classic "bypass 2FA" tokens.
+      # Prefer --access public; provenance is best-effort (OIDC) and is not
+      # required for a successful publish if the registry rejects it.
       - name: Publish to npm
         if: steps.already.outputs.published != 'true'
-        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Prefer provenance when the runner can attest; fall back to plain
+          # publish if the registry rejects provenance without trusted publisher.
+          if npm publish --provenance --access public; then
+            echo "Published with provenance"
+          else
+            echo "::warning::npm publish --provenance failed; retrying without provenance (token auth)"
+            npm publish --access public
+          fi
