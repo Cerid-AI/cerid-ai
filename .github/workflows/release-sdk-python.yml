@@ -72,7 +72,23 @@ jobs:
           fi
           echo "Releasing cerid-sdk v$pkg_version"
 
+      - name: Skip if version already on target index
+        id: already
+        run: |
+          pkg_version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$pkg_version" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.target }}" = "testpypi" ]; then
+            # TestPyPI has no reliable public JSON; always attempt (may no-op/fail if duplicate).
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          elif python -c "import json,tomllib,urllib.request; v=tomllib.load(open('pyproject.toml','rb'))['project']['version']; d=json.load(urllib.request.urlopen('https://pypi.org/pypi/cerid-sdk/json',timeout=20)); raise SystemExit(0 if v in d.get('releases',{}) else 1)"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::cerid-sdk==$pkg_version is already on PyPI — marking Deployments current without re-upload"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install package + test deps
+        if: steps.already.outputs.published != 'true'
         # The [test] extra, not bare pytest: the contract tests import
         # jsonschema, and installing around the extra is how this workflow's
         # first-ever run failed while ci.yml's sdk-contract job (which uses
@@ -80,28 +96,32 @@ jobs:
         run: pip install --quiet -e ".[test]"
 
       - name: Run package tests
+        if: steps.already.outputs.published != 'true'
         run: pytest tests/ -v
 
       - name: Install build tooling
+        if: steps.already.outputs.published != 'true'
         run: pip install --upgrade build twine
 
       - name: Build sdist + wheel
+        if: steps.already.outputs.published != 'true'
         run: python -m build
 
       - name: Verify built artifacts (twine check)
+        if: steps.already.outputs.published != 'true'
         run: |
           twine check dist/*
           ls -la dist/
 
       - name: Publish to TestPyPI
-        if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+        if: steps.already.outputs.published != 'true' && github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packages/sdk/python/dist
           repository-url: https://test.pypi.org/legacy/
 
       - name: Publish to PyPI
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+        if: steps.already.outputs.published != 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi'))
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packages/sdk/python/dist

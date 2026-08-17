@@ -1,7 +1,8 @@
 {
   "name": "@cerid/widget",
   "version": "0.1.0",
-  "description": "Embeddable verified-chat web component for Cerid AI Knowledge Companion",
+  "private": true,
+  "description": "Embeddable verified-chat web component for Cerid AI Knowledge Companion (not published to npm yet)",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.cjs",

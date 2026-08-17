@@ -13,6 +13,10 @@ name: Release / cerid-sdk (TypeScript)
 # package must be configured on npmjs.com as a trusted publisher
 # referencing this repo + workflow filename + environment name. See
 # docs/SDK_PUBLISHING.md for the one-time setup runbook.
+#
+# GitHub Environments: only the publish job binds ``npm``. Dry-runs never
+# create Deployments. Re-dispatch with target=npm on an already-published
+# version succeeds and marks the environment current (skip re-upload).
 
 on:
   push:
@@ -40,21 +44,13 @@ permissions:
   contents: read
 
 jobs:
-  build-and-publish:
-    name: Build + publish @cerid-ai/sdk
+  build:
+    name: Build + test @cerid-ai/sdk
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    # The environment block is what npm's Trusted Publisher binds to.
-    # npm verifies (repo, workflow file, environment) — mismatch = reject.
-    environment:
-      name: npm
-      url: https://www.npmjs.com/package/@cerid-ai/sdk
-
     defaults:
       run:
         working-directory: packages/sdk/typescript
-
     steps:
       - uses: actions/checkout@v6
 
@@ -65,10 +61,6 @@ jobs:
           cache: npm
           cache-dependency-path: packages/sdk/typescript/package-lock.json
 
-      # npm's OIDC trusted publishing exists only in npm >= 11.5.1; Node 22
-      # bundles npm 10, which silently skips the token exchange and publishes
-      # unauthenticated (PUT -> 404 with the registry hiding the package).
-      # Found on the first probe run after the registry-side binding was added.
       - name: Upgrade npm for OIDC trusted publishing
         run: |
           npm install -g npm@latest
@@ -77,7 +69,6 @@ jobs:
       - name: Assert tag matches package.json version (tag-triggered only)
         if: github.event_name == 'push'
         run: |
-          # Tag pattern: cerid-sdk-ts-v0.1.1 → version "0.1.1"
           tag_version="${GITHUB_REF#refs/tags/cerid-sdk-ts-v}"
           pkg_version=$(node -p "require('./package.json').version")
           if [ "$tag_version" != "$pkg_version" ]; then
@@ -101,10 +92,66 @@ jobs:
       - name: Verify packed artifact (npm pack --dry-run)
         run: npm pack --dry-run
 
-      - name: Publish to npm (dry run)
+      - name: Pack for dry-run inspection
         if: github.event_name == 'workflow_dispatch' && inputs.target == 'dry-run'
         run: npm pack
 
+  publish:
+    name: Publish @cerid-ai/sdk to npm
+    needs: build
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'npm')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@cerid-ai/sdk
+    defaults:
+      run:
+        working-directory: packages/sdk/typescript
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: src/web/.nvmrc
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: packages/sdk/typescript/package-lock.json
+
+      - name: Upgrade npm for OIDC trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Skip if version already on npm
+        id: already
+        run: |
+          pkg_version=$(node -p "require('./package.json').version")
+          echo "version=$pkg_version" >> "$GITHUB_OUTPUT"
+          if npm view "@cerid-ai/sdk@${pkg_version}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::@cerid-ai/sdk@${pkg_version} is already on npm — marking Deployments current without re-upload"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "Will publish @cerid-ai/sdk@${pkg_version}"
+          fi
+
+      - name: Install dependencies
+        if: steps.already.outputs.published != 'true'
+        run: npm ci
+
+      - name: Typecheck
+        if: steps.already.outputs.published != 'true'
+        run: npm run typecheck
+
+      - name: Run package tests
+        if: steps.already.outputs.published != 'true'
+        run: npm test
+
+      - name: Build
+        if: steps.already.outputs.published != 'true'
+        run: npm run build
+
       - name: Publish to npm
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'npm')
+        if: steps.already.outputs.published != 'true'
         run: npm publish --provenance --access public

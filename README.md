@@ -7,6 +7,8 @@ A privacy-first, local-first workspace that unifies your code, finance, projects
 [![Release](https://img.shields.io/github/v/release/Cerid-AI/cerid-ai)](https://github.com/Cerid-AI/cerid-ai/releases/latest)
 [![License](https://img.shields.io/badge/License-FSL--1.1--ALv2-blue)](LICENSE)
 [![CI](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml)
+[![npm @cerid-ai/sdk](https://img.shields.io/npm/v/@cerid-ai/sdk?label=npm%20%40cerid-ai%2Fsdk)](https://www.npmjs.com/package/@cerid-ai/sdk)
+[![PyPI cerid-sdk](https://img.shields.io/pypi/v/cerid-sdk?label=pypi%20cerid-sdk)](https://pypi.org/project/cerid-sdk/)
 
 [Docs](docs/) · [Website](https://cerid.ai) · [**Product demo**](https://cerid.ai/#demo) · [Pricing](https://cerid.ai/pricing) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
 
@@ -150,14 +152,15 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 
 ### Install the SDKs
 
-Typed client libraries for the stable `/sdk/v1/` API — [`cerid-sdk` on PyPI](https://pypi.org/project/cerid-sdk/) and [`@cerid-ai/sdk` on npm](https://www.npmjs.com/package/@cerid-ai/sdk):
+Typed client libraries for the stable `/sdk/v1/` API. SDKs version **independently**
+of the product release (product **v1.0.2** · clients **0.1.1** on both registries):
 
-```bash
-pip install cerid-sdk          # Python
-npm install @cerid-ai/sdk     # TypeScript
-```
+| Client | Install | Registry |
+|--------|---------|----------|
+| Python | `pip install cerid-sdk` | [PyPI](https://pypi.org/project/cerid-sdk/) |
+| TypeScript | `npm install @cerid-ai/sdk` | [npm](https://www.npmjs.com/package/@cerid-ai/sdk) |
 
-See [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md) for quickstarts and the full endpoint reference.
+See [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md) for quickstarts and [docs/SDK_PUBLISHING.md](docs/SDK_PUBLISHING.md) for cutting a client release.
 
 ---
 

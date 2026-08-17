@@ -78,7 +78,8 @@ look right.
 If the version on PyPI/TestPyPI already exists, **bump the version in
 [`packages/sdk/python/pyproject.toml`](../packages/sdk/python/pyproject.toml)
 first** — PyPI rejects re-uploads of an existing version (immutable
-release contract).
+release contract). The workflow **skips the upload** and exits green when
+the target index already has that version (same Deployments hygiene as npm).
 
 ---
 
@@ -262,7 +263,14 @@ the uploaded tarball listing in the job log and confirm it matches the
 If the version on npm already exists, **bump the version in
 [`packages/sdk/typescript/package.json`](../packages/sdk/typescript/package.json)
 first** — npm rejects re-publishing an existing version (immutable
-release contract, same as PyPI).
+release contract, same as PyPI). The workflow now **skips the upload** and
+exits green when the version is already published, so a re-dispatch of
+`target=npm` refreshes the GitHub `npm` environment deployment without
+failing the job (that failure mode is what made the Deployments UI show
+“not current” after the first successful 0.1.1 ship).
+
+**Dry-run does not bind the `npm` environment** — only the publish job
+does — so pack-only smoke tests never create Deployments noise.
 
 ---
 
