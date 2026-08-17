@@ -8,7 +8,9 @@ A privacy-first, local-first workspace that unifies your code, finance, projects
 [![License](https://img.shields.io/badge/License-FSL--1.1--ALv2-blue)](LICENSE)
 [![CI](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml)
 
-[Docs](docs/) · [Website](https://cerid.ai) · [Pricing](https://cerid.ai/pricing) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
+[Docs](docs/) · [Website](https://cerid.ai) · [**Product demo**](https://cerid.ai/#demo) · [Pricing](https://cerid.ai/pricing) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
+
+**[90s product tour](https://cerid.ai/#demo)** · [30s sizzle](https://cerid.ai/cerid-30s-demo.mp4) — live UI: claim verification, Constellation explore, wiki, TrustScore.
 
 ---
 
@@ -53,22 +55,24 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 
 ## Key Capabilities
 
-- **React GUI** at :3000 — streaming chat, knowledge browser, monitoring dashboards
-- **Specialist Agents** — Query (LLM reranking), Triage (LangGraph), Hallucination Detection, Memory Extraction, Maintenance, Audit, and more
+- **React GUI** at :3000 — streaming chat, Constellation map, wiki, sources, monitoring
+- **Claim verification** — verified / partial / **refuted** with NLI contradiction gating and inline sources
+- **Constellation + Atlas** — zoom, cluster, drill hubs; domain communities; Open-in-Atlas from wiki
+- **Accumulating wiki** — entity pages that grow from your sources (not one-shot chat dumps)
+- **Disclosed TrustScore** — straight mean of measured components; methodology open in-product
+- **Specialist Agents** — Query, Triage, Hallucination Detection, Memory Extraction, Maintenance, Audit, and more
 - **55 MCP Tools** (60 with the optional trading module) — Full control via MCP protocol (`pkb_*` namespace)
-- **Hallucination Detection** — Extracts claims from responses and verifies them against your KB using NLI + source attribution
 - **Memory System** — Automatically extracts facts, decisions, and preferences from conversations
 - **Tiered Inference** — Auto-detects Ollama (GPU/CPU), FastEmbed sidecar, or Docker CPU fallback
 - **Quenchforge AMD-GPU Routing** — Intel Mac + AMD discrete GPU operators get GPU acceleration for LLM chat, dense embeddings, cross-encoder reranking, AND ingest-time enrichment via per-workload env-driven routing (`INTERNAL_LLM_PROVIDER` / `EMBEDDINGS_PROVIDER` / `RERANK_PROVIDER`). See [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](docs/AMD_GPU_MODEL_RECOMMENDATIONS.md) for vetted GGUF picks by VRAM tier.
 - **`/health.inference_routing`** — Five-key introspection of the active inference provider per workload (LLM / embed / rerank / sparse / NLI). Operators verify their env vars actually reached the container.
 - **Hybrid Retrieval** — dense bi-encoder + BM25 + SPLADE-v3 learned-sparse, RRF-fused across all three retrievers
 - **Adaptive Configuration Recommender** — Settings pane surfaces gated retrieval features (sparse, HyPE, parent-child, RRF) once your corpus crosses a feature-specific threshold; three-action dismissal matches GitHub's notification model
-- **Hybrid Search** — BM25 + vector + knowledge graph traversal
 - **File Ingestion** — 30+ formats (PDF with tables, DOCX, code, Obsidian vaults, etc.)
 - **Multi-Machine Sync** — Optional Dropbox JSONL sync (encrypted)
 - **Full Observability** — Health checks, cost tracking, queue depth, swallowed error counters
 
-All data stays local. Only LLM API calls leave your machine.
+Knowledge stores stay on your machine. Only the LLM calls you choose leave (or nothing, with full local Ollama).
 
 ---
 

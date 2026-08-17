@@ -147,6 +147,9 @@ Make the differentiator real and measured before GA, not just described.
   60–90s demo video (Constellation hero), Apple App Store / TestFlight submission.
   (Shipped from this bullet: the `v1.0.0` tag, 2026-08-07; launch comms drafted
   2026-08-09 — posting still pending.)
+  **Demo video (v4, 2026-08-16):** 90s + 30s live-product sizzle on [cerid.ai/#demo](https://cerid.ai/#demo)
+  — verify/refute, snappy Constellation explore, wiki, TrustScore, feature cards.
+  Hosted from `cerid-ai-marketing/public/`; rebuild via local `docs/assets/demo-video/` pipeline.
 
 ---
 

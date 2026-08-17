@@ -159,6 +159,19 @@ Features that answer all four crisply tend to ship. Features that don't
 tend to be redundant or premature, and live in the anti-scope list of
 their candidate task driver until the answers sharpen.
 
+## Product demo (public)
+
+The marketing site hosts a live-product sizzle that mirrors this story:
+
+- Claim verification with **refutation** (not only green checks)
+- Constellation explore & drill-down (not a static still)
+- Accumulating wiki entity pages
+- Disclosed TrustScore methodology
+- Local artifact stores + sources
+
+Watch: [cerid.ai/#demo](https://cerid.ai/#demo) (90s tour · 30s sizzle).  
+Rebuild pipeline lives under `docs/assets/demo-video/` in the monorepo working tree (local asset pipeline; not required to run Core).
+
 ## See also
 
 - [`tasks/2026-05-10-v0.92-final-plan.md`](../tasks/2026-05-10-v0.92-final-plan.md) — current release driver
